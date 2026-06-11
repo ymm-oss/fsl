@@ -1,0 +1,12 @@
+refinement CartImplRefinesCart {
+  impl CartImpl
+  abs  ShoppingCart
+
+  map stock[i: ItemId] = impl_stock[i] - reserved[i]
+  map cart[u: UserId]  = impl_cart[u]
+
+  action add_to_cart(u, i)     -> add_to_cart(u, i)
+  action remove_from_cart(u)   -> remove_from_cart(u)
+  action impl_checkout(u)      -> checkout(u)
+  action reserve(i)            -> stutter
+}

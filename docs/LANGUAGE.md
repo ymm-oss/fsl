@@ -286,7 +286,47 @@ invariant NoDupQueue {
 }
 ```
 
-## 10. 実装への橋
+## 10. Refinement(詳細仕様の忠実性)
+
+抽象仕様(abs)を先に `verify` / `prove` したあと、実装に近い詳細仕様(impl)が
+abs の振る舞いから外れないことを **`fslc refine`** で検査する
+(`DESIGN-refinement.md` 参照)。
+
+マッピングは **独立ファイル** に書く(impl/abs の `.fsl` は汚さない):
+
+```fsl
+refinement CartImplRefinesCart {
+  impl CartImpl
+  abs  ShoppingCart
+
+  map stock[i: ItemId] = impl_stock[i] - reserved[i]
+  map cart[u: UserId]  = impl_cart[u]
+
+  action add_to_cart(u, i)   -> add_to_cart(u, i)
+  action impl_checkout(u)    -> checkout(u)
+  action reserve(i)          -> stutter
+}
+```
+
+- `map <abs変数> = <impl式>` — スカラ抽象変数。
+- `map <abs変数>[<binder>] = <式>` — Map の要素ごと写像(キー型を有界列挙)。
+- `action <impl>(<仮引数>) -> <abs>(<式>) | stutter` — 全 impl アクション必須。
+  `stutter` は抽象状態が変わらない内部ステップ。
+
+```bash
+fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
+```
+
+成功: `result: "refines"`(exit 0)。違反: `refinement_failed`(exit 1) と
+`kind`(`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
+`map_out_of_bounds`)、`impl_trace`、写像後の `abs_before` / `abs_after_*`。
+静的エラー(map 漏れ・未知アクション等)は `kind: "type"`(exit 2)。
+
+推奨ワークフロー: **abs を人間/LLM がレビュー → impl を LLM が詳細化 →
+`refine` が忠実性を担保**。abs の `ensures` / invariant は refine では再検査せず、
+abs 側で別途検証済みであることを前提とする。
+
+## 11. 実装への橋
 
 仕様を証明したあと、実装と結線するための3つの入口がある
 (`DESIGN-bridge.md` 参照)。
@@ -317,7 +357,7 @@ fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # Adapter 未実装なら全
 `replay` は有限ログのみを検査するため **`leadsTo` は対象外**(出力 `note` に明記)。
 `Monitor` は init が決定的である必要がある(forall 一括代入可)。
 
-## 11. ライブラリ API
+## 12. ライブラリ API
 
 ```python
 from fslc import parse, build_spec, verify, prove, Monitor

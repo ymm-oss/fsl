@@ -5,9 +5,10 @@ import argparse
 
 from lark.exceptions import UnexpectedInput, VisitError
 
-from .parser import parse
+from .parser import parse, parse_refinement
 from .model import build_spec, check_spec, FslError
 from .bmc import verify, prove, scenarios
+from .refine import build_refinement, refine
 from .runtime import Monitor
 from .testgen import generate_test_file, default_output_name
 
@@ -219,6 +220,42 @@ def run_replay(file, trace_path):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_refine(impl_file, abs_file, mapping_file, depth=8):
+    try:
+        impl_spec, _ = _read_spec(impl_file)
+        abs_spec, _ = _read_spec(abs_file)
+        mapping_src = open(mapping_file, encoding="utf-8").read()
+        mapping_ast = parse_refinement(mapping_src)
+        mapping = build_refinement(mapping_ast, impl_spec, abs_spec)
+        return _envelope(refine(impl_spec, abs_spec, mapping, depth))
+    except UnexpectedInput as e:
+        return _envelope({
+            "result": "error",
+            "kind": "parse",
+            "loc": {"line": e.line, "column": e.column},
+            "message": str(e).split("\n")[0],
+            "expected": _parse_expected(e),
+        })
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except ValueError as e:
+        return _envelope({"result": "error", "kind": "parse", "message": str(e)})
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
     try:
         out_path = output or default_output_name(file)
@@ -260,9 +297,9 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
 
 def exit_code(result):
     r = result.get("result")
-    if r in ("verified", "proved", "scenarios", "conformant", "generated"):
+    if r in ("verified", "proved", "scenarios", "conformant", "generated", "refines"):
         return 0
-    if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant"):
+    if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant", "refinement_failed"):
         return 1
     if r == "error":
         kind = result.get("kind")
@@ -304,6 +341,12 @@ def main(argv=None):
     tg.add_argument("-o", "--output", default=None)
     tg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
 
+    rf = sub.add_parser("refine")
+    rf.add_argument("impl")
+    rf.add_argument("abs")
+    rf.add_argument("mapping")
+    rf.add_argument("--depth", type=int, default=8)
+
     args = ap.parse_args(argv)
 
     if args.cmd == "check":
@@ -314,6 +357,9 @@ def main(argv=None):
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "replay":
         result = run_replay(args.file, args.trace)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "refine":
+        result = run_refine(args.impl, args.abs, args.mapping, args.depth)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "testgen":
         result = run_testgen(args.file, args.depth, args.output, args.deadlock,

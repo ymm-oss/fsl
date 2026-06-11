@@ -4,7 +4,20 @@ from lark import Lark, Transformer, v_args
 # ---------------------------------------------------------------- grammar
 
 GRAMMAR = r"""
-start: "spec" NAME "{" item* "}"
+start: spec_def | refinement_def
+
+spec_def: "spec" NAME "{" item* "}"
+
+refinement_def: "refinement" NAME "{" refinement_item* "}"
+?refinement_item: refinement_impl | refinement_abs | map_def | refinement_action
+refinement_impl: "impl" NAME
+refinement_abs: "abs" NAME
+map_def: "map" NAME ["[" binder "]"] "=" expr
+refinement_action: "action" NAME "(" [refinement_param ("," refinement_param)*] ")" "->" action_target
+refinement_param: NAME
+action_target: stutter_target | mapped_action_target
+stutter_target: "stutter"
+mapped_action_target: NAME "(" [expr ("," expr)*] ")"
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
@@ -431,8 +444,49 @@ class Ast(Transformer):
         binders, p, q = _flatten_leadsto(body)
         return ("leadsto", name, binders, p, q, _loc(meta))
 
-    def start(self, meta, name, *items):
+    def start(self, meta, child):
+        return child
+
+    def spec_def(self, meta, name, *items):
         return ("spec", name, [i for i in items if i])
+
+    def refinement_impl(self, meta, name):
+        return ("impl", name)
+
+    def refinement_abs(self, meta, name):
+        return ("abs", name)
+
+    def map_def(self, meta, name, binder=None, expr=None):
+        if binder is not None:
+            return ("map", name, binder, expr, _loc(meta))
+        return ("map", name, None, expr, _loc(meta))
+
+    def refinement_param(self, meta, name):
+        return name
+
+    def action_target(self, meta, child):
+        return child
+
+    def stutter_target(self, meta):
+        return ("stutter",)
+
+    def mapped_action_target(self, meta, name, *exprs):
+        return ("action", name, list(exprs))
+
+    def refinement_action(self, meta, name, *params_and_target):
+        params = []
+        target = None
+        for p in params_and_target:
+            if isinstance(p, str):
+                params.append(p)
+            else:
+                target = p
+        if target is None:
+            raise ValueError("refinement action missing target")
+        return ("action_map", name, params, target, _loc(meta))
+
+    def refinement_def(self, meta, name, *items):
+        return ("refinement", name, [i for i in items if i])
 
 
 PARSER = Lark(

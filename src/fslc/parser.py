@@ -12,3 +12,11 @@ def parse(src):
     """Parse FSL source text into the tuple-based AST (``("spec", name, items)``)."""
     tree = PARSER.parse(src)
     return Ast().transform(tree)
+
+
+def parse_refinement(src):
+    """Parse a refinement mapping file (``("refinement", name, items)``)."""
+    ast = parse(src)
+    if ast[0] != "refinement":
+        raise ValueError("expected refinement mapping file")
+    return ast

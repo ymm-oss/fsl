@@ -1,0 +1,42 @@
+spec CartImpl {
+  type UserId = 0..1
+  type ItemId = 0..1
+  type Qty    = 0..3
+
+  state {
+    impl_stock: Map<ItemId, Qty>,
+    reserved:   Map<ItemId, Qty>,
+    impl_cart:  Map<UserId, Option<ItemId>>
+  }
+
+  init {
+    forall i: ItemId { impl_stock[i] = 1 }
+    forall i: ItemId { reserved[i] = 0 }
+    forall u: UserId { impl_cart[u] = none }
+  }
+
+  action add_to_cart(u: UserId, i: ItemId) {
+    requires impl_cart[u] == none
+    impl_cart[u] = some(i)
+  }
+
+  action remove_from_cart(u: UserId) {
+    requires impl_cart[u] != none
+    impl_cart[u] = none
+  }
+
+  // internal: grows both counters so impl_stock - reserved stays constant (stutter on abs stock)
+  action reserve(i: ItemId) {
+    requires impl_stock[i] < 3
+    requires reserved[i] < 3
+    impl_stock[i] = impl_stock[i] + 1
+    reserved[i] = reserved[i] + 1
+  }
+
+  action impl_checkout(u: UserId) {
+    requires impl_cart[u] is some(i)
+    requires impl_stock[i] > reserved[i]
+    impl_stock[i] = impl_stock[i] - 1
+    impl_cart[u] = none
+  }
+}
