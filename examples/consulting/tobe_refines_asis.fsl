@@ -1,0 +1,28 @@
+// ════════════════════════════════════════════════════════════════
+// 【改革の統制検査】To-Be は As-Is の統制を弱めていないか?
+//
+//   fslc refine examples/consulting/tobe_expense.fsl \
+//               examples/consulting/asis_expense.fsl \
+//               examples/consulting/tobe_refines_asis.fsl --depth 6
+//
+// result: "refines" = To-Be のあらゆる業務の流れは、As-Is でも
+// 起こり得た流れに対応する(=新しい抜け道を作っていない)。
+// 対応しない流れがあれば、その具体的な手順(トレース)が返る。
+// ════════════════════════════════════════════════════════════════
+refinement ToBeKeepsAsIsControls {
+  impl ToBeExpense
+  abs  AsIsExpense
+
+  // 業務ステージは同名で対応(改革でステージは増やしていない)
+  map claim_stage[c: Claim] = claim_stage[c]
+  map paid_claims = paid_claims
+
+  // 遷移の対応表: 「To-Be のこの業務は、As-Is のどの業務にあたるか」
+  action submit(c)       -> submit(c)
+  // ★自動承認は、As-Is の世界では「マネージャ承認」に相当する
+  //   (承認という統制行為が行われたことに変わりはない)
+  action auto_approve(c) -> mgr_approve(c)
+  action mgr_approve(c)  -> mgr_approve(c)
+  action reject(c)       -> reject(c)
+  action pay(c)          -> pay(c)
+}

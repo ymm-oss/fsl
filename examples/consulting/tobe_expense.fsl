@@ -1,0 +1,48 @@
+// ════════════════════════════════════════════════════════════════
+// 経費精算ワークフロー【To-Be(改革案)】— コンサルタント向けサンプル
+//
+// 改革の狙い: マネージャ承認がボトルネック(全件直列)なので、
+// 少額レーンを自動承認化して処理を速くする。
+//
+// 重要なのは下の「tobe_refines_asis.fsl」— この改革案が As-Is の
+// 統制(承認を経ない支払いが無い等)を一切弱めていないことを
+// 機械検査できる。改革提案書に「統制は維持される(機械検証済み)」
+// と書ける根拠になる。
+// ════════════════════════════════════════════════════════════════
+business ToBeExpense {
+
+  actor Employee, Manager, Finance, System
+
+  case Claim = 0..2
+
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+
+    transition submit       Draft     -> Submitted by Employee
+    // ★改革ポイント: 少額レーンは自動承認(どの申請が少額かは
+    //   要件定義層で決める詳細。この層では「自動承認という経路が
+    //   増える」ことだけを表す)
+    transition auto_approve Submitted -> Approved  by System
+    // 高額レーンは従来どおりマネージャ承認
+    transition mgr_approve  Submitted -> Approved  by Manager
+    transition reject       Submitted -> Rejected  by Manager
+    transition pay          Approved  -> Paid      by Finance
+  }
+
+  kpi paid_claims counts Claim in Paid
+
+  // 統制は As-Is と同じものを維持する(弱めない)
+  policy CTRL-1 "提出された申請は必ず承認または差戻しの裁定を受ける" responds {
+    forall c: Claim {
+      stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
+    }
+  }
+  policy CTRL-2 "承認された申請は必ず支払われる" responds {
+    forall c: Claim { stage(c) == Approved ~> stage(c) == Paid }
+  }
+
+  goal CanComplete "申請から支払いまで完遂できる" {
+    exists c: Claim { stage(c) == Paid }
+  }
+}

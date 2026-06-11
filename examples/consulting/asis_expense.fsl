@@ -1,0 +1,57 @@
+// ════════════════════════════════════════════════════════════════
+// 経費精算ワークフロー【As-Is(現行業務)】— コンサルタント向けサンプル
+//
+// ヒアリング結果(現行の業務フローと社内規程)をそのまま検査可能な
+// 形で書いたもの。実行:
+//
+//   fslc verify examples/consulting/asis_expense.fsl \
+//        --engine induction --deadlock ignore
+//
+// proved = 「現行規程はどんな処理順序でも矛盾しない」。
+// 規程同士が矛盾していれば、違反した規程の ID・原文・再現手順が返る。
+// ════════════════════════════════════════════════════════════════
+business AsIsExpense {
+
+  // 登場部署・役割(遷移の「誰がやるか」)
+  actor Employee, Manager, Finance
+
+  // 検証する世界: 同時に流れる申請3件分(小さな世界で十分)
+  case Claim = 0..2
+
+  // ── 現行プロセス(ヒアリングで得たフロー図と1対1)──────────
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+
+    // 申請(従業員)
+    transition submit      Draft     -> Submitted by Employee
+    // 承認・差戻し(マネージャ)— 現行は金額によらず全件マネージャ承認
+    transition mgr_approve Submitted -> Approved  by Manager
+    transition reject      Submitted -> Rejected  by Manager
+    // 支払い(経理)— 承認済みのものだけ
+    transition pay         Approved  -> Paid      by Finance
+  }
+
+  // ── KPI(数え漏れ・二重計上は自動検査される)─────────────
+  kpi paid_claims counts Claim in Paid
+
+  // ── 社内規程(統制)— ID と原文ごと書く ─────────────────
+  // ※「支払いは承認後のみ」はプロセス構造そのものが保証している
+  //   (Paid への矢印は Approved からしか無い)。下の2本は
+  //   構造だけでは言えない「放置しない」系の統制。
+
+  policy CTRL-1 "提出された申請は必ず承認または差戻しの裁定を受ける" responds {
+    forall c: Claim {
+      stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
+    }
+  }
+
+  policy CTRL-2 "承認された申請は必ず支払われる" responds {
+    forall c: Claim { stage(c) == Approved ~> stage(c) == Paid }
+  }
+
+  // ── ゴール(現行プロセスで業務が完遂できることの確認)──────
+  goal CanComplete "申請から支払いまで完遂できる" {
+    exists c: Claim { stage(c) == Paid }
+  }
+}
