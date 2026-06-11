@@ -1,0 +1,35 @@
+spec ShoppingCart {
+  type UserId = 0..1
+  type ItemId = 0..1
+  type Qty    = 0..3
+
+  state {
+    stock: Map<ItemId, Qty>,
+    cart:  Map<UserId, Option<ItemId>>
+  }
+
+  init {
+    forall i: ItemId { stock[i] = 1 }
+    forall u: UserId { cart[u] = none }
+  }
+
+  action add_to_cart(u: UserId, i: ItemId) {
+    requires cart[u] == none
+    cart[u] = some(i)
+  }
+
+  action remove_from_cart(u: UserId) {
+    requires cart[u] != none
+    cart[u] = none
+  }
+
+  action checkout(u: UserId) {
+    requires cart[u] is some(i)
+    stock[i] = stock[i] - 1
+    cart[u] = none
+  }
+
+  reachable SoldOut {
+    forall i: ItemId { stock[i] == 0 }
+  }
+}

@@ -1,0 +1,38 @@
+// ショッピングカートの設計仕様(修正版)
+// checkout に在庫ガードを追加。アクションは原子的なので
+// 「確認→引き落とし」の競合はこのモデルでは起きない
+spec ShoppingCart {
+  const MAXU = 1
+  const MAXI = 1
+
+  state {
+    stock: Map<Int, Int>,
+    cart:  Map<Int, Int>
+  }
+
+  init {
+    forall i in 0..MAXI: { stock[i] = 1 }
+    forall u in 0..MAXU: { cart[u] = -1 }
+  }
+
+  action add_to_cart(u in 0..MAXU, i in 0..MAXI) {
+    requires cart[u] == -1
+    cart[u] = i
+  }
+
+  action remove_from_cart(u in 0..MAXU) {
+    requires cart[u] != -1
+    cart[u] = -1
+  }
+
+  action checkout(u in 0..MAXU) {
+    requires cart[u] != -1
+    requires stock[cart[u]] > 0   // 修正: 在庫がある場合のみ決済できる
+    stock[cart[u]] = stock[cart[u]] - 1
+    cart[u] = -1
+  }
+
+  invariant NoNegativeStock {
+    forall i in 0..MAXI: stock[i] >= 0
+  }
+}

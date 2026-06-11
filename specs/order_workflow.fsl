@@ -1,0 +1,63 @@
+spec OrderWorkflow {
+  type OrderId = 0..2
+  type Qty     = 0..5
+
+  enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+
+  struct Order { status: Status, qty: Qty }
+
+  state {
+    orders:  Map<OrderId, Order>,
+    shipped: Set<OrderId>,
+    revenue: Int
+  }
+
+  init {
+    forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } }
+    shipped = Set {}
+    revenue = 0
+  }
+
+  action place(o: OrderId, q: Qty) {
+    requires orders[o].status == Draft
+    requires q > 0
+    orders[o].status = Placed
+    orders[o].qty = q
+  }
+
+  action pay(o: OrderId) {
+    requires orders[o].status == Placed
+    orders[o].status = Paid
+    revenue = revenue + orders[o].qty
+  }
+
+  action ship(o: OrderId) {
+    requires orders[o].status == Paid
+    orders[o].status = Shipped
+    shipped = shipped.add(o)
+    ensures shipped.contains(o)
+  }
+
+  action cancel(o: OrderId) {
+    requires orders[o].status == Placed or orders[o].status == Paid
+    if orders[o].status == Paid {
+      revenue = revenue - orders[o].qty
+    }
+    orders[o].status = Cancelled
+  }
+
+  invariant ShippedWasPaid {
+    forall o: OrderId { shipped.contains(o) => orders[o].status == Shipped }
+  }
+
+  invariant RevenueConsistent {
+    revenue == sum(o: OrderId of orders[o].qty
+                   where orders[o].status == Paid or orders[o].status == Shipped)
+  }
+
+  invariant NonNegativeRevenue { revenue >= 0 }
+
+  reachable FullLifecycle {
+    exists o: OrderId { orders[o].status == Shipped }
+  }
+}
