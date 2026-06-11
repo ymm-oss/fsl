@@ -145,6 +145,12 @@ fslc verify    <file.fsl> [--depth K]            # BMC(既定 K=8、反例は最
 fslc scenarios <file.fsl> [--depth K]            # 統合テスト雛形JSONを生成
 ```
 
+`scenarios` は `reachable` / action coverage に加えて、`leadsTo P ~> Q` ごとに
+`respond_<Name>[_<binding>]` シナリオを出力する。各シナリオは `kind: "leadsTo"`、
+`pending_at`、`satisfied_at`、`bindings`、`steps`、`initial_state`、
+`expected_states` を持ち、深さ K 内で P が成立してから Q が成立するまでの最短
+トレースを表す。P が一度も成立しない束縛はシナリオ化されず、`warnings` に出る。
+
 終了コード: `0` = verified / proved / scenarios生成、
 `1` = violated / reachable_failed / unknown_cti、`2` = 仕様エラー、`3` = 内部エラー。
 

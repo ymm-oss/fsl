@@ -1,7 +1,11 @@
 """FSL v2.0-lite temporal: leadsTo and fair (DESIGN-temporal.md §6)."""
+import ast
+import subprocess
+import tempfile
 from pathlib import Path
 
-from fslc import parse, build_spec, verify, prove
+from fslc import Monitor, parse, build_spec, scenarios, verify, prove
+from fslc.cli import run_testgen
 
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 ROOT = Path(__file__).resolve().parent.parent
@@ -281,3 +285,86 @@ spec IndLeadsto {
     assert r["result"] == "proved"
     assert r["leads_to"]["ReachThree"]["checked_to_depth"] == 8
     assert "note" in r
+
+
+def test_mutex_queue_leadsto_response_scenarios_replay_pending_to_satisfied():
+    src = (SPECS / "mutex_queue.fsl").read_text(encoding="utf-8")
+    spec = build_spec(parse(src))
+    r = scenarios(spec, 8, source_lines=src.splitlines())
+    assert r["result"] == "scenarios"
+
+    respond = [s for s in r["scenarios"] if s["kind"] == "leadsTo"]
+    names = [s["name"] for s in respond]
+    assert names == [
+        "respond_WaiterGetsLock_p0",
+        "respond_WaiterGetsLock_p1",
+        "respond_WaiterGetsLock_p2",
+    ]
+    assert all("__" not in name for name in names)
+
+    mon = Monitor(str(SPECS / "mutex_queue.fsl"))
+    for scen in respond:
+        p = scen["bindings"]["p"]
+        mon.reset()
+        states = [mon.state]
+        for step in scen["steps"]:
+            result = mon.step(step["action"], step["params"])
+            assert result["ok"], result
+            states.append(mon.state)
+        assert states[scen["pending_at"]]["waiters"].count(p) > 0
+        assert states[scen["satisfied_at"]]["holder"] == p
+
+
+def test_leadsto_response_warns_when_antecedent_never_holds_for_binding():
+    src = """
+spec NeverPending {
+  type ProcId = 0..1
+  state { x: Int }
+  init { x = 0 }
+  action stay() { x = 0 }
+  invariant Stable { x == 0 }
+  leadsTo MaybePending {
+    forall p: ProcId {
+      (p == 0 or x == 1) ~> x == 0
+    }
+  }
+}
+"""
+    r = scenarios(build_spec(parse(src)), 4)
+    assert r["result"] == "scenarios"
+    respond = [s for s in r["scenarios"] if s["kind"] == "leadsTo"]
+    assert [s["name"] for s in respond] == ["respond_MaybePending_p0"]
+    assert respond[0]["pending_at"] == 0
+    assert respond[0]["satisfied_at"] == 0
+    assert any(
+        "leadsTo MaybePending {'p': 1}: P never holds within depth 4" in w["message"]
+        and w.get("hint")
+        for w in r["warnings"]
+    )
+
+
+def test_testgen_with_leadsto_scenarios_imports_and_skips():
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "test_mutex_queue.py"
+        gen = run_testgen(str(SPECS / "mutex_queue.fsl"), output=str(out))
+        assert gen["result"] == "generated"
+
+        content = out.read_text(encoding="utf-8")
+        compile(content, str(out), "exec")
+        module = ast.parse(content, filename=str(out))
+        test_names = [
+            node.name
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_scenario_")
+        ]
+        assert "test_scenario_respond_WaiterGetsLock_p0" in test_names
+        assert all("__" not in name for name in test_names)
+
+        proc = subprocess.run(
+            [str(PY), "-m", "pytest", str(out), "-q"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "skipped" in proc.stdout.lower()

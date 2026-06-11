@@ -1715,11 +1715,17 @@ def _display_leadsto_bindings(model, binds, spec, binding_types):
 
 def _eval_at_state(expr, state, binds, spec, expr_cache):
     with _eval_cache_scope(expr_cache, id(state)):
-        return eval_expr(expr, state, binds, spec)
+        return eval_expr(expr, state, dict(binds), spec)
 
 
 def _leadsto_binding_key(leadsto_name, extra_binds):
     return (leadsto_name, tuple(sorted(extra_binds.items())))
+
+
+def _leadsto_binding_suffix(bindings):
+    if not bindings:
+        return ""
+    return "_" + "_".join(f"{k}{v}" for k, v in bindings.items())
 
 
 def _build_leadsto_stutter_violation(
@@ -1872,6 +1878,106 @@ def _check_leadstos(explored, spec):
     return None, leads_to
 
 
+def _build_leadsto_response_scenarios(explored, spec):
+    scenarios_out = []
+    warnings = []
+    if not spec.get("leadstos"):
+        return scenarios_out, warnings
+
+    depth = explored["depth"]
+    states = explored["states"]
+    choices = explored["choices"]
+    instances = explored["instances"]
+    s = explored["solver"]
+    expr_cache = explored["expr_cache"]
+
+    for leadsto in spec["leadstos"]:
+        binding_types = _leadsto_binding_types(leadsto, spec)
+        for extra_binds in expand_leadsto_bindings(leadsto, spec):
+            display_bindings = None
+            found = False
+            for t in range(depth + 1):
+                candidates = []
+                for p in range(t + 1):
+                    p_hold = _eval_at_state(
+                        leadsto["P"], states[p], extra_binds, spec, expr_cache)
+                    q_hold = _eval_at_state(
+                        leadsto["Q"], states[t], extra_binds, spec, expr_cache)
+                    not_q_before_t = [
+                        z3.Not(_eval_at_state(
+                            leadsto["Q"], states[q], extra_binds, spec, expr_cache))
+                        for q in range(p, t)
+                    ]
+                    candidates.append(z3.And(
+                        p_hold,
+                        q_hold,
+                        z3.And(*not_q_before_t) if not_q_before_t else z3.BoolVal(True),
+                    ))
+
+                s.push()
+                s.add(z3.Or(*candidates))
+                if s.check() == z3.sat:
+                    m = s.model()
+                    display_bindings = _display_leadsto_bindings(
+                        m, extra_binds, spec, binding_types)
+                    pending_at = None
+                    for p, cond in enumerate(candidates):
+                        if z3.is_true(m.eval(cond, model_completion=True)):
+                            pending_at = p
+                            break
+                    trace = _build_trace(m, states, choices, instances, spec, t)
+                    s.pop()
+
+                    if pending_at is None:
+                        pending_at = t
+                    steps, expected_states = _trace_to_scenario_steps(trace)
+                    suffix = _leadsto_binding_suffix(display_bindings)
+                    scenarios_out.append({
+                        "name": f"respond_{leadsto['name']}{suffix}",
+                        "kind": "leadsTo",
+                        "property": leadsto["name"],
+                        "bindings": display_bindings,
+                        "steps": steps,
+                        "pending_at": pending_at,
+                        "satisfied_at": t,
+                        "initial_state": trace[0]["state"],
+                        "expected_states": expected_states,
+                    })
+                    found = True
+                    break
+                s.pop()
+
+            if found:
+                continue
+
+            if display_bindings is None:
+                display_bindings = _public_model_bindings(
+                    None, extra_binds, spec, binding_types)
+
+            p_candidates = [
+                _eval_at_state(leadsto["P"], states[t], extra_binds, spec, expr_cache)
+                for t in range(depth + 1)
+            ]
+            s.push()
+            s.add(z3.Or(*p_candidates))
+            p_ever_holds = s.check() == z3.sat
+            if p_ever_holds:
+                m = s.model()
+                display_bindings = _display_leadsto_bindings(
+                    m, extra_binds, spec, binding_types)
+            s.pop()
+
+            if not p_ever_holds:
+                warnings.append(_warn(
+                    f"leadsTo {leadsto['name']} {display_bindings}: "
+                    f"P never holds within depth {depth}",
+                    "the antecedent is unreachable for this binding within the bound; "
+                    "check the property or increase --depth",
+                ))
+
+    return scenarios_out, warnings
+
+
 _COVERAGE_HINT = (
     "these requires clauses are unsatisfiable at every step up to depth K; "
     "weaken one of them, add an action that establishes them, or increase --depth"
@@ -2021,6 +2127,8 @@ def _display_scenario(scenario, spec):
         out["name"] = f"reach_{display_label(prop, spec)}"
     elif kind == "action_coverage" and action is not None:
         out["name"] = f"cover_{display_label(action, spec)}"
+    elif kind == "leadsTo" and prop is not None:
+        out["name"] = f"respond_{display_label(prop, spec)}{_leadsto_binding_suffix(out.get('bindings') or {})}"
     return out
 
 
@@ -2498,6 +2606,10 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
         })
 
     warnings = []
+    leadsto_scenarios, leadsto_warnings = _build_leadsto_response_scenarios(explored, spec)
+    scenario_list.extend(leadsto_scenarios)
+    warnings.extend(leadsto_warnings)
+
     for aname, cov in coverage_diag.items():
         if cov is True:
             info = cover_info.get(resolve_action_name(aname, spec))
