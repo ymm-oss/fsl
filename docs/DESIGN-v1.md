@@ -137,7 +137,32 @@ state { shipped: Set<OrderId> }
 - リテラル: `Set {}`(空)、`Set { 0, 2 }`。
 - JSON 上は**ソート済み配列**で表示(`"shipped": [0, 2]`)。
 
-### 3.6 Map
+### 3.6 Seq(v1.1)
+
+```fsl
+const CAP = 3
+state {
+  queue: Seq<JobId, CAP>,
+  log:   Seq<Qty, 5>
+}
+```
+
+- 容量 `N` 付きの FIFO 列。要素型 `T` はスカラ型のみ。`N` は正の定数式
+  (整数リテラルまたは `const` 名)。
+- **状態変数の型としてのみ**使用可能(struct フィールド・Map の値・
+  Set の要素・Seq の要素には不可 — `check` で `kind: "type"` + hint)。
+- 操作(純粋・再代入イディオム): `size()` / `push(e)` / `pop()` /
+  `head()` / `at(i)` / `contains(e)` / `==` / `!=`。
+- リテラル: `Seq {}` / `Seq { 1, 2 }`(要素数 ≤ N)。
+- `pop()` / `head()` / `at(i)` は部分関数。アクション本体・`requires`・
+  `ensures` 内では **暗黙の well-definedness 検査**(`partial_op`)が付く。
+  `requires q.size() > 0` 等のガードイディオムと併用する(G5)。
+- 満杯時の `push` は暗黙境界 invariant `_bounds_<変数>` 違反
+  (`violation_kind: "type_bound"`)。
+- JSON 上は長さプレフィックスの配列(`"queue": [1, 2]`、空は `[]`)。
+  diff は列全体の `{from, to}`。
+
+### 3.7 Map
 
 - `Map<K, V>`: **K は有界型(ドメイン型・enum)でなければならない**。
   これによりトレース表示が全域になり、量化・集約が常に有界になる。
@@ -145,12 +170,12 @@ state { shipped: Set<OrderId> }
   `verify` の `warnings` に非推奨警告と機械的な書き換えヒント
   (「`type K = 0..N` を宣言して置換せよ」)を載せる。
 
-### 3.7 Int / Bool
+### 3.8 Int / Bool
 
 - そのまま残す。`Int` は非有界(Z3 整数)。集計値(売上合計など)に使う。
   非有界変数には自動境界チェックは付かない。
 
-### 3.8 文字列は提供しない(設計判断)
+### 3.9 文字列は提供しない(設計判断)
 
 仕様レベルで文字列の中身に意味があることはまれで、ほぼ常に「有限個の
 区別される値」で十分。`enum` か不透明なドメイン型で表す。
@@ -180,6 +205,7 @@ var_decl      ::= NAME ":" type
 type          ::= "Int" | "Bool" | NAME            // NAME = ドメイン/enum/struct
                 | "Map" "<" type "," type ">"
                 | "Set" "<" type ">"
+                | "Seq" "<" type "," const_expr ">"
                 | "Option" "<" type ">"
 
 init_def      ::= "init" "{" stmt* "}"
@@ -219,11 +245,13 @@ sum         ::= product (("+" | "-") product)*
 product     ::= unary ("*" unary)*
 unary       ::= "-" unary | postfix
 postfix     ::= atom ("[" expr "]" | "." NAME
-                     | "." ("contains" | "add" | "remove" | "size")
+                     | "." ("contains" | "add" | "remove" | "push" | "pop"
+                            | "head" | "at" | "size")
                        "(" (expr ("," expr)*)? ")")*
 atom        ::= INT | "true" | "false" | "none"
               | "some" "(" expr ")"
               | "Set" "{" (expr ("," expr)*)? "}"
+              | "Seq" "{" (expr ("," expr)*)? "}"
               | NAME "{" NAME ":" expr ("," NAME ":" expr)* "}"  // struct リテラル
               | "count" "(" NAME ":" NAME "where" expr ")"
               | "sum" "(" NAME ":" NAME "of" expr ("where" expr)? ")"
@@ -237,7 +265,7 @@ atom        ::= INT | "true" | "false" | "none"
 
 予約語: `spec state init action requires ensures invariant reachable
 const type enum struct let if else forall exists in where is and or not
-true false none some old count sum min max abs Int Bool Map Set Option`
+true false none some old count sum min max abs Int Bool Map Set Seq Option`
 
 ### 4.2 量化と集約
 
@@ -392,7 +420,7 @@ fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
   "fsl": "1.0",
   "result": "violated",
   "spec": "ShoppingCart",
-  "violation_kind": "invariant",        // "invariant" | "ensures" | "type_bound" | "deadlock"
+  "violation_kind": "invariant",        // "invariant" | "ensures" | "type_bound" | "partial_op" | "deadlock"
   "invariant": "_bounds_stock",
   "loc": { "line": 8, "column": 5 },    // 違反した性質(または ensures)の位置
   "violated_at_step": 4,
@@ -471,6 +499,7 @@ v0 からの差分:
 | `error` / `name`・`type` | `loc`, `hint` | 宣言の追加・型の変更。再 `check` |
 | `violated` / `invariant`・`type_bound` | `last_action`, `changes`, `violating_bindings` | まず `last_action` の `requires` 不足を疑う(最頻のバグ)。トレース上の `changes` が意図通りなら invariant 側の誤りを疑う |
 | `violated` / `ensures` | `last_action`, `changes` | 当該アクションの更新式と ensures のどちらが仕様意図か判断して片方を直す |
+| `violated` / `partial_op` | `last_action`, `hint`, `trace` | `requires q.size() > 0` 等でガードを追加するか、空状態で発火しないよう requires を強化する |
 | `violated` / `deadlock` | `trace` | 終端状態が意図的なら `--deadlock=ignore`、そうでなければガードを弱めるか脱出アクションを追加 |
 | `reachable_failed` | `action_coverage`, `hint` | coverage が false のアクションの `requires` と `init` を疑う。次に `--depth` を増やす |
 | `verified` だが `action_coverage` に false | `warnings` | 空虚性。requires と init の矛盾を修正 |
@@ -545,7 +574,7 @@ CTI →「補助 invariant の提案」は LLM が得意な帰納的一般化で
   デッドロック検査、JSON v1(diff・loc・スキーマ版数)、`fslc check`。
 - **v1.1**: k 帰納法エンジン(§9、実装済み)、`fslc scenarios`(reachable witness と
   coverage トレースから統合テスト雛形 JSON を生成=実装との橋の第一歩)、
-  `Seq<T, N>`(容量付き列。配列+長さでエンコード)、unsat core による
+  `Seq<T, N>`(容量付き列。配列+長さでエンコード、**実装済み**)、unsat core による
   「どの requires が enabled を阻んでいるか」ヒント。
 - **v2.0**: 公平性注釈(`fair action ...`)と有界 `leadsTo`、実装橋の本体
   (仕様からのランタイムモニタ/プロパティテスト生成)、複数 spec の合成と

@@ -37,7 +37,30 @@ def eval_const(e, consts, binds=None):
     _err(f"range bound is not a compile-time integer: {e}", kind="type")
 
 
-def resolve_type(ty, types):
+_STATE_TYPE_HINT = (
+    "v1 state variables may use: scalar (Int, Bool, domain, enum), "
+    "Option<scalar>, struct (scalar fields only), "
+    "Map<bounded-scalar, scalar | Option<scalar> | struct>, "
+    "Set<bounded-scalar>, or Seq<scalar, N>"
+)
+
+
+def is_scalar_type(ty):
+    return ty[0] in ("int", "bool", "domain", "enum")
+
+
+def is_bounded_scalar_type(ty):
+    return ty[0] in ("domain", "enum")
+
+
+def resolve_seq_capacity(cap_ast, consts):
+    cap = eval_const(cap_ast, consts, {})
+    if cap <= 0:
+        _err(f"Seq capacity must be a positive integer, got {cap}", kind="type")
+    return cap
+
+
+def resolve_type(ty, types, consts=None):
     if ty[0] in ("int", "bool"):
         return ty
     if ty[0] == "name":
@@ -46,11 +69,17 @@ def resolve_type(ty, types):
             _err(f"unknown type '{n}'", kind="type")
         return types[n]["ty"]
     if ty[0] == "map":
-        return ("map", resolve_type(ty[1], types), resolve_type(ty[2], types))
+        return ("map", resolve_type(ty[1], types, consts), resolve_type(ty[2], types, consts))
     if ty[0] == "set":
-        return ("set", resolve_type(ty[1], types))
+        return ("set", resolve_type(ty[1], types, consts))
+    if ty[0] == "seq":
+        if consts is None:
+            _err("internal error: Seq capacity requires consts", kind="internal")
+        elem = resolve_type(ty[1], types, consts)
+        cap = resolve_seq_capacity(ty[2], consts)
+        return ("seq", elem, cap)
     if ty[0] == "option":
-        return ("option", resolve_type(ty[1], types))
+        return ("option", resolve_type(ty[1], types, consts))
     _err(f"unknown type form {ty}", kind="type")
 
 
@@ -122,10 +151,10 @@ def collect_types(items, consts):
     for n, info in types_meta.items():
         if info["kind"] == "struct":
             info["fields"] = {
-                fn: resolve_type(ft, types_meta) for fn, ft in info["fields"].items()
+                fn: resolve_type(ft, types_meta, consts) for fn, ft in info["fields"].items()
             }
             for fn, fty in info["fields"].items():
-                if fty[0] not in ("int", "bool", "domain", "enum"):
+                if not is_scalar_type(fty):
                     _err(
                         f"struct field '{n}.{fn}' has non-scalar type",
                         kind="type",
@@ -168,6 +197,27 @@ def expand_phys_var(logical_name, ty, types_meta, out):
             "logical": logical_name,
             "ty": ("set", elem),
             "elem_ty": elem,
+        })
+        return
+    if ty[0] == "seq":
+        elem, cap = ty[1], ty[2]
+        idx_ty = ("domain", 0, cap - 1)
+        out.append({
+            "phys": f"{logical_name}__data",
+            "logical": logical_name,
+            "part": "data",
+            "parent": logical_name,
+            "ty": ("map", idx_ty, elem),
+            "seq_cap": cap,
+            "elem_ty": elem,
+        })
+        out.append({
+            "phys": f"{logical_name}__len",
+            "logical": logical_name,
+            "part": "len",
+            "parent": logical_name,
+            "ty": ("int",),
+            "seq_cap": cap,
         })
         return
     if ty[0] == "map":
@@ -317,6 +367,24 @@ def bounds_invariant_expr(var_name, ty, types_meta):
         return ("forall", b, v_body)
     if ty[0] == "set":
         return None
+    if ty[0] == "seq":
+        cap = ty[2]
+        len_var = f"{var_name}__len"
+        data_var = f"{var_name}__data"
+        len_bounds = ("bin", "and",
+                      ("bin", ">=", ("var", len_var), ("num", 0)),
+                      ("bin", "<=", ("var", len_var), ("num", cap)))
+        elem_ty = ty[1]
+        if elem_ty[0] in ("domain", "enum"):
+            lo, hi = domain_range(elem_ty, types_meta)
+            elem_b = ("bin", "and",
+                      ("bin", ">=", ("index", data_var, ("var", "__k")), ("num", lo)),
+                      ("bin", "<=", ("index", data_var, ("var", "__k")), ("num", hi)))
+            idx_body = ("bin", "=>", ("bin", "<", ("var", "__k"), ("var", len_var)), elem_b)
+            b = ("binder_range", "__k", ("num", 0), ("num", cap - 1))
+            data_bounds = ("forall", b, idx_body)
+            return ("bin", "and", len_bounds, data_bounds)
+        return len_bounds
     if ty[0] == "option":
         inner = ty[1]
         present = ("var", f"{var_name}__present")
@@ -410,10 +478,147 @@ def _subst_var(expr, old, new):
     return expr
 
 
+def _validate_map_value_type(vty, types_meta, path):
+    if is_scalar_type(vty):
+        return
+    if vty[0] == "option":
+        if not is_scalar_type(vty[1]):
+            _err(
+                f"{path}: Map value type Option<{vty[1][0]}> is not allowed",
+                kind="type",
+                hint=_STATE_TYPE_HINT,
+            )
+        return
+    if vty[0] == "struct":
+        sname = vty[1]
+        for fn, fty in types_meta[sname]["fields"].items():
+            if not is_scalar_type(fty):
+                _err(
+                    f"{path}: struct field '{sname}.{fn}' has non-scalar type",
+                    kind="type",
+                    hint=_STATE_TYPE_HINT,
+                )
+        return
+    _err(f"{path}: illegal Map value type", kind="type", hint=_STATE_TYPE_HINT)
+
+
+def _resolve_lvalue_seq_capacity(lv, state, types_meta):
+    """Return Seq capacity for an assign target, or None if not a Seq assignment."""
+    if lv[0] == "var":
+        ty = state.get(lv[1])
+        if ty and ty[0] == "seq":
+            return ty[2]
+        return None
+    if lv[0] == "field_lv":
+        base, field = lv[1], lv[2]
+        if base[0] != "var":
+            return None
+        ty = state.get(base[1])
+        if ty and ty[0] == "struct":
+            fty = types_meta[ty[1]]["fields"].get(field)
+            if fty and fty[0] == "seq":
+                return fty[2]
+        return None
+    if lv[0] == "index":
+        ty = state.get(lv[1])
+        if ty and ty[0] == "map":
+            vty = ty[2]
+            if vty[0] == "seq":
+                return vty[2]
+        return None
+    return None
+
+
+def _check_seq_literals_in_stmts(stmts, state, types_meta):
+    for st in stmts:
+        if st[0] == "assign":
+            lv, rhs = st[1], st[2]
+            if rhs[0] == "seq_lit":
+                cap = _resolve_lvalue_seq_capacity(lv, state, types_meta)
+                if cap is not None and len(rhs[1]) > cap:
+                    _err(
+                        f"Seq literal has {len(rhs[1])} elements but capacity is {cap}",
+                        kind="type",
+                        loc=st[3] if len(st) > 3 else None,
+                        hint=_STATE_TYPE_HINT,
+                    )
+        elif st[0] == "if":
+            _check_seq_literals_in_stmts(st[2], state, types_meta)
+            _check_seq_literals_in_stmts(st[3], state, types_meta)
+        elif st[0] == "forall_stmt":
+            _check_seq_literals_in_stmts(st[2], state, types_meta)
+
+
+def check_seq_literal_sizes(state, init, actions, types_meta):
+    _check_seq_literals_in_stmts(init, state, types_meta)
+    for act in actions:
+        _check_seq_literals_in_stmts(act["stmts"], state, types_meta)
+
+
+def validate_state_var_type(ty, types_meta, path):
+    """Whitelist validation for state variable types (DESIGN-seq §7)."""
+    if is_scalar_type(ty):
+        return
+    if ty[0] == "option":
+        if not is_scalar_type(ty[1]):
+            _err(f"{path}: Option element must be scalar", kind="type", hint=_STATE_TYPE_HINT)
+        return
+    if ty[0] == "struct":
+        sname = ty[1]
+        for fn, fty in types_meta[sname]["fields"].items():
+            if not is_scalar_type(fty):
+                _err(
+                    f"{path}: struct field '{sname}.{fn}' has non-scalar type",
+                    kind="type",
+                    hint=_STATE_TYPE_HINT,
+                )
+        return
+    if ty[0] == "map":
+        kty, vty = ty[1], ty[2]
+        if kty[0] == "int":
+            _validate_map_value_type(vty, types_meta, path)
+            return
+        if not is_bounded_scalar_type(kty):
+            _err(
+                f"{path}: Map key must be a bounded scalar (domain or enum)",
+                kind="type",
+                hint=_STATE_TYPE_HINT,
+            )
+        _validate_map_value_type(vty, types_meta, path)
+        return
+    if ty[0] == "set":
+        if not is_bounded_scalar_type(ty[1]):
+            _err(
+                f"{path}: Set element must be a bounded scalar (domain or enum)",
+                kind="type",
+                hint=_STATE_TYPE_HINT,
+            )
+        return
+    if ty[0] == "seq":
+        if not is_scalar_type(ty[1]):
+            _err(
+                f"{path}: Seq element must be scalar",
+                kind="type",
+                hint=_STATE_TYPE_HINT,
+            )
+        return
+    _err(f"{path}: illegal state variable type", kind="type", hint=_STATE_TYPE_HINT)
+
+
 def generate_bounds_invariants(logical_state, phys_vars, types_meta):
     invs = []
     for logical, ty in logical_state.items():
-        if ty[0] in ("int", "bool", "set"):
+        if ty[0] in ("int", "bool", "set", "seq"):
+            if ty[0] == "seq":
+                expr = bounds_invariant_expr(logical, ty, types_meta)
+                if expr:
+                    invs.append({
+                        "name": f"_bounds_{logical}",
+                        "expr": expr,
+                        "implicit": True,
+                        "loc": None,
+                        "logical_var": logical,
+                    })
             continue
         if ty[0] in ("domain", "enum"):
             expr = bounds_invariant_expr(logical, ty, types_meta)
@@ -475,7 +680,7 @@ def build_spec(tree):
             for _, n, ty_ast in it[1]:
                 if n in state:
                     _err(f"duplicate state variable '{n}'", kind="name")
-                state[n] = resolve_type(ty_ast, types_meta)
+                state[n] = resolve_type(ty_ast, types_meta, consts)
         elif tag == "init":
             init = it[1]
         elif tag == "action":
@@ -508,6 +713,9 @@ def build_spec(tree):
     if not state:
         _err("spec has no state block", kind="semantics")
 
+    for n, ty in state.items():
+        validate_state_var_type(ty, types_meta, f"state variable '{n}'")
+
     phys_vars = []
     for n, ty in state.items():
         expand_phys_var(n, ty, types_meta, phys_vars)
@@ -527,6 +735,8 @@ def build_spec(tree):
 
     if not actions:
         _err("spec has no actions", kind="semantics")
+
+    check_seq_literal_sizes(state, init, actions, types_meta)
 
     return {
         "name": name,

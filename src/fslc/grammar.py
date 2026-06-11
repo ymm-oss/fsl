@@ -23,8 +23,11 @@ var_decl: NAME ":" type
      | "Bool" -> t_bool
      | "Map" "<" type "," type ">" -> t_map
      | "Set" "<" type ">" -> t_set
+     | "Seq" "<" type "," cap ">" -> t_seq
      | "Option" "<" type ">" -> t_option
      | NAME -> t_name
+cap: INT -> cap_int
+    | NAME -> cap_name
 
 init_def: "init" "{" stmt* "}"
 
@@ -75,6 +78,10 @@ postfix_suffix: "[" expr "]" -> idx_suffix
                | "." "contains" "(" [expr_list] ")" -> method_contains
                | "." "add" "(" [expr_list] ")" -> method_add
                | "." "remove" "(" [expr_list] ")" -> method_remove
+               | "." "push" "(" [expr_list] ")" -> method_push
+               | "." "pop" "(" ")" -> method_pop
+               | "." "head" "(" ")" -> method_head
+               | "." "at" "(" expr ")" -> method_at
                | "." "size" "(" ")" -> method_size
                | "." NAME -> field_suffix
 ?atom: INT -> num
@@ -83,6 +90,7 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "none" -> none_lit
      | "some" "(" expr ")" -> some_lit
      | "Set" "{" [expr_list] "}" -> set_lit
+     | "Seq" "{" [expr_list] "}" -> seq_lit
      | NAME struct_fields -> struct_lit
      | "count" "(" NAME ":" NAME "where" expr ")" -> count_e
      | "sum" "(" NAME ":" NAME "of" expr ["where" expr] ")" -> sum_e
@@ -135,6 +143,9 @@ class Ast(Transformer):
     def set_lit(self, meta, items=None):
         return ("set_lit", list(items or []))
 
+    def seq_lit(self, meta, items=None):
+        return ("seq_lit", list(items or []))
+
     def struct_lit(self, meta, name, fields):
         return ("struct_lit", name, dict(fields))
 
@@ -170,6 +181,27 @@ class Ast(Transformer):
 
     def method_size(self, meta):
         return self._method_suffix("size", [])
+
+    def method_push(self, meta, args=None):
+        return self._method_suffix("push", args)
+
+    def method_pop(self, meta):
+        return self._method_suffix("pop", [])
+
+    def method_head(self, meta):
+        return self._method_suffix("head", [])
+
+    def method_at(self, meta, idx):
+        return self._method_suffix("at", [idx])
+
+    def cap_int(self, meta, n):
+        return ("num", int(n))
+
+    def cap_name(self, meta, n):
+        return ("var", str(n))
+
+    def t_seq(self, meta, elem, cap):
+        return ("seq", elem, cap)
 
     def postfix(self, meta, atom, *suffixes):
         e = atom

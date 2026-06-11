@@ -148,6 +148,10 @@ _CTI_HINT = (
     "then re-run"
 )
 
+_PARTIAL_OP_HINT = (
+    "guard the action with requires q.size() > 0 (or bound the index)"
+)
+
 
 def _inv_constraint(inv, state, spec, expr_cache):
     with _eval_cache_scope(expr_cache, id(state)):
@@ -233,6 +237,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         return ("option_val", z3.BoolVal(True), v)
     if tag == "set_lit":
         _err("bare Set literal must appear in assignment (use shipped = Set {} on a Set-typed variable)")
+    if tag == "seq_lit":
+        _err("bare Seq literal must appear in assignment (use q = Seq {} on a Seq-typed variable)")
     if tag == "struct_lit":
         sname, fields = e[1], e[2]
         vals = {}
@@ -263,6 +269,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
                 })
             if ty[0] == "set":
                 return ("set_val", state[n], ty[1])
+            if ty[0] == "seq":
+                return ("seq_val", state[f"{n}__data"], state[f"{n}__len"], ty[1], ty[2])
         if n in state:
             return state[n]
         _err(f"unknown identifier '{n}'")
@@ -291,6 +299,9 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
             struct_cmp = _struct_compare(a, b, op, spec)
             if struct_cmp is not None:
                 return struct_cmp
+            seq_cmp = _seq_compare(a, b, op, spec)
+            if seq_cmp is not None:
+                return seq_cmp
             _reject_option_binop(a, b, op)
         else:
             _reject_option_binop(a, b, op)
@@ -358,6 +369,25 @@ def _struct_info(val, spec):
         if ty and ty[0] == "map" and ty[2][0] == "struct":
             return ty[2][1], val[3]
     return None, None
+
+
+def _seq_compare(a, b, op, spec):
+    if not (isinstance(a, tuple) and a[0] == "seq_val"
+            and isinstance(b, tuple) and b[0] == "seq_val"):
+        if isinstance(a, tuple) and a[0] == "seq_val":
+            _err("Seq comparison requires two Seq values", kind="type")
+        if isinstance(b, tuple) and b[0] == "seq_val":
+            _err("Seq comparison requires two Seq values", kind="type")
+        return None
+    data1, len1, _, cap1 = a[1], a[2], a[3], a[4]
+    data2, len2, _, cap2 = b[1], b[2], b[3], b[4]
+    if cap1 != cap2:
+        _err("Seq comparison between different capacities", kind="type")
+    parts = [len1 == len2]
+    for i in range(cap1):
+        parts.append(z3.Implies(i < len1, z3.Select(data1, i) == z3.Select(data2, i)))
+    res = z3.And(*parts)
+    return z3.Not(res) if op == "!=" else res
 
 
 def _struct_compare(a, b, op, spec):
@@ -475,12 +505,16 @@ def _set_elem_ty(base, state, spec):
         for n, ty in spec["state"].items():
             if ty[0] == "set" and state.get(n) is base:
                 return base, ty[1]
-    _err("method call on non-set value")
+    return None
 
 
-def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
-    m, elem_ty = _set_elem_ty(base, state, spec)
+def _seq_val_parts(base):
+    if isinstance(base, tuple) and base[0] == "seq_val":
+        return base[1], base[2], base[3], base[4]
+    return None
 
+
+def _eval_set_method(m, elem_ty, method, args, state, binds, spec, old_state, in_ensures):
     if method == "contains":
         if len(args) != 1:
             _err("contains expects 1 argument")
@@ -506,7 +540,71 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
         for t in terms:
             acc = acc + t
         return acc
-    _err(f"unknown method '{method}'")
+    return None
+
+
+def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spec,
+                       old_state, in_ensures):
+    if method == "push":
+        if len(args) != 1:
+            _err("push expects 1 argument")
+        e = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        return ("seq_val", z3.Store(data, length, e), length + 1, elem_ty, cap)
+    if method == "pop":
+        if args:
+            _err("pop expects no arguments")
+        new_data = data
+        for i in range(cap - 1):
+            new_data = z3.Store(new_data, z3.IntVal(i), z3.Select(data, i + 1))
+        return ("seq_val", new_data, length - 1, elem_ty, cap)
+    if method == "head":
+        if args:
+            _err("head expects no arguments")
+        return z3.Select(data, 0)
+    if method == "at":
+        if len(args) != 1:
+            _err("at expects 1 argument")
+        idx = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        return z3.Select(data, idx)
+    if method == "contains":
+        if len(args) != 1:
+            _err("contains expects 1 argument")
+        e = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        terms = [
+            z3.And(z3.IntVal(i) < length, z3.Select(data, z3.IntVal(i)) == e)
+            for i in range(cap)
+        ]
+        return z3.Or(*terms) if terms else z3.BoolVal(False)
+    if method == "size":
+        if args:
+            _err("size expects no arguments")
+        return length
+    return None
+
+
+def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
+    set_parts = _set_elem_ty(base, state, spec)
+    if set_parts is not None:
+        res = _eval_set_method(
+            set_parts[0], set_parts[1], method, args, state, binds, spec,
+            old_state, in_ensures,
+        )
+        if res is not None:
+            return res
+        _err(f"unknown method '{method}' on Set")
+
+    seq_parts = _seq_val_parts(base)
+    if seq_parts is not None:
+        data, length, elem_ty, cap = seq_parts
+        res = _eval_seq_method(
+            data, length, elem_ty, cap, method, args, state, binds, spec,
+            old_state, in_ensures,
+        )
+        if res is not None:
+            return res
+        _err(f"unknown method '{method}' on Seq")
+
+    _err("method call on value that is neither Set nor Seq")
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
@@ -614,6 +712,21 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
                 m = z3.Store(m, idx, z3.BoolVal(True))
             pend[n] = m
             return ("scalar", n)
+        if ty[0] == "seq" and rhs[0] == "seq_lit":
+            elem_ty, cap = ty[1], ty[2]
+            if len(rhs[1]) > cap:
+                _err(
+                    f"Seq literal has {len(rhs[1])} elements but capacity is {cap}",
+                    kind="type",
+                )
+            elem_sort = z3_sort(elem_ty, spec["types"])
+            m = z3.K(elem_sort, z3.IntVal(0))
+            for i, lit in enumerate(rhs[1]):
+                val_i = eval_expr(lit, state, binds, spec)
+                m = z3.Store(m, z3.IntVal(i), val_i)
+            pend[f"{n}__data"] = m
+            pend[f"{n}__len"] = z3.IntVal(len(rhs[1]))
+            return ("scalar", n)
 
     val = eval_expr(rhs, state, binds, spec)
 
@@ -627,6 +740,12 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
                 pend[n] = val[1]
             else:
                 pend[n] = val
+        elif ty[0] == "seq":
+            if isinstance(val, tuple) and val[0] == "seq_val":
+                pend[f"{n}__data"] = val[1]
+                pend[f"{n}__len"] = val[2]
+            else:
+                _err("Seq assignment requires Seq literal or Seq operation expression")
         elif ty[0] == "option":
             if isinstance(val, tuple) and val[0] == "option_val":
                 pend[f"{n}__present"] = val[1]
@@ -1009,6 +1128,15 @@ def _logical_val(model, state, name, ty, spec):
             if _py_val(model, z3.Select(m, z3.IntVal(i))):
                 elems.append(_display_value(elem_ty, i, spec))
         return sorted(elems, key=str)
+    if ty[0] == "seq":
+        elem_ty, cap = ty[1], ty[2]
+        data = state[f"{name}__data"]
+        length = _py_val(model, state[f"{name}__len"])
+        out = []
+        for i in range(length):
+            raw = _py_val(model, z3.Select(data, z3.IntVal(i)))
+            out.append(_display_value(elem_ty, raw, spec))
+        return out
     if ty[0] == "option":
         present = _py_val(model, state[f"{name}__present"])
         if not present:
@@ -1129,10 +1257,20 @@ def _expr_static_type(e, spec, env):
     if tag == "method":
         method = e[2]
         base_ty = _expr_static_type(e[1], spec, env)
-        if method in ("contains", "size"):
-            return ("bool",) if method == "contains" else ("int",)
-        if method in ("add", "remove"):
+        if method in ("contains",):
+            return ("bool",)
+        if method == "size":
+            return ("int",)
+        if method in ("add", "remove", "push", "pop"):
             return base_ty
+        if method == "head":
+            if base_ty and base_ty[0] == "seq":
+                return base_ty[1]
+            return ("int",)
+        if method == "at":
+            if base_ty and base_ty[0] == "seq":
+                return base_ty[1]
+            return ("int",)
         return None
     if tag == "bin":
         if e[1] in ("+", "-", "*"):
@@ -1411,6 +1549,69 @@ def _trace_to_scenario_steps(trace):
     return steps, expected_states
 
 
+def _and_path_ast(path_ast, extra):
+    if path_ast is None:
+        return extra
+    return ("bin", "and", path_ast, extra)
+
+
+def _collect_partial_op_sites(action_def):
+    sites = []
+
+    def walk_expr(e, loc, path_ast):
+        if not isinstance(e, tuple):
+            return
+        if e[0] == "method" and e[2] in ("pop", "head", "at"):
+            sites.append({"expr": e, "loc": loc, "path_ast": path_ast})
+        for child in e[1:]:
+            if isinstance(child, tuple):
+                walk_expr(child, loc, path_ast)
+            elif isinstance(child, dict):
+                for sub in child.values():
+                    if isinstance(sub, tuple):
+                        walk_expr(sub, loc, path_ast)
+            elif isinstance(child, list):
+                for sub in child:
+                    if isinstance(sub, tuple):
+                        walk_expr(sub, loc, path_ast)
+
+    def walk_stmts(stmts, path_ast):
+        for st in stmts:
+            if st[0] == "assign":
+                walk_expr(st[2], st[3] if len(st) > 3 else None, path_ast)
+            elif st[0] == "if":
+                _, cond, then_stmts, else_stmts, loc = st
+                walk_expr(cond, loc, path_ast)
+                walk_stmts(then_stmts, _and_path_ast(path_ast, cond))
+                walk_stmts(else_stmts, _and_path_ast(path_ast, ("not", cond)))
+            elif st[0] == "forall_stmt":
+                _, _binder, body, _ = st
+                walk_stmts(body, path_ast)
+
+    for req in action_def["requires"]:
+        walk_expr(req["expr"], req.get("loc"), None)
+    for let in action_def["lets"]:
+        walk_expr(let["expr"], let.get("loc"), None)
+    walk_stmts(action_def["stmts"], None)
+    for ens in action_def["ensures"]:
+        walk_expr(ens["expr"], ens.get("loc"), None)
+    return sites
+
+
+def _partial_op_well_defined(site_expr, state, binds, spec):
+    method = site_expr[2]
+    base = eval_expr(site_expr[1], state, binds, spec)
+    if not isinstance(base, tuple) or base[0] != "seq_val":
+        return z3.BoolVal(True)
+    _, _data, length, _elem_ty, _cap = base
+    if method in ("pop", "head"):
+        return length > 0
+    if method == "at":
+        idx = eval_expr(site_expr[3][0], state, binds, spec)
+        return z3.And(idx >= 0, idx < length)
+    return z3.BoolVal(True)
+
+
 def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cache):
     if step >= len(choices):
         return None
@@ -1460,6 +1661,47 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
     dl_warn = []
 
     for t in range(depth + 1):
+        if t > 0:
+            for idx, inst in enumerate(instances):
+                act = inst["action_def"]
+                sites = _collect_partial_op_sites(act)
+                if not sites:
+                    continue
+                with _eval_cache_scope(expr_cache, id(states[t - 1])):
+                    guards, binds = _eval_requires(
+                        inst["requires"], inst["lets"], states[t - 1], inst["binds"], spec)
+                for site in sites:
+                    with _eval_cache_scope(expr_cache, id(states[t - 1])):
+                        wd = _partial_op_well_defined(site["expr"], states[t - 1], binds, spec)
+                        path_ast = site.get("path_ast")
+                        if path_ast is not None:
+                            path_cond = eval_expr(path_ast, states[t - 1], binds, spec)
+                            wd_check = z3.Implies(path_cond, wd)
+                        else:
+                            wd_check = wd
+                    s.push()
+                    s.add(choices[t - 1] == idx)
+                    if guards:
+                        s.add(z3.And(*guards))
+                    s.add(z3.Not(wd_check))
+                    if s.check() == z3.sat:
+                        m = s.model()
+                        trace = _build_trace(m, states, choices, instances, spec, t)
+                        s.pop()
+                        return {
+                            "result": "violated",
+                            "spec": spec["name"],
+                            "violation_kind": "partial_op",
+                            "invariant": f"_partial_{inst['action']}",
+                            "loc": site.get("loc"),
+                            "hint": _PARTIAL_OP_HINT,
+                            "violated_at_step": t,
+                            "violating_bindings": None,
+                            "last_action": _last_action(m, choices, instances, t, spec),
+                            "trace": trace,
+                        }
+                    s.pop()
+
         passed_invariants = []
         for inv in spec["invariants"]:
             with _eval_cache_scope(expr_cache, id(states[t])):
