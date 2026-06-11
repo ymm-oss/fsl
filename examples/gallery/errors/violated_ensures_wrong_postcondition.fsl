@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: violated
+// expected-kind: ensures
+spec GalleryViolatedEnsuresWrongPostcondition {
+  state { x: Int }
+  init { x = 0 }
+  action inc() {
+    x = x + 1
+    ensures x == old(x) + 2
+  }
+}

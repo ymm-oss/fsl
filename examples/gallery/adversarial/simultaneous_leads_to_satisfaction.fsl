@@ -1,0 +1,17 @@
+// expected-command: verify --depth 4 --deadlock ignore
+// expected-result: verified
+spec GalleryAdversarialSimultaneousLeadsTo {
+  state { ready: Bool, done: Bool }
+  init { ready = true  done = true }
+  action reset() {
+    requires ready == true
+    ready = false
+    done = false
+  }
+  action start_and_finish() {
+    requires ready == false
+    ready = true
+    done = true
+  }
+  leadsTo AlreadySatisfied { ready == true ~> done == true }
+}

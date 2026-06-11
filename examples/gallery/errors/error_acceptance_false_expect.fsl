@@ -1,0 +1,21 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: acceptance
+requirements GalleryAcceptanceFalseExpect {
+  type K = 0..0
+  enum St { New, Done }
+  state { st: St }
+  init { st = New }
+
+  requirement REQ-1 "完了操作" {
+    action finish(k: K) {
+      requires st == New
+      st = Done
+    }
+  }
+
+  acceptance AC-1 "完了後は New ではない" {
+    finish(0)
+    expect st == New
+  }
+}

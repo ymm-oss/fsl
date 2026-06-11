@@ -1,0 +1,39 @@
+// topic: 1台エレベータ
+// scale: small
+// features: enum, bounded floor, guarded movement, reachable
+// expected-command: verify --depth 7 --engine induction --deadlock ignore
+// expected-result: proved
+spec GallerySmallElevator {
+  type Floor = 0..2
+  enum Door { Open, Closed }
+
+  state { floor: Floor, target: Floor, door: Door }
+  init { floor = 0  target = 0  door = Open }
+
+  action call(t: Floor) {
+    requires door == Open
+    target = t
+    door = Closed
+  }
+
+  action move_up() {
+    requires door == Closed
+    requires floor < target
+    floor = floor + 1
+  }
+
+  action move_down() {
+    requires door == Closed
+    requires floor > target
+    floor = floor - 1
+  }
+
+  action open() {
+    requires door == Closed
+    requires floor == target
+    door = Open
+  }
+
+  invariant OpenAtTarget { door == Open => floor == target }
+  reachable OpenAtTop { door == Open and floor == 2 }
+}

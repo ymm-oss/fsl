@@ -1,0 +1,51 @@
+// topic: 食事する哲学者のデッドロック観察
+// scale: medium
+// features: Map<Option>, symmetry, reachable deadlock-shaped state
+// expected-command: verify --depth 6 --deadlock warn
+// expected-result: verified
+spec GalleryMediumDiningPhilosophers {
+  type Phil = 0..1
+  type Fork = 0..1
+
+  state {
+    hungry: Map<Phil, Bool>,
+    left_held: Map<Phil, Bool>,
+    fork_owner: Map<Fork, Option<Phil>>
+  }
+
+  init {
+    forall p: Phil { hungry[p] = false }
+    forall p: Phil { left_held[p] = false }
+    forall f: Fork { fork_owner[f] = none }
+  }
+
+  action become_hungry(p: Phil) {
+    requires hungry[p] == false
+    hungry[p] = true
+  }
+
+  action take_left(p: Phil) {
+    requires hungry[p] == true
+    requires left_held[p] == false
+    requires fork_owner[p] == none
+    left_held[p] = true
+    fork_owner[p] = some(p)
+  }
+
+  action eat_and_release(p: Phil) {
+    requires hungry[p] == true
+    requires left_held[p] == true
+    requires fork_owner[1 - p] == none
+    hungry[p] = false
+    left_held[p] = false
+    fork_owner[p] = none
+  }
+
+  invariant LeftFlagMatchesOwner {
+    forall p: Phil { left_held[p] == (fork_owner[p] is some(h) and h == p) }
+  }
+
+  reachable BothHoldLeft {
+    left_held[0] == true and left_held[1] == true
+  }
+}

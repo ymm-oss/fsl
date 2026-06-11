@@ -1,0 +1,27 @@
+// topic: ターンスタイル
+// scale: tiny
+// features: Bool, 有界カウンタ, reachable, ensures
+// expected-command: verify --depth 4 --engine induction --deadlock ignore
+// expected-result: proved
+spec GalleryTinyTurnstile {
+  type Entries = 0..2
+
+  state { locked: Bool, entries: Entries }
+  init { locked = true  entries = 0 }
+
+  action coin() {
+    requires locked == true
+    locked = false
+  }
+
+  action push() {
+    requires locked == false
+    requires entries < 2
+    locked = true
+    entries = entries + 1
+    ensures entries == old(entries) + 1
+  }
+
+  invariant LockedOrOpen { locked == true or locked == false }
+  reachable OneEntry { entries == 1 and locked == true }
+}

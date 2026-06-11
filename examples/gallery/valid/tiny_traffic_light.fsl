@@ -1,0 +1,26 @@
+// topic: 信号機
+// scale: tiny
+// features: enum, if/else, invariant, reachable
+// expected-command: verify --depth 5 --engine induction --deadlock ignore
+// expected-result: proved
+spec GalleryTinyTrafficLight {
+  enum Light { Red, Green, Yellow }
+
+  state { light: Light }
+  init { light = Red }
+
+  action tick() {
+    if light == Red {
+      light = Green
+    } else {
+      if light == Green {
+        light = Yellow
+      } else {
+        light = Red
+      }
+    }
+  }
+
+  invariant AlwaysAColor { light == Red or light == Green or light == Yellow }
+  reachable SeenYellow { light == Yellow }
+}

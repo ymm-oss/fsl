@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: violated
+// expected-kind: partial_op
+spec GalleryAdversarialSeqEmptyHead {
+  type Job = 0..1
+  state { q: Seq<Job, 2>, current: Job }
+  init { q = Seq {}  current = 0 }
+  action read_empty() {
+    current = q.head()
+  }
+}

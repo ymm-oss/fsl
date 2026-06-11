@@ -1,0 +1,90 @@
+// topic: 注文から返品までの複合ワークフロー
+// scale: large
+// features: Map<_, struct>, Option field, ledger invariant, depth 8 reachable
+// expected-command: verify --depth 8 --deadlock ignore
+// expected-result: verified
+spec GalleryLargeOrderWorkflow {
+  type OrderId = 0..1
+  type UserId = 0..1
+  type Qty = 0..2
+  enum OSt { Empty, Placed, Approved, Paid, Packed, Shipped, Delivered, ReturnRequested, Refunded }
+  struct Order { st: OSt, qty: Qty, buyer: Option<UserId> }
+
+  state {
+    orders: Map<OrderId, Order>,
+    stock: Qty,
+    paid_count: Int,
+    refund_count: Int
+  }
+
+  init {
+    forall o: OrderId { orders[o] = Order { st: Empty, qty: 0, buyer: none } }
+    stock = 2
+    paid_count = 0
+    refund_count = 0
+  }
+
+  action place(o: OrderId, u: UserId, q: Qty) {
+    requires orders[o].st == Empty
+    requires q > 0
+    requires stock >= q
+    orders[o] = Order { st: Placed, qty: q, buyer: some(u) }
+    stock = stock - q
+  }
+
+  action approve(o: OrderId) {
+    requires orders[o].st == Placed
+    orders[o].st = Approved
+  }
+
+  action pay(o: OrderId) {
+    requires orders[o].st == Approved
+    orders[o].st = Paid
+    paid_count = paid_count + 1
+  }
+
+  action pack(o: OrderId) {
+    requires orders[o].st == Paid
+    orders[o].st = Packed
+  }
+
+  action ship(o: OrderId) {
+    requires orders[o].st == Packed
+    orders[o].st = Shipped
+  }
+
+  action deliver(o: OrderId) {
+    requires orders[o].st == Shipped
+    orders[o].st = Delivered
+  }
+
+  action request_return(o: OrderId) {
+    requires orders[o].st == Delivered
+    orders[o].st = ReturnRequested
+  }
+
+  action refund(o: OrderId) {
+    requires orders[o].st == ReturnRequested
+    orders[o].st = Refunded
+    stock = stock + orders[o].qty
+    refund_count = refund_count + 1
+  }
+
+  invariant PaidLedger {
+    paid_count == count(o: OrderId where
+      orders[o].st == Paid or orders[o].st == Packed or orders[o].st == Shipped
+      or orders[o].st == Delivered or orders[o].st == ReturnRequested or orders[o].st == Refunded)
+  }
+
+  invariant RefundLedger {
+    refund_count == count(o: OrderId where orders[o].st == Refunded)
+  }
+
+  invariant BuyerKnownAfterPlace {
+    forall o: OrderId { orders[o].st != Empty => orders[o].buyer != none }
+  }
+
+  reachable RefundedOne {
+    exists o: OrderId { orders[o].st == Refunded }
+  }
+}

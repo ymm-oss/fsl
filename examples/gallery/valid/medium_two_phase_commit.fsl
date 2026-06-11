@@ -1,0 +1,67 @@
+// topic: 2フェーズコミット
+// scale: medium
+// features: coordinator phase, participant votes, count, safety invariant
+// expected-command: verify --depth 8 --engine induction --deadlock ignore
+// expected-result: proved
+spec GalleryMediumTwoPhaseCommit {
+  type Node = 0..1
+  enum Phase { Idle, Preparing, Committed, Aborted }
+  enum Vote { Unknown, Yes, No }
+
+  state {
+    phase: Phase,
+    vote: Map<Node, Vote>,
+    applied: Map<Node, Bool>
+  }
+
+  init {
+    phase = Idle
+    forall n: Node { vote[n] = Unknown }
+    forall n: Node { applied[n] = false }
+  }
+
+  action begin() {
+    requires phase == Idle
+    phase = Preparing
+  }
+
+  action vote_yes(n: Node) {
+    requires phase == Preparing
+    requires vote[n] == Unknown
+    vote[n] = Yes
+  }
+
+  action vote_no(n: Node) {
+    requires phase == Preparing
+    requires vote[n] == Unknown
+    vote[n] = No
+  }
+
+  action commit() {
+    requires phase == Preparing
+    requires forall n: Node { vote[n] == Yes }
+    phase = Committed
+  }
+
+  action abort() {
+    requires phase == Preparing
+    requires exists n: Node { vote[n] == No }
+    phase = Aborted
+  }
+
+  action apply(n: Node) {
+    requires phase == Committed
+    requires applied[n] == false
+    applied[n] = true
+  }
+
+  invariant CommitRequiresYes {
+    phase == Committed => (forall n: Node { vote[n] == Yes })
+  }
+
+  invariant AppliedOnlyCommitted {
+    forall n: Node { applied[n] == true => phase == Committed }
+  }
+
+  reachable AllApplied { forall n: Node { applied[n] == true } }
+}

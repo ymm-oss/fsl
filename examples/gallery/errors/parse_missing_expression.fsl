@@ -1,0 +1,7 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: parse
+spec GalleryParseMissingExpression {
+  state { x: Int }
+  init { x = }
+}

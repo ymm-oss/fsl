@@ -1,0 +1,7 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: type
+spec GalleryTypeUndeclaredType {
+  state { owner: UserId }
+  init { owner = 0 }
+}

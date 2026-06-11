@@ -1,0 +1,9 @@
+// expected-command: verify --depth 2
+// expected-result: violated
+// expected-kind: invariant
+spec GalleryViolatedInvariantCounter {
+  state { x: Int }
+  init { x = 0 }
+  action inc() { x = x + 1 }
+  invariant StaysZero { x == 0 }
+}

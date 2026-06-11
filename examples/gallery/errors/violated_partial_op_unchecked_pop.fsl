@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: violated
+// expected-kind: partial_op
+spec GalleryViolatedPartialOpUncheckedPop {
+  type Job = 0..1
+  state { q: Seq<Job, 2> }
+  init { q = Seq {} }
+  action pop_empty() {
+    q = q.pop()
+  }
+}

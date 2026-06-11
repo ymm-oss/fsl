@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: violated
+// expected-kind: type_bound
+spec GalleryAdversarialSeqFullPush {
+  type Job = 0..1
+  state { q: Seq<Job, 2> }
+  init { q = Seq { 0, 1 } }
+  action push_full() {
+    q = q.push(0)
+  }
+}

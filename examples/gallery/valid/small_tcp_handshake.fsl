@@ -1,0 +1,40 @@
+// topic: TCP風ハンドシェイク
+// scale: small
+// features: enum state machine, fair progress, leadsTo, reachable
+// expected-command: verify --depth 6 --deadlock ignore
+// expected-result: verified
+spec GallerySmallTcpHandshake {
+  enum CSt { Closed, SynSent, Established }
+  enum SSt { Listen, SynReceived, Connected }
+
+  state { client: CSt, server: SSt }
+  init { client = Closed  server = Listen }
+
+  fair action send_syn() {
+    requires client == Closed
+    requires server == Listen
+    client = SynSent
+    server = SynReceived
+  }
+
+  fair action recv_syn_ack() {
+    requires client == SynSent
+    requires server == SynReceived
+    client = Established
+    server = Connected
+  }
+
+  action close() {
+    requires client == Established
+    requires server == Connected
+    client = Closed
+    server = Listen
+  }
+
+  invariant ClientServerAgree {
+    client == Established => server == Connected
+  }
+
+  reachable ConnectedOnce { client == Established and server == Connected }
+  leadsTo HandshakeCompletes { client == SynSent ~> client == Established }
+}

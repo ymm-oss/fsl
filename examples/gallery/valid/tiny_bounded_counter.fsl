@@ -1,0 +1,24 @@
+// topic: 上限付きカウンタ
+// scale: tiny
+// features: domain type, requires guard, reachable
+// expected-command: verify --depth 4 --engine induction --deadlock ignore
+// expected-result: proved
+spec GalleryTinyBoundedCounter {
+  type Count = 0..3
+
+  state { n: Count }
+  init { n = 0 }
+
+  action inc() {
+    requires n < 3
+    n = n + 1
+  }
+
+  action dec() {
+    requires n > 0
+    n = n - 1
+  }
+
+  invariant NeverAboveCap { n <= 3 }
+  reachable HitCap { n == 3 }
+}

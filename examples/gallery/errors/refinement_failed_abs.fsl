@@ -1,0 +1,15 @@
+// expected-helper: used by refinement_failed_map.fsl
+spec GalleryRefinementAbs {
+  type K = 0..0
+  state { approved: Bool, paid: Bool }
+  init { approved = false  paid = false }
+  action approve(k: K) {
+    requires approved == false
+    approved = true
+  }
+  action pay(k: K) {
+    requires approved == true
+    requires paid == false
+    paid = true
+  }
+}

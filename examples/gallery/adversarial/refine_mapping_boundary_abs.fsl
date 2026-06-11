@@ -1,0 +1,11 @@
+// expected-helper: used by refine_mapping_boundary_map.fsl
+spec GalleryAdversarialRefineAbs {
+  type Id = 0..0
+  type N = 0..1
+  state { n: N }
+  init { n = 0 }
+  action bump(i: Id) {
+    requires n == 0
+    n = 1
+  }
+}

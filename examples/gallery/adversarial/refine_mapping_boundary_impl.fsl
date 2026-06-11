@@ -1,0 +1,11 @@
+// expected-helper: used by refine_mapping_boundary_map.fsl
+spec GalleryAdversarialRefineImpl {
+  type Id = 0..0
+  type N = 0..2
+  state { n_i: N }
+  init { n_i = 0 }
+  action jump(i: Id) {
+    requires n_i == 0
+    n_i = 2
+  }
+}

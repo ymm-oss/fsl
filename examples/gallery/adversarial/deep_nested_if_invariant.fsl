@@ -1,0 +1,23 @@
+// expected-command: verify --depth 4
+// expected-result: violated
+// expected-kind: invariant
+spec GalleryAdversarialDeepNestedIf {
+  state { x: Int, y: Int }
+  init { x = 0  y = 0 }
+  action twist() {
+    if x == 0 {
+      if y == 0 {
+        x = 1
+      } else {
+        y = 1
+      }
+    } else {
+      if y == 0 {
+        y = 2
+      } else {
+        x = 0
+      }
+    }
+  }
+  invariant XNeverOne { x != 1 }
+}

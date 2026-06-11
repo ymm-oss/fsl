@@ -1,0 +1,9 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: type
+spec GalleryTypeStructSetField {
+  type K = 0..1
+  struct Bag { members: Set<K> }
+  state { bag: Bag }
+  init { bag.members = Set {} }
+}

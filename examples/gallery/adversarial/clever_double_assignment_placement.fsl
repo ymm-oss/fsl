@@ -1,0 +1,15 @@
+// expected-command: verify --depth 3
+// expected-result: error
+// expected-kind: semantics
+spec GalleryAdversarialCleverDoubleAssignment {
+  state { x: Int, flag: Bool }
+  init { x = 0  flag = true }
+  action bad() {
+    if flag == true {
+      x = 1
+    } else {
+      flag = true
+    }
+    x = 2
+  }
+}

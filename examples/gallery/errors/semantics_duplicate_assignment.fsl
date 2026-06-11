@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: error
+// expected-kind: semantics
+spec GallerySemanticsDuplicateAssignment {
+  state { x: Int }
+  init { x = 0 }
+  action bad() {
+    x = 1
+    x = 2
+  }
+}

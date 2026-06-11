@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: error
+// expected-kind: vacuous
+spec GalleryVacuousContradictoryInit {
+  type K = 0..1
+  state { x: Int }
+  init {
+    forall k: K { x = k }
+  }
+  action noop() { }
+}

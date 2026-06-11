@@ -1,0 +1,14 @@
+// expected-command: verify --depth 3
+// expected-result: violated
+// expected-kind: invariant
+spec GalleryAdversarialQuantifierBoundary {
+  type K = 0..2
+  state { seen: Map<K, Bool> }
+  init { forall k: K { seen[k] = true } }
+  action clear_edge() {
+    seen[2] = false
+  }
+  invariant AllSeen {
+    forall k: K { seen[k] == true }
+  }
+}

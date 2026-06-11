@@ -1,0 +1,52 @@
+// expected-command: verify --depth 5 --engine induction --deadlock ignore
+// expected-result: proved
+spec GalleryAdversarialOptionStructSetSeqCombo {
+  type Job = 0..2
+  type Idx = 0..2
+  const CAP = 3
+  enum JSt { New, Queued, Done }
+  struct Rec { st: JSt, owner: Option<Job> }
+
+  state {
+    jobs: Map<Job, Rec>,
+    active: Set<Job>,
+    q: Seq<Job, CAP>
+  }
+
+  init {
+    forall j: Job { jobs[j] = Rec { st: New, owner: none } }
+    active = Set {}
+    q = Seq {}
+  }
+
+  action enqueue(j: Job) {
+    requires jobs[j].st == New
+    requires q.size() < CAP
+    jobs[j].st = Queued
+    jobs[j].owner = some(j)
+    active = active.add(j)
+    q = q.push(j)
+  }
+
+  action complete() {
+    requires q.size() > 0
+    let j = q.head()
+    jobs[j].st = Done
+    active = active.remove(j)
+    q = q.pop()
+  }
+
+  invariant QueuedInActive {
+    forall j: Job { jobs[j].st == Queued => active.contains(j) }
+  }
+
+  invariant QueueRowsQueued {
+    forall i in 0..CAP-1 { i < q.size() => jobs[q.at(i)].st == Queued }
+  }
+
+  invariant NoDuplicateQueue {
+    forall i in 0..CAP-1 { forall j in 0..CAP-1 {
+      (i < j and j < q.size()) => not (q.at(i) == q.at(j))
+    } }
+  }
+}

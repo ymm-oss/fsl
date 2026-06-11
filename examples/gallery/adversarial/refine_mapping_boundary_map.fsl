@@ -1,0 +1,11 @@
+// expected-command: refine refine_mapping_boundary_impl.fsl refine_mapping_boundary_abs.fsl refine_mapping_boundary_map.fsl --depth 2
+// expected-result: refinement_failed
+// expected-kind: map_out_of_bounds
+refinement GalleryAdversarialRefineBoundaryMap {
+  impl GalleryAdversarialRefineImpl
+  abs GalleryAdversarialRefineAbs
+
+  map n = n_i
+
+  action jump(i) -> bump(i)
+}

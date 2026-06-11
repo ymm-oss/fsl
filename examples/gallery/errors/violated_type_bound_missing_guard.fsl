@@ -1,0 +1,11 @@
+// expected-command: verify --depth 2
+// expected-result: violated
+// expected-kind: type_bound
+spec GalleryViolatedTypeBoundMissingGuard {
+  type Qty = 0..1
+  state { stock: Qty }
+  init { stock = 0 }
+  action sell_without_stock() {
+    stock = stock - 1
+  }
+}

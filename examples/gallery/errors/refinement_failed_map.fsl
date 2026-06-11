@@ -1,0 +1,13 @@
+// expected-command: refine refinement_failed_impl.fsl refinement_failed_abs.fsl refinement_failed_map.fsl --depth 3
+// expected-result: refinement_failed
+// expected-kind: abs_requires_failed
+refinement GalleryRefinementFailedMap {
+  impl GalleryRefinementImpl
+  abs GalleryRefinementAbs
+
+  map approved = approved_i
+  map paid = paid_i
+
+  action approve_i(k) -> approve(k)
+  action quick_pay_i(k) -> pay(k)
+}

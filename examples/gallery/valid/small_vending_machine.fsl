@@ -1,0 +1,51 @@
+// topic: 自動販売機
+// scale: small
+// features: Map, Option, 有界在庫, ensures, reachable
+// expected-command: verify --depth 6 --deadlock ignore
+// expected-result: verified
+spec GallerySmallVendingMachine {
+  type Item = 0..1
+  type Stock = 0..2
+  type Credit = 0..2
+
+  state {
+    stock: Map<Item, Stock>,
+    credit: Credit,
+    selected: Option<Item>
+  }
+
+  init {
+    forall i: Item { stock[i] = 1 }
+    credit = 0
+    selected = none
+  }
+
+  action insert_coin() {
+    requires credit < 2
+    credit = credit + 1
+  }
+
+  action select(i: Item) {
+    requires selected == none
+    requires stock[i] > 0
+    selected = some(i)
+  }
+
+  action vend() {
+    requires selected is some(i)
+    requires credit > 0
+    stock[i] = stock[i] - 1
+    credit = credit - 1
+    selected = none
+    ensures stock[i] == old(stock[i]) - 1
+  }
+
+  action refund() {
+    requires credit > 0
+    requires selected == none
+    credit = credit - 1
+  }
+
+  invariant SelectionHasStock { selected is some(i) => stock[i] > 0 }
+  reachable SoldItemZero { stock[0] == 0 }
+}

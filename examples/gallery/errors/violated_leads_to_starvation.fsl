@@ -1,0 +1,22 @@
+// expected-command: verify --depth 4 --deadlock ignore
+// expected-result: violated
+// expected-kind: leadsTo
+spec GalleryViolatedLeadsToStarvation {
+  state { pending: Bool, done: Bool }
+  init { pending = false  done = false }
+
+  action request() {
+    requires pending == false
+    pending = true
+  }
+
+  action idle() { }
+
+  action finish() {
+    requires pending == true
+    done = true
+    pending = false
+  }
+
+  leadsTo EventuallyFinished { pending == true ~> done == true }
+}
