@@ -1,0 +1,68 @@
+// ════════════════════════════════════════════════════════════════
+// 解約フロー(ビジネス層)— PM/PdM 向けサンプル
+//
+// このファイルは「プロセス図 + 業務ルール」を検査可能な形で書いたもの。
+// 実装の用語は一切出てこない。書いたら:
+//
+//   fslc verify examples/pm/cancel_flow.fsl --engine induction --deadlock ignore
+//
+// が「全ルールがあらゆる進行順序で成り立つ」ことを証明してくれる。
+// ルール違反があれば、違反した規程の ID・原文・再現手順(トレース)が
+// JSON で返る。
+// ════════════════════════════════════════════════════════════════
+business CancelFlow {
+
+  // 登場人物(遷移の「誰がやるか」の検証に使われる)
+  actor Customer, System
+
+  // 検証する世界の大きさ: 契約3件分。少数で十分
+  // (バグは小さな世界でも再現する、が形式検証の経験則)
+  case Sub = 0..2
+
+  // ── プロセス図(状態遷移)─────────────────────────────
+  // 紙のフロー図と1対1。各 transition が「矢印」にあたる。
+  process Sub {
+    stages Active, CancelRequested, OfferShown, Retained, Churned
+    initial Active
+
+    // 解約申請(顧客)
+    transition request_cancel Active          -> CancelRequested by Customer
+    // 救済オファーの提示(システム)— 解約導線では必ずここを通る
+    transition show_offer     CancelRequested -> OfferShown      by System
+    // オファー承諾 → 継続
+    transition accept_offer   OfferShown      -> Retained        by Customer
+    // オファー辞退 → 解約成立
+    transition decline_offer  OfferShown      -> Churned         by Customer
+  }
+
+  // ── KPI ────────────────────────────────────────────────
+  // カウンタの整合性(数え漏れ・二重計上が無いこと)は自動で検査される
+  kpi churned  counts Sub in Churned
+  kpi retained counts Sub in Retained
+
+  // ── 業務ルール(ポリシー)───────────────────────────────
+  // ID と原文ごと書く。違反したとき、この ID と原文が反例に表示される。
+
+  // 「申請を放置しない」— どんな進行順序でも、解約申請はいつか
+  // オファー提示に進む(SLA 的な応答ルール)
+  policy POL-1 "解約申請には必ず救済オファーを提示する" responds {
+    forall c: Sub { stage(c) == CancelRequested ~> stage(c) == OfferShown }
+  }
+
+  // 「オファーを出したまま放置しない」— 提示後は必ず決着する
+  policy POL-2 "提示したオファーは必ず承諾か辞退で決着する" responds {
+    forall c: Sub {
+      stage(c) == OfferShown ~> (stage(c) == Retained or stage(c) == Churned)
+    }
+  }
+
+  // ── ゴール(到達できるべき状態)─────────────────────────
+  // 「このプロセス、そもそも継続(リテンション)に到達できるの?」を機械確認。
+  // 規程を変更してゴールに到達できなくなると reachable_failed で検出される。
+  goal CanRetain "救済オファーで継続に至るケースが存在する" {
+    exists c: Sub { stage(c) == Retained }
+  }
+  goal CanChurn "辞退して解約に至るケースも存在する" {
+    exists c: Sub { stage(c) == Churned }
+  }
+}

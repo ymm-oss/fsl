@@ -1,0 +1,110 @@
+// ════════════════════════════════════════════════════════════════
+// 解約フロー(要件定義層)— PM/PdM 向けサンプル
+//
+// ビジネス層(cancel_flow.fsl)を「システムの要件」に詳細化したもの。
+// requirement ブロックに要件 ID と原文をそのまま書く。
+//
+//   fslc verify examples/pm/cancel_system.fsl --deadlock ignore
+//
+// 1コマンドで (1) 要件同士の矛盾検査 と (2) ビジネス層との整合検査
+// (implements)が同時に走る。要件違反の反例には、壊れた要件の ID と
+// 原文がそのまま表示される。受け入れ基準(acceptance)は検証時に
+// 自動再生され、そのまま開発チームの統合テスト雛形になる。
+// ════════════════════════════════════════════════════════════════
+requirements CancelSystemReq {
+
+  // ── ビジネス層との対応宣言 ─────────────────────────────
+  // 「このシステム要件は、業務フロー CancelFlow を逸脱しない」を
+  // 機械検査するための対応表。システムの画面状態 → 業務ステージ。
+  implements CancelFlow from "cancel_flow.fsl" {
+    map sub_stage[c: Sub] =
+      if scr[c].st == Browsing    then Active
+      else if scr[c].st == CancelForm  then CancelRequested
+      else if scr[c].st == OfferDialog then OfferShown
+      else if scr[c].st == ThanksStay  then Retained
+      else Churned
+    map churned  = churn_count
+    map retained = retain_count
+  }
+
+  // ── システムの状態(画面と内部フラグ)──────────────────
+  type Sub = 0..2
+  // 画面の状態。業務ステージより1段具体的(画面名で書く)
+  enum Screen { Browsing, CancelForm, OfferDialog, ThanksStay, GoodbyePage }
+  struct SubView { st: Screen, offered: Bool }   // offered: オファー提示済みフラグ
+
+  state {
+    scr: Map<Sub, SubView>,
+    churn_count:  Int,
+    retain_count: Int
+  }
+  init {
+    forall c: Sub { scr[c] = SubView { st: Browsing, offered: false } }
+    churn_count = 0
+    retain_count = 0
+  }
+
+  // ── 要件(ID と原文をそのまま書く)──────────────────────
+
+  requirement REQ-1 "解約ボタンを押すと解約フォームに遷移する" {
+    fair action tap_cancel(c: Sub) maps request_cancel(c) {
+      requires scr[c].st == Browsing
+      scr[c].st = CancelForm
+    }
+  }
+
+  requirement REQ-2 "解約フォーム送信時、救済オファーを1契約につき1回だけ提示する" {
+    fair action submit_cancel(c: Sub) maps show_offer(c) {
+      requires scr[c].st == CancelForm
+      requires not scr[c].offered        // 二重提示の禁止(1回だけ)
+      scr[c] = SubView { st: OfferDialog, offered: true }
+    }
+  }
+
+  requirement REQ-3 "オファー承諾で継続(サンクス画面)、辞退で解約完了画面へ" {
+    fair action accept(c: Sub) maps accept_offer(c) {
+      requires scr[c].st == OfferDialog
+      scr[c].st = ThanksStay
+      retain_count = retain_count + 1
+    }
+    fair action decline(c: Sub) maps decline_offer(c) {
+      requires scr[c].st == OfferDialog
+      scr[c].st = GoodbyePage
+      churn_count = churn_count + 1
+    }
+    // カウンタの定義そのものを要件として明文化(数え漏れ・二重計上の防止)
+    invariant CountsMatchScreens {
+      churn_count  == count(c: Sub where scr[c].st == GoodbyePage)
+        and retain_count == count(c: Sub where scr[c].st == ThanksStay)
+    }
+  }
+
+  requirement REQ-4 "オファーは提示済みの契約に再提示されない" {
+    // 「offered フラグはオファー画面以降で必ず立っている」
+    invariant OfferedFlagConsistent {
+      forall c: Sub {
+        (scr[c].st == OfferDialog or scr[c].st == ThanksStay or scr[c].st == GoodbyePage)
+          => scr[c].offered
+      }
+    }
+  }
+
+  // ── 受け入れ基準(そのままテストになる)─────────────────
+  // 検証時に1ステップずつ自動再生され、expect が成り立たなければ
+  // どのステップで崩れたかを指して失敗する。scenarios / testgen に
+  // 流れて、開発チームの統合テスト雛形になる。
+
+  acceptance AC-1 "承諾フロー: 申請→提示→承諾で継続になる" {
+    tap_cancel(0)
+    submit_cancel(0)
+    accept(0)
+    expect scr[0].st == ThanksStay and retain_count == 1
+  }
+
+  acceptance AC-2 "辞退フロー: 申請→提示→辞退で解約が成立する" {
+    tap_cancel(1)
+    submit_cancel(1)
+    decline(1)
+    expect scr[1].st == GoodbyePage and churn_count == 1
+  }
+}
