@@ -1,0 +1,14 @@
+refinement SeatImplRefinesBooking {
+  impl SeatBookingImpl
+  abs  SeatBooking
+
+  // F9: state-dependent Option mapping — held seats are invisible
+  // in the abstract view, only Sold seats surface their holder.
+  map seats[s: SeatId] =
+    if slots[s].st == Sold then slots[s].holder else none
+
+  action hold(s, u)     -> stutter
+  action confirm(s, u)  -> book(s, u)
+  action release(s)     -> stutter
+  action cancel_sold(s) -> cancel(s)
+}

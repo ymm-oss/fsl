@@ -106,6 +106,8 @@ def _subst_binder(expr, binder_var, key_val):
             return ("struct_lit", e[1], {k: walk(v) for k, v in e[2].items()})
         if tag == "bin":
             return ("bin", e[1], walk(e[2]), walk(e[3]))
+        if tag == "ite":
+            return ("ite", walk(e[1]), walk(e[2]), walk(e[3]))
         if tag == "neg":
             return ("neg", walk(e[1]))
         if tag == "not":

@@ -1,0 +1,58 @@
+// Two-phase seat booking: hold (invisible in the abstract view) then
+// confirm to Sold. Uses Option-in-struct (v2.1) for the holder.
+spec SeatBookingImpl {
+  type SeatId = 0..2
+  type UserId = 0..1
+  const MAX_PER_USER = 2
+
+  enum SSt { Open, Held, Sold }
+
+  struct Slot { st: SSt, holder: Option<UserId> }
+
+  state { slots: Map<SeatId, Slot> }
+
+  init { forall s: SeatId { slots[s] = Slot { st: Open, holder: none } } }
+
+  action hold(s: SeatId, u: UserId) {
+    requires slots[s].st == Open
+    slots[s] = Slot { st: Held, holder: some(u) }
+  }
+
+  action confirm(s: SeatId, u: UserId) {
+    requires slots[s].st == Held
+    requires slots[s].holder is some(h)
+    requires h == u
+    requires count(s2: SeatId
+                   where slots[s2].st == Sold
+                     and (slots[s2].holder is some(v) and v == u)) < MAX_PER_USER
+    slots[s].st = Sold
+  }
+
+  action release(s: SeatId) {
+    requires slots[s].st == Held
+    slots[s] = Slot { st: Open, holder: none }
+  }
+
+  action cancel_sold(s: SeatId) {
+    requires slots[s].st == Sold
+    slots[s] = Slot { st: Open, holder: none }
+  }
+
+  invariant OpenHasNoHolder {
+    forall s: SeatId { slots[s].st == Open => slots[s].holder == none }
+  }
+
+  invariant NonOpenHasHolder {
+    forall s: SeatId { slots[s].st != Open => slots[s].holder != none }
+  }
+
+  invariant SoldPerUserCap {
+    forall u: UserId {
+      count(s: SeatId
+            where slots[s].st == Sold
+              and (slots[s].holder is some(v) and v == u)) <= MAX_PER_USER
+    }
+  }
+
+  reachable Sold { exists s: SeatId { slots[s].st == Sold } }
+}

@@ -1,0 +1,35 @@
+// Abstract seat booking: a seat is either free (none) or owned by a user.
+// The two-phase implementation (seat_booking_impl.fsl) refines this via a
+// state-dependent conditional mapping — the DOGFOOD-3 F9 motivating case.
+spec SeatBooking {
+  type SeatId = 0..2
+  type UserId = 0..1
+  const MAX_PER_USER = 2
+
+  state { seats: Map<SeatId, Option<UserId>> }
+
+  init { forall s: SeatId { seats[s] = none } }
+
+  action book(s: SeatId, u: UserId) {
+    requires seats[s] == none
+    requires count(s2: SeatId where seats[s2] is some(v) and v == u) < MAX_PER_USER
+    seats[s] = some(u)
+  }
+
+  action cancel(s: SeatId) {
+    requires seats[s] != none
+    seats[s] = none
+  }
+
+  invariant PerUserCap {
+    forall u: UserId {
+      count(s: SeatId where seats[s] is some(v) and v == u) <= MAX_PER_USER
+    }
+  }
+
+  reachable TwoSoldToOne {
+    exists u: UserId {
+      count(s: SeatId where seats[s] is some(v) and v == u) == 2
+    }
+  }
+}

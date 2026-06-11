@@ -322,6 +322,11 @@ refinement CartImplRefinesCart {
 - `action <impl>(<仮引数>) -> <abs>(<式>) | stutter` — 全 impl アクション必須。
   `stutter` は抽象状態が変わらない内部ステップ。
 
+Refinement マッピングファイルの式に限り、`if <expr> then <expr> else <expr>` を
+使える。これは `map` の右辺と `action ... -> abs(<式列>)` の引数式だけで有効で、
+通常の `.fsl` 仕様ファイルの式文法には含まれない。then/else の両腕は同じ論理型
+(Bool、Int/ドメイン/enum、Option、struct)でなければならない。
+
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
 ```

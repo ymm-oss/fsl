@@ -28,12 +28,12 @@ refinement_def: "refinement" NAME "{" refinement_item* "}"
 ?refinement_item: refinement_impl | refinement_abs | map_def | refinement_action
 refinement_impl: "impl" NAME
 refinement_abs: "abs" NAME
-map_def: "map" NAME ["[" binder "]"] "=" expr
+map_def: "map" NAME ["[" binder "]"] "=" ref_expr
 refinement_action: "action" NAME "(" [refinement_param ("," refinement_param)*] ")" "->" action_target
 refinement_param: NAME
 action_target: stutter_target | mapped_action_target
 stutter_target: "stutter"
-mapped_action_target: NAME "(" [expr ("," expr)*] ")"
+mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
@@ -138,6 +138,53 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "(" expr ")"
 struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
 expr_list: expr ("," expr)*
+
+?ref_expr: "if" ref_expr "then" ref_expr "else" ref_expr -> ite
+         | ref_quant
+         | ref_implies
+ref_quant: "forall" binder [":"] ref_expr -> quant_forall
+         | "forall" binder [":"] "{" ref_expr "}" -> quant_forall_brace
+         | "exists" binder [":"] ref_expr -> quant_exists
+         | "exists" binder [":"] "{" ref_expr "}" -> quant_exists_brace
+?ref_implies: ref_or_e | ref_or_e "=>" ref_implies -> imp
+?ref_or_e: ref_and_e | ref_or_e "or" ref_and_e -> or_op
+?ref_and_e: ref_not_e | ref_and_e "and" ref_not_e -> and_op
+?ref_not_e: "not" ref_not_e -> not_op
+          | ref_is_e
+?ref_is_e: ref_cmp ["is" pattern] -> is_pat
+?ref_cmp: ref_sum | ref_sum CMPOP ref_sum -> cmp_op
+?ref_sum: ref_product | ref_sum "+" ref_product -> add | ref_sum "-" ref_product -> sub
+?ref_product: ref_unary | ref_product "*" ref_unary -> mul
+?ref_unary: "-" ref_unary -> neg | ref_postfix
+ref_postfix: ref_atom ref_postfix_suffix* -> postfix
+ref_postfix_suffix: "[" ref_expr "]" -> idx_suffix
+                  | "." "contains" "(" [ref_expr_list] ")" -> method_contains
+                  | "." "add" "(" [ref_expr_list] ")" -> method_add
+                  | "." "remove" "(" [ref_expr_list] ")" -> method_remove
+                  | "." "push" "(" [ref_expr_list] ")" -> method_push
+                  | "." "pop" "(" ")" -> method_pop
+                  | "." "head" "(" ")" -> method_head
+                  | "." "at" "(" ref_expr ")" -> method_at
+                  | "." "size" "(" ")" -> method_size
+                  | "." NAME -> field_suffix
+?ref_atom: INT -> num
+         | "true" -> true_lit
+         | "false" -> false_lit
+         | "none" -> none_lit
+         | "some" "(" ref_expr ")" -> some_lit
+         | "Set" "{" [ref_expr_list] "}" -> set_lit
+         | "Seq" "{" [ref_expr_list] "}" -> seq_lit
+         | NAME ref_struct_fields -> struct_lit
+         | "count" "(" NAME ":" qname "where" ref_expr ")" -> count_e
+         | "sum" "(" NAME ":" qname "of" ref_expr ["where" ref_expr] ")" -> sum_e
+         | "min" "(" ref_expr "," ref_expr ")" -> min_e
+         | "max" "(" ref_expr "," ref_expr ")" -> max_e
+         | "abs" "(" ref_expr ")" -> abs_e
+         | "old" "(" ref_expr ")" -> old_e
+         | NAME -> var
+         | "(" ref_expr ")"
+ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> struct_fields
+ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
@@ -290,6 +337,9 @@ class Ast(Transformer):
 
     def not_op(self, meta, a):
         return ("not", a)
+
+    def ite(self, meta, c, a, b):
+        return ("ite", c, a, b)
 
     def is_pat(self, meta, a, pat=None):
         if pat is None:

@@ -38,12 +38,15 @@ io エラーであるべき失敗が UnexpectedCharacters になる(修復プロ
 - **F8: ワークフロー全段が「一発」で通った。** 第1・2回と異なり仕様起因の
   CTI も反例も出ていない。抽象→詳細→合成の各段で proved を維持したまま
   進める「段階的詳細化」が、このツールチェーンの実際の使い心地として成立する。
-- **F9: refinement の写像式に条件式が書けない。** 当初候補だった座席予約
-  ドメインでは `map seats[s] = (st == Sold ? some(holder) : none)` 相当が
-  必要で、FSL に条件式(三項演算子 / if 式)が無いため写像で表現できず、
-  ドメインを変えた。算術で吸収できる写像(`cleared + pending`)は書けるが、
-  **状態タグに依存する Option/enum 値の写像**は現状書けない。v2.2 候補:
-  写像式限定の `if-then-else` 式、または `match`。実例が2件目に出たら着手。
+- **F9: refinement の写像式に条件式が書けない。**(v2.2 で解消)当初候補
+  だった座席予約ドメインでは `map seats[s] = (st == Sold ? some(holder) : none)`
+  相当が必要で、FSL に条件式が無いため写像で表現できず、ドメインを変えた。
+  → **写像式限定の `if-then-else` 式**として実装(DESIGN-refinement §2.5)。
+  断念した座席予約ドメインそのものが2件目の実例となり、
+  `specs/seat_booking{,_impl}.fsl` + `seat_refines.fsl` で
+  `map seats[s] = if slots[s].st == Sold then slots[s].holder else none` が
+  refines を通ることを確認(抽象側の count 集約が条件付き写像値の上で
+  正しく評価される)。通常仕様の式文法には開放していない。
 - **F10: Adapter の結線規約は十分明確。** observe() の射影(表示名キー、
   Seq は list、Option は None|値)は LANGUAGE.md の規約どおりで迷いなし。
   ランダムウォークが settle の「nothing to settle」ガードと spec の

@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import pytest
+from lark.exceptions import UnexpectedInput
 
 from fslc import parse, build_spec, FslError
 from fslc.cli import run_refine, exit_code
@@ -33,6 +34,68 @@ def test_cart_impl_refines_shopping_cart():
     assert r["abs"] == "ShoppingCart"
     assert r["action_map"]["reserve"] == "stutter"
     assert exit_code(r) == 0
+
+
+def test_seat_conditional_map_refines_booking():
+    r = run_refine(
+        str(SPECS / "seat_booking_impl.fsl"),
+        str(SPECS / "seat_booking.fsl"),
+        str(SPECS / "seat_refines.fsl"),
+        depth=6,
+    )
+    assert r["result"] == "refines"
+    assert r["impl"] == "SeatBookingImpl"
+    assert r["abs"] == "SeatBooking"
+    assert r["action_map"]["confirm"] == "book"
+    assert exit_code(r) == 0
+
+
+def test_seat_wrong_action_mapping_not_refines(tmp_path):
+    mapping_src = (SPECS / "seat_refines.fsl").read_text(encoding="utf-8")
+    mapping_src = mapping_src.replace(
+        "action confirm(s, u)  -> book(s, u)",
+        "action confirm(s, u)  -> cancel(s)",
+    )
+    map_file = tmp_path / "seat_refines_bad_action.fsl"
+    map_file.write_text(mapping_src, encoding="utf-8")
+    r = run_refine(
+        str(SPECS / "seat_booking_impl.fsl"),
+        str(SPECS / "seat_booking.fsl"),
+        str(map_file),
+        depth=6,
+    )
+    assert r["result"] == "refinement_failed"
+    assert exit_code(r) == 1
+
+
+def test_seat_conditional_map_type_mismatch_is_type_error(tmp_path):
+    mapping_src = (SPECS / "seat_refines.fsl").read_text(encoding="utf-8")
+    mapping_src = mapping_src.replace(
+        "if slots[s].st == Sold then slots[s].holder else none",
+        "if slots[s].st == Sold then slots[s].st else none",
+    )
+    map_file = tmp_path / "seat_refines_bad_ite_type.fsl"
+    map_file.write_text(mapping_src, encoding="utf-8")
+    r = run_refine(
+        str(SPECS / "seat_booking_impl.fsl"),
+        str(SPECS / "seat_booking.fsl"),
+        str(map_file),
+        depth=2,
+    )
+    assert r["result"] == "error"
+    assert r["kind"] == "type"
+    assert exit_code(r) == 2
+
+
+def test_ite_syntax_is_not_allowed_in_normal_specs():
+    src = """
+spec BadIte {
+  state { x: Int }
+  init { x = if true then 1 else 0 }
+}
+"""
+    with pytest.raises(UnexpectedInput):
+        parse(src)
 
 
 def test_stutter_violation_when_reserve_changes_abs_stock(tmp_path):

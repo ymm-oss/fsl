@@ -302,6 +302,13 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         return _eval_is(e[1], e[2], state, binds, spec, old_state, in_ensures)
     if tag == "not":
         return z3.Not(eval_expr(e[1], state, binds, spec, old_state, in_ensures))
+    if tag == "ite":
+        c = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        if not isinstance(c, z3.ExprRef) or c.sort().kind() != z3.Z3_BOOL_SORT:
+            _err("if condition must be Bool", kind="type")
+        a = eval_expr(e[2], state, binds, spec, old_state, in_ensures)
+        b = eval_expr(e[3], state, binds, spec, old_state, in_ensures)
+        return _ite_value(c, a, b, spec)
     if tag == "bin":
         op = e[1]
         a = eval_expr(e[2], state, binds, spec, old_state, in_ensures)
@@ -370,6 +377,47 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         with _eval_cache_scope(None, None):
             return eval_expr(e[1], old_state, binds, spec, None, False)
     _err(f"cannot evaluate expression node {e}")
+
+
+def _ite_value(c, a, b, spec):
+    if isinstance(a, tuple) and a[0] == "none":
+        if isinstance(b, tuple) and b[0] == "none":
+            return ("none",)
+        if isinstance(b, tuple) and b[0] == "option_val":
+            return ("option_val", z3.If(c, z3.BoolVal(False), b[1]), b[2])
+        _err("if arms must have the same type", kind="type")
+    if isinstance(b, tuple) and b[0] == "none":
+        if isinstance(a, tuple) and a[0] == "option_val":
+            return ("option_val", z3.If(c, a[1], z3.BoolVal(False)), a[2])
+        _err("if arms must have the same type", kind="type")
+    if isinstance(a, tuple) and a[0] == "option_val":
+        if not (isinstance(b, tuple) and b[0] == "option_val"):
+            _err("if arms must have the same type", kind="type")
+        if a[2].sort() != b[2].sort():
+            _err("if Option arms must have the same value type", kind="type")
+        return ("option_val", z3.If(c, a[1], b[1]), z3.If(c, a[2], b[2]))
+    if isinstance(b, tuple) and b[0] == "option_val":
+        _err("if arms must have the same type", kind="type")
+    if isinstance(a, tuple) and a[0] == "struct_val":
+        if not (isinstance(b, tuple) and b[0] == "struct_val"):
+            _err("if arms must have the same type", kind="type")
+        if a[1] != b[1]:
+            _err(f"if struct arms must have the same type: {a[1]} vs {b[1]}", kind="type")
+        if set(a[2]) != set(b[2]):
+            _err("if struct arms must have the same fields", kind="type")
+        return ("struct_val", a[1], {
+            fn: _ite_value(c, a[2][fn], b[2][fn], spec)
+            for fn in a[2]
+        })
+    if isinstance(b, tuple) and b[0] == "struct_val":
+        _err("if arms must have the same type", kind="type")
+    if isinstance(a, z3.ExprRef) and isinstance(b, z3.ExprRef):
+        if a.sort() != b.sort():
+            _err("if arms must have the same type", kind="type")
+        if a.sort().kind() not in (z3.Z3_BOOL_SORT, z3.Z3_INT_SORT):
+            _err("if arms only support Bool, Int/domain/enum, Option, and struct values", kind="type")
+        return z3.If(c, a, b)
+    _err("if arms must have the same type", kind="type")
 
 
 def _struct_info(val, spec):
@@ -1331,12 +1379,35 @@ def _binder_static_type(binder, spec):
     return ("int",)
 
 
+def _merge_ite_static_types(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if a == b:
+        return a
+    if a[0] == "option" and b[0] == "option":
+        inner_a, inner_b = a[1], b[1]
+        if inner_a == ("int",):
+            return b
+        if inner_b == ("int",):
+            return a
+        return ("option", _merge_ite_static_types(inner_a, inner_b))
+    if a[0] in ("int", "domain", "enum") and b[0] in ("int", "domain", "enum"):
+        if a[0] == "int":
+            return b
+        return a
+    _err(f"if arms must have the same type: {a} vs {b}", kind="type")
+
+
 def _expr_static_type(e, spec, env):
     tag = e[0]
     if tag == "num":
         return ("int",)
     if tag == "bool":
         return ("bool",)
+    if tag == "none":
+        return ("option", ("int",))
     if tag == "var":
         n = e[1]
         if n in env:
@@ -1390,6 +1461,13 @@ def _expr_static_type(e, spec, env):
         if e[1] in ("+", "-", "*"):
             return ("int",)
         return ("bool",)
+    if tag == "ite":
+        c_ty = _expr_static_type(e[1], spec, env)
+        if c_ty and c_ty != ("bool",):
+            _err(f"if condition must be Bool, got {c_ty}", kind="type")
+        a_ty = _expr_static_type(e[2], spec, env)
+        b_ty = _expr_static_type(e[3], spec, env)
+        return _merge_ite_static_types(a_ty, b_ty)
     if tag in ("not", "is", "forall", "exists"):
         return ("bool",)
     if tag in ("count", "sum", "min", "max", "abs"):
