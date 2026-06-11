@@ -4,7 +4,7 @@ from lark import Lark, Transformer, v_args
 # ---------------------------------------------------------------- grammar
 
 GRAMMAR = r"""
-start: spec_def | refinement_def | compose_def | requirements_def
+start: spec_def | refinement_def | compose_def | requirements_def | business_def
 
 spec_def: "spec" NAME "{" item* "}"
 
@@ -131,6 +131,7 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "Set" "{" [expr_list] "}" -> set_lit
      | "Seq" "{" [expr_list] "}" -> seq_lit
      | NAME struct_fields -> struct_lit
+     | "stage" "(" expr ")" -> stage_e
      | "count" "(" NAME ":" qname "where" expr ")" -> count_e
      | "sum" "(" NAME ":" qname "of" expr ["where" expr] ")" -> sum_e
      | "min" "(" expr "," expr ")" -> min_e
@@ -178,6 +179,7 @@ ref_postfix_suffix: "[" ref_expr "]" -> idx_suffix
          | "Set" "{" [ref_expr_list] "}" -> set_lit
          | "Seq" "{" [ref_expr_list] "}" -> seq_lit
          | NAME ref_struct_fields -> struct_lit
+         | "stage" "(" ref_expr ")" -> stage_e
          | "count" "(" NAME ":" qname "where" ref_expr ")" -> count_e
          | "sum" "(" NAME ":" qname "of" ref_expr ["where" ref_expr] ")" -> sum_e
          | "min" "(" ref_expr "," ref_expr ")" -> min_e
@@ -211,6 +213,22 @@ acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expec
 acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
 acceptance_arg: ref_expr
 acceptance_expect: "expect" expr
+
+business_def: "business" NAME "{" business_item* "}"
+?business_item: actor_def | case_def | process_def | kpi_def | policy_def | goal_def
+actor_def: "actor" NAME ("," NAME)* ","?
+case_def: "case" NAME "=" expr ".." expr
+process_def: "process" NAME "{" process_item* "}"
+?process_item: process_stages | process_initial | process_transition
+process_stages: "stages" NAME ("," NAME)* ","?
+process_initial: "initial" NAME
+process_transition: "transition" NAME NAME "->" NAME "by" NAME
+kpi_def: "kpi" NAME "counts" NAME "in" NAME
+policy_def: "policy" REQ_ID STRING policy_body
+?policy_body: policy_invariant | policy_responds
+policy_invariant: "invariant" "{" expr "}"
+policy_responds: "responds" "{" lt_body "}"
+goal_def: "goal" REQ_ID STRING "{" expr "}"
 
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 REQ_ID: /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/
@@ -409,6 +427,9 @@ class Ast(Transformer):
 
     def old_e(self, meta, e):
         return ("old", e)
+
+    def stage_e(self, meta, e):
+        return ("stage", e, _loc(meta))
 
     def binder_typed(self, meta, v, ty, where=None):
         return ("binder_typed", v, ty, where)
@@ -756,6 +777,43 @@ class Ast(Transformer):
             elif isinstance(p, tuple) and p[0] == "acceptance_expect":
                 expect = p
         return ("acceptance", str(ac_id), text, steps, expect, _loc(meta))
+
+    def actor_def(self, meta, *names):
+        return ("biz_actor", list(names), _loc(meta))
+
+    def case_def(self, meta, name, lo, hi):
+        return ("biz_case", name, lo, hi, _loc(meta))
+
+    def process_stages(self, meta, *names):
+        return ("biz_stages", list(names), _loc(meta))
+
+    def process_initial(self, meta, name):
+        return ("biz_initial", name, _loc(meta))
+
+    def process_transition(self, meta, name, src, dst, actor):
+        return ("biz_transition", name, src, dst, actor, _loc(meta))
+
+    def process_def(self, meta, name, *items):
+        return ("biz_process", name, [i for i in items if i], _loc(meta))
+
+    def kpi_def(self, meta, name, case_name, stage):
+        return ("biz_kpi", name, case_name, stage, _loc(meta))
+
+    def policy_invariant(self, meta, expr):
+        return ("biz_policy_invariant", expr)
+
+    def policy_responds(self, meta, body):
+        binders, p, q = _flatten_leadsto(body)
+        return ("biz_policy_responds", binders, p, q)
+
+    def policy_def(self, meta, policy_id, text, body):
+        return ("biz_policy", str(policy_id), text, body, _loc(meta))
+
+    def goal_def(self, meta, goal_id, text, expr):
+        return ("biz_goal", str(goal_id), text, expr, _loc(meta))
+
+    def business_def(self, meta, name, *items):
+        return ("business", name, [i for i in items if i])
 
 
 PARSER = Lark(

@@ -421,7 +421,78 @@ fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # Adapter 未実装なら全
 `replay` は有限ログのみを検査するため **`leadsTo` は対象外**(出力 `note` に明記)。
 `Monitor` は init が決定的である必要がある(forall 一括代入可)。
 
-## 13. ライブラリ API
+## 13. 3層方言(コンサル / 要件 / 設計)とトレーサビリティ
+
+設計の背景は `DESIGN-layers.md`、実装仕様は `DESIGN-dialects.md`。
+カーネル(本書 §1〜12)は1つで、層ごとの方言は AST 展開のフロントエンド。
+層間は refinement で連携する: **業務 ⊒ 要件 ⊒ 設計 ⊒ 実装(testgen/replay)**。
+
+### 13.1 宣言タグ(全層共通のトレーサビリティ)
+
+invariant / reachable / leadsTo / action の `{` 直前に `"ID: 原文"` を書くと、
+違反・CTI・coverage 診断・scenarios に `requirement: {id, text}` が載る:
+
+```fsl
+invariant PaidLedger "REQ-3: 台帳は支払い件数と一致" { ... }
+action submit(c: Case, a: Amount) "REQ-1: 閾値以下は自動承認" { ... }
+```
+
+### 13.2 要件層: `requirements`(fsl-req 方言)
+
+```fsl
+requirements ReturnSystemReq {
+  implements ReturnPolicy from "return_policy.fsl" {   // 上位層への写像(省略可)
+    map cases[c: CaseId] = if sys[c].st == New then Requested else ...
+    map refunded = paid_count
+  }
+
+  // 型・state・init はカーネル構文そのまま
+  requirement REQ-1 "閾値以下の返品は自動承認される" {
+    fair action submit(c: CaseId, a: Amount) {
+      requires sys[c].st == New
+      requires a > 0
+      branches {                                       // データ依存の分岐対応
+        when a <= AUTO_LIMIT { sys[c] = ... } maps approve(c)
+        when a > AUTO_LIMIT  { sys[c] = ... } maps stutter
+      }
+    }
+  }
+  requirement REQ-3 "支払いは承認後のみ" {
+    fair action pay(c: CaseId) maps refund(c) { ... }
+    invariant PaidLedger { ... }
+  }
+  acceptance AC-1 "小額は自動承認され支払われる" {
+    submit(0, 1)
+    pay(0)
+    expect sys[0].st == Paid
+  }
+}
+```
+
+- `requirement` 内の要素には自動で `{id, text}` メタが付く(13.1 と同じ配管)。
+- `branches` はアクションを when 条件ごとに自動分割する(表示は
+  `submit[a <= AUTO_LIMIT]`)。`maps` 句が上位層への action 対応になる。
+- `implements` があると `fslc verify` が**上位層への refine を同時実行**し、
+  結果に `implements: {abs, result}` が載る。
+- `acceptance` は check 時に具象 Monitor で再生検証され(失敗は
+  `kind: "acceptance"`)、scenarios / testgen にそのまま流れる
+  (= 受け入れ基準が実装の適合テストになる)。
+
+### 13.3 コンサル層: `business`(fsl-biz 方言)
+
+業務プロセス・ポリシー・KPI を実装の語彙ゼロで書く
+(構文の詳細は `DESIGN-dialects.md` §3)。process は enum+Map+遷移 action に、
+policy は invariant / leadsTo に、kpi はゴーストカウンタ+整合 invariant に
+展開される。規程の矛盾 = invariant 違反、死んだプロセスステップ = coverage 診断、
+業務ゴール到達不能 = reachable_failed、放置されるケース = leadsTo 反例として
+機械検出できる。
+
+### 13.4 扱わないもの(層の線引き)
+
+実時間・SLA 時間値・確率・非機能要件・散文の根拠は FSL の外
+(各層の文書に書く)。FSL は各成果物の**検査可能な骨格**を担う。
+
+## 14. ライブラリ API
 
 ```python
 from fslc import parse, build_spec, verify, prove, Monitor
