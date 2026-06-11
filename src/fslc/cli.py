@@ -366,8 +366,13 @@ def exit_code(result):
 
 
 def main(argv=None):
+    from . import __version__
     ap = argparse.ArgumentParser(prog="fslc")
+    ap.add_argument("-V", "--version", action="version",
+                    version=f"fslc {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("version", help="バージョンを表示")
 
     c = sub.add_parser("check")
     c.add_argument("file")
@@ -403,6 +408,9 @@ def main(argv=None):
 
     args = ap.parse_args(argv)
 
+    if args.cmd == "version":
+        print(f"fslc {__version__}")
+        return 0
     if args.cmd == "check":
         result = run_check(args.file)
         print(json.dumps(result, indent=2, ensure_ascii=False))
