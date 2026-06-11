@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+from contextlib import contextmanager
 
 import z3
 
@@ -27,6 +28,70 @@ def _public_bindings(binds):
 
 
 _DROP_BINDING = object()
+_EVAL_CACHE = None
+_EVAL_CACHE_TOKEN = None
+_EXPR_HAS_IS_CACHE = {}
+
+
+@contextmanager
+def _eval_cache_scope(cache, token):
+    global _EVAL_CACHE, _EVAL_CACHE_TOKEN
+    old_cache, old_token = _EVAL_CACHE, _EVAL_CACHE_TOKEN
+    _EVAL_CACHE, _EVAL_CACHE_TOKEN = cache, token
+    try:
+        yield
+    finally:
+        _EVAL_CACHE, _EVAL_CACHE_TOKEN = old_cache, old_token
+
+
+def _expr_contains_is(e):
+    if not isinstance(e, tuple):
+        return False
+    cache_key = id(e)
+    cached = _EXPR_HAS_IS_CACHE.get(cache_key)
+    if cached is not None:
+        cached_e, found = cached
+        if cached_e is e:
+            return found
+    found = e[0] == "is"
+    if not found:
+        for child in e[1:]:
+            if isinstance(child, tuple):
+                found = _expr_contains_is(child)
+            elif isinstance(child, dict):
+                found = any(_expr_contains_is(v) for v in child.values() if isinstance(v, tuple))
+            elif isinstance(child, list):
+                found = any(_expr_contains_is(v) for v in child if isinstance(v, tuple))
+            if found:
+                break
+    _EXPR_HAS_IS_CACHE[cache_key] = (e, found)
+    return found
+
+
+def _freeze_cache_value(v):
+    if isinstance(v, (int, bool, str)) or v is None:
+        return v
+    if isinstance(v, z3.ExprRef):
+        return ("z3", v.get_id())
+    if isinstance(v, tuple):
+        out = []
+        for item in v:
+            frozen = _freeze_cache_value(item)
+            if frozen is _DROP_BINDING:
+                return _DROP_BINDING
+            out.append(frozen)
+        return tuple(out)
+    return _DROP_BINDING
+
+
+def _freeze_binds_for_cache(binds):
+    items = []
+    for k, v in sorted(binds.items()):
+        frozen = _freeze_cache_value(v)
+        if frozen is _DROP_BINDING:
+            return None
+        items.append((k, frozen))
+    return tuple(items)
 
 
 def _json_binding_value(model, value, ty, spec):
@@ -99,6 +164,25 @@ def _type_of_expr(e, spec, ctx_ty=None):
 
 
 def eval_expr(e, state, binds, spec, old_state=None, in_ensures=False):
+    cache_key = None
+    if (
+        _EVAL_CACHE is not None
+        and _EVAL_CACHE_TOKEN is not None
+        and not in_ensures
+        and not _expr_contains_is(e)
+    ):
+        frozen_binds = _freeze_binds_for_cache(binds)
+        if frozen_binds is not None:
+            cache_key = (_EVAL_CACHE_TOKEN, id(e), frozen_binds)
+            if cache_key in _EVAL_CACHE:
+                return _EVAL_CACHE[cache_key]
+    result = _eval_expr_uncached(e, state, binds, spec, old_state, in_ensures)
+    if cache_key is not None:
+        _EVAL_CACHE[cache_key] = result
+    return result
+
+
+def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False):
     consts = spec["consts"]
     tag = e[0]
     if tag == "num":
@@ -223,7 +307,8 @@ def eval_expr(e, state, binds, spec, old_state=None, in_ensures=False):
             _err("old() is only allowed in ensures clauses", kind="type")
         if old_state is None:
             _err("old() used without old state context")
-        return eval_expr(e[1], old_state, binds, spec, None, False)
+        with _eval_cache_scope(None, None):
+            return eval_expr(e[1], old_state, binds, spec, None, False)
     _err(f"cannot evaluate expression node {e}")
 
 
@@ -619,6 +704,7 @@ def compute_updates(stmts, state, binds, spec):
                 for s2 in branch_stmts:
                     run_into(s2, binds, local)
                 target.update(local)
+                return set(scalar_writes)
 
             def run_into(st2, binds, local_pend):
                 if st2[0] == "assign":
@@ -662,22 +748,24 @@ def compute_updates(stmts, state, binds, spec):
                 scalar_writes.update(save_scalars2)
                 for s3 in th:
                     run_into(s3, binds, th_p)
+                th_writes = set(scalar_writes)
                 scalar_writes.clear()
                 scalar_writes.update(save_scalars2)
                 for s3 in el:
                     run_into(s3, binds, el_p)
+                el_writes = set(scalar_writes)
                 scalar_writes.clear()
-                scalar_writes.update(save_scalars2)
+                scalar_writes.update(save_scalars2 | th_writes | el_writes)
                 all_keys = set(th_p) | set(el_p) | set(local_pend)
                 for k in all_keys:
                     tv = th_p.get(k, local_pend.get(k, state[k]))
                     ev = el_p.get(k, local_pend.get(k, state[k]))
                     local_pend[k] = z3.If(c2, tv, ev)
 
-            run_branch(then_stmts, then_pend, binds)
-            run_branch(else_stmts, else_pend, binds)
+            then_writes = run_branch(then_stmts, then_pend, binds)
+            else_writes = run_branch(else_stmts, else_pend, binds)
             scalar_writes.clear()
-            scalar_writes.update(save_scalars)
+            scalar_writes.update(save_scalars | then_writes | else_writes)
             all_keys = set(then_pend) | set(else_pend) | set(pend)
             for k in all_keys:
                 fb = pend.get(k, state[k])
@@ -808,17 +896,18 @@ def _eval_requires(requires, lets, state, param_binds, spec):
     return guards, binds
 
 
-def transition(spec, instances, cur, nxt, choice):
-    disj = []
-    for idx, inst in enumerate(instances):
-        guards, binds = _eval_requires(inst["requires"], inst["lets"], cur, inst["binds"], spec)
-        pend = compute_updates(inst["stmts"], cur, binds, spec)
-        frame = []
-        for p in spec["phys_vars"]:
-            phys = p["phys"]
-            frame.append(nxt[phys] == pend.get(phys, cur[phys]))
-        disj.append(z3.And(choice == idx, *guards, *frame))
-    return z3.Or(*disj)
+def transition(spec, instances, cur, nxt, choice, expr_cache=None):
+    clauses = []
+    with _eval_cache_scope(expr_cache, id(cur)):
+        for idx, inst in enumerate(instances):
+            guards, binds = _eval_requires(inst["requires"], inst["lets"], cur, inst["binds"], spec)
+            pend = compute_updates(inst["stmts"], cur, binds, spec)
+            frame = []
+            for p in spec["phys_vars"]:
+                phys = p["phys"]
+                frame.append(nxt[phys] == pend.get(phys, cur[phys]))
+            clauses.append(z3.Implies(choice == idx, z3.And(*guards, *frame)))
+    return z3.And(*clauses)
 
 
 def _enum_name(spec, ename, val):
@@ -1156,10 +1245,15 @@ def _last_action(model, choices, instances, step, spec):
 
 def verify(spec, depth, deadlock_mode="warn"):
     instances = build_instances(spec)
+    expr_cache = {}
     states = [make_state(spec, 0)]
     choices = []
     s = z3.Solver()
-    s.add(*init_constraints(spec, states[0]))
+    inv_s = z3.Solver()
+    with _eval_cache_scope(expr_cache, id(states[0])):
+        init_cons = init_constraints(spec, states[0])
+    s.add(*init_cons)
+    inv_s.add(*init_cons)
 
     if s.check() != z3.sat:
         return {
@@ -1168,12 +1262,28 @@ def verify(spec, depth, deadlock_mode="warn"):
             "message": "init constraints are unsatisfiable — the spec has no initial state",
         }
 
+    reachables_result = {}
+    pending_reachables = list(spec["reachables"])
+
+    by_action = {}
+    for idx, inst in enumerate(instances):
+        by_action.setdefault(inst["action"], []).append(idx)
+    coverage = {aname: False for aname in by_action}
+    coverage_pending = set(by_action)
+
+    deadlock_info = {"found": False}
+    deadlock_violation = None
+    dl_warn = []
+
     for t in range(depth + 1):
+        passed_invariants = []
         for inv in spec["invariants"]:
-            s.push()
-            s.add(z3.Not(eval_expr(inv["expr"], states[t], {}, spec)))
-            if s.check() == z3.sat:
-                m = s.model()
+            with _eval_cache_scope(expr_cache, id(states[t])):
+                inv_cond = eval_expr(inv["expr"], states[t], {}, spec)
+            inv_s.push()
+            inv_s.add(z3.Not(inv_cond))
+            if inv_s.check() == z3.sat:
+                m = inv_s.model()
                 trace = _build_trace(m, states, choices, instances, spec, t)
                 return {
                     "result": "violated",
@@ -1186,13 +1296,17 @@ def verify(spec, depth, deadlock_mode="warn"):
                     "last_action": _last_action(m, choices, instances, t, spec),
                     "trace": trace,
                 }
-            s.pop()
+            inv_s.pop()
+            passed_invariants.append(inv_cond)
+        if passed_invariants:
+            inv_s.add(*passed_invariants)
 
         if t > 0:
             for idx, inst in enumerate(instances):
                 for ens in inst["ensures"]:
-                    guards, binds = _eval_requires(
-                        inst["requires"], inst["lets"], states[t - 1], inst["binds"], spec)
+                    with _eval_cache_scope(expr_cache, id(states[t - 1])):
+                        guards, binds = _eval_requires(
+                            inst["requires"], inst["lets"], states[t - 1], inst["binds"], spec)
                     cond = eval_expr(
                         ens["expr"], states[t], binds, spec,
                         old_state=states[t - 1], in_ensures=True)
@@ -1218,50 +1332,91 @@ def verify(spec, depth, deadlock_mode="warn"):
                         }
                     s.pop()
 
+        if pending_reachables:
+            still_pending = []
+            for reach in pending_reachables:
+                with _eval_cache_scope(expr_cache, id(states[t])):
+                    prop = eval_expr(reach["expr"], states[t], {}, spec)
+                s.push()
+                s.add(prop)
+                if s.check() == z3.sat:
+                    m = s.model()
+                    witness_trace = _build_trace(m, states, choices, instances, spec, t)
+                    reachables_result[reach["name"]] = {
+                        "witnessed_at_step": t,
+                        "witness": witness_trace,
+                    }
+                else:
+                    still_pending.append(reach)
+                s.pop()
+            pending_reachables = still_pending
+
+        if deadlock_mode != "ignore" and not deadlock_info.get("found"):
+            enabled = []
+            with _eval_cache_scope(expr_cache, id(states[t])):
+                for inst in instances:
+                    guards, _ = _eval_requires(inst["requires"], inst["lets"], states[t], inst["binds"], spec)
+                    enabled.append(z3.And(*guards) if guards else z3.BoolVal(True))
+            if enabled:
+                s.push()
+                s.add(z3.Not(z3.Or(*enabled)))
+                if s.check() == z3.sat:
+                    m = s.model()
+                    dl_trace = _build_trace(m, states, choices, instances, spec, t)
+                    deadlock_info = {"found": True, "at_step": t, "trace": dl_trace}
+                    if deadlock_mode == "error":
+                        deadlock_violation = {
+                            "result": "violated",
+                            "spec": spec["name"],
+                            "violation_kind": "deadlock",
+                            "invariant": "deadlock",
+                            "loc": None,
+                            "violated_at_step": t,
+                            "violating_bindings": None,
+                            "last_action": _last_action(m, choices, instances, t, spec) if t > 0 else None,
+                            "trace": dl_trace,
+                        }
+                    else:
+                        dl_warn.append(_warn(
+                            f"deadlock reachable at step {t}",
+                            "add an enabled action or use --deadlock=ignore if intentional",
+                        ))
+                s.pop()
+
+        if coverage_pending:
+            done = []
+            for aname in list(coverage_pending):
+                for idx in by_action[aname]:
+                    inst = instances[idx]
+                    with _eval_cache_scope(expr_cache, id(states[t])):
+                        guards, _ = _eval_requires(
+                            inst["requires"], inst["lets"], states[t], inst["binds"], spec)
+                    s.push()
+                    if guards:
+                        s.add(z3.And(*guards))
+                    enabled = s.check() == z3.sat
+                    s.pop()
+                    if enabled:
+                        coverage[aname] = True
+                        done.append(aname)
+                        break
+            for aname in done:
+                coverage_pending.discard(aname)
+
         if t < depth:
             nxt = make_state(spec, t + 1)
             ch = z3.Int(f"__choice@{t}")
             s.add(ch >= 0, ch < len(instances))
-            s.add(transition(spec, instances, states[t], nxt, ch))
+            step_transition = transition(spec, instances, states[t], nxt, ch, expr_cache)
+            s.add(step_transition)
+            inv_s.add(ch >= 0, ch < len(instances))
+            inv_s.add(step_transition)
             states.append(nxt)
             choices.append(ch)
 
-    reachables_result = {}
-    unreached = []
-    for reach in spec["reachables"]:
-        rs = z3.Solver()
-        rs.add(*init_constraints(spec, states[0]))
-        rstates = [states[0]]
-        rchoices = []
-        found = False
-        witness_trace = None
-        for t in range(depth + 1):
-            prop = eval_expr(reach["expr"], rstates[t], {}, spec)
-            rs.push()
-            rs.add(prop)
-            if rs.check() == z3.sat:
-                m = rs.model()
-                witness_trace = _build_trace(m, rstates, rchoices, instances, spec, t)
-                reachables_result[reach["name"]] = {
-                    "witnessed_at_step": t,
-                    "witness": witness_trace,
-                }
-                found = True
-                rs.pop()
-                break
-            rs.pop()
-            if t < depth:
-                rnxt = make_state(spec, t + 1)
-                rch = z3.Int(f"__reach_choice@{reach['name']}@{t}")
-                rs.add(rch >= 0, rch < len(instances))
-                rs.add(transition(spec, instances, rstates[t], rnxt, rch))
-                rstates.append(rnxt)
-                rchoices.append(rch)
-        if not found:
-            unreached.append({"name": reach["name"], "loc": reach.get("loc")})
+    unreached = [{"name": reach["name"], "loc": reach.get("loc")} for reach in pending_reachables]
 
     if unreached:
-        coverage = _action_coverage(spec, instances, depth)
         return {
             "result": "reachable_failed",
             "spec": spec["name"],
@@ -1271,55 +1426,9 @@ def verify(spec, depth, deadlock_mode="warn"):
             "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
         }
 
-    deadlock_info = {"found": False}
-    dl_warn = []
-    if deadlock_mode != "ignore":
-        ds = z3.Solver()
-        ds.add(*init_constraints(spec, states[0]))
-        dstates = [states[0]]
-        dchoices = []
-        for t in range(depth + 1):
-            enabled = []
-            for inst in instances:
-                guards, _ = _eval_requires(inst["requires"], inst["lets"], dstates[t], inst["binds"], spec)
-                enabled.append(z3.And(*guards) if guards else z3.BoolVal(True))
-            if enabled:
-                ds.push()
-                ds.add(z3.Not(z3.Or(*enabled)))
-                if ds.check() == z3.sat:
-                    m = ds.model()
-                    dl_trace = _build_trace(m, dstates, dchoices, instances, spec, t)
-                    deadlock_info = {"found": True, "at_step": t, "trace": dl_trace}
-                    if deadlock_mode == "error":
-                        return {
-                            "result": "violated",
-                            "spec": spec["name"],
-                            "violation_kind": "deadlock",
-                            "invariant": "deadlock",
-                            "loc": None,
-                            "violated_at_step": t,
-                            "violating_bindings": None,
-                            "last_action": _last_action(m, dchoices, instances, t, spec) if t > 0 else None,
-                            "trace": dl_trace,
-                        }
-                    dl_warn.append(_warn(
-                        f"deadlock reachable at step {t}",
-                        "add an enabled action or use --deadlock=ignore if intentional",
-                    ))
-                    ds.pop()
-                    break
-                ds.pop()
-            if deadlock_info.get("found"):
-                break
-            if t < depth:
-                dnxt = make_state(spec, t + 1)
-                dch = z3.Int(f"__dl_choice@{t}")
-                ds.add(dch >= 0, dch < len(instances))
-                ds.add(transition(spec, instances, dstates[t], dnxt, dch))
-                dstates.append(dnxt)
-                dchoices.append(dch)
+    if deadlock_violation is not None:
+        return deadlock_violation
 
-    coverage = _action_coverage(spec, instances, depth)
     warnings = [_warn(w["message"], w.get("hint")) if isinstance(w, dict) and "message" in w
                 else _warn(str(w)) for w in spec.get("warnings", [])]
     warnings.extend(dl_warn)
@@ -1342,48 +1451,3 @@ def verify(spec, depth, deadlock_mode="warn"):
         "warnings": warnings,
         "note": f"bounded verification: no violation within depth {depth}",
     }
-
-
-def _action_coverage(spec, instances, depth):
-    """True if each action is enabled at some reachable state within depth K (§6.3)."""
-    by_action = {}
-    for idx, inst in enumerate(instances):
-        by_action.setdefault(inst["action"], []).append(idx)
-
-    coverage = {aname: False for aname in by_action}
-    pending = set(by_action)
-    if not pending:
-        return coverage
-
-    states = [make_state(spec, 0)]
-    cov = z3.Solver()
-    cov.add(*init_constraints(spec, states[0]))
-
-    for t in range(depth + 1):
-        done = []
-        for aname in pending:
-            for idx in by_action[aname]:
-                inst = instances[idx]
-                guards, _ = _eval_requires(
-                    inst["requires"], inst["lets"], states[t], inst["binds"], spec)
-                cov.push()
-                if guards:
-                    cov.add(z3.And(*guards))
-                enabled = cov.check() == z3.sat
-                cov.pop()
-                if enabled:
-                    coverage[aname] = True
-                    done.append(aname)
-                    break
-        for aname in done:
-            pending.discard(aname)
-        if not pending:
-            break
-        if t < depth:
-            nxt = make_state(spec, t + 1)
-            ch = z3.Int(f"__cov_choice@{t}")
-            cov.add(ch >= 0, ch < len(instances))
-            cov.add(transition(spec, instances, states[t], nxt, ch))
-            states.append(nxt)
-
-    return coverage

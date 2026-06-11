@@ -113,5 +113,12 @@ action go() {
 
 ## 対応状況
 
-- BUG11 / BUG12 / BUG13: **修正済み**(codex ラウンド、回帰テスト6件追加、計32テスト green)
-- BUG14 / PERF1: 次ラウンドで対応予定
+- BUG11 / BUG12 / BUG13: **修正済み**(codex ラウンド、回帰テスト6件追加)
+- BUG14: **修正済み**(if 分岐の書き込み和集合を後続文へ伝播。回帰テスト追加)
+- PERF1: **解消**。展開の共有(invariant/reachable/deadlock/coverage が単一展開に相乗り)、
+  遷移の Implies 形化、式キャッシュ、検証済み invariant の強化により:
+  - inventory depth 5: 48s → 2.2s、depth 8: 30分超 → **5.4s**
+  - テストスイート全体: 57s → **3.5s**
+  - プロファイル結論: ボトルネックは Python 側でなく Z3 ソルバー時間
+    (reachable ごとの全再展開が支配的だった)
+- 計33テスト green。全サンプル仕様の結果不変。

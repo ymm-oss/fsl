@@ -135,6 +135,22 @@ spec DoubleAssign {
     assert exc.value.loc["line"] > 0
 
 
+def test_if_then_assignment_followed_by_same_assignment_errors():
+    src = """
+spec IfThenDoubleAssign {
+  state { x: Int, flag: Bool }
+  init { x = 0  flag = true }
+  action go() {
+    if flag { x = 1 }
+    x = 2
+  }
+}
+"""
+    with pytest.raises(FslError, match="double assignment") as exc:
+        verify(build_spec(parse(src)), 2)
+    assert exc.value.kind == "semantics"
+
+
 def test_fslc_check_ok():
     r = run_check(str(SPECS / "cart_v1.fsl"))
     assert r["result"] == "ok"
