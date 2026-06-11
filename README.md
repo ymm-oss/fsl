@@ -57,22 +57,24 @@ fsl/
 
 ## かんたんセットアップ（PM・コンサル・非エンジニアの方）
 
-yumemi/fsl は社内リポジトリのため、GitHub へのログインが1度だけ必要です。
+プログラミングの知識は不要です。次の3ステップだけ:
 
-**初回のみ(GitHub CLI の準備)**: ターミナルで `brew install gh` のあと
-`gh auth login`(ブラウザが開くので社内アカウントでログイン)。
+1. **ダウンロード** — ブラウザで GitHub の yumemi/fsl を開き、緑の
+   **「Code」▾ → 「Download ZIP」** をクリック（社内 GitHub にログイン済みの
+   ブラウザならそのまま落とせます)。ダウンロードした zip をダブルクリックで解凍。
+2. **ターミナルを開く**（Mac なら「ターミナル.app」、アプリ検索で "terminal")。
+3. 解凍してできたフォルダで**インストールコマンドを実行**:
 
-その後、次の1行でインストールできます:
+   ```bash
+   cd ~/Downloads/fsl-main      # 解凍先のフォルダ名に合わせてください
+   bash install.sh
+   ```
 
-```bash
-gh repo clone yumemi/fsl ~/.fsl && bash ~/.fsl/install.sh
-```
+これで `fslc` と Claude Code 用スキルが `~/.fsl` に配置されます
+(配置後はダウンロードしたフォルダを削除して構いません)。
 
-リポジトリを zip などで受け取った方・取得済みの方は、展開したフォルダ直下で:
-
-```bash
-./install.sh
-```
+> GitHub CLI を使う方・エンジニアの方は、`gh auth login` 済みなら次の1行でも:
+> `gh repo clone yumemi/fsl ~/.fsl && bash ~/.fsl/install.sh`
 
 インストールされるもの:
 

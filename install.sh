@@ -37,7 +37,7 @@ fi
 PYTHON_BIN=$(command -v python3)
 if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
   PY_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' 2>/dev/null || echo "unknown")
-  fail "Python 3.9 以上が必要です（現在: $PY_VERSION）。https://www.python.org/ から更新してから再実行してください。"
+  fail "Python 3.9 以上が必要です（現在: ${PY_VERSION}）。https://www.python.org/ から更新してから再実行してください。"
 fi
 
 is_fsl_repo() {
@@ -95,7 +95,38 @@ if [ -z "$REPO_DIR" ]; then
   REPO_DIR=$(cd "$INSTALL_DIR" && pwd -P)
 else
   REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
-  echo "このリポジトリを使います: $REPO_DIR"
+  if [ -d "$REPO_DIR/.git" ]; then
+    # 開発者の作業ツリー(git チェックアウト): その場で使う
+    echo "このリポジトリを使います: $REPO_DIR"
+  elif [ "$REPO_DIR" = "$INSTALL_DIR" ]; then
+    # 既に $INSTALL_DIR に配置済み(再実行)
+    echo "インストール済みのフォルダを使います: $REPO_DIR"
+  else
+    case "$REPO_DIR/" in
+      "$INSTALL_DIR"/*)
+        # 万一 $INSTALL_DIR の中から実行された場合はその場で使う
+        echo "このフォルダを使います: $REPO_DIR"
+        ;;
+      *)
+        # ZIP などで展開したソース: 安定した場所($INSTALL_DIR)へ配置してから使う
+        echo "ダウンロードしたフォルダから $INSTALL_DIR へ配置しています。"
+        SRC_DIR="$REPO_DIR"
+        mkdir -p "$INSTALL_DIR"
+        # .venv は残す(再実行時に環境を保つ)、ソースは入れ替える
+        find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name .venv -exec rm -rf {} + 2>/dev/null || true
+        (
+          cd "$SRC_DIR" && for item in * .[!.]*; do
+            case "$item" in .venv|.git) continue ;; esac
+            [ -e "$item" ] || continue
+            cp -R "$item" "$INSTALL_DIR/"
+          done
+        ) || fail "$INSTALL_DIR への配置に失敗しました。$INSTALL_DIR を削除してから再実行してください。"
+        REPO_DIR=$(cd "$INSTALL_DIR" && pwd -P)
+        is_fsl_repo "$REPO_DIR" || fail "$INSTALL_DIR への配置に失敗しました。$INSTALL_DIR を削除してから再実行してください。"
+        echo "配置しました: ${REPO_DIR}（ダウンロードしたフォルダは削除して構いません）"
+        ;;
+    esac
+  fi
 fi
 
 VENV_DIR="$REPO_DIR/.venv"
@@ -158,7 +189,7 @@ if [ -L "$LINK_PATH" ]; then
   if [ "$LINK_TARGET" = "$FSL_BIN" ]; then
     echo "fslc コマンドのリンクは既に設定済みです: $LINK_PATH"
   else
-    echo "警告: $LINK_PATH は別の場所を指しています（$LINK_TARGET）。上書きしません。"
+    echo "警告: $LINK_PATH は別の場所を指しています（${LINK_TARGET}）。上書きしません。"
   fi
 elif [ -e "$LINK_PATH" ]; then
   echo "警告: $LINK_PATH は既に存在します。上書きしません。必要なら手動で削除して再実行してください。"
