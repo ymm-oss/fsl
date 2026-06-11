@@ -30,6 +30,22 @@ def _warn(message, hint=None):
     return w
 
 
+def _requirement(source):
+    if not source:
+        return None
+    meta = source.get("meta") if isinstance(source, dict) else None
+    if not meta:
+        return None
+    return {"id": meta["id"], "text": meta.get("text")}
+
+
+def _attach_requirement(out, source):
+    req = _requirement(source)
+    if req is not None:
+        out["requirement"] = req
+    return out
+
+
 def _public_bindings(binds):
     out = {}
     for k, v in binds.items():
@@ -1808,7 +1824,7 @@ def _leadsto_binding_suffix(bindings):
 
 def _build_leadsto_stutter_violation(
         m, states, choices, instances, spec, leadsto, extra_binds, t, p, binding_types):
-    return {
+    return _attach_requirement({
         "result": "violated",
         "spec": spec["name"],
         "violation_kind": "leadsTo",
@@ -1819,7 +1835,7 @@ def _build_leadsto_stutter_violation(
         "stutter": True,
         "trace": _build_trace(m, states, choices, instances, spec, t),
         "hint": _LEADSTO_STUTTER_HINT.format(pending=p, deadlock=t),
-    }
+    }, leadsto)
 
 
 def _check_leadsto_stutter_at_step(
@@ -1922,7 +1938,7 @@ def _check_single_leadsto(explored, spec, leadsto):
                     break
             s.pop()
 
-            violation = {
+            violation = _attach_requirement({
                 "result": "violated",
                 "spec": spec["name"],
                 "violation_kind": "leadsTo",
@@ -1934,7 +1950,7 @@ def _check_single_leadsto(explored, spec, leadsto):
                 "stutter": False,
                 "trace": _build_trace(m, states, choices, instances, spec, j_val),
                 "hint": _LEADSTO_HINT.format(pending=p_val, loop_start=i_val),
-            }
+            }, leadsto)
             return violation
         s.pop()
 
@@ -2010,7 +2026,7 @@ def _build_leadsto_response_scenarios(explored, spec):
                         pending_at = t
                     steps, expected_states = _trace_to_scenario_steps(trace)
                     suffix = _leadsto_binding_suffix(display_bindings)
-                    scenarios_out.append({
+                    scenario = _attach_requirement({
                         "name": f"respond_{leadsto['name']}{suffix}",
                         "kind": "leadsTo",
                         "property": leadsto["name"],
@@ -2020,7 +2036,8 @@ def _build_leadsto_response_scenarios(explored, spec):
                         "satisfied_at": t,
                         "initial_state": trace[0]["state"],
                         "expected_states": expected_states,
-                    })
+                    }, leadsto)
+                    scenarios_out.append(scenario)
                     found = True
                     break
                 s.pop()
@@ -2170,10 +2187,12 @@ def _finalize_action_coverage(coverage, s, instances, by_action, states, depth, 
         if fired:
             out[label] = True
         else:
-            out[label] = _diagnose_action_coverage(
+            diag = _diagnose_action_coverage(
                 s, aname, by_action[aname], instances, states, depth, spec, expr_cache,
                 source_lines=source_lines,
             )
+            action_def = instances[by_action[aname][0]]["action_def"]
+            out[label] = _attach_requirement(diag, action_def)
     return out
 
 
@@ -2377,7 +2396,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                         m = s.model()
                         trace = _build_trace(m, states, choices, instances, spec, t)
                         s.pop()
-                        return {
+                        return _attach_requirement({
                             "result": "violated",
                             "spec": spec["name"],
                             "violation_kind": "partial_op",
@@ -2388,7 +2407,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                             "violating_bindings": None,
                             "last_action": _last_action(m, choices, instances, t, spec),
                             "trace": trace,
-                        }
+                        }, act)
                     s.pop()
 
         passed_invariants = []
@@ -2400,7 +2419,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
             if inv_s.check() == z3.sat:
                 m = inv_s.model()
                 trace = _build_trace(m, states, choices, instances, spec, t)
-                return {
+                return _attach_requirement({
                     "result": "violated",
                     "spec": spec["name"],
                     "violation_kind": _violation_kind(inv),
@@ -2410,7 +2429,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                     "violating_bindings": violating_bindings(m, inv["expr"], states[t], spec),
                     "last_action": _last_action(m, choices, instances, t, spec),
                     "trace": trace,
-                }
+                }, inv)
             inv_s.pop()
             passed_invariants.append(inv_cond)
         if passed_invariants:
@@ -2434,7 +2453,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                         m = s.model()
                         trace = _build_trace(m, states, choices, instances, spec, t)
                         s.pop()
-                        return {
+                        return _attach_requirement({
                             "result": "violated",
                             "spec": spec["name"],
                             "violation_kind": "ensures",
@@ -2444,7 +2463,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                             "violating_bindings": None,
                             "last_action": _last_action(m, choices, instances, t, spec),
                             "trace": trace,
-                        }
+                        }, inst["action_def"])
                     s.pop()
 
         if pending_reachables:
@@ -2669,11 +2688,12 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
         return _display_output(deadlock_violation, spec)
 
     scenario_list = []
+    reachable_by_name = {r["name"]: r for r in spec["reachables"]}
 
     for rname, rdata in reachables_result.items():
         trace = rdata["witness"]
         steps, expected_states = _trace_to_scenario_steps(trace)
-        scenario_list.append({
+        scenario = _attach_requirement({
             "name": f"reach_{rname}",
             "kind": "reachable",
             "property": rname,
@@ -2681,7 +2701,8 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
             "initial_state": trace[0]["state"],
             "expected_states": expected_states,
             "final_check": rname,
-        })
+        }, reachable_by_name.get(rname))
+        scenario_list.append(scenario)
 
     warnings = []
     leadsto_scenarios, leadsto_warnings = _build_leadsto_response_scenarios(explored, spec)
@@ -2702,14 +2723,15 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
                 ))
                 continue
             steps, expected_states = _trace_to_scenario_steps(trace)
-            scenario_list.append({
+            scenario = _attach_requirement({
                 "name": f"cover_{aname}",
                 "kind": "action_coverage",
                 "action": aname,
                 "steps": steps,
                 "initial_state": trace[0]["state"],
                 "expected_states": expected_states,
-            })
+            }, instances[info["idx"]]["action_def"])
+            scenario_list.append(scenario)
         else:
             br = cov.get("blocking_requires") or []
             locs = ", ".join(
@@ -2803,7 +2825,7 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
     if remaining:
         inv, k, model = last_cti
         trace = _build_trace(model, states, choices, instances, spec, k)
-        return _display_output({
+        return _display_output(_attach_requirement({
             "result": "unknown_cti",
             "spec": spec["name"],
             "invariant": inv["name"],
@@ -2813,7 +2835,7 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
                 "violated_at": k,
             },
             "hint": _CTI_HINT,
-        }, spec)
+        }, inv), spec)
 
     warnings = [
         w for w in base.get("warnings", [])

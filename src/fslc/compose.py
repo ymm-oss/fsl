@@ -313,6 +313,7 @@ def _prefix_component_items(items, alias, display_names):
         elif tag == "action":
             aname, params, body, loc = it[1], it[2], it[3], it[4]
             fair = it[5] if len(it) > 5 else False
+            meta = it[6] if len(it) > 6 else None
             pn = _prefix(aname, alias)
             display_names[pn] = _display_logical(alias, aname)
             new_body = []
@@ -327,23 +328,24 @@ def _prefix_component_items(items, alias, display_names):
                 else:
                     new_body.append(_rewrite_stmt(bit, {alias}, state, types, consts))
             out.append((
-                "action", pn, _rewrite_params(params, {alias}, types), new_body, loc, fair,
+                "action", pn, _rewrite_params(params, {alias}, types), new_body, loc, fair, meta,
             ))
         elif tag == "invariant":
             pn = _prefix(it[1], alias)
             display_names[pn] = _display_logical(alias, it[1])
-            out.append(("invariant", pn, _rewrite_expr(it[2], {alias}, state, types, consts), it[3]))
+            out.append(("invariant", pn, _rewrite_expr(it[2], {alias}, state, types, consts), it[3], it[4] if len(it) > 4 else None))
         elif tag == "reachable":
             pn = _prefix(it[1], alias)
             display_names[pn] = _display_logical(alias, it[1])
-            out.append(("reachable", pn, _rewrite_expr(it[2], {alias}, state, types, consts), it[3]))
+            out.append(("reachable", pn, _rewrite_expr(it[2], {alias}, state, types, consts), it[3], it[4] if len(it) > 4 else None))
         elif tag == "leadsto":
             binders = [_rewrite_binder(b, {alias}, types) for b in it[2]]
             pn = _prefix(it[1], alias)
             display_names[pn] = _display_logical(alias, it[1])
             out.append(("leadsto", pn, binders,
                         _rewrite_expr(it[3], {alias}, state, types, consts),
-                        _rewrite_expr(it[4], {alias}, state, types, consts), it[5]))
+                        _rewrite_expr(it[4], {alias}, state, types, consts),
+                        it[5], it[6] if len(it) > 6 else None))
     return out
 
 
@@ -356,7 +358,7 @@ def _action_lookup(actions):
 
 
 def _expand_sync_action(sync, action_by_name, aliases, loc):
-    _, name, params, sync_refs, body_items, _, fair = sync
+    _, name, params, sync_refs, body_items, _, fair, sync_meta = sync
     if len({r[1] for r in sync_refs}) != len(sync_refs):
         _compose_err("sync action cannot reference two actions from the same component", loc=loc)
     merged = []
@@ -368,7 +370,7 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
         comp = action_by_name.get(key)
         if comp is None:
             _compose_err(f"unknown action '{alias}.{act_name}'", loc=loc)
-        _, _, cparams, cbody, _, _ = comp
+        _, _, cparams, cbody, _, _fair, _meta = comp
         if len(cparams) != len(arg_exprs):
             _compose_err(f"sync arity mismatch for '{alias}.{act_name}'", loc=loc)
         param_map = {}
@@ -409,7 +411,7 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
             ))
         else:
             merged.append(_rewrite_stmt(bit, aliases, empty_comp, set(), set()))
-    return ("action", name, _rewrite_params(params, aliases), merged, loc, fair)
+    return ("action", name, _rewrite_params(params, aliases), merged, loc, fair, sync_meta)
 
 
 def expand_compose(ast, base_dir):
@@ -472,6 +474,7 @@ def expand_compose(ast, base_dir):
         elif tag == "action":
             aname, params, body, loc = it[1], it[2], it[3], it[4]
             fair = it[5] if len(it) > 5 else False
+            meta = it[6] if len(it) > 6 else None
             new_body = []
             for bit in body:
                 bt = bit[0]
@@ -483,7 +486,7 @@ def expand_compose(ast, base_dir):
                     new_body.append(("let", bit[1], _rewrite_expr(bit[2], compose_aliases, empty_comp, set(), set()), bit[3]))
                 else:
                     new_body.append(_rewrite_stmt(bit, compose_aliases, empty_comp, set(), set()))
-            merged.append(("action", aname, _rewrite_params(params, compose_aliases), new_body, loc, fair))
+            merged.append(("action", aname, _rewrite_params(params, compose_aliases), new_body, loc, fair, meta))
         elif tag == "state":
             decls = []
             for _, n, ty_ast in it[1]:
@@ -492,14 +495,15 @@ def expand_compose(ast, base_dir):
         elif tag == "init":
             merged.append(("init", [_rewrite_stmt(s, compose_aliases, empty_comp, set(), set()) for s in it[1]]))
         elif tag == "invariant":
-            merged.append(("invariant", it[1], _rewrite_expr(it[2], compose_aliases, empty_comp, set(), set()), it[3]))
+            merged.append(("invariant", it[1], _rewrite_expr(it[2], compose_aliases, empty_comp, set(), set()), it[3], it[4] if len(it) > 4 else None))
         elif tag == "reachable":
-            merged.append(("reachable", it[1], _rewrite_expr(it[2], compose_aliases, empty_comp, set(), set()), it[3]))
+            merged.append(("reachable", it[1], _rewrite_expr(it[2], compose_aliases, empty_comp, set(), set()), it[3], it[4] if len(it) > 4 else None))
         elif tag == "leadsto":
             binders = [_rewrite_binder(b, compose_aliases) for b in it[2]]
             merged.append(("leadsto", it[1], binders,
                            _rewrite_expr(it[3], compose_aliases, empty_comp, set(), set()),
-                           _rewrite_expr(it[4], compose_aliases, empty_comp, set(), set()), it[5]))
+                           _rewrite_expr(it[4], compose_aliases, empty_comp, set(), set()),
+                           it[5], it[6] if len(it) > 6 else None))
 
     final_actions = [a for a in merged if a[0] == "action" and a[1] not in internal_phys]
     non_actions = [a for a in merged if a[0] not in ("action", "init")]

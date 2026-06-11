@@ -16,7 +16,7 @@ use_def: "use" NAME "as" NAME "from" STRING
 internal_def: "internal" NAME "." NAME
 compose_state: "state" "{" var_decl ("," var_decl)* ","? "}"
 compose_init: "init" "{" stmt* "}"
-sync_action: "fair"? "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body "{" action_item* "}"
+sync_action: "fair"? "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body meta_tag? "{" action_item* "}"
 glue_action: fair_action | plain_action
 sync_body: sync_ref ("||" sync_ref)*
 sync_ref: NAME "." NAME "(" [expr ("," expr)*] ")"
@@ -61,8 +61,8 @@ cap: INT -> cap_int
 init_def: "init" "{" stmt* "}"
 
 action_def: fair_action | plain_action
-fair_action: "fair" "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
-plain_action: "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
+fair_action: "fair" "action" NAME "(" [param ("," param)*] ")" meta_tag? "{" action_item* "}"
+plain_action: "action" NAME "(" [param ("," param)*] ")" meta_tag? "{" action_item* "}"
 param: NAME ":" qname -> param_typed
      | NAME "in" expr ".." expr -> param_range
 ?action_item: requires_clause | ensures_clause | let_clause | stmt
@@ -84,10 +84,11 @@ lvalue: NAME "[" expr "]" "." NAME -> lvalue_map_field
 binder: NAME ":" qname ["where" expr] -> binder_typed
        | NAME "in" expr ".." expr -> binder_range
 
-invariant_def: "invariant" NAME "{" expr "}"
-reachable_def: "reachable" NAME "{" expr "}"
+invariant_def: "invariant" NAME meta_tag? "{" expr "}"
+reachable_def: "reachable" NAME meta_tag? "{" expr "}"
 
-leadsto_def: "leadsTo" NAME "{" lt_body "}"
+leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body "}"
+meta_tag: STRING
 ?lt_body: lt_forall | lt_implies
 lt_forall: "forall" binder [":"] "{" lt_body "}"
 lt_implies: expr "~>" expr
@@ -214,6 +215,13 @@ def _flatten_leadsto(body):
         raise ValueError(f"expected leadsTo implication, got {node[0]}")
     _, p, q = node
     return binders, p, q
+
+
+def _parse_meta(s):
+    if ":" in s:
+        ident, text = s.split(":", 1)
+        return {"id": ident.strip(), "text": text.strip()}
+    return {"id": s.strip(), "text": None}
 
 
 @v_args(inline=True, meta=True)
@@ -475,28 +483,47 @@ class Ast(Transformer):
     def init_def(self, meta, *stmts):
         return ("init", list(stmts))
 
-    def invariant_def(self, meta, n, e):
-        return ("invariant", n, e, _loc(meta))
+    def meta_tag(self, meta, s):
+        return _parse_meta(s)
 
-    def reachable_def(self, meta, n, e):
-        return ("reachable", n, e, _loc(meta))
+    def invariant_def(self, meta, n, *rest):
+        req_meta, e = None, None
+        for r in rest:
+            if isinstance(r, dict):
+                req_meta = r
+            else:
+                e = r
+        return ("invariant", n, e, _loc(meta), req_meta)
+
+    def reachable_def(self, meta, n, *rest):
+        req_meta, e = None, None
+        for r in rest:
+            if isinstance(r, dict):
+                req_meta = r
+            else:
+                e = r
+        return ("reachable", n, e, _loc(meta), req_meta)
 
     def _action_parts(self, meta, name, *rest):
-        params, items = [], []
+        params, items, req_meta = [], [], None
         for r in rest:
             if r is None:
                 continue
-            if r[0] in ("param_typed", "param_range"):
+            if isinstance(r, dict):
+                req_meta = r
+            elif r[0] in ("param_typed", "param_range"):
                 params.append(r)
             else:
                 items.append(r)
-        return ("action", name, params, items, _loc(meta))
+        return ("action", name, params, items, _loc(meta), req_meta)
 
     def fair_action(self, meta, name, *rest):
-        return self._action_parts(meta, name, *rest) + (True,)
+        base = self._action_parts(meta, name, *rest)
+        return base[:5] + (True, base[5])
 
     def plain_action(self, meta, name, *rest):
-        return self._action_parts(meta, name, *rest) + (False,)
+        base = self._action_parts(meta, name, *rest)
+        return base[:5] + (False, base[5])
 
     def action_def(self, meta, node):
         return node
@@ -507,9 +534,15 @@ class Ast(Transformer):
     def lt_forall(self, meta, binder, body):
         return ("lt_forall", binder, body)
 
-    def leadsto_def(self, meta, name, body):
+    def leadsto_def(self, meta, name, *rest):
+        req_meta, body = None, None
+        for r in rest:
+            if isinstance(r, dict):
+                req_meta = r
+            else:
+                body = r
         binders, p, q = _flatten_leadsto(body)
-        return ("leadsto", name, binders, p, q, _loc(meta))
+        return ("leadsto", name, binders, p, q, _loc(meta), req_meta)
 
     def start(self, meta, child):
         return child
@@ -594,11 +627,13 @@ class Ast(Transformer):
             idx = 1
         name = parts[idx]
         rest = parts[idx + 1:]
-        params, sync_refs, body_items = [], None, []
+        params, sync_refs, body_items, req_meta = [], None, [], None
         for r in rest:
             if r is None:
                 continue
-            if isinstance(r, tuple) and r[0] in ("param_typed", "param_range"):
+            if isinstance(r, dict):
+                req_meta = r
+            elif isinstance(r, tuple) and r[0] in ("param_typed", "param_range"):
                 params.append(r)
             elif isinstance(r, list) and r and isinstance(r[0], tuple) and r[0][0] == "sync_ref":
                 sync_refs = r
@@ -612,7 +647,7 @@ class Ast(Transformer):
                 sync_refs = [r]
         if sync_refs is None:
             raise ValueError("sync action missing sync body")
-        return ("sync_action", name, params, sync_refs, body_items, _loc(meta), fair)
+        return ("sync_action", name, params, sync_refs, body_items, _loc(meta), fair, req_meta)
 
     def compose_def(self, meta, name, *items):
         return ("compose", name, [i for i in items if i])

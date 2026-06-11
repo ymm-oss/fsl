@@ -734,6 +734,11 @@ def display_keyed(mapping, spec):
     return {display_label(k, spec): v for k, v in mapping.items()}
 
 
+def _with_meta(entry, meta):
+    entry["meta"] = meta
+    return entry
+
+
 def build_spec(tree, display_names=None):
     _, name, items = tree
     consts = {}
@@ -762,9 +767,10 @@ def build_spec(tree, display_names=None):
         elif tag == "action":
             aname, params, body_items, loc = it[1], it[2], it[3], it[4]
             fair = it[5] if len(it) > 5 else False
+            meta = it[6] if len(it) > 6 else None
             nparams = normalize_params(params, consts, types_meta)
             requires, lets, stmts, ensures = normalize_action_items(body_items)
-            actions.append({
+            actions.append(_with_meta({
                 "name": aname,
                 "params": nparams,
                 "requires": requires,
@@ -773,28 +779,28 @@ def build_spec(tree, display_names=None):
                 "ensures": ensures,
                 "loc": loc,
                 "fair": bool(fair),
-            })
+            }, meta))
         elif tag == "leadsto":
-            leadstos.append({
+            leadstos.append(_with_meta({
                 "name": it[1],
                 "binders": it[2],
                 "P": it[3],
                 "Q": it[4],
                 "loc": it[5],
-            })
+            }, it[6] if len(it) > 6 else None))
         elif tag == "invariant":
-            invariants.append({
+            invariants.append(_with_meta({
                 "name": it[1],
                 "expr": it[2],
                 "implicit": False,
                 "loc": it[3],
-            })
+            }, it[4] if len(it) > 4 else None))
         elif tag == "reachable":
-            reachables.append({
+            reachables.append(_with_meta({
                 "name": it[1],
                 "expr": it[2],
                 "loc": it[3],
-            })
+            }, it[4] if len(it) > 4 else None))
 
     if not state:
         _err("spec has no state block", kind="semantics")
