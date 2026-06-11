@@ -55,7 +55,41 @@ fsl/
 └── tests/                  # pytest (v0互換 / v1 / induction / scenarios / runtime)
 ```
 
-## セットアップ
+## かんたんセットアップ（PM・コンサル・非エンジニアの方）
+
+リポジトリをまだ取得していない方は、ターミナルで次の1行を実行してください:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yumemi/fsl/main/install.sh | bash
+```
+
+すでにリポジトリを取得済みの方は、リポジトリ直下で次を実行してください:
+
+```bash
+./install.sh
+```
+
+インストールされるもの:
+
+- `fslc` コマンド（`~/.local/bin/fslc` から利用）
+- Claude Code 用スキル（`~/.claude/skills/fsl`）
+- PM 向け・コンサル向けのサンプル（`examples/pm/`, `examples/consulting/`）
+
+Windows の方は WSL を利用するか、開発者向け手順（PowerShell）を参照してください。
+
+アンインストール:
+
+```bash
+rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl
+```
+
+## 開発者向けセットアップ
+
+まずリポジトリを取得します:
+
+```bash
+git clone https://github.com/yumemi/fsl && cd fsl
+```
 
 依存は `lark`（純Python）と `z3-solver`（ネイティブ libz3 を同梱した
 ビルド済み wheel）の2つだけ。**C++ コンパイラや別途の Z3 インストールは不要**で、
