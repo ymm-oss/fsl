@@ -1,9 +1,10 @@
-# FSL — AI-Native Formal Specification Language (v0 プロトタイプ)
+# FSL — AI-Native Formal Specification Language (v1.1)
 
 FSL は、**生成AIが書き・検証し・修正する**ことを第一目標に設計した、
-アプリ開発向けの形式仕様言語です。検証器 `fslc` は Lark + Z3 による
-**有界モデル検査(BMC)** を行い、結果を常に**機械可読な JSON** で返します
-（LLM の write→verify→repair ループ用）。
+アプリ開発向けの形式仕様言語です。検証器 `fslc` は Lark + Z3 により
+**有界モデル検査(BMC)** と **k 帰納法による無限深度証明** を行い、結果を常に
+**機械可読な JSON** で返します（LLM の write→verify→repair ループ用）。
+仕様から統合テスト雛形を生成する `fslc scenarios` も備えます。
 
 言語仕様・意味論・出力 JSON の詳細は [`docs/LANGUAGE.md`](docs/LANGUAGE.md) を参照。
 次版の言語設計(型システム・reachable・修復プロトコル等)は
@@ -16,21 +17,33 @@ fsl/
 ├── README.md
 ├── pyproject.toml          # 依存 (lark, z3-solver) と fslc コマンドの定義
 ├── docs/
-│   ├── LANGUAGE.md         # 言語仕様書 (v0)
-│   └── DESIGN-v1.md        # v1 言語設計書
-├── specs/                  # サンプル仕様 (*.fsl)
-│   ├── cart_buggy.fsl      #   在庫確認なしの checkout — invariant 違反する
-│   └── cart_fixed.fsl      #   在庫ガード追加 — 検証を通る
+│   ├── LANGUAGE.md         # 言語リファレンス (v1.1) — 仕様を書くならまずこれ
+│   ├── DESIGN-v1.md        # v1 言語設計書
+│   ├── DESIGN-induction.md # k 帰納法エンジン実装設計
+│   ├── DESIGN-scenarios.md # coverage 診断 / scenarios 実装設計
+│   ├── DESIGN-seq.md       # Seq<T, N> 実装設計
+│   └── DOGFOOD-1.md / -2.md# ドッグフーディング所見
+├── specs/                  # サンプル仕様 (*.fsl) — 正しい10本は全て k=1 で proved
+│   ├── cart_v1.fsl         #   Option / ensures / reachable の基本形
+│   ├── cart_v1_buggy.fsl   #   ガード欠落 — type_bound 違反の最短反例が返る
+│   ├── order_workflow.fsl  #   enum / struct / Set / sum
+│   ├── auth_lockout.fsl    #   ロックアウト + ゴースト変数 + 補助 invariant
+│   ├── inventory_reservation.fsl  # 保存則 invariant
+│   ├── payment.fsl         #   部分返金 + 台帳 + 補助 invariant
+│   ├── rate_limiter.fsl    #   トークンバケット
+│   ├── mutex_queue.fsl     #   FIFO ミューテックス (Option + Seq)
+│   ├── job_pipeline.fsl    #   リトライ付きジョブキュー (Seq + struct)
+│   ├── audit_log.fsl       #   追記ログ + Seq 集約イディオム
+│   └── cart_{buggy,fixed}.fsl     # v0 互換サンプル
 ├── src/fslc/               # 検証器パッケージ
 │   ├── __init__.py         #   公開API: parse / build_spec / verify
 │   ├── __main__.py         #   python -m fslc 用
 │   ├── grammar.py          #   Lark 文法 + AST トランスフォーマ
 │   ├── parser.py           #   parse(src) -> AST
 │   ├── model.py            #   build_spec / 型→Z3sort / 定数評価 / FslError
-│   ├── bmc.py              #   verify / transition / 反例トレース生成
+│   ├── bmc.py              #   verify / prove(k帰納法) / scenarios / トレース生成
 │   └── cli.py              #   CLI と JSON 出力・エラー封筒
-└── tests/                  # サンプル仕様の期待結果テスト
-    └── test_cart.py
+└── tests/                  # 60 テスト (v0互換 / v1 / induction / scenarios / seq)
 ```
 
 ## セットアップ
@@ -61,17 +74,18 @@ venv を有効化せずに直接実行することもできます:
 ## 使い方
 
 ```bash
-# editable インストール後はコマンドとして
-fslc verify specs/cart_buggy.fsl
-fslc verify specs/cart_fixed.fsl --depth 8
+fslc check  specs/cart_v1.fsl                    # 構文・型のみ(高速ループ)
+fslc verify specs/cart_v1.fsl --depth 8          # BMC: verified + 最短反例/witness
+fslc verify specs/cart_v1.fsl --engine induction # k帰納法: proved(無限深度)
+fslc scenarios specs/cart_v1.fsl                 # 統合テスト雛形 JSON を生成
 
 # インストールせずモジュール実行でも可
-python -m fslc verify specs/cart_buggy.fsl
+python -m fslc verify specs/cart_v1_buggy.fsl
 ```
 
-出力は常に JSON（stdout）。`verified` のときのみ終了コード 0。
-`cart_buggy.fsl` は `NoNegativeStock` 違反の反例トレースを、
-`cart_fixed.fsl` は `action_coverage`（空虚性チェック）つきの検証成功を返します。
+出力は常に JSON（stdout）。終了コード: 0 = verified / proved、
+1 = violated / reachable_failed / unknown_cti、2 = 仕様エラー、3 = 内部エラー。
+`cart_v1_buggy.fsl` は自動境界チェック（`type_bound`）の最短反例トレースを返します。
 
 ## テスト
 
@@ -79,15 +93,15 @@ python -m fslc verify specs/cart_buggy.fsl
 pytest
 ```
 
-`tests/test_cart.py` が `specs/` のサンプルに対して
-「バグ版は violated・修正版は verified」を検証します。
+60 テストが v0 互換・v1 型システム・k 帰納法・scenarios・Seq の
+全機能を検証します（約6秒）。
 
 ## ライブラリ API
 
 ```python
-from fslc import parse, build_spec, verify
+from fslc import parse, build_spec, verify, prove
 
-ast  = parse(open("specs/cart_fixed.fsl").read())
-spec = build_spec(ast)
-result = verify(spec, depth=8)   # dict（CLI が JSON 化するのと同じ構造）
+spec   = build_spec(parse(open("specs/cart_v1.fsl").read()))
+result = verify(spec, depth=8)              # BMC。dict（CLI と同じ構造）
+result = prove(spec, k_ind=1, base_depth=8) # k帰納法（proved / unknown_cti）
 ```
