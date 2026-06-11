@@ -577,9 +577,9 @@ CTI →「補助 invariant の提案」は LLM が得意な帰納的一般化で
   `Seq<T, N>`(容量付き列。配列+長さでエンコード、**実装済み**)、unsat core による
   「どの requires が enabled を阻んでいるか」ヒント。
 - **v2.0**: 公平性注釈(`fair action ...`)と有界 `leadsTo`(**実装済み lite**:
-  `DESIGN-temporal.md` 参照)、実装橋の本体
-  (仕様からのランタイムモニタ/プロパティテスト生成)、複数 spec の合成と
-  refinement。
+  `DESIGN-temporal.md` 参照)、実装橋の本体(**実装済み**:
+  `DESIGN-bridge.md` — `fslc.runtime.Monitor` / `fslc replay` / `fslc testgen`)、
+  複数 spec の合成と refinement。
 
 ---
 

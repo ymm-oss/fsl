@@ -286,10 +286,41 @@ invariant NoDupQueue {
 }
 ```
 
-## 10. ライブラリ API
+## 10. 実装への橋
+
+仕様を証明したあと、実装と結線するための3つの入口がある
+(`DESIGN-bridge.md` 参照)。
+
+| 手段 | 用途 |
+|---|---|
+| `fslc.runtime.Monitor` | 仕様の具象インタプリタ(Z3 不要)。実装に組み込んで実行時検査 |
+| `fslc replay` | 実システムのイベントログ JSON を仕様に対して検査 |
+| `fslc testgen` | pytest 適合性テスト雛形を生成(Adapter に実装を結線) |
+
+推奨ワークフロー: **spec を `verify` / `prove` → `testgen` で雛形生成 →
+`Adapter` に実装を結線 → pytest**。`Monitor` は oracle としてランダムウォーク
+テストに使われる。
 
 ```python
-from fslc import parse, build_spec, verify, prove
+from fslc import Monitor
+
+mon = Monitor("specs/cart_v1.fsl")
+mon.reset()
+r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
+```
+
+```bash
+fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # Adapter 未実装なら全 skip
+```
+
+`replay` は有限ログのみを検査するため **`leadsTo` は対象外**(出力 `note` に明記)。
+`Monitor` は init が決定的である必要がある(forall 一括代入可)。
+
+## 11. ライブラリ API
+
+```python
+from fslc import parse, build_spec, verify, prove, Monitor
 
 spec   = build_spec(parse(src))
 result = verify(spec, depth=8)            # BMC

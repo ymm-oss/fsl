@@ -2,7 +2,11 @@
 from .parser import parse
 from .model import build_spec, check_spec, FslError
 from .bmc import verify, prove, scenarios
+from .runtime import Monitor
 
 __version__ = "1.0.0"
 
-__all__ = ["parse", "build_spec", "check_spec", "verify", "prove", "scenarios", "FslError", "__version__"]
+__all__ = [
+    "parse", "build_spec", "check_spec", "verify", "prove", "scenarios",
+    "Monitor", "FslError", "__version__",
+]
