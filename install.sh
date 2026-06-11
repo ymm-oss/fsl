@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INSTALL_SKILL=1
-CLONE_URL="${FSL_INSTALL_REPO_URL:-https://github.com/yumemi/fsl}"
+CLONE_URL="git@github.com:yumemi/fsl.git"
 INSTALL_DIR="${FSL_INSTALL_DIR:-$HOME/.fsl}"
 
 fail() {
@@ -85,7 +85,12 @@ if [ -z "$REPO_DIR" ]; then
     git -C "$INSTALL_DIR" pull --ff-only || fail "$INSTALL_DIR の更新に失敗しました。ローカル変更を確認するか、削除してから再実行してください。"
   else
     echo "FSL リポジトリを取得しています: $INSTALL_DIR"
-    git clone "$CLONE_URL" "$INSTALL_DIR" || fail "FSL リポジトリの取得に失敗しました。ネットワーク接続と git の設定を確認してから再実行してください。"
+    # 社内(private)リポジトリのため認証が必要。gh CLI があればそれが一番確実
+    if command -v gh >/dev/null 2>&1; then
+      gh repo clone yumemi/fsl "$INSTALL_DIR" || fail "リポジトリの取得に失敗しました。'gh auth login' で GitHub にログインしているか、yumemi/fsl へのアクセス権があるかを確認してください。"
+    else
+      git clone "$CLONE_URL" "$INSTALL_DIR" || fail "リポジトリの取得に失敗しました。yumemi/fsl は社内リポジトリのため認証が必要です。GitHub CLI('brew install gh' → 'gh auth login')を入れて再実行するのが簡単です。SSH キー設定済みの方はそのままで動きます。"
+    fi
   fi
   REPO_DIR=$(cd "$INSTALL_DIR" && pwd -P)
 else

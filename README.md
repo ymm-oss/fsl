@@ -57,13 +57,18 @@ fsl/
 
 ## かんたんセットアップ（PM・コンサル・非エンジニアの方）
 
-リポジトリをまだ取得していない方は、ターミナルで次の1行を実行してください:
+yumemi/fsl は社内リポジトリのため、GitHub へのログインが1度だけ必要です。
+
+**初回のみ(GitHub CLI の準備)**: ターミナルで `brew install gh` のあと
+`gh auth login`(ブラウザが開くので社内アカウントでログイン)。
+
+その後、次の1行でインストールできます:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yumemi/fsl/main/install.sh | bash
+gh repo clone yumemi/fsl ~/.fsl && bash ~/.fsl/install.sh
 ```
 
-すでにリポジトリを取得済みの方は、リポジトリ直下で次を実行してください:
+リポジトリを zip などで受け取った方・取得済みの方は、展開したフォルダ直下で:
 
 ```bash
 ./install.sh
