@@ -57,33 +57,61 @@ python -m fslc <subcommand> ...  # または venv の python で
 | `error` / `parse` | 構文エラー | `loc` と `expected`(候補トークン)に従う |
 | `error` / `type` | 型エラー | `hint` に従う(例: `x == some(e)` → `x is some(v)` で束縛して比較) |
 | `error` / `semantics` | 二重代入など | 同一パスで同じ変数に2回代入しない(if の then/else は別パスなので可) |
+| `error` / `vacuous` | init が充足不能(矛盾した代入など) | init を見直す。1つの状態変数に矛盾する値を与えていないか確認。範囲外の値による違反は別物で `violated`/`type_bound` になる |
 
 coverage が `false` のアクションは `blocking_requires` が「どの requires が
 阻んでいるか」を句単位で特定している。silent に無視しないこと。
 
 ## 最小構文(詳細・全カタログは reference.md)
 
+下記はそのまま `fslc check` を通る自己完結の雛形(Map/Option/Seq の要素型は
+全てドメイン型として宣言してある — **使う型は必ず `type ... = lo..hi` か `enum`
+で宣言する**。未宣言だと `unknown type` の型エラーになる):
+
 ```fsl
-spec Name {
+spec Cart {
   const CAP = 3
-  type Qty = 0..5                       // ドメイン型 = 有界整数。範囲は自動検査
+  type ItemId = 0..1
+  type UserId = 0..1
+  type JobId  = 0..1
+  type Qty    = 0..5                     // ドメイン型 = 有界整数。範囲は自動検査
   enum St { Open, Closed }
   struct Order { st: St, qty: Qty, buyer: Option<UserId> }
 
-  state { stock: Map<ItemId, Qty>, cart: Option<ItemId>, q: Seq<JobId, CAP> }
-  init  { forall i: ItemId { stock[i] = 1 }  cart = none  q = Seq {} }
+  state {
+    stock: Map<ItemId, Qty>,
+    cart:  Option<ItemId>,
+    q:     Seq<JobId, CAP>
+  }
+  init {
+    forall i: ItemId { stock[i] = 1 }
+    cart = none
+    q = Seq {}
+  }
 
-  fair action checkout(u: UserId) {     // fair = 弱公平(leadsTo 用)
-    requires cart is some(i)            // i がここで束縛される
+  action add_to_cart(i: ItemId) {
+    requires cart == none
+    cart = some(i)
+  }
+
+  fair action abandon() {                // 常に可能なので Served(下記)が成立する
+    requires cart != none
+    cart = none
+  }
+
+  fair action checkout(u: UserId) {      // fair = 弱公平(leadsTo 用)
+    requires cart is some(i)             // i がここで束縛される
     requires stock[i] > 0
-    stock[i] = stock[i] - 1             // 右辺は全て旧状態を読む(同時代入)
+    stock[i] = stock[i] - 1              // 右辺は全て旧状態を読む(同時代入)
     cart = none
     ensures stock[i] == old(stock[i]) - 1
   }
 
-  invariant Name { <式> }               // 安全性(全到達状態)
-  reachable Name { <式> }               // 到達可能性(witness が返る)
-  leadsTo Name { <P式> ~> <Q式> }       // 応答性(~> は leadsTo 専用)
+  // 「stock[i] >= 0」のような境界 invariant は書かない(Qty=0..5 で自動検査)。
+  // 下は非・境界の真の安全性 invariant の例(<式> の位置)。
+  invariant QueueStaysEmpty { q.size() == 0 }   // q を触る action が無いので不変
+  reachable SoldOut { stock[0] == 0 }           // witness が返る
+  leadsTo Served { cart is some(j) ~> cart == none }   // ~> は leadsTo 専用
 }
 ```
 
