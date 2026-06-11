@@ -1278,12 +1278,160 @@ def _last_action(model, choices, instances, step, spec):
     return la
 
 
-def verify(spec, depth, deadlock_mode="warn"):
+_COVERAGE_HINT = (
+    "these requires clauses are unsatisfiable at every step up to depth K; "
+    "weaken one of them, add an action that establishes them, or increase --depth"
+)
+
+_SCENARIOS_CONVENTION = (
+    "set up initial_state, invoke each step as an API call, and after step i "
+    "assert only the fields mentioned in expected_states[i]"
+)
+
+
+def _requires_loc_key(req):
+    loc = req.get("loc") or {}
+    return (loc.get("line"), loc.get("column"))
+
+
+def _requires_blocking_entry(req, source_lines=None):
+    entry = {}
+    if req.get("loc"):
+        entry["loc"] = req["loc"]
+        if source_lines:
+            line = req["loc"].get("line")
+            if line and 1 <= line <= len(source_lines):
+                text = source_lines[line - 1].strip()
+                if text:
+                    entry["text"] = text
+    return entry
+
+
+def _display_bindings(binds, inst, spec):
+    act = inst["action_def"]
+    return {pk: _display_param(pk, pv, act, spec) for pk, pv in binds.items()}
+
+
+def _diagnose_action_coverage(s, aname, instance_idxs, instances, states, depth, spec, expr_cache,
+                              source_lines=None):
+    """At depth K, find blocking requires for an uncovered action via unsat core."""
+    t = depth
+    instance_cores = []
+    instance_bindings = []
+
+    for idx in instance_idxs:
+        inst = instances[idx]
+        with _eval_cache_scope(expr_cache, id(states[t])):
+            _, binds = _eval_requires(inst["requires"], inst["lets"], states[t], inst["binds"], spec)
+        if not inst["requires"]:
+            continue
+
+        s.push()
+        assumptions = []
+        lit_map = {}
+        for j, req in enumerate(inst["requires"]):
+            lit = z3.Bool(f"__cov_{aname}_{idx}_{j}")
+            with _eval_cache_scope(expr_cache, id(states[t])):
+                b = dict(binds)
+                guard = eval_expr(req["expr"], states[t], b, spec)
+            s.assert_and_track(guard, lit)
+            assumptions.append(lit)
+            lit_map[lit] = req
+
+        blocking = []
+        if assumptions and s.check(*assumptions) == z3.unsat:
+            for c in s.unsat_core():
+                if c in lit_map:
+                    blocking.append(lit_map[c])
+        s.pop()
+
+        if blocking:
+            instance_cores.append(blocking)
+            instance_bindings.append((inst, binds))
+
+    if not instance_cores:
+        return {
+            "covered": False,
+            "blocking_requires": [],
+            "hint": _COVERAGE_HINT.replace("K", str(depth)),
+        }
+
+    common_keys = {_requires_loc_key(r) for r in instance_cores[0]}
+    for core in instance_cores[1:]:
+        keys = {_requires_loc_key(r) for r in core}
+        common_keys &= keys
+
+    if common_keys:
+        chosen_core = [r for r in instance_cores[0] if _requires_loc_key(r) in common_keys]
+        chosen_inst = instance_bindings[0][0]
+        chosen_binds = instance_bindings[0][1]
+        use_bindings = False
+    else:
+        chosen_core = instance_cores[0]
+        chosen_inst = instance_bindings[0][0]
+        chosen_binds = instance_bindings[0][1]
+        use_bindings = len(instance_cores) > 1
+
+    out = {
+        "covered": False,
+        "blocking_requires": [
+            _requires_blocking_entry(r, source_lines) for r in chosen_core
+        ],
+        "hint": _COVERAGE_HINT.replace("K", str(depth)),
+    }
+    if use_bindings:
+        out["bindings"] = _display_bindings(chosen_binds, chosen_inst, spec)
+    return out
+
+
+def _finalize_action_coverage(coverage, s, instances, by_action, states, depth, spec, expr_cache,
+                              source_lines=None):
+    out = {}
+    for aname, fired in coverage.items():
+        if fired:
+            out[aname] = True
+        else:
+            out[aname] = _diagnose_action_coverage(
+                s, aname, by_action[aname], instances, states, depth, spec, expr_cache,
+                source_lines=source_lines,
+            )
+    return out
+
+
+def _trace_to_scenario_steps(trace):
+    steps = []
+    expected_states = []
+    for entry in trace[1:]:
+        if "action" in entry:
+            steps.append({
+                "action": entry["action"]["name"],
+                "params": dict(entry["action"]["params"]),
+            })
+        expected_states.append(entry["state"])
+    return steps, expected_states
+
+
+def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cache):
+    if step >= len(choices):
+        return None
+    s.push()
+    s.add(choices[step] == idx)
+    if s.check() == z3.sat:
+        m = s.model()
+        trace = _build_trace(m, states, choices, instances, spec, step + 1)
+        s.pop()
+        return trace
+    s.pop()
+    return None
+
+
+def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
     instances = build_instances(spec)
     expr_cache = {}
     states = [make_state(spec, 0)]
     choices = []
     s = z3.Solver()
+    s.set(unsat_core=True)
     inv_s = z3.Solver()
     with _eval_cache_scope(expr_cache, id(states[0])):
         init_cons = init_constraints(spec, states[0])
@@ -1305,6 +1453,7 @@ def verify(spec, depth, deadlock_mode="warn"):
         by_action.setdefault(inst["action"], []).append(idx)
     coverage = {aname: False for aname in by_action}
     coverage_pending = set(by_action)
+    cover_info = {}
 
     deadlock_info = {"found": False}
     deadlock_violation = None
@@ -1433,6 +1582,8 @@ def verify(spec, depth, deadlock_mode="warn"):
                     s.pop()
                     if enabled:
                         coverage[aname] = True
+                        if track_cover and aname not in cover_info:
+                            cover_info[aname] = {"step": t, "idx": idx}
                         done.append(aname)
                         break
             for aname in done:
@@ -1449,12 +1600,50 @@ def verify(spec, depth, deadlock_mode="warn"):
             states.append(nxt)
             choices.append(ch)
 
+    return {
+        "result": "explored",
+        "spec": spec["name"],
+        "depth": depth,
+        "instances": instances,
+        "states": states,
+        "choices": choices,
+        "solver": s,
+        "expr_cache": expr_cache,
+        "by_action": by_action,
+        "coverage": coverage,
+        "reachables_result": reachables_result,
+        "pending_reachables": pending_reachables,
+        "deadlock_info": deadlock_info,
+        "deadlock_violation": deadlock_violation,
+        "dl_warn": dl_warn,
+        "cover_info": cover_info,
+    }
+
+
+def verify(spec, depth, deadlock_mode="warn", source_lines=None):
+    explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode)
+    if explored["result"] != "explored":
+        return explored
+
+    depth = explored["depth"]
+    coverage = explored["coverage"]
+    pending_reachables = explored["pending_reachables"]
+    deadlock_violation = explored["deadlock_violation"]
+    deadlock_info = explored["deadlock_info"]
+    dl_warn = explored["dl_warn"]
+    reachables_result = explored["reachables_result"]
+
+    coverage = _finalize_action_coverage(
+        coverage, explored["solver"], explored["instances"], explored["by_action"],
+        explored["states"], depth, spec, explored["expr_cache"], source_lines=source_lines,
+    )
+
     unreached = [{"name": reach["name"], "loc": reach.get("loc")} for reach in pending_reachables]
 
     if unreached:
         return {
             "result": "reachable_failed",
-            "spec": spec["name"],
+            "spec": explored["spec"],
             "unreached": unreached,
             "depth": depth,
             "action_coverage": coverage,
@@ -1467,17 +1656,18 @@ def verify(spec, depth, deadlock_mode="warn"):
     warnings = [_warn(w["message"], w.get("hint")) if isinstance(w, dict) and "message" in w
                 else _warn(str(w)) for w in spec.get("warnings", [])]
     warnings.extend(dl_warn)
-    for aname, fired in coverage.items():
-        if not fired:
+    for aname, cov in coverage.items():
+        if cov is not True:
+            hint = cov.get("hint", "review requires clauses and init")
             warnings.append(_warn(
                 f"action '{aname}' is never enabled within depth {depth} — "
                 f"the spec may be vacuous (check its requires clauses)",
-                "review requires clauses and init",
+                hint,
             ))
 
     return {
         "result": "verified",
-        "spec": spec["name"],
+        "spec": explored["spec"],
         "depth": depth,
         "invariants_checked": [i["name"] for i in spec["invariants"]],
         "reachables": reachables_result,
@@ -1485,6 +1675,113 @@ def verify(spec, depth, deadlock_mode="warn"):
         "deadlock": deadlock_info,
         "warnings": warnings,
         "note": f"bounded verification: no violation within depth {depth}",
+    }
+
+
+def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
+    explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode, track_cover=True)
+    if explored["result"] != "explored":
+        return explored
+
+    depth = explored["depth"]
+    s = explored["solver"]
+    instances = explored["instances"]
+    states = explored["states"]
+    choices = explored["choices"]
+    expr_cache = explored["expr_cache"]
+    coverage = explored["coverage"]
+    cover_info = explored["cover_info"]
+    reachables_result = explored["reachables_result"]
+    pending_reachables = explored["pending_reachables"]
+    deadlock_violation = explored["deadlock_violation"]
+    deadlock_info = explored["deadlock_info"]
+
+    coverage_diag = _finalize_action_coverage(
+        coverage, s, instances, explored["by_action"], states, depth, spec, expr_cache,
+        source_lines=source_lines,
+    )
+
+    if pending_reachables:
+        return {
+            "result": "reachable_failed",
+            "spec": explored["spec"],
+            "unreached": [{"name": r["name"], "loc": r.get("loc")} for r in pending_reachables],
+            "depth": depth,
+            "action_coverage": coverage_diag,
+            "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
+        }
+
+    if deadlock_violation is not None:
+        return deadlock_violation
+
+    scenario_list = []
+
+    for rname, rdata in reachables_result.items():
+        trace = rdata["witness"]
+        steps, expected_states = _trace_to_scenario_steps(trace)
+        scenario_list.append({
+            "name": f"reach_{rname}",
+            "kind": "reachable",
+            "property": rname,
+            "steps": steps,
+            "initial_state": trace[0]["state"],
+            "expected_states": expected_states,
+            "final_check": rname,
+        })
+
+    warnings = []
+    for aname, cov in coverage_diag.items():
+        if cov is True:
+            info = cover_info.get(aname)
+            if info is None:
+                continue
+            trace = _build_cover_trace(
+                s, states, choices, instances, spec, info["step"], info["idx"], expr_cache)
+            if trace is None:
+                warnings.append(_warn(
+                    f"action '{aname}' was enabled at step {info['step']} but no cover trace "
+                    f"could be built within depth {depth}",
+                ))
+                continue
+            steps, expected_states = _trace_to_scenario_steps(trace)
+            scenario_list.append({
+                "name": f"cover_{aname}",
+                "kind": "action_coverage",
+                "action": aname,
+                "steps": steps,
+                "initial_state": trace[0]["state"],
+                "expected_states": expected_states,
+            })
+        else:
+            br = cov.get("blocking_requires") or []
+            locs = ", ".join(
+                f"line {e['loc']['line']}" for e in br if e.get("loc", {}).get("line")
+            )
+            detail = f" ({locs})" if locs else ""
+            warnings.append(_warn(
+                f"no cover scenario for action '{aname}': never enabled within depth {depth}{detail}",
+                cov.get("hint"),
+            ))
+
+    if deadlock_info.get("found"):
+        trace = deadlock_info["trace"]
+        steps, expected_states = _trace_to_scenario_steps(trace)
+        scenario_list.append({
+            "name": "deadlock_terminal",
+            "kind": "deadlock",
+            "steps": steps,
+            "initial_state": trace[0]["state"],
+            "expected_states": expected_states,
+            "note": "after these steps no action is enabled",
+        })
+
+    return {
+        "result": "scenarios",
+        "spec": explored["spec"],
+        "depth": depth,
+        "convention": _SCENARIOS_CONVENTION,
+        "scenarios": scenario_list,
+        "warnings": warnings,
     }
 
 

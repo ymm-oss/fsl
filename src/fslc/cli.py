@@ -7,7 +7,7 @@ from lark.exceptions import UnexpectedInput, VisitError
 
 from .parser import parse
 from .model import build_spec, check_spec, FslError
-from .bmc import verify, prove
+from .bmc import verify, prove, scenarios
 
 FSL_VERSION = "1.0"
 
@@ -75,14 +75,49 @@ def run_check(file):
                           "message": f"file not found: {file}"})
 
 
+def _read_spec(file):
+    src = open(file, encoding="utf-8").read()
+    ast = parse(src)
+    return build_spec(ast), src.splitlines()
+
+
 def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
     try:
-        src = open(file, encoding="utf-8").read()
-        ast = parse(src)
-        spec = build_spec(ast)
+        spec, source_lines = _read_spec(file)
         if engine == "induction":
             return _envelope(prove(spec, k_ind, depth, deadlock_mode=deadlock_mode))
-        return _envelope(verify(spec, depth, deadlock_mode=deadlock_mode))
+        return _envelope(verify(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines))
+    except UnexpectedInput as e:
+        return _envelope({
+            "result": "error",
+            "kind": "parse",
+            "loc": {"line": e.line, "column": e.column},
+            "message": str(e).split("\n")[0],
+            "expected": _parse_expected(e),
+        })
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+
+
+def run_scenarios(file, depth, deadlock_mode="warn"):
+    try:
+        spec, source_lines = _read_spec(file)
+        return _envelope(scenarios(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines))
     except UnexpectedInput as e:
         return _envelope({
             "result": "error",
@@ -112,7 +147,7 @@ def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
 
 def exit_code(result):
     r = result.get("result")
-    if r in ("verified", "proved"):
+    if r in ("verified", "proved", "scenarios"):
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti"):
         return 1
@@ -141,10 +176,17 @@ def main(argv=None):
                    help="max induction depth (induction engine only)")
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
 
+    sc = sub.add_parser("scenarios")
+    sc.add_argument("file")
+    sc.add_argument("--depth", type=int, default=8)
+    sc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "check":
         result = run_check(args.file)
+    elif args.cmd == "scenarios":
+        result = run_scenarios(args.file, args.depth, args.deadlock)
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
                             engine=args.engine, k_ind=args.k_ind)
