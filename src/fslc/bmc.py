@@ -1416,6 +1416,342 @@ def _last_action(model, choices, instances, step, spec):
     return la
 
 
+_LEADSTO_HINT = (
+    "P held at step {pending} but the loop from step {loop_start} can repeat forever "
+    "without Q; if progress relies on some action being taken eventually, "
+    "annotate it with `fair action ...`"
+)
+
+_LEADSTO_STUTTER_HINT = (
+    "P held at step {pending} but execution deadlocks at step {deadlock} without Q"
+)
+
+
+def _phys_for_logical(spec, logical):
+    for p in spec["phys_vars"]:
+        if p["logical"] == logical and "part" not in p:
+            return p["phys"]
+    return logical
+
+
+def _logical_eq_var(spec, s1, s2, name, ty):
+    if ty[0] in ("int", "bool", "domain", "enum"):
+        phys = _phys_for_logical(spec, name)
+        return s1[phys] == s2[phys]
+    if ty[0] == "option":
+        pres1, pres2 = s1[f"{name}__present"], s2[f"{name}__present"]
+        val1, val2 = s1[f"{name}__value"], s2[f"{name}__value"]
+        inner = ty[1]
+        if inner[0] in ("int", "bool", "domain", "enum"):
+            val_eq = val1 == val2
+        else:
+            val_eq = _logical_eq_var(spec, s1, s2, f"{name}__value", inner)
+        return z3.And(pres1 == pres2, z3.Implies(pres1, val_eq))
+    if ty[0] == "seq":
+        elem_ty, cap = ty[1], ty[2]
+        len1, len2 = s1[f"{name}__len"], s2[f"{name}__len"]
+        data1, data2 = s1[f"{name}__data"], s2[f"{name}__data"]
+        parts = [len1 == len2]
+        for idx in range(cap):
+            idx_v = z3.IntVal(idx)
+            in_range = idx < len1
+            elem_eq = _logical_eq_scalar(elem_ty, z3.Select(data1, idx_v), z3.Select(data2, idx_v))
+            parts.append(z3.Implies(in_range, elem_eq))
+        return z3.And(*parts)
+    if ty[0] == "set":
+        elem_ty = ty[1]
+        m1, m2 = s1[name], s2[name]
+        parts = []
+        for i in _map_domain(elem_ty, spec):
+            parts.append(z3.Select(m1, z3.IntVal(i)) == z3.Select(m2, z3.IntVal(i)))
+        return z3.And(*parts) if parts else z3.BoolVal(True)
+    if ty[0] == "map":
+        kty, vty = ty[1], ty[2]
+        parts = []
+        for i in _map_domain(kty, spec):
+            key = z3.IntVal(i)
+            parts.append(_logical_eq_map_value(spec, s1, s2, name, vty, key))
+        return z3.And(*parts) if parts else z3.BoolVal(True)
+    if ty[0] == "struct":
+        sname = ty[1]
+        parts = []
+        for fn, fty in spec["types"][sname]["fields"].items():
+            parts.append(_logical_eq_var(spec, s1, s2, f"{name}__{fn}", fty))
+        return z3.And(*parts)
+    return z3.BoolVal(True)
+
+
+def _logical_eq_scalar(ty, v1, v2):
+    return v1 == v2
+
+
+def _logical_eq_map_value(spec, s1, s2, map_name, vty, key):
+    if vty[0] in ("int", "bool", "domain", "enum"):
+        return z3.Select(s1[map_name], key) == z3.Select(s2[map_name], key)
+    if vty[0] == "option":
+        pres1 = z3.Select(s1[f"{map_name}__present"], key)
+        pres2 = z3.Select(s2[f"{map_name}__present"], key)
+        val1 = z3.Select(s1[f"{map_name}__value"], key)
+        val2 = z3.Select(s2[f"{map_name}__value"], key)
+        inner = vty[1]
+        if inner[0] in ("int", "bool", "domain", "enum"):
+            val_eq = val1 == val2
+        else:
+            val_eq = _logical_eq_scalar(inner, val1, val2)
+        return z3.And(pres1 == pres2, z3.Implies(pres1, val_eq))
+    if vty[0] == "struct":
+        sname = vty[1]
+        parts = []
+        for fn, fty in spec["types"][sname]["fields"].items():
+            v1 = z3.Select(s1[f"{map_name}__{fn}"], key)
+            v2 = z3.Select(s2[f"{map_name}__{fn}"], key)
+            if fty[0] in ("int", "bool", "domain", "enum"):
+                parts.append(v1 == v2)
+        return z3.And(*parts) if parts else z3.BoolVal(True)
+    return z3.BoolVal(True)
+
+
+def _logical_eq(spec, s1, s2):
+    parts = [_logical_eq_var(spec, s1, s2, n, ty) for n, ty in spec["state"].items()]
+    return z3.And(*parts) if parts else z3.BoolVal(True)
+
+
+def _enabled_instance(inst, state, spec, extra_binds, expr_cache):
+    with _eval_cache_scope(expr_cache, id(state)):
+        guards, _ = _eval_requires(
+            inst["requires"], inst["lets"], state, {**inst["binds"], **extra_binds}, spec)
+    return z3.And(*guards) if guards else z3.BoolVal(True)
+
+
+def _action_enabled_exprs(state, instances, spec, expr_cache):
+    enabled = []
+    with _eval_cache_scope(expr_cache, id(state)):
+        for inst in instances:
+            guards, _ = _eval_requires(
+                inst["requires"], inst["lets"], state, inst["binds"], spec)
+            enabled.append(z3.And(*guards) if guards else z3.BoolVal(True))
+    return enabled
+
+
+def _deadlock_from_enabled(enabled):
+    if not enabled:
+        return z3.BoolVal(False)
+    return z3.Not(z3.Or(*enabled))
+
+
+def _deadlock_at(state, instances, spec, extra_binds, expr_cache):
+    enabled = []
+    with _eval_cache_scope(expr_cache, id(state)):
+        for inst in instances:
+            enabled.append(_enabled_instance(inst, state, spec, extra_binds, expr_cache))
+    return _deadlock_from_enabled(enabled)
+
+
+def _fairness_ok(instances, states, choices, i, j, spec, extra_binds, expr_cache):
+    fair_idxs = [idx for idx, inst in enumerate(instances) if inst["action_def"].get("fair")]
+    if not fair_idxs:
+        return z3.BoolVal(True)
+    per_inst = []
+    for idx in fair_idxs:
+        disabled_somewhere = z3.Or(*[
+            z3.Not(_enabled_instance(instances[idx], states[q], spec, extra_binds, expr_cache))
+            for q in range(i, j)
+        ])
+        executed = z3.Or(*[choices[q] == idx for q in range(i, j)])
+        per_inst.append(z3.Or(disabled_somewhere, executed))
+    return z3.And(*per_inst)
+
+
+def expand_leadsto_bindings(leadsto, spec):
+    binders = leadsto["binders"]
+
+    def expand(idx, current):
+        if idx >= len(binders):
+            yield dict(current)
+            return
+        b = binders[idx]
+        v, lo, hi, _where = binder_range(b, spec["consts"], spec["types"])
+        for val in range(lo, hi + 1):
+            yield from expand(idx + 1, {**current, v: val})
+
+    yield from expand(0, {})
+
+
+def _leadsto_binding_types(leadsto, spec):
+    types = {}
+    for b in leadsto["binders"]:
+        if b[0] == "binder_typed":
+            ty_name = b[2]
+            if ty_name in spec["types"]:
+                types[b[1]] = spec["types"][ty_name]["ty"]
+    _collect_pattern_binding_types(leadsto["P"], spec, types, types)
+    _collect_pattern_binding_types(leadsto["Q"], spec, types, types)
+    return types
+
+
+def _display_leadsto_bindings(model, binds, spec, binding_types):
+    return _public_model_bindings(model, binds, spec, binding_types)
+
+
+def _eval_at_state(expr, state, binds, spec, expr_cache):
+    with _eval_cache_scope(expr_cache, id(state)):
+        return eval_expr(expr, state, binds, spec)
+
+
+def _leadsto_binding_key(leadsto_name, extra_binds):
+    return (leadsto_name, tuple(sorted(extra_binds.items())))
+
+
+def _build_leadsto_stutter_violation(
+        m, states, choices, instances, spec, leadsto, extra_binds, t, p, binding_types):
+    return {
+        "result": "violated",
+        "spec": spec["name"],
+        "violation_kind": "leadsTo",
+        "invariant": leadsto["name"],
+        "loc": leadsto.get("loc"),
+        "bindings": _display_leadsto_bindings(m, extra_binds, spec, binding_types),
+        "pending_since": p,
+        "stutter": True,
+        "trace": _build_trace(m, states, choices, instances, spec, t),
+        "hint": _LEADSTO_STUTTER_HINT.format(pending=p, deadlock=t),
+    }
+
+
+def _check_leadsto_stutter_at_step(
+        s, states, choices, instances, spec, leadsto, extra_binds, t, enabled, expr_cache,
+        binding_types):
+    dl = _deadlock_from_enabled(enabled)
+    candidates = []
+    for p in range(t + 1):
+        not_q = [
+            z3.Not(_eval_at_state(leadsto["Q"], states[q], extra_binds, spec, expr_cache))
+            for q in range(p, t + 1)
+        ]
+        p_hold = _eval_at_state(leadsto["P"], states[p], extra_binds, spec, expr_cache)
+        candidates.append(z3.And(
+            dl,
+            p_hold,
+            z3.And(*not_q) if not_q else z3.BoolVal(True),
+        ))
+    if not candidates:
+        return None
+
+    s.push()
+    s.add(z3.Or(*candidates))
+    if s.check() != z3.sat:
+        s.pop()
+        return None
+
+    m = s.model()
+    p_val = None
+    for p in range(t + 1):
+        not_q = [
+            z3.Not(_eval_at_state(leadsto["Q"], states[q], extra_binds, spec, expr_cache))
+            for q in range(p, t + 1)
+        ]
+        p_hold = _eval_at_state(leadsto["P"], states[p], extra_binds, spec, expr_cache)
+        cond = z3.And(
+            dl,
+            p_hold,
+            z3.And(*not_q) if not_q else z3.BoolVal(True),
+        )
+        if z3.is_true(m.eval(cond, model_completion=True)):
+            p_val = p
+            break
+    s.pop()
+    if p_val is None:
+        return None
+    return _build_leadsto_stutter_violation(
+        m, states, choices, instances, spec, leadsto, extra_binds, t, p_val, binding_types)
+
+
+def _check_single_leadsto(explored, spec, leadsto):
+    depth = explored["depth"]
+    states = explored["states"]
+    choices = explored["choices"]
+    instances = explored["instances"]
+    s = explored["solver"]
+    expr_cache = explored["expr_cache"]
+    K = depth
+
+    binding_types = _leadsto_binding_types(leadsto, spec)
+
+    for extra_binds in expand_leadsto_bindings(leadsto, spec):
+        candidates = []
+        meta = []
+
+        for i in range(K):
+            for j in range(i + 1, K + 1):
+                loop = _logical_eq(spec, states[i], states[j])
+                for p in range(j):
+                    not_q = [
+                        z3.Not(_eval_at_state(leadsto["Q"], states[q], extra_binds, spec, expr_cache))
+                        for q in range(min(i, p), j)
+                    ]
+                    p_hold = _eval_at_state(leadsto["P"], states[p], extra_binds, spec, expr_cache)
+                    fair_ok = _fairness_ok(
+                        instances, states, choices, i, j, spec, extra_binds, expr_cache)
+                    cond = z3.And(
+                        loop,
+                        p_hold,
+                        z3.And(*not_q) if not_q else z3.BoolVal(True),
+                        fair_ok,
+                    )
+                    sel = z3.Bool(f"__lt_lasso_{i}_{j}_{p}")
+                    candidates.append(sel)
+                    meta.append(("lasso", i, j, p, cond, sel))
+
+        if not candidates:
+            continue
+
+        s.push()
+        for _, _, _, _, cond, sel in meta:
+            s.add(sel == cond)
+        s.add(z3.Or(*candidates))
+        if s.check() == z3.sat:
+            m = s.model()
+            i_val = j_val = p_val = None
+            for _, i_c, j_c, p_c, cond, _sel in meta:
+                if z3.is_true(m.eval(cond, model_completion=True)):
+                    i_val, j_val, p_val = i_c, j_c, p_c
+                    break
+            s.pop()
+
+            violation = {
+                "result": "violated",
+                "spec": spec["name"],
+                "violation_kind": "leadsTo",
+                "invariant": leadsto["name"],
+                "loc": leadsto.get("loc"),
+                "bindings": _display_leadsto_bindings(m, extra_binds, spec, binding_types),
+                "pending_since": p_val,
+                "loop_start": i_val,
+                "stutter": False,
+                "trace": _build_trace(m, states, choices, instances, spec, j_val),
+                "hint": _LEADSTO_HINT.format(pending=p_val, loop_start=i_val),
+            }
+            return violation
+        s.pop()
+
+    return None
+
+
+def _check_leadstos(explored, spec):
+    if not spec.get("leadstos"):
+        return None, None
+    stutter_violation = explored.get("leadsto_stutter_violation")
+    if stutter_violation is not None:
+        return stutter_violation, None
+    depth = explored["depth"]
+    for lt in spec["leadstos"]:
+        violation = _check_single_leadsto(explored, spec, lt)
+        if violation is not None:
+            return violation, None
+    leads_to = {lt["name"]: {"checked_to_depth": depth} for lt in spec["leadstos"]}
+    return None, leads_to
+
+
 _COVERAGE_HINT = (
     "these requires clauses are unsatisfiable at every step up to depth K; "
     "weaken one of them, add an action that establishes them, or increase --depth"
@@ -1659,6 +1995,11 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
     deadlock_info = {"found": False}
     deadlock_violation = None
     dl_warn = []
+    leadsto_stutter_violation = None
+    leadsto_stutter_found = set()
+    leadsto_binding_types = {
+        lt["name"]: _leadsto_binding_types(lt, spec) for lt in spec.get("leadstos", [])
+    }
 
     for t in range(depth + 1):
         if t > 0:
@@ -1777,15 +2118,30 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                 s.pop()
             pending_reachables = still_pending
 
+        enabled = _action_enabled_exprs(states[t], instances, spec, expr_cache)
+
+        if spec.get("leadstos") and leadsto_stutter_violation is None:
+            for lt in spec["leadstos"]:
+                binding_types = leadsto_binding_types[lt["name"]]
+                for extra_binds in expand_leadsto_bindings(lt, spec):
+                    key = _leadsto_binding_key(lt["name"], extra_binds)
+                    if key in leadsto_stutter_found:
+                        continue
+                    violation = _check_leadsto_stutter_at_step(
+                        s, states, choices, instances, spec, lt, extra_binds, t, enabled,
+                        expr_cache, binding_types,
+                    )
+                    if violation is not None:
+                        leadsto_stutter_found.add(key)
+                        leadsto_stutter_violation = violation
+                        break
+                if leadsto_stutter_violation is not None:
+                    break
+
         if deadlock_mode != "ignore" and not deadlock_info.get("found"):
-            enabled = []
-            with _eval_cache_scope(expr_cache, id(states[t])):
-                for inst in instances:
-                    guards, _ = _eval_requires(inst["requires"], inst["lets"], states[t], inst["binds"], spec)
-                    enabled.append(z3.And(*guards) if guards else z3.BoolVal(True))
             if enabled:
                 s.push()
-                s.add(z3.Not(z3.Or(*enabled)))
+                s.add(_deadlock_from_enabled(enabled))
                 if s.check() == z3.sat:
                     m = s.model()
                     dl_trace = _build_trace(m, states, choices, instances, spec, t)
@@ -1859,6 +2215,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
         "deadlock_violation": deadlock_violation,
         "dl_warn": dl_warn,
         "cover_info": cover_info,
+        "leadsto_stutter_violation": leadsto_stutter_violation,
     }
 
 
@@ -1895,6 +2252,10 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
     if deadlock_violation is not None:
         return deadlock_violation
 
+    lt_violation, leads_to = _check_leadstos(explored, spec)
+    if lt_violation is not None:
+        return lt_violation
+
     warnings = [_warn(w["message"], w.get("hint")) if isinstance(w, dict) and "message" in w
                 else _warn(str(w)) for w in spec.get("warnings", [])]
     warnings.extend(dl_warn)
@@ -1907,7 +2268,7 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
                 hint,
             ))
 
-    return {
+    result = {
         "result": "verified",
         "spec": explored["spec"],
         "depth": depth,
@@ -1918,6 +2279,9 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
         "warnings": warnings,
         "note": f"bounded verification: no violation within depth {depth}",
     }
+    if leads_to is not None:
+        result["leads_to"] = leads_to
+    return result
 
 
 def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
@@ -2104,7 +2468,7 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
         if not (isinstance(w, dict) and "deadlock" in w.get("message", ""))
     ]
 
-    return {
+    result = {
         "result": "proved",
         "spec": spec["name"],
         "engine": "induction",
@@ -2115,3 +2479,9 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
         "reachables": base["reachables"],
         "warnings": warnings,
     }
+    if base.get("leads_to") is not None:
+        result["leads_to"] = base["leads_to"]
+        result["note"] = (
+            f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
+        )
+    return result

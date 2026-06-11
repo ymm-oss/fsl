@@ -673,6 +673,7 @@ def build_spec(tree):
     actions = []
     invariants = []
     reachables = []
+    leadstos = []
 
     for it in items:
         tag = it[0]
@@ -685,6 +686,7 @@ def build_spec(tree):
             init = it[1]
         elif tag == "action":
             aname, params, body_items, loc = it[1], it[2], it[3], it[4]
+            fair = it[5] if len(it) > 5 else False
             nparams = normalize_params(params, consts, types_meta)
             requires, lets, stmts, ensures = normalize_action_items(body_items)
             actions.append({
@@ -695,6 +697,15 @@ def build_spec(tree):
                 "stmts": stmts,
                 "ensures": ensures,
                 "loc": loc,
+                "fair": bool(fair),
+            })
+        elif tag == "leadsto":
+            leadstos.append({
+                "name": it[1],
+                "binders": it[2],
+                "P": it[3],
+                "Q": it[4],
+                "loc": it[5],
             })
         elif tag == "invariant":
             invariants.append({
@@ -749,6 +760,7 @@ def build_spec(tree):
         "invariants": all_invariants,
         "user_invariants": invariants,
         "reachables": reachables,
+        "leadstos": leadstos,
         "warnings": warnings,
     }
 

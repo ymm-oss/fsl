@@ -29,14 +29,14 @@ spec MutexQueue {
     waiters = waiters.push(p)
   }
 
-  action release_handoff() {
+  fair action release_handoff() {
     requires holder != none
     requires waiters.size() > 0
     holder = some(waiters.head())
     waiters = waiters.pop()
   }
 
-  action release_idle() {
+  fair action release_idle() {
     requires holder != none
     requires waiters.size() == 0
     holder = none
@@ -61,5 +61,11 @@ spec MutexQueue {
   reachable FullQueue { waiters.size() == 2 }
   reachable HandoffHappened {
     holder is some(h) and h == 1
+  }
+
+  leadsTo WaiterGetsLock {
+    forall p: ProcId {
+      waiters.contains(p) ~> (holder is some(h) and h == p)
+    }
   }
 }

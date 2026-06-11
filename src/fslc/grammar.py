@@ -8,7 +8,7 @@ start: "spec" NAME "{" item* "}"
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
-     | invariant_def | reachable_def
+     | invariant_def | reachable_def | leadsto_def
 
 const_def: "const" NAME "=" expr
 type_def: "type" NAME "=" expr ".." expr
@@ -31,7 +31,9 @@ cap: INT -> cap_int
 
 init_def: "init" "{" stmt* "}"
 
-action_def: "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
+action_def: fair_action | plain_action
+fair_action: "fair" "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
+plain_action: "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
 param: NAME ":" NAME -> param_typed
      | NAME "in" expr ".." expr -> param_range
 ?action_item: requires_clause | ensures_clause | let_clause | stmt
@@ -55,6 +57,11 @@ binder: NAME ":" NAME ["where" expr] -> binder_typed
 
 invariant_def: "invariant" NAME "{" expr "}"
 reachable_def: "reachable" NAME "{" expr "}"
+
+leadsto_def: "leadsTo" NAME "{" lt_body "}"
+?lt_body: lt_forall | lt_implies
+lt_forall: "forall" binder [":"] "{" lt_body "}"
+lt_implies: expr "~>" expr
 
 ?expr: quant | implies
 quant: "forall" binder [":"] expr -> quant_forall
@@ -117,6 +124,19 @@ def _loc(meta):
     if meta is None:
         return None
     return {"line": meta.line, "column": meta.column}
+
+
+def _flatten_leadsto(body):
+    binders = []
+    node = body
+    while node[0] == "lt_forall":
+        _, binder, inner = node
+        binders.append(binder)
+        node = inner
+    if node[0] != "lt_implies":
+        raise ValueError(f"expected leadsTo implication, got {node[0]}")
+    _, p, q = node
+    return binders, p, q
 
 
 @v_args(inline=True, meta=True)
@@ -381,7 +401,7 @@ class Ast(Transformer):
     def reachable_def(self, meta, n, e):
         return ("reachable", n, e, _loc(meta))
 
-    def action_def(self, meta, name, *rest):
+    def _action_parts(self, meta, name, *rest):
         params, items = [], []
         for r in rest:
             if r is None:
@@ -391,6 +411,25 @@ class Ast(Transformer):
             else:
                 items.append(r)
         return ("action", name, params, items, _loc(meta))
+
+    def fair_action(self, meta, name, *rest):
+        return self._action_parts(meta, name, *rest) + (True,)
+
+    def plain_action(self, meta, name, *rest):
+        return self._action_parts(meta, name, *rest) + (False,)
+
+    def action_def(self, meta, node):
+        return node
+
+    def lt_implies(self, meta, p, q):
+        return ("lt_implies", p, q)
+
+    def lt_forall(self, meta, binder, body):
+        return ("lt_forall", binder, body)
+
+    def leadsto_def(self, meta, name, body):
+        binders, p, q = _flatten_leadsto(body)
+        return ("leadsto", name, binders, p, q, _loc(meta))
 
     def start(self, meta, name, *items):
         return ("spec", name, [i for i in items if i])

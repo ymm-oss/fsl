@@ -576,7 +576,8 @@ CTI →「補助 invariant の提案」は LLM が得意な帰納的一般化で
   coverage トレースから統合テスト雛形 JSON を生成=実装との橋の第一歩)、
   `Seq<T, N>`(容量付き列。配列+長さでエンコード、**実装済み**)、unsat core による
   「どの requires が enabled を阻んでいるか」ヒント。
-- **v2.0**: 公平性注釈(`fair action ...`)と有界 `leadsTo`、実装橋の本体
+- **v2.0**: 公平性注釈(`fair action ...`)と有界 `leadsTo`(**実装済み lite**:
+  `DESIGN-temporal.md` 参照)、実装橋の本体
   (仕様からのランタイムモニタ/プロパティテスト生成)、複数 spec の合成と
   refinement。
 
