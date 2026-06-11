@@ -4,8 +4,10 @@ description: >-
   FSL (AI-Native Formal Specification Language) で仕様を書き・検証し・修復する。
   .fsl ファイルの作成/編集/検証、fslc コマンド(check/verify/scenarios/replay/
   testgen/refine)の実行、形式仕様・モデル検査・invariant 証明・仕様からのテスト
-  生成・refinement 検査・実装の適合性検査を行うときに使う。「仕様を書いて」
-  「形式検証して」「この仕様を証明して」「FSL」などが合図。
+  生成・refinement 検査・実装の適合性検査を行うときに使う。業務フロー/業務
+  プロセスの矛盾チェック、As-Is/To-Be の統制検査、要求・要件定義の形式化、
+  受け入れ基準のテスト化、SLA・非機能要件の検査も対象。「仕様を書いて」
+  「形式検証して」「業務フローを検証して」「要件定義して」「FSL」などが合図。
 ---
 
 # FSL — 仕様の書き方と write→verify→repair ループ
@@ -58,6 +60,10 @@ python -m fslc <subcommand> ...  # または venv の python で
 | `error` / `type` | 型エラー | `hint` に従う(例: `x == some(e)` → `x is some(v)` で束縛して比較) |
 | `error` / `semantics` | 二重代入など | 同一パスで同じ変数に2回代入しない(if の then/else は別パスなので可) |
 | `error` / `vacuous` | init が充足不能(矛盾した代入など) | init を見直す。1つの状態変数に矛盾する値を与えていないか確認。範囲外の値による違反は別物で `violated`/`type_bound` になる |
+| `refinement_failed` / `abs_requires_failed` | 詳細層の遷移が上位層のガードを破る(例: 承認を飛ばす近道) | `impl_action` と `impl_trace` を読む。詳細層にガードを足すか、対応(`maps`/写像)の解釈を見直す |
+| `refinement_failed` / `abs_state_mismatch`・`stutter_changed_abs`・`map_out_of_bounds` | 写像の不整合(更新が対応しない / stutter なのに上位状態が変わる / 写像値が型範囲外) | `mismatch` のパスと `abs_before/after` を比較。写像式か action 対応を修正 |
+| verify 内 `implements.result: violated` | 要件層が上位(業務)層から逸脱 | `implements.violation` の中身は refinement_failed と同形。上と同じ手順 + 要件側の `requirement` を確認 |
+| `error` / `acceptance` | 受け入れ基準の再生が失敗 | 失敗した AC の ID とステップが返る。手順の前提(状態)か expect のどちらが正かを判断して修正 |
 
 coverage が `false` のアクションは `blocking_requires` が「どの requires が
 阻んでいるか」を句単位で特定している。silent に無視しないこと。
@@ -128,6 +134,16 @@ spec Cart {
   const から導出して書く — リテラルをハードコードすると容量変更に追従しない)。
 - 「X の後に Y が起きた」という**履歴**は状態で書けない → ゴースト変数
   (`ever_locked` 等)を足すか、応答性質なら `leadsTo`。
+
+## 役割別の入口(まず実例を読む)
+
+| 立場 | 読む実例 | 主に書く構文 |
+|---|---|---|
+| コンサル(業務フロー・規程・As-Is/To-Be) | `examples/consulting/`、`examples/pm/cancel_flow.fsl` | `business`(reference.md §10) |
+| PM / PdM(要件定義・受け入れ基準) | `examples/pm/`、`examples/e2e/2_requirements.fsl` | `requirements`(同 §10)+ NFR(同 §11) |
+| エンジニア(設計・実装接続) | `examples/e2e/`(3役の連鎖全体)、`examples/bank/` | `spec`(本書)+ refine 写像 + Adapter(同 §9) |
+
+3役を1ドメインで貫通する旗艦例は `examples/e2e/`(経費精算)。
 
 ## 3層方言(コンサル / 要件 / 設計)
 
