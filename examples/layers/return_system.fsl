@@ -1,0 +1,33 @@
+spec ReturnSystem {
+  type CaseId = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum SSt { New, AutoApproved, MgrQueue, MgrApproved, MgrRejected, Paid }
+  struct RCase { st: SSt, amount: Amount }
+  state { sys: Map<CaseId, RCase>, paid_count: Int }
+  init { forall c: CaseId { sys[c] = RCase { st: New, amount: 0 } }  paid_count = 0 }
+
+  // REQ-1: 閾値以下は自動承認
+  fair action submit_small(c: CaseId, a: Amount) {
+    requires sys[c].st == New
+    requires a > 0
+    requires a <= AUTO_LIMIT
+    sys[c] = RCase { st: AutoApproved, amount: a }
+  }
+  // REQ-2: 閾値超はマネージャ承認キューへ
+  action submit_large(c: CaseId, a: Amount) {
+    requires sys[c].st == New
+    requires a > AUTO_LIMIT
+    sys[c] = RCase { st: MgrQueue, amount: a }
+  }
+  fair action mgr_approve(c: CaseId) { requires sys[c].st == MgrQueue  sys[c].st = MgrApproved }
+  fair action mgr_reject(c: CaseId)  { requires sys[c].st == MgrQueue  sys[c].st = MgrRejected }
+  fair action pay(c: CaseId) {
+    requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
+    sys[c].st = Paid
+    paid_count = paid_count + 1
+  }
+
+  invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }
+  reachable AutoPaid { exists c: CaseId { sys[c].st == Paid } }
+}
