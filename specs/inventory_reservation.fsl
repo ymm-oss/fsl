@@ -1,0 +1,59 @@
+// Inventory hold/confirm/release with a conservation invariant.
+// Exercises: whole-struct assignment to map element, let-bound lvalue index,
+// sum() with compound where-condition over struct fields.
+spec InventoryReservation {
+  type ItemId = 0..1
+  type ResId  = 0..2
+  type Qty    = 0..4
+
+  enum RState { Free, Held, Confirmed }
+
+  struct Res { st: RState, item: ItemId, qty: Qty }
+
+  state {
+    available: Map<ItemId, Qty>,
+    res:       Map<ResId, Res>
+  }
+
+  init {
+    forall i: ItemId { available[i] = 2 }
+    forall r: ResId { res[r] = Res { st: Free, item: 0, qty: 0 } }
+  }
+
+  action hold(r: ResId, i: ItemId, q: Qty) {
+    requires res[r].st == Free
+    requires q > 0
+    requires available[i] >= q
+    available[i] = available[i] - q
+    res[r] = Res { st: Held, item: i, qty: q }
+  }
+
+  action confirm(r: ResId) {
+    requires res[r].st == Held
+    res[r].st = Confirmed
+  }
+
+  action release(r: ResId) {
+    requires res[r].st == Held
+    let i = res[r].item
+    available[i] = available[i] + res[r].qty
+    res[r] = Res { st: Free, item: 0, qty: 0 }
+  }
+
+  invariant FreeIsZero {
+    forall r: ResId { res[r].st == Free => res[r].qty == 0 }
+  }
+
+  invariant Conservation {
+    forall i: ItemId {
+      available[i]
+        + sum(r: ResId of res[r].qty where res[r].st == Held and res[r].item == i)
+        + sum(r: ResId of res[r].qty where res[r].st == Confirmed and res[r].item == i)
+      == 2
+    }
+  }
+
+  reachable AllHeld {
+    forall r: ResId { res[r].st != Free }
+  }
+}

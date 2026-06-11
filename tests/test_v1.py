@@ -19,6 +19,15 @@ def run(name, depth=8, **kwargs):
     return verify(build_spec(ast), depth, **kwargs)
 
 
+def check_inline(src, name="_inline_check.fsl"):
+    path = SPECS / name
+    path.write_text(src, encoding="utf-8")
+    try:
+        return run_check(str(path))
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def cli_verify(name, depth=8):
     proc = subprocess.run(
         [str(PY), "-m", "fslc", "verify", str(SPECS / name), "--depth", str(depth)],
@@ -371,3 +380,136 @@ spec P {
     assert exc.value.kind == "type"
     assert exc.value.hint is not None
     assert "is some(v)" in exc.value.hint
+
+
+def test_struct_option_field_rejected_at_check():
+    src = """
+spec BadStructOption {
+  type K = 0..1
+  struct S { v: Option<K> }
+  state { s: S }
+  init { s.v = 0 }
+  action noop() { }
+}
+"""
+    out = check_inline(src, "_bad_struct_option.fsl")
+    assert out["result"] == "error"
+    assert out["kind"] == "type"
+    assert out["hint"] == (
+        "struct fields must be scalar (domain type, enum, Bool, Int) "
+        "in v1; model an optional field with an enum state, or use a separate Map"
+    )
+
+
+def test_struct_nested_field_rejected_at_check():
+    src = """
+spec BadStructNested {
+  type K = 0..1
+  struct Inner { v: K }
+  struct Outer { i: Inner }
+  state { o: Outer }
+  init { o.i = 0 }
+  action noop() { }
+}
+"""
+    out = check_inline(src, "_bad_struct_nested.fsl")
+    assert out["result"] == "error"
+    assert out["kind"] == "type"
+    assert "struct fields must be scalar" in out["hint"]
+
+
+def test_struct_set_field_rejected_at_check():
+    src = """
+spec BadStructSet {
+  type K = 0..1
+  struct S { members: Set<K> }
+  state { s: S }
+  init { s.members = Set {} }
+  action noop() { }
+}
+"""
+    out = check_inline(src, "_bad_struct_set.fsl")
+    assert out["result"] == "error"
+    assert out["kind"] == "type"
+    assert "struct fields must be scalar" in out["hint"]
+
+
+def test_nested_if_exclusive_assignments_verify():
+    src = """
+spec NestedExclusive {
+  state { x: Int }
+  init { x = 0 }
+  action step() {
+    if x == 0 {
+      x = 1
+    } else {
+      if x == 1 {
+        x = 2
+      } else {
+        x = 0
+      }
+    }
+  }
+  invariant I { true }
+}
+"""
+    r = verify(build_spec(parse(src)), 4)
+    assert r["result"] == "verified"
+
+
+def test_nested_if_true_double_assignment_still_errors():
+    src = """
+spec NestedDoubleAssign {
+  state { x: Int }
+  init { x = 0 }
+  action step() {
+    if x == 0 {
+      x = 1
+    } else {
+      if x == 1 {
+        x = 2
+        x = 3
+      } else {
+        x = 0
+      }
+    }
+  }
+  invariant I { true }
+}
+"""
+    with pytest.raises(FslError, match="double assignment") as exc:
+        verify(build_spec(parse(src)), 4)
+    assert exc.value.kind == "semantics"
+
+
+def test_is_pattern_violation_bindings_are_json_safe_in_cli():
+    src = """
+spec P2N {
+  type K = 0..1
+  state { c: Option<K>, target: K }
+  init {
+    c = some(0)
+    target = 1
+  }
+  action noop() { }
+  invariant Match { c is some(j) => j == target }
+}
+"""
+    path = SPECS / "_p2n.fsl"
+    path.write_text(src, encoding="utf-8")
+    try:
+        proc = subprocess.run(
+            [str(PY), "-m", "fslc", "verify", str(path), "--depth", "2"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        out = json.loads(proc.stdout)
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert proc.returncode == 1
+    assert out["result"] == "violated"
+    assert out["invariant"] == "Match"
+    assert out["violating_bindings"] == [{"j": 0}]
+    json.dumps(out)

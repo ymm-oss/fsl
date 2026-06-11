@@ -1,0 +1,39 @@
+// Token-bucket rate limiter.
+// Exercises: const, scalar domain-typed state (auto _bounds_tokens),
+// min() to clamp refill.
+spec RateLimiter {
+  type Tokens = 0..3
+  const BURST  = 3
+  const REFILL = 2
+
+  state {
+    tokens:   Tokens,
+    served:   Int,
+    rejected: Int
+  }
+
+  init {
+    tokens = BURST
+    served = 0
+    rejected = 0
+  }
+
+  action request_ok() {
+    requires tokens > 0
+    tokens = tokens - 1
+    served = served + 1
+  }
+
+  action request_rejected() {
+    requires tokens == 0
+    rejected = rejected + 1
+  }
+
+  action tick() {
+    tokens = min(tokens + REFILL, BURST)
+  }
+
+  invariant Counters { served >= 0 and rejected >= 0 }
+
+  reachable Exhausted { tokens == 0 and rejected > 0 }
+}

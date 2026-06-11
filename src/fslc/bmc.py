@@ -26,6 +26,47 @@ def _public_bindings(binds):
     return out
 
 
+_DROP_BINDING = object()
+
+
+def _json_binding_value(model, value, ty, spec):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return _display_value(ty, value, spec) if ty else value
+    if value is None or isinstance(value, str):
+        return value
+    if not isinstance(value, z3.ExprRef):
+        return _DROP_BINDING
+
+    try:
+        concrete = model.eval(value, model_completion=True)
+    except z3.Z3Exception:
+        return _DROP_BINDING
+
+    if z3.is_true(concrete):
+        return True
+    if z3.is_false(concrete):
+        return False
+    if z3.is_int_value(concrete):
+        raw = concrete.as_long()
+        return _display_value(ty, raw, spec) if ty else raw
+    if z3.is_bv_value(concrete):
+        raw = concrete.as_long()
+        return _display_value(ty, raw, spec) if ty else raw
+    return _DROP_BINDING
+
+
+def _public_model_bindings(model, binds, spec, binding_types):
+    out = {}
+    for k, v in binds.items():
+        public_key = "key" if k == "__k" else k
+        public_value = _json_binding_value(model, v, binding_types.get(k), spec)
+        if public_value is not _DROP_BINDING:
+            out[public_key] = public_value
+    return out
+
+
 def make_state(spec, t):
     return {p["phys"]: z3.Const(f"{p['phys']}@{t}", phys_z3_sort(p, spec["types"]))
             for p in spec["phys_vars"]}
@@ -616,10 +657,17 @@ def compute_updates(stmts, state, binds, spec):
                 _, cond2, th, el, _ = st2
                 c2 = eval_expr(cond2, state, binds, spec)
                 th_p, el_p = {}, {}
+                save_scalars2 = set(scalar_writes)
+                scalar_writes.clear()
+                scalar_writes.update(save_scalars2)
                 for s3 in th:
                     run_into(s3, binds, th_p)
+                scalar_writes.clear()
+                scalar_writes.update(save_scalars2)
                 for s3 in el:
                     run_into(s3, binds, el_p)
+                scalar_writes.clear()
+                scalar_writes.update(save_scalars2)
                 all_keys = set(th_p) | set(el_p) | set(local_pend)
                 for k in all_keys:
                     tv = th_p.get(k, local_pend.get(k, state[k]))
@@ -911,11 +959,113 @@ def compute_changes(prev, curr):
     return changes
 
 
+def _binder_static_type(binder, spec):
+    if binder[0] == "binder_typed":
+        ty_name = binder[2]
+        if ty_name in spec["types"]:
+            return spec["types"][ty_name]["ty"]
+    return ("int",)
+
+
+def _expr_static_type(e, spec, env):
+    tag = e[0]
+    if tag == "num":
+        return ("int",)
+    if tag == "bool":
+        return ("bool",)
+    if tag == "var":
+        n = e[1]
+        if n in env:
+            return env[n]
+        if n in spec["state"]:
+            return spec["state"][n]
+        for name, info in spec["types"].items():
+            if info["kind"] == "enum" and n in info["members"]:
+                return ("enum", name)
+        return None
+    if tag == "some":
+        inner = _expr_static_type(e[1], spec, env)
+        return ("option", inner or ("int",))
+    if tag == "index":
+        base = e[1]
+        if isinstance(base, str):
+            base_ty = spec["state"].get(base) or env.get(base)
+        elif base[0] == "var":
+            base_ty = spec["state"].get(base[1]) or env.get(base[1])
+        else:
+            base_ty = _expr_static_type(base, spec, env)
+        if base_ty and base_ty[0] == "map":
+            return base_ty[2]
+        return None
+    if tag == "field":
+        base_ty = _expr_static_type(e[1], spec, env)
+        if base_ty and base_ty[0] == "struct":
+            return spec["types"][base_ty[1]]["fields"].get(e[2])
+        return None
+    if tag == "method":
+        method = e[2]
+        base_ty = _expr_static_type(e[1], spec, env)
+        if method in ("contains", "size"):
+            return ("bool",) if method == "contains" else ("int",)
+        if method in ("add", "remove"):
+            return base_ty
+        return None
+    if tag == "bin":
+        if e[1] in ("+", "-", "*"):
+            return ("int",)
+        return ("bool",)
+    if tag in ("not", "is", "forall", "exists"):
+        return ("bool",)
+    if tag in ("count", "sum", "min", "max", "abs"):
+        return ("int",)
+    return None
+
+
+def _collect_pattern_binding_types(e, spec, env, out):
+    tag = e[0]
+    if tag in ("num", "bool", "none", "var"):
+        return
+    if tag == "is":
+        inner, pat = e[1], e[2]
+        if pat[0] == "pat_some":
+            inner_ty = _expr_static_type(inner, spec, env)
+            if inner_ty and inner_ty[0] == "option":
+                out[pat[1]] = inner_ty[1]
+        _collect_pattern_binding_types(inner, spec, env, out)
+        return
+    if tag in ("forall", "exists"):
+        binder, body = e[1], e[2]
+        if binder[0] == "binder_typed":
+            env = {**env, binder[1]: _binder_static_type(binder, spec)}
+            where = binder[3]
+            if where is not None:
+                _collect_pattern_binding_types(where, spec, env, out)
+        _collect_pattern_binding_types(body, spec, env, out)
+        return
+    for child in e[1:]:
+        if isinstance(child, tuple):
+            _collect_pattern_binding_types(child, spec, env, out)
+        elif isinstance(child, dict):
+            for sub in child.values():
+                if isinstance(sub, tuple):
+                    _collect_pattern_binding_types(sub, spec, env, out)
+        elif isinstance(child, list):
+            for sub in child:
+                if isinstance(sub, tuple):
+                    _collect_pattern_binding_types(sub, spec, env, out)
+
+
 def violating_bindings(model, inv_expr, state, spec):
-    def search(e, binds):
+    binding_types = {}
+    _collect_pattern_binding_types(inv_expr, spec, {}, binding_types)
+
+    def search(e, binds, env):
         if e[0] in ("forall", "exists"):
             binder, body = e[1], e[2]
             v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
+            bty = _binder_static_type(binder, spec)
+            env = {**env, v: bty}
+            binding_types[v] = bty
             bad = []
             for i in range(lo, hi + 1):
                 b2 = {**binds, v: i}
@@ -925,19 +1075,19 @@ def violating_bindings(model, inv_expr, state, spec):
                         continue
                 inst = eval_expr(body, state, b2, spec)
                 if z3.is_false(model.eval(inst, model_completion=True)):
-                    bad.append(_public_bindings({**binds, v: i}))
+                    bad.append(_public_model_bindings(model, {**binds, v: i}, spec, binding_types))
             return bad if bad else None
         if e[0] == "bin" and e[1] == "and":
-            left = search(e[2], binds)
+            left = search(e[2], binds, env)
             if left:
                 return left
-            return search(e[3], binds)
+            return search(e[3], binds, env)
         inst = eval_expr(e, state, binds, spec)
         if z3.is_false(model.eval(inst, model_completion=True)):
-            return [_public_bindings(dict(binds))] if binds else [{}]
+            return [_public_model_bindings(model, dict(binds), spec, binding_types)] if binds else [{}]
         return None
 
-    return search(inv_expr, {})
+    return search(inv_expr, {}, {})
 
 
 def _display_max(spec):

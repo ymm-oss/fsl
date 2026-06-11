@@ -124,6 +124,16 @@ def collect_types(items, consts):
             info["fields"] = {
                 fn: resolve_type(ft, types_meta) for fn, ft in info["fields"].items()
             }
+            for fn, fty in info["fields"].items():
+                if fty[0] not in ("int", "bool", "domain", "enum"):
+                    _err(
+                        f"struct field '{n}.{fn}' has non-scalar type",
+                        kind="type",
+                        hint=(
+                            "struct fields must be scalar (domain type, enum, Bool, Int) "
+                            "in v1; model an optional field with an enum state, or use a separate Map"
+                        ),
+                    )
             info["ty"] = ("struct", n)
 
     return types_meta

@@ -1,0 +1,68 @@
+// Payment state machine with partial refunds and a ledger.
+// Exercises: sum() with arithmetic body, ensures + old() on map struct fields,
+// multi-field struct updates across separate statements.
+spec Payment {
+  type PayId  = 0..1
+  type Amount = 0..6
+
+  enum PSt { Created, Authorized, Captured, Voided }
+
+  struct Pmt { st: PSt, amount: Amount, refunded: Amount }
+
+  state {
+    payments: Map<PayId, Pmt>,
+    ledger:   Int
+  }
+
+  init {
+    forall p: PayId { payments[p] = Pmt { st: Created, amount: 0, refunded: 0 } }
+    ledger = 0
+  }
+
+  action authorize(p: PayId, a: Amount) {
+    requires payments[p].st == Created
+    requires a > 0
+    payments[p].st = Authorized
+    payments[p].amount = a
+  }
+
+  action capture(p: PayId) {
+    requires payments[p].st == Authorized
+    payments[p].st = Captured
+    ledger = ledger + payments[p].amount
+    ensures ledger == old(ledger) + payments[p].amount
+  }
+
+  action refund(p: PayId, a: Amount) {
+    requires payments[p].st == Captured
+    requires a > 0
+    requires payments[p].refunded + a <= payments[p].amount
+    payments[p].refunded = payments[p].refunded + a
+    ledger = ledger - a
+    ensures payments[p].refunded == old(payments[p].refunded) + a
+  }
+
+  action void(p: PayId) {
+    requires payments[p].st == Authorized
+    payments[p].st = Voided
+  }
+
+  invariant RefundWithinAmount {
+    forall p: PayId { payments[p].refunded <= payments[p].amount }
+  }
+
+  invariant LedgerMatches {
+    ledger == sum(p: PayId of payments[p].amount - payments[p].refunded
+                  where payments[p].st == Captured)
+  }
+
+  invariant LedgerNonNegative { ledger >= 0 }
+
+  reachable FullyRefunded {
+    exists p: PayId {
+      payments[p].st == Captured
+        and payments[p].amount > 0
+        and payments[p].refunded == payments[p].amount
+    }
+  }
+}

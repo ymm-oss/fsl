@@ -1,0 +1,69 @@
+// Authentication with lockout after 3 failed attempts.
+// Exercises: struct with Bool field, if/else writing multiple vars,
+// ghost variable (ever_locked) for "past" reachability.
+spec AuthLockout {
+  type UserId   = 0..1
+  type Attempts = 0..3
+
+  struct Account { locked: Bool, attempts: Attempts }
+
+  state {
+    accounts:    Map<UserId, Account>,
+    session:     Map<UserId, Bool>,
+    ever_locked: Map<UserId, Bool>
+  }
+
+  init {
+    forall u: UserId {
+      accounts[u] = Account { locked: false, attempts: 0 }
+      session[u] = false
+      ever_locked[u] = false
+    }
+  }
+
+  action login_fail(u: UserId) {
+    requires not accounts[u].locked
+    requires not session[u]
+    if accounts[u].attempts == 2 {
+      accounts[u].locked = true
+      accounts[u].attempts = 3
+      ever_locked[u] = true
+    } else {
+      accounts[u].attempts = accounts[u].attempts + 1
+    }
+  }
+
+  action login_ok(u: UserId) {
+    requires not accounts[u].locked
+    requires not session[u]
+    accounts[u].attempts = 0
+    session[u] = true
+  }
+
+  action logout(u: UserId) {
+    requires session[u]
+    session[u] = false
+  }
+
+  action admin_unlock(u: UserId) {
+    requires accounts[u].locked
+    accounts[u] = Account { locked: false, attempts: 0 }
+    ensures not accounts[u].locked
+  }
+
+  invariant LockedMeansMaxAttempts {
+    forall u: UserId { accounts[u].locked => accounts[u].attempts == 3 }
+  }
+
+  invariant NoSessionWhileLocked {
+    forall u: UserId { accounts[u].locked => not session[u] }
+  }
+
+  reachable LockedOut {
+    exists u: UserId { accounts[u].locked }
+  }
+
+  reachable RecoveredAfterLock {
+    exists u: UserId { ever_locked[u] and session[u] }
+  }
+}
