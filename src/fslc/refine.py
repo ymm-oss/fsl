@@ -629,7 +629,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
                 abs_act["requires"], abs_act["lets"], alpha_prev, abs_binds, abs_spec)
             requires_ok = z3.And(*req_guards) if req_guards else z3.BoolVal(True)
 
-            with _eval_cache_scope(expr_cache, id(alpha_prev)):
+            with _eval_cache_scope(expr_cache, ("alpha_prev", t)):
                 pend = compute_updates(abs_act["stmts"], alpha_prev, abs_binds, abs_spec)
             alpha_expected = dict(alpha_prev)
             alpha_expected.update(pend)

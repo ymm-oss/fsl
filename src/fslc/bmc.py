@@ -120,6 +120,20 @@ def _freeze_binds_for_cache(binds):
     return tuple(items)
 
 
+def _pin_binds_for_cache(binds):
+    return tuple((k, v) for k, v in sorted(binds.items()))
+
+
+def _cache_binds_match(cached_pins, binds):
+    if len(cached_pins) != len(binds):
+        return False
+    missing = object()
+    for k, cached_v in cached_pins:
+        if binds.get(k, missing) is not cached_v:
+            return False
+    return True
+
+
 def _json_binding_value(model, value, ty, spec):
     if isinstance(value, bool):
         return value
@@ -239,11 +253,14 @@ def eval_expr(e, state, binds, spec, old_state=None, in_ensures=False):
         frozen_binds = _freeze_binds_for_cache(binds)
         if frozen_binds is not None:
             cache_key = (_EVAL_CACHE_TOKEN, id(e), frozen_binds)
-            if cache_key in _EVAL_CACHE:
-                return _EVAL_CACHE[cache_key]
+            cached = _EVAL_CACHE.get(cache_key)
+            if cached is not None:
+                cached_e, cached_binds, cached_result = cached
+                if cached_e is e and _cache_binds_match(cached_binds, binds):
+                    return cached_result
     result = _eval_expr_uncached(e, state, binds, spec, old_state, in_ensures)
     if cache_key is not None:
-        _EVAL_CACHE[cache_key] = result
+        _EVAL_CACHE[cache_key] = (e, _pin_binds_for_cache(binds), result)
     return result
 
 
