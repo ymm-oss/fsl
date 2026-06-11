@@ -39,7 +39,7 @@ def eval_const(e, consts, binds=None):
 
 _STATE_TYPE_HINT = (
     "v1 state variables may use: scalar (Int, Bool, domain, enum), "
-    "Option<scalar>, struct (scalar fields only), "
+    "Option<scalar>, struct (scalar or Option<scalar> fields only), "
     "Map<bounded-scalar, scalar | Option<scalar> | struct>, "
     "Set<bounded-scalar>, or Seq<scalar, N>"
 )
@@ -51,6 +51,14 @@ def is_scalar_type(ty):
 
 def is_bounded_scalar_type(ty):
     return ty[0] in ("domain", "enum")
+
+
+def is_option_scalar_type(ty):
+    return ty[0] == "option" and is_scalar_type(ty[1])
+
+
+def is_struct_field_type(ty):
+    return is_scalar_type(ty) or is_option_scalar_type(ty)
 
 
 def resolve_seq_capacity(cap_ast, consts):
@@ -154,13 +162,13 @@ def collect_types(items, consts):
                 fn: resolve_type(ft, types_meta, consts) for fn, ft in info["fields"].items()
             }
             for fn, fty in info["fields"].items():
-                if not is_scalar_type(fty):
+                if not is_struct_field_type(fty):
                     _err(
                         f"struct field '{n}.{fn}' has non-scalar type",
                         kind="type",
                         hint=(
                             "struct fields must be scalar (domain type, enum, Bool, Int) "
-                            "in v1; model an optional field with an enum state, or use a separate Map"
+                            "or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"
                         ),
                     )
             info["ty"] = ("struct", n)
@@ -225,14 +233,37 @@ def expand_phys_var(logical_name, ty, types_meta, out):
         if vty[0] == "struct":
             sname = vty[1]
             for fn, fty in types_meta[sname]["fields"].items():
-                out.append({
-                    "phys": f"{logical_name}__{fn}",
-                    "logical": logical_name,
-                    "part": fn,
-                    "parent": logical_name,
-                    "map_key": kty,
-                    "ty": ("map", kty, fty),
-                })
+                if fty[0] == "option":
+                    inner = fty[1]
+                    out.append({
+                        "phys": f"{logical_name}__{fn}__present",
+                        "logical": logical_name,
+                        "part": f"{fn}__present",
+                        "parent": logical_name,
+                        "field": fn,
+                        "option_part": "present",
+                        "map_key": kty,
+                        "ty": ("map", kty, ("bool",)),
+                    })
+                    out.append({
+                        "phys": f"{logical_name}__{fn}__value",
+                        "logical": logical_name,
+                        "part": f"{fn}__value",
+                        "parent": logical_name,
+                        "field": fn,
+                        "option_part": "value",
+                        "map_key": kty,
+                        "ty": ("map", kty, inner),
+                    })
+                else:
+                    out.append({
+                        "phys": f"{logical_name}__{fn}",
+                        "logical": logical_name,
+                        "part": fn,
+                        "parent": logical_name,
+                        "map_key": kty,
+                        "ty": ("map", kty, fty),
+                    })
         elif vty[0] == "option":
             inner = vty[1]
             out.append({
@@ -261,7 +292,34 @@ def expand_phys_var(logical_name, ty, types_meta, out):
     if ty[0] == "struct":
         sname = ty[1]
         for fn, fty in types_meta[sname]["fields"].items():
-            expand_phys_var(f"{logical_name}__{fn}", fty, types_meta, out)
+            if fty[0] == "option":
+                inner = fty[1]
+                out.append({
+                    "phys": f"{logical_name}__{fn}__present",
+                    "logical": logical_name,
+                    "part": f"{fn}__present",
+                    "parent": logical_name,
+                    "field": fn,
+                    "option_part": "present",
+                    "ty": ("bool",),
+                })
+                out.append({
+                    "phys": f"{logical_name}__{fn}__value",
+                    "logical": logical_name,
+                    "part": f"{fn}__value",
+                    "parent": logical_name,
+                    "field": fn,
+                    "option_part": "value",
+                    "ty": inner,
+                })
+            else:
+                out.append({
+                    "phys": f"{logical_name}__{fn}",
+                    "logical": logical_name,
+                    "part": fn,
+                    "parent": logical_name,
+                    "ty": fty,
+                })
         return
     _err(f"cannot expand state type {ty}", kind="type")
 
@@ -388,8 +446,9 @@ def bounds_invariant_expr(var_name, ty, types_meta):
     if ty[0] == "option":
         inner = ty[1]
         present = ("var", f"{var_name}__present")
-        val = ("var", f"{var_name}__value")
         inner_b = bounds_invariant_expr("__v", inner, types_meta)
+        if inner_b is None:
+            return None
         inner_b = _subst_var(inner_b, "__v", ("var", f"{var_name}__value"))
         return ("bin", "=>", present, inner_b)
     if ty[0] == "struct":
@@ -411,49 +470,42 @@ def bounds_invariant_expr(var_name, ty, types_meta):
 def bounds_invariant_expr_map_field(phys_name, map_key_ty, value_ty, types_meta):
     k_lo, k_hi = domain_range(map_key_ty, types_meta)
 
-    def value_bounds_for(vty, select_expr):
+    def scalar_bounds(vty, select_expr):
         if vty[0] in ("domain", "enum"):
             lo, hi = domain_range(vty, types_meta)
             return ("bin", "and",
                     ("bin", ">=", select_expr, ("num", lo)),
                     ("bin", "<=", select_expr, ("num", hi)))
+        return None
+
+    def value_bounds_for(vty, phys_base):
+        if vty[0] in ("domain", "enum"):
+            return scalar_bounds(vty, ("index", phys_base, ("var", "__k")))
         if vty[0] == "option":
             inner = vty[1]
-            present_sel = ("index", phys_name.replace("__value", "__present"), ("var", "__k"))
-            val_sel = select_expr
-            inner_b = value_bounds_for(inner, val_sel)
+            inner_b = scalar_bounds(inner, ("index", f"{phys_base}__value", ("var", "__k")))
+            if inner_b is None:
+                return None
+            present_sel = ("index", f"{phys_base}__present", ("var", "__k"))
             return ("bin", "=>", present_sel, inner_b)
         if vty[0] == "struct":
             sname = vty[1]
             parts = []
-            base = phys_name.rsplit("__", 1)[0]
             for fn, fty in types_meta[sname]["fields"].items():
-                sel = ("index", f"{base}__{fn}", ("var", "__k"))
-                parts.append(value_bounds_for(fty, sel))
+                p = value_bounds_for(fty, f"{phys_base}__{fn}")
+                if p is not None:
+                    parts.append(p)
+            if not parts:
+                return None
             acc = parts[0]
             for p in parts[1:]:
                 acc = ("bin", "and", acc, p)
             return acc
-        return ("bool", True)
+        return None
 
-    if value_ty[0] == "struct":
-        sname = value_ty[1]
-        parts = []
-        base = phys_name.rsplit("__", 1)[0] if "__" in phys_name else phys_name
-        for fn, fty in types_meta[sname]["fields"].items():
-            sel = ("index", f"{base}__{fn}", ("var", "__k"))
-            parts.append(value_bounds_for(fty, sel))
-        body = parts[0]
-        for p in parts[1:]:
-            body = ("bin", "and", body, p)
-    elif value_ty[0] == "option":
-        present_sel = ("index", phys_name.replace("__value", "__present"), ("var", "__k"))
-        val_sel = ("index", phys_name, ("var", "__k"))
-        body = value_bounds_for(value_ty, val_sel)
-        body = ("bin", "=>", present_sel, body) if value_ty[0] == "option" else body
-    else:
-        sel = ("index", phys_name, ("var", "__k"))
-        body = value_bounds_for(value_ty, sel)
+    body = value_bounds_for(value_ty, phys_name)
+    if body is None:
+        return None
 
     b = ("binder_range", "__k", ("num", k_lo), ("num", k_hi))
     return ("forall", b, body)
@@ -492,7 +544,7 @@ def _validate_map_value_type(vty, types_meta, path):
     if vty[0] == "struct":
         sname = vty[1]
         for fn, fty in types_meta[sname]["fields"].items():
-            if not is_scalar_type(fty):
+            if not is_struct_field_type(fty):
                 _err(
                     f"{path}: struct field '{sname}.{fn}' has non-scalar type",
                     kind="type",
@@ -566,7 +618,7 @@ def validate_state_var_type(ty, types_meta, path):
     if ty[0] == "struct":
         sname = ty[1]
         for fn, fty in types_meta[sname]["fields"].items():
-            if not is_scalar_type(fty):
+            if not is_struct_field_type(fty):
                 _err(
                     f"{path}: struct field '{sname}.{fn}' has non-scalar type",
                     kind="type",
@@ -633,17 +685,10 @@ def generate_bounds_invariants(logical_state, phys_vars, types_meta):
             if vty[0] in ("int", "bool"):
                 continue
             if vty[0] == "struct":
-                parts = []
-                for fn in types_meta[vty[1]]["fields"]:
-                    pexpr = bounds_invariant_expr_map_field(
-                        f"{logical}__{fn}", kty, vty, types_meta)
-                    parts.append(pexpr)
-                expr = parts[0]
-                for p in parts[1:]:
-                    expr = ("bin", "and", expr, p)
+                expr = bounds_invariant_expr_map_field(logical, kty, vty, types_meta)
             elif vty[0] == "option":
                 expr = bounds_invariant_expr_map_field(
-                    f"{logical}__value", kty, vty, types_meta)
+                    logical, kty, vty, types_meta)
             else:
                 expr = bounds_invariant_expr_map_field(logical, kty, vty, types_meta)
         else:

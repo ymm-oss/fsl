@@ -16,12 +16,13 @@
 
 ### BUG11: struct フィールドの複合型を check が素通しし、verify で内部エラー
 
-- `struct S { v: Option<K> }` → check ok、verify で `kind: "internal", message: "'s__v'"`(生 KeyError)
+- `struct S { v: Option<K> }` → 当時は check ok、verify で `kind: "internal", message: "'s__v'"`(生 KeyError)。
+  v2.1 では `Option<scalar>` フィールドとして正式に合法化済み。
 - `struct Outer { i: Inner }`(struct ネスト、設計 §3.4 で「v1 不可」と明記)→ 同様に `"'o__i'"`
 - `struct S { members: Set<K> }` → verify で見当違いな semantics エラー
-- **期待動作**: `check_spec` が struct フィールド型を検証し、domain / enum / Bool / Int 以外
-  (Option / Set / Map / struct)は `kind: "type"` + hint
-  (例: "struct fields must be scalar in v1; model optional fields with an enum state or a separate Map")で拒否。
+- **期待動作**: `check_spec` が struct フィールド型を検証し、domain / enum / Bool / Int /
+  `Option<scalar>` 以外(Set / Map / Seq / struct / nested Option)は `kind: "type"` + hint
+  (例: "struct fields must be scalar or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields")で拒否。
   修復プロトコル(§8)の「全ての失敗に次の一手」原則に従う。
 
 ### BUG12: ネストした if/else の排他分岐を「double assignment」と誤検出
@@ -89,10 +90,10 @@ action go() {
 - **F2: `is some(j)` の束縛スコープは `=>` の右辺まで届く**(probe2 で確認、verified も正しい)。
   ただし設計書 §3.3 にスコープ規定が無い — 「`is` を含む論理式の中で、`is` の評価が
   true となる文脈でのみ束縛が有効」と明文化すべき。
-- **F3: struct に Option フィールドが書けないと不便な実例が出た。**
+- **F3: struct に Option フィールドが書けないと不便な実例が出た。**(v2.1 で解消)
   inventory_reservation は本来 `Res { item: Option<ItemId> }` と書きたかったが、
-  enum 状態(Free のとき item は無意味な 0)で回避した。BUG11 の修正(明確な拒否)を
-  v1 の回答とし、Option-in-struct の合成ロワリングは v1.1 候補に積む。
+  enum 状態(Free のとき item は無意味な 0)で回避した。v2.1 では
+  `Option<scalar>` フィールドを合成ロワリングで直接扱う。
 - **F4: 機能の直交組合せは概ね健全。** let 経由の lvalue 添字、struct 一括代入、
   sum の算術式本体+複合 where、count/min/max/abs、Set<Enum>、ゴースト変数、
   const + min によるクランプ — いずれも期待どおり動作(probe2/4/5、auth_lockout で確認)。
@@ -101,7 +102,7 @@ action go() {
 
 | プローブ | 内容 | 結果 |
 |---|---|---|
-| probe1 | Option を struct フィールドに | BUG11(internal error) |
+| probe1 | Option を struct フィールドに | v2.1 で OK(`Option<scalar>` のみ) |
 | probe2 | `is some(j)` 束縛が `=>` 右辺に届くか | OK(verified) |
 | probe2n | probe2 の負例(violated になるべき) | BUG13(JSON クラッシュ) |
 | probe3 | `else { if … else … }` ネスト | BUG12(誤 double assignment) |
@@ -113,7 +114,8 @@ action go() {
 
 ## 対応状況
 
-- BUG11 / BUG12 / BUG13: **修正済み**(codex ラウンド、回帰テスト6件追加)
+- BUG11 / BUG12 / BUG13: **修正済み**(codex ラウンド、回帰テスト6件追加)。
+  BUG11 のうち `Option<scalar>` フィールドは v2.1 で合法化、その他の複合フィールドは type error。
 - BUG14: **修正済み**(if 分岐の書き込み和集合を後続文へ伝播。回帰テスト追加)
 - PERF1: **解消**。展開の共有(invariant/reachable/deadlock/coverage が単一展開に相乗り)、
   遷移の Implies 形化、式キャッシュ、検証済み invariant の強化により:

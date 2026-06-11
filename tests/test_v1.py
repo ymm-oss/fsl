@@ -398,23 +398,46 @@ spec P {
     assert "is some(v)" in exc.value.hint
 
 
-def test_struct_option_field_rejected_at_check():
+def test_struct_option_scalar_field_allowed_at_check():
     src = """
-spec BadStructOption {
+spec GoodStructOption {
   type K = 0..1
   struct S { v: Option<K> }
   state { s: S }
-  init { s.v = 0 }
+  init { s = S { v: none } }
   action noop() { }
 }
 """
+    out = check_inline(src, "_good_struct_option.fsl")
+    assert out["result"] == "ok"
+
+
+@pytest.mark.parametrize(
+    ("field_type", "extra"),
+    [
+        ("Option<Option<K>>", ""),
+        ("Option<Set<K>>", ""),
+        ("Option<Map<K, K>>", ""),
+        ("Option<Seq<K, 2>>", ""),
+        ("Option<Inner>", "struct Inner { v: K }"),
+    ],
+)
+def test_struct_option_non_scalar_field_rejected_at_check(field_type, extra):
+    src = """
+spec BadStructOption {
+  type K = 0..1
+  %(extra)s
+  struct S { v: %(field_type)s }
+  state { s: S }
+  init { s = S { v: none } }
+  action noop() { }
+}
+""" % {"field_type": field_type, "extra": extra}
     out = check_inline(src, "_bad_struct_option.fsl")
     assert out["result"] == "error"
     assert out["kind"] == "type"
-    assert out["hint"] == (
-        "struct fields must be scalar (domain type, enum, Bool, Int) "
-        "in v1; model an optional field with an enum state, or use a separate Map"
-    )
+    assert out["hint"] is not None
+    assert "Option<scalar>" in out["hint"]
 
 
 def test_struct_nested_field_rejected_at_check():

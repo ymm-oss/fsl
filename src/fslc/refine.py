@@ -98,9 +98,12 @@ def _subst_binder(expr, binder_var, key_val):
         if tag == "num" or tag == "bool" or tag == "none":
             return e
         if tag == "index":
-            return ("index", walk(e[1]), walk(e[2]))
+            base = e[1] if isinstance(e[1], str) else walk(e[1])
+            return ("index", base, walk(e[2]))
         if tag == "field":
             return ("field", walk(e[1]), e[2])
+        if tag == "struct_lit":
+            return ("struct_lit", e[1], {k: walk(v) for k, v in e[2].items()})
         if tag == "bin":
             return ("bin", e[1], walk(e[2]), walk(e[3]))
         if tag == "neg":
@@ -146,7 +149,7 @@ def _build_map_array(elem_expr_template, binder, key_ty, value_ty, impl_state, i
     return arr
 
 
-def _expand_alpha_scalar(logical, ty, z3_val, out):
+def _expand_alpha_scalar(logical, ty, z3_val, out, types_meta):
     """Place a scalar/option/struct/seq/set value into physical alpha dict."""
     if ty[0] in ("int", "bool", "domain", "enum"):
         out[logical] = z3_val
@@ -157,6 +160,7 @@ def _expand_alpha_scalar(logical, ty, z3_val, out):
             out[f"{logical}__value"] = z3_val[2]
         elif z3_val == ("none",):
             out[f"{logical}__present"] = z3.BoolVal(False)
+            out[f"{logical}__value"] = _default_array_value(ty[1], types_meta)
         else:
             _err(f"map for Option '{logical}' must produce none or some(...)", kind="type")
         return
@@ -165,7 +169,17 @@ def _expand_alpha_scalar(logical, ty, z3_val, out):
             _err(f"map for struct '{logical}' must produce a struct literal", kind="type")
         _, sname, fields = z3_val
         for fn, fv in fields.items():
-            out[f"{logical}__{fn}"] = fv
+            fty = types_meta[sname]["fields"][fn]
+            if fty[0] == "option" and isinstance(fv, tuple) and fv[0] == "option_val":
+                out[f"{logical}__{fn}__present"] = fv[1]
+                out[f"{logical}__{fn}__value"] = fv[2]
+            elif fty[0] == "option" and fv == ("none",):
+                out[f"{logical}__{fn}__present"] = z3.BoolVal(False)
+                out[f"{logical}__{fn}__value"] = _default_array_value(fty[1], types_meta)
+            elif fty[0] == "option":
+                _err(f"map for Option field '{logical}.{fn}' must produce none or some(...)", kind="type")
+            else:
+                out[f"{logical}__{fn}"] = fv
         return
     if ty[0] == "set":
         if isinstance(z3_val, tuple) and z3_val[0] == "set_val":
@@ -188,7 +202,7 @@ def _expand_alpha_map_option(logical, kty, vty, impl_state, elem_expr, binder,
     merged_types = _merge_types_meta(impl_spec, abs_spec)
     lo, hi = domain_range(kty, merged_types)
     pres_arr = z3.K(z3_sort(kty, merged_types), z3.BoolVal(False))
-    val_arr = z3.K(z3_sort(kty, merged_types), z3.IntVal(0))
+    val_arr = z3.K(z3_sort(kty, merged_types), _default_array_value(vty[1], merged_types))
     for k in range(lo, hi + 1):
         expr_k = _subst_binder(elem_expr, binder[1], k)
         val = _eval_map_expr(expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
@@ -225,7 +239,7 @@ def build_alpha(impl_state, mapping, impl_spec, abs_spec):
                 else:
                     alpha[logical] = val[1]
             else:
-                _expand_alpha_scalar(logical, ty, val, alpha)
+                _expand_alpha_scalar(logical, ty, val, alpha, merged_types)
         elif m["kind"] == "indexed":
             binder = m["binder"]
             kty = ty[1] if ty[0] == "map" else None
@@ -240,22 +254,51 @@ def build_alpha(impl_state, mapping, impl_spec, abs_spec):
                     sname = vty[1]
                     lo, hi = domain_range(ty[1], merged_types)
                     for fn, fty in merged_types[sname]["fields"].items():
-                        elem_sort = z3_sort(fty, merged_types)
-                        arr = z3.K(z3_sort(ty[1], merged_types), _default_array_value(fty, merged_types))
-                        for k in range(lo, hi + 1):
-                            expr_k = _subst_binder(m["expr"], binder[1], k)
-                            sval = _eval_map_expr(expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
-                            if not isinstance(sval, tuple) or sval[0] != "struct_val":
-                                _err(f"map for struct map '{logical}' must produce struct values", kind="type")
-                            arr = z3.Store(arr, z3.IntVal(k), sval[2][fn])
-                        alpha[f"{logical}__{fn}"] = arr
+                        if fty[0] == "option":
+                            pres_arr = z3.K(z3_sort(ty[1], merged_types), z3.BoolVal(False))
+                            val_arr = z3.K(
+                                z3_sort(ty[1], merged_types),
+                                _default_array_value(fty[1], merged_types),
+                            )
+                            for k in range(lo, hi + 1):
+                                expr_k = _subst_binder(m["expr"], binder[1], k)
+                                sval = _eval_map_expr(
+                                    expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
+                                if not isinstance(sval, tuple) or sval[0] != "struct_val":
+                                    _err(f"map for struct map '{logical}' must produce struct values", kind="type")
+                                fv = sval[2][fn]
+                                if isinstance(fv, tuple) and fv[0] == "option_val":
+                                    pres_arr = z3.Store(pres_arr, z3.IntVal(k), fv[1])
+                                    val_arr = z3.Store(val_arr, z3.IntVal(k), fv[2])
+                                elif fv == ("none",):
+                                    pres_arr = z3.Store(pres_arr, z3.IntVal(k), z3.BoolVal(False))
+                                else:
+                                    _err(
+                                        f"map for Option field '{logical}[].{fn}' must produce none or some(...)",
+                                        kind="type",
+                                    )
+                            alpha[f"{logical}__{fn}__present"] = pres_arr
+                            alpha[f"{logical}__{fn}__value"] = val_arr
+                        else:
+                            arr = z3.K(
+                                z3_sort(ty[1], merged_types),
+                                _default_array_value(fty, merged_types),
+                            )
+                            for k in range(lo, hi + 1):
+                                expr_k = _subst_binder(m["expr"], binder[1], k)
+                                sval = _eval_map_expr(
+                                    expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
+                                if not isinstance(sval, tuple) or sval[0] != "struct_val":
+                                    _err(f"map for struct map '{logical}' must produce struct values", kind="type")
+                                arr = z3.Store(arr, z3.IntVal(k), sval[2][fn])
+                            alpha[f"{logical}__{fn}"] = arr
                 else:
                     alpha[logical] = _build_map_array(
                         m["expr"], binder, ty[1], vty, impl_state, impl_spec, abs_spec,
                     )
             elif ty[0] == "seq":
                 val = _eval_map_expr(m["expr"], impl_state, impl_spec, abs_spec)
-                _expand_alpha_scalar(logical, ty, val, alpha)
+                _expand_alpha_scalar(logical, ty, val, alpha, merged_types)
             else:
                 _err(f"indexed map on non-Map/Seq variable '{logical}'", kind="type")
         else:

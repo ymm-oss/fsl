@@ -274,8 +274,12 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
             if ty[0] == "struct":
                 sname = ty[1]
                 return ("struct_val", sname, {
-                    fn: state[f"{n}__{fn}"]
-                    for fn in spec["types"][sname]["fields"]
+                    fn: (
+                        ("option_val", state[f"{n}__{fn}__present"], state[f"{n}__{fn}__value"])
+                        if fty[0] == "option"
+                        else state[f"{n}__{fn}"]
+                    )
+                    for fn, fty in spec["types"][sname]["fields"].items()
                 })
             if ty[0] == "set":
                 return ("set_val", state[n], ty[1])
@@ -411,11 +415,30 @@ def _struct_compare(a, b, op, spec):
         _err(f"struct comparison between '{sa}' and '{sb}'", kind="type")
     if set(fa) != set(fb):
         _err(f"struct field mismatch in comparison of '{sa}'", kind="type")
-    if not fa:
-        res = z3.BoolVal(True)
-    else:
-        res = z3.And(*[fa[k] == fb[k] for k in fa])
+    fields = spec["types"][sa]["fields"]
+    parts = []
+    for k in fa:
+        fty = fields[k]
+        if fty[0] == "option":
+            parts.append(_option_logical_eq(fa[k], fb[k]))
+        else:
+            parts.append(fa[k] == fb[k])
+    res = z3.And(*parts) if parts else z3.BoolVal(True)
     return z3.Not(res) if op == "!=" else res
+
+
+def _option_logical_eq(a, b):
+    if isinstance(a, tuple) and a[0] == "option_val":
+        if isinstance(b, tuple) and b[0] == "option_val":
+            return z3.And(a[1] == b[1], z3.Implies(a[1], a[2] == b[2]))
+        if isinstance(b, tuple) and b[0] == "none":
+            return z3.Not(a[1])
+    if isinstance(b, tuple) and b[0] == "option_val":
+        if isinstance(a, tuple) and a[0] == "none":
+            return z3.Not(b[1])
+    if isinstance(a, tuple) and a[0] == "none" and isinstance(b, tuple) and b[0] == "none":
+        return z3.BoolVal(True)
+    _err("struct Option field comparison requires Option values", kind="type")
 
 
 def _option_none_cmp(a, b, op):
@@ -471,7 +494,14 @@ def _logical_map_access(logical, idx, state, spec):
         sname = vty[1]
         fields = spec["types"][sname]["fields"]
         return ("struct_map_val", logical, idx, {
-            fn: z3.Select(state[f"{logical}__{fn}"], idx) for fn in fields
+            fn: (
+                ("option_val",
+                 z3.Select(state[f"{logical}__{fn}__present"], idx),
+                 z3.Select(state[f"{logical}__{fn}__value"], idx))
+                if fty[0] == "option"
+                else z3.Select(state[f"{logical}__{fn}"], idx)
+            )
+            for fn, fty in fields.items()
         })
     if vty[0] == "option":
         return ("option_val",
@@ -506,6 +536,54 @@ def _eval_field(base, field, state, binds, spec):
             _err(f"unknown field '{field}' in struct {sname}")
         return vals[field]
     _err(f"cannot access field '{field}' on this value")
+
+
+def _struct_field_ty(spec, sname, field):
+    try:
+        return spec["types"][sname]["fields"][field]
+    except KeyError:
+        _err(f"unknown field '{field}' in struct {sname}")
+
+
+def _assign_option_to_phys(pend, state, present_phys, value_phys, val, none_ok=True):
+    if isinstance(val, tuple) and val[0] == "option_val":
+        pend[present_phys] = val[1]
+        pend[value_phys] = val[2]
+        return
+    if none_ok and val == ("none",):
+        pend[present_phys] = z3.BoolVal(False)
+        return
+    _err("Option assignment requires none or some(...)")
+
+
+def _store_option_to_phys(pend, state, present_phys, value_phys, idx, val, none_ok=True):
+    if isinstance(val, tuple) and val[0] == "option_val":
+        base_p = pend.get(present_phys, state[present_phys])
+        base_v = pend.get(value_phys, state[value_phys])
+        pend[present_phys] = z3.Store(base_p, idx, val[1])
+        pend[value_phys] = z3.Store(base_v, idx, val[2])
+        return
+    if none_ok and val == ("none",):
+        base_p = pend.get(present_phys, state[present_phys])
+        pend[present_phys] = z3.Store(base_p, idx, z3.BoolVal(False))
+        return
+    _err("Option map assignment requires none or some(...)")
+
+
+def _assign_struct_field(pend, state, phys_base, fty, fv):
+    if fty[0] == "option":
+        _assign_option_to_phys(pend, state, f"{phys_base}__present", f"{phys_base}__value", fv)
+    else:
+        pend[phys_base] = fv
+
+
+def _store_struct_field(pend, state, phys_base, idx, fty, fv):
+    if fty[0] == "option":
+        _store_option_to_phys(
+            pend, state, f"{phys_base}__present", f"{phys_base}__value", idx, fv)
+    else:
+        base = pend.get(phys_base, state[phys_base])
+        pend[phys_base] = z3.Store(base, idx, fv)
 
 
 def _set_elem_ty(base, state, spec):
@@ -768,7 +846,8 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
             if isinstance(val, tuple) and val[0] == "struct_val":
                 sname, fields = val[1], val[2]
                 for fn, fv in fields.items():
-                    pend[f"{n}__{fn}"] = fv
+                    fty = _struct_field_ty(spec, sname, fn)
+                    _assign_struct_field(pend, state, f"{n}__{fn}", fty, fv)
             else:
                 _err("struct assignment requires struct literal")
         else:
@@ -797,9 +876,8 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
             if isinstance(val, tuple) and val[0] == "struct_val":
                 _, sname, fields = val
                 for fn, fv in fields.items():
-                    phys = f"{n}__{fn}"
-                    base = pend.get(phys, state[phys])
-                    pend[phys] = z3.Store(base, idx, fv)
+                    fty = _struct_field_ty(spec, sname, fn)
+                    _store_struct_field(pend, state, f"{n}__{fn}", idx, fty, fv)
             else:
                 _err("struct map assignment requires struct literal")
         else:
@@ -810,15 +888,20 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
     if key[0] == "map_field":
         n, idx_e, field = key[1], key[2], key[3]
         idx = eval_expr(idx_e, state, binds, spec)
-        phys = f"{n}__{field}"
-        base = pend.get(phys, state[phys])
-        pend[phys] = z3.Store(base, idx, val)
+        ty = spec["state"][n]
+        if ty[0] != "map" or ty[2][0] != "struct":
+            _err(f"field assignment target '{n}.{field}' is not a struct")
+        fty = _struct_field_ty(spec, ty[2][1], field)
+        _store_struct_field(pend, state, f"{n}__{field}", idx, fty, val)
         return ("map_field", n, idx_e, field)
 
     if key[0] == "field":
         n, field = key[1], key[2]
-        phys = f"{n}__{field}"
-        pend[phys] = val
+        ty = spec["state"][n]
+        if ty[0] != "struct":
+            _err(f"field assignment target '{n}.{field}' is not a struct")
+        fty = _struct_field_ty(spec, ty[1], field)
+        _assign_struct_field(pend, state, f"{n}__{field}", fty, val)
         return ("field", n, field)
 
     return None
@@ -1093,6 +1176,20 @@ def _display_value(ty, val, spec):
     return val
 
 
+def _display_option_value(model, state, base, inner_ty, spec, key=None):
+    if key is None:
+        present = _py_val(model, state[f"{base}__present"])
+        if not present:
+            return None
+        raw = _py_val(model, state[f"{base}__value"])
+    else:
+        present = _py_val(model, z3.Select(state[f"{base}__present"], key))
+        if not present:
+            return None
+        raw = _py_val(model, z3.Select(state[f"{base}__value"], key))
+    return _display_value(inner_ty, raw, spec)
+
+
 def _py_val(model, expr):
     v = model.eval(expr, model_completion=True)
     if z3.is_int_value(v):
@@ -1155,17 +1252,15 @@ def _logical_val(model, state, name, ty, spec):
             out.append(_display_value(elem_ty, raw, spec))
         return out
     if ty[0] == "option":
-        present = _py_val(model, state[f"{name}__present"])
-        if not present:
-            return None
-        inner = ty[1]
-        raw = _py_val(model, state[f"{name}__value"])
-        return _display_value(inner, raw, spec)
+        return _display_option_value(model, state, name, ty[1], spec)
     if ty[0] == "struct":
         sname = ty[1]
         obj = {}
         for fn, fty in spec["types"][sname]["fields"].items():
-            obj[fn] = _display_value(fty, _py_val(model, state[f"{name}__{fn}"]), spec)
+            if fty[0] == "option":
+                obj[fn] = _display_option_value(model, state, f"{name}__{fn}", fty[1], spec)
+            else:
+                obj[fn] = _display_value(fty, _py_val(model, state[f"{name}__{fn}"]), spec)
         return obj
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
@@ -1173,18 +1268,18 @@ def _logical_val(model, state, name, ty, spec):
         for i in _map_domain(kty, spec):
             key = str(_display_value(kty, i, spec) if kty[0] == "enum" else i)
             if vty[0] == "option":
-                pres = _py_val(model, z3.Select(state[f"{name}__present"], z3.IntVal(i)))
-                if not pres:
-                    mout[key] = None
-                else:
-                    raw = _py_val(model, z3.Select(state[f"{name}__value"], z3.IntVal(i)))
-                    mout[key] = _display_value(vty[1], raw, spec)
+                mout[key] = _display_option_value(
+                    model, state, name, vty[1], spec, z3.IntVal(i))
             elif vty[0] == "struct":
                 sname = vty[1]
                 obj = {}
                 for fn, fty in spec["types"][sname]["fields"].items():
-                    raw = _py_val(model, z3.Select(state[f"{name}__{fn}"], z3.IntVal(i)))
-                    obj[fn] = _display_value(fty, raw, spec)
+                    if fty[0] == "option":
+                        obj[fn] = _display_option_value(
+                            model, state, f"{name}__{fn}", fty[1], spec, z3.IntVal(i))
+                    else:
+                        raw = _py_val(model, z3.Select(state[f"{name}__{fn}"], z3.IntVal(i)))
+                        obj[fn] = _display_value(fty, raw, spec)
                 mout[key] = obj
             else:
                 raw = _py_val(model, z3.Select(state[name], z3.IntVal(i)))
@@ -1255,6 +1350,8 @@ def _expr_static_type(e, spec, env):
     if tag == "some":
         inner = _expr_static_type(e[1], spec, env)
         return ("option", inner or ("int",))
+    if tag == "struct_lit":
+        return ("struct", e[1])
     if tag == "index":
         base = e[1]
         if isinstance(base, str):
@@ -1520,10 +1617,16 @@ def _logical_eq_map_value(spec, s1, s2, map_name, vty, key):
         sname = vty[1]
         parts = []
         for fn, fty in spec["types"][sname]["fields"].items():
-            v1 = z3.Select(s1[f"{map_name}__{fn}"], key)
-            v2 = z3.Select(s2[f"{map_name}__{fn}"], key)
             if fty[0] in ("int", "bool", "domain", "enum"):
+                v1 = z3.Select(s1[f"{map_name}__{fn}"], key)
+                v2 = z3.Select(s2[f"{map_name}__{fn}"], key)
                 parts.append(v1 == v2)
+            elif fty[0] == "option":
+                pres1 = z3.Select(s1[f"{map_name}__{fn}__present"], key)
+                pres2 = z3.Select(s2[f"{map_name}__{fn}__present"], key)
+                val1 = z3.Select(s1[f"{map_name}__{fn}__value"], key)
+                val2 = z3.Select(s2[f"{map_name}__{fn}__value"], key)
+                parts.append(z3.And(pres1 == pres2, z3.Implies(pres1, val1 == val2)))
         return z3.And(*parts) if parts else z3.BoolVal(True)
     return z3.BoolVal(True)
 

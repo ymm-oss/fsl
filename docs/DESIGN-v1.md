@@ -119,9 +119,11 @@ state  { orders: Map<OrderId, Order> }
 - フィールドアクセス `orders[o].status`、フィールド単位の代入
   `orders[o].status = Shipped`、リテラル
   `orders[o] = Order { status: Draft, qty: 0 }`。
-- 等価 `==` はフィールドごとの等価。struct のネスト(struct を含む
-  struct)は v1 では不可(ロワリングと表示の単純さを優先。必要になった
-  実例が出てから検討)。
+- 等価 `==` はフィールドごとの等価。v2.1 から `Option<スカラ>` フィールドは
+  直接書ける(`struct Res { item: Option<ItemId> }`)。Option フィールドの等価は
+  `none` 同士を同値とし、present のときだけ value を比較する論理等価。
+  struct のネスト(struct を含む struct)、Set/Map/Seq フィールド、
+  `Option<Option<...>>` や `Option<Set/Map/Seq/struct>` は不可。
 
 ### 3.5 Set
 
@@ -149,8 +151,9 @@ state {
 
 - 容量 `N` 付きの FIFO 列。要素型 `T` はスカラ型のみ。`N` は正の定数式
   (整数リテラルまたは `const` 名)。
-- **状態変数の型としてのみ**使用可能(struct フィールド・Map の値・
-  Set の要素・Seq の要素には不可 — `check` で `kind: "type"` + hint)。
+- **状態変数の型としてのみ**使用可能(Map の値・Set の要素・Seq の要素には
+  不可。struct フィールドにも不可だが `Option<Seq<...>>` も不可 —
+  `check` で `kind: "type"` + hint)。
 - 操作(純粋・再代入イディオム): `size()` / `push(e)` / `pop()` /
   `head()` / `at(i)` / `contains(e)` / `==` / `!=`。
 - リテラル: `Seq {}` / `Seq { 1, 2 }`(要素数 ≤ N)。

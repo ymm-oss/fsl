@@ -1,6 +1,6 @@
 // Inventory hold/confirm/release with a conservation invariant.
-// Exercises: whole-struct assignment to map element, let-bound lvalue index,
-// sum() with compound where-condition over struct fields.
+// v2.1: Res.item is Option<ItemId> — the natural modeling DOGFOOD-1 F3
+// asked for (previously worked around with a meaningless item: 0 when Free).
 spec InventoryReservation {
   type ItemId = 0..1
   type ResId  = 0..2
@@ -8,7 +8,7 @@ spec InventoryReservation {
 
   enum RState { Free, Held, Confirmed }
 
-  struct Res { st: RState, item: ItemId, qty: Qty }
+  struct Res { st: RState, item: Option<ItemId>, qty: Qty }
 
   state {
     available: Map<ItemId, Qty>,
@@ -17,7 +17,7 @@ spec InventoryReservation {
 
   init {
     forall i: ItemId { available[i] = 2 }
-    forall r: ResId { res[r] = Res { st: Free, item: 0, qty: 0 } }
+    forall r: ResId { res[r] = Res { st: Free, item: none, qty: 0 } }
   }
 
   action hold(r: ResId, i: ItemId, q: Qty) {
@@ -25,7 +25,7 @@ spec InventoryReservation {
     requires q > 0
     requires available[i] >= q
     available[i] = available[i] - q
-    res[r] = Res { st: Held, item: i, qty: q }
+    res[r] = Res { st: Held, item: some(i), qty: q }
   }
 
   action confirm(r: ResId) {
@@ -35,20 +35,30 @@ spec InventoryReservation {
 
   action release(r: ResId) {
     requires res[r].st == Held
-    let i = res[r].item
+    requires res[r].item is some(i)
     available[i] = available[i] + res[r].qty
-    res[r] = Res { st: Free, item: 0, qty: 0 }
+    res[r] = Res { st: Free, item: none, qty: 0 }
   }
 
   invariant FreeIsZero {
     forall r: ResId { res[r].st == Free => res[r].qty == 0 }
   }
 
+  invariant FreeHasNoItem {
+    forall r: ResId { res[r].st == Free => res[r].item == none }
+  }
+
+  invariant HeldHasItem {
+    forall r: ResId { res[r].st != Free => res[r].item != none }
+  }
+
   invariant Conservation {
     forall i: ItemId {
       available[i]
-        + sum(r: ResId of res[r].qty where res[r].st == Held and res[r].item == i)
-        + sum(r: ResId of res[r].qty where res[r].st == Confirmed and res[r].item == i)
+        + sum(r: ResId of res[r].qty
+              where res[r].st == Held and (res[r].item is some(j) and j == i))
+        + sum(r: ResId of res[r].qty
+              where res[r].st == Confirmed and (res[r].item is some(j) and j == i))
       == 2
     }
   }

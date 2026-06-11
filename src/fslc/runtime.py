@@ -54,6 +54,18 @@ def _display_value(ty, val, spec):
     return val
 
 
+def _display_option_value(state, base, inner_ty, spec, key=None):
+    if key is None:
+        if not state[f"{base}__present"]:
+            return None
+        raw = state[f"{base}__value"]
+    else:
+        if not state[f"{base}__present"][key]:
+            return None
+        raw = state[f"{base}__value"][key]
+    return _display_value(inner_ty, raw, spec)
+
+
 def _map_domain(kty, spec):
     if kty[0] == "int":
         mx = max(spec["consts"].values()) if spec["consts"] else 1
@@ -217,7 +229,11 @@ def _default_phys_value(entry, spec):
             sname = vty[1]
             defaults = {}
             for fn, fty in spec["types"][sname]["fields"].items():
-                defaults[fn] = {i: _scalar_default(fty) for i in dom}
+                if fty[0] == "option":
+                    defaults[f"{fn}__present"] = {i: False for i in dom}
+                    defaults[f"{fn}__value"] = {i: _scalar_default(fty[1]) for i in dom}
+                else:
+                    defaults[fn] = {i: _scalar_default(fty) for i in dom}
             return defaults
         return {i: _scalar_default(vty) for i in dom}
     return 0
@@ -251,8 +267,14 @@ def _empty_phys_state(spec):
             if ty[2][0] == "struct":
                 if entry.get("part"):
                     dom = _map_domain(ty[1], spec)
-                    fty = spec["types"][ty[2][1]]["fields"][entry["part"]]
-                    state[phys] = {i: _scalar_default(fty) for i in dom}
+                    if entry.get("option_part") == "present":
+                        state[phys] = {i: False for i in dom}
+                    elif entry.get("option_part") == "value":
+                        fty = spec["types"][ty[2][1]]["fields"][entry["field"]][1]
+                        state[phys] = {i: _scalar_default(fty) for i in dom}
+                    else:
+                        fty = spec["types"][ty[2][1]]["fields"][entry["part"]]
+                        state[phys] = {i: _scalar_default(fty) for i in dom}
             elif ty[2][0] == "option":
                 dom = _map_domain(ty[1], spec)
                 if entry.get("part") == "present":
@@ -266,7 +288,12 @@ def _empty_phys_state(spec):
             elem_ty = ty[1]
             state[phys] = {i: False for i in _map_domain(elem_ty, spec)}
         elif ty[0] == "struct":
-            state[phys] = _scalar_default(entry["ty"])
+            if entry.get("option_part") == "present":
+                state[phys] = False
+            elif entry.get("option_part") == "value":
+                state[phys] = _scalar_default(entry["ty"])
+            else:
+                state[phys] = _scalar_default(entry["ty"])
         else:
             state[phys] = _scalar_default(ty)
     return state
@@ -424,7 +451,12 @@ def _read_logical(name, ty, state, spec):
     if ty[0] == "struct":
         sname = ty[1]
         return ("struct_val", sname, {
-            fn: state[f"{name}__{fn}"] for fn in spec["types"][sname]["fields"]
+            fn: (
+                ("option_val", state[f"{name}__{fn}__present"], state[f"{name}__{fn}__value"])
+                if fty[0] == "option"
+                else state[f"{name}__{fn}"]
+            )
+            for fn, fty in spec["types"][sname]["fields"].items()
         })
     if ty[0] == "set":
         m = state[name]
@@ -442,7 +474,14 @@ def _logical_map_access(logical, idx, state, spec):
     if vty[0] == "struct":
         sname = vty[1]
         return ("struct_map_val", logical, idx, {
-            fn: state[f"{logical}__{fn}"][idx] for fn in spec["types"][sname]["fields"]
+            fn: (
+                ("option_val",
+                 state[f"{logical}__{fn}__present"][idx],
+                 state[f"{logical}__{fn}__value"][idx])
+                if fty[0] == "option"
+                else state[f"{logical}__{fn}"][idx]
+            )
+            for fn, fty in spec["types"][sname]["fields"].items()
         })
     if vty[0] == "option":
         return (
@@ -674,8 +713,28 @@ def _struct_compare(a, b, op, spec):
         _err("struct comparison requires two struct values", kind="type")
     if sa != sb:
         _err(f"struct comparison between '{sa}' and '{sb}'", kind="type")
-    eq = all(fa.get(k) == fb.get(k) for k in set(fa) | set(fb))
+    fields = spec["types"][sa]["fields"]
+    eq = True
+    for k in set(fa) | set(fb):
+        if fields[k][0] == "option":
+            eq = eq and _option_logical_eq(fa.get(k), fb.get(k))
+        else:
+            eq = eq and fa.get(k) == fb.get(k)
     return (not eq) if op == "!=" else eq
+
+
+def _option_logical_eq(a, b):
+    if isinstance(a, tuple) and a[0] == "option_val":
+        if isinstance(b, tuple) and b[0] == "option_val":
+            return a[1] == b[1] and (not a[1] or a[2] == b[2])
+        if isinstance(b, tuple) and b[0] == "none":
+            return not a[1]
+    if isinstance(b, tuple) and b[0] == "option_val":
+        if isinstance(a, tuple) and a[0] == "none":
+            return not b[1]
+    if isinstance(a, tuple) and a[0] == "none" and isinstance(b, tuple) and b[0] == "none":
+        return True
+    _err("struct Option field comparison requires Option values", kind="type")
 
 
 def _option_none_cmp(a, b, op):
@@ -714,6 +773,57 @@ def _lvalue_key(lv):
             return ("map_field", base[1], base[2], field)
         return ("field", base[1], field)
     _err(f"invalid lvalue {lv}")
+
+
+def _struct_field_ty(spec, sname, field):
+    try:
+        return spec["types"][sname]["fields"][field]
+    except KeyError:
+        _err(f"unknown field '{field}' in struct {sname}")
+
+
+def _assign_option_to_phys(pend, state, present_phys, value_phys, val):
+    if isinstance(val, tuple) and val[0] == "option_val":
+        pend[present_phys] = val[1]
+        pend[value_phys] = val[2]
+        return
+    if val == ("none",):
+        pend[present_phys] = False
+        return
+    _err("Option assignment requires none or some(...)")
+
+
+def _store_option_to_phys(pend, state, present_phys, value_phys, idx, val):
+    base_p = dict(pend.get(present_phys, state[present_phys]))
+    if isinstance(val, tuple) and val[0] == "option_val":
+        base_v = dict(pend.get(value_phys, state[value_phys]))
+        base_p[idx] = val[1]
+        base_v[idx] = val[2]
+        pend[present_phys] = base_p
+        pend[value_phys] = base_v
+        return
+    if val == ("none",):
+        base_p[idx] = False
+        pend[present_phys] = base_p
+        return
+    _err("Option map assignment requires none or some(...)")
+
+
+def _assign_struct_field(pend, state, phys_base, fty, fv):
+    if fty[0] == "option":
+        _assign_option_to_phys(pend, state, f"{phys_base}__present", f"{phys_base}__value", fv)
+    else:
+        pend[phys_base] = fv
+
+
+def _store_struct_field(pend, state, phys_base, idx, fty, fv):
+    if fty[0] == "option":
+        _store_option_to_phys(
+            pend, state, f"{phys_base}__present", f"{phys_base}__value", idx, fv)
+    else:
+        base = dict(pend.get(phys_base, state[phys_base]))
+        base[idx] = fv
+        pend[phys_base] = base
 
 
 def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
@@ -767,9 +877,10 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
                 _err("Option assignment requires none or some(...)")
         elif ty[0] == "struct":
             if isinstance(val, tuple) and val[0] == "struct_val":
-                _, fields = val[1], val[2]
+                sname, fields = val[1], val[2]
                 for fn, fv in fields.items():
-                    pend[f"{n}__{fn}"] = fv
+                    fty = _struct_field_ty(spec, sname, fn)
+                    _assign_struct_field(pend, state, f"{n}__{fn}", fty, fv)
             else:
                 _err("struct assignment requires struct literal")
         else:
@@ -797,10 +908,8 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
             if isinstance(val, tuple) and val[0] == "struct_val":
                 _, sname, fields = val
                 for fn, fv in fields.items():
-                    phys = f"{n}__{fn}"
-                    base = dict(pend.get(phys, state[phys]))
-                    base[idx] = fv
-                    pend[phys] = base
+                    fty = _struct_field_ty(spec, sname, fn)
+                    _store_struct_field(pend, state, f"{n}__{fn}", idx, fty, fv)
             else:
                 _err("struct map assignment requires struct literal")
         else:
@@ -812,15 +921,20 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
     if key[0] == "map_field":
         n, idx_e, field = key[1], key[2], key[3]
         idx = eval_concrete(idx_e, state, binds, spec)
-        phys = f"{n}__{field}"
-        base = dict(pend.get(phys, state[phys]))
-        base[idx] = val
-        pend[phys] = base
+        ty = spec["state"][n]
+        if ty[0] != "map" or ty[2][0] != "struct":
+            _err(f"field assignment target '{n}.{field}' is not a struct")
+        fty = _struct_field_ty(spec, ty[2][1], field)
+        _store_struct_field(pend, state, f"{n}__{field}", idx, fty, val)
         return ("map_field", n, idx_e, field)
 
     if key[0] == "field":
         n, field = key[1], key[2]
-        pend[f"{n}__{field}"] = val
+        ty = spec["state"][n]
+        if ty[0] != "struct":
+            _err(f"field assignment target '{n}.{field}' is not a struct")
+        fty = _struct_field_ty(spec, ty[1], field)
+        _assign_struct_field(pend, state, f"{n}__{field}", fty, val)
         return ("field", n, field)
     return None
 
@@ -950,31 +1064,32 @@ def _logical_val(state, name, ty, spec):
         length = state[f"{name}__len"]
         return [_display_value(elem_ty, data[i], spec) for i in range(length)]
     if ty[0] == "option":
-        if not state[f"{name}__present"]:
-            return None
-        return _display_value(ty[1], state[f"{name}__value"], spec)
+        return _display_option_value(state, name, ty[1], spec)
     if ty[0] == "struct":
         sname = ty[1]
-        return {
-            fn: _display_value(fty, state[f"{name}__{fn}"], spec)
-            for fn, fty in spec["types"][sname]["fields"].items()
-        }
+        out = {}
+        for fn, fty in spec["types"][sname]["fields"].items():
+            if fty[0] == "option":
+                out[fn] = _display_option_value(state, f"{name}__{fn}", fty[1], spec)
+            else:
+                out[fn] = _display_value(fty, state[f"{name}__{fn}"], spec)
+        return out
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
         mout = {}
         for i in _map_domain(kty, spec):
             key = str(_display_value(kty, i, spec) if kty[0] == "enum" else i)
             if vty[0] == "option":
-                if not state[f"{name}__present"][i]:
-                    mout[key] = None
-                else:
-                    mout[key] = _display_value(vty[1], state[f"{name}__value"][i], spec)
+                mout[key] = _display_option_value(state, name, vty[1], spec, i)
             elif vty[0] == "struct":
                 sname = vty[1]
-                mout[key] = {
-                    fn: _display_value(fty, state[f"{name}__{fn}"][i], spec)
-                    for fn, fty in spec["types"][sname]["fields"].items()
-                }
+                obj = {}
+                for fn, fty in spec["types"][sname]["fields"].items():
+                    if fty[0] == "option":
+                        obj[fn] = _display_option_value(state, f"{name}__{fn}", fty[1], spec, i)
+                    else:
+                        obj[fn] = _display_value(fty, state[f"{name}__{fn}"][i], spec)
+                mout[key] = obj
             else:
                 mout[key] = _display_value(vty, state[name][i], spec)
         return mout
