@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .compose import expand_compose
 from .grammar import Ast, PARSER
-from .model import FslError
+from .model import FslError, eval_const
 
 
 def _err(message, kind="type", loc=None):
@@ -92,6 +92,93 @@ def _param_names(params):
     return [p[1] for p in params]
 
 
+def _and_all(exprs):
+    if not exprs:
+        return ("bool", True)
+    out = exprs[0]
+    for expr in exprs[1:]:
+        out = ("bin", "and", out, expr)
+    return out
+
+
+def _or_all(exprs):
+    if not exprs:
+        return ("bool", False)
+    out = exprs[0]
+    for expr in exprs[1:]:
+        out = ("bin", "or", out, expr)
+    return out
+
+
+def _subst_expr(expr, env, bound=None):
+    bound = set(bound or ())
+    if not isinstance(expr, tuple):
+        return expr
+    tag = expr[0]
+    if tag == "var":
+        name = expr[1]
+        if name in env and name not in bound:
+            return deepcopy(env[name])
+        return expr
+    if tag in ("num", "bool", "none", "pat_none", "pat_some"):
+        return expr
+    if tag in ("neg", "not", "abs", "old", "some"):
+        return (tag, _subst_expr(expr[1], env, bound))
+    if tag == "bin":
+        return ("bin", expr[1], _subst_expr(expr[2], env, bound), _subst_expr(expr[3], env, bound))
+    if tag == "index":
+        return ("index", _subst_expr(expr[1], env, bound), _subst_expr(expr[2], env, bound))
+    if tag == "field":
+        return ("field", _subst_expr(expr[1], env, bound), expr[2])
+    if tag == "method":
+        return ("method", _subst_expr(expr[1], env, bound), expr[2],
+                [_subst_expr(a, env, bound) for a in expr[3]])
+    if tag == "is":
+        return ("is", _subst_expr(expr[1], env, bound), expr[2])
+    if tag == "ite":
+        return (
+            "ite",
+            _subst_expr(expr[1], env, bound),
+            _subst_expr(expr[2], env, bound),
+            _subst_expr(expr[3], env, bound),
+        )
+    if tag in ("forall", "exists"):
+        binder = expr[1]
+        bname = binder[1]
+        bbound = set(bound)
+        bbound.add(bname)
+        if binder[0] == "binder_typed":
+            where = _subst_expr(binder[3], env, bbound) if binder[3] is not None else None
+            binder = ("binder_typed", binder[1], binder[2], where)
+        elif binder[0] == "binder_range":
+            binder = (
+                "binder_range",
+                binder[1],
+                _subst_expr(binder[2], env, bound),
+                _subst_expr(binder[3], env, bound),
+            )
+        return (tag, binder, _subst_expr(expr[2], env, bbound))
+    if tag in ("set_lit", "seq_lit"):
+        return (tag, [_subst_expr(e, env, bound) for e in expr[1]])
+    if tag == "struct_lit":
+        return (tag, expr[1], {k: _subst_expr(v, env, bound) for k, v in expr[2].items()})
+    if tag in ("count", "sum"):
+        bbound = set(bound)
+        bbound.add(expr[1])
+        if tag == "count":
+            return ("count", expr[1], expr[2], _subst_expr(expr[3], env, bbound))
+        return (
+            "sum",
+            expr[1],
+            expr[2],
+            _subst_expr(expr[3], env, bbound),
+            _subst_expr(expr[4], env, bbound) if expr[4] is not None else None,
+        )
+    if tag in ("min", "max"):
+        return (tag, _subst_expr(expr[1], env, bound), _subst_expr(expr[2], env, bound))
+    return expr
+
+
 def _target_from_maps(maps, loc):
     if maps is None:
         _err("action in requirements implements block needs a maps clause", loc=loc)
@@ -141,6 +228,218 @@ def _expand_item(item, req_meta, display_names, action_aliases):
     return [item], []
 
 
+def _collect_consts(items):
+    consts = {}
+    for item in items:
+        if item[0] == "const":
+            consts[item[1]] = eval_const(item[2], consts, {})
+    return consts
+
+
+def _generated_age_type_name(age_name, existing):
+    base = "_Age" + "".join(part[:1].upper() + part[1:] for part in age_name.split("_") if part)
+    if not base or base == "_Age":
+        base = "_AgeCounter"
+    name = base
+    i = 2
+    while name in existing:
+        name = f"{base}{i}"
+        i += 1
+    existing.add(name)
+    return name
+
+
+def _require_simple_type_name(ty_name, loc):
+    if not isinstance(ty_name, str):
+        _err("indexed age expects a simple domain type name", loc=loc)
+    return ty_name
+
+
+def _param_to_binder(param):
+    if param[0] == "param_typed":
+        return ("binder_typed", param[1], param[2], None)
+    return ("binder_range", param[1], param[2], param[3])
+
+
+def _action_enabled_expr(action):
+    _, _name, params, body, _loc, _fair, *_rest = action
+    env = {}
+    requires = []
+    for item in body:
+        if item[0] == "let":
+            env[item[1]] = _subst_expr(item[2], env)
+        elif item[0] == "requires":
+            requires.append(_subst_expr(item[1], env))
+    expr = _and_all(requires)
+    for param in reversed(params):
+        expr = ("exists", _param_to_binder(param), expr)
+    return expr
+
+
+def _merge_init(out, extra_stmts):
+    if not extra_stmts:
+        return
+    last_init_idx = None
+    for i, item in enumerate(out):
+        if item[0] == "init":
+            last_init_idx = i
+    if last_init_idx is None:
+        out.append(("init", extra_stmts))
+        return
+    init = out[last_init_idx]
+    out[last_init_idx] = ("init", list(init[1]) + extra_stmts)
+
+
+def _age_ref(age):
+    if age["binder"] is None:
+        return ("var", age["name"])
+    return ("index", ("var", age["name"]), ("var", age["binder"][1]))
+
+
+def _age_lvalue(age):
+    if age["binder"] is None:
+        return ("var", age["name"])
+    return ("index", age["name"], ("var", age["binder"][1]))
+
+
+def _build_age_tick_stmt(age):
+    ref = _age_ref(age)
+    lv = _age_lvalue(age)
+    inc = ("assign", deepcopy(lv), ("bin", "+", deepcopy(ref), ("num", 1)), age["loc"])
+    reset = ("assign", deepcopy(lv), ("num", 0), age["loc"])
+    cap_guard = ("bin", "<", deepcopy(ref), ("num", age["cap"]))
+    bump = ("if", cap_guard, [inc], [], age["loc"])
+    body = [("if", age["cond"], [bump], [reset], age["loc"])]
+    if age["binder"] is None:
+        return body[0]
+    return ("forall_stmt", age["binder"], body, age["loc"])
+
+
+def _deadline_invariant_name(req_id, age_name, index):
+    safe_req = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in req_id)
+    return f"_deadline_{safe_req}_{age_name}_{index}"
+
+
+def _deadline_expr(age, bound):
+    ref = _age_ref(age)
+    expr = ("bin", "<=", ref, bound)
+    if age["binder"] is None:
+        return expr
+    return ("forall", age["binder"], expr)
+
+
+def _parse_time_block(time_block):
+    age_decls = {}
+    urgent = []
+    if time_block is None:
+        return age_decls, urgent
+    for item in time_block[1]:
+        if item[0] == "time_urgent":
+            urgent.extend(item[1])
+        elif item[0] == "time_age":
+            _, name, binder, cond, loc = item
+            if name in age_decls:
+                _err(f"duplicate age '{name}'", loc=loc)
+            if binder is not None:
+                if binder[0] != "binder_typed":
+                    _err("indexed age expects syntax `age m[x: T] while ...`", loc=loc)
+                _require_simple_type_name(binder[2], loc)
+            age_decls[name] = {
+                "name": name,
+                "binder": binder,
+                "cond": cond,
+                "loc": loc,
+            }
+    return age_decls, urgent
+
+
+def _expand_time(out, time_block, deadlines, action_aliases, action_maps, implements, consts):
+    if deadlines and time_block is None:
+        _err("deadline requires a time block", loc=deadlines[0]["loc"])
+    if time_block is None:
+        return
+
+    age_decls, urgent_names = _parse_time_block(time_block)
+    if "tick" in action_aliases or any(item[0] == "action" and item[1] == "tick" for item in out):
+        _err("time block cannot generate tick: action 'tick' already exists", loc=time_block[2])
+
+    deadline_by_age = {}
+    for d in deadlines:
+        if d["age"] not in age_decls:
+            _err(f"deadline references undeclared age '{d['age']}'", loc=d["loc"])
+        k = eval_const(d["bound"], consts, {})
+        if k < 0:
+            _err("deadline bound must be non-negative", loc=d["loc"])
+        d["bound_value"] = k
+        deadline_by_age.setdefault(d["age"], []).append(d)
+
+    for name, age in age_decls.items():
+        refs = deadline_by_age.get(name, [])
+        if not refs:
+            _err(f"unused age '{name}'", loc=age["loc"])
+        age["cap"] = max(d["bound_value"] for d in refs) + 1
+
+    action_by_name = {item[1]: item for item in out if item[0] == "action"}
+    urgent_enabled = []
+    for name in urgent_names:
+        physical = action_aliases.get(name)
+        if not physical:
+            _err(f"unknown urgent action '{name}'", loc=time_block[2])
+        for phys in physical:
+            action = action_by_name.get(phys)
+            if action is None:
+                _err(f"unknown urgent action '{name}'", loc=time_block[2])
+            urgent_enabled.append(_action_enabled_expr(action))
+
+    existing_types = {item[1] for item in out if item[0] in ("type", "enum", "struct")}
+    state_decls = []
+    init_stmts = []
+    ages = []
+    for age in age_decls.values():
+        type_name = _generated_age_type_name(age["name"], existing_types)
+        age["type_name"] = type_name
+        out.append(("type", type_name, ("num", 0), ("num", age["cap"])))
+        if age["binder"] is None:
+            state_decls.append(("decl", age["name"], ("name", type_name)))
+            init_stmts.append(("assign", ("var", age["name"]), ("num", 0), age["loc"]))
+        else:
+            key_ty = _require_simple_type_name(age["binder"][2], age["loc"])
+            state_decls.append(("decl", age["name"], ("map", ("name", key_ty), ("name", type_name))))
+            idx = ("var", age["binder"][1])
+            init_stmts.append((
+                "forall_stmt",
+                age["binder"],
+                [("assign", ("index", age["name"], idx), ("num", 0), age["loc"])],
+                age["loc"],
+            ))
+        ages.append(age)
+
+    if state_decls:
+        out.append(("state", state_decls))
+    _merge_init(out, init_stmts)
+
+    tick_body = []
+    if urgent_enabled:
+        tick_body.append(("requires", ("not", _or_all(urgent_enabled)), time_block[2]))
+    tick_body.extend(_build_age_tick_stmt(age) for age in ages)
+    out.append(("action", "tick", [], tick_body, time_block[2], False, None))
+    action_aliases.setdefault("tick", []).append("tick")
+    if implements is not None:
+        action_maps.append(("action_map", "tick", [], ("stutter",), time_block[2]))
+
+    idx = 1
+    for d in deadlines:
+        age = age_decls[d["age"]]
+        out.append((
+            "invariant",
+            _deadline_invariant_name(d["meta"]["id"], d["age"], idx),
+            _deadline_expr(age, d["bound"]),
+            d["loc"],
+            d["meta"],
+        ))
+        idx += 1
+
+
 def _expand_requirements_with_display(ast, base_dir):
     _, name, items = ast
     out = []
@@ -149,6 +448,9 @@ def _expand_requirements_with_display(ast, base_dir):
     action_aliases = {}
     implements = None
     acceptances = []
+    time_block = None
+    deadlines = []
+    consts = _collect_consts(items)
 
     for item in items:
         tag = item[0]
@@ -170,10 +472,22 @@ def _expand_requirements_with_display(ast, base_dir):
                 "maps": map_items,
                 "loc": loc,
             }
+        elif tag == "time":
+            if time_block is not None:
+                _err("requirements may declare time block only once", loc=item[2])
+            time_block = item
         elif tag == "requirement":
             _, req_id, text, req_items, loc = item
             req_meta = _meta(req_id, text)
             for child in req_items:
+                if child[0] == "deadline":
+                    deadlines.append({
+                        "age": child[1],
+                        "bound": child[2],
+                        "loc": child[3],
+                        "meta": req_meta,
+                    })
+                    continue
                 expanded, maps = _expand_item(child, req_meta, display_names, action_aliases)
                 out.extend(expanded)
                 action_maps.extend(maps)
@@ -192,6 +506,8 @@ def _expand_requirements_with_display(ast, base_dir):
             expanded, maps = _expand_item(item, None, display_names, action_aliases)
             out.extend(expanded)
             action_maps.extend(maps)
+
+    _expand_time(out, time_block, deadlines, action_aliases, action_maps, implements, consts)
 
     if implements is not None:
         mapping_items = [("impl", name), ("abs", implements["abs"])]

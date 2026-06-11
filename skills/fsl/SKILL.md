@@ -148,6 +148,7 @@ verify/induction/scenarios/Monitor は同じに使える:
 
 ## 高度な機能(必要になったら reference.md の該当節)
 
+- **非機能要件**: 権限・監査・容量・信頼性挙動は通常の invariant/leadsTo で書ける。SLA/タイムアウトは requirements の `time`+`deadline`(reference.md §11)
 - **Seq の集約**: `sum(i: Idx of log.at(i) where i < log.size())`(Idx は容量を覆うドメイン型)
 - **合成**: `compose X { use A as a from "a.fsl" ... }`、同期アクション
   `action s(..) = a.act(..) || b.act2(..) { .. }`、`internal a.act`

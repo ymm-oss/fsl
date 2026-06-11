@@ -194,12 +194,12 @@ ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def
                   | const_def | type_def | enum_def | struct_def
-                  | state_def | init_def | req_action_def
+                  | state_def | init_def | req_action_def | time_def
                   | invariant_def | reachable_def | leadsto_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def
 requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
-?requirement_item: req_action_def | invariant_def | reachable_def | leadsto_def
+?requirement_item: req_action_def | invariant_def | reachable_def | leadsto_def | deadline_def
 req_action_def: req_fair_action | req_plain_action
 req_fair_action: _FAIR "action" NAME "(" [param ("," param)*] ")" maps_clause? meta_tag? "{" req_action_item* "}"
 req_plain_action: "action" NAME "(" [param ("," param)*] ")" maps_clause? meta_tag? "{" req_action_item* "}"
@@ -213,6 +213,11 @@ acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expec
 acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
 acceptance_arg: ref_expr
 acceptance_expect: "expect" expr
+time_def: "time" "{" time_item* "}"
+?time_item: urgent_def | age_def
+urgent_def: "urgent" NAME ("," NAME)* ","?
+age_def: "age" NAME ["[" binder "]"] "while" expr
+deadline_def: "deadline" NAME "<=" expr
 
 business_def: "business" NAME "{" business_item* "}"
 ?business_item: actor_def | case_def | process_def | kpi_def | policy_def | goal_def
@@ -777,6 +782,21 @@ class Ast(Transformer):
             elif isinstance(p, tuple) and p[0] == "acceptance_expect":
                 expect = p
         return ("acceptance", str(ac_id), text, steps, expect, _loc(meta))
+
+    def urgent_def(self, meta, *names):
+        return ("time_urgent", list(names), _loc(meta))
+
+    def age_def(self, meta, name, binder=None, cond=None):
+        if cond is None:
+            cond = binder
+            binder = None
+        return ("time_age", name, binder, cond, _loc(meta))
+
+    def time_def(self, meta, *items):
+        return ("time", [i for i in items if i], _loc(meta))
+
+    def deadline_def(self, meta, name, bound):
+        return ("deadline", name, bound, _loc(meta))
 
     def actor_def(self, meta, *names):
         return ("biz_actor", list(names), _loc(meta))

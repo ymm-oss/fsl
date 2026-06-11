@@ -487,7 +487,40 @@ policy は invariant / leadsTo に、kpi はゴーストカウンタ+整合 inva
 業務ゴール到達不能 = reachable_failed、放置されるケース = leadsTo 反例として
 機械検出できる。
 
-### 13.4 扱わないもの(層の線引き)
+### 13.5 非機能要件(NFR)の書き方
+
+NFR の過半は機能要件と同じ機構で書ける(詳細・実証は `DESIGN-nfr.md`):
+
+| NFR | 書き方 |
+|---|---|
+| 権限(管理者のみ X) | `requires role[u] == Admin` + ゴースト `done_by_admin` の invariant |
+| 監査完全性 | 横断 invariant(例: `audit.balance == cleared + pending + withdrawn`) |
+| 容量・上限 | 有界型 / Seq 容量 / `count(...) <= N` invariant |
+| 信頼性の挙動 | 故障注入 action(`crash`)+ モード状態 + `fair recover` + 復旧 leadsTo |
+| **SLA / タイムアウト** | `time` ブロック + `deadline`(下記) |
+| 確率・パーセンタイル・実時間 ms | **対象外**(文書に書く) |
+
+SLA は離散時刻で安全性として検査する(`requirements` 内):
+
+```fsl
+time {
+  urgent start, finish                    // enabled の間、時間(tick)は進まない
+  age waitAge[r: Req] while pending[r]    // tick で +1、条件が偽なら 0
+}
+requirement NFR-1 "受理から4tick以内に完了" {
+  deadline waitAge <= 4
+}
+```
+
+- tick は自動生成され、urgency 規律(「システムは暇なとき仕事を先延ばし
+  しない」)がそのガードになる。urgent を指定しないと大半の deadline は
+  飢餓トレースで violated になる — それは「スケジューリング前提が無い」
+  ことの正しい指摘。
+- BMC 検査は即動く。帰納証明には時間予算の補助 invariant
+  (`age + 残り作業 <= K` 型)が要ることが多い(CTI から導出。実例:
+  `examples/nfr/`)。
+
+### 13.6 扱わないもの(層の線引き)
 
 実時間・SLA 時間値・確率・非機能要件・散文の根拠は FSL の外
 (各層の文書に書く)。FSL は各成果物の**検査可能な骨格**を担う。

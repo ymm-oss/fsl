@@ -1,0 +1,54 @@
+// Discrete-time SLA in the requirements dialect.
+// The time block generates age counter state, init, tick, and the NFR-1
+// deadline invariant. The hand-written kernel spike in this directory shows
+// the lower-level version with explicit tick-side work progress.
+requirements SlaWorker {
+  type Req = 0..1
+
+  state {
+    pending: Map<Req, Bool>,
+    served:  Map<Req, Bool>,
+    serving: Option<Req>
+  }
+  init {
+    forall r: Req { pending[r] = false  served[r] = false }
+    serving = none
+  }
+
+  time {
+    urgent start, finish
+    age age[r: Req] while pending[r]
+  }
+
+  action submit(r: Req) {
+    requires not pending[r]
+    requires not served[r]
+    pending[r] = true
+  }
+
+  fair action start(r: Req) {
+    requires pending[r]
+    requires serving == none
+    serving = some(r)
+  }
+
+  fair action finish() {
+    requires serving is some(r)
+    pending[r] = false
+    served[r] = true
+    serving = none
+  }
+
+  invariant PendingServedExclusive {
+    forall r: Req { not (pending[r] and served[r]) }
+  }
+  invariant ServingIsPending {
+    serving is some(r) => pending[r]
+  }
+
+  requirement NFR-1 "submitted requests finish within 4 ticks" {
+    deadline age <= 4
+  }
+
+  reachable BothServed { forall r: Req { served[r] } }
+}

@@ -246,3 +246,19 @@ requirements ReturnSystemReq {
 ### 層の線引き
 
 実時間・SLA 時間値・確率・非機能要件・散文は FSL の外(各層の文書に書く)。
+
+## 11. 非機能要件(NFR)
+
+| NFR | 書き方 |
+|---|---|
+| 権限 | requires でロール検査 + ゴースト invariant |
+| 監査完全性 | 横断 invariant(bank_system パターン) |
+| 容量 | 有界型・Seq 容量・count invariant |
+| 信頼性の挙動 | 故障注入 action + モード状態 + fair recover + 復旧 leadsTo |
+| SLA/タイムアウト | requirements の `time { urgent ...  age m[x: T] while P }` + `deadline m <= K` |
+| 確率・%・実時間 | 対象外(文書へ) |
+
+SLA の要点: tick は自動生成。`urgent` に「先延ばしされないアクション」を列挙
+しないと飢餓トレースで violated になる(それが正しい診断)。BMC は即動く。
+帰納証明には `age + 残り作業 <= K` 型の時間予算補助 invariant を CTI から
+導出する(実例: examples/nfr/)。
