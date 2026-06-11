@@ -1,0 +1,87 @@
+// Discrete-time SLA spike: 1 worker, service takes 2 ticks.
+// SLA: a submitted request is finished within 4 ticks (tagged invariant).
+// Urgency discipline: tick may fire only when no urgent action is enabled.
+spec SlaSpike {
+  type Req = 0..1
+  type Age = 0..5
+  type Work = 0..2
+
+  state {
+    pending: Map<Req, Bool>,
+    served:  Map<Req, Bool>,
+    age:     Map<Req, Age>,
+    serving: Option<Req>,
+    busy:    Work
+  }
+  init {
+    forall r: Req { pending[r] = false  served[r] = false  age[r] = 0 }
+    serving = none
+    busy = 0
+  }
+
+  action submit(r: Req) {
+    requires not pending[r]
+    requires not served[r]
+    pending[r] = true
+    age[r] = 0
+  }
+
+  // urgent: tick は start/finish が enabled の間は進めない(下の tick の requires に反映)
+  fair action start(r: Req) {
+    requires pending[r]
+    requires serving == none
+    serving = some(r)
+    busy = 2
+  }
+
+  fair action finish() {
+    requires serving is some(r)
+    requires busy == 0
+    pending[r] = false
+    served[r] = true
+    serving = none
+  }
+
+  action tick() {
+    // urgency: start も finish も enabled でないときだけ時間が進む
+    requires (serving != none) or (forall r: Req { not pending[r] })
+    requires not (serving != none and busy == 0)
+    if busy > 0 { busy = busy - 1 }
+    forall r: Req {
+      if pending[r] {
+        if age[r] < 5 { age[r] = age[r] + 1 }
+      }
+    }
+  }
+
+  invariant PendingServedExclusive {
+    forall r: Req { not (pending[r] and served[r]) }
+  }
+  invariant ServingIsPending {
+    serving is some(r) => pending[r]
+  }
+  invariant BusyImpliesServing {
+    busy > 0 => serving != none
+  }
+
+  invariant ServingAgeBudget {
+    serving is some(r) => age[r] + busy <= 4
+  }
+  invariant WaitingAgeBudget {
+    forall r: Req {
+      pending[r] => ((serving is some(s) and s == r)
+                     or (serving != none and age[r] + busy <= 2)
+                     or (serving == none and age[r] <= 2))
+    }
+  }
+  invariant NoServiceYet {
+    (serving == none and (forall s: Req { not served[s] }))
+      => (forall r: Req { age[r] == 0 })
+  }
+
+  invariant SLA "NFR-1: 受理されたリクエストは4tick以内に完了する" {
+    forall r: Req { pending[r] => age[r] <= 4 }
+  }
+
+  reachable BothServed { forall r: Req { served[r] } }
+}
