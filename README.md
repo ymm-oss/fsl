@@ -96,6 +96,18 @@ conformant / generated、1 = violated / refinement_failed / reachable_failed /
 unknown_cti / nonconformant、2 = 仕様エラー、3 = 内部エラー。
 `cart_v1_buggy.fsl` は自動境界チェック（`type_bound`）の最短反例トレースを返します。
 
+## AI エージェント向けスキル
+
+FSL は学習データに存在しない言語のため、AI エージェント(Claude Code 等)が
+仕様を書く際は **Agent Skill** で言語仕様と修復プロトコルを文脈に供給する:
+
+- `.claude/skills/fsl/SKILL.md` — ワークフロー・修復プロトコル・最小構文
+  (このリポジトリで作業する Claude Code には自動で認識される)
+- `.claude/skills/fsl/reference.md` — 凝縮版の完全言語リファレンスカード
+
+別プロジェクトで FSL を使う場合は `.claude/skills/fsl/` をそのプロジェクトの
+`.claude/skills/` か `~/.claude/skills/` にコピーする。
+
 ## テスト
 
 ```bash
