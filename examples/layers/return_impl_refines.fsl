@@ -1,0 +1,24 @@
+refinement ImplRefinesRequirements {
+  impl ReturnImpl
+  abs  ReturnSystemReq
+
+  map sys[c: CaseId] = RCase {
+    st: if d[c].st == New then New
+        else if d[c].st == AutoApproved then AutoApproved
+        else if d[c].st == MgrQueue then MgrQueue
+        else if d[c].st == MgrApproved then MgrApproved
+        else if d[c].st == MgrRejected then MgrRejected
+        else Paid,
+    amount: d[c].amount
+  }
+  map paid_count = paid
+
+  // branches で分割された要件層アクションは内部名(submit__b1/b2)で対応する
+  action submit_small(c, a) -> submit__b1(c, a)
+  action submit_large(c, a) -> submit__b2(c, a)
+  action mgr_approve(c)     -> mgr_approve(c)
+  action mgr_reject(c)      -> mgr_reject(c)
+  action pay_submit(c)      -> pay(c)
+  action pay_confirm(c)     -> stutter
+  action outbox_send()      -> stutter
+}

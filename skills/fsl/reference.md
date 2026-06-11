@@ -173,3 +173,76 @@ map seats[s: SeatId] = if slots[s].st == Sold then slots[s].holder else none
 ランダムウォークテストは Monitor(仕様の具象インタプリタ)をオラクルに
 実装と1ステップずつ突き合わせる。失敗 = 実装と仕様の乖離(どちらが正かは
 trace を見て判断)。
+
+## 10. 3層方言(コンサル / 要件 / 設計)
+
+層間は refinement で連鎖: 業務 ⊒ 要件 ⊒ 設計 ⊒ 実装(testgen/replay)。
+全方言はカーネルへの AST 展開なので、§7 の全コマンドがそのまま使える。
+
+### 宣言タグ(全層共通)
+
+invariant / reachable / leadsTo / action の `{` 直前に `"ID: 原文"`:
+`invariant PaidLedger "REQ-3: 台帳整合" { ... }` →
+violated / unknown_cti / coverage 診断 / scenarios に `requirement: {id, text}`。
+
+### business(コンサル層)
+
+```fsl
+business ReturnHandling {
+  actor Customer, Manager            // 名簿(by の検証)
+  case Return = 0..2                 // → ドメイン型
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager   // → fair action approve(c: Return)
+    transition reject  Requested -> Rejected by Manager
+    transition refund  Approved  -> Refunded by Manager
+  }
+  kpi refunded counts Return in Refunded      // → ゴースト+自動整合 invariant(流入遷移で+1。流出遷移があれば type エラー)
+  policy PAY-2 "申請は必ず裁定される" responds {
+    forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
+  }                                           // invariant { 式 } 形も可
+  goal AllSettled "全件完了しうる" { forall c: Return { ... } }   // → reachable
+}
+```
+
+`stage(c)` は束縛 c の型からプロセスの状態 Map(`return_stage[c]`)に展開される。
+
+### requirements(要件層)
+
+```fsl
+requirements ReturnSystemReq {
+  implements ReturnHandling from "return_policy.fsl" {   // 上位層への写像(省略可)
+    map return_stage[c: CaseId] = if sys[c].st == New then Requested else ...
+    map refunded = paid_count
+  }
+  // 型・state・init はカーネル構文そのまま
+  requirement REQ-1 "閾値以下は自動承認" {
+    fair action submit(c: CaseId, a: Amount) {
+      requires sys[c].st == New
+      requires a > 0
+      branches {                                          // データ依存の分岐対応・自動分割
+        when a <= AUTO_LIMIT { sys[c] = ... } maps approve(c)
+        when a > AUTO_LIMIT  { sys[c] = ... } maps stutter
+      }
+    }
+  }
+  requirement REQ-3 "支払いは承認後のみ" {
+    fair action pay(c: CaseId) maps refund(c) { ... }     // maps = 上位層 action 対応
+    invariant PaidLedger { ... }
+  }
+  acceptance AC-1 "小額は支払われる" { submit(0, 1)  pay(0)  expect sys[0].st == Paid }
+}
+```
+
+- `implements` があると `fslc verify` が上位層 refine を同時実行 →
+  結果 JSON に `implements: {abs, result}`。
+- `acceptance` は check 時に具象 Monitor で再生検証(失敗は `kind: "acceptance"`)。
+  scenarios に `acceptance_<ID>` として出力され testgen に流れる。
+- branches の分割アクションの表示は `submit[a <= AUTO_LIMIT]`、**下流の
+  refinement 写像から参照するときは内部名 `submit__b1`/`submit__b2`**(現状の制約)。
+- requirement 内の要素には自動で {id, text} メタが付く。
+
+### 層の線引き
+
+実時間・SLA 時間値・確率・非機能要件・散文は FSL の外(各層の文書に書く)。

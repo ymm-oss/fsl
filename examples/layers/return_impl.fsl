@@ -1,0 +1,39 @@
+spec ReturnImpl {
+  type CaseId = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum DSt { New, AutoApproved, MgrQueue, MgrApproved, MgrRejected, PaySubmitted, PayConfirmed }
+  struct DCase { st: DSt, amount: Amount }
+  state {
+    d: Map<CaseId, DCase>,
+    paid: Int,
+    outbox: Seq<CaseId, 3>
+  }
+  init { forall c: CaseId { d[c] = DCase { st: New, amount: 0 } }  paid = 0  outbox = Seq {} }
+
+  fair action submit_small(c: CaseId, a: Amount) {
+    requires d[c].st == New  requires a > 0  requires a <= AUTO_LIMIT
+    d[c] = DCase { st: AutoApproved, amount: a }
+  }
+  action submit_large(c: CaseId, a: Amount) {
+    requires d[c].st == New  requires a > AUTO_LIMIT
+    d[c] = DCase { st: MgrQueue, amount: a }
+  }
+  fair action mgr_approve(c: CaseId) { requires d[c].st == MgrQueue  d[c].st = MgrApproved }
+  fair action mgr_reject(c: CaseId)  { requires d[c].st == MgrQueue  d[c].st = MgrRejected }
+  fair action pay_submit(c: CaseId) {
+    requires d[c].st == AutoApproved or d[c].st == MgrApproved
+    requires outbox.size() < 3
+    d[c].st = PaySubmitted
+    paid = paid + 1
+    outbox = outbox.push(c)
+  }
+  fair action pay_confirm(c: CaseId) { requires d[c].st == PaySubmitted  d[c].st = PayConfirmed }
+  fair action outbox_send() {
+    requires outbox.size() > 0
+    outbox = outbox.pop()
+  }
+  invariant PaidLedgerD {
+    paid == count(c: CaseId where d[c].st == PaySubmitted or d[c].st == PayConfirmed)
+  }
+}

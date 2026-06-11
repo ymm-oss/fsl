@@ -167,7 +167,7 @@ def test_biz_policy_can_replace_handwritten_return_policy_for_refinement(tmp_pat
     mapping = tmp_path / "return_refines_biz.fsl"
     mapping.write_text(
         r'''refinement SystemRefinesBizPolicy {
-  impl ReturnSystem
+  impl ReturnSystemReq
   abs  ReturnPolicy
 
   map return_stage[c: Return] =
@@ -179,8 +179,8 @@ def test_biz_policy_can_replace_handwritten_return_policy_for_refinement(tmp_pat
     else Refunded
   map refunded = paid_count
 
-  action submit_small(c, a) -> approve(c)
-  action submit_large(c, a) -> stutter
+  action submit__b1(c, a) -> approve(c)
+  action submit__b2(c, a) -> stutter
   action mgr_approve(c)     -> approve(c)
   action mgr_reject(c)      -> reject(c)
   action pay(c)             -> refund(c)
@@ -196,5 +196,5 @@ def test_biz_policy_can_replace_handwritten_return_policy_for_refinement(tmp_pat
         depth=6,
     )
 
-    assert result["result"] == "refines"
+    assert result["result"] == "refines", result
     assert result["abs"] == "ReturnPolicy"

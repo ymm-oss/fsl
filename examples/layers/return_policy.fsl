@@ -1,26 +1,21 @@
-spec ReturnPolicy {
-  type CaseId = 0..2
-  enum Stage { Requested, Approved, Rejected, Refunded }
-  state { cases: Map<CaseId, Stage>, refunded: Int }
-  init { forall c: CaseId { cases[c] = Requested }  refunded = 0 }
+business ReturnHandling {
+  actor Customer, Manager
+  case Return = 0..2
 
-  fair action approve(c: CaseId) { requires cases[c] == Requested  cases[c] = Approved }
-  fair action reject(c: CaseId)  { requires cases[c] == Requested  cases[c] = Rejected }
-  fair action refund(c: CaseId)  {
-    requires cases[c] == Approved
-    cases[c] = Refunded
-    refunded = refunded + 1
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition reject  Requested -> Rejected by Manager
+    transition refund  Approved  -> Refunded by Manager
   }
 
-  // ポリシー: 返金件数は Refunded 件数と常に一致(会計整合)
-  invariant RefundLedgerConsistent {
-    refunded == count(c: CaseId where cases[c] == Refunded)
+  kpi refunded counts Return in Refunded
+
+  policy PAY-2 "申請は必ず裁定される" responds {
+    forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
   }
-  // ポリシー(応答性): 申請は必ずいつか裁定される
-  leadsTo EveryRequestDecided {
-    forall c: CaseId {
-      cases[c] == Requested ~> (cases[c] == Approved or cases[c] == Rejected or cases[c] == Refunded)
-    }
+  goal AllSettled "全件が完了しうる" {
+    forall c: Return { stage(c) == Refunded or stage(c) == Rejected }
   }
-  reachable AllSettled { forall c: CaseId { cases[c] == Refunded or cases[c] == Rejected } }
 }

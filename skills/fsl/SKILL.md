@@ -129,6 +129,23 @@ spec Cart {
 - 「X の後に Y が起きた」という**履歴**は状態で書けない → ゴースト変数
   (`ever_locked` 等)を足すか、応答性質なら `leadsTo`。
 
+## 3層方言(コンサル / 要件 / 設計)
+
+仕様は3つの層で書ける。**業務 ⊒ 要件 ⊒ 設計 ⊒ 実装**を refinement で連鎖させる
+(構文は reference.md §10)。どの層もカーネルに展開されるので
+verify/induction/scenarios/Monitor は同じに使える:
+
+- `business Name { process/policy/kpi/goal }` — コンサル層。規程の矛盾=invariant
+  違反、死んだ業務ステップ=coverage 診断、業務ゴール到達不能=reachable_failed
+- `requirements Name { requirement REQ-1 "原文" {...} / acceptance / branches /
+  implements Abs from "file" {map ...} }` — 要件層。`implements` があると verify が
+  上位層への refine を同時実行(結果 JSON の `implements`)。`acceptance` は
+  check 時に再生検証され scenarios → testgen に流れる
+- 設計層は通常の `spec`(本書の主対象)。要件層へ `fslc refine` で接続
+- **トレーサビリティ**: 宣言の `{` 直前に `"ID: 原文"` タグ。violated / CTI /
+  coverage / scenarios に `requirement: {id, text}` が載る — 反例を読んだら
+  必ず requirement を見て、その要件の意図に沿って修復すること
+
 ## 高度な機能(必要になったら reference.md の該当節)
 
 - **Seq の集約**: `sum(i: Idx of log.at(i) where i < log.size())`(Idx は容量を覆うドメイン型)

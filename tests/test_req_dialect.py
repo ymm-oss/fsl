@@ -6,6 +6,35 @@ from fslc.cli import run_check, run_scenarios, run_verify
 ROOT = Path(__file__).resolve().parents[1]
 
 
+OLD_RETURN_POLICY_SRC = r'''spec ReturnPolicy {
+  type CaseId = 0..2
+  enum Stage { Requested, Approved, Rejected, Refunded }
+  state { cases: Map<CaseId, Stage>, refunded: Int }
+  init { forall c: CaseId { cases[c] = Requested }  refunded = 0 }
+
+  fair action approve(c: CaseId) { requires cases[c] == Requested  cases[c] = Approved }
+  fair action reject(c: CaseId)  { requires cases[c] == Requested  cases[c] = Rejected }
+  fair action refund(c: CaseId)  {
+    requires cases[c] == Approved
+    cases[c] = Refunded
+    refunded = refunded + 1
+  }
+
+  // ポリシー: 返金件数は Refunded 件数と常に一致(会計整合)
+  invariant RefundLedgerConsistent {
+    refunded == count(c: CaseId where cases[c] == Refunded)
+  }
+  // ポリシー(応答性): 申請は必ずいつか裁定される
+  leadsTo EveryRequestDecided {
+    forall c: CaseId {
+      cases[c] == Requested ~> (cases[c] == Approved or cases[c] == Rejected or cases[c] == Refunded)
+    }
+  }
+  reachable AllSettled { forall c: CaseId { cases[c] == Refunded or cases[c] == Rejected } }
+}
+'''
+
+
 REQ_SRC = r'''requirements ReturnSystemReq {
   implements ReturnPolicy from "return_policy.fsl" {
     map cases[c: CaseId] =
@@ -60,10 +89,7 @@ REQ_SRC = r'''requirements ReturnSystemReq {
 
 
 def _write_req(tmp_path, src=REQ_SRC):
-    (tmp_path / "return_policy.fsl").write_text(
-        (ROOT / "examples/layers/return_policy.fsl").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
+    (tmp_path / "return_policy.fsl").write_text(OLD_RETURN_POLICY_SRC, encoding="utf-8")
     req = tmp_path / "return_req.fsl"
     req.write_text(src, encoding="utf-8")
     return req
