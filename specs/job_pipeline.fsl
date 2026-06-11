@@ -1,0 +1,92 @@
+// Job pipeline: submitted jobs enter a FIFO queue, a single worker
+// processes the head, jobs end Done or Failed (with retry once).
+// Exercises: Seq + Map<_, struct> + enum interplay, partial_op guards,
+// ghost counter, induction-aimed invariants.
+spec JobPipeline {
+  type JobId  = 0..2
+  type Tries  = 0..2
+  const QCAP = 3
+
+  enum JSt { New, Queued, Running, Done, Failed }
+
+  struct Job { st: JSt, tries: Tries }
+
+  state {
+    jobs:    Map<JobId, Job>,
+    queue:   Seq<JobId, QCAP>,
+    running: Option<JobId>
+  }
+
+  init {
+    forall j: JobId { jobs[j] = Job { st: New, tries: 0 } }
+    queue = Seq {}
+    running = none
+  }
+
+  action submit(j: JobId) {
+    requires jobs[j].st == New
+    requires queue.size() < QCAP
+    jobs[j].st = Queued
+    queue = queue.push(j)
+  }
+
+  action start() {
+    requires running == none
+    requires queue.size() > 0
+    let j = queue.head()
+    running = some(j)
+    jobs[j].st = Running
+    queue = queue.pop()
+  }
+
+  action finish_ok() {
+    requires running is some(j)
+    jobs[j].st = Done
+    running = none
+  }
+
+  action finish_retry() {
+    requires running is some(j)
+    requires jobs[j].tries < 1
+    requires queue.size() < QCAP
+    jobs[j].st = Queued
+    jobs[j].tries = jobs[j].tries + 1
+    queue = queue.push(j)
+    running = none
+  }
+
+  action finish_fail() {
+    requires running is some(j)
+    requires jobs[j].tries >= 1
+    jobs[j].st = Failed
+    running = none
+  }
+
+  invariant QueuedAreQueued {
+    forall i in 0..2 {
+      i < queue.size() => jobs[queue.at(i)].st == Queued
+    }
+  }
+
+  invariant RunningMatches {
+    running is some(j) => jobs[j].st == Running
+  }
+
+  // Auxiliary invariant from a k-induction CTI (queue = [0, 0, 0]):
+  // without it, a phantom state where one job sits in the queue twice
+  // breaks QueuedAreQueued after start() pops only the first copy.
+  invariant NoDupQueue {
+    forall i in 0..2 {
+      forall j in 0..2 {
+        (i < j and j < queue.size()) => not (queue.at(i) == queue.at(j))
+      }
+    }
+  }
+
+  reachable SomeDone {
+    exists j: JobId { jobs[j].st == Done }
+  }
+  reachable RetriedThenFailed {
+    exists j: JobId { jobs[j].st == Failed }
+  }
+}

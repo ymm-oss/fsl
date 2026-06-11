@@ -1,0 +1,42 @@
+// Append-only audit log for a small account.
+// Exercises: append-only Seq growth, the at()-guard idiom, and the
+// index-domain aggregate idiom: sum(i: Idx of log.at(i) where
+// i < log.size()) folds a Seq even though sum() ranges over a domain
+// type, because at() is total in property context and the where guard
+// keeps it on the live prefix.
+spec AuditLog {
+  type Amount = 0..3
+  type Idx    = 0..3
+  const LCAP = 4
+
+  state {
+    balance: Int,
+    log:     Seq<Amount, LCAP>
+  }
+
+  init {
+    balance = 0
+    log = Seq {}
+  }
+
+  action deposit(a: Amount) {
+    requires a > 0
+    requires log.size() < LCAP
+    balance = balance + a
+    log = log.push(a)
+  }
+
+  invariant BalanceNonNegative { balance >= 0 }
+
+  invariant EntriesPositive {
+    forall i in 0..3 {
+      i < log.size() => log.at(i) > 0
+    }
+  }
+
+  invariant BalanceMatchesLog {
+    balance == sum(i: Idx of log.at(i) where i < log.size())
+  }
+
+  reachable LogFull { log.size() == 4 }
+}
