@@ -5,7 +5,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from .parser import parse
+from .parser import parse_src
 from .model import build_spec
 from .bmc import scenarios
 
@@ -15,8 +15,10 @@ def _py_literal(obj):
 
 
 def generate_test_file(spec_path, depth=8, deadlock_mode="warn"):
-    src = Path(spec_path).read_text(encoding="utf-8")
-    spec = build_spec(parse(src))
+    path = Path(spec_path)
+    src = path.read_text(encoding="utf-8")
+    ast, display_names = parse_src(src, str(path.parent))
+    spec = build_spec(ast, display_names)
     sc = scenarios(spec, depth, deadlock_mode=deadlock_mode, source_lines=src.splitlines())
     if sc.get("result") != "scenarios":
         raise RuntimeError(f"cannot generate tests: scenarios returned {sc.get('result')}")

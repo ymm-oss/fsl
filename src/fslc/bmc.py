@@ -6,7 +6,17 @@ from contextlib import contextmanager
 
 import z3
 
-from .model import FslError, binder_range, domain_range, eval_const, phys_z3_sort, z3_sort
+from .model import (
+    FslError,
+    binder_range,
+    display_keyed,
+    display_label,
+    domain_range,
+    eval_const,
+    phys_z3_sort,
+    resolve_action_name,
+    z3_sort,
+)
 
 
 def _err(msg, kind="semantics", loc=None, expected=None, hint=None):
@@ -1102,11 +1112,18 @@ def _map_domain(kty, spec):
     return range(lo, hi + 1)
 
 
+def _display_state_keys(logical, spec):
+    dn = spec.get("display_names") or {}
+    if not dn:
+        return logical
+    return {dn.get(k, k): v for k, v in logical.items()}
+
+
 def logical_state_values(model, state, spec):
     out = {}
     for n, ty in spec["state"].items():
         out[n] = _logical_val(model, state, n, ty, spec)
-    return out
+    return _display_state_keys(out, spec)
 
 
 def _logical_val(model, state, name, ty, spec):
@@ -1374,7 +1391,7 @@ def _build_trace(model, states, choices, instances, spec, upto):
             inst = instances[idx]
             act = inst["action_def"]
             entry["action"] = {
-                "name": inst["action"],
+                "name": display_label(inst["action"], spec),
                 "params": {pk: _display_param(pk, pv, act, spec)
                            for pk, pv in inst["binds"].items()},
             }
@@ -1408,7 +1425,7 @@ def _last_action(model, choices, instances, step, spec):
     inst = instances[idx]
     act = inst["action_def"]
     la = {
-        "name": inst["action"],
+        "name": display_label(inst["action"], spec),
         "params": {pk: _display_param(pk, pv, act, spec) for pk, pv in inst["binds"].items()},
     }
     if act.get("loc"):
@@ -1862,10 +1879,11 @@ def _finalize_action_coverage(coverage, s, instances, by_action, states, depth, 
                               source_lines=None):
     out = {}
     for aname, fired in coverage.items():
+        label = display_label(aname, spec)
         if fired:
-            out[aname] = True
+            out[label] = True
         else:
-            out[aname] = _diagnose_action_coverage(
+            out[label] = _diagnose_action_coverage(
                 s, aname, by_action[aname], instances, states, depth, spec, expr_cache,
                 source_lines=source_lines,
             )
@@ -1883,6 +1901,47 @@ def _trace_to_scenario_steps(trace):
             })
         expected_states.append(entry["state"])
     return steps, expected_states
+
+
+def _display_scenario(scenario, spec):
+    out = dict(scenario)
+    prop = out.get("property")
+    action = out.get("action")
+    kind = out.get("kind")
+    if prop is not None:
+        out["property"] = display_label(prop, spec)
+    if action is not None:
+        out["action"] = display_label(action, spec)
+    if out.get("final_check") is not None:
+        out["final_check"] = display_label(out["final_check"], spec)
+    if kind == "reachable" and prop is not None:
+        out["name"] = f"reach_{display_label(prop, spec)}"
+    elif kind == "action_coverage" and action is not None:
+        out["name"] = f"cover_{display_label(action, spec)}"
+    return out
+
+
+def _display_output(result, spec):
+    if not spec.get("display_names"):
+        return result
+    out = dict(result)
+    if "invariants_checked" in out:
+        out["invariants_checked"] = [display_label(n, spec) for n in out["invariants_checked"]]
+    if "reachables" in out:
+        out["reachables"] = display_keyed(out["reachables"], spec)
+    if "k_used" in out:
+        out["k_used"] = display_keyed(out["k_used"], spec)
+    if "leads_to" in out:
+        out["leads_to"] = display_keyed(out["leads_to"], spec)
+    if "invariant" in out:
+        out["invariant"] = display_label(out["invariant"], spec)
+    if "unreached" in out:
+        out["unreached"] = [
+            {**u, "name": display_label(u["name"], spec)} for u in out["unreached"]
+        ]
+    if "scenarios" in out:
+        out["scenarios"] = [_display_scenario(s, spec) for s in out["scenarios"]]
+    return out
 
 
 def _and_path_ast(path_ast, extra):
@@ -2222,7 +2281,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
 def verify(spec, depth, deadlock_mode="warn", source_lines=None):
     explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode)
     if explored["result"] != "explored":
-        return explored
+        return _display_output(explored, spec)
 
     depth = explored["depth"]
     coverage = explored["coverage"]
@@ -2240,21 +2299,21 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
     unreached = [{"name": reach["name"], "loc": reach.get("loc")} for reach in pending_reachables]
 
     if unreached:
-        return {
+        return _display_output({
             "result": "reachable_failed",
             "spec": explored["spec"],
             "unreached": unreached,
             "depth": depth,
             "action_coverage": coverage,
             "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
-        }
+        }, spec)
 
     if deadlock_violation is not None:
-        return deadlock_violation
+        return _display_output(deadlock_violation, spec)
 
     lt_violation, leads_to = _check_leadstos(explored, spec)
     if lt_violation is not None:
-        return lt_violation
+        return _display_output(lt_violation, spec)
 
     warnings = [_warn(w["message"], w.get("hint")) if isinstance(w, dict) and "message" in w
                 else _warn(str(w)) for w in spec.get("warnings", [])]
@@ -2281,13 +2340,13 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
     }
     if leads_to is not None:
         result["leads_to"] = leads_to
-    return result
+    return _display_output(result, spec)
 
 
 def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
     explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode, track_cover=True)
     if explored["result"] != "explored":
-        return explored
+        return _display_output(explored, spec)
 
     depth = explored["depth"]
     s = explored["solver"]
@@ -2308,17 +2367,17 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
     )
 
     if pending_reachables:
-        return {
+        return _display_output({
             "result": "reachable_failed",
             "spec": explored["spec"],
             "unreached": [{"name": r["name"], "loc": r.get("loc")} for r in pending_reachables],
             "depth": depth,
             "action_coverage": coverage_diag,
             "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
-        }
+        }, spec)
 
     if deadlock_violation is not None:
-        return deadlock_violation
+        return _display_output(deadlock_violation, spec)
 
     scenario_list = []
 
@@ -2338,7 +2397,7 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
     warnings = []
     for aname, cov in coverage_diag.items():
         if cov is True:
-            info = cover_info.get(aname)
+            info = cover_info.get(resolve_action_name(aname, spec))
             if info is None:
                 continue
             trace = _build_cover_trace(
@@ -2381,14 +2440,14 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
             "note": "after these steps no action is enabled",
         })
 
-    return {
+    return _display_output({
         "result": "scenarios",
         "spec": explored["spec"],
         "depth": depth,
         "convention": _SCENARIOS_CONVENTION,
         "scenarios": scenario_list,
         "warnings": warnings,
-    }
+    }, spec)
 
 
 def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
@@ -2451,7 +2510,7 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
     if remaining:
         inv, k, model = last_cti
         trace = _build_trace(model, states, choices, instances, spec, k)
-        return {
+        return _display_output({
             "result": "unknown_cti",
             "spec": spec["name"],
             "invariant": inv["name"],
@@ -2461,7 +2520,7 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
                 "violated_at": k,
             },
             "hint": _CTI_HINT,
-        }
+        }, spec)
 
     warnings = [
         w for w in base.get("warnings", [])
@@ -2484,4 +2543,4 @@ def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
         result["note"] = (
             f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
         )
-    return result
+    return _display_output(result, spec)

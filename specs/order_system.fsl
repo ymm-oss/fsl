@@ -1,0 +1,22 @@
+compose OrderSystem {
+  use ShoppingCart as cart from "cart_v1.fsl"
+  use Payment      as pay  from "payment.fsl"
+
+  state { orders_linked: Int }
+  init  { orders_linked = 0 }
+
+  action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) {
+    requires pay.payments[p].st == Authorized
+    requires pay.payments[p].amount > 0
+    orders_linked = orders_linked + 1
+  }
+
+  internal cart.checkout
+  internal pay.capture
+
+  invariant LinkedNonNeg { orders_linked >= 0 }
+  reachable PaidOrder {
+    exists p: pay.PayId { pay.payments[p].st == Captured }
+  }
+}

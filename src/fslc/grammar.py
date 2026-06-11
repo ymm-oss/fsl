@@ -4,9 +4,25 @@ from lark import Lark, Transformer, v_args
 # ---------------------------------------------------------------- grammar
 
 GRAMMAR = r"""
-start: spec_def | refinement_def
+start: spec_def | refinement_def | compose_def
 
 spec_def: "spec" NAME "{" item* "}"
+
+compose_def: "compose" NAME "{" compose_item* "}"
+?compose_item: use_def | internal_def | compose_state | compose_init
+             | sync_action | action_def
+             | invariant_def | reachable_def | leadsto_def
+use_def: "use" NAME "as" NAME "from" STRING
+internal_def: "internal" NAME "." NAME
+compose_state: "state" "{" var_decl ("," var_decl)* ","? "}"
+compose_init: "init" "{" stmt* "}"
+sync_action: "fair"? "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body "{" action_item* "}"
+glue_action: fair_action | plain_action
+sync_body: sync_ref ("||" sync_ref)*
+sync_ref: NAME "." NAME "(" [expr ("," expr)*] ")"
+compose_param: NAME ":" qname -> param_typed
+             | NAME "in" expr ".." expr -> param_range
+qname: NAME ("." NAME)?
 
 refinement_def: "refinement" NAME "{" refinement_item* "}"
 ?refinement_item: refinement_impl | refinement_abs | map_def | refinement_action
@@ -47,7 +63,7 @@ init_def: "init" "{" stmt* "}"
 action_def: fair_action | plain_action
 fair_action: "fair" "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
 plain_action: "action" NAME "(" [param ("," param)*] ")" "{" action_item* "}"
-param: NAME ":" NAME -> param_typed
+param: NAME ":" qname -> param_typed
      | NAME "in" expr ".." expr -> param_range
 ?action_item: requires_clause | ensures_clause | let_clause | stmt
 requires_clause: "requires" expr
@@ -65,7 +81,7 @@ lvalue: NAME "[" expr "]" "." NAME -> lvalue_map_field
       | NAME "[" expr "]" -> lvalue_index
       | NAME -> lvalue_var
 
-binder: NAME ":" NAME ["where" expr] -> binder_typed
+binder: NAME ":" qname ["where" expr] -> binder_typed
        | NAME "in" expr ".." expr -> binder_range
 
 invariant_def: "invariant" NAME "{" expr "}"
@@ -112,8 +128,8 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "Set" "{" [expr_list] "}" -> set_lit
      | "Seq" "{" [expr_list] "}" -> seq_lit
      | NAME struct_fields -> struct_lit
-     | "count" "(" NAME ":" NAME "where" expr ")" -> count_e
-     | "sum" "(" NAME ":" NAME "of" expr ["where" expr] ")" -> sum_e
+     | "count" "(" NAME ":" qname "where" expr ")" -> count_e
+     | "sum" "(" NAME ":" qname "of" expr ["where" expr] ")" -> sum_e
      | "min" "(" expr "," expr ")" -> min_e
      | "max" "(" expr "," expr ")" -> max_e
      | "abs" "(" expr ")" -> abs_e
@@ -126,6 +142,7 @@ expr_list: expr ("," expr)*
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 INT: /[0-9]+/
+STRING: /"[^"]*"/
 COMMENT: /\/\/[^\n]*/
 %import common.WS
 %ignore WS
@@ -487,6 +504,68 @@ class Ast(Transformer):
 
     def refinement_def(self, meta, name, *items):
         return ("refinement", name, [i for i in items if i])
+
+    def STRING(self, *args):
+        s = str(args[-1])
+        return s[1:-1]
+
+    def qname(self, meta, first, second=None):
+        if second is None:
+            return first
+        return ("qname", first, second)
+
+    def use_def(self, meta, spec_name, alias, path):
+        return ("use", spec_name, alias, path, _loc(meta))
+
+    def internal_def(self, meta, alias, action):
+        return ("internal", alias, action, _loc(meta))
+
+    def compose_state(self, meta, *decls):
+        return ("state", [d for d in decls if d])
+
+    def compose_init(self, meta, *stmts):
+        return ("init", list(stmts))
+
+    def sync_ref(self, meta, alias, action, *args):
+        return ("sync_ref", alias, action, list(args))
+
+    def sync_body(self, meta, *refs):
+        return list(refs)
+
+    def sync_action(self, meta, *parts):
+        fair = False
+        idx = 0
+        first = parts[0] if parts else None
+        if first == "fair" or (hasattr(first, "type") and first.type == "FAIR"):
+            fair = True
+            idx = 1
+        elif isinstance(first, str) and first == "fair":
+            fair = True
+            idx = 1
+        name = parts[idx]
+        rest = parts[idx + 1:]
+        params, sync_refs, body_items = [], None, []
+        for r in rest:
+            if r is None:
+                continue
+            if isinstance(r, tuple) and r[0] in ("param_typed", "param_range"):
+                params.append(r)
+            elif isinstance(r, list) and r and isinstance(r[0], tuple) and r[0][0] == "sync_ref":
+                sync_refs = r
+            elif isinstance(r, tuple) and r[0] in (
+                "requires", "ensures", "let", "assign", "if", "forall_stmt",
+            ):
+                body_items.append(r)
+            elif not isinstance(r, (tuple, list)):
+                continue
+            elif isinstance(r, tuple) and r[0] == "sync_ref":
+                sync_refs = [r]
+        if sync_refs is None:
+            raise ValueError("sync action missing sync body")
+        return ("sync_action", name, params, sync_refs, body_items, _loc(meta), fair)
+
+    def compose_def(self, meta, name, *items):
+        return ("compose", name, [i for i in items if i])
 
 
 PARSER = Lark(

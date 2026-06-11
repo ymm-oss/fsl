@@ -659,7 +659,37 @@ def generate_bounds_invariants(logical_state, phys_vars, types_meta):
     return invs
 
 
-def build_spec(tree):
+def display_label(name, spec):
+    """Map physical compose-prefixed identifiers to logical display labels."""
+    if not name or not isinstance(name, str):
+        return name
+    dn = spec.get("display_names") or {}
+    if name in dn:
+        return dn[name]
+    for prefix in ("_bounds_", "_partial_"):
+        if name.startswith(prefix):
+            inner = name[len(prefix):]
+            if inner in dn:
+                return f"{prefix}{dn[inner]}"
+    return name
+
+
+def resolve_action_name(name, spec):
+    """Resolve a display action label back to the physical action name."""
+    dn = spec.get("display_names") or {}
+    for phys, disp in dn.items():
+        if disp == name:
+            return phys
+    return name
+
+
+def display_keyed(mapping, spec):
+    if not mapping:
+        return mapping
+    return {display_label(k, spec): v for k, v in mapping.items()}
+
+
+def build_spec(tree, display_names=None):
     _, name, items = tree
     consts = {}
     for it in items:
@@ -762,12 +792,13 @@ def build_spec(tree):
         "reachables": reachables,
         "leadstos": leadstos,
         "warnings": warnings,
+        "display_names": dict(display_names or {}),
     }
 
 
-def check_spec(tree):
+def check_spec(tree, display_names=None):
     """Syntax/name/type check only; returns result dict for fslc check."""
-    spec = build_spec(tree)
+    spec = build_spec(tree, display_names)
     return {
         "result": "ok",
         "spec": spec["name"],

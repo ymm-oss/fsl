@@ -579,8 +579,9 @@ CTI →「補助 invariant の提案」は LLM が得意な帰納的一般化で
 - **v2.0**: 公平性注釈(`fair action ...`)と有界 `leadsTo`(**実装済み lite**:
   `DESIGN-temporal.md` 参照)、実装橋の本体(**実装済み**:
   `DESIGN-bridge.md` — `fslc.runtime.Monitor` / `fslc replay` / `fslc testgen`)、
-  複数 spec の合成(**設計**: `DESIGN-compose.md`)と refinement(**実装済み**:
-  `DESIGN-refinement.md` — `fslc refine`)。
+  複数 spec の合成(**実装済み**: `DESIGN-compose.md` — `compose` / 同期アクション /
+  `internal` / `specs/order_system.fsl`)と refinement(**実装済み**:
+  `DESIGN-refinement.md` — `fslc refine`)。**v2.0 ロードマップの項目はすべて実装済み。**
 
 ---
 

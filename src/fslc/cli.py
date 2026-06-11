@@ -5,7 +5,9 @@ import argparse
 
 from lark.exceptions import UnexpectedInput, VisitError
 
-from .parser import parse, parse_refinement
+from pathlib import Path
+
+from .parser import parse, parse_src, parse_refinement
 from .model import build_spec, check_spec, FslError
 from .bmc import verify, prove, scenarios
 from .refine import build_refinement, refine
@@ -48,11 +50,15 @@ def _parse_expected(e):
     return "valid FSL syntax"
 
 
+def _parse_file(file, src):
+    return parse_src(src, str(Path(file).parent))
+
+
 def run_check(file):
     try:
         src = open(file, encoding="utf-8").read()
-        ast = parse(src)
-        return _envelope(check_spec(ast))
+        ast, display_names = _parse_file(file, src)
+        return _envelope(check_spec(ast, display_names))
     except UnexpectedInput as e:
         return _envelope({
             "result": "error",
@@ -80,8 +86,8 @@ def run_check(file):
 
 def _read_spec(file):
     src = open(file, encoding="utf-8").read()
-    ast = parse(src)
-    return build_spec(ast), src.splitlines()
+    ast, display_names = _parse_file(file, src)
+    return build_spec(ast, display_names), src.splitlines()
 
 
 def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
@@ -264,7 +270,7 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
             open(output, "w", encoding="utf-8").write(content)
         return _envelope({
             "result": "generated",
-            "spec": build_spec(parse(open(file, encoding="utf-8").read()))["name"],
+            "spec": _read_spec(file)[0]["name"],
             "output": out_path,
             "content": content,
         })

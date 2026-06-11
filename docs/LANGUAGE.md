@@ -326,7 +326,57 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 `refine` が忠実性を担保**。abs の `ensures` / invariant は refine では再検査せず、
 abs 側で別途検証済みであることを前提とする。
 
-## 11. 実装への橋
+## 11. 合成 (compose)
+
+複数の検証済みコンポーネント spec を **名前空間付きでマージ**し、1 つの
+システム仕様にする。展開後は通常の単一 spec になるため、`verify` / `prove` /
+`scenarios` / `Monitor` / `replay` / `testgen` / `refine` はそのまま使える
+(設計: `DESIGN-compose.md`)。
+
+```fsl
+compose OrderSystem {
+  use ShoppingCart as cart from "cart_v1.fsl"
+  use Payment      as pay  from "payment.fsl"
+
+  state { orders_linked: Int }
+  init  { orders_linked = 0 }
+
+  // 同期アクション: 複数コンポーネントのアクションを同一ステップで実行
+  action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) {
+    requires pay.payments[p].st == Authorized
+    orders_linked = orders_linked + 1
+  }
+
+  // 単独実行から除外(同期経由でのみ発火)
+  internal cart.checkout
+  internal pay.capture
+
+  invariant LinkedNonNeg { orders_linked >= 0 }
+  reachable PaidOrder {
+    exists p: pay.PayId { pay.payments[p].st == Captured }
+  }
+}
+```
+
+- `use <SpecName> as <alias> from "<相対パス>"` — パスは compose ファイル基準。
+  spec 名はファイル内名と一致必須。alias は compose 内で一意。ネスト compose は不可。
+- コンポーネントの型・状態・アクションは `alias.Name` で参照する。
+- **同期アクション** `action <name>(...) = <a>.<act>(...) || <b>.<act2>(...) { ... }`:
+  各コンポーネントアクションの requires / 本体 / ensures をマージし、追加文は
+  合成側状態への代入のみ(同一コンポーネントの 2 アクション同期は不可)。
+- `internal <alias>.<action>` — そのアクションをインターリービングから除外。
+- 通常の `action`( `=` なし)も書ける(グルーアクション)。
+- JSON 表示: 物理名 `alias__x` は `alias.x` として出力される(状態キー・アクション名、
+  invariant / reachable 名、トレース、scenarios、Monitor すべて)。
+
+```bash
+fslc check  specs/order_system.fsl
+fslc verify specs/order_system.fsl --depth 8
+fslc scenarios specs/order_system.fsl
+```
+
+## 12. 実装への橋
 
 仕様を証明したあと、実装と結線するための3つの入口がある
 (`DESIGN-bridge.md` 参照)。
@@ -357,7 +407,7 @@ fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # Adapter 未実装なら全
 `replay` は有限ログのみを検査するため **`leadsTo` は対象外**(出力 `note` に明記)。
 `Monitor` は init が決定的である必要がある(forall 一括代入可)。
 
-## 12. ライブラリ API
+## 13. ライブラリ API
 
 ```python
 from fslc import parse, build_spec, verify, prove, Monitor

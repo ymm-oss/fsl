@@ -5,8 +5,8 @@ import itertools
 from copy import deepcopy
 from pathlib import Path
 
-from .model import FslError, binder_range, domain_range, eval_const
-from .parser import parse
+from .model import FslError, binder_range, display_label, domain_range, eval_const, resolve_action_name
+from .parser import parse_src
 from .model import build_spec
 from .bmc import build_instances, compute_changes, _collect_partial_op_sites
 
@@ -914,11 +914,18 @@ def _exec_init(spec):
     return state
 
 
+def _display_state_keys(logical, spec):
+    dn = spec.get("display_names") or {}
+    if not dn:
+        return logical
+    return {dn.get(k, k): v for k, v in logical.items()}
+
+
 def phys_to_logical(state, spec):
     out = {}
     for n, ty in spec["state"].items():
         out[n] = _logical_val(state, n, ty, spec)
-    return out
+    return _display_state_keys(out, spec)
 
 
 def _logical_val(state, name, ty, spec):
@@ -1048,12 +1055,15 @@ def _eval_requires(requires, lets, state, param_binds, spec, source_lines=None, 
 class Monitor:
     def __init__(self, source_or_path):
         if isinstance(source_or_path, (str, Path)) and Path(source_or_path).is_file():
-            src = Path(source_or_path).read_text(encoding="utf-8")
+            path = Path(source_or_path)
+            src = path.read_text(encoding="utf-8")
             self._source_lines = src.splitlines()
-            self._spec = build_spec(parse(src))
+            ast, display_names = parse_src(src, str(path.parent))
+            self._spec = build_spec(ast, display_names)
         elif isinstance(source_or_path, str):
             self._source_lines = source_or_path.splitlines()
-            self._spec = build_spec(parse(source_or_path))
+            ast, display_names = parse_src(source_or_path)
+            self._spec = build_spec(ast, display_names)
         elif isinstance(source_or_path, dict) and "state" in source_or_path:
             self._spec = source_or_path
             self._source_lines = None
@@ -1095,12 +1105,13 @@ class Monitor:
                 continue
             act = inst["action_def"]
             out.append({
-                "action": inst["action"],
+                "action": display_label(inst["action"], self._spec),
                 "params": {pk: _display_param(pk, pv, act, self._spec) for pk, pv in inst["binds"].items()},
             })
         return out
 
     def _find_action(self, name, params):
+        name = resolve_action_name(name, self._spec)
         act_def = None
         for act in self._spec["actions"]:
             if act["name"] == name:
@@ -1162,18 +1173,20 @@ class Monitor:
         if bad:
             return {"ok": False, **bad, "action": action, "params": params, "state": old_logical}
 
+        disp = display_label(inst["action"], self._spec)
+
         try:
             guards_ok, binds, viol = _eval_requires(
                 inst["requires"], inst["lets"], old_phys, inst["binds"], self._spec,
-                self._source_lines, action_name=action,
+                self._source_lines, action_name=inst["action"],
             )
         except _PartialOp as po:
             return {
                 "ok": False,
                 "kind": "partial_op",
-                "name": f"_partial_{action}",
+                "name": display_label(f"_partial_{inst['action']}", self._spec),
                 "loc": po.loc,
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
                 "hint": _PARTIAL_OP_HINT,
@@ -1183,7 +1196,7 @@ class Monitor:
                 "ok": False,
                 "kind": "internal",
                 "message": ex.message,
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
             }
@@ -1192,7 +1205,7 @@ class Monitor:
                 "ok": False,
                 "kind": "internal",
                 "message": str(ex),
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
             }
@@ -1201,14 +1214,14 @@ class Monitor:
             out = {
                 "ok": False,
                 "kind": viol["kind"],
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
             }
             if viol["kind"] == "requires_failed":
                 out["requires"] = viol["requires"]
             else:
-                out["name"] = viol["name"]
+                out["name"] = display_label(viol["name"], self._spec)
                 out["loc"] = viol.get("loc")
                 out["hint"] = viol.get("hint")
             return out
@@ -1217,7 +1230,7 @@ class Monitor:
             return {
                 "ok": False,
                 "kind": "requires_failed",
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
             }
@@ -1228,9 +1241,9 @@ class Monitor:
             return {
                 "ok": False,
                 "kind": "partial_op",
-                "name": f"_partial_{action}",
+                "name": display_label(f"_partial_{inst['action']}", self._spec),
                 "loc": po.loc,
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
                 "hint": _PARTIAL_OP_HINT,
@@ -1240,7 +1253,7 @@ class Monitor:
                 "ok": False,
                 "kind": "internal",
                 "message": ex.message,
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
             }
@@ -1249,7 +1262,7 @@ class Monitor:
                 "ok": False,
                 "kind": "internal",
                 "message": str(ex),
-                "action": action,
+                "action": disp,
                 "params": params,
                 "state": old_logical,
             }
@@ -1270,7 +1283,7 @@ class Monitor:
                     "ok": False,
                     "kind": "internal",
                     "message": msg,
-                    "action": action,
+                    "action": disp,
                     "params": params,
                     "state": old_logical,
                 }
@@ -1278,9 +1291,9 @@ class Monitor:
                 return {
                     "ok": False,
                     "kind": "ensures",
-                    "name": inst["action"],
+                    "name": disp,
                     "loc": ens.get("loc"),
-                    "action": action,
+                    "action": disp,
                     "params": params,
                     "state": old_logical,
                 }
@@ -1294,7 +1307,7 @@ class Monitor:
                     "ok": False,
                     "kind": "internal",
                     "message": msg,
-                    "action": action,
+                    "action": disp,
                     "params": params,
                     "state": old_logical,
                 }
@@ -1302,9 +1315,9 @@ class Monitor:
                 return {
                     "ok": False,
                     "kind": _violation_kind(inv),
-                    "name": inv["name"],
+                    "name": display_label(inv["name"], self._spec),
                     "loc": inv.get("loc"),
-                    "action": action,
+                    "action": disp,
                     "params": params,
                     "state": old_logical,
                 }
@@ -1312,4 +1325,4 @@ class Monitor:
         self._phys = new_phys
         self._logical = new_logical
         changes = compute_changes(old_logical, new_logical)
-        return {"ok": True, "state": dict(new_logical), "changes": changes}
+        return {"ok": True, "action": disp, "state": dict(new_logical), "changes": changes}

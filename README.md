@@ -34,6 +34,7 @@ fsl/
 │   ├── mutex_queue.fsl     #   FIFO ミューテックス (Option + Seq)
 │   ├── job_pipeline.fsl    #   リトライ付きジョブキュー (Seq + struct)
 │   ├── audit_log.fsl       #   追記ログ + Seq 集約イディオム
+│   ├── order_system.fsl    #   compose: cart_v1 + payment 同期 checkout/capture
 │   └── cart_{buggy,fixed}.fsl     # v0 互換サンプル
 ├── src/fslc/               # 検証器パッケージ
 │   ├── __init__.py         #   公開API: parse / build_spec / verify
@@ -84,6 +85,7 @@ fslc replay specs/cart_v1.fsl --trace events.json  # イベントログの適合
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py  # pytest 適合性テスト雛形を生成
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
                                                   # 詳細仕様が抽象仕様を refine するか検査
+fslc verify specs/order_system.fsl --depth 8    # compose: cart + payment を同期合成
 
 # インストールせずモジュール実行でも可
 python -m fslc verify specs/cart_v1_buggy.fsl
