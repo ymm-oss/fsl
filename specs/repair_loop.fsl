@@ -1,0 +1,47 @@
+// Self-spec: fslc's own write -> verify -> repair loop, written in FSL.
+// FSL dogfooding itself at the protocol level — the toolchain's intended
+// workflow (check -> verify -> induction, repair on failure) modeled as a
+// state machine. ProvedWasVerified is not 1-inductive on its own; the CTI
+// exposes the phantom state {Verified, ever_verified=false}, and the aux
+// invariant VerifiedImpliesEver (added below, exactly the CTI->repair move
+// this very spec describes) makes it `proved`.
+// Run with --deadlock ignore: Proved is terminal and the edit budget can
+// run out, so dead ends are intended, not bugs.
+spec RepairLoop {
+  type Edits = 0..3
+  enum Status { Draft, CheckErr, Checked, Violated, ReachFailed, Verified, UnknownCti, Proved }
+
+  state {
+    status: Status,
+    edits:  Edits,
+    ever_verified: Bool       // ghost: passed `verify` at least once
+  }
+
+  init { status = Draft  edits = 0  ever_verified = false }
+
+  action check_pass() { requires status == Draft  status = Checked }
+  action check_fail() { requires status == Draft  status = CheckErr }
+
+  action verify_violated()  { requires status == Checked  status = Violated }
+  action verify_reachfail() { requires status == Checked  status = ReachFailed }
+  action verify_ok()        { requires status == Checked  status = Verified  ever_verified = true }
+
+  action induction_proved() { requires status == Verified  status = Proved }
+  action induction_cti()    { requires status == Verified  status = UnknownCti }
+
+  action repair() {
+    requires status == CheckErr or status == Violated
+          or status == ReachFailed or status == UnknownCti
+    requires edits < 3
+    status = Draft
+    edits = edits + 1
+  }
+
+  // Safety: you can only end Proved if verify passed at some point.
+  invariant ProvedWasVerified { status == Proved => ever_verified }
+  // aux invariant derived from the CTI (Verified must imply ever_verified):
+  invariant VerifiedImpliesEver { status == Verified => ever_verified }
+
+  reachable ReachProved { status == Proved }
+  reachable RepairedThenProved { status == Proved and edits >= 1 }
+}
