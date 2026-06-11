@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import textwrap
 from pathlib import Path
 
@@ -14,7 +16,23 @@ def _py_literal(obj):
     return repr(obj)
 
 
-def generate_test_file(spec_path, depth=8, deadlock_mode="warn"):
+def _scenario_function_name(display_name, seen_names):
+    safe_name = re.sub(r"[^A-Za-z0-9_]+", "_", display_name).strip("_")
+    count = seen_names.get(safe_name, 0) + 1
+    seen_names[safe_name] = count
+    if count > 1:
+        safe_name = f"{safe_name}_{count}"
+    return f"test_scenario_{safe_name}"
+
+
+def _spec_path_line(spec_path, output_path=None):
+    if output_path is None:
+        return f"SPEC_PATH = {str(Path(spec_path).resolve())!r}"
+    relative = os.path.relpath(Path(spec_path).resolve(), Path(output_path).resolve().parent)
+    return f"SPEC_PATH = Path(__file__).resolve().parent / {str(relative)!r}"
+
+
+def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=None):
     path = Path(spec_path)
     src = path.read_text(encoding="utf-8")
     ast, display_names = parse_src(src, str(path.parent))
@@ -33,12 +51,13 @@ def generate_test_file(spec_path, depth=8, deadlock_mode="warn"):
         'Connect Adapter to your implementation, or use MonitorSelfAdapter for self-check.',
         '"""',
         "import random",
+        "from pathlib import Path",
         "",
         "import pytest",
         "",
         "from fslc.runtime import Monitor",
         "",
-        f"SPEC_PATH = {spec_path!r}",
+        _spec_path_line(spec_path, output_path),
         "",
         "",
         "class Adapter:",
@@ -83,11 +102,14 @@ def generate_test_file(spec_path, depth=8, deadlock_mode="warn"):
         "",
     ]
 
+    scenario_function_names = {}
     for scen in scenario_data:
         name = scen["name"]
+        function_name = _scenario_function_name(name, scenario_function_names)
         lines.extend([
             "",
-            f"def test_scenario_{name}(adapter):",
+            f"def {function_name}(adapter):",
+            f"    {_py_literal(f'Scenario: {name}')}",
             "    if not _adapter_ready(adapter):",
             f"        pytest.skip('Adapter not implemented')",
             "    adapter.reset()",

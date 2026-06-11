@@ -1,0 +1,40 @@
+// Two-ledger bank implementation: deposits land in a pending ledger
+// and are settled to cleared asynchronously. The abstract balance is
+// cleared + pending; settle is invisible (stutter) through that map.
+// Withdrawals are only allowed against cleared funds (a *stronger*
+// guard than the abstract one — refinement permits this).
+spec BankAccountImpl {
+  type Amount = 0..3
+
+  state {
+    cleared: Int,
+    pending: Int
+  }
+
+  init {
+    cleared = 0
+    pending = 0
+  }
+
+  action submit_deposit(a: Amount) {
+    requires a > 0
+    pending = pending + a
+  }
+
+  action settle() {
+    requires pending > 0
+    cleared = cleared + pending
+    pending = 0
+  }
+
+  action withdraw_cleared(a: Amount) {
+    requires a > 0
+    requires cleared >= a
+    cleared = cleared - a
+  }
+
+  invariant ClearedNonNegative { cleared >= 0 }
+  invariant PendingNonNegative { pending >= 0 }
+
+  reachable Settled { cleared >= 2 and pending == 0 }
+}

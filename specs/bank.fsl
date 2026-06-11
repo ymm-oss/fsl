@@ -1,0 +1,25 @@
+// Abstract bank account: an immediately-consistent balance.
+// The detailed two-ledger implementation (bank_impl.fsl) refines this.
+spec BankAccount {
+  type Amount = 0..3
+
+  state { balance: Int }
+
+  init { balance = 0 }
+
+  action deposit(a: Amount) {
+    requires a > 0
+    balance = balance + a
+    ensures balance == old(balance) + a
+  }
+
+  action withdraw(a: Amount) {
+    requires a > 0
+    requires balance >= a
+    balance = balance - a
+  }
+
+  invariant NonNegative { balance >= 0 }
+
+  reachable Funded { balance >= 2 }
+}

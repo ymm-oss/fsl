@@ -1,0 +1,34 @@
+// Composite: two-ledger bank + append-only audit log.
+// Deposits and withdrawals must go through the audited sync actions
+// (the raw component actions are internal); the cross-component
+// invariant proves the audit trail accounts for every movement.
+compose BankSystem {
+  use BankAccountImpl as bank  from "bank_impl.fsl"
+  use AuditLog        as audit from "audit_log.fsl"
+
+  state { withdrawn: Int }
+  init  { withdrawn = 0 }
+
+  action deposit_audited(a: bank.Amount) =
+      bank.submit_deposit(a) || audit.deposit(a) {
+  }
+
+  action withdraw_audited(a: bank.Amount) =
+      bank.withdraw_cleared(a) {
+    withdrawn = withdrawn + a
+  }
+
+  internal bank.submit_deposit
+  internal bank.withdraw_cleared
+  internal audit.deposit
+
+  invariant AuditAccountsForEverything {
+    audit.balance == bank.cleared + bank.pending + withdrawn
+  }
+
+  invariant WithdrawnNonNegative { withdrawn >= 0 }
+
+  reachable FullCycle {
+    bank.cleared >= 1 and withdrawn >= 1 and audit.log.size() >= 2
+  }
+}

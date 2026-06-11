@@ -1,0 +1,10 @@
+refinement BankImplRefinesBank {
+  impl BankAccountImpl
+  abs  BankAccount
+
+  map balance = cleared + pending
+
+  action submit_deposit(a)   -> deposit(a)
+  action settle()            -> stutter
+  action withdraw_cleared(a) -> withdraw(a)
+}

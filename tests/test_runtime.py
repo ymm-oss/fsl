@@ -1,4 +1,5 @@
 """FSL v2.0 runtime monitor, replay, and testgen tests (DESIGN-bridge §6)."""
+import ast
 import copy
 import json
 import subprocess
@@ -220,6 +221,26 @@ spec NoInit {
     assert "deterministic init" in (exc.value.hint or "")
 
 
+def test_monitor_missing_fsl_path_raises_io():
+    with pytest.raises(FslError) as exc:
+        Monitor("specs/nonexistent.fsl")
+    assert exc.value.kind == "io"
+    assert str(exc.value) == "file not found: specs/nonexistent.fsl"
+
+
+def test_monitor_accepts_direct_fsl_source_string():
+    src = """
+spec DirectSource {
+  state { x: Int }
+  init { x = 0 }
+  action inc() { x = x + 1 }
+  invariant NonNegative { x >= 0 }
+}
+"""
+    mon = Monitor(src)
+    assert mon.state == {"x": 0}
+
+
 def test_replay_conformant_and_nonconformant():
     vr = _run_verify("cart_v1.fsl")
     witness = vr["reachables"]["SoldOut"]["witness"]
@@ -274,6 +295,35 @@ def test_testgen_import_skips_without_adapter():
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "skipped" in proc.stdout.lower()
+
+
+def test_testgen_sanitizes_composed_scenario_function_names():
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "test_bank_system.py"
+        gen = run_testgen(str(SPECS / "bank_system.fsl"), output=str(out))
+        assert gen["result"] == "generated"
+
+        content = out.read_text(encoding="utf-8")
+        compile(content, str(out), "exec")
+        module = ast.parse(content, filename=str(out))
+        test_names = [
+            node.name
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_scenario_")
+        ]
+
+        assert test_names
+        assert all("." not in name for name in test_names)
+        assert "test_scenario_reach_bank_Settled" in test_names
+        assert "test_scenario_cover_bank_settle" in test_names
+
+        docstrings = {
+            node.name: ast.get_docstring(node)
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_scenario_")
+        }
+        assert docstrings["test_scenario_reach_bank_Settled"] == "Scenario: reach_bank.Settled"
+        assert docstrings["test_scenario_cover_bank_settle"] == "Scenario: cover_bank.settle"
 
 
 def test_testgen_self_conformance_with_monitor_adapter():

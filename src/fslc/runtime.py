@@ -1175,6 +1175,13 @@ class Monitor:
             self._source_lines = src.splitlines()
             ast, display_names = parse_src(src, str(path.parent))
             self._spec = build_spec(ast, display_names)
+        elif (
+            isinstance(source_or_path, (str, Path))
+            and "\n" not in str(source_or_path)
+            and "\r" not in str(source_or_path)
+            and str(source_or_path).endswith(".fsl")
+        ):
+            _err(f"file not found: {source_or_path}", kind="io")
         elif isinstance(source_or_path, str):
             self._source_lines = source_or_path.splitlines()
             ast, display_names = parse_src(source_or_path)

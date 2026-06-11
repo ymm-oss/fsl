@@ -181,7 +181,42 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 8. **induction との併用**: leadsTo 付き仕様の `--engine induction` が
    proved + leads_to.checked_to_depth を返す。
 
-## 7. ドキュメント反映
+## 7. leadsTo のシナリオ化(v2.1 で実装)
+
+`fslc scenarios` に応答シナリオを追加する。leadsTo `P ~> Q`(束縛ごと)に
+ついて、**P が成立してから Q が成立するまでの最短トレース**を生成する:
+
+- 探索: 共有展開上で「∃p ≤ t: P(states[p]) ∧ Q(states[t]) ∧
+  ∀q ∈ [p, t-1]: ¬Q(states[q])」を t = 0..K の順に push/pop で判定し、
+  最初に sat になった t のモデルからトレースを構築(p もモデルから特定)。
+- シナリオ形:
+
+```json
+{
+  "name": "respond_WaiterGetsLock_p0",
+  "kind": "leadsTo",
+  "property": "WaiterGetsLock",
+  "bindings": { "p": 0 },
+  "steps": [ ... ],
+  "pending_at": 1,
+  "satisfied_at": 3,
+  "initial_state": { ... },
+  "expected_states": [ ... ]
+}
+```
+
+- P が深さ K 内で一度も成立しない束縛はシナリオを生成せず、warnings に
+  `{message: "leadsTo <name> <bindings>: P never holds within depth K", hint}` を
+  載せる(silent cap にしない)。
+- P∧Q 同時成立(pending_at == satisfied_at)も正当なシナリオとして生成する。
+- 実装位置: scenarios() の reachable シナリオ生成と同じ場所に相乗り。
+  名前は `respond_<性質名>` + 束縛サフィックス(`_p0` 形。サニタイズは
+  testgen 側の既存機構が処理)。
+- テスト: mutex_queue(WaiterGetsLock × 3束縛)でシナリオが生成され
+  steps の Monitor 再生で pending→satisfied が確認できること、
+  P が成立しない束縛の warnings、testgen 生成物が import 可能なこと。
+
+## 8. ドキュメント反映
 
 - DESIGN-v1.md §10 の v2.0 項目に「実装済み(lite): fair / leadsTo」を注記。
 - LANGUAGE.md: §3 に `~>`(leadsTo ブロック専用)、§1 に `fair` と

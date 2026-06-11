@@ -265,7 +265,12 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8):
 def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
     try:
         out_path = output or default_output_name(file)
-        content = generate_test_file(file, depth=depth, deadlock_mode=deadlock_mode)
+        content = generate_test_file(
+            file,
+            depth=depth,
+            deadlock_mode=deadlock_mode,
+            output_path=output if output else None,
+        )
         if write_file and output:
             open(output, "w", encoding="utf-8").write(content)
         return _envelope({
