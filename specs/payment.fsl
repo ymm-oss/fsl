@@ -58,6 +58,13 @@ spec Payment {
 
   invariant LedgerNonNegative { ledger >= 0 }
 
+  // Auxiliary invariant derived from a k-induction CTI: refunds only
+  // accumulate on captured payments, which LedgerMatches needs to be
+  // inductive (rules out phantom states like Authorized with refunded > 0).
+  invariant RefundedOnlyWhenCaptured {
+    forall p: PayId { payments[p].st != Captured => payments[p].refunded == 0 }
+  }
+
   reachable FullyRefunded {
     exists p: PayId {
       payments[p].st == Captured

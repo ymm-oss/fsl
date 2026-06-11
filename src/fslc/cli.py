@@ -7,7 +7,7 @@ from lark.exceptions import UnexpectedInput, VisitError
 
 from .parser import parse
 from .model import build_spec, check_spec, FslError
-from .bmc import verify
+from .bmc import verify, prove
 
 FSL_VERSION = "1.0"
 
@@ -75,11 +75,13 @@ def run_check(file):
                           "message": f"file not found: {file}"})
 
 
-def run_verify(file, depth, deadlock_mode):
+def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
     try:
         src = open(file, encoding="utf-8").read()
         ast = parse(src)
         spec = build_spec(ast)
+        if engine == "induction":
+            return _envelope(prove(spec, k_ind, depth, deadlock_mode=deadlock_mode))
         return _envelope(verify(spec, depth, deadlock_mode=deadlock_mode))
     except UnexpectedInput as e:
         return _envelope({
@@ -110,9 +112,9 @@ def run_verify(file, depth, deadlock_mode):
 
 def exit_code(result):
     r = result.get("result")
-    if r == "verified":
+    if r in ("verified", "proved"):
         return 0
-    if r in ("violated", "reachable_failed"):
+    if r in ("violated", "reachable_failed", "unknown_cti"):
         return 1
     if r == "error":
         kind = result.get("kind")
@@ -135,6 +137,8 @@ def main(argv=None):
     v.add_argument("file")
     v.add_argument("--depth", type=int, default=8)
     v.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    v.add_argument("--k", type=int, default=1, dest="k_ind",
+                   help="max induction depth (induction engine only)")
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
 
     args = ap.parse_args(argv)
@@ -142,14 +146,8 @@ def main(argv=None):
     if args.cmd == "check":
         result = run_check(args.file)
     else:
-        if args.engine == "induction":
-            result = _envelope({
-                "result": "error",
-                "kind": "internal",
-                "message": "induction engine is not implemented in v1.0 (planned for v1.1)",
-            })
-        else:
-            result = run_verify(args.file, args.depth, args.deadlock)
+        result = run_verify(args.file, args.depth, args.deadlock,
+                            engine=args.engine, k_ind=args.k_ind)
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
     sys.exit(exit_code(result))

@@ -59,6 +59,13 @@ spec AuthLockout {
     forall u: UserId { accounts[u].locked => not session[u] }
   }
 
+  // Auxiliary invariant derived from a k-induction CTI: a state with
+  // attempts == 3 but not locked is unreachable, and without this fact
+  // login_fail's else-branch would push attempts past its bound.
+  invariant MaxAttemptsMeansLocked {
+    forall u: UserId { accounts[u].attempts == 3 => accounts[u].locked }
+  }
+
   reachable LockedOut {
     exists u: UserId { accounts[u].locked }
   }

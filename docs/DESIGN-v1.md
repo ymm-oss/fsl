@@ -346,7 +346,8 @@ reachable FullLifecycle {
 ```
 fslc check  <file.fsl>                          # 構文・名前・型検査のみ(高速ループ用)
 fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
-                       [--engine bmc|induction] # induction は v1.1(§9)
+                       [--engine bmc|induction] # induction: §9
+                       [--k N]                  # 最大帰納深さ(既定 1、induction のみ)
                        [--deadlock warn|error|ignore]
 ```
 
@@ -481,15 +482,36 @@ v0 からの差分:
 
 ---
 
-## 9. 帰納的証明エンジン(v1.1 実装、プロトコルは v1 で確定)
+## 9. 帰納的証明エンジン(v1.1)
+
+詳細アルゴリズム・健全性条件・テスト計画は `docs/DESIGN-induction.md` を参照。
 
 `--engine induction` は k 帰納法で invariant の**無限深度証明**を試みる。
 
-- base: 深さ k の BMC(違反すれば通常の `violated`)。
-- step: 「任意の連続 k 状態で invariant が成立 ⇒ k+1 状態目でも成立」を
-  Z3 で判定。unsat なら証明完了 → `result: "proved"`(`depth` なし)。
-- step が sat の場合、その状態は**到達可能とは限らない**。これを
-  `unknown_cti` として返す:
+- **base**: 通常 BMC(深さ `--depth`)。違反すれば通常の `violated`。
+- **step**: 自由状態列 σ₀..σₖ(init なし)で「全 invariant 成立かつ連続遷移」を
+  仮定し、対象 invariant が σₖ で破れるかを Z3 で判定。全 invariant が
+  unsat → `result: "proved"`。sat → `unknown_cti`(到達可能とは限らない CTI)。
+- induction 出力に `deadlock` フィールドは含めない。
+
+**proved:**
+
+```json
+{
+  "fsl": "1.0",
+  "result": "proved",
+  "spec": "OrderWorkflow",
+  "engine": "induction",
+  "k_used": { "ShippedWasPaid": 1, "RevenueConsistent": 2 },
+  "base_depth": 8,
+  "invariants_checked": ["ShippedWasPaid", "RevenueConsistent", "_bounds_orders"],
+  "action_coverage": { "place": true, "pay": true },
+  "reachables": { "FullLifecycle": { "witnessed_at_step": 3, "witness": [ ... ] } },
+  "warnings": []
+}
+```
+
+**unknown_cti:**
 
 ```json
 {
@@ -497,9 +519,16 @@ v0 からの差分:
   "result": "unknown_cti",
   "spec": "OrderWorkflow",
   "invariant": "RevenueConsistent",
-  "k": 1,
-  "cti": { "state": { ... }, "action": { ... }, "next_state": { ... } },
-  "hint": "this state satisfies all invariants but one step leads to a violation; it may be unreachable — add an auxiliary invariant that excludes it, then re-run"
+  "k": 2,
+  "cti": {
+    "states": [
+      { "step": 0, "state": { ... } },
+      { "step": 1, "state": { ... }, "action": { ... }, "changes": { ... } },
+      { "step": 2, "state": { ... }, "action": { ... }, "changes": { ... } }
+    ],
+    "violated_at": 2
+  },
+  "hint": "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run"
 }
 ```
 
@@ -514,7 +543,7 @@ CTI →「補助 invariant の提案」は LLM が得意な帰納的一般化で
 - **v1.0(本書のコア)**: 型システム(ドメイン/enum/Option/struct/Set)、
   `let`/`if`/`is`、`ensures`、`reachable`、`count`/`sum`、自動境界チェック、
   デッドロック検査、JSON v1(diff・loc・スキーマ版数)、`fslc check`。
-- **v1.1**: k 帰納法エンジン(§9)、`fslc scenarios`(reachable witness と
+- **v1.1**: k 帰納法エンジン(§9、実装済み)、`fslc scenarios`(reachable witness と
   coverage トレースから統合テスト雛形 JSON を生成=実装との橋の第一歩)、
   `Seq<T, N>`(容量付き列。配列+長さでエンコード)、unsat core による
   「どの requires が enabled を阻んでいるか」ヒント。

@@ -137,6 +137,41 @@ def make_state(spec, t):
             for p in spec["phys_vars"]}
 
 
+def make_ind_state(spec, t):
+    return {p["phys"]: z3.Const(f"{p['phys']}@ind{t}", phys_z3_sort(p, spec["types"]))
+            for p in spec["phys_vars"]}
+
+
+_CTI_HINT = (
+    "this state sequence satisfies all invariants but leads to a violation; "
+    "the start state may be unreachable — add an auxiliary invariant that excludes it, "
+    "then re-run"
+)
+
+
+def _inv_constraint(inv, state, spec, expr_cache):
+    with _eval_cache_scope(expr_cache, id(state)):
+        return eval_expr(inv["expr"], state, {}, spec)
+
+
+def _enum_phys_constraints(spec, state):
+    """Physical enum range when not already covered by _bounds_* invariants."""
+    cons = []
+    covered = {inv.get("logical_var") for inv in spec["invariants"] if inv.get("implicit")}
+    for n, ty in spec["state"].items():
+        if ty[0] != "enum" or n in covered:
+            continue
+        lo, hi = domain_range(ty, spec["types"])
+        phys = n
+        for p in spec["phys_vars"]:
+            if p["logical"] == n and "part" not in p:
+                phys = p["phys"]
+                break
+        cons.append(state[phys] >= lo)
+        cons.append(state[phys] <= hi)
+    return cons
+
+
 def _is_enum_member(name, spec):
     for info in spec["types"].values():
         if info["kind"] == "enum" and name in info["members"]:
@@ -1450,4 +1485,94 @@ def verify(spec, depth, deadlock_mode="warn"):
         "deadlock": deadlock_info,
         "warnings": warnings,
         "note": f"bounded verification: no violation within depth {depth}",
+    }
+
+
+def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
+    """k-induction: base BMC then step-case invariant proof."""
+    base = verify(spec, base_depth, deadlock_mode=deadlock_mode)
+    if base["result"] in ("violated", "reachable_failed", "error"):
+        return base
+
+    instances = build_instances(spec)
+    invariants = spec["invariants"]
+    expr_cache = {}
+
+    s = z3.Solver()
+    states = []
+    choices = []
+    k_used = {}
+    remaining = list(invariants)
+    last_cti = None
+
+    for k in range(1, k_ind + 1):
+        if k == 1:
+            states = [make_ind_state(spec, 0), make_ind_state(spec, 1)]
+            ch = z3.Int("__ind_choice@0")
+            s.add(ch >= 0, ch < len(instances))
+            s.add(*_enum_phys_constraints(spec, states[0]))
+            for inv in invariants:
+                s.add(_inv_constraint(inv, states[0], spec, expr_cache))
+            with _eval_cache_scope(expr_cache, id(states[0])):
+                s.add(transition(spec, instances, states[0], states[1], ch, expr_cache))
+            choices = [ch]
+        else:
+            nxt = make_ind_state(spec, k)
+            prev = states[k - 1]
+            ch = z3.Int(f"__ind_choice@{k - 1}")
+            s.add(ch >= 0, ch < len(instances))
+            s.add(*_enum_phys_constraints(spec, prev))
+            for inv in invariants:
+                s.add(_inv_constraint(inv, prev, spec, expr_cache))
+            with _eval_cache_scope(expr_cache, id(prev)):
+                s.add(transition(spec, instances, prev, nxt, ch, expr_cache))
+            states.append(nxt)
+            choices.append(ch)
+
+        still_remaining = []
+        for inv in remaining:
+            inv_cond = _inv_constraint(inv, states[k], spec, expr_cache)
+            s.push()
+            s.add(z3.Not(inv_cond))
+            if s.check() == z3.sat:
+                still_remaining.append(inv)
+                last_cti = (inv, k, s.model())
+            else:
+                k_used[inv["name"]] = k
+            s.pop()
+
+        remaining = still_remaining
+        if not remaining:
+            break
+
+    if remaining:
+        inv, k, model = last_cti
+        trace = _build_trace(model, states, choices, instances, spec, k)
+        return {
+            "result": "unknown_cti",
+            "spec": spec["name"],
+            "invariant": inv["name"],
+            "k": k,
+            "cti": {
+                "states": trace,
+                "violated_at": k,
+            },
+            "hint": _CTI_HINT,
+        }
+
+    warnings = [
+        w for w in base.get("warnings", [])
+        if not (isinstance(w, dict) and "deadlock" in w.get("message", ""))
+    ]
+
+    return {
+        "result": "proved",
+        "spec": spec["name"],
+        "engine": "induction",
+        "k_used": k_used,
+        "base_depth": base_depth,
+        "invariants_checked": [i["name"] for i in invariants],
+        "action_coverage": base["action_coverage"],
+        "reachables": base["reachables"],
+        "warnings": warnings,
     }
