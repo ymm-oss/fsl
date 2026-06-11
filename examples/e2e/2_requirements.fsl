@@ -1,0 +1,116 @@
+// ════════════════════════════════════════════════════════════════
+// 経費精算システム要件【PM の成果物】— fsl-req 方言
+//
+// 誰が書くか:
+//   PM/PdM が、業務層の To-Be を壊さない範囲で、プロダクト要件として
+//   金額・閾値・受け入れ基準まで具体化する。
+//
+// 何のために書くか:
+//   コンサルタントの「少額は自動承認、高額はマネージャ裁定」という改革を、
+//   AUTO_LIMIT という判断可能なルールへ落とし込む。implements により、
+//   要件が業務プロセス ExpenseToBe を逸脱していないことも同時に検査する。
+//
+// 読み方:
+//   requirement はチケットや要求仕様書の原文に相当する。acceptance は
+//   そのままシナリオ・実装適合テストの雛形になる。
+// ════════════════════════════════════════════════════════════════
+requirements ExpenseRequirements {
+
+  implements ExpenseToBe from "1_business.fsl" {
+    map claim_stage[c: Claim] =
+      if req[c].st == ReqDraft then Draft
+      else if req[c].st == ReqAutoReview then Submitted
+      else if req[c].st == ReqManagerReview then Submitted
+      else if req[c].st == ReqAutoApproved then Approved
+      else if req[c].st == ReqManagerApproved then Approved
+      else if req[c].st == ReqRejected then Rejected
+      else Paid
+    map paid_claims = paid_count
+  }
+
+  type Claim = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+
+  enum ReqSt {
+    ReqDraft,
+    ReqAutoReview,
+    ReqManagerReview,
+    ReqAutoApproved,
+    ReqManagerApproved,
+    ReqRejected,
+    ReqPaid
+  }
+  struct ReqClaim { st: ReqSt, amount: Amount }
+
+  state {
+    req: Map<Claim, ReqClaim>,
+    paid_count: Int
+  }
+  init {
+    forall c: Claim { req[c] = ReqClaim { st: ReqDraft, amount: 0 } }
+    paid_count = 0
+  }
+
+  requirement REQ-1 "申請者は金額を入力して経費申請を提出できる" {
+    fair action submit(c: Claim, a: Amount) {
+      requires req[c].st == ReqDraft
+      requires a > 0
+      branches {
+        when a <= AUTO_LIMIT {
+          req[c] = ReqClaim { st: ReqAutoReview, amount: a }
+        } maps submit(c)
+        when a > AUTO_LIMIT {
+          req[c] = ReqClaim { st: ReqManagerReview, amount: a }
+        } maps submit(c)
+      }
+    }
+  }
+
+  requirement REQ-2 "AUTO_LIMIT 以下の申請はシステムが自動承認する" {
+    fair action auto_approve(c: Claim) maps auto_approve(c) {
+      requires req[c].st == ReqAutoReview
+      requires req[c].amount <= AUTO_LIMIT
+      req[c].st = ReqAutoApproved
+    }
+  }
+
+  requirement REQ-3 "AUTO_LIMIT を超える申請はマネージャが承認または差戻しする" {
+    fair action mgr_approve(c: Claim) maps mgr_approve(c) {
+      requires req[c].st == ReqManagerReview
+      requires req[c].amount > AUTO_LIMIT
+      req[c].st = ReqManagerApproved
+    }
+
+    fair action mgr_reject(c: Claim) maps reject(c) {
+      requires req[c].st == ReqManagerReview
+      requires req[c].amount > AUTO_LIMIT
+      req[c].st = ReqRejected
+    }
+  }
+
+  requirement REQ-4 "承認済み申請だけを支払い、支払い件数は Paid 状態の件数と一致する" {
+    fair action pay(c: Claim) maps pay(c) {
+      requires req[c].st == ReqAutoApproved or req[c].st == ReqManagerApproved
+      req[c].st = ReqPaid
+      paid_count = paid_count + 1
+    }
+
+    invariant CountsMatchPaid {
+      paid_count == count(c: Claim where req[c].st == ReqPaid)
+    }
+  }
+
+  acceptance AC-1 "承認フロー: 少額申請は自動承認され支払われる" {
+    submit(0, 1)
+    auto_approve(0)
+    pay(0)
+    expect req[0].st == ReqPaid and paid_count == 1
+  }
+
+  acceptance AC-2 "差戻しフロー: 高額申請はマネージャ差戻しで終了する" {
+    submit(1, 2)
+    mgr_reject(1)
+    expect req[1].st == ReqRejected and paid_count == 0
+  }
+}

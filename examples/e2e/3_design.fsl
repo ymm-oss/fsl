@@ -1,0 +1,105 @@
+// ════════════════════════════════════════════════════════════════
+// 経費精算カーネル設計【エンジニアの成果物】— FSL kernel spec
+//
+// 誰が書くか:
+//   エンジニアが、PM 要件を実装可能な内部状態・アクションへ詳細化する。
+//
+// 何のために書くか:
+//   要件層には無い実装寄りの詳細として、支払いを submit/confirm の
+//   2段階に分け、通知 outbox を追加する。それでも PM 要件から見ると
+//   「承認済みだけが支払われ、支払い件数が一致する」ことを refinement で検査する。
+//
+// 読み方:
+//   ここから先は API・ジョブ・通知キューに近い粒度。FSL 非依存の Python 実装は
+//   この spec から生成した conformance harness に接続する。
+// ════════════════════════════════════════════════════════════════
+spec ExpenseDesign {
+  type Claim = 0..2
+  type Amount = 0..3
+  type OutboxIndex = 0..2
+  const AUTO_LIMIT = 1
+  const OUTBOX_CAP = 3
+
+  enum DesignSt {
+    DesignDraft,
+    DesignAutoReview,
+    DesignManagerReview,
+    DesignAutoApproved,
+    DesignManagerApproved,
+    DesignRejected,
+    DesignPaymentSubmitted,
+    DesignPaid
+  }
+  struct DesignClaim { st: DesignSt, amount: Amount }
+
+  state {
+    design: Map<Claim, DesignClaim>,
+    paid_count: Int,
+    outbox: Seq<Claim, OUTBOX_CAP>
+  }
+  init {
+    forall c: Claim { design[c] = DesignClaim { st: DesignDraft, amount: 0 } }
+    paid_count = 0
+    outbox = Seq {}
+  }
+
+  fair action submit_small(c: Claim, a: Amount) {
+    requires design[c].st == DesignDraft
+    requires a > 0
+    requires a <= AUTO_LIMIT
+    design[c] = DesignClaim { st: DesignAutoReview, amount: a }
+  }
+
+  fair action submit_large(c: Claim, a: Amount) {
+    requires design[c].st == DesignDraft
+    requires a > AUTO_LIMIT
+    design[c] = DesignClaim { st: DesignManagerReview, amount: a }
+  }
+
+  fair action auto_approve(c: Claim) {
+    requires design[c].st == DesignAutoReview
+    requires design[c].amount <= AUTO_LIMIT
+    design[c].st = DesignAutoApproved
+  }
+
+  fair action mgr_approve(c: Claim) {
+    requires design[c].st == DesignManagerReview
+    requires design[c].amount > AUTO_LIMIT
+    design[c].st = DesignManagerApproved
+  }
+
+  fair action mgr_reject(c: Claim) {
+    requires design[c].st == DesignManagerReview
+    requires design[c].amount > AUTO_LIMIT
+    design[c].st = DesignRejected
+  }
+
+  fair action pay_submit(c: Claim) {
+    requires design[c].st == DesignAutoApproved or design[c].st == DesignManagerApproved
+    requires outbox.size() < OUTBOX_CAP
+    design[c].st = DesignPaymentSubmitted
+    paid_count = paid_count + 1
+    outbox = outbox.push(c)
+  }
+
+  fair action pay_confirm(c: Claim) {
+    requires design[c].st == DesignPaymentSubmitted
+    design[c].st = DesignPaid
+  }
+
+  fair action outbox_send() {
+    requires outbox.size() > 0
+    outbox = outbox.pop()
+  }
+
+  invariant CountsMatchSubmittedOrPaid {
+    paid_count == count(c: Claim where design[c].st == DesignPaymentSubmitted or design[c].st == DesignPaid)
+  }
+
+  invariant OutboxOnlyForPaymentSubmittedOrPaid {
+    forall i in 0..2 {
+      i < outbox.size() =>
+        (design[outbox.at(i)].st == DesignPaymentSubmitted or design[outbox.at(i)].st == DesignPaid)
+    }
+  }
+}

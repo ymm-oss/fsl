@@ -1,0 +1,71 @@
+// ════════════════════════════════════════════════════════════════
+// 経費精算 To-Be【コンサルタントの成果物】— fsl-biz 方言
+//
+// 誰が書くか:
+//   業務改革を設計するコンサルタントが、現場・経理・統制担当と合意した
+//   「あるべき業務プロセス」を、紙の業務フローと同じ粒度で書く。
+//
+// 何のために書くか:
+//   少額経費はシステムで自動承認し、高額経費は従来どおりマネージャが
+//   裁定する。改革で処理速度を上げても、「提出放置」「承認後未払い」
+//   という統制リスクを増やしていないことを機械検査する。
+//
+// 読み方:
+//   process が業務フロー図、policy が監査・統制ルール、kpi が経営指標、
+//   goal が「この業務が実際に完了まで流れる」ことの確認点。
+//   実装の画面名・API名・DB名はまだ一切出さない。
+// ════════════════════════════════════════════════════════════════
+business ExpenseToBe {
+
+  actor Employee, Manager, Finance, System
+
+  // 検証対象は申請3件分。小さく見えるが、状態の組み合わせは十分にあり、
+  // 「承認を飛ばす」「支払いだけ増える」などの統制抜けはここで再現する。
+  case Claim = 0..2
+
+  // ── 業務プロセス(紙のフロー図と1対1)───────────────────
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+
+    transition submit       Draft     -> Submitted by Employee
+
+    // 改革ポイント: 少額レーンは System が自動承認する。
+    // 「いくらまでを少額とするか」は PM の要件層で決める詳細。
+    transition auto_approve Submitted -> Approved  by System
+
+    // 高額レーンは統制上の人手裁定を残す。
+    transition mgr_approve  Submitted -> Approved  by Manager
+    transition reject       Submitted -> Rejected  by Manager
+
+    // 支払いは承認後に Finance が実行する。
+    transition pay          Approved  -> Paid      by Finance
+  }
+
+  // 経営指標: 支払い完了件数。kpi は同名のカウンタ整合 invariant を
+  // 自動生成するため、支払い件数の数え漏れ・二重計上も検査対象になる。
+  kpi paid_claims counts Claim in Paid
+
+  // ── 統制ポリシー──────────────────────────────────────
+  // ID と原文をそのまま書く。違反した場合、JSON の反例にはこの ID と
+  // 原文が載るため、監査・PM・エンジニアが同じ失敗を見られる。
+
+  policy CTRL-1 "提出された申請は必ず裁定を受ける" responds {
+    forall c: Claim {
+      stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
+    }
+  }
+
+  policy CTRL-2 "承認された申請は必ず支払われる" responds {
+    forall c: Claim {
+      stage(c) == Approved ~> stage(c) == Paid
+    }
+  }
+
+  // ── ゴール────────────────────────────────────────────
+  // 「そもそも Draft から Paid まで到達できるのか」を確認する。
+  // ここが reachable_failed になる改革案は、統制以前に業務として詰まっている。
+  goal CanPay "申請から承認を経て支払い完了に至るケースが存在する" {
+    exists c: Claim { stage(c) == Paid }
+  }
+}

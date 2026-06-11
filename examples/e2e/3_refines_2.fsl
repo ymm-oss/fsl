@@ -1,0 +1,40 @@
+// ════════════════════════════════════════════════════════════════
+// 設計→要件 refinement 対応表【エンジニアの成果物】
+//
+// 誰が書くか:
+//   エンジニアが、設計層の内部状態・内部アクションを PM 要件の語彙へ
+//   どう見せるかを宣言する。
+//
+// 何のために書くか:
+//   支払い submit/confirm や outbox など、実装寄りの詳細を追加しても、
+//   PM 要件から見た振る舞いが増えていないことを検査する。
+//
+// 注意:
+//   2_requirements.fsl の submit は branches で分割されているため、
+//   対応先は内部名 submit__b1 / submit__b2 を使う。
+// ════════════════════════════════════════════════════════════════
+refinement DesignRefinesRequirements {
+  impl ExpenseDesign
+  abs  ExpenseRequirements
+
+  map req[c: Claim] = ReqClaim {
+    st: if design[c].st == DesignDraft then ReqDraft
+        else if design[c].st == DesignAutoReview then ReqAutoReview
+        else if design[c].st == DesignManagerReview then ReqManagerReview
+        else if design[c].st == DesignAutoApproved then ReqAutoApproved
+        else if design[c].st == DesignManagerApproved then ReqManagerApproved
+        else if design[c].st == DesignRejected then ReqRejected
+        else ReqPaid,
+    amount: design[c].amount
+  }
+  map paid_count = paid_count
+
+  action submit_small(c, a) -> submit__b1(c, a)
+  action submit_large(c, a) -> submit__b2(c, a)
+  action auto_approve(c)    -> auto_approve(c)
+  action mgr_approve(c)     -> mgr_approve(c)
+  action mgr_reject(c)      -> mgr_reject(c)
+  action pay_submit(c)      -> pay(c)
+  action pay_confirm(c)     -> stutter
+  action outbox_send()      -> stutter
+}
