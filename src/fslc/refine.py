@@ -696,6 +696,9 @@ def _inst_action(model, inst, spec):
     }
     if act.get("loc"):
         la["loc"] = act["loc"]
+    meta = act.get("meta")
+    if meta:
+        la["requirement"] = {"id": meta["id"], "text": meta.get("text")}
     return la
 
 

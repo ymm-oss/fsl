@@ -741,6 +741,20 @@ def _with_meta(entry, meta):
 
 def build_spec(tree, display_names=None):
     _, name, items = tree
+    dialect_display_names = {}
+    dialect_implements = None
+    dialect_acceptance = []
+    dialect_action_aliases = {}
+    for it in items:
+        if it[0] == "__display_names":
+            dialect_display_names.update(it[1])
+        elif it[0] == "__implements":
+            dialect_implements = it[1]
+        elif it[0] == "__acceptance":
+            dialect_acceptance.extend(it[1])
+        elif it[0] == "__action_aliases":
+            dialect_action_aliases.update(it[1])
+
     consts = {}
     for it in items:
         if it[0] == "const":
@@ -830,6 +844,9 @@ def build_spec(tree, display_names=None):
 
     check_seq_literal_sizes(state, init, actions, types_meta)
 
+    all_display_names = dict(display_names or {})
+    all_display_names.update(dialect_display_names)
+
     return {
         "name": name,
         "consts": consts,
@@ -843,7 +860,10 @@ def build_spec(tree, display_names=None):
         "reachables": reachables,
         "leadstos": leadstos,
         "warnings": warnings,
-        "display_names": dict(display_names or {}),
+        "display_names": all_display_names,
+        "implements": dialect_implements,
+        "acceptance": dialect_acceptance,
+        "action_aliases": dialect_action_aliases,
     }
 
 

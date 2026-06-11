@@ -12,6 +12,7 @@ from .model import build_spec, check_spec, FslError
 from .bmc import verify, prove, scenarios
 from .refine import build_refinement, refine
 from .runtime import Monitor
+from .acceptance import validate_acceptance
 from .testgen import generate_test_file, default_output_name
 
 FSL_VERSION = "1.0"
@@ -54,11 +55,44 @@ def _parse_file(file, src):
     return parse_src(src, str(Path(file).parent))
 
 
+def _implements_result(spec, depth=8):
+    impl = spec.get("implements")
+    if not impl:
+        return None
+    abs_spec = build_spec(impl["abs_ast"], impl.get("abs_display_names"))
+    mapping = build_refinement(impl["mapping_ast"], spec, abs_spec)
+    result = refine(spec, abs_spec, mapping, depth)
+    if result.get("result") == "refines":
+        return {"abs": abs_spec["name"], "result": "refines"}
+    return {"abs": abs_spec["name"], "result": result.get("result"), "violation": result}
+
+
+def _acceptance_error(spec):
+    checked = validate_acceptance(spec)
+    if checked.get("ok"):
+        return None
+    out = dict(checked)
+    out.pop("ok", None)
+    return {"result": "error", **out}
+
+
 def run_check(file):
     try:
         src = open(file, encoding="utf-8").read()
         ast, display_names = _parse_file(file, src)
-        return _envelope(check_spec(ast, display_names))
+        spec = build_spec(ast, display_names)
+        acc = _acceptance_error(spec)
+        if acc:
+            return _envelope(acc)
+        out = {
+            "result": "ok",
+            "spec": spec["name"],
+            "warnings": spec["warnings"],
+        }
+        impl = _implements_result(spec)
+        if impl:
+            out["implements"] = impl
+        return _envelope(out)
     except UnexpectedInput as e:
         return _envelope({
             "result": "error",
@@ -93,9 +127,18 @@ def _read_spec(file):
 def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
     try:
         spec, source_lines = _read_spec(file)
+        acc = _acceptance_error(spec)
+        if acc:
+            return _envelope(acc)
         if engine == "induction":
-            return _envelope(prove(spec, k_ind, depth, deadlock_mode=deadlock_mode))
-        return _envelope(verify(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines))
+            out = prove(spec, k_ind, depth, deadlock_mode=deadlock_mode)
+        else:
+            out = verify(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines)
+        impl = _implements_result(spec, depth)
+        if impl:
+            out = dict(out)
+            out["implements"] = impl
+        return _envelope(out)
     except UnexpectedInput as e:
         return _envelope({
             "result": "error",

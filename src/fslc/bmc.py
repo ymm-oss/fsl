@@ -2755,6 +2755,15 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
             "note": "after these steps no action is enabled",
         })
 
+    if spec.get("acceptance"):
+        from .acceptance import validate_acceptance
+        acceptance = validate_acceptance(spec)
+        if not acceptance.get("ok"):
+            out = dict(acceptance)
+            out.pop("ok", None)
+            return {"result": "error", **out}
+        scenario_list.extend(acceptance["scenarios"])
+
     return _display_output({
         "result": "scenarios",
         "spec": explored["spec"],

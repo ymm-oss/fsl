@@ -4,7 +4,7 @@ from lark import Lark, Transformer, v_args
 # ---------------------------------------------------------------- grammar
 
 GRAMMAR = r"""
-start: spec_def | refinement_def | compose_def
+start: spec_def | refinement_def | compose_def | requirements_def
 
 spec_def: "spec" NAME "{" item* "}"
 
@@ -16,7 +16,9 @@ use_def: "use" NAME "as" NAME "from" STRING
 internal_def: "internal" NAME "." NAME
 compose_state: "state" "{" var_decl ("," var_decl)* ","? "}"
 compose_init: "init" "{" stmt* "}"
-sync_action: "fair"? "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body meta_tag? "{" action_item* "}"
+sync_action: fair_sync_action | plain_sync_action
+fair_sync_action: _FAIR "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body meta_tag? "{" action_item* "}"
+plain_sync_action: "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body meta_tag? "{" action_item* "}"
 glue_action: fair_action | plain_action
 sync_body: sync_ref ("||" sync_ref)*
 sync_ref: NAME "." NAME "(" [expr ("," expr)*] ")"
@@ -61,7 +63,7 @@ cap: INT -> cap_int
 init_def: "init" "{" stmt* "}"
 
 action_def: fair_action | plain_action
-fair_action: "fair" "action" NAME "(" [param ("," param)*] ")" meta_tag? "{" action_item* "}"
+fair_action: _FAIR "action" NAME "(" [param ("," param)*] ")" meta_tag? "{" action_item* "}"
 plain_action: "action" NAME "(" [param ("," param)*] ")" meta_tag? "{" action_item* "}"
 param: NAME ":" qname -> param_typed
      | NAME "in" expr ".." expr -> param_range
@@ -72,8 +74,8 @@ let_clause: "let" NAME "=" expr
 
 ?stmt: assign | if_stmt | forall_stmt
 assign: lvalue "=" expr
-if_stmt: "if" expr "{" stmt_list "}" else_opt?
-else_opt: "else" "{" stmt_list "}"
+if_stmt: _IF expr "{" stmt_list "}" else_opt?
+else_opt: _ELSE "{" stmt_list "}"
 stmt_list: stmt*
 forall_stmt: "forall" binder [":"] "{" stmt_list "}"
 lvalue: NAME "[" expr "]" "." NAME -> lvalue_map_field
@@ -99,9 +101,9 @@ quant: "forall" binder [":"] expr -> quant_forall
      | "exists" binder [":"] expr -> quant_exists
      | "exists" binder [":"] "{" expr "}" -> quant_exists_brace
 ?implies: or_e | or_e "=>" implies -> imp
-?or_e: and_e | or_e "or" and_e -> or_op
-?and_e: not_e | and_e "and" not_e -> and_op
-?not_e: "not" not_e -> not_op
+?or_e: and_e | or_e _OR and_e -> or_op
+?and_e: not_e | and_e _AND not_e -> and_op
+?not_e: _NOT not_e -> not_op
        | is_e
 ?is_e: cmp ["is" pattern] -> is_pat
 pattern: "none" -> pat_none
@@ -140,7 +142,7 @@ postfix_suffix: "[" expr "]" -> idx_suffix
 struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
 expr_list: expr ("," expr)*
 
-?ref_expr: "if" ref_expr "then" ref_expr "else" ref_expr -> ite
+?ref_expr: _IF ref_expr "then" ref_expr _ELSE ref_expr -> ite
          | ref_quant
          | ref_implies
 ref_quant: "forall" binder [":"] ref_expr -> quant_forall
@@ -148,9 +150,9 @@ ref_quant: "forall" binder [":"] ref_expr -> quant_forall
          | "exists" binder [":"] ref_expr -> quant_exists
          | "exists" binder [":"] "{" ref_expr "}" -> quant_exists_brace
 ?ref_implies: ref_or_e | ref_or_e "=>" ref_implies -> imp
-?ref_or_e: ref_and_e | ref_or_e "or" ref_and_e -> or_op
-?ref_and_e: ref_not_e | ref_and_e "and" ref_not_e -> and_op
-?ref_not_e: "not" ref_not_e -> not_op
+?ref_or_e: ref_and_e | ref_or_e _OR ref_and_e -> or_op
+?ref_and_e: ref_not_e | ref_and_e _AND ref_not_e -> and_op
+?ref_not_e: _NOT ref_not_e -> not_op
           | ref_is_e
 ?ref_is_e: ref_cmp ["is" pattern] -> is_pat
 ?ref_cmp: ref_sum | ref_sum CMPOP ref_sum -> cmp_op
@@ -187,7 +189,37 @@ ref_postfix_suffix: "[" ref_expr "]" -> idx_suffix
 ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> struct_fields
 ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 
+requirements_def: "requirements" NAME "{" requirements_item* "}"
+?requirements_item: implements_def | requirement_def | acceptance_def
+                  | const_def | type_def | enum_def | struct_def
+                  | state_def | init_def | req_action_def
+                  | invariant_def | reachable_def | leadsto_def
+implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
+?implements_item: map_def
+requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
+?requirement_item: req_action_def | invariant_def | reachable_def | leadsto_def
+req_action_def: req_fair_action | req_plain_action
+req_fair_action: _FAIR "action" NAME "(" [param ("," param)*] ")" maps_clause? meta_tag? "{" req_action_item* "}"
+req_plain_action: "action" NAME "(" [param ("," param)*] ")" maps_clause? meta_tag? "{" req_action_item* "}"
+?req_action_item: requires_clause | ensures_clause | let_clause | branches_def | stmt
+branches_def: "branches" "{" branch_when+ "}"
+branch_when: "when" expr "{" stmt* "}" maps_clause
+maps_clause: "maps" req_action_target
+req_action_target: stutter_target | req_mapped_action_target
+req_mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
+acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expect "}"
+acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
+acceptance_arg: ref_expr
+acceptance_expect: "expect" expr
+
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
+REQ_ID: /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/
+_AND: /and\b/
+_OR: /or\b/
+_NOT: /not\b/
+_IF: /if\b/
+_ELSE: /else\b/
+_FAIR: /fair\b/
 NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 INT: /[0-9]+/
 STRING: /"[^"]*"/
@@ -528,6 +560,53 @@ class Ast(Transformer):
     def action_def(self, meta, node):
         return node
 
+    def maps_clause(self, meta, target):
+        return ("maps", target, _loc(meta))
+
+    def req_mapped_action_target(self, meta, name, *exprs):
+        return ("action", name, list(exprs))
+
+    def req_action_target(self, meta, child):
+        return child
+
+    def branch_when(self, meta, cond, *parts):
+        stmts = []
+        maps = None
+        for p in parts:
+            if isinstance(p, tuple) and p[0] == "maps":
+                maps = p
+            else:
+                stmts.append(p)
+        return ("branch", cond, stmts, maps, _loc(meta))
+
+    def branches_def(self, meta, *branches):
+        return ("branches", list(branches), _loc(meta))
+
+    def _req_action_parts(self, meta, name, *rest):
+        params, items, req_meta, maps = [], [], None, None
+        for r in rest:
+            if r is None:
+                continue
+            if isinstance(r, dict):
+                req_meta = r
+            elif isinstance(r, tuple) and r[0] in ("param_typed", "param_range"):
+                params.append(r)
+            elif isinstance(r, tuple) and r[0] == "maps":
+                maps = r
+            else:
+                items.append(r)
+        return ("req_action", name, params, items, _loc(meta), False, req_meta, maps)
+
+    def req_fair_action(self, meta, name, *rest):
+        base = self._req_action_parts(meta, name, *rest)
+        return base[:5] + (True, base[6], base[7])
+
+    def req_plain_action(self, meta, name, *rest):
+        return self._req_action_parts(meta, name, *rest)
+
+    def req_action_def(self, meta, node):
+        return node
+
     def lt_implies(self, meta, p, q):
         return ("lt_implies", p, q)
 
@@ -615,18 +694,7 @@ class Ast(Transformer):
     def sync_body(self, meta, *refs):
         return list(refs)
 
-    def sync_action(self, meta, *parts):
-        fair = False
-        idx = 0
-        first = parts[0] if parts else None
-        if first == "fair" or (hasattr(first, "type") and first.type == "FAIR"):
-            fair = True
-            idx = 1
-        elif isinstance(first, str) and first == "fair":
-            fair = True
-            idx = 1
-        name = parts[idx]
-        rest = parts[idx + 1:]
+    def _sync_action_parts(self, meta, fair, name, *rest):
         params, sync_refs, body_items, req_meta = [], None, [], None
         for r in rest:
             if r is None:
@@ -649,8 +717,45 @@ class Ast(Transformer):
             raise ValueError("sync action missing sync body")
         return ("sync_action", name, params, sync_refs, body_items, _loc(meta), fair, req_meta)
 
+    def fair_sync_action(self, meta, name, *rest):
+        return self._sync_action_parts(meta, True, name, *rest)
+
+    def plain_sync_action(self, meta, name, *rest):
+        return self._sync_action_parts(meta, False, name, *rest)
+
+    def sync_action(self, meta, node):
+        return node
+
     def compose_def(self, meta, name, *items):
         return ("compose", name, [i for i in items if i])
+
+    def requirement_def(self, meta, req_id, text, *items):
+        return ("requirement", str(req_id), text, [i for i in items if i], _loc(meta))
+
+    def implements_def(self, meta, name, path, *items):
+        return ("implements", name, path, [i for i in items if i], _loc(meta))
+
+    def requirements_def(self, meta, name, *items):
+        return ("requirements", name, [i for i in items if i])
+
+    def acceptance_arg(self, meta, expr):
+        return expr
+
+    def acceptance_step(self, meta, name, *args):
+        return ("acceptance_step", name, list(args), _loc(meta))
+
+    def acceptance_expect(self, meta, expr):
+        return ("acceptance_expect", expr, _loc(meta))
+
+    def acceptance_def(self, meta, ac_id, text, *parts):
+        steps = []
+        expect = None
+        for p in parts:
+            if isinstance(p, tuple) and p[0] == "acceptance_step":
+                steps.append(p)
+            elif isinstance(p, tuple) and p[0] == "acceptance_expect":
+                expect = p
+        return ("acceptance", str(ac_id), text, steps, expect, _loc(meta))
 
 
 PARSER = Lark(
