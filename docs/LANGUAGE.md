@@ -83,7 +83,8 @@ leadsTo <Name> {
 
 ## 3. 式
 
-- 算術: `+ - *`、単項 `-`、`min(a, b)` / `max(a, b)` / `abs(a)`
+- 算術: `+ - * / %`、単項 `-`、`min(a, b)` / `max(a, b)` / `abs(a)`
+  (`a//b` は `//` 以降がコメントになるため、除算は `a / b` と空白を置く)
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
 - 量化(有界): `forall x: T { 式 }` / `exists x: T { 式 }`(`where 式` でフィルタ可)、
@@ -124,7 +125,7 @@ leadsTo <Name> {
 | チェック | 内容 | 違反時 |
 |---|---|---|
 | 型境界 | 有界型の全状態変数(Map値・structフィールド・Seq要素含む)が範囲内 | `violated` / `type_bound` / `_bounds_<var>` |
-| 部分操作 | `pop()`/`head()`/`at(i)` 実行時に列が空でない・添字が範囲内 | `violated` / `partial_op` / `_partial_<action>` |
+| 部分操作 | `pop()`/`head()`/`at(i)` 実行時に列が空でない・添字が範囲内、`/` `%` の除数が 0 でない | `violated` / `partial_op` / `_partial_<action>` |
 | action coverage | 各アクションが深さ K 以内に一度は enabled | `action_coverage` に阻害 requires の診断 |
 | デッドロック | 全アクションが disabled になる状態への到達 | warning(`--deadlock error` で violated) |
 | leadsTo | 深さ K までのラッソ / デッドロック停滞で P ~> Q 違反 | `violated` / `leadsTo` / `bindings` + trace |

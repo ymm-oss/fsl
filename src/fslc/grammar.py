@@ -110,7 +110,7 @@ pattern: "none" -> pat_none
        | "some" "(" NAME ")" -> pat_some
 ?cmp: sum | sum CMPOP sum -> cmp_op
 ?sum: product | sum "+" product -> add | sum "-" product -> sub
-?product: unary | product "*" unary -> mul
+?product: unary | product "*" unary -> mul | product "/" unary -> div | product "%" unary -> mod
 ?unary: "-" unary -> neg | postfix
 postfix: atom postfix_suffix*
 postfix_suffix: "[" expr "]" -> idx_suffix
@@ -158,7 +158,7 @@ ref_quant: "forall" binder [":"] ref_expr -> quant_forall
 ?ref_is_e: ref_cmp ["is" pattern] -> is_pat
 ?ref_cmp: ref_sum | ref_sum CMPOP ref_sum -> cmp_op
 ?ref_sum: ref_product | ref_sum "+" ref_product -> add | ref_sum "-" ref_product -> sub
-?ref_product: ref_unary | ref_product "*" ref_unary -> mul
+?ref_product: ref_unary | ref_product "*" ref_unary -> mul | ref_product "/" ref_unary -> div | ref_product "%" ref_unary -> mod
 ?ref_unary: "-" ref_unary -> neg | ref_postfix
 ref_postfix: ref_atom ref_postfix_suffix* -> postfix
 ref_postfix_suffix: "[" ref_expr "]" -> idx_suffix
@@ -382,6 +382,12 @@ class Ast(Transformer):
 
     def mul(self, meta, a, b):
         return ("bin", "*", a, b)
+
+    def div(self, meta, a, b):
+        return ("bin", "/", a, b)
+
+    def mod(self, meta, a, b):
+        return ("bin", "%", a, b)
 
     def neg(self, meta, a):
         return ("neg", a)

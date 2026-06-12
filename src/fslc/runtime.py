@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 
@@ -12,6 +13,39 @@ from .bmc import build_instances, compute_changes, _collect_partial_op_sites
 
 _INIT_HINT = "runtime monitor requires a deterministic init"
 _PARTIAL_OP_HINT = "guard the action with requires q.size() > 0 (or bound the index)"
+_DIV_PARTIAL_OP_HINT = "guard the division: requires y != 0"
+_CHECK_DIV_ZERO = False
+
+
+@contextmanager
+def _div_partial_op_checks(enabled=True):
+    global _CHECK_DIV_ZERO
+    old = _CHECK_DIV_ZERO
+    _CHECK_DIV_ZERO = enabled
+    try:
+        yield
+    finally:
+        _CHECK_DIV_ZERO = old
+
+
+def _partial_op_hint(po):
+    if po.name == "_partial_div":
+        return _DIV_PARTIAL_OP_HINT
+    return _PARTIAL_OP_HINT
+
+
+def _euc_div(a, b):
+    if b == 0: return 0
+    q = a // b
+    if a - b * q < 0: q += 1
+    return q
+
+
+def _euc_mod(a, b):
+    if b == 0: return 0
+    r = a % b
+    if r < 0: r += abs(b)
+    return r
 
 
 class _PartialOp(Exception):
@@ -406,6 +440,14 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
             return a - b
         if op == "*":
             return a * b
+        if op == "/":
+            if _CHECK_DIV_ZERO and b == 0:
+                raise _PartialOp(None, "_partial_div")
+            return _euc_div(a, b)
+        if op == "%":
+            if _CHECK_DIV_ZERO and b == 0:
+                raise _PartialOp(None, "_partial_div")
+            return _euc_mod(a, b)
         if op == "==":
             return a == b
         if op == "!=":
@@ -1142,41 +1184,43 @@ def _partial_op_well_defined_concrete(site_expr, state, binds, spec):
 
 def _eval_requires(requires, lets, state, param_binds, spec, source_lines=None, action_name=None):
     binds = dict(param_binds)
-    for let in lets:
-        binds[let["name"]] = eval_concrete(let["expr"], state, binds, spec)
-    for req in requires:
-        b = dict(binds)
-        try:
-            ok = eval_concrete(req["expr"], state, b, spec)
-        except _PartialOp as po:
-            pname = f"_partial_{action_name}" if action_name else po.name
-            return None, binds, {
-                "kind": "partial_op",
-                "name": pname,
-                "loc": po.loc or req.get("loc"),
-                "hint": _PARTIAL_OP_HINT,
-            }
-        if not _as_bool(ok):
-            return False, binds, {
-                "kind": "requires_failed",
-                "requires": _requires_text(req, source_lines),
-            }
-        for k, v in b.items():
-            if k not in param_binds:
-                binds[k] = v
+    with _div_partial_op_checks():
+        for let in lets:
+            binds[let["name"]] = eval_concrete(let["expr"], state, binds, spec)
+        for req in requires:
+            b = dict(binds)
+            try:
+                ok = eval_concrete(req["expr"], state, b, spec)
+            except _PartialOp as po:
+                pname = f"_partial_{action_name}" if action_name else po.name
+                return None, binds, {
+                    "kind": "partial_op",
+                    "name": pname,
+                    "loc": po.loc or req.get("loc"),
+                    "hint": _partial_op_hint(po),
+                }
+            if not _as_bool(ok):
+                return False, binds, {
+                    "kind": "requires_failed",
+                    "requires": _requires_text(req, source_lines),
+                }
+            for k, v in b.items():
+                if k not in param_binds:
+                    binds[k] = v
     return True, binds, None
 
 
 def _eval_enabled_requires(requires, state, param_binds, spec):
     binds = dict(param_binds)
-    for req in requires:
-        b = dict(binds)
-        ok = eval_concrete(req["expr"], state, b, spec)
-        if not _as_bool(ok):
-            return False
-        for k, v in b.items():
-            if k not in param_binds:
-                binds[k] = v
+    with _div_partial_op_checks():
+        for req in requires:
+            b = dict(binds)
+            ok = eval_concrete(req["expr"], state, b, spec)
+            if not _as_bool(ok):
+                return False
+            for k, v in b.items():
+                if k not in param_binds:
+                    binds[k] = v
     return True
 
 
@@ -1323,7 +1367,7 @@ class Monitor:
                 "action": disp,
                 "params": params,
                 "state": old_logical,
-                "hint": _PARTIAL_OP_HINT,
+                "hint": _partial_op_hint(po),
             }
         except _EvalError as ex:
             return {
@@ -1370,7 +1414,8 @@ class Monitor:
             }
 
         try:
-            pend = compute_updates(inst["stmts"], old_phys, binds, self._spec)
+            with _div_partial_op_checks():
+                pend = compute_updates(inst["stmts"], old_phys, binds, self._spec)
         except _PartialOp as po:
             return {
                 "ok": False,
@@ -1380,7 +1425,7 @@ class Monitor:
                 "action": disp,
                 "params": params,
                 "state": old_logical,
-                "hint": _PARTIAL_OP_HINT,
+                "hint": _partial_op_hint(po),
             }
         except _EvalError as ex:
             return {
@@ -1407,10 +1452,22 @@ class Monitor:
 
         for ens in inst["ensures"]:
             try:
-                cond = eval_concrete(
-                    ens["expr"], new_phys, binds, self._spec,
-                    old_state=old_phys, in_ensures=True,
-                )
+                with _div_partial_op_checks():
+                    cond = eval_concrete(
+                        ens["expr"], new_phys, binds, self._spec,
+                        old_state=old_phys, in_ensures=True,
+                    )
+            except _PartialOp as po:
+                return {
+                    "ok": False,
+                    "kind": "partial_op",
+                    "name": display_label(f"_partial_{inst['action']}", self._spec),
+                    "loc": po.loc or ens.get("loc"),
+                    "action": disp,
+                    "params": params,
+                    "state": old_logical,
+                    "hint": _partial_op_hint(po),
+                }
             except (_EvalError, FslError) as ex:
                 msg = ex.message if isinstance(ex, _EvalError) else str(ex)
                 return {

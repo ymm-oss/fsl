@@ -51,7 +51,7 @@ python -m fslc <subcommand> ...  # または venv の python で
 |---|---|---|
 | `violated` / `invariant` | 反例あり(trace は最短) | trace の `changes` と `violating_bindings` を読み、ガード追加か invariant 修正 |
 | `violated` / `type_bound` | 有界型が範囲外(自動検査) | `last_action` のガード不足。`requires` で範囲を守る(invariant を手書きしない) |
-| `violated` / `partial_op` | 空 Seq の pop/head、添字範囲外 | `requires q.size() > 0` か `if q.size() > 0 { … }` でガード |
+| `violated` / `partial_op` | 空 Seq の pop/head、添字範囲外、除数 0 | `requires q.size() > 0` / `requires d != 0` か `if` でガード |
 | `violated` / `ensures` | 事後条件不成立 | 本体と ensures のどちらが正かを判断して修正 |
 | `violated` / `leadsTo` | 応答性質の反例(ラッソ/停滞) | trace の `loop_start` を確認。進行を担うアクションに `fair` を付けるか仕様を修正 |
 | `reachable_failed` | 到達したい状態に届かない | `action_coverage` の `blocking_requires`(unsat core)を読む。ガード緩和/アクション追加/`--depth` 増 |
@@ -128,7 +128,7 @@ spec Cart {
 - **「0以上」系 invariant を手書きしない** → `type Qty = 0..N` で自動検査される。
 - 同一実行パスでの**二重代入はエラー**。if の後に分岐内と同じ変数へ代入もエラー。
 - Set/Seq の更新は**再代入**: `s = s.add(x)`、`q = q.pop()`。
-- Seq の `pop/head/at` は**必ずガード**(requires か if)。忘れは partial_op で検出される。
+- Seq の `pop/head/at` と `/` `%` の除数は**必ずガード**(requires か if)。忘れは partial_op で検出される。
 - invariant で Seq を語るときは添字ガード:
   `forall i in 0..CAP-1 { i < q.size() => P(q.at(i)) }`(範囲は `0..CAP-1` と
   const から導出して書く — リテラルをハードコードすると容量変更に追従しない)。

@@ -191,6 +191,13 @@ _CTI_HINT = (
 _PARTIAL_OP_HINT = (
     "guard the action with requires q.size() > 0 (or bound the index)"
 )
+_DIV_PARTIAL_OP_HINT = "guard the division: requires y != 0"
+
+
+def _partial_op_hint(site_expr):
+    if isinstance(site_expr, tuple) and site_expr[0] == "bin" and site_expr[1] in ("/", "%"):
+        return _DIV_PARTIAL_OP_HINT
+    return _PARTIAL_OP_HINT
 
 
 def _inv_constraint(inv, state, spec, expr_cache):
@@ -366,6 +373,10 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
             return a - b
         if op == "*":
             return a * b
+        if op == "/":
+            return _z3_div(a, b)
+        if op == "%":
+            return _z3_mod(a, b)
         if op == "==":
             return a == b
         if op == "!=":
@@ -554,6 +565,14 @@ def _reject_option_binop(a, b, op):
             hint=_OPTION_EQ_HINT,
         )
     _err(f"Option values cannot be used with '{op}'", kind="type")
+
+
+def _z3_div(a, b):
+    return z3.If(b == 0, z3.IntVal(0), a / b)
+
+
+def _z3_mod(a, b):
+    return z3.If(b == 0, z3.IntVal(0), a % b)
 
 
 def _unify_option_cmp(a, b):
@@ -1491,7 +1510,7 @@ def _expr_static_type(e, spec, env):
             return ("int",)
         return None
     if tag == "bin":
-        if e[1] in ("+", "-", "*"):
+        if e[1] in ("+", "-", "*", "/", "%"):
             return ("int",)
         return ("bool",)
     if tag == "ite":
@@ -2283,6 +2302,8 @@ def _collect_partial_op_sites(action_def):
             return
         if e[0] == "method" and e[2] in ("pop", "head", "at"):
             sites.append({"expr": e, "loc": loc, "path_ast": path_ast})
+        if e[0] == "bin" and e[1] in ("/", "%"):
+            sites.append({"expr": e, "loc": loc, "path_ast": path_ast})
         for child in e[1:]:
             if isinstance(child, tuple):
                 walk_expr(child, loc, path_ast)
@@ -2319,6 +2340,9 @@ def _collect_partial_op_sites(action_def):
 
 
 def _partial_op_well_defined(site_expr, state, binds, spec):
+    if site_expr[0] == "bin" and site_expr[1] in ("/", "%"):
+        divisor = eval_expr(site_expr[3], state, binds, spec)
+        return divisor != 0
     method = site_expr[2]
     base = eval_expr(site_expr[1], state, binds, spec)
     if not isinstance(base, tuple) or base[0] != "seq_val":
@@ -2419,7 +2443,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                             "violation_kind": "partial_op",
                             "invariant": f"_partial_{inst['action']}",
                             "loc": site.get("loc"),
-                            "hint": _PARTIAL_OP_HINT,
+                            "hint": _partial_op_hint(site["expr"]),
                             "violated_at_step": t,
                             "violating_bindings": None,
                             "last_action": _last_action(m, choices, instances, t, spec),
