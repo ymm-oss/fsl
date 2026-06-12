@@ -1167,6 +1167,19 @@ def _eval_requires(requires, lets, state, param_binds, spec, source_lines=None, 
     return True, binds, None
 
 
+def _eval_enabled_requires(requires, state, param_binds, spec):
+    binds = dict(param_binds)
+    for req in requires:
+        b = dict(binds)
+        ok = eval_concrete(req["expr"], state, b, spec)
+        if not _as_bool(ok):
+            return False
+        for k, v in b.items():
+            if k not in param_binds:
+                binds[k] = v
+    return True
+
+
 class Monitor:
     def __init__(self, source_or_path):
         if isinstance(source_or_path, (str, Path)) and Path(source_or_path).is_file():
@@ -1217,13 +1230,12 @@ class Monitor:
         out = []
         for inst in self._instances:
             try:
-                guards_ok, _, viol = _eval_requires(
-                    inst["requires"], inst["lets"], self._phys, inst["binds"], self._spec,
-                    self._source_lines, action_name=inst["action"],
+                guards_ok = _eval_enabled_requires(
+                    inst["requires"], self._phys, inst["binds"], self._spec,
                 )
-            except (FslError, _EvalError):
+            except (FslError, _EvalError, _PartialOp):
                 continue
-            if viol is not None or guards_ok is not True:
+            if guards_ok is not True:
                 continue
             act = inst["action_def"]
             out.append({

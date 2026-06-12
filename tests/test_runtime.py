@@ -206,6 +206,18 @@ spec PartialUnguarded {
     assert r["name"] == "_partial_bad_pop"
 
 
+def test_enabled_short_circuits_requires_before_guarded_let():
+    mon = Monitor(str(SPECS / "job_pipeline.fsl"))
+    mon.reset()
+    initial_enabled = mon.enabled()
+    assert {entry["action"] for entry in initial_enabled} == {"submit"}
+
+    submit = mon.step("submit", {"j": 0})
+    assert submit["ok"] is True
+    enabled_after_submit = mon.enabled()
+    assert "start" in {entry["action"] for entry in enabled_after_submit}
+
+
 def test_nondeterministic_init_raises_semantics():
     src = """
 spec NoInit {

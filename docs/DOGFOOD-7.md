@@ -106,3 +106,4 @@ Final `git diff -- src/fslc` was empty.
   Impact: runtime Monitor / replay / testgen for any spec with a guarded
   partial-op (`head`/`pop`/`at`) inside a `let`. The BFS oracle skips this
   spec for now. Independently reproduced; not fixed in this test-only round.
+  fixed: short-circuit requires guards in Monitor.enabled() before evaluating let bindings
