@@ -744,6 +744,7 @@ def build_spec(tree, display_names=None):
     dialect_display_names = {}
     dialect_implements = None
     dialect_acceptance = []
+    dialect_forbidden = []
     dialect_action_aliases = {}
     for it in items:
         if it[0] == "__display_names":
@@ -752,6 +753,8 @@ def build_spec(tree, display_names=None):
             dialect_implements = it[1]
         elif it[0] == "__acceptance":
             dialect_acceptance.extend(it[1])
+        elif it[0] == "__forbidden":
+            dialect_forbidden.extend(it[1])
         elif it[0] == "__action_aliases":
             dialect_action_aliases.update(it[1])
 
@@ -863,6 +866,7 @@ def build_spec(tree, display_names=None):
         "display_names": all_display_names,
         "implements": dialect_implements,
         "acceptance": dialect_acceptance,
+        "forbidden": dialect_forbidden,
         "action_aliases": dialect_action_aliases,
     }
 

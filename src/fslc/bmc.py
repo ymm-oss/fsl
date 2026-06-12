@@ -2805,6 +2805,15 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
             return {"result": "error", **out}
         scenario_list.extend(acceptance["scenarios"])
 
+    if spec.get("forbidden"):
+        from .acceptance import validate_forbidden
+        forbidden = validate_forbidden(spec)
+        if not forbidden.get("ok"):
+            out = dict(forbidden)
+            out.pop("ok", None)
+            return {"result": "error", **out}
+        scenario_list.extend(forbidden["scenarios"])
+
     return _display_output({
         "result": "scenarios",
         "spec": explored["spec"],

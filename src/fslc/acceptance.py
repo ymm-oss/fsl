@@ -108,3 +108,97 @@ def validate_acceptance(spec):
             return result
         scenarios.append(result["scenario"])
     return {"ok": True, "scenarios": scenarios}
+
+
+def replay_forbidden(spec, fb):
+    """Replay a must-forbid scenario: the setup steps must all be accepted, and
+    the final step must be rejected (not enabled, or executing it violates an
+    invariant / type_bound / partial_op / ensures). Mirror of acceptance, but
+    the last step's outcome must be a rejection rather than a state predicate."""
+    steps = fb.get("steps") or []
+    if not steps:
+        raise FslError(
+            f"forbidden '{fb['id']}' must have at least one step",
+            kind="forbidden", loc=fb.get("loc"),
+        )
+
+    mon = Monitor(spec)
+    initial = mon.reset()
+    aliases = spec.get("action_aliases") or {}
+    steps_out = []
+    expected_states = []
+
+    # Setup: every step before the last must be accepted (ok).
+    for idx in range(len(steps) - 1):
+        _, name, args, loc = steps[idx]
+        candidates = aliases.get(name, [name])
+        failures = []
+        for candidate in candidates:
+            params = _params_for(spec, candidate, args, loc)
+            result = mon.step(candidate, params)
+            if result.get("ok"):
+                steps_out.append({"action": result["action"], "params": params})
+                expected_states.append(result["state"])
+                break
+            failures.append(result)
+        else:
+            return {
+                "ok": False,
+                "kind": "forbidden_setup",
+                "id": fb["id"],
+                "text": fb["text"],
+                "failed_step": idx,
+                "step": {"action": name, "args": [_literal_value(a) for a in args]},
+                "step_results": failures,
+                "loc": loc,
+                "hint": "forbidden の前提ステップは enabled で ok でなければならない(トレースが壊れている)。",
+            }
+
+    # Final step: must be rejected. If any candidate is accepted, the spec
+    # failed to forbid the operation.
+    _, name, args, loc = steps[-1]
+    candidates = aliases.get(name, [name])
+    attempts = []
+    for candidate in candidates:
+        params = _params_for(spec, candidate, args, loc)
+        result = mon.step(candidate, params)
+        attempts.append((params, result))
+        if result.get("ok"):
+            return {
+                "ok": False,
+                "kind": "forbidden",
+                "id": fb["id"],
+                "text": fb["text"],
+                "accepted_step": len(steps) - 1,
+                "step": {"action": name, "args": [_literal_value(a) for a in args]},
+                "accepted_trace": steps_out + [{"action": result["action"], "params": params}],
+                "state": result["state"],
+                "loc": fb.get("loc"),
+                "hint": "この操作は拒否されるべきだが受理された。ガードか invariant が不足している可能性。",
+            }
+
+    last_params, last_result = attempts[-1]
+    return {
+        "ok": True,
+        "scenario": {
+            "name": f"forbidden_{fb['id']}",
+            "kind": "forbidden",
+            "forbidden": fb["id"],
+            "requirement": {"id": fb["id"], "text": fb["text"]},
+            "steps": steps_out,
+            "initial_state": initial,
+            "expected_states": expected_states,
+            "forbidden_step": {"action": last_result.get("action", name), "params": last_params},
+            "rejected_by": last_result.get("kind"),
+        },
+    }
+
+
+def validate_forbidden(spec):
+    scenarios = []
+    for fb in spec.get("forbidden") or []:
+        result = replay_forbidden(spec, fb)
+        if not result.get("ok"):
+            return result
+        scenarios.append(result["scenario"])
+    return {"ok": True, "scenarios": scenarios}

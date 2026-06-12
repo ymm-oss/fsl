@@ -192,7 +192,7 @@ ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> st
 ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 
 requirements_def: "requirements" NAME "{" requirements_item* "}"
-?requirements_item: implements_def | requirement_def | acceptance_def
+?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def
                   | const_def | type_def | enum_def | struct_def
                   | state_def | init_def | req_action_def | time_def
                   | invariant_def | reachable_def | leadsto_def
@@ -213,6 +213,7 @@ acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expec
 acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
 acceptance_arg: ref_expr
 acceptance_expect: "expect" expr
+forbidden_def: "forbidden" REQ_ID STRING "{" acceptance_step* "expect" "rejected" "}"
 time_def: "time" "{" time_item* "}"
 ?time_item: urgent_def | age_def
 urgent_def: "urgent" NAME ("," NAME)* ","?
@@ -788,6 +789,11 @@ class Ast(Transformer):
             elif isinstance(p, tuple) and p[0] == "acceptance_expect":
                 expect = p
         return ("acceptance", str(ac_id), text, steps, expect, _loc(meta))
+
+    def forbidden_def(self, meta, fb_id, text, *parts):
+        # `expect rejected` is an inline marker (no tree node); parts are the steps.
+        steps = [p for p in parts if isinstance(p, tuple) and p[0] == "acceptance_step"]
+        return ("forbidden", str(fb_id), text, steps, _loc(meta))
 
     def urgent_def(self, meta, *names):
         return ("time_urgent", list(names), _loc(meta))

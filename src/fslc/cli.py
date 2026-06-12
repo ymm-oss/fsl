@@ -12,7 +12,7 @@ from .model import build_spec, check_spec, FslError
 from .bmc import verify, prove, scenarios
 from .refine import build_refinement, refine
 from .runtime import Monitor
-from .acceptance import validate_acceptance
+from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import generate_test_file, default_output_name
 
 FSL_VERSION = "1.0"
@@ -76,6 +76,15 @@ def _acceptance_error(spec):
     return {"result": "error", **out}
 
 
+def _forbidden_error(spec):
+    checked = validate_forbidden(spec)
+    if checked.get("ok"):
+        return None
+    out = dict(checked)
+    out.pop("ok", None)
+    return {"result": "error", **out}
+
+
 def run_check(file):
     try:
         src = open(file, encoding="utf-8").read()
@@ -84,6 +93,9 @@ def run_check(file):
         acc = _acceptance_error(spec)
         if acc:
             return _envelope(acc)
+        forb = _forbidden_error(spec)
+        if forb:
+            return _envelope(forb)
         out = {
             "result": "ok",
             "spec": spec["name"],
@@ -130,6 +142,9 @@ def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
         acc = _acceptance_error(spec)
         if acc:
             return _envelope(acc)
+        forb = _forbidden_error(spec)
+        if forb:
+            return _envelope(forb)
         if engine == "induction":
             out = prove(spec, k_ind, depth, deadlock_mode=deadlock_mode)
         else:

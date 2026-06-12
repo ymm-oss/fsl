@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+### 追加
+- **`forbidden`(負の受け入れ基準 / must-forbid)**(issue #3)を requirements 方言に追加。
+  `forbidden FB-1 "原文" { <手順> expect rejected }` は「拒否されるべき操作列」を書き、
+  前提ステップは全て ok・**最後のステップが拒否**される(not-enabled か invariant/
+  type_bound/partial_op/ensures 違反)ことを check 時に具象 Monitor で検証する。受理
+  されたら `kind: "forbidden"`(安全性 invariant では沈黙する過小制約=ガード漏れの
+  検出)、前提が未 enabled なら `kind: "forbidden_setup"`。scenarios に `forbidden_<ID>`
+  を出力(`rejected_by` 付き)し testgen のネガティブテストへ流れる。検証エンジン・
+  Monitor は無改修。
+
 ### ドキュメント / ワークフロー
 - **AI形式化の妥当性確認(validation)ワークフロー**(issue #2)をスキルに追加。
   検証器が保証する「内部整合」と、元の意図への忠実性のギャップを埋める規律:

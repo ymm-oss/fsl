@@ -118,6 +118,8 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
 | `refinement_failed` / `abs_state_mismatch`・`stutter_changed_abs`・`map_out_of_bounds` | 写像の不整合(更新が対応しない / stutter なのに上位状態が変わる / 写像値が型範囲外) | `mismatch` のパスと `abs_before/after` を比較。写像式か action 対応を修正 |
 | verify 内 `implements.result: violated` | 要件層が上位(業務)層から逸脱 | `implements.violation` の中身は refinement_failed と同形。上と同じ手順 + 要件側の `requirement` を確認 |
 | `error` / `acceptance` | 受け入れ基準の再生が失敗 | 失敗した AC の ID とステップが返る。手順の前提(状態)か expect のどちらが正かを判断して修正 |
+| `error` / `forbidden` | 拒否されるべき操作列が受理された(過小制約。安全性 invariant では沈黙する種類) | `accepted_trace` が受理経路。最後の操作を enabled にしている requires が緩い → ガードを追加するか仕様を見直す |
+| `error` / `forbidden_setup` | forbidden の前提(最後以外の)ステップが enabled でない(トレース不正) | セットアップ手順を見直す。最後以外はそこへ到達する手順であり、成功扱いにはならない |
 
 coverage が `false` のアクションは `blocking_requires` が「どの requires が
 阻んでいるか」を句単位で特定している。silent に無視しないこと。
@@ -237,7 +239,11 @@ verify/induction/scenarios/Monitor は同じに使える:
 - `requirements Name { requirement REQ-1 "原文" {...} / acceptance / branches /
   implements Abs from "file" {map ...} }` — 要件層。`implements` があると verify が
   上位層への refine を同時実行(結果 JSON の `implements`)。`acceptance` は
-  check 時に再生検証され scenarios → testgen に流れる
+  check 時に再生検証され scenarios → testgen に流れる。`forbidden`(must-forbid)は
+  逆に「拒否されるべき操作列」を書き、最後のステップが拒否される(not-enabled か
+  違反)ことを check 時に検証する — 受理されたら `kind: "forbidden"`。安全性
+  invariant では沈黙する過小制約(ガード漏れ)を捕まえる独立チャネル(別エージェントに
+  NL から正負トレースを書かせる交差検証の受け皿)
 - 設計層は通常の `spec`(本書の主対象)。要件層へ `fslc refine` で接続
 - **トレーサビリティ**: 宣言の `{` 直前に `"ID: 原文"` タグ。violated / CTI /
   coverage / scenarios に `requirement: {id, text}` が載る — 反例を読んだら

@@ -239,6 +239,7 @@ requirements ReturnSystemReq {
     invariant PaidLedger { ... }
   }
   acceptance AC-1 "小額は支払われる" { submit(0, 1)  pay(0)  expect sys[0].st == Paid }
+  forbidden FB-1 "出荷後の取消は拒否" { submit(0, 1)  ship(0)  cancel(0)  expect rejected }
 }
 ```
 
@@ -246,6 +247,12 @@ requirements ReturnSystemReq {
   結果 JSON に `implements: {abs, result}`。
 - `acceptance` は check 時に具象 Monitor で再生検証(失敗は `kind: "acceptance"`)。
   scenarios に `acceptance_<ID>` として出力され testgen に流れる。
+- `forbidden FB-1 "原文" { <手順> expect rejected }` は must-forbid(acceptance の双対)。
+  前提ステップ(最後以外)は全て ok、**最後のステップが拒否**(not-enabled か
+  invariant/type_bound/partial_op/ensures 違反)されれば成功。受理されたら
+  `kind: "forbidden"`(過小制約=ガード漏れの検出。安全性 invariant では沈黙する)、
+  前提が未 enabled なら `kind: "forbidden_setup"`。scenarios に `forbidden_<ID>`
+  (`rejected_by` 付き — `requires_failed` 以外なら spec 自体が verify 違反)。
 - branches の分割アクションの表示は `submit[a <= AUTO_LIMIT]`、**下流の
   refinement 写像から参照するときは内部名 `submit__b1`/`submit__b2`**(現状の制約)。
 - requirement 内の要素には自動で {id, text} メタが付く。

@@ -448,6 +448,7 @@ def _expand_requirements_with_display(ast, base_dir):
     action_aliases = {}
     implements = None
     acceptances = []
+    forbiddens = []
     time_block = None
     deadlines = []
     consts = _collect_consts(items)
@@ -502,6 +503,14 @@ def _expand_requirements_with_display(ast, base_dir):
                 "expect": expect[1],
                 "loc": loc,
             })
+        elif tag == "forbidden":
+            _, fb_id, text, steps, loc = item
+            forbiddens.append({
+                "id": fb_id,
+                "text": text,
+                "steps": steps,
+                "loc": loc,
+            })
         else:
             expanded, maps = _expand_item(item, None, display_names, action_aliases)
             out.extend(expanded)
@@ -521,6 +530,8 @@ def _expand_requirements_with_display(ast, base_dir):
         out.append(("__action_aliases", action_aliases))
     if acceptances:
         out.append(("__acceptance", acceptances))
+    if forbiddens:
+        out.append(("__forbidden", forbiddens))
     return ("spec", name, out), display_names
 
 
