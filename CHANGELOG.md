@@ -6,6 +6,26 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-12
+
+### 追加
+- **整数除算 `/` と剰余 `%`**(算術に追加、`*` と同位)。ゼロ除算は両評価器で
+  全域的に 0 と定義(Z3 符号化も明示固定)し、アクション文脈では除数 != 0 を
+  暗黙の `partial_op` として検査。負数は Euclidean(`0 <= a%b < |b|`)。
+  → 2次元データを単一キーに平坦化したときの軸復元(`c / SLOTS` 等)が書ける。
+
+### ドキュメント / イディオム
+- **2次元データの平坦化イディオム**(Map のネスト不可 → 積ドメイン型1本+`/` `%`)を
+  LANGUAGE.md・スキルに追記。
+- **離散時刻 SLA の明文化**: `time`/`deadline` の配置規則、`age` の意味論、
+  `urgent` = 時間凍結という意味。特に「常時 enabled なアクションを urgent に
+  すると deadline が空虚に成立する罠」と、正しい **deadline-urgency パターン**
+  (期限到達時のみ enabled なガード付きアクションだけを urgent に)を明記。
+  公式例 `examples/nfr/support_sla.fsl` を追加(proved)。
+- 盲検可記述性テスト(`docs/DOGFOOD-8.md`、n=3): スキル単体で別エージェントが
+  新規ドメインを proved にできることを外部検証。上記ドキュメント改善はこの
+  テストが surface したギャップに対応するもの。
+
 ## [1.0.3] - 2026-06-12
 
 ### 追加
@@ -77,7 +97,8 @@
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/yumemi/fsl/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/yumemi/fsl/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/yumemi/fsl/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/yumemi/fsl/compare/v1.0.0...v1.0.1
