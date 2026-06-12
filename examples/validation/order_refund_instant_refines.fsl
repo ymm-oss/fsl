@@ -1,0 +1,14 @@
+refinement InstantRefinesBase {
+  impl OrderRefundInstant
+  abs  OrderRefund
+
+  map order[o: OrderId] = order[o]
+  map stock = stock
+  map refunded_total = refunded_total
+
+  action pay(o)            -> pay(o)
+  action ship(o)           -> ship(o)
+  action cancel(o)         -> cancel(o)
+  action refund(o)         -> refund(o)
+  action instant_refund(o) -> refund(o)   // 「同じ返金だ」という主張 — 検査で破綻するはず
+}

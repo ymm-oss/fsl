@@ -1,0 +1,67 @@
+// 設計変種: 返金期間ウィンドウ付き(DOGFOOD-9 ASSUME-5 で先送りした R5 の設計層実装案)
+// 抽象契約 examples/validation/order_refund.fsl を一切編集せずに、
+// cancel 後 WINDOW tick 以内のみ refund 可能という制限を詳細層で追加する。
+spec OrderRefundWindowed {
+  const CAP = 2
+  const WINDOW = 2
+  type OrderId = 0..2
+  type Cnt = 0..3
+  enum OSt { Cart, Paid, Shipped, Cancelled, Refunded }
+  type Stock = 0..CAP
+  type Age = 0..WINDOW                  // WINDOW = 期限切れの番地(refund は age < WINDOW のみ)
+
+  state {
+    order: Map<OrderId, OSt>,
+    stock: Stock,
+    refunded_total: Cnt,
+    age: Map<OrderId, Age>              // cancel からの経過 tick(詳細層にのみ存在)
+  }
+  init {
+    forall o: OrderId { order[o] = Cart }
+    stock = CAP
+    refunded_total = 0
+    forall o: OrderId { age[o] = 0 }
+  }
+
+  action pay(o: OrderId) {
+    requires order[o] == Cart
+    requires stock > 0
+    order[o] = Paid
+    stock = stock - 1
+  }
+  action ship(o: OrderId) {
+    requires order[o] == Paid
+    order[o] = Shipped
+  }
+  action cancel(o: OrderId) {
+    requires order[o] == Paid
+    order[o] = Cancelled
+    stock = stock + 1
+    age[o] = 0                          // ウィンドウ開始
+  }
+  action refund(o: OrderId) {
+    requires order[o] == Cancelled
+    requires age[o] < WINDOW            // ← 追加された時間ガード(事前条件の強化方向)
+    order[o] = Refunded
+    refunded_total = refunded_total + 1
+  }
+  action tick() {                       // 時間進行(詳細層の内部事象)
+    forall o: OrderId {
+      if order[o] == Cancelled and age[o] < WINDOW {
+        age[o] = age[o] + 1
+      }
+    }
+  }
+
+  invariant StockConserved {
+    stock + count(o: OrderId where (order[o] == Paid or order[o] == Shipped)) == CAP
+  }
+  invariant RefundLedger {
+    refunded_total == count(o: OrderId where order[o] == Refunded)
+  }
+
+  // 正例ペア: ウィンドウ内の返金は依然可能(過剰制約の検出)
+  reachable FullyRefunded { exists o: OrderId { order[o] == Refunded } }
+  // 正例ペア: 期限切れが実際に起きる(ウィンドウ機構が死に飾りでない)
+  reachable WindowExpired { exists o: OrderId { order[o] == Cancelled and age[o] == WINDOW } }
+}

@@ -1,0 +1,56 @@
+// 負例プローブ(レビューに歯があることの確認):
+// 「即時返金」— cancel を経ずに Paid から直接 Refunded へ。
+// UX 短縮の名目でありがちな近道だが、抽象契約の「refund は Cancelled のみ」を迂回する。
+spec OrderRefundInstant {
+  const CAP = 2
+  type OrderId = 0..2
+  type Cnt = 0..3
+  enum OSt { Cart, Paid, Shipped, Cancelled, Refunded }
+  type Stock = 0..CAP
+
+  state {
+    order: Map<OrderId, OSt>,
+    stock: Stock,
+    refunded_total: Cnt
+  }
+  init {
+    forall o: OrderId { order[o] = Cart }
+    stock = CAP
+    refunded_total = 0
+  }
+
+  action pay(o: OrderId) {
+    requires order[o] == Cart
+    requires stock > 0
+    order[o] = Paid
+    stock = stock - 1
+  }
+  action ship(o: OrderId) {
+    requires order[o] == Paid
+    order[o] = Shipped
+  }
+  action cancel(o: OrderId) {
+    requires order[o] == Paid
+    order[o] = Cancelled
+    stock = stock + 1
+  }
+  action instant_refund(o: OrderId) {   // ← 近道: キャンセル手続きを飛ばす
+    requires order[o] == Paid
+    order[o] = Refunded
+    stock = stock + 1
+    refunded_total = refunded_total + 1
+  }
+  action refund(o: OrderId) {
+    requires order[o] == Cancelled
+    order[o] = Refunded
+    refunded_total = refunded_total + 1
+  }
+
+  invariant StockConserved {
+    stock + count(o: OrderId where (order[o] == Paid or order[o] == Shipped)) == CAP
+  }
+  invariant RefundLedger {
+    refunded_total == count(o: OrderId where order[o] == Refunded)
+  }
+  reachable FullyRefunded { exists o: OrderId { order[o] == Refunded } }
+}

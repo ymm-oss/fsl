@@ -1,0 +1,14 @@
+refinement WindowedRefinesBase {
+  impl OrderRefundWindowed
+  abs  OrderRefund
+
+  map order[o: OrderId] = order[o]
+  map stock = stock
+  map refunded_total = refunded_total
+
+  action pay(o)    -> pay(o)
+  action ship(o)   -> ship(o)
+  action cancel(o) -> cancel(o)
+  action refund(o) -> refund(o)
+  action tick()    -> stutter           // 時間進行は抽象契約から不可視のはず
+}
