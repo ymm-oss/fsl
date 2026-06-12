@@ -33,6 +33,10 @@
 3. [`DOGFOOD-3.md`](DOGFOOD-3.md) — フルワークフロー(抽象→refine→compose→実装)
 4. [`DOGFOOD-4.md`](DOGFOOD-4.md) — 3層方言の貫通(要件 ID の層横断診断)
 5. [`DOGFOOD-5.md`](DOGFOOD-5.md) — NFR / 離散時刻 SLA
+6. [`DOGFOOD-6.md`](DOGFOOD-6.md) — 事例ギャラリーのバグ狩り(refine の見逃し2件)
+7. [`DOGFOOD-7.md`](DOGFOOD-7.md) — 正解オラクル試験群(Monitor BFS・trace 健全性・BUG-020)
+8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — 盲検可記述性テスト(G1 の外部検証)
+9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — 妥当性確認ワークフローの実走(メモ→正例ペア→修復)
 
 実例は [`../specs/`](../specs/)(単体仕様)と [`../examples/`](../examples/)
 (bank: 実装適合 / layers: 3層チェーン / nfr: SLA)に。

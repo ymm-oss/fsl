@@ -1,0 +1,67 @@
+// ════════════════════════════════════════════════════════════════
+// 注文の支払い・キャンセル・返金フロー(在庫付き)— 設計層 spec
+//
+// 妥当性確認ワークフロー(形式化メモ → 仕様 → 正例ペア → 修復)の実走成果物。
+// 経緯は docs/DOGFOOD-9.md。仮定は下の ASSUME タグに畳んである。
+//
+//   fslc verify examples/validation/order_refund.fsl --engine induction
+// ════════════════════════════════════════════════════════════════
+spec OrderRefund {
+  // ASSUME-1: 単一SKU。在庫初期 CAP=2。相互作用を見るため注文3件。
+  // ASSUME-2: キャンセルは支払い済みかつ未出荷(Paid)のみ。「出荷後はキャンセル不可」。
+  // ASSUME-3: キャンセル時に在庫を即時戻す(返金完了時ではない)。
+  // ASSUME-4: 返金は全額のみ。金額はモデル化せず件数台帳で扱う(MODEL)。
+  // ASSUME-5: 「返金は一定期間内」(元要件 R5)は離散時刻 SLA。設計層では扱わず、
+  //           返金可否は「キャンセル済みなら可能」とする。期間検査は requirements
+  //           層の time+deadline に委ねる(初版で window フラグとして持ち込んだら
+  //           返金が到達不能になり、reachable FullyRefunded が検出した。DOGFOOD-9)。
+  const CAP = 2
+  type OrderId = 0..2
+  type Cnt = 0..3
+  enum OSt { Cart, Paid, Shipped, Cancelled, Refunded }
+  type Stock = 0..CAP
+
+  state {
+    order: Map<OrderId, OSt>,
+    stock: Stock,
+    refunded_total: Cnt
+  }
+  init {
+    forall o: OrderId { order[o] = Cart }
+    stock = CAP
+    refunded_total = 0
+  }
+
+  action pay(o: OrderId) {
+    requires order[o] == Cart
+    requires stock > 0
+    order[o] = Paid
+    stock = stock - 1
+  }
+  action ship(o: OrderId) {
+    requires order[o] == Paid
+    order[o] = Shipped
+  }
+  action cancel(o: OrderId) "ASSUME-2: 出荷後はキャンセル不可" {
+    requires order[o] == Paid
+    order[o] = Cancelled
+    stock = stock + 1
+  }
+  action refund(o: OrderId) {
+    requires order[o] == Cancelled       // ASSUME-5: 期間ガードは上位層
+    order[o] = Refunded
+    refunded_total = refunded_total + 1
+  }
+
+  // 安全性: 在庫の保存則。保有(Paid/Shipped)中の数と在庫の和は一定。
+  invariant StockConserved {
+    stock + count(o: OrderId where (order[o] == Paid or order[o] == Shipped)) == CAP
+  }
+  // 安全性: 返金台帳の整合。二重返金は状態機械(Cancelled→Refunded 一方向)が防ぐ。
+  invariant RefundLedger {
+    refunded_total == count(o: OrderId where order[o] == Refunded)
+  }
+
+  // 正例ペア(P4): 返金まで到達できることを検査 — 過剰制約/空虚を炙り出す。
+  reachable FullyRefunded { exists o: OrderId { order[o] == Refunded } }
+}
