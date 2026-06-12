@@ -539,6 +539,14 @@ requirement NFR-1 "受理から4tick以内に完了" {
   しない」)がそのガードになる。urgent を指定しないと大半の deadline は
   飢餓トレースで violated になる — それは「スケジューリング前提が無い」
   ことの正しい指摘。
+- 配置: `time` は requirements 直下に高々1つ、`deadline` は requirement 内
+  (要件 ID が違反に紐付く)。age は tick で +1(while が偽なら 0 リセット)、
+  通常の状態変数としてガードから読める。
+- **⚠ 空虚 SLA の罠**: 常時 enabled になり得るアクションを urgent にすると
+  時間が凍結し、どんな K でも deadline が空虚に成立する(`<= 0` ですら緑)。
+  **期限到達時にのみ enabled になるガード付きアクション
+  (`requires age >= K` の respond_due 型)だけを urgent にする**のが正しい形。
+  非空虚の確認は `K-1` に下げて violated になること。
 - BMC 検査は即動く。帰納証明には時間予算の補助 invariant
   (`age + 残り作業 <= K` 型)が要ることが多い(CTI から導出。実例:
   `examples/nfr/`)。

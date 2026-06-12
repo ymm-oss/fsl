@@ -41,6 +41,10 @@ python -m fslc <subcommand> ...  # または venv の python で
 1. 仕様を書く → `fslc check file.fsl`(構文・型のみ、速い。エラーの `loc`/`expected`/`hint` に従って修正)
 2. `fslc verify file.fsl --depth 8` → 結果ごとの対応は下表
 3. verified になったら `fslc verify file.fsl --engine induction` → `proved` で完了
+   (注: `--depth K` はステップ K を**含む**。`proved` が無限深度になるのは
+   invariant のみで、**leadsTo は深さ K までの有界検査のまま** — 状態が単調にしか
+   進まない非循環の仕様なら、最長実行長より大きい `--depth` で再 verify すれば
+   全実行を被覆できる)
 4. 必要に応じて: `fslc scenarios`(統合テスト雛形 JSON)、`fslc testgen -o test_x.py`
    (実装適合 pytest 雛形)、`fslc replay --trace events.json`(ログ適合性)、
    `fslc refine impl.fsl abs.fsl mapping.fsl`(詳細仕様の忠実性検査)

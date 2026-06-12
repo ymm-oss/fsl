@@ -156,7 +156,7 @@ type Idx = 0..3
 invariant B { balance == sum(i: Idx of log.at(i) where i < log.size()) }
 // 2次元データ: Map のネスト不可 → 積ドメイン1本に平坦化し / % で軸復元
 const SLOTS = 4
-type Cell = 0..11                          // ROOMS*SLOTS - 1
+type Cell = 0..ROOMS*SLOTS-1               // 型上限は定数式が書ける
 state { holder: Map<Cell, Option<UserId>> }
 reachable Room1Full { forall c: Cell { c / SLOTS == 1 => holder[c] != none } }
 // 履歴(「一度でも X した」)はゴースト変数
@@ -266,7 +266,41 @@ NFR の過半は扱える(§11)。FSL の外に残るのは確率・パーセン
 | SLA/タイムアウト | requirements の `time { urgent ...  age m[x: T] while P }` + `deadline m <= K` |
 | 確率・%・実時間 | 対象外(文書へ) |
 
-SLA の要点: tick は自動生成。`urgent` に「先延ばしされないアクション」を列挙
-しないと飢餓トレースで violated になる(それが正しい診断)。BMC は即動く。
-帰納証明には `age + 残り作業 <= K` 型の時間予算補助 invariant を CTI から
-導出する(実例: examples/nfr/)。
+### time / deadline の規則(配置・意味論)
+
+- **配置**: `time { ... }` は requirements **直下**に高々1つ(requirement ブロック
+  内は parse エラー)。`deadline <age名> <= K` は **requirement 内**に書く
+  (要件 ID が違反に紐付く)。
+- **age の意味論**: `age m[x: T] while P` — 自動生成される `tick` の実行時、
+  P が真なら +1、偽なら 0 にリセット。上限は参照する deadline から自動設定され
+  `_bounds_*` で検査。**age は通常の状態変数としてガードから読める**
+  (`requires m[c] >= K`)。
+- **urgent の意味論 = 時間凍結**: 列挙したアクションのどれかが enabled な間、
+  `tick` は発火できない。
+
+### ⚠ 空虚 SLA の罠と deadline-urgency パターン
+
+常時 enabled になり得るアクション(例: 応答そのもの)を `urgent` にすると、
+**時間が一切進まず deadline がどんな K でも空虚に verified になる**
+(`deadline <= 0` ですら緑)。正しい形は、**期限到達時にのみ enabled になる
+ガード付きアクションだけを urgent にする**:
+
+```fsl
+time {
+  urgent respond_due                       // ← 期限到達ケースの処理だけを urgent に
+  age resp_age[c: CaseId] while cases[c] == Accepted
+}
+requirement REQ-3 "受付から 3 tick 以内に一次応答" {
+  fair action respond_due(c: CaseId) {
+    requires cases[c] == Accepted
+    requires resp_age[c] >= SLA_TICKS      // 期限到達時のみ enabled = それまで時間は流れる
+    cases[c] = Responded
+  }
+  deadline resp_age <= SLA_TICKS
+}
+```
+
+非空虚の確認法: `deadline <= K-1` に変えて violated になること(境界がちょうど
+効いている証拠)。`urgent` を消すと放置トレースで violated になる(正しい診断)。
+BMC は即動く。帰納証明には `age + 残り作業 <= K` 型の時間予算補助 invariant を
+CTI から導出する(実例: examples/nfr/)。

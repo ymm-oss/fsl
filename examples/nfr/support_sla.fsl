@@ -1,0 +1,76 @@
+// deadline-urgency パターンの公式例(盲検テスト第2回の被験が発見・DOGFOOD-8)。
+// 「応答そのもの」を urgent にすると時間が凍結し deadline が空虚化する罠を避け、
+// 期限到達ケースの処理(respond_due)だけを urgent にする。
+// 非空虚: deadline を <= 2 に下げると violated、urgent を消すと violated。
+// カスタマーサポート一次応答 SLA(requirements 方言 + 離散時刻)
+// モデル: tick は fslc が自動生成。resp_age[c] は「c が受付済みである間」の経過 tick 数。
+// SLA は deadline(不変条件として検査)で表現し、urgent respond_due が
+// 「期限に達したケースを放置したまま時間だけが進む」ことを禁止する
+// (通常の respond は非 urgent なので、期限内に時間が経過する正当な挙動は許される)。
+requirements SupportSLA {
+  const SLA_TICKS = 3
+  type CaseId = 0..2
+  enum St { Waiting, Accepted, Responded }
+
+  state {
+    cases: Map<CaseId, St>,
+    ever_responded: Map<CaseId, Bool>
+  }
+  init {
+    forall c: CaseId {
+      cases[c] = Waiting
+      ever_responded[c] = false
+    }
+  }
+
+  requirement REQ-1 "問い合わせは受付待ちから受付済みになる" {
+    fair action accept(c: CaseId) {
+      requires cases[c] == Waiting
+      cases[c] = Accepted
+    }
+  }
+
+  requirement REQ-2 "オペレーターは受付済みのケースに一次応答する" {
+    fair action respond(c: CaseId) {
+      requires cases[c] == Accepted
+      cases[c] = Responded
+      ever_responded[c] = true
+    }
+  }
+
+  time {
+    urgent respond_due
+    age resp_age[c: CaseId] while cases[c] == Accepted
+  }
+
+  requirement REQ-3 "SLA: ケースは受付済みになってから 3 tick 以内に一次応答される" {
+    // 期限に達したケースへの応答。urgent なのでこれが可能な間 tick は進めない。
+    fair action respond_due(c: CaseId) {
+      requires cases[c] == Accepted
+      requires resp_age[c] >= SLA_TICKS
+      cases[c] = Responded
+      ever_responded[c] = true
+    }
+    deadline resp_age <= SLA_TICKS
+  }
+
+  requirement REQ-4 "一次応答済みのケースが受付済みや受付待ちに戻ることはない" {
+    invariant NoRegress {
+      forall c: CaseId { ever_responded[c] => cases[c] == Responded }
+    }
+  }
+
+  requirement REQ-5 "全ケースが一次応答済みになる状態に到達できる" {
+    reachable AllResponded { forall c: CaseId { cases[c] == Responded } }
+  }
+
+  leadsTo EveryAcceptedGetsResponse "REQ-3: 受付済みは必ず一次応答される" {
+    forall c: CaseId { cases[c] == Accepted ~> cases[c] == Responded }
+  }
+
+  acceptance AC-1 "1件を受け付けて一次応答する" {
+    accept(0)
+    respond(0)
+    expect cases[0] == Responded
+  }
+}
