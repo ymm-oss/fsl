@@ -4,7 +4,7 @@
 
 | 文書 | 内容 |
 |---|---|
-| [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **形式手法と FSL の照会文書**。非専門家向けの背景説明、AI 駆動開発での位置づけ、導入 PoC 観点 |
+| [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **形式手法と FSL 入門**。非専門家向けの背景説明、AI 駆動開発での位置づけ、導入 PoC 観点 |
 | [`LANGUAGE.md`](LANGUAGE.md) | **言語リファレンス**(全構文・意味論・CLI・イディオム・3層方言・NFR)。仕様を書くならこれ |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | 言語設計書(設計原理 G1-G5・型システムの設計判断・修復プロトコル・ロードマップ) |
 
