@@ -159,17 +159,17 @@ else
       fail "site-packages の場所を安全に確認できません。$VENV_DIR を確認してから再実行してください。"
       ;;
   esac
-  rm -rf "$SITE_PACKAGES/fslc" "$SITE_PACKAGES/fslc-1.0.0.dist-info"
+  rm -rf "$SITE_PACKAGES/fslc" "$SITE_PACKAGES/fslc-1.0.1.dist-info"
   cp -R "$REPO_DIR/src/fslc" "$SITE_PACKAGES/fslc"
-  mkdir -p "$SITE_PACKAGES/fslc-1.0.0.dist-info"
+  mkdir -p "$SITE_PACKAGES/fslc-1.0.1.dist-info"
   {
     echo "Metadata-Version: 2.1"
     echo "Name: fslc"
-    echo "Version: 1.0.0"
-  } > "$SITE_PACKAGES/fslc-1.0.0.dist-info/METADATA"
+    echo "Version: 1.0.1"
+  } > "$SITE_PACKAGES/fslc-1.0.1.dist-info/METADATA"
   {
     echo "fslc"
-  } > "$SITE_PACKAGES/fslc-1.0.0.dist-info/top_level.txt"
+  } > "$SITE_PACKAGES/fslc-1.0.1.dist-info/top_level.txt"
   cat > "$FSL_BIN" <<EOF
 #!$VENV_PYTHON
 from fslc.cli import main
