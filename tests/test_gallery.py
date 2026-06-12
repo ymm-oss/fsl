@@ -38,6 +38,12 @@ GALLERY_CASES = [
     GalleryCase("errors/type_struct_set_field.fsl", "check", "error", "type"),
     GalleryCase("errors/semantics_duplicate_assignment.fsl", "verify --depth 2", "error", "semantics"),
     GalleryCase("errors/vacuous_contradictory_init.fsl", "verify --depth 2", "error", "vacuous"),
+    GalleryCase(
+        "errors/vacuous_implication_warning.fsl",
+        "verify --depth 2 --deadlock ignore --vacuity error",
+        "error",
+        "vacuous_implication",
+    ),
     GalleryCase("errors/violated_invariant_counter.fsl", "verify --depth 2", "violated", "invariant"),
     GalleryCase("errors/violated_type_bound_missing_guard.fsl", "verify --depth 2", "violated", "type_bound"),
     GalleryCase("errors/violated_ensures_wrong_postcondition.fsl", "verify --depth 2", "violated", "ensures"),

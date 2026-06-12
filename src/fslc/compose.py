@@ -411,7 +411,9 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
             ))
         else:
             merged.append(_rewrite_stmt(bit, aliases, empty_comp, set(), set()))
-    return ("action", name, _rewrite_params(params, aliases), merged, loc, fair, sync_meta)
+    # 8th element marks this as a sync action (inherits clauses from multiple
+    # components) — used to scope per-action diagnostics like always_true_requires.
+    return ("action", name, _rewrite_params(params, aliases), merged, loc, fair, sync_meta, True)
 
 
 def expand_compose(ast, base_dir):

@@ -136,7 +136,7 @@ def _read_spec(file):
     return build_spec(ast, display_names), src.splitlines()
 
 
-def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
+def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn"):
     try:
         spec, source_lines = _read_spec(file)
         acc = _acceptance_error(spec)
@@ -146,9 +146,19 @@ def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1):
         if forb:
             return _envelope(forb)
         if engine == "induction":
-            out = prove(spec, k_ind, depth, deadlock_mode=deadlock_mode)
+            out = prove(
+                spec, k_ind, depth,
+                deadlock_mode=deadlock_mode,
+                vacuity_mode=vacuity_mode,
+            )
         else:
-            out = verify(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines)
+            out = verify(
+                spec,
+                depth,
+                deadlock_mode=deadlock_mode,
+                source_lines=source_lines,
+                vacuity_mode=vacuity_mode,
+            )
         impl = _implements_result(spec, depth)
         if impl:
             out = dict(out)
@@ -399,6 +409,7 @@ def main(argv=None):
     v.add_argument("--k", type=int, default=1, dest="k_ind",
                    help="max induction depth (induction engine only)")
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    v.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
 
     sc = sub.add_parser("scenarios")
     sc.add_argument("file")
@@ -453,7 +464,8 @@ def main(argv=None):
             print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
-                            engine=args.engine, k_ind=args.k_ind)
+                            engine=args.engine, k_ind=args.k_ind,
+                            vacuity_mode=args.vacuity)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

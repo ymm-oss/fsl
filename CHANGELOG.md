@@ -7,6 +7,14 @@
 ## [Unreleased]
 
 ### 追加
+- **vacuity checks**(issue #4)を `fslc verify` に追加。verified/proved 経路で
+  `vacuous_implication`(含意 invariant の不到達前件)、`vacuous_leadsto`
+  (leadsTo トリガ不到達)、`always_true_requires`(先行 requires 文脈下で常に真の
+  requires 句)を warning として出力する。`--vacuity warn|error|ignore`
+  (既定 warn)を追加し、error は `result:"error"` / exit 2 にする。
+  coverage false のアクションと compose 同期アクションは `always_true_requires`
+  の対象外(同期アクションの句は成分からの継承複製 — 成分間の同一ガードは
+  各成分が契約を自衛する設計どおりで、成分 spec 単体の verify で検査される)。
 - **`forbidden`(負の受け入れ基準 / must-forbid)**(issue #3)を requirements 方言に追加。
   `forbidden FB-1 "原文" { <手順> expect rejected }` は「拒否されるべき操作列」を書き、
   前提ステップは全て ok・**最後のステップが拒否**される(not-enabled か invariant/

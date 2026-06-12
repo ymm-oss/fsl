@@ -785,6 +785,7 @@ def build_spec(tree, display_names=None):
             aname, params, body_items, loc = it[1], it[2], it[3], it[4]
             fair = it[5] if len(it) > 5 else False
             meta = it[6] if len(it) > 6 else None
+            sync = bool(it[7]) if len(it) > 7 else False
             nparams = normalize_params(params, consts, types_meta)
             requires, lets, stmts, ensures = normalize_action_items(body_items)
             actions.append(_with_meta({
@@ -796,6 +797,7 @@ def build_spec(tree, display_names=None):
                 "ensures": ensures,
                 "loc": loc,
                 "fair": bool(fair),
+                "sync": sync,
             }, meta))
         elif tag == "leadsto":
             leadstos.append(_with_meta({

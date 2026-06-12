@@ -110,6 +110,9 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
 | `violated` / `leadsTo` | 応答性質の反例(ラッソ/停滞) | trace の `loop_start` を確認。進行を担うアクションに `fair` を付けるか仕様を修正 |
 | `reachable_failed` | 到達したい状態に届かない | `action_coverage` の `blocking_requires`(unsat core)を読む。ガード緩和/アクション追加/`--depth` 増 |
 | `unknown_cti` | invariant は真だが帰納的でない | **CTI の開始状態 = 全 invariant を満たす幽霊状態。それを排除する補助 invariant(ドメインの真実であるもの)を追加して再実行。** 実績: 1ラウンド収束(例: 「キューに重複なし」「返金は Captured のみ」) |
+| warning / `vacuous_implication` | 含意 invariant の前件が depth 内で一度も到達しない | 前件を成立させる action / reachable 正例が欠けていないか、前件式が意図と逆・強すぎでないかを確認。単に後件を弱めない |
+| warning / `vacuous_leadsto` | leadsTo のトリガが depth 内で到達しない | トリガ状態に入る action / ガード / 初期条件を確認。応答先(Q)ではなく、まず P が実際に起きる仕様かを見る |
+| warning / `always_true_requires` | 先行 requires の文脈下で、その requires 句が制約として効いていない | 句が冗長なのか、その句が効く状態へ到達する経路が欠けているのかを判断。自動的に削除しない |
 | `error` / `parse` | 構文エラー | `loc` と `expected`(候補トークン)に従う |
 | `error` / `type` | 型エラー | `hint` に従う(例: `x == some(e)` → `x is some(v)` で束縛して比較) |
 | `error` / `semantics` | 二重代入など | 同一パスで同じ変数に2回代入しない(if の then/else は別パスなので可) |

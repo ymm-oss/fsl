@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import textwrap
+from pathlib import Path
+
+from fslc import build_spec, parse, prove, verify
+from fslc.cli import run_verify
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PY = ROOT / ".venv" / "bin" / "python"
+
+
+def _spec(src: str):
+    return build_spec(parse(textwrap.dedent(src)))
+
+
+def _kinds(out):
+    return [w.get("kind") for w in out.get("warnings", []) if isinstance(w, dict)]
+
+
+def test_vacuous_implication_warning_has_name_loc_and_requirement():
+    src = """
+    spec VacuousInvariant {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant NeverOne "REQ-I: x never reaches one" { x == 1 => false }
+    }
+    """
+    out = verify(_spec(src), 2, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    warning = next(w for w in out["warnings"] if w.get("kind") == "vacuous_implication")
+    assert warning["name"] == "NeverOne"
+    assert warning["loc"]["line"] > 0
+    assert warning["requirement"]["id"] == "REQ-I"
+    assert "within depth 2" in warning["message"]
+
+
+def test_forall_wrapped_implication_antecedent_is_checked():
+    src = """
+    spec ForallVacuousInvariant {
+      type K = 0..1
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant Guarded "REQ-F: guarded invariant" {
+        forall k: K { x == 1 => k >= 0 }
+      }
+    }
+    """
+    out = verify(_spec(src), 2, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    assert "vacuous_implication" in _kinds(out)
+
+
+def test_vacuous_leadsto_trigger_warning():
+    src = """
+    spec VacuousLeadsto {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant Stable { x == 0 }
+      leadsTo EventuallyTwo "REQ-L: x one responds" { x == 1 ~> x == 2 }
+    }
+    """
+    out = verify(_spec(src), 3, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    warning = next(w for w in out["warnings"] if w.get("kind") == "vacuous_leadsto")
+    assert warning["name"] == "EventuallyTwo"
+    assert warning["requirement"]["id"] == "REQ-L"
+
+
+def test_conditioned_redundant_requires_warning():
+    src = """
+    spec ConditionedRequires {
+      enum St { Paid, Cancelled }
+      state { st: St }
+      init { st = Paid }
+      action cancel() { st = Cancelled }
+      action pay() "REQ-A: paid action" {
+        requires st == Paid
+        requires st != Cancelled
+        st = Paid
+      }
+      invariant TypeOk { st == Paid or st == Cancelled }
+    }
+    """
+    out = verify(_spec(src), 2, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    warnings = [w for w in out["warnings"] if w.get("kind") == "always_true_requires"]
+    assert len(warnings) == 1
+    assert warnings[0]["name"] == "pay"
+    assert warnings[0]["requirement"]["id"] == "REQ-A"
+
+
+def test_coverage_false_actions_suppress_always_true_requires():
+    src = """
+    spec CoverageFalseSuppressesRequires {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      action impossible() {
+        requires x == 1
+        requires x == 1
+        x = x
+      }
+      invariant Stable { x == 0 }
+    }
+    """
+    out = verify(_spec(src), 2, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    assert "always_true_requires" not in _kinds(out)
+    assert out["action_coverage"]["impossible"] is not True
+
+
+def test_vacuity_warnings_not_surfaced_on_violated_path():
+    src = """
+    spec ViolatedBeatsVacuity {
+      state { x: Int }
+      init { x = 0 }
+      action inc() { x = 1 }
+      invariant Bad { x == 0 }
+      invariant Vacuous { x == 2 => false }
+    }
+    """
+    out = verify(_spec(src), 1, deadlock_mode="ignore")
+    assert out["result"] == "violated"
+    assert "warnings" not in out
+
+
+def test_induction_transparently_carries_vacuity_warning():
+    src = """
+    spec InductionVacuity {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant NeverOne { x == 1 => false }
+    }
+    """
+    out = prove(_spec(src), k_ind=1, base_depth=2, deadlock_mode="ignore")
+    assert out["result"] == "proved"
+    assert "vacuous_implication" in _kinds(out)
+
+
+def test_vacuity_error_and_ignore_modes(tmp_path):
+    src = """
+    spec VacuityModes {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant NeverOne { x == 1 => false }
+    }
+    """
+    path = tmp_path / "vacuity_modes.fsl"
+    path.write_text(textwrap.dedent(src), encoding="utf-8")
+
+    proc = subprocess.run(
+        [str(PY), "-m", "fslc", "verify", str(path), "--depth", "2",
+         "--deadlock", "ignore", "--vacuity", "error"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    error_out = json.loads(proc.stdout)
+    assert proc.returncode == 2
+    assert error_out["result"] == "error"
+    assert error_out["kind"] == "vacuous_implication"
+    assert error_out["findings"][0]["kind"] == "vacuous_implication"
+
+    ignored = run_verify(
+        str(path), 2, "ignore", vacuity_mode="ignore")
+    assert ignored["result"] == "verified"
+    assert "vacuous_implication" not in _kinds(ignored)
+
+
+def test_compose_sync_duplicate_component_guards_not_flagged(tmp_path):
+    # 同期アクションは複数成分から requires を継承する。成分間で同一のガード
+    # (各成分が自分の契約を自衛する設計どおりの複製)を「先行句から恒真」と
+    # 誤検出しないこと。specs/bank_system.fsl の deposit_audited と同じ形。
+    (tmp_path / "a.fsl").write_text(textwrap.dedent("""
+    spec CompA {
+      type Amount = 0..2
+      state { x: Int }
+      init { x = 0 }
+      action step(a: Amount) {
+        requires a > 0
+        x = x + a
+      }
+      invariant NonNeg { x >= 0 }
+    }
+    """), encoding="utf-8")
+    (tmp_path / "b.fsl").write_text(textwrap.dedent("""
+    spec CompB {
+      type Amount = 0..2
+      state { y: Int }
+      init { y = 0 }
+      action step(a: Amount) {
+        requires a > 0
+        y = y + a
+      }
+      invariant NonNeg { y >= 0 }
+    }
+    """), encoding="utf-8")
+    compose_path = tmp_path / "system.fsl"
+    compose_path.write_text(textwrap.dedent("""
+    compose DupGuardSystem {
+      use CompA as a from "a.fsl"
+      use CompB as b from "b.fsl"
+
+      action both(v: a.Amount) = a.step(v) || b.step(v) {
+      }
+
+      internal a.step
+      internal b.step
+
+      invariant Together { a.x == b.y }
+    }
+    """), encoding="utf-8")
+
+    out = run_verify(str(compose_path), 6, "ignore")
+    assert out["result"] == "verified"
+    assert out["action_coverage"]["both"] is True
+    assert "always_true_requires" not in _kinds(out)
+
+
+def test_verified_sample_corpus_has_no_vacuity_false_positives():
+    roots = [ROOT / "specs", ROOT / "examples", ROOT / "examples" / "gallery" / "valid"]
+    paths = sorted({p for root in roots for p in root.rglob("*.fsl")})
+    checked = 0
+    for path in paths:
+        if "gallery/errors" in path.as_posix() or "gallery/adversarial" in path.as_posix():
+            continue
+        baseline = run_verify(str(path), 8, "ignore", vacuity_mode="ignore")
+        if baseline["result"] not in {"verified", "proved"}:
+            continue
+        checked += 1
+        out = run_verify(str(path), 8, "ignore", vacuity_mode="warn")
+        vacuity = [w for w in out.get("warnings", []) if w.get("kind") in {
+            "vacuous_implication",
+            "vacuous_leadsto",
+            "always_true_requires",
+        }]
+        assert vacuity == [], (path, vacuity)
+    assert checked > 0

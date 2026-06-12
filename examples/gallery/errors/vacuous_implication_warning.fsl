@@ -1,0 +1,17 @@
+// expected-command: verify --depth 2 --deadlock ignore --vacuity error
+// expected-result: error
+// expected-kind: vacuous_implication
+// features: vacuity
+
+spec VacuousImplicationWarning {
+  state { x: Int }
+  init { x = 0 }
+
+  action noop() {
+    x = x
+  }
+
+  invariant NeverOne "REQ-VAC: x never reaches one" {
+    x == 1 => false
+  }
+}

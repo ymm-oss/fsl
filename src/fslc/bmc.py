@@ -30,6 +30,20 @@ def _warn(message, hint=None):
     return w
 
 
+_VACUOUS_IMPLICATION_HINT = (
+    "the antecedent is not reachable within this depth; check whether an action "
+    "that should establish it is missing, or whether the antecedent expression is wrong"
+)
+_VACUOUS_LEADSTO_HINT = (
+    "the leadsTo trigger is not reachable within this depth; check whether an action "
+    "that should establish it is missing, or whether the trigger expression is wrong"
+)
+_ALWAYS_TRUE_REQUIRES_HINT = (
+    "this requires clause is not acting as a constraint within this depth; decide "
+    "whether the model is missing a path to states where it matters, or the clause is redundant"
+)
+
+
 def _requirement(source):
     if not source:
         return None
@@ -44,6 +58,18 @@ def _attach_requirement(out, source):
     if req is not None:
         out["requirement"] = req
     return out
+
+
+def _vacuity_warning(kind, name, loc, message, hint, source, spec):
+    out = {
+        "kind": kind,
+        "name": display_label(name, spec),
+        "message": message,
+        "hint": hint,
+    }
+    if loc:
+        out["loc"] = loc
+    return _attach_requirement(out, source)
 
 
 def _public_bindings(binds):
@@ -2138,6 +2164,169 @@ def _requires_blocking_entry(req, source_lines=None):
     return entry
 
 
+def _exists_wrap(binders, expr):
+    out = expr
+    for binder in reversed(binders):
+        out = ("exists", binder, out)
+    return out
+
+
+def _implication_antecedent_candidate(inv):
+    if inv.get("implicit"):
+        return None
+    expr = inv["expr"]
+    binders = []
+    while isinstance(expr, tuple) and expr[0] == "forall":
+        binders.append(expr[1])
+        expr = expr[2]
+    if not (isinstance(expr, tuple) and expr[0] == "bin" and expr[1] == "=>"):
+        return None
+    return {
+        "kind": "vacuous_implication",
+        "name": inv["name"],
+        "source": inv,
+        "loc": inv.get("loc"),
+        "expr": _exists_wrap(binders, expr[2]),
+    }
+
+
+def _leadsto_trigger_candidate(leadsto):
+    return {
+        "kind": "vacuous_leadsto",
+        "name": leadsto["name"],
+        "source": leadsto,
+        "loc": leadsto.get("loc"),
+        "expr": _exists_wrap(leadsto.get("binders") or [], leadsto["P"]),
+    }
+
+
+def _vacuity_candidates(spec):
+    pending = []
+    for inv in spec.get("user_invariants", []):
+        cand = _implication_antecedent_candidate(inv)
+        if cand is not None:
+            pending.append(cand)
+    for leadsto in spec.get("leadstos", []):
+        pending.append(_leadsto_trigger_candidate(leadsto))
+    return pending
+
+
+def _requires_clause_locally_implied(inst, req_idx, spec):
+    if req_idx == 0:
+        return True
+    state = make_ind_state(spec, f"vac_{inst['action']}_{req_idx}")
+    expr_cache = {}
+    s = z3.Solver()
+    s.add(*_enum_phys_constraints(spec, state))
+    for inv in spec["invariants"]:
+        if inv.get("implicit"):
+            s.add(_inv_constraint(inv, state, spec, expr_cache))
+    with _eval_cache_scope(expr_cache, id(state)):
+        guards, _ = _eval_requires(inst["requires"], inst["lets"], state, inst["binds"], spec)
+    if req_idx >= len(guards):
+        return False
+    if req_idx:
+        s.add(*guards[:req_idx])
+    s.add(z3.Not(guards[req_idx]))
+    return s.check() == z3.unsat
+
+
+def _requires_vacuity_candidates(instances, spec):
+    pending = {}
+    suppress = {}
+    for idx, inst in enumerate(instances):
+        if inst["action_def"].get("sync"):
+            # compose の同期アクションは対象外: 句は複数成分からの継承複製であり、
+            # 成分間の同一ガード(例: bank_system の deposit_audited が bank と
+            # audit の両方から `a > 0` を継承)は「各成分が自分の契約を自衛する」
+            # 設計どおりで、除去可能な冗長ではない。各句は成分 spec 単体の
+            # verify で正しい文脈の検査を受ける(検出損失なし)。
+            continue
+        aname = inst["action"]
+        action_pending = pending.setdefault(aname, {})
+        action_suppress = suppress.setdefault(aname, set())
+        for req_idx, req in enumerate(inst["requires"]):
+            key = _requires_loc_key(req) + (req_idx,)
+            if not _requires_clause_locally_implied(inst, req_idx, spec):
+                action_suppress.add(key)
+            entry = action_pending.setdefault(key, {
+                "kind": "always_true_requires",
+                "name": aname,
+                "source": inst["action_def"],
+                "loc": req.get("loc"),
+                "req_idx": req_idx,
+                "instances": [],
+            })
+            entry["instances"].append(idx)
+    for aname, keys in suppress.items():
+        for key in keys:
+            pending.get(aname, {}).pop(key, None)
+    return {aname: by_clause for aname, by_clause in pending.items() if by_clause}
+
+
+def _check_requires_clause_can_constrain(s, inst, req_idx, state, spec, expr_cache):
+    with _eval_cache_scope(expr_cache, id(state)):
+        guards, _ = _eval_requires(inst["requires"], inst["lets"], state, inst["binds"], spec)
+    if req_idx >= len(guards):
+        return False
+    s.push()
+    if req_idx:
+        s.add(*guards[:req_idx])
+    s.add(z3.Not(guards[req_idx]))
+    can_constrain = s.check() == z3.sat
+    s.pop()
+    return can_constrain
+
+
+def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, coverage, depth, spec):
+    findings = []
+    for item in pending_vacuity:
+        if item["kind"] == "vacuous_implication":
+            findings.append(_vacuity_warning(
+                "vacuous_implication",
+                item["name"],
+                item.get("loc"),
+                (
+                    f"invariant '{display_label(item['name'], spec)}' has an implication "
+                    f"antecedent that is unreachable within depth {depth}"
+                ),
+                _VACUOUS_IMPLICATION_HINT,
+                item.get("source"),
+                spec,
+            ))
+        elif item["kind"] == "vacuous_leadsto":
+            findings.append(_vacuity_warning(
+                "vacuous_leadsto",
+                item["name"],
+                item.get("loc"),
+                (
+                    f"leadsTo '{display_label(item['name'], spec)}' has a trigger "
+                    f"that is unreachable within depth {depth}"
+                ),
+                _VACUOUS_LEADSTO_HINT,
+                item.get("source"),
+                spec,
+            ))
+
+    for aname, by_clause in pending_requires_vacuity.items():
+        if coverage.get(aname) is not True:
+            continue
+        for item in by_clause.values():
+            findings.append(_vacuity_warning(
+                "always_true_requires",
+                aname,
+                item.get("loc"),
+                (
+                    f"action '{display_label(aname, spec)}' has a requires clause "
+                    f"that is always true within depth {depth} when preceding clauses hold"
+                ),
+                _ALWAYS_TRUE_REQUIRES_HINT,
+                item.get("source"),
+                spec,
+            ))
+    return findings
+
+
 def _display_bindings(binds, inst, spec):
     act = inst["action_def"]
     return {pk: _display_param(pk, pv, act, spec) for pk, pv in binds.items()}
@@ -2370,7 +2559,7 @@ def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cach
     return None
 
 
-def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
+def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn"):
     instances = build_instances(spec)
     expr_cache = {}
     states = [make_state(spec, 0)]
@@ -2392,12 +2581,16 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
 
     reachables_result = {}
     pending_reachables = list(spec["reachables"])
+    pending_vacuity = _vacuity_candidates(spec) if vacuity_mode != "ignore" else []
 
     by_action = {}
     for idx, inst in enumerate(instances):
         by_action.setdefault(inst["action"], []).append(idx)
     coverage = {aname: False for aname in by_action}
     coverage_pending = set(by_action)
+    pending_requires_vacuity = (
+        _requires_vacuity_candidates(instances, spec) if vacuity_mode != "ignore" else {}
+    )
     cover_info = {}
 
     deadlock_info = {"found": False}
@@ -2526,6 +2719,19 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
                 s.pop()
             pending_reachables = still_pending
 
+        if pending_vacuity:
+            still_pending = []
+            for item in pending_vacuity:
+                with _eval_cache_scope(expr_cache, id(states[t])):
+                    prop = eval_expr(item["expr"], states[t], {}, spec)
+                s.push()
+                s.add(prop)
+                reachable = s.check() == z3.sat
+                s.pop()
+                if not reachable:
+                    still_pending.append(item)
+            pending_vacuity = still_pending
+
         enabled = _action_enabled_exprs(states[t], instances, spec, expr_cache)
 
         if spec.get("leadstos") and leadsto_stutter_violation is None:
@@ -2595,6 +2801,25 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
             for aname in done:
                 coverage_pending.discard(aname)
 
+        if pending_requires_vacuity:
+            empty_actions = []
+            for aname, by_clause in list(pending_requires_vacuity.items()):
+                discharged = []
+                for key, item in by_clause.items():
+                    for idx in item["instances"]:
+                        inst = instances[idx]
+                        if _check_requires_clause_can_constrain(
+                            s, inst, item["req_idx"], states[t], spec, expr_cache,
+                        ):
+                            discharged.append(key)
+                            break
+                for key in discharged:
+                    by_clause.pop(key, None)
+                if not by_clause:
+                    empty_actions.append(aname)
+            for aname in empty_actions:
+                pending_requires_vacuity.pop(aname, None)
+
         if t < depth:
             nxt = make_state(spec, t + 1)
             ch = z3.Int(f"__choice@{t}")
@@ -2619,6 +2844,8 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
         "coverage": coverage,
         "reachables_result": reachables_result,
         "pending_reachables": pending_reachables,
+        "pending_vacuity": pending_vacuity,
+        "pending_requires_vacuity": pending_requires_vacuity,
         "deadlock_info": deadlock_info,
         "deadlock_violation": deadlock_violation,
         "dl_warn": dl_warn,
@@ -2627,8 +2854,8 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False):
     }
 
 
-def verify(spec, depth, deadlock_mode="warn", source_lines=None):
-    explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode)
+def verify(spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn"):
+    explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode)
     if explored["result"] != "explored":
         return _display_output(explored, spec)
 
@@ -2664,9 +2891,25 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
     if lt_violation is not None:
         return _display_output(lt_violation, spec)
 
+    vacuity_findings = _finalize_vacuity_findings(
+        explored.get("pending_vacuity", []),
+        explored.get("pending_requires_vacuity", {}),
+        explored["coverage"],
+        depth,
+        spec,
+    ) if vacuity_mode != "ignore" else []
+    if vacuity_mode == "error" and vacuity_findings:
+        return _display_output({
+            "result": "error",
+            "spec": explored["spec"],
+            "kind": vacuity_findings[0]["kind"],
+            "findings": vacuity_findings,
+        }, spec)
+
     warnings = [_warn(w["message"], w.get("hint")) if isinstance(w, dict) and "message" in w
                 else _warn(str(w)) for w in spec.get("warnings", [])]
     warnings.extend(dl_warn)
+    warnings.extend(vacuity_findings)
     for aname, cov in coverage.items():
         if cov is not True:
             hint = cov.get("hint", "review requires clauses and init")
@@ -2693,7 +2936,8 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None):
 
 
 def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
-    explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode, track_cover=True)
+    explored = _bmc_explore(
+        spec, depth, deadlock_mode=deadlock_mode, track_cover=True, vacuity_mode="ignore")
     if explored["result"] != "explored":
         return _display_output(explored, spec)
 
@@ -2824,9 +3068,9 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
     }, spec)
 
 
-def prove(spec, k_ind, base_depth, deadlock_mode="warn"):
+def prove(spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn"):
     """k-induction: base BMC then step-case invariant proof."""
-    base = verify(spec, base_depth, deadlock_mode=deadlock_mode)
+    base = verify(spec, base_depth, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode)
     if base["result"] in ("violated", "reachable_failed", "error"):
         return base
 
