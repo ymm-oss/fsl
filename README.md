@@ -66,7 +66,7 @@ fsl/
 │   ├── README.md           # docs の見取り図(まずここ)
 │   ├── LANGUAGE.md         # 言語リファレンス — 仕様を書くならこれ
 │   ├── DESIGN-*.md         # 設計書(言語/3層方言/NFR/各機能 — 計12本)
-│   └── DOGFOOD-1..5.md     # ドッグフーディング所見(バグ・発見の記録)
+│   └── DOGFOOD-1..7.md     # ドッグフーディング所見(バグ・発見の記録)
 ├── specs/                  # サンプル仕様 (*.fsl) — 正しいものは全て k=1 で proved
 │   ├── cart_v1.fsl         #   Option / ensures / reachable の基本形
 │   ├── cart_v1_buggy.fsl   #   ガード欠落 — type_bound 違反の最短反例が返る
@@ -84,6 +84,10 @@ fsl/
 │   ├── repair_loop.fsl     #   fslc 自身のワークフローの自己仕様
 │   └── cart_{buggy,fixed}.fsl     # v0 互換サンプル
 ├── examples/
+│   ├── pm/                 # PM/PdM 向け(解約フロー: 業務+要件)
+│   ├── consulting/         # コンサル向け(As-Is/To-Be 統制検査)
+│   ├── e2e/                # 3役統合(コンサル→PM→エンジニア→実装)
+│   ├── gallery/            # 事例ギャラリー(正例/不正例カタログ/adversarial)
 │   ├── bank/               # 素の Python 実装への適合テスト(8/8)
 │   ├── layers/             # 3層チェーン(business → requirements → 設計)
 │   └── nfr/                # 離散時刻 SLA(urgency 規律・時間予算 invariant)
@@ -97,7 +101,8 @@ fsl/
 │   ├── runtime.py          #   Monitor 具象インタプリタ (Z3 不要)
 │   ├── testgen.py          #   pytest 適合性テスト雛形生成
 │   └── cli.py              #   CLI と JSON 出力・エラー封筒
-└── tests/                  # pytest (v0互換 / v1 / induction / scenarios / runtime)
+└── tests/                  # pytest (v0互換 / v1 / induction / scenarios / runtime /
+                            #         方言 / NFR / 独立オラクル照合・trace健全性)
 ```
 
 ## かんたんセットアップ（PM・コンサル・非エンジニアの方）
@@ -210,9 +215,11 @@ FSL は学習データに存在しない言語のため、AI エージェント(
 pytest
 ```
 
-169 テストが全機能(v0互換 / 型システム / k帰納法 / leadsTo / scenarios /
-runtime / refine / compose / 方言 / NFR)を検証します(約90秒)。
-両評価器(Z3・具象 Monitor)は witness 再生の差分テストで相互検証されています。
+301 テスト(+69 skip)が全機能(v0互換 / 型システム / k帰納法 / leadsTo /
+scenarios / runtime / refine / compose / 3層方言 / NFR)を検証します(約260秒)。
+両評価器(Z3・具象 Monitor)は witness 再生の差分テストで相互検証され、さらに
+**Z3 非依存の総当たりオラクル**(`tests/oracle.py`)で偽陰性(本来 violated/
+refinement_failed を verified/proved/refines と誤る見逃し)を照合しています。
 
 ## ライブラリ API
 
