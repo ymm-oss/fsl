@@ -261,6 +261,25 @@ invariant BalanceMatchesLog {
 `sum`/`count` はドメイン型を走るが、`where i < size` で live prefix に
 制限すれば **Seq の畳み込み**になる。
 
+### 2次元データ(室×スロット等): 単一キーへ平坦化
+
+`Map<RoomId, Map<SlotId, …>>` のような **Map のネストは不可**(§2)。
+2軸は積のドメイン型1本に平坦化し、軸は `/`・`%` で復元する:
+
+```fsl
+const SLOTS = 4
+type RoomId = 0..2
+type Cell   = 0..11                       // ROOMS*SLOTS - 1
+state { holder: Map<Cell, Option<UserId>> }
+// c / SLOTS = 室、c % SLOTS = スロット
+reachable Room1Full {
+  forall c: Cell { c / SLOTS == 1 => holder[c] != none }
+}
+```
+
+軸が少なく名前を持つ場合(例: 平日5コマ固定)は struct のフィールドに
+分解する選択肢もあるが、量化が要るなら平坦化が基本。
+
 ### 履歴(過去)を語るにはゴースト変数
 
 ```fsl

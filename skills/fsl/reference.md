@@ -154,6 +154,11 @@ invariant I { forall i in 0..CAP-1 { i < q.size() => jobs[q.at(i)].st == Queued 
 // Seq の畳み込み(インデックス・ドメイン型)
 type Idx = 0..3
 invariant B { balance == sum(i: Idx of log.at(i) where i < log.size()) }
+// 2次元データ: Map のネスト不可 → 積ドメイン1本に平坦化し / % で軸復元
+const SLOTS = 4
+type Cell = 0..11                          // ROOMS*SLOTS - 1
+state { holder: Map<Cell, Option<UserId>> }
+reachable Room1Full { forall c: Cell { c / SLOTS == 1 => holder[c] != none } }
 // 履歴(「一度でも X した」)はゴースト変数
 state { ever_locked: Map<UserId, Bool> }   // ロック時に true をセット
 // 重複なしキュー(帰納証明の定番補助 invariant)

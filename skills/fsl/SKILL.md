@@ -132,6 +132,8 @@ spec Cart {
 - invariant で Seq を語るときは添字ガード:
   `forall i in 0..CAP-1 { i < q.size() => P(q.at(i)) }`(範囲は `0..CAP-1` と
   const から導出して書く — リテラルをハードコードすると容量変更に追従しない)。
+- **Map のネスト(`Map<K1, Map<K2,V>>`)は不可** → 2軸は積のドメイン型1本に
+  平坦化(`type Cell = 0..ROOMS*SLOTS-1`)し、軸は `c / SLOTS`・`c % SLOTS` で復元。
 - 「X の後に Y が起きた」という**履歴**は状態で書けない → ゴースト変数
   (`ever_locked` 等)を足すか、応答性質なら `leadsTo`。
 
