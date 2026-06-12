@@ -31,8 +31,8 @@
   `Not(requires_ok)` violation condition, so the likely issue is in how the explored
   implementation step / action instance / singleton parameter binding is constrained
   when checking the mapped transition.
-- test status: `tests/test_gallery.py` keeps the correct expected value and marks this
-  case `xfail` (`DOGFOOD-6 BUG-001`).
+- test status: `tests/test_gallery.py` で期待 `refinement_failed`/`abs_requires_failed` を検証(xfail 解除済み)。
+- **fixed**: refine が `_bmc_explore` の「深さちょうど depth」の完全展開ソルバーを再利用しており、impl が depth 手前でデッドロックすると展開が unsat → 全違反検査が unsat=見逃しになっていた。refine 内で到達可能な各プレフィックスを増分構築し、unsat になった深さで打ち切る方式に変更(src/fslc/refine.py)。
 
 ## BUG-002: refinement map out-of-bounds is missed when impl/abs type names collide
 
@@ -60,5 +60,5 @@
   refinement bound checking or static map typing is resolving the shared type name
   through the implementation type environment instead of the abstract one, or otherwise
   treating the mapped alpha value as already abstract-bounded.
-- test status: `tests/test_gallery.py` keeps the correct expected value and marks this
-  case `xfail` (`DOGFOOD-6 BUG-002`).
+- test status: `tests/test_gallery.py` で期待 `refinement_failed`/`abs_state_mismatch` を検証(xfail 解除済み)。
+- **fixed**: BUG-001 と同じ「完全展開のデッドロック→空虚 refines」が根本原因。増分プレフィックス展開で解消。期待 kind は `map_out_of_bounds` ではなく `abs_state_mismatch`(jump 後 bump の更新結果 n=1 と α(n)=2 の不一致を境界検査より先に検出)であることを確認し、gallery の期待を実際に合わせた(どちらも refinement_failed である点は不変)。

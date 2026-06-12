@@ -22,6 +22,7 @@ from .bmc import (
     init_constraints,
     logical_state_values,
     make_state,
+    transition,
     z3_sort,
     _eval_cache_scope,
     _map_domain,
@@ -554,17 +555,48 @@ def refine(impl_spec, abs_spec, mapping, depth):
         return explored
 
     instances = explored["instances"]
-    states = explored["states"]
-    choices = explored["choices"]
-    s = explored["solver"]
-    expr_cache = explored["expr_cache"]
+
+    # Build our own incremental unrolling instead of reusing the verify-side
+    # solver: the impl may deadlock before `depth`, which makes a full
+    # depth-length unrolling unsatisfiable and would hide every violation
+    # (refine would vacuously report "refines"). Check each reachable prefix
+    # length and stop once the prefix becomes unsatisfiable.
+    expr_cache = {}
+    states = [make_state(impl_spec, 0)]
+    choices = []
+    s = z3.Solver()
+    s.set(unsat_core=True)
+    with _eval_cache_scope(expr_cache, id(states[0])):
+        s.add(*init_constraints(impl_spec, states[0]))
+
+    # 到達可能なプレフィックスだけを展開する。impl が depth より手前で
+    # デッドロックすると「深さちょうど depth」の完全展開は充足不能になり、
+    # 全ての違反検査が unsat=見逃しとなって空虚に refines を返してしまう。
+    for step in range(depth):
+        if s.check() != z3.sat:
+            break
+        nxt = make_state(impl_spec, step + 1)
+        ch = z3.Int(f"__refine_choice@{step}")
+        cons = [ch >= 0, ch < len(instances)]
+        with _eval_cache_scope(expr_cache, id(states[step])):
+            cons.append(transition(impl_spec, instances, states[step], nxt, ch, expr_cache))
+        s.push()
+        s.add(*cons)
+        reachable = s.check() == z3.sat
+        s.pop()
+        if not reachable:
+            break  # この遷移は到達不能(デッドロック)— ここで打ち切る
+        s.add(*cons)
+        states.append(nxt)
+        choices.append(ch)
+    ctx = {"states": states, "choices": choices, "instances": instances}
 
     for t in range(len(states)):
         alpha_t = build_alpha(states[t], mapping, impl_spec, abs_spec)
 
         if t == 0:
             failure = _check_map_out_of_bounds(
-                s, alpha_t, abs_spec, impl_spec, mapping, explored, step=0, at="init")
+                s, alpha_t, abs_spec, impl_spec, mapping, ctx, step=0, at="init")
             if failure is not None:
                 return failure
 
@@ -576,7 +608,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
                     m = s.model()
                     s.pop()
                     return _failure(
-                        impl_spec, abs_spec, mapping, explored, m, at="init",
+                        impl_spec, abs_spec, mapping, ctx, m, at="init",
                         kind="abs_state_mismatch",
                         step=0,
                         impl_action=None,
@@ -610,7 +642,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
                     ab = _alpha_logical_values(m, alpha_prev, abs_spec)
                     aa = _alpha_logical_values(m, alpha_cur, abs_spec)
                     return _failure(
-                        impl_spec, abs_spec, mapping, explored, m, at="step",
+                        impl_spec, abs_spec, mapping, ctx, m, at="step",
                         kind="stutter_changed_abs",
                         step=t,
                         impl_action=_inst_action(m, inst, impl_spec),
@@ -650,7 +682,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
                 ) if req_guards else False
                 kind = "abs_requires_failed" if req_fail else "abs_state_mismatch"
                 return _failure(
-                    impl_spec, abs_spec, mapping, explored, m, at="step",
+                    impl_spec, abs_spec, mapping, ctx, m, at="step",
                     kind=kind,
                     step=t,
                     impl_action=_inst_action(m, inst, impl_spec),
@@ -662,7 +694,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
             s.pop()
 
         failure = _check_map_out_of_bounds(
-            s, alpha_t, abs_spec, impl_spec, mapping, explored, step=t, at="step")
+            s, alpha_t, abs_spec, impl_spec, mapping, ctx, step=t, at="step")
         if failure is not None:
             return failure
 

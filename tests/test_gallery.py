@@ -43,17 +43,11 @@ GALLERY_CASES = [
     GalleryCase("errors/violated_partial_op_unchecked_pop.fsl", "verify --depth 2", "violated", "partial_op"),
     GalleryCase("errors/violated_leads_to_starvation.fsl", "verify --depth 4 --deadlock ignore", "violated", "leadsTo"),
     GalleryCase("errors/violated_deadlock_terminal.fsl", "verify --depth 3 --deadlock error", "violated", "deadlock"),
-    pytest.param(
-        GalleryCase(
-            "errors/refinement_failed_map.fsl",
-            "refine refinement_failed_impl.fsl refinement_failed_abs.fsl refinement_failed_map.fsl --depth 3",
-            "refinement_failed",
-            "abs_requires_failed",
-        ),
-        marks=pytest.mark.xfail(
-            reason="DOGFOOD-6 BUG-001: fslc reports refines for an approval shortcut",
-            strict=True,
-        ),
+    GalleryCase(
+        "errors/refinement_failed_map.fsl",
+        "refine refinement_failed_impl.fsl refinement_failed_abs.fsl refinement_failed_map.fsl --depth 3",
+        "refinement_failed",
+        "abs_requires_failed",
     ),
     GalleryCase("errors/error_acceptance_false_expect.fsl", "check", "error", "acceptance"),
     GalleryCase("adversarial/deep_nested_if_invariant.fsl", "verify --depth 4", "violated", "invariant"),
@@ -61,17 +55,12 @@ GALLERY_CASES = [
     GalleryCase("adversarial/seq_empty_head_boundary.fsl", "verify --depth 2", "violated", "partial_op"),
     GalleryCase("adversarial/option_struct_set_seq_combo.fsl", "verify --depth 5 --engine induction --deadlock ignore", "proved"),
     GalleryCase("adversarial/quantifier_boundary_break.fsl", "verify --depth 3", "violated", "invariant"),
-    pytest.param(
-        GalleryCase(
-            "adversarial/refine_mapping_boundary_map.fsl",
-            "refine refine_mapping_boundary_impl.fsl refine_mapping_boundary_abs.fsl refine_mapping_boundary_map.fsl --depth 2",
-            "refinement_failed",
-            "map_out_of_bounds",
-        ),
-        marks=pytest.mark.xfail(
-            reason="DOGFOOD-6 BUG-002: fslc reports refines when the map leaves the abstract bound",
-            strict=True,
-        ),
+    GalleryCase(
+        "adversarial/refine_mapping_boundary_map.fsl",
+        "refine refine_mapping_boundary_impl.fsl refine_mapping_boundary_abs.fsl refine_mapping_boundary_map.fsl --depth 2",
+        "refinement_failed",
+        # jump 後の状態不一致(bump は n=1 だが α(n)=2)を境界検査より先に検出する
+        "abs_state_mismatch",
     ),
     GalleryCase("adversarial/clever_double_assignment_placement.fsl", "verify --depth 3", "error", "semantics"),
     GalleryCase("adversarial/simultaneous_leads_to_satisfaction.fsl", "verify --depth 4 --deadlock ignore", "verified"),
