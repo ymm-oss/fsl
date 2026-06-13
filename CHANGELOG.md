@@ -19,6 +19,13 @@
   `process`/stages)・`Option<_>` スロット(none/some ≈ Empty/Filled)**の3形。
   `--ts` で導出可能エンティティの TypeScript だけを stdout に出す。出力は他コマンドと
   同じ JSON エンベロープ(`result:"typestate"`、exit 0)。
+- **`fslc mutate`**(issue #6)を追加。方言展開後の kernel AST に決定的な単一変異
+  (requires 削除/否定、代入削除、enum 入替、整数/型境界 ±1、then/else 交換、
+  fair 削除)を加え、mutant ごとに `build_spec` し直して BMC/acceptance/forbidden/
+  refinement で殺せるかを JSON 報告する。baseline が clean でない仕様は変異せず
+  baseline 結果を返す。`--by-requirement` は殺した性質の requirement tag で集計し、
+  ゼロ kill を `empty_formalization` として警告する。survivor はレビュー用データで、
+  `mutate` の exit は常に 0。
 - **`--strict-tags` lint**(issue #5)を `fslc check` / `fslc verify` に追加。
   ok/verified/proved の成功結果でのみ、タグなし action/invariant/reachable/leadsTo と
   未参照要件 ID(`--requirements ids.txt` および requirements 方言の `requirement`

@@ -130,6 +130,7 @@ fslc check <f>                                  # 構文・名前・型のみ
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--strict-tags] [--requirements ids.txt]
+fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [-o out.py]        # Adapter 雛形 + 適合 pytest
@@ -137,6 +138,13 @@ fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc typestate <f> [--ts]                       # 状態機械→幽霊型の適用可否判定 + TS雛形
 ```
 
+- `mutate` は kernel AST に決定的な単一変異(requires 削除/否定、代入削除、
+  enum 入替、整数/型境界 ±1、then/else 交換、fair 削除)を加え、各 mutant を
+  `build_spec` し直して BMC/acceptance/forbidden/refinement で殺せるかを報告する。
+  exit は常に 0。survivor は失敗ではなく、同値 mutant または拘束不足のレビュー候補。
+  baseline が depth K で clean でなければ変異せず baseline 結果を返す。
+  `--by-requirement` は「殺した性質」の requirement tag で集計し、ゼロ kill を
+  `empty_formalization` として警告する(この mutant 集合・depth で観測された下限)。
 - `check` / `verify` の `--strict-tags` は ok/verified/proved の成功結果だけに
   トレーサビリティ warning を追加する。対象はタグなし action/invariant/reachable/
   leadsTo と、`--requirements ids.txt` または requirements 方言の `requirement`
