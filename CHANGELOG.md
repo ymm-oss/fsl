@@ -7,6 +7,18 @@
 ## [Unreleased]
 
 ### 追加
+- **`fslc typestate`(設計 spec → typestate / 幽霊型の適用可否判定 + TS 雛形)**を追加。
+  `(エンティティ, action)` ごとに、from-state が**エンティティ自身の状態に対する局所
+  ガード**(`requires e.status == S`)なら `derivable`、`if` 内のデータ依存 to-state なら
+  `branching`、**状態を代入するのに局所ガードが無い**(前提が queue 等の外部構造に住む)
+  なら `relational` と判定する。`relational`/`branching` は型に出さず、理由(diagnostics)
+  と action の要件 ID(business 層の `transition ... by <actor>` 等)を添えて runtime/
+  検証義務として残す。エンティティ単位の `applicability` は全遷移が `derivable`/
+  `branching` のときだけ `full`(理解できなかった遷移を取りこぼして full を名乗らない)。
+  対応する状態機械は **enum 値の struct フィールド・enum 値の state 変数(business
+  `process`/stages)・`Option<_>` スロット(none/some ≈ Empty/Filled)**の3形。
+  `--ts` で導出可能エンティティの TypeScript だけを stdout に出す。出力は他コマンドと
+  同じ JSON エンベロープ(`result:"typestate"`、exit 0)。
 - **`--strict-tags` lint**(issue #5)を `fslc check` / `fslc verify` に追加。
   ok/verified/proved の成功結果でのみ、タグなし action/invariant/reachable/leadsTo と
   未参照要件 ID(`--requirements ids.txt` および requirements 方言の `requirement`

@@ -134,6 +134,7 @@ fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* 
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [-o out.py]        # Adapter 雛形 + 適合 pytest
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc typestate <f> [--ts]                       # 状態機械→幽霊型の適用可否判定 + TS雛形
 ```
 
 - `check` / `verify` の `--strict-tags` は ok/verified/proved の成功結果だけに
@@ -141,6 +142,12 @@ fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
   leadsTo と、`--requirements ids.txt` または requirements 方言の `requirement`
   ブロックで宣言されたが未参照の ID。`MODEL: ...` / `ASSUME-n: ...` などタグが
   ある宣言は warning にならない。
+- `typestate`: 状態機械(enum 値の struct フィールド / state 変数 / `Option<_>` スロット)を、
+  ホスト言語の **typestate(幽霊型)** にどこまで写せるか判定する。各 action は
+  `derivable`(from-state がエンティティ自身の局所ガード)/ `branching`(`if` 内のデータ依存)/
+  `relational`(局所ガードが無く前提が外部構造に住む — 型に出せず runtime/検証義務として残る)
+  に分類。エンティティの `applicability` は全遷移が derivable/branching のときのみ `full`。
+  `relational` には理由(diagnostics)と要件 ID が付く。`--ts` で導出可能分の TypeScript のみ出力。
 - 反例 trace: `[{step, state, action{name,params,loc}, changes{path:{from,to}}}]`。
   最短保証。状態は論理表示(enum 名 / Option は null|値 / Seq は配列 /
   合成は `alias.var` キー)。内部名(`__`)は出ない。

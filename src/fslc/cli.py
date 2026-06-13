@@ -14,6 +14,7 @@ from .refine import build_refinement, refine
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import generate_test_file, default_output_name
+from .typestate import analyze as analyze_typestate
 
 FSL_VERSION = "1.0"
 
@@ -128,6 +129,37 @@ def run_check(file, strict_tags=False, requirements=None):
             out["implements"] = impl
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
         return _envelope(out)
+    except UnexpectedInput as e:
+        return _envelope({
+            "result": "error",
+            "kind": "parse",
+            "loc": {"line": e.line, "column": e.column},
+            "message": str(e).split("\n")[0],
+            "expected": _parse_expected(e),
+        })
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+
+
+def run_typestate(file):
+    try:
+        src = open(file, encoding="utf-8").read()
+        ast, display_names = _parse_file(file, src)
+        spec = build_spec(ast, display_names)
+        return _envelope(analyze_typestate(spec))
     except UnexpectedInput as e:
         return _envelope({
             "result": "error",
@@ -402,7 +434,8 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
 
 def exit_code(result):
     r = result.get("result")
-    if r in ("verified", "proved", "scenarios", "conformant", "generated", "refines"):
+    if r in ("verified", "proved", "scenarios", "conformant", "generated",
+             "refines", "typestate"):
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant", "refinement_failed"):
         return 1
@@ -462,6 +495,12 @@ def main(argv=None):
     rf.add_argument("mapping")
     rf.add_argument("--depth", type=int, default=8)
 
+    ts = sub.add_parser("typestate",
+                        help="設計 spec から typestate(幽霊型)の適用可否を判定し TS 雛形を出す")
+    ts.add_argument("file")
+    ts.add_argument("--ts", action="store_true",
+                    help="JSON ではなく導出可能なエンティティの TypeScript だけを stdout に出す")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "version":
@@ -469,6 +508,14 @@ def main(argv=None):
         return 0
     if args.cmd == "check":
         result = run_check(args.file, args.strict_tags, args.requirements)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "typestate":
+        result = run_typestate(args.file)
+        if args.ts and result.get("result") == "typestate":
+            blocks = [e["typescript"] for e in result["entities"]
+                      if e["applicability"] != "none"]
+            sys.stdout.write("\n\n".join(blocks) + ("\n" if blocks else ""))
+            sys.exit(0)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "scenarios":
         result = run_scenarios(args.file, args.depth, args.deadlock)
