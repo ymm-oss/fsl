@@ -8,7 +8,7 @@ from lark.exceptions import UnexpectedInput, VisitError
 from pathlib import Path
 
 from .parser import parse, parse_src, parse_refinement
-from .model import build_spec, check_spec, FslError
+from .model import build_spec, check_spec, FslError, strict_tag_warnings
 from .bmc import verify, prove, scenarios
 from .refine import build_refinement, refine
 from .runtime import Monitor
@@ -55,6 +55,28 @@ def _parse_file(file, src):
     return parse_src(src, str(Path(file).parent))
 
 
+def _read_requirement_ids(path):
+    if path is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [line.strip() for line in fh if line.strip()]
+    except FileNotFoundError:
+        raise FslError(f"file not found: {path}", kind="io")
+
+
+def _add_strict_tag_warnings(out, spec, strict_tags=False, requirements=None):
+    if not strict_tags or out.get("result") not in ("ok", "verified", "proved"):
+        return out
+    out = dict(out)
+    out.setdefault("warnings", [])
+    out["warnings"] = list(out["warnings"]) + strict_tag_warnings(
+        spec,
+        _read_requirement_ids(requirements),
+    )
+    return out
+
+
 def _implements_result(spec, depth=8):
     impl = spec.get("implements")
     if not impl:
@@ -85,7 +107,7 @@ def _forbidden_error(spec):
     return {"result": "error", **out}
 
 
-def run_check(file):
+def run_check(file, strict_tags=False, requirements=None):
     try:
         src = open(file, encoding="utf-8").read()
         ast, display_names = _parse_file(file, src)
@@ -104,6 +126,7 @@ def run_check(file):
         impl = _implements_result(spec)
         if impl:
             out["implements"] = impl
+        out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
         return _envelope(out)
     except UnexpectedInput as e:
         return _envelope({
@@ -136,7 +159,9 @@ def _read_spec(file):
     return build_spec(ast, display_names), src.splitlines()
 
 
-def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn"):
+def run_verify(
+        file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
+        strict_tags=False, requirements=None):
     try:
         spec, source_lines = _read_spec(file)
         acc = _acceptance_error(spec)
@@ -163,6 +188,7 @@ def run_verify(file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="
         if impl:
             out = dict(out)
             out["implements"] = impl
+        out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
         return _envelope(out)
     except UnexpectedInput as e:
         return _envelope({
@@ -401,6 +427,8 @@ def main(argv=None):
 
     c = sub.add_parser("check")
     c.add_argument("file")
+    c.add_argument("--strict-tags", action="store_true")
+    c.add_argument("--requirements", default=None)
 
     v = sub.add_parser("verify")
     v.add_argument("file")
@@ -410,6 +438,8 @@ def main(argv=None):
                    help="max induction depth (induction engine only)")
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
     v.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
+    v.add_argument("--strict-tags", action="store_true")
+    v.add_argument("--requirements", default=None)
 
     sc = sub.add_parser("scenarios")
     sc.add_argument("file")
@@ -438,7 +468,7 @@ def main(argv=None):
         print(f"fslc {__version__}")
         return 0
     if args.cmd == "check":
-        result = run_check(args.file)
+        result = run_check(args.file, args.strict_tags, args.requirements)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "scenarios":
         result = run_scenarios(args.file, args.depth, args.deadlock)
@@ -465,7 +495,9 @@ def main(argv=None):
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
                             engine=args.engine, k_ind=args.k_ind,
-                            vacuity_mode=args.vacuity)
+                            vacuity_mode=args.vacuity,
+                            strict_tags=args.strict_tags,
+                            requirements=args.requirements)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

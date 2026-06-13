@@ -129,12 +129,18 @@ requires の文脈下で常に真の requires 句(`always_true_requires` — cov
 fslc check <f>                                  # 構文・名前・型のみ
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
+               [--strict-tags] [--requirements ids.txt]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [-o out.py]        # Adapter 雛形 + 適合 pytest
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 ```
 
+- `check` / `verify` の `--strict-tags` は ok/verified/proved の成功結果だけに
+  トレーサビリティ warning を追加する。対象はタグなし action/invariant/reachable/
+  leadsTo と、`--requirements ids.txt` または requirements 方言の `requirement`
+  ブロックで宣言されたが未参照の ID。`MODEL: ...` / `ASSUME-n: ...` などタグが
+  ある宣言は warning にならない。
 - 反例 trace: `[{step, state, action{name,params,loc}, changes{path:{from,to}}}]`。
   最短保証。状態は論理表示(enum 名 / Option は null|値 / Seq は配列 /
   合成は `alias.var` キー)。内部名(`__`)は出ない。

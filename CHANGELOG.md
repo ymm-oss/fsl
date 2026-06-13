@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### 追加
+- **`--strict-tags` lint**(issue #5)を `fslc check` / `fslc verify` に追加。
+  ok/verified/proved の成功結果でのみ、タグなし action/invariant/reachable/leadsTo と
+  未参照要件 ID(`--requirements ids.txt` および requirements 方言の `requirement`
+  ブロック)を warning として出力する。方言生成の `tick` / `_kpi_*` は明示マーカーで
+  除外し、既定(フラグなし)の出力は従来どおり。
 - **vacuity checks**(issue #4)を `fslc verify` に追加。verified/proved 経路で
   `vacuous_implication`(含意 invariant の不到達前件)、`vacuous_leadsto`
   (leadsTo トリガ不到達)、`always_true_requires`(先行 requires 文脈下で常に真の

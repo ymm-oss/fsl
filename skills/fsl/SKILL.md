@@ -89,6 +89,9 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
 ## 標準ワークフロー(proved を標準とする)
 
 1. 仕様を書く → `fslc check file.fsl`(構文・型のみ、速い。エラーの `loc`/`expected`/`hint` に従って修正)
+   要件トレーサビリティを厳格に見るときは `--strict-tags`
+   (必要なら `--requirements ids.txt`)を付ける。ok/verified/proved のときだけ、
+   タグなし宣言や未参照要件 ID が warning になる。
 2. `fslc verify file.fsl --depth 8` → 結果ごとの対応は下表
 3. verified になったら `fslc verify file.fsl --engine induction` → `proved` で完了
    (注: `--depth K` はステップ K を**含む**。`proved` が無限深度になるのは

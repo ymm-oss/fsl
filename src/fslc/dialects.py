@@ -357,7 +357,7 @@ def _expand_time(out, time_block, deadlines, action_aliases, action_maps, implem
     if deadlines and time_block is None:
         _err("deadline requires a time block", loc=deadlines[0]["loc"])
     if time_block is None:
-        return
+        return []
 
     age_decls, urgent_names = _parse_time_block(time_block)
     if "tick" in action_aliases or any(item[0] == "action" and item[1] == "tick" for item in out):
@@ -424,6 +424,7 @@ def _expand_time(out, time_block, deadlines, action_aliases, action_maps, implem
     tick_body.extend(_build_age_tick_stmt(age) for age in ages)
     out.append(("action", "tick", [], tick_body, time_block[2], False, None))
     action_aliases.setdefault("tick", []).append("tick")
+    generated_names = ["tick"]
     if implements is not None:
         action_maps.append(("action_map", "tick", [], ("stutter",), time_block[2]))
 
@@ -438,6 +439,7 @@ def _expand_time(out, time_block, deadlines, action_aliases, action_maps, implem
             d["meta"],
         ))
         idx += 1
+    return generated_names
 
 
 def _expand_requirements_with_display(ast, base_dir):
@@ -451,6 +453,8 @@ def _expand_requirements_with_display(ast, base_dir):
     forbiddens = []
     time_block = None
     deadlines = []
+    requirement_ids = []
+    generated_names = []
     consts = _collect_consts(items)
 
     for item in items:
@@ -479,6 +483,7 @@ def _expand_requirements_with_display(ast, base_dir):
             time_block = item
         elif tag == "requirement":
             _, req_id, text, req_items, loc = item
+            requirement_ids.append(req_id)
             req_meta = _meta(req_id, text)
             for child in req_items:
                 if child[0] == "deadline":
@@ -516,7 +521,9 @@ def _expand_requirements_with_display(ast, base_dir):
             out.extend(expanded)
             action_maps.extend(maps)
 
-    _expand_time(out, time_block, deadlines, action_aliases, action_maps, implements, consts)
+    generated_names.extend(
+        _expand_time(out, time_block, deadlines, action_aliases, action_maps, implements, consts)
+    )
 
     if implements is not None:
         mapping_items = [("impl", name), ("abs", implements["abs"])]
@@ -532,6 +539,10 @@ def _expand_requirements_with_display(ast, base_dir):
         out.append(("__acceptance", acceptances))
     if forbiddens:
         out.append(("__forbidden", forbiddens))
+    if generated_names:
+        out.append(("__generated", generated_names))
+    if requirement_ids:
+        out.append(("__requirement_ids", requirement_ids))
     return ("spec", name, out), display_names
 
 
@@ -779,6 +790,7 @@ def expand_business(ast):
         })
 
     out = []
+    generated_names = []
     for case_name, data in cases.items():
         out.append(("type", case_name, data["lo"], data["hi"]))
     for proc in processes:
@@ -845,7 +857,9 @@ def expand_business(ast):
                 ("index", ("var", proc["state_var"]), ("var", "c")),
                 ("var", kpi["stage"]))
         expr = ("bin", "==", ("var", kpi["name"]), ("count", "c", kpi["case"], cond))
-        out.append(("invariant", f"_kpi_{kpi['name']}", expr, kpi["loc"], None))
+        inv_name = f"_kpi_{kpi['name']}"
+        out.append(("invariant", inv_name, expr, kpi["loc"], None))
+        generated_names.append(inv_name)
 
     for item in policies:
         _, policy_id, text, body, loc = item
@@ -861,4 +875,6 @@ def expand_business(ast):
         _, goal_id, text, expr, loc = item
         out.append(("reachable", goal_id, _rewrite_stage_expr(expr, {}, process_by_case), loc, _meta(goal_id, text)))
 
+    if generated_names:
+        out.append(("__generated", generated_names))
     return ("spec", name, out)

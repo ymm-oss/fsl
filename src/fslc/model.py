@@ -734,6 +734,56 @@ def display_keyed(mapping, spec):
     return {display_label(k, spec): v for k, v in mapping.items()}
 
 
+def strict_tag_warnings(spec, requirement_ids=None):
+    """Return opt-in traceability lint warnings for user-visible declarations."""
+    generated = set(spec.get("generated_names") or [])
+    warnings = []
+
+    def add_untagged(element, item):
+        if item["name"] in generated or item.get("meta"):
+            return
+        warnings.append({
+            "kind": "untagged",
+            "element": element,
+            "name": display_label(item["name"], spec),
+            "loc": item.get("loc"),
+            "hint": (
+                "add a declaration tag such as \"REQ-1: original requirement\"; "
+                "use \"MODEL: ...\" or \"ASSUME-1: ...\" when this is modeling intent"
+            ),
+        })
+
+    for action in spec.get("actions", []):
+        add_untagged("action", action)
+    for inv in spec.get("user_invariants", []):
+        add_untagged("invariant", inv)
+    for leadsto in spec.get("leadstos", []):
+        add_untagged("leadsTo", leadsto)
+    for reachable in spec.get("reachables", []):
+        add_untagged("reachable", reachable)
+
+    referenced = set()
+    for collection in ("actions", "user_invariants", "leadstos", "reachables"):
+        for item in spec.get(collection, []):
+            meta = item.get("meta")
+            if meta and meta.get("id"):
+                referenced.add(meta["id"])
+    referenced.update(ac["id"] for ac in spec.get("acceptance", []) if ac.get("id"))
+    referenced.update(fb["id"] for fb in spec.get("forbidden", []) if fb.get("id"))
+
+    declared = set(spec.get("requirement_ids") or [])
+    declared.update(requirement_ids or [])
+    for req_id in sorted(declared - referenced):
+        warnings.append({
+            "kind": "unreferenced_requirement",
+            "element": "requirement",
+            "name": req_id,
+            "loc": None,
+            "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID",
+        })
+    return warnings
+
+
 def _with_meta(entry, meta):
     entry["meta"] = meta
     return entry
@@ -746,6 +796,8 @@ def build_spec(tree, display_names=None):
     dialect_acceptance = []
     dialect_forbidden = []
     dialect_action_aliases = {}
+    dialect_generated_names = []
+    dialect_requirement_ids = []
     for it in items:
         if it[0] == "__display_names":
             dialect_display_names.update(it[1])
@@ -757,6 +809,10 @@ def build_spec(tree, display_names=None):
             dialect_forbidden.extend(it[1])
         elif it[0] == "__action_aliases":
             dialect_action_aliases.update(it[1])
+        elif it[0] == "__generated":
+            dialect_generated_names.extend(it[1])
+        elif it[0] == "__requirement_ids":
+            dialect_requirement_ids.extend(it[1])
 
     consts = {}
     for it in items:
@@ -870,6 +926,8 @@ def build_spec(tree, display_names=None):
         "acceptance": dialect_acceptance,
         "forbidden": dialect_forbidden,
         "action_aliases": dialect_action_aliases,
+        "generated_names": dialect_generated_names,
+        "requirement_ids": dialect_requirement_ids,
     }
 
 
