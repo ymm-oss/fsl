@@ -23,6 +23,13 @@
 | [`DESIGN-scenarios.md`](DESIGN-scenarios.md) | scenarios・coverage の unsat core 診断 |
 | [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N>(partial_op・型ホワイトリスト) |
 | [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | struct の Option フィールド |
+| [`DESIGN-divmod.md`](DESIGN-divmod.md) | 整数除算 `/`・剰余 `%`(ゼロ除算の全域定義・partial_op・Euclidean) |
+| [`DESIGN-forbidden.md`](DESIGN-forbidden.md) | `forbidden`(負の受け入れ基準 / must-forbid)— 過小制約の検出 |
+| [`DESIGN-vacuity.md`](DESIGN-vacuity.md) | 空虚性検査(前件不到達 invariant / trigger 不到達 leadsTo / 恒真 requires) |
+| [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md) | `--strict-tags` lint(タグなし宣言・未参照要件の突合) |
+| [`DESIGN-mutate.md`](DESIGN-mutate.md) | `fslc mutate`(仕様ミューテーション・要件ストレスレポート) |
+| [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain`(骨格列挙・反実仮想・witness 物語化) |
+| [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate`(状態機械→幽霊型の適用可否判定 + TS 雛形) |
 
 ## ドッグフーディング記録(DOGFOOD-*)
 

@@ -185,13 +185,22 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
                                                   # 詳細仕様が抽象仕様を refine するか検査
 fslc verify specs/order_system.fsl --depth 8    # compose: cart + payment を同期合成
 
+# 妥当性確認スイート(仕様 ≠ 意図 のギャップを塞ぐ。docs/DESIGN-{forbidden,vacuity,...} 参照)
+fslc verify specs/cart_v1.fsl --vacuity error   # 空虚な性質(前件/trigger 不到達・恒真 requires)を検出
+fslc verify specs/cart_v1.fsl --strict-tags     # タグなし宣言(捏造候補)・未参照要件(欠落候補)を突合
+fslc mutate specs/cart_v1.fsl                    # 仕様ミューテーション: 性質がどれだけ挙動を拘束するか測る
+fslc explain specs/cart_v1.fsl                   # 骨格列挙 + 反実仮想(このルールが無いとこうなる)
+fslc typestate specs/order_workflow.fsl --ts    # 状態機械→幽霊型の適用可否判定 + TS 雛形
+# (requirements 方言では forbidden ブロックで「拒否されるべき操作列」も書ける)
+
 # インストールせずモジュール実行でも可
 python -m fslc verify specs/cart_v1_buggy.fsl
 ```
 
 出力は常に JSON（stdout）。終了コード: 0 = verified / proved / refines /
-conformant / generated、1 = violated / refinement_failed / reachable_failed /
-unknown_cti / nonconformant、2 = 仕様エラー、3 = 内部エラー。
+conformant / generated / mutated / explained / typestate、1 = violated /
+refinement_failed / reachable_failed / unknown_cti / nonconformant、
+2 = 仕様エラー（`error`／空虚性 `--vacuity error` 含む）、3 = 内部エラー。
 `cart_v1_buggy.fsl` は自動境界チェック（`type_bound`）の最短反例トレースを返します。
 
 ## AI エージェント向けスキル

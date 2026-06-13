@@ -2,8 +2,8 @@
 name: fsl
 description: >-
   FSL (AI-Native Formal Specification Language) で仕様を書き・検証し・修復する。
-  .fsl ファイルの作成/編集/検証、fslc コマンド(check/verify/explain/mutate/scenarios/replay/
-  testgen/refine)の実行、形式仕様・モデル検査・invariant 証明・仕様からのテスト
+  .fsl ファイルの作成/編集/検証、fslc コマンド(check/verify/explain/mutate/typestate/
+  scenarios/replay/testgen/refine)の実行、形式仕様・モデル検査・invariant 証明・仕様からのテスト
   生成・refinement 検査・実装の適合性検査を行うときに使う。業務フロー/業務
   プロセスの矛盾チェック、As-Is/To-Be の統制検査、要求・要件定義の形式化、
   受け入れ基準のテスト化、SLA・非機能要件の検査も対象。「仕様を書いて」
@@ -274,3 +274,7 @@ verify/induction/scenarios/Monitor は同じに使える:
 - **実装接続**: `fslc testgen` 生成ファイルの Adapter(reset/step/observe)を
   実装に結線。observe は仕様の論理状態と同形(enum は名前、Option は None|値、
   Seq は list、合成は `alias.var` キー)
+- **幽霊型(typestate)**: `fslc typestate file.fsl [--ts]` — 状態機械(enum 値の
+  struct フィールド / state 変数 / `Option<_>` スロット)をホスト言語の typestate に
+  どこまで写せるか判定(derivable / branching / relational)。全遷移が型化可能なら
+  applicability=full。`--ts` で導出可能分の TypeScript 雛形を出力(reference.md §7)
