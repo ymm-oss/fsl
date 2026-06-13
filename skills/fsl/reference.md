@@ -130,6 +130,7 @@ fslc check <f>                                  # 構文・名前・型のみ
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--strict-tags] [--requirements ids.txt]
+fslc explain <f> [--depth K=8]                 # 骨格 + 反実仮想 + witness 物語化
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
@@ -145,6 +146,10 @@ fslc typestate <f> [--ts]                       # 状態機械→幽霊型の適
   baseline が depth K で clean でなければ変異せず baseline 結果を返す。
   `--by-requirement` は「殺した性質」の requirement tag で集計し、ゼロ kill を
   `empty_formalization` として警告する(この mutant 集合・depth で観測された下限)。
+- `explain` は LLM なしの決定的整形。state/action/requires/writes/properties/
+  暗黙チェックを source loc と構造走査で列挙し、user invariant ごとに
+  requires/assignment/fair 除去で壊れる最短 counterfactual trace を付ける。
+  見つからない invariant は `no counterfactual within depth K` と明示する。
 - `check` / `verify` の `--strict-tags` は ok/verified/proved の成功結果だけに
   トレーサビリティ warning を追加する。対象はタグなし action/invariant/reachable/
   leadsTo と、`--requirements ids.txt` または requirements 方言の `requirement`

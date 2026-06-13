@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### 追加
+- **`fslc explain`(issue #7)**を追加。仕様の骨格(state/action/requires/writes/
+  properties/暗黙の型境界・partial_op 検査)を loc ベースの原文切り出しと構造走査で
+  JSON 化し、user invariant ごとに requires/代入/fair 除去の反実仮想トレースを
+  `mutate`/`verify` 機構の再利用で生成する。反実仮想が depth K で見つからない
+  invariant はエラーにせず明示し、reachable/scenarios witness も段階的な記述へ整形する。
 - **`fslc typestate`(設計 spec → typestate / 幽霊型の適用可否判定 + TS 雛形)**を追加。
   `(エンティティ, action)` ごとに、from-state が**エンティティ自身の状態に対する局所
   ガード**(`requires e.status == S`)なら `derivable`、`if` 内のデータ依存 to-state なら

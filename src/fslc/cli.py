@@ -16,6 +16,7 @@ from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import generate_test_file, default_output_name
 from .typestate import analyze as analyze_typestate
 from .mutate import DEFAULT_MAX_MUTANTS, mutate_file
+from .explain import explain_file
 
 FSL_VERSION = "1.0"
 
@@ -468,10 +469,40 @@ def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTA
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_explain(file, depth=8):
+    try:
+        return _envelope(explain_file(file, depth=depth))
+    except UnexpectedInput as e:
+        return _envelope({
+            "result": "error",
+            "kind": "parse",
+            "loc": {"line": e.line, "column": e.column},
+            "message": str(e).split("\n")[0],
+            "expected": _parse_expected(e),
+        })
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
-             "refines", "typestate", "mutated"):
+             "refines", "typestate", "mutated", "explained"):
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant", "refinement_failed"):
         return 1
@@ -531,6 +562,10 @@ def main(argv=None):
     mt.add_argument("--by-requirement", action="store_true")
     mt.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS)
 
+    ex = sub.add_parser("explain")
+    ex.add_argument("file")
+    ex.add_argument("--depth", type=int, default=8)
+
     rf = sub.add_parser("refine")
     rf.add_argument("impl")
     rf.add_argument("abs")
@@ -585,6 +620,9 @@ def main(argv=None):
         result = run_mutate(args.file, args.depth, args.by_requirement, args.max_mutants)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         sys.exit(0)
+    elif args.cmd == "explain":
+        result = run_explain(args.file, args.depth)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
                             engine=args.engine, k_ind=args.k_ind,

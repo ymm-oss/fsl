@@ -2,7 +2,7 @@
 name: fsl
 description: >-
   FSL (AI-Native Formal Specification Language) で仕様を書き・検証し・修復する。
-  .fsl ファイルの作成/編集/検証、fslc コマンド(check/verify/mutate/scenarios/replay/
+  .fsl ファイルの作成/編集/検証、fslc コマンド(check/verify/explain/mutate/scenarios/replay/
   testgen/refine)の実行、形式仕様・モデル検査・invariant 証明・仕様からのテスト
   生成・refinement 検査・実装の適合性検査を行うときに使う。業務フロー/業務
   プロセスの矛盾チェック、As-Is/To-Be の統制検査、要求・要件定義の形式化、
@@ -98,7 +98,11 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
    invariant のみで、**leadsTo は深さ K までの有界検査のまま** — 状態が単調にしか
    進まない非循環の仕様なら、最長実行長より大きい `--depth` で再 verify すれば
    全実行を被覆できる)
-4. 必要に応じて: `fslc mutate file.fsl --depth 8 --by-requirement`
+4. 必要に応じて: `fslc explain file.fsl --depth 8`
+   (仕様の骨格、暗黙の型境界/partial_op 検査、user invariant ごとの
+   「このルールが無ければ」の反実仮想、reachable/scenarios witness を
+   決定的 JSON で出す。PM/コンサルには論理式ではなく具体トレースの裁定を頼む)、
+   `fslc mutate file.fsl --depth 8 --by-requirement`
    (仕様の性質群がモデル変異をどれだけ殺すかを見る。survivor は失敗ではなく、
    invariant / acceptance / forbidden の不足候補。baseline が verified でない仕様では
    変異レポートを出さず baseline 結果を返す)、`fslc scenarios`(統合テスト雛形 JSON)、
