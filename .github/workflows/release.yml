@@ -1,0 +1,119 @@
+name: release-binaries
+
+# v* タグを push すると、各 OS/アーキ向けのスタンドアロン単一バイナリを
+# PyInstaller でビルドし、GitHub Release に添付する。
+# 生成物は Python 不要で「ダウンロードして実行」できる（z3 ネイティブlib同梱）。
+#
+#   git tag v1.1.0 && git push origin v1.1.0
+#
+# 手動確認したいときは Actions タブから workflow_dispatch でも起動可能
+# (この場合 Release への添付はスキップし、artifact として残す)。
+
+on:
+  push:
+    tags:
+      - "v*"
+  # 手動実行。main に入ると Actions タブの "Run workflow" から起動でき、
+  # 任意のブランチでビルド + smoke test を試走できる
+  # (Release 添付ステップは tag ガードのためスキップされ、artifact のみ残る)。
+  workflow_dispatch:
+
+permissions:
+  contents: write   # Release への asset 添付に必要
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14        # Apple Silicon
+            target: macos-arm64
+            asset: fslc-macos-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+            asset: fslc-linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            asset: fslc-linux-arm64
+          - os: windows-latest
+            target: windows-x64
+            asset: fslc-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # z3-solver / lark / 本体すべて wheel または純Python。
+          # 幅広い wheel が揃う 3.12 を採用。
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        # z3-solver は wheel 限定 (--only-binary)。最新版が当該 OS/アーキの wheel を
+        # 持たない場合 (例: 4.16.0.0 に macOS arm64 wheel が無い)、pip は wheel のある
+        # 直近バージョンへ自動で後退する。これを付けないと sdist のソースビルドに
+        # 落ちて "Unable to build Z3" で失敗する。
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=z3-solver . pyinstaller
+
+      - name: Build standalone binary
+        # --collect-all z3   : z3 のネイティブ libz3(.so/.dylib/.dll) を同梱
+        # --copy-metadata fslc: importlib.metadata でのバージョン解決を維持
+        run: >
+          pyinstaller --onefile --name fslc
+          --collect-all z3
+          --copy-metadata fslc
+          --distpath dist
+          packaging/fslc_entry.py
+
+      # 検証済みで反例を持たない既知の仕様を決め打ちで使う。
+      # find|head などで任意の .fsl を拾うと、デモ用に反例を含む仕様を引いた際
+      # verify が非ゼロ終了し、ランナーのファイル順次第で flaky になる。
+      - name: Smoke test (binary must self-contain Python + z3)
+        if: runner.os != 'Windows'
+        run: |
+          ./dist/fslc --version
+          ./dist/fslc verify examples/pm/cancel_flow.fsl > /dev/null
+          echo "ok"
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./dist/fslc.exe --version
+          ./dist/fslc.exe verify examples/pm/cancel_flow.fsl > $null
+          echo "ok"
+
+      - name: Rename + checksum (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mv dist/fslc "dist/${{ matrix.asset }}"
+          ( cd dist && shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256" )
+
+      - name: Rename + checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Move-Item dist/fslc.exe "dist/${{ matrix.asset }}"
+          $hash = (Get-FileHash "dist/${{ matrix.asset }}" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.asset }}" | Out-File -Encoding ascii "dist/${{ matrix.asset }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256

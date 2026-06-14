@@ -105,6 +105,37 @@ fsl/
                             #         方言 / NFR / 独立オラクル照合・trace健全性)
 ```
 
+## いちばん簡単：実行ファイルをダウンロードするだけ（Python 不要）
+
+`fslc` は**スタンドアロン単一バイナリ**として配布しています。Python のインストールも
+`pip` も `git` も不要です。GitHub の **Releases** から自分の OS 用のファイルを
+1つ落とすだけで動きます。
+
+| OS / アーキ | ダウンロードするファイル |
+| --- | --- |
+| macOS (Apple Silicon, M1〜) | `fslc-macos-arm64` |
+| Linux (x86_64) | `fslc-linux-x64` |
+| Linux (ARM64) | `fslc-linux-arm64` |
+| Windows (x64) | `fslc-windows-x64.exe` |
+
+```bash
+# 例: macOS (Apple Silicon)
+chmod +x fslc-macos-arm64
+./fslc-macos-arm64 verify spec.fsl
+```
+
+> **macOS の注意**: ダウンロードした実行ファイルは Gatekeeper によりブロックされます。
+> 初回だけ検疫属性を外してください:
+> `xattr -d com.apple.quarantine ./fslc-macos-arm64`
+> （または Finder で右クリック →「開く」を一度実行）。
+
+各ファイルには `*.sha256` を併せて添付しています。検証は
+`shasum -a 256 -c fslc-macos-arm64.sha256` で行えます。
+
+> このバイナリは z3 のネイティブライブラリまで同梱済みで、`verify` を含む
+> すべての機能が外部依存なしで動作します。スキル連携や editable 開発が必要な方は、
+> 下記のセットアップ手順を使ってください。
+
 ## かんたんセットアップ（PM・コンサル・非エンジニアの方）
 
 プログラミングの知識は不要です。次の3ステップだけ:
