@@ -1212,11 +1212,19 @@ def init_constraints(spec, s0):
                 out.append(c)
         elif st[0] == "forall_stmt":
             _, binder, body, _ = st
-            v, lo, hi, _where = binder_range(binder, spec["consts"], spec["types"])
+            v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
             for i in range(lo, hi + 1):
                 b2 = {**binds, v: i}
-                for s2 in body:
-                    run_collect(s2, b2, s0, out)
+                if where is not None:
+                    wcond = eval_expr(where, s0, b2, spec)
+                    saved = []
+                    for s2 in body:
+                        run_collect(s2, b2, s0, saved)
+                    for c in saved:
+                        out.append(z3.Implies(wcond, c))
+                else:
+                    for s2 in body:
+                        run_collect(s2, b2, s0, out)
 
     for st in spec["init"]:
         run(st, {})
@@ -1846,9 +1854,15 @@ def expand_leadsto_bindings(leadsto, spec):
             yield dict(current)
             return
         b = binders[idx]
-        v, lo, hi, _where = binder_range(b, spec["consts"], spec["types"])
+        v, lo, hi, where = binder_range(b, spec["consts"], spec["types"])
         for val in range(lo, hi + 1):
-            yield from expand(idx + 1, {**current, v: val})
+            b2 = {**current, v: val}
+            if where is not None:
+                from .runtime import eval_concrete
+
+                if not eval_concrete(where, {}, b2, spec):
+                    continue
+            yield from expand(idx + 1, b2)
 
     yield from expand(0, {})
 

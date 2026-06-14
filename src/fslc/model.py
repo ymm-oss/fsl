@@ -17,6 +17,13 @@ def _err(message, kind="semantics", loc=None, expected=None, hint=None):
     raise FslError(message, kind=kind, loc=loc, expected=expected, hint=hint)
 
 
+def _euc_div_const(a, b):
+    q = a // b
+    if a - b * q < 0:
+        q += 1
+    return q
+
+
 def eval_const(e, consts, binds=None):
     """Evaluate an expression that must be a compile-time integer."""
     binds = binds or {}
@@ -31,8 +38,12 @@ def eval_const(e, consts, binds=None):
         if e[1] in consts:
             return consts[e[1]]
         _err(f"'{e[1]}' is not a constant (ranges must be compile-time integers)", kind="type")
-    if tag == "bin" and e[1] in ("+", "-", "*"):
+    if tag == "bin" and e[1] in ("+", "-", "*", "/"):
         a, b = eval_const(e[2], consts, binds), eval_const(e[3], consts, binds)
+        if e[1] == "/":
+            if b == 0:
+                _err("division by zero in compile-time integer expression", kind="type")
+            return _euc_div_const(a, b)
         return {"+": a + b, "-": a - b, "*": a * b}[e[1]]
     _err(f"range bound is not a compile-time integer: {e}", kind="type")
 

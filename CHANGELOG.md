@@ -6,6 +6,27 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-06-15
+
+テーマ: **自動コード監査(composer-2.5)で検出した検証済みバグの修正**。検証器の健全性に
+関わる 1 件を含む 3 件を修正(issue #13/#14/#15)。いずれも実 CLI 動作で確認済み。
+
+### 修正
+- **`leadsTo` 束縛の `where` 句が破棄され誤った `violated` を報告**していた問題を修正
+  (issue #13)。`expand_leadsto_bindings`(`bmc.py`)が binder の `where` を捨てて全
+  ドメイン値を列挙していたため、`forall p: T where p > 0` でも `p = 0` を別束縛として
+  検査し、where を満たさない値で偽の反例を出しうる(検証器の健全性)。`where` を具体評価
+  して列挙をフィルタするよう修正。あわせて `init_constraints` の `run_collect` が
+  ネストした `forall` の `where` を無視していた過剰拘束(unsat)も修正。
+- **欠落 spec ファイルが `kind:"internal"`/exit 3 で報告**されていた問題を修正
+  (issue #14)。`run_check`/`run_scenarios`(`cli.py`)で `except FileNotFoundError`
+  が `except Exception` より後にあり到達不能だった。順序を入れ替え、io エラーは
+  LANGUAGE.md §7 どおり `kind:"io"`/exit 2 になるよう修正。
+- **コンパイル時整数の除算 `/` が未実装**(`+ - *` のみ)だった問題を修正(issue #15)。
+  DESIGN-v1 §3.1 の「四則」に合わせ `eval_const`(`model.py`)に除算を追加。意味論は
+  ランタイム(`_euc_div`、ユークリッド除算)と一致させ、0 除算は `kind:"type"` の
+  コンパイルエラーにする。`type K = 0..(MAX / 2)` のような range bound が通るように。
+
 ## [1.2.0] - 2026-06-14
 
 テーマ: **AI 形式化の妥当性確認(validation)スイート**(roadmap #1 完了)。検査器が
@@ -175,7 +196,8 @@
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/yumemi/fsl/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/yumemi/fsl/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/yumemi/fsl/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/yumemi/fsl/compare/v1.0.2...v1.0.3

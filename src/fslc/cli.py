@@ -244,11 +244,11 @@ def run_verify(
     except FslError as e:
         return _error_envelope(e.kind, str(e), _loc_from_exc(e),
                                getattr(e, "expected", None), getattr(e, "hint", None))
-    except Exception as e:
-        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
     except FileNotFoundError:
         return _envelope({"result": "error", "kind": "io",
                           "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
 def run_scenarios(file, depth, deadlock_mode="warn"):
@@ -275,11 +275,11 @@ def run_scenarios(file, depth, deadlock_mode="warn"):
     except FslError as e:
         return _error_envelope(e.kind, str(e), _loc_from_exc(e),
                                getattr(e, "expected", None), getattr(e, "hint", None))
-    except Exception as e:
-        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
     except FileNotFoundError:
         return _envelope({"result": "error", "kind": "io",
                           "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
 def run_replay(file, trace_path):
