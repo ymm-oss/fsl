@@ -597,7 +597,8 @@ class Ast(Transformer):
         return ("maps", target, _loc(meta))
 
     def req_mapped_action_target(self, meta, name, *exprs):
-        return ("action", name, list(exprs))
+        # 空括弧 foo() は maybe_placeholders で (None,) になる — 0引数として扱う
+        return ("action", name, [e for e in exprs if e is not None])
 
     def req_action_target(self, meta, child):
         return child
@@ -683,7 +684,8 @@ class Ast(Transformer):
         return ("stutter",)
 
     def mapped_action_target(self, meta, name, *exprs):
-        return ("action", name, list(exprs))
+        # 空括弧 foo() は maybe_placeholders で (None,) になる — 0引数として扱う
+        return ("action", name, [e for e in exprs if e is not None])
 
     def refinement_action(self, meta, name, *params_and_target):
         params = []

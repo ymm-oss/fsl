@@ -30,6 +30,7 @@
 | [`DESIGN-mutate.md`](DESIGN-mutate.md) | `fslc mutate`(仕様ミューテーション・要件ストレスレポート) |
 | [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain`(骨格列挙・反実仮想・witness 物語化) |
 | [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate`(状態機械→幽霊型の適用可否判定 + TS 雛形) |
+| [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui(画面遷移方言)スパイク所見・展開規則案・go/no-go(#9) |
 
 ## ドッグフーディング記録(DOGFOOD-*)
 

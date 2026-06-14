@@ -1,0 +1,15 @@
+refinement UIRefinesReq {
+  impl ReturnUI
+  abs  ReturnReqMin
+  map st  = if screen == Done then Paid else if screen == ReadyToPay then Approved else New
+  map amt = if screen == ReadyToPay or screen == Done then amount else 0
+  map paid = screen == Done
+  action enter_amount(a) -> stutter
+  action submit()        -> stutter
+  action resp_auto()     -> approve(amount)
+  action resp_mgr()      -> stutter
+  action resp_error()    -> stutter
+  action retry()         -> stutter
+  action mgr_approved()  -> approve(amount)
+  action pay()           -> pay()
+}

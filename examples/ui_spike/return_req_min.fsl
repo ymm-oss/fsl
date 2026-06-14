@@ -1,0 +1,10 @@
+// 要件層のエッセンス(単一ケース): 承認後のみ支払い・台帳整合。
+spec ReturnReqMin {
+  type Amount = 0..3
+  enum St { New, Approved, Paid }
+  state { st: St, amt: Amount, paid: Bool }
+  init { st = New  amt = 0  paid = false }
+  fair action approve(a: Amount) { requires st == New  requires a > 0  st = Approved  amt = a }
+  fair action pay() { requires st == Approved  st = Paid  paid = true }
+  invariant PaidWasApproved { paid => st == Paid }
+}

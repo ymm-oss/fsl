@@ -6,7 +6,18 @@
 
 ## [Unreleased]
 
+### 修正
+- **refinement の 0引数 abstract アクション写像**(`action foo() -> bar()`)が
+  `expects 0 arguments` の偽エラーで落ちていた問題を修正(`grammar.py` の
+  `mapped_action_target`/`req_mapped_action_target` で `maybe_placeholders` 由来の
+  None を除去)。既存仕様は 0引数 impl を全て `stutter` に写していたため未発覚。
+  fsl-ui スパイク(#9)の副産物。
+
 ### 追加
+- **fsl-ui スパイク**(#9): 画面遷移方言の検討。返品申請の画面フローを素の fsl で
+  手書きし、verified + proved、かつ要件層への refine も成立することを確認
+  (`examples/ui_spike/`、所見は `docs/DESIGN-ui.md`)。カーネルの意味論変更なしに
+  画面フローを表現でき、方言は AST 糖衣として成立する見込み(go/no-go は DESIGN-ui)。
 - **`fslc explain`(issue #7)**を追加。仕様の骨格(state/action/requires/writes/
   properties/暗黙の型境界・partial_op 検査)を loc ベースの原文切り出しと構造走査で
   JSON 化し、user invariant ごとに requires/代入/fair 除去の反実仮想トレースを

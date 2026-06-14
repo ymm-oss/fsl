@@ -1,0 +1,64 @@
+// fsl-ui スパイク(issue #9): 返品申請の画面フローを素の fsl で手書き。
+// screen=enum / navigate=action / ガード=requires / 袋小路なし=leadsTo /
+// 全画面到達=reachable / 二重送信防止=invariant。新構文は使わない。
+// 注: 画面名 Done は abs の St.Paid と被らないよう改名(enum 衝突回避。下記 F 参照)。
+spec ReturnUI {
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum Screen { Form, Submitting, ReadyToPay, MgrPending, Done, Error }
+
+  state {
+    screen: Screen,
+    amount: Amount,
+    submitting: Bool
+  }
+  init { screen = Form  amount = 0  submitting = false }
+
+  action enter_amount(a: Amount) {
+    requires screen == Form
+    requires a > 0
+    amount = a
+  }
+  fair action submit() {
+    requires screen == Form
+    requires amount > 0
+    requires not submitting
+    screen = Submitting
+    submitting = true
+  }
+  fair action resp_auto() {
+    requires screen == Submitting
+    requires amount <= AUTO_LIMIT
+    screen = ReadyToPay
+    submitting = false
+  }
+  fair action resp_mgr() {
+    requires screen == Submitting
+    requires amount > AUTO_LIMIT
+    screen = MgrPending
+    submitting = false
+  }
+  fair action resp_error() {
+    requires screen == Submitting
+    screen = Error
+    submitting = false
+  }
+  action retry() {
+    requires screen == Error
+    screen = Form
+  }
+  fair action mgr_approved() {
+    requires screen == MgrPending
+    screen = ReadyToPay
+  }
+  fair action pay() {
+    requires screen == ReadyToPay
+    screen = Done
+  }
+
+  reachable CanDone { screen == Done }
+  reachable CanError { screen == Error }
+  reachable CanMgr { screen == MgrPending }
+  leadsTo SubmitResolves { screen == Submitting ~> (screen != Submitting) }
+  invariant NoSubmitElsewhere { submitting => screen == Submitting }
+}
