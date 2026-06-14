@@ -435,6 +435,9 @@ def bounds_invariant_expr(var_name, ty, types_meta):
         b = ("binder_range", "__k", ("num", k_lo), ("num", k_hi))
         return ("forall", b, v_body)
     if ty[0] == "set":
+        elem_ty = ty[1]
+        if elem_ty[0] in ("domain", "enum"):
+            return ("set_bounds", var_name, elem_ty)
         return None
     if ty[0] == "seq":
         cap = ty[2]
@@ -479,6 +482,9 @@ def bounds_invariant_expr(var_name, ty, types_meta):
 
 
 def bounds_invariant_expr_map_field(phys_name, map_key_ty, value_ty, types_meta):
+    if map_key_ty[0] == "int":
+        return ("map_value_bounds", phys_name, value_ty)
+
     k_lo, k_hi = domain_range(map_key_ty, types_meta)
 
     def scalar_bounds(vty, select_expr):
@@ -524,6 +530,8 @@ def bounds_invariant_expr_map_field(phys_name, map_key_ty, value_ty, types_meta)
 
 def _subst_var(expr, old, new):
     tag = expr[0]
+    if tag in ("set_bounds", "map_value_bounds"):
+        return expr
     if tag == "var" and expr[1] == old:
         return new
     if tag == "num" or tag == "bool":
@@ -672,7 +680,7 @@ def generate_bounds_invariants(logical_state, phys_vars, types_meta):
     invs = []
     for logical, ty in logical_state.items():
         if ty[0] in ("int", "bool", "set", "seq"):
-            if ty[0] == "seq":
+            if ty[0] in ("set", "seq"):
                 expr = bounds_invariant_expr(logical, ty, types_meta)
                 if expr:
                     invs.append({
@@ -691,8 +699,6 @@ def generate_bounds_invariants(logical_state, phys_vars, types_meta):
             expr = bounds_invariant_expr(logical, ty, types_meta)
         elif ty[0] == "map":
             kty, vty = ty[1], ty[2]
-            if kty[0] == "int":
-                continue
             if vty[0] in ("int", "bool"):
                 continue
             if vty[0] == "struct":

@@ -1,5 +1,6 @@
-from fslc import build_spec, parse, verify
-from fslc.cli import exit_code, run_check, run_scenarios
+from fslc import Monitor, build_spec, parse, verify
+from fslc.cli import exit_code, run_check, run_scenarios, run_testgen
+from fslc.explain import explain_file
 from fslc.model import eval_const
 
 
@@ -96,3 +97,95 @@ def test_eval_const_compile_time_division_uses_euclidean_negative_cases():
         ("bin", "/", ("num", 3), ("var", "NEG_TWO")),
         {"NEG_TWO": -2},
     ) == -1
+
+
+def test_set_bounded_add_out_of_range_is_violated(tmp_path):
+    src = """
+spec SetBoundedBad {
+  type Id = 0..3
+  state { s: Set<Id> }
+  init { s = Set {} }
+  action addbad() { s = s.add(99) }
+}
+"""
+    result = _verify_fixture(tmp_path, "set_bounded_bad.fsl", src, depth=1)
+
+    assert result["result"] == "violated", result
+    assert result["violation_kind"] == "type_bound"
+    assert result["invariant"] == "_bounds_s"
+
+
+def test_map_int_value_out_of_range_is_violated(tmp_path):
+    src = """
+spec MapIntValueBad {
+  type Qty = 0..5
+  state { m: Map<Int, Qty> }
+  init { m[0] = 0 }
+  action setbad() { m[0] = 99 }
+}
+"""
+    result = _verify_fixture(tmp_path, "map_int_value_bad.fsl", src, depth=1)
+
+    assert result["result"] == "violated", result
+    assert result["violation_kind"] == "type_bound"
+    assert result["invariant"] == "_bounds_m"
+
+
+def test_explain_max_mutants_counts_processed_not_global_index(tmp_path):
+    src = """
+spec ExplainMaxMutants {
+  state { x: Int }
+  init { x = 0 }
+  action bad() {
+    requires x == 1
+    x = 2
+  }
+  invariant Small { x <= 1 }
+}
+"""
+    path = tmp_path / "explain_max_mutants.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = explain_file(str(path), depth=1, max_mutants=1)
+    small = next(item for item in result["counterfactuals"] if item["invariant"] == "Small")
+
+    assert small["weakening"] is not None, result
+    assert small["weakening"]["op"] == "requires-removal"
+
+
+def test_step_partial_op_in_invariant_returns_result_dict():
+    src = """
+spec InvariantPartialOp {
+  type JobId = 0..1
+  state { q: Seq<JobId, 2> }
+  init { q = Seq {} }
+  action noop() { }
+  invariant HeadDefined { q.head() == 0 }
+}
+"""
+    monitor = Monitor(src)
+    monitor.reset()
+
+    result = monitor.step("noop", {})
+
+    assert result["ok"] is False
+    assert result["kind"] == "partial_op"
+    assert result["name"] == "_partial_noop"
+
+
+def test_testgen_no_output_flag_no_nameerror(tmp_path):
+    src = """
+spec TestgenDefaultName {
+  state { x: Int }
+  init { x = 0 }
+  action noop() { }
+  invariant TrueInvariant { true }
+}
+"""
+    path = tmp_path / "testgen_default_name.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_testgen(str(path), depth=1, output=None, write_file=False)
+
+    assert result["result"] == "generated", result
+    assert result["output"] == "test_testgenDefaultName.py"

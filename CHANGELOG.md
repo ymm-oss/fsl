@@ -6,6 +6,34 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-06-15
+
+テーマ: **自動コード監査(issue #12)のトリアージ着手 — 健全性バッチ(Batch A)**。
+44件(未検証42 + 検証済み未修正2)を 7並列の検証＋実機再現でトリアージし、健全性・
+正しさに直結する 5件を修正。いずれも実 CLI 動作で確認済み。
+
+### 修正
+- **`Set<有界スカラ>` に暗黙の型境界 invariant が付かず、範囲外要素が見逃される**問題を
+  修正(`model.py`/`bmc.py`/`runtime.py`)。`Set<Id>`(Id=0..3)に `s.add(99)` しても
+  `verified` のままだった(偽の検証成功)。`set_bounds` AST ノードを導入し、全要素が
+  要素型の範囲内であることを Z3 ForAll / 具体評価で検査する(明示初期化された集合に
+  対する偽陽性は出ない)。
+- **`Map<Int, 有界値>` の値境界 invariant が生成されず、範囲外の値が見逃される**問題を
+  修正。`Map<Int, Qty>`(Qty=0..5)に `m[0] = 99` しても `verified` のままだった。
+  `map_value_bounds` AST ノードを導入し、Int キー Map の実効ドメイン(`_map_domain` の
+  既存規約 `0..max(consts)`)上で値型の境界を検査する。
+- **`fslc explain` の `--max-mutants` が弱化探索の前に早期終了**していた問題を修正
+  (`explain.py`)。打ち切りを `enumerate_mutants` 全体の index ではなく実際に処理した
+  弱化ミュータント数で行うよう変更(反実仮想の取りこぼしを解消)。
+- **invariant 評価中の `_PartialOp`(部分演算)が `step()` から例外として漏れる**問題を
+  修正(`runtime.py`)。invariant 式が 0 除算・空 Seq の head 等を踏むと例外が伝播し、
+  DESIGN-bridge §1.2「step() は常に結果 dict を返す」契約に反していた。`partial_op`
+  違反として構造化結果を返す。
+- **`fslc testgen` が `-o` 省略時に `NameError`(`parse` 未 import)で全壊**していた問題を
+  修正(`testgen.py`)。`default_output_name` が未 import の `parse` を呼んでいた。
+  `generate_test_file` と同じく `parse_src(src, base_dir)` を使い、compose 仕様の相対
+  パス解決のため spec ファイルの親ディレクトリを base_dir として渡す。
+
 ## [1.2.1] - 2026-06-15
 
 テーマ: **自動コード監査(composer-2.5)で検出した検証済みバグの修正**。検証器の健全性に
@@ -196,7 +224,8 @@
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/yumemi/fsl/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/yumemi/fsl/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/yumemi/fsl/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/yumemi/fsl/compare/v1.0.3...v1.1.0

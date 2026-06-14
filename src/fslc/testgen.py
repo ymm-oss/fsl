@@ -152,6 +152,9 @@ def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=Non
 
 
 def default_output_name(spec_path):
-    spec = build_spec(parse(Path(spec_path).read_text(encoding="utf-8")))
+    path = Path(spec_path)
+    src = path.read_text(encoding="utf-8")
+    ast, display_names = parse_src(src, str(path.parent))
+    spec = build_spec(ast, display_names)
     name = spec["name"]
     return f"test_{name[0].lower()}{name[1:]}.py"

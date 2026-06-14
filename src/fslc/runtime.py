@@ -353,6 +353,34 @@ def eval_concrete(e, state, binds, spec, old_state=None, in_ensures=False):
 def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False):
     consts = spec["consts"]
     tag = e[0]
+    if tag == "set_bounds":
+        _, name, elem_ty = e
+        lo, hi = domain_range(elem_ty, spec["types"])
+        return all(lo <= key <= hi for key, present in state[name].items() if present)
+    if tag == "map_value_bounds":
+        _, phys_name, value_ty = e
+
+        def scalar_ok(vty, value):
+            if vty[0] in ("domain", "enum"):
+                lo, hi = domain_range(vty, spec["types"])
+                return lo <= value <= hi
+            return True
+
+        def values_ok(vty, phys_base):
+            if vty[0] in ("domain", "enum"):
+                return all(scalar_ok(vty, value) for value in state[phys_base].values())
+            if vty[0] == "option":
+                present = state[f"{phys_base}__present"]
+                values = state[f"{phys_base}__value"]
+                return all(scalar_ok(vty[1], values[key]) for key, is_present in present.items() if is_present)
+            if vty[0] == "struct":
+                return all(
+                    values_ok(fty, f"{phys_base}__{fn}")
+                    for fn, fty in spec["types"][vty[1]]["fields"].items()
+                )
+            return True
+
+        return values_ok(value_ty, phys_name)
     if tag == "num":
         return e[1]
     if tag == "bool":
@@ -1492,6 +1520,17 @@ class Monitor:
         for inv in self._spec["invariants"]:
             try:
                 cond = eval_concrete(inv["expr"], new_phys, {}, self._spec)
+            except _PartialOp as po:
+                return {
+                    "ok": False,
+                    "kind": "partial_op",
+                    "name": display_label(f"_partial_{inst['action']}", self._spec),
+                    "loc": po.loc or inv.get("loc"),
+                    "action": disp,
+                    "params": params,
+                    "state": old_logical,
+                    "hint": _partial_op_hint(po),
+                }
             except (_EvalError, FslError) as ex:
                 msg = ex.message if isinstance(ex, _EvalError) else str(ex)
                 return {

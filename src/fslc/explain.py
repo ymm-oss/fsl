@@ -238,13 +238,15 @@ def _counterfactuals(ast, display_names, spec, source_lines, depth, max_mutants)
     reachable_kills = []
     op_priority = {"assignment_remove": 0, "requires_remove": 1, "fair_remove": 2}
 
-    for idx, mutant in enumerate(enumerate_mutants(ast, display_names)):
+    processed = 0
+    for mutant in enumerate_mutants(ast, display_names):
         if mutant.op not in WEAKENING_OPS:
             continue
         if mutant.action == "init":
             continue
-        if max_mutants is not None and idx >= max_mutants:
+        if max_mutants is not None and processed >= max_mutants:
             break
+        processed += 1
         try:
             mutated_spec = build_spec(("spec", name, _apply(items, mutant)), display_names)
             oracle = _oracle(mutated_spec, depth, source_lines=source_lines)

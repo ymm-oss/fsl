@@ -300,6 +300,47 @@ def eval_expr(e, state, binds, spec, old_state=None, in_ensures=False):
 def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False):
     consts = spec["consts"]
     tag = e[0]
+    if tag == "set_bounds":
+        _, name, elem_ty = e
+        lo, hi = domain_range(elem_ty, spec["types"])
+        k = z3.Int(f"__bounds_{name}_elem")
+        return z3.ForAll([k], z3.Implies(z3.Select(state[name], k), z3.And(k >= lo, k <= hi)))
+    if tag == "map_value_bounds":
+        _, phys_name, value_ty = e
+
+        def scalar_bounds(vty, select_expr):
+            if vty[0] in ("domain", "enum"):
+                lo, hi = domain_range(vty, spec["types"])
+                return z3.And(select_expr >= lo, select_expr <= hi)
+            return None
+
+        def value_bounds_for(vty, phys_base):
+            if vty[0] in ("domain", "enum"):
+                return scalar_bounds(vty, z3.Select(state[phys_base], k))
+            if vty[0] == "option":
+                inner_b = scalar_bounds(vty[1], z3.Select(state[f"{phys_base}__value"], k))
+                if inner_b is None:
+                    return None
+                return z3.Implies(z3.Select(state[f"{phys_base}__present"], k), inner_b)
+            if vty[0] == "struct":
+                parts = []
+                for fn, fty in spec["types"][vty[1]]["fields"].items():
+                    part = value_bounds_for(fty, f"{phys_base}__{fn}")
+                    if part is not None:
+                        parts.append(part)
+                if not parts:
+                    return None
+                return z3.And(*parts)
+            return None
+
+        mx = max(spec["consts"].values()) if spec["consts"] else 1
+        parts = []
+        for i in range(0, mx + 1):
+            k = z3.IntVal(i)
+            body = value_bounds_for(value_ty, phys_name)
+            if body is not None:
+                parts.append(body)
+        return z3.And(*parts) if parts else z3.BoolVal(True)
     if tag == "num":
         return z3.IntVal(e[1])
     if tag == "bool":
