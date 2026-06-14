@@ -1,0 +1,33 @@
+// base: specs/order_workflow.fsl
+// inject: boundary-flip
+// expect-detector: forbidden-acceptance
+// expect-signal: acceptance:OR-AC-MIN-QTY
+// note: verify/vacuity/strict-tags are blind to the positive minimum boundary.
+requirements OrderBoundaryFlipInjected {
+  type OrderId = 0..2
+  type Qty = 0..5
+  enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+  struct Order { status: Status, qty: Qty }
+  state { orders: Map<OrderId, Order>, shipped: Set<OrderId>, revenue: Int }
+  init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
+
+  requirement OR-PLACE "orders can be placed with quantity at the minimum boundary" {
+    action place(o: OrderId, q: Qty) "OR-PLACE: boundary flipped from q >= 1 to q > 1" {
+      requires orders[o].status == Draft
+      requires q > 1
+      orders[o].status = Placed
+      orders[o].qty = q
+    }
+  }
+  requirement OR-PAY "placed orders can be paid" {
+    action pay(o: OrderId) "OR-PAY: placed orders can be paid" { requires orders[o].status == Placed orders[o].status = Paid revenue = revenue + orders[o].qty }
+  }
+
+  invariant RevenueConsistent "MODEL: revenue reflects paid orders" {
+    revenue == sum(o: OrderId of orders[o].qty where orders[o].status == Paid)
+  }
+  acceptance OR-AC-MIN-QTY "minimum quantity one can be placed" {
+    place(0, 1)
+    expect orders[0].status == Placed
+  }
+}

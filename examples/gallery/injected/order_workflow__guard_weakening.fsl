@@ -1,0 +1,39 @@
+// base: specs/order_workflow.fsl
+// inject: guard-weakening
+// expect-detector: forbidden
+// expect-signal: forbidden:OR-FB-CANCEL-SHIPPED
+// note: The must-forbid shipped-cancel trace becomes accepted.
+requirements OrderGuardWeakeningInjected {
+  type OrderId = 0..2
+  type Qty = 0..5
+  enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+  struct Order { status: Status, qty: Qty }
+  state { orders: Map<OrderId, Order>, shipped: Set<OrderId>, revenue: Int }
+  init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
+
+  requirement OR-PLACE "orders can be placed" {
+    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
+  }
+  requirement OR-PAY "placed orders can be paid" {
+    action pay(o: OrderId) "OR-PAY: placed orders can be paid" { requires orders[o].status == Placed orders[o].status = Paid revenue = revenue + orders[o].qty }
+  }
+  requirement OR-SHIP "paid orders can be shipped" {
+    action ship(o: OrderId) "OR-SHIP: paid orders can be shipped" { requires orders[o].status == Paid orders[o].status = Shipped shipped = shipped.add(o) }
+  }
+  requirement OR-CANCEL "only placed or paid orders can be cancelled" {
+    action cancel(o: OrderId) "OR-CANCEL: weakened to allow shipped cancellation" {
+      requires orders[o].status == Placed or orders[o].status == Paid or orders[o].status == Shipped
+      if orders[o].status == Paid { revenue = revenue - orders[o].qty }
+      orders[o].status = Cancelled
+    }
+  }
+
+  invariant RevenueFloor "MODEL: unrelated safety weakened so forbidden owns this lane" { revenue >= -100 }
+  forbidden OR-FB-CANCEL-SHIPPED "shipped orders cannot be cancelled" {
+    place(0, 1)
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}

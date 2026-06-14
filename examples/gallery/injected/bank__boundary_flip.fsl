@@ -1,0 +1,31 @@
+// base: specs/bank.fsl
+// inject: boundary-flip
+// expect-detector: forbidden-acceptance
+// expect-signal: acceptance:BANK-AC-WITHDRAW-ALL
+// note: verify/vacuity/strict-tags are blind to the inclusive/exclusive boundary.
+requirements BankBoundaryFlipInjected {
+  type Amount = 0..3
+  state { balance: Int }
+  init { balance = 0 }
+
+  requirement BANK-DEPOSIT "positive deposits increase balance" {
+    action deposit(a: Amount) "BANK-DEPOSIT: positive deposits increase balance" {
+      requires a > 0
+      balance = balance + a
+    }
+  }
+  requirement BANK-WITHDRAW "withdrawals may use the full available balance" {
+    action withdraw(a: Amount) "BANK-WITHDRAW: withdrawing the exact balance is allowed" {
+      requires a > 0
+      requires balance > a
+      balance = balance - a
+    }
+  }
+
+  invariant NonNegative "MODEL: balance never goes below zero" { balance >= 0 }
+  acceptance BANK-AC-WITHDRAW-ALL "withdrawing the exact balance succeeds" {
+    deposit(1)
+    withdraw(1)
+    expect balance == 0
+  }
+}

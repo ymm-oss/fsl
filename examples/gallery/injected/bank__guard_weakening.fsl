@@ -1,0 +1,30 @@
+// base: specs/bank.fsl
+// inject: guard-weakening
+// expect-detector: forbidden
+// expect-signal: forbidden:BANK-FB-OVERDRAFT
+// note: The must-forbid overdraft trace becomes accepted.
+requirements BankGuardWeakeningInjected {
+  type Amount = 0..3
+  state { balance: Int }
+  init { balance = 0 }
+
+  requirement BANK-DEPOSIT "positive deposits increase balance" {
+    action deposit(a: Amount) "BANK-DEPOSIT: positive deposits increase balance" {
+      requires a > 0
+      balance = balance + a
+    }
+  }
+  requirement BANK-WITHDRAW "withdrawals require available balance" {
+    action withdraw(a: Amount) "BANK-WITHDRAW: overdraft guard is weakened" {
+      requires a > 0
+      requires balance >= a - 1
+      balance = balance - a
+    }
+  }
+
+  invariant NonNegative "MODEL: unrelated safety weakened so forbidden owns this lane" { balance >= -100 }
+  forbidden BANK-FB-OVERDRAFT "withdrawing from an empty account is rejected" {
+    withdraw(1)
+    expect rejected
+  }
+}

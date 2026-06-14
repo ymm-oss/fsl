@@ -1,0 +1,34 @@
+// base: examples/layers/return_system.fsl
+// inject: over-strengthened-guard
+// expect-detector: reachability-coverage
+// expect-signal: reachable_failed:PaidReachable
+// note: The positive paid-return pair becomes unreachable and pay coverage is false.
+requirements ReturnOverStrengthenedGuardInjected {
+  type CaseId = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum SSt { New, AutoApproved, MgrQueue, MgrApproved, MgrRejected, Paid }
+  struct RCase { st: SSt, amount: Amount }
+  state { sys: Map<CaseId, RCase>, paid_count: Int }
+  init { forall c: CaseId { sys[c] = RCase { st: New, amount: 0 } } paid_count = 0 }
+
+  requirement RET-SUBMIT "threshold-or-below returns are auto-approved" {
+    action submit(c: CaseId, a: Amount) "RET-SUBMIT: submit return" {
+      requires sys[c].st == New
+      requires a > 0
+      if a <= AUTO_LIMIT { sys[c] = RCase { st: AutoApproved, amount: a } } else { sys[c] = RCase { st: MgrQueue, amount: a } }
+    }
+  }
+  requirement RET-PAY "approved returns can be paid" {
+    action pay(c: CaseId) "RET-PAY: impossible over-strengthened guard" {
+      requires sys[c].st == Paid
+      sys[c].st = Paid
+      paid_count = paid_count + 1
+    }
+  }
+
+  invariant PaidFloor "MODEL: paid_count never goes negative" { paid_count >= 0 }
+  reachable PaidReachable "MODEL: an approved return can be paid" {
+    exists c: CaseId { sys[c].st == Paid }
+  }
+}

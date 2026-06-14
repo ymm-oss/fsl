@@ -1,0 +1,21 @@
+// base: specs/bank.fsl
+// inject: omission
+// expect-detector: strict-tags-requirements
+// expect-signal: unreferenced_requirement:BANK-WITHDRAW
+// note: Pure omission without the requirements registry is undetectable.
+requirements BankOmissionInjected {
+  type Amount = 0..3
+  state { balance: Int }
+  init { balance = 0 }
+
+  requirement BANK-DEPOSIT "positive deposits increase balance" {
+    action deposit(a: Amount) "BANK-DEPOSIT: positive deposits increase balance" {
+      requires a > 0
+      balance = balance + a
+      ensures balance == old(balance) + a
+    }
+  }
+
+  invariant NonNegative "MODEL: balance is protected by the omitted withdrawal rule" { balance >= 0 }
+  reachable Funded "MODEL: deposits can fund the account" { balance >= 2 }
+}

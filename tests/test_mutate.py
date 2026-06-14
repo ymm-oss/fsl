@@ -163,6 +163,10 @@ def test_corpus_stability_no_crash_or_serialization_error():
     for path in paths:
         if any(path.name.startswith(prefix) for prefix in skipped):
             continue
+        # 意図的に欠陥のある注入コーパスは専用の test_injection_bench.py が扱う
+        # (ここで再度 mutate を回すと冗長かつ低速)。
+        if "gallery/injected" in path.as_posix():
+            continue
         out = run_mutate(str(path), depth=2, max_mutants=5)
         json.dumps(out)
         assert out["result"] in {

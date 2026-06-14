@@ -1,0 +1,35 @@
+// base: specs/order_workflow.fsl
+// inject: invariant-weakening
+// expect-detector: mutate-differential
+// expect-signal: survivors_increase
+// note: Single-spec mutate only shows survivors; detection requires a baseline differential.
+requirements OrderInvariantWeakeningInjected {
+  type OrderId = 0..2
+  type Qty = 0..5
+  enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+  struct Order { status: Status, qty: Qty }
+  state { orders: Map<OrderId, Order>, shipped: Set<OrderId>, revenue: Int }
+  init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
+
+  requirement OR-PLACE "orders can be placed" {
+    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
+  }
+  requirement OR-PAY "placed orders can be paid" {
+    action pay(o: OrderId) "OR-PAY: placed orders can be paid" { requires orders[o].status == Placed orders[o].status = Paid revenue = revenue + orders[o].qty }
+  }
+  requirement OR-SHIP "paid orders can be shipped" {
+    action ship(o: OrderId) "OR-SHIP: paid orders can be shipped" { requires orders[o].status == Paid orders[o].status = Shipped shipped = shipped.add(o) }
+  }
+  requirement OR-CANCEL "placed or paid orders can be cancelled" {
+    action cancel(o: OrderId) "OR-CANCEL: placed or paid orders can be cancelled" {
+      requires orders[o].status == Placed or orders[o].status == Paid
+      if orders[o].status == Paid { revenue = revenue - orders[o].qty }
+      orders[o].status = Cancelled
+    }
+  }
+
+  invariant RevenueConsistent "OR-PAY: weakened revenue invariant" { revenue >= -100 }
+  invariant ShippedWasPaid "OR-SHIP: shipped set agrees with status" {
+    forall o: OrderId { shipped.contains(o) => orders[o].status == Shipped }
+  }
+}

@@ -1,0 +1,41 @@
+// base: examples/layers/return_system.fsl
+// inject: boundary-flip
+// expect-detector: forbidden-acceptance
+// expect-signal: acceptance:RET-AC-AUTO-LIMIT
+// note: verify/vacuity/strict-tags are blind to the auto-approval threshold boundary.
+requirements ReturnBoundaryFlipInjected {
+  type CaseId = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum SSt { New, AutoApproved, MgrQueue, MgrApproved, MgrRejected, Paid }
+  struct RCase { st: SSt, amount: Amount }
+  state { sys: Map<CaseId, RCase>, paid_count: Int }
+  init { forall c: CaseId { sys[c] = RCase { st: New, amount: 0 } } paid_count = 0 }
+
+  requirement RET-SUBMIT "threshold-or-below returns are auto-approved" {
+    action submit(c: CaseId, a: Amount) "RET-SUBMIT: boundary flipped from a <= limit to a < limit" {
+      requires sys[c].st == New
+      requires a > 0
+      if a < AUTO_LIMIT {
+        sys[c] = RCase { st: AutoApproved, amount: a }
+      } else {
+        sys[c] = RCase { st: MgrQueue, amount: a }
+      }
+    }
+  }
+  requirement RET-PAY "approved returns can be paid" {
+    action pay(c: CaseId) "RET-PAY: pay approved return" {
+      requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
+      sys[c].st = Paid
+      paid_count = paid_count + 1
+    }
+  }
+  invariant PaidLedger "MODEL: paid_count reflects paid cases" {
+    paid_count == count(c: CaseId where sys[c].st == Paid)
+  }
+  acceptance RET-AC-AUTO-LIMIT "amount at the auto limit is paid without manager approval" {
+    submit(0, 1)
+    pay(0)
+    expect sys[0].st == Paid
+  }
+}

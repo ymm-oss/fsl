@@ -1,0 +1,32 @@
+// base: specs/order_workflow.fsl
+// inject: over-strengthened-guard
+// expect-detector: reachability-coverage
+// expect-signal: reachable_failed:FullLifecycle
+// note: The positive shipped lifecycle pair becomes unreachable and pay coverage is false.
+requirements OrderOverStrengthenedGuardInjected {
+  type OrderId = 0..2
+  type Qty = 0..5
+  enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+  struct Order { status: Status, qty: Qty }
+  state { orders: Map<OrderId, Order>, shipped: Set<OrderId>, revenue: Int }
+  init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
+
+  requirement OR-PLACE "orders can be placed" {
+    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
+  }
+  requirement OR-PAY "placed orders can be paid" {
+    action pay(o: OrderId) "OR-PAY: impossible over-strengthened guard" {
+      requires orders[o].status == Shipped
+      orders[o].status = Paid
+      revenue = revenue + orders[o].qty
+    }
+  }
+  requirement OR-SHIP "paid orders can be shipped" {
+    action ship(o: OrderId) "OR-SHIP: paid orders can be shipped" { requires orders[o].status == Paid orders[o].status = Shipped shipped = shipped.add(o) }
+  }
+
+  invariant RevenueFloor "MODEL: revenue does not go negative" { revenue >= 0 }
+  reachable FullLifecycle "MODEL: shipping remains possible" {
+    exists o: OrderId { orders[o].status == Shipped }
+  }
+}

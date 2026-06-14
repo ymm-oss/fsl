@@ -44,6 +44,7 @@
 7. [`DOGFOOD-7.md`](DOGFOOD-7.md) — 正解オラクル試験群(Monitor BFS・trace 健全性・BUG-020)
 8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — 盲検可記述性テスト(G1 の外部検証)
 9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — 妥当性確認ワークフローの実走(メモ→正例ペア→修復)
+10. [`DOGFOOD-10.md`](DOGFOOD-10.md) — 誤り注入ベンチマーク(検出器の捕捉率を類型×機構で測定)
 
 実例は [`../specs/`](../specs/)(単体仕様)と [`../examples/`](../examples/)
 (bank: 実装適合 / layers: 3層チェーン / nfr: SLA)に。

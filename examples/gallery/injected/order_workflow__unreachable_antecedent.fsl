@@ -1,0 +1,27 @@
+// base: specs/order_workflow.fsl
+// inject: unreachable-antecedent
+// expect-detector: vacuity
+// expect-signal: vacuous_implication:ImpossibleDraftShipment
+// note: The implication antecedent names mutually exclusive enum states.
+requirements OrderUnreachableAntecedentInjected {
+  type OrderId = 0..2
+  type Qty = 0..5
+  enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+  struct Order { status: Status, qty: Qty }
+  state { orders: Map<OrderId, Order>, shipped: Set<OrderId>, revenue: Int }
+  init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
+
+  requirement OR-PLACE "orders can be placed" {
+    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
+  }
+  requirement OR-PAY "placed orders can be paid" {
+    action pay(o: OrderId) "OR-PAY: placed orders can be paid" { requires orders[o].status == Placed orders[o].status = Paid revenue = revenue + orders[o].qty }
+  }
+  requirement OR-SHIP "paid orders can be shipped" {
+    action ship(o: OrderId) "OR-SHIP: paid orders can be shipped" { requires orders[o].status == Paid orders[o].status = Shipped shipped = shipped.add(o) }
+  }
+
+  invariant ImpossibleDraftShipment "OR-SHIP: vacuous impossible status implication" {
+    forall o: OrderId { orders[o].status == Draft and orders[o].status == Shipped => false }
+  }
+}

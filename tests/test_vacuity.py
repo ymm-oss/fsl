@@ -233,7 +233,12 @@ def test_verified_sample_corpus_has_no_vacuity_false_positives():
     paths = sorted({p for root in roots for p in root.rglob("*.fsl")})
     checked = 0
     for path in paths:
-        if "gallery/errors" in path.as_posix() or "gallery/adversarial" in path.as_posix():
+        # gallery/errors・adversarial・injected は意図的に欠陥のある仕様の置き場。
+        # 「正解コーパスに偽陽性ゼロ」スイープの対象外(injected は専用の
+        # tests/test_injection_bench.py が扱う)。
+        posix = path.as_posix()
+        if ("gallery/errors" in posix or "gallery/adversarial" in posix
+                or "gallery/injected" in posix):
             continue
         baseline = run_verify(str(path), 8, "ignore", vacuity_mode="ignore")
         if baseline["result"] not in {"verified", "proved"}:

@@ -1,0 +1,27 @@
+// base: specs/bank.fsl
+// inject: fabricated-constraint
+// expect-detector: strict-tags
+// expect-signal: untagged:FabricatedDailyLimit
+// note: The extra invariant has no source requirement tag.
+requirements BankFabricatedConstraintInjected {
+  type Amount = 0..3
+  state { balance: Int }
+  init { balance = 0 }
+
+  requirement BANK-DEPOSIT "positive deposits increase balance" {
+    action deposit(a: Amount) "BANK-DEPOSIT: positive deposits increase balance" {
+      requires a > 0
+      balance = balance + a
+    }
+  }
+  requirement BANK-WITHDRAW "withdrawals require available balance" {
+    action withdraw(a: Amount) "BANK-WITHDRAW: withdrawals require available balance" {
+      requires a > 0
+      requires balance >= a
+      balance = balance - a
+    }
+  }
+
+  invariant NonNegative "MODEL: balance never goes below zero" { balance >= 0 }
+  invariant FabricatedDailyLimit { balance >= -100 }
+}

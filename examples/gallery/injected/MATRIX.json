@@ -1,0 +1,893 @@
+{
+  "cases": [
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "acceptance:BANK-AC-WITHDRAW-ALL",
+          "status": "caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"error\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "acceptance",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "error",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "forbidden-acceptance",
+      "expect_signal": "acceptance:BANK-AC-WITHDRAW-ALL",
+      "file": "examples/gallery/injected/bank__boundary_flip.fsl",
+      "inject": "boundary-flip",
+      "note": "verify/vacuity/strict-tags are blind to the inclusive/exclusive boundary."
+    },
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 2, \"result\": \"mutated\", \"survived\": 6, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "untagged:FabricatedDailyLimit",
+          "status": "caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "strict-tags",
+      "expect_signal": "untagged:FabricatedDailyLimit",
+      "file": "examples/gallery/injected/bank__fabricated_constraint.fsl",
+      "inject": "fabricated-constraint",
+      "note": "The extra invariant has no source requirement tag."
+    },
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "forbidden:BANK-FB-OVERDRAFT",
+          "status": "caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"error\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "forbidden",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "error",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "forbidden",
+      "expect_signal": "forbidden:BANK-FB-OVERDRAFT",
+      "file": "examples/gallery/injected/bank__guard_weakening.fsl",
+      "inject": "guard-weakening",
+      "note": "The must-forbid overdraft trace becomes accepted."
+    },
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "condition": "baseline differential",
+          "signal": "survivors 13->16",
+          "status": "caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "mutate-differential",
+      "expect_signal": "survivors_increase",
+      "file": "examples/gallery/injected/bank__invariant_weakening.fsl",
+      "inject": "invariant-weakening",
+      "note": "Single-spec mutate only shows survivors; detection requires a baseline differential."
+    },
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 2, \"result\": \"mutated\", \"survived\": 6, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "unreferenced_requirement:BANK-WITHDRAW",
+          "status": "caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "strict-tags-requirements",
+      "expect_signal": "unreferenced_requirement:BANK-WITHDRAW",
+      "file": "examples/gallery/injected/bank__omission.fsl",
+      "inject": "omission",
+      "note": "Pure omission without the requirements registry is undetectable."
+    },
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"reachable_failed\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "reachable_failed",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "reachable_failed:Funded",
+          "status": "caught"
+        }
+      },
+      "expect_detector": "reachability-coverage",
+      "expect_signal": "reachable_failed:Funded",
+      "file": "examples/gallery/injected/bank__over_strengthened_guard.fsl",
+      "inject": "over-strengthened-guard",
+      "note": "The positive funded pair becomes unreachable and deposit coverage is false."
+    },
+    {
+      "base": "specs/bank.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 2, \"result\": \"mutated\", \"survived\": 6, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "vacuous_implication:NoNegativeDebt",
+          "status": "caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "vacuity",
+      "expect_signal": "vacuous_implication:NoNegativeDebt",
+      "file": "examples/gallery/injected/bank__unreachable_antecedent.fsl",
+      "inject": "unreachable-antecedent",
+      "note": "The implication antecedent is unreachable under the intact withdrawal guard."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "acceptance:OR-AC-MIN-QTY",
+          "status": "caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"error\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "acceptance",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "error",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "forbidden-acceptance",
+      "expect_signal": "acceptance:OR-AC-MIN-QTY",
+      "file": "examples/gallery/injected/order_workflow__boundary_flip.fsl",
+      "inject": "boundary-flip",
+      "note": "verify/vacuity/strict-tags are blind to the positive minimum boundary."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 1, \"result\": \"mutated\", \"survived\": 7, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "untagged:FabricatedRevenueFloor",
+          "status": "caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "strict-tags",
+      "expect_signal": "untagged:FabricatedRevenueFloor",
+      "file": "examples/gallery/injected/order_workflow__fabricated_constraint.fsl",
+      "inject": "fabricated-constraint",
+      "note": "The extra invariant has no source requirement tag."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "forbidden:OR-FB-CANCEL-SHIPPED",
+          "status": "caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"error\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "forbidden",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "error",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "forbidden",
+      "expect_signal": "forbidden:OR-FB-CANCEL-SHIPPED",
+      "file": "examples/gallery/injected/order_workflow__guard_weakening.fsl",
+      "inject": "guard-weakening",
+      "note": "The must-forbid shipped-cancel trace becomes accepted."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "condition": "baseline differential",
+          "signal": "survivors 15->25",
+          "status": "caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "mutate-differential",
+      "expect_signal": "survivors_increase",
+      "file": "examples/gallery/injected/order_workflow__invariant_weakening.fsl",
+      "inject": "invariant-weakening",
+      "note": "Single-spec mutate only shows survivors; detection requires a baseline differential."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"reachable_failed\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "unreferenced_requirement:OR-CANCEL",
+          "status": "caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "strict-tags-requirements",
+      "expect_signal": "unreferenced_requirement:OR-CANCEL",
+      "file": "examples/gallery/injected/order_workflow__omission.fsl",
+      "inject": "omission",
+      "note": "Pure omission without the requirements registry is undetectable."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"reachable_failed\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "reachable_failed",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "reachable_failed:FullLifecycle",
+          "status": "caught"
+        }
+      },
+      "expect_detector": "reachability-coverage",
+      "expect_signal": "reachable_failed:FullLifecycle",
+      "file": "examples/gallery/injected/order_workflow__over_strengthened_guard.fsl",
+      "inject": "over-strengthened-guard",
+      "note": "The positive shipped lifecycle pair becomes unreachable and pay coverage is false."
+    },
+    {
+      "base": "specs/order_workflow.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 1, \"result\": \"mutated\", \"survived\": 7, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "vacuous_implication:ImpossibleDraftShipment",
+          "status": "caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "vacuity",
+      "expect_signal": "vacuous_implication:ImpossibleDraftShipment",
+      "file": "examples/gallery/injected/order_workflow__unreachable_antecedent.fsl",
+      "inject": "unreachable-antecedent",
+      "note": "The implication antecedent names mutually exclusive enum states."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "acceptance:RET-AC-AUTO-LIMIT",
+          "status": "caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"error\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "acceptance",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "error",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "forbidden-acceptance",
+      "expect_signal": "acceptance:RET-AC-AUTO-LIMIT",
+      "file": "examples/gallery/injected/return_system__boundary_flip.fsl",
+      "inject": "boundary-flip",
+      "note": "verify/vacuity/strict-tags are blind to the auto-approval threshold boundary."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 2, \"result\": \"mutated\", \"survived\": 6, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "untagged:FabricatedAmountCeiling",
+          "status": "caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "strict-tags",
+      "expect_signal": "untagged:FabricatedAmountCeiling",
+      "file": "examples/gallery/injected/return_system__fabricated_constraint.fsl",
+      "inject": "fabricated-constraint",
+      "note": "The extra invariant has no source requirement tag."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "forbidden:RET-FB-UNAPPROVED-PAY",
+          "status": "caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"error\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "error",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "forbidden",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "error",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "forbidden",
+      "expect_signal": "forbidden:RET-FB-UNAPPROVED-PAY",
+      "file": "examples/gallery/injected/return_system__guard_weakening.fsl",
+      "inject": "guard-weakening",
+      "note": "The must-forbid manager-queue payment trace becomes accepted."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "condition": "baseline differential",
+          "signal": "survivors 6->26",
+          "status": "caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "mutate-differential",
+      "expect_signal": "survivors_increase",
+      "file": "examples/gallery/injected/return_system__invariant_weakening.fsl",
+      "inject": "invariant-weakening",
+      "note": "Single-spec mutate only shows survivors; detection requires a baseline differential."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 1, \"result\": \"mutated\", \"survived\": 7, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "unreferenced_requirement:RET-PAY",
+          "status": "caught"
+        },
+        "vacuity": {
+          "signal": "verified",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "strict-tags-requirements",
+      "expect_signal": "unreferenced_requirement:RET-PAY",
+      "file": "examples/gallery/injected/return_system__omission.fsl",
+      "inject": "omission",
+      "note": "Pure omission without the requirements registry is undetectable."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": null, \"result\": \"reachable_failed\", \"survived\": null, \"total\": null}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "reachable_failed",
+          "status": "not-caught"
+        },
+        "verify": {
+          "signal": "reachable_failed:PaidReachable",
+          "status": "caught"
+        }
+      },
+      "expect_detector": "reachability-coverage",
+      "expect_signal": "reachable_failed:PaidReachable",
+      "file": "examples/gallery/injected/return_system__over_strengthened_guard.fsl",
+      "inject": "over-strengthened-guard",
+      "note": "The positive paid-return pair becomes unreachable and pay coverage is false."
+    },
+    {
+      "base": "examples/layers/return_system.fsl",
+      "detectors": {
+        "forbidden_acceptance": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "mutate": {
+          "signal": "{\"killed\": 1, \"result\": \"mutated\", \"survived\": 7, \"total\": 8}",
+          "status": "not-caught"
+        },
+        "strict_tags": {
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "strict_tags_requirements": {
+          "condition": "per-domain ids registry derived from examples/gallery/injected/ids.txt",
+          "signal": "ok",
+          "status": "not-caught"
+        },
+        "vacuity": {
+          "signal": "vacuous_implication:ImpossibleNewPaid",
+          "status": "caught"
+        },
+        "verify": {
+          "signal": "verified",
+          "status": "not-caught"
+        }
+      },
+      "expect_detector": "vacuity",
+      "expect_signal": "vacuous_implication:ImpossibleNewPaid",
+      "file": "examples/gallery/injected/return_system__unreachable_antecedent.fsl",
+      "inject": "unreachable-antecedent",
+      "note": "The implication antecedent names mutually exclusive enum states."
+    }
+  ],
+  "detectors": [
+    "forbidden_acceptance",
+    "verify",
+    "vacuity",
+    "strict_tags",
+    "strict_tags_requirements",
+    "mutate"
+  ],
+  "summary_by_injection": {
+    "boundary-flip": {
+      "forbidden_acceptance": {
+        "caught": 3
+      },
+      "mutate": {
+        "not-caught": 3
+      },
+      "strict_tags": {
+        "not-caught": 3
+      },
+      "strict_tags_requirements": {
+        "not-caught": 3
+      },
+      "vacuity": {
+        "not-caught": 3
+      },
+      "verify": {
+        "not-caught": 3
+      }
+    },
+    "fabricated-constraint": {
+      "forbidden_acceptance": {
+        "not-caught": 3
+      },
+      "mutate": {
+        "not-caught": 3
+      },
+      "strict_tags": {
+        "caught": 3
+      },
+      "strict_tags_requirements": {
+        "not-caught": 3
+      },
+      "vacuity": {
+        "not-caught": 3
+      },
+      "verify": {
+        "not-caught": 3
+      }
+    },
+    "guard-weakening": {
+      "forbidden_acceptance": {
+        "caught": 3
+      },
+      "mutate": {
+        "not-caught": 3
+      },
+      "strict_tags": {
+        "not-caught": 3
+      },
+      "strict_tags_requirements": {
+        "not-caught": 3
+      },
+      "vacuity": {
+        "not-caught": 3
+      },
+      "verify": {
+        "not-caught": 3
+      }
+    },
+    "invariant-weakening": {
+      "forbidden_acceptance": {
+        "not-caught": 3
+      },
+      "mutate": {
+        "caught": 3
+      },
+      "strict_tags": {
+        "not-caught": 3
+      },
+      "strict_tags_requirements": {
+        "not-caught": 3
+      },
+      "vacuity": {
+        "not-caught": 3
+      },
+      "verify": {
+        "not-caught": 3
+      }
+    },
+    "omission": {
+      "forbidden_acceptance": {
+        "not-caught": 3
+      },
+      "mutate": {
+        "not-caught": 3
+      },
+      "strict_tags": {
+        "not-caught": 3
+      },
+      "strict_tags_requirements": {
+        "caught": 3
+      },
+      "vacuity": {
+        "not-caught": 3
+      },
+      "verify": {
+        "not-caught": 3
+      }
+    },
+    "over-strengthened-guard": {
+      "forbidden_acceptance": {
+        "not-caught": 3
+      },
+      "mutate": {
+        "not-caught": 3
+      },
+      "strict_tags": {
+        "not-caught": 3
+      },
+      "strict_tags_requirements": {
+        "not-caught": 3
+      },
+      "vacuity": {
+        "not-caught": 3
+      },
+      "verify": {
+        "caught": 3
+      }
+    },
+    "unreachable-antecedent": {
+      "forbidden_acceptance": {
+        "not-caught": 3
+      },
+      "mutate": {
+        "not-caught": 3
+      },
+      "strict_tags": {
+        "not-caught": 3
+      },
+      "strict_tags_requirements": {
+        "not-caught": 3
+      },
+      "vacuity": {
+        "caught": 3
+      },
+      "verify": {
+        "not-caught": 3
+      }
+    }
+  },
+  "surprises": []
+}
