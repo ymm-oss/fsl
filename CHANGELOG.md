@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-14
+
+テーマ: **AI 形式化の妥当性確認(validation)スイート**(roadmap #1 完了)。検査器が
+保証する「仕様の内部整合」と「仕様が元の意図に忠実か」のギャップを埋める検出器群を
+追加し、AI が書く仕様の誤り(過小制約・空虚・欠落/捏造・取違)に検出網を掛ける。
+書く前の規律(形式化メモ・推奨プラクティス)はスキルに、効果は誤り注入ベンチで実測。
+
 ### 修正
 - **refinement の 0引数 abstract アクション写像**(`action foo() -> bar()`)が
   `expects 0 arguments` の偽エラーで落ちていた問題を修正(`grammar.py` の
@@ -168,7 +175,8 @@
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/yumemi/fsl/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/yumemi/fsl/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/yumemi/fsl/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/yumemi/fsl/compare/v1.0.1...v1.0.2
