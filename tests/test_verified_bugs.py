@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fslc import Monitor, build_spec, parse, verify
 from fslc.cli import exit_code, run_check, run_scenarios, run_testgen
+from fslc.parser import parse_src
 from fslc.explain import explain_file
 from fslc.model import eval_const
 from fslc.mutate import mutate_file
@@ -374,3 +375,39 @@ requirements LoneAcceptanceStress {
     assert "AC-2" not in result["by_requirement"]
     assert "FB-1" not in result["by_requirement"]
     assert result["by_requirement"] == {}
+
+
+def test_compose_rewrites_component_const_in_type_binder_and_param(tmp_path):
+    # コンポーネントが const をレンジ/binder/param で使うと、展開時に const は
+    # alias__ でプレフィクスされるが式中の参照が書き換えられず未解決になっていた。
+    comp = """
+spec Counter {
+  const CAP = 2
+  type N = 0..CAP
+  state { v: N }
+  init { v = 0 }
+  action bump(n in 0..CAP) {
+    requires v < CAP
+    v = v + 1
+  }
+  invariant Bound { forall k in 0..CAP { v <= CAP } }
+}
+"""
+    compose = """
+compose CounterSys {
+  use Counter as c from "counter_comp.fsl"
+}
+"""
+    (tmp_path / "counter_comp.fsl").write_text(comp, encoding="utf-8")
+    cpath = tmp_path / "counter_sys.fsl"
+    cpath.write_text(compose, encoding="utf-8")
+
+    # check が通る(展開後の c__N = 0..c__CAP が解決される)
+    checked = run_check(str(cpath))
+    assert checked["result"] == "ok", checked
+
+    # verify も通り、境界 invariant が効く
+    ast, dn = parse_src(compose, str(tmp_path))
+    spec = build_spec(ast, dn)
+    vr = verify(spec, 5)
+    assert vr["result"] in ("verified", "proved"), vr

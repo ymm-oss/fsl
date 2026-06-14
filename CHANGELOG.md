@@ -6,6 +6,23 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — compose 展開バッチ(Batch D)**。コンポーネントの
+`const` をレンジ/binder/param/sync 引数で参照したとき、展開時に const は `alias__` で
+プレフィクスされるのに式中の参照が書き換えられず未解決になる問題を修正。
+
+### 修正
+- **コンポーネントの `type T = 0..MAX` の domain 境界式が書き換えられず未解決**になる
+  問題を修正(`compose.py` `_prefix_component_items`)。展開後 `alias__MAX` と不整合だった。
+- **`binder_range`(`forall k in 0..MAX`)・`param_range`(`action f(n in 0..MAX)`)の
+  lo/hi 式が書き換えられない**問題を修正。`_rewrite_binder`/`_rewrite_params` が
+  コンポーネントの const 集合を受け取り、レンジ境界の const 参照をプレフィクスする。
+- **sync 引数式中の `alias.x` 参照が書き換えられず展開後 AST に残る**問題を修正
+  (`_expand_sync_action`)。代入前に `_rewrite_expr` で物理名へ解決する。
+- 「同期引数の型不一致」の静的検査(DESIGN-compose §2)は compose 層に型推論が無いため
+  今回は未実装とし、`build_spec` 後段の型検査に委ねる(arity 検査は従来どおり実施)。
+
 ## [1.2.4] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — acceptance/forbidden/mutate バッチ(Batch C)**。
@@ -265,7 +282,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.5...HEAD
+[1.2.5]: https://github.com/yumemi/fsl/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/yumemi/fsl/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/yumemi/fsl/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/yumemi/fsl/compare/v1.2.1...v1.2.2

@@ -88,21 +88,29 @@ def _rewrite_type(ty_ast, aliases, component_types=None, component_consts=None):
     return ty_ast
 
 
-def _rewrite_binder(binder, aliases, component_types=None):
+def _rewrite_binder(binder, aliases, component_types=None, component_consts=None):
+    component_consts = component_consts or set()
     if binder[0] == "binder_range":
-        return binder
+        _, v, lo, hi = binder
+        lo = _rewrite_expr(lo, aliases, set(), component_types, component_consts)
+        hi = _rewrite_expr(hi, aliases, set(), component_types, component_consts)
+        return ("binder_range", v, lo, hi)
     _, v, ty_name, where = binder
     resolved = _resolve_type_ref(ty_name, aliases, component_types)
     if where is not None:
-        where = _rewrite_expr(where, aliases, set(), component_types, set())
+        where = _rewrite_expr(where, aliases, set(), component_types, component_consts)
     return ("binder_typed", v, resolved, where)
 
 
-def _rewrite_params(params, aliases, component_types=None):
+def _rewrite_params(params, aliases, component_types=None, component_consts=None):
+    component_consts = component_consts or set()
     out = []
     for p in params:
         if p[0] == "param_range":
-            out.append(p)
+            _, n, lo, hi = p
+            lo = _rewrite_expr(lo, aliases, set(), component_types, component_consts)
+            hi = _rewrite_expr(hi, aliases, set(), component_types, component_consts)
+            out.append(("param_range", n, lo, hi))
         else:
             _, n, ty_name = p
             out.append(("param_typed", n, _resolve_type_ref(ty_name, aliases, component_types)))
@@ -156,7 +164,7 @@ def _rewrite_expr(expr, aliases, comp_state, comp_types, comp_consts):
                 _rewrite_expr(expr[1], aliases, comp_state, comp_types, comp_consts),
                 expr[2])
     if tag in ("forall", "exists"):
-        return (tag, _rewrite_binder(expr[1], aliases, comp_types),
+        return (tag, _rewrite_binder(expr[1], aliases, comp_types, comp_consts),
                 _rewrite_expr(expr[2], aliases, comp_state, comp_types, comp_consts))
     if tag == "some":
         return ("some", _rewrite_expr(expr[1], aliases, comp_state, comp_types, comp_consts))
@@ -220,7 +228,7 @@ def _rewrite_stmt(stmt, aliases, comp_state, comp_types, comp_consts):
                 [_rewrite_stmt(s, aliases, comp_state, comp_types, comp_consts) for s in stmt[3]],
                 stmt[4] if len(stmt) > 4 else None)
     if tag == "forall_stmt":
-        return ("forall_stmt", _rewrite_binder(stmt[1], aliases, comp_types),
+        return ("forall_stmt", _rewrite_binder(stmt[1], aliases, comp_types, comp_consts),
                 [_rewrite_stmt(s, aliases, comp_state, comp_types, comp_consts) for s in stmt[2]],
                 stmt[3] if len(stmt) > 3 else None)
     return stmt
@@ -291,7 +299,9 @@ def _prefix_component_items(items, alias, display_names):
             out.append(("const", pn, _rewrite_expr(it[2], {alias}, state, types, consts)))
         elif tag == "type":
             pn = _prefix(it[1], alias)
-            out.append(("type", pn, it[2], it[3]))
+            lo = _rewrite_expr(it[2], {alias}, state, types, consts)
+            hi = _rewrite_expr(it[3], {alias}, state, types, consts)
+            out.append(("type", pn, lo, hi))
         elif tag == "enum":
             pn = _prefix(it[1], alias)
             out.append(("enum", pn, it[2]))
@@ -328,7 +338,7 @@ def _prefix_component_items(items, alias, display_names):
                 else:
                     new_body.append(_rewrite_stmt(bit, {alias}, state, types, consts))
             out.append((
-                "action", pn, _rewrite_params(params, {alias}, types), new_body, loc, fair, meta,
+                "action", pn, _rewrite_params(params, {alias}, types, consts), new_body, loc, fair, meta,
             ))
         elif tag == "invariant":
             pn = _prefix(it[1], alias)
@@ -339,7 +349,7 @@ def _prefix_component_items(items, alias, display_names):
             display_names[pn] = _display_logical(alias, it[1])
             out.append(("reachable", pn, _rewrite_expr(it[2], {alias}, state, types, consts), it[3], it[4] if len(it) > 4 else None))
         elif tag == "leadsto":
-            binders = [_rewrite_binder(b, {alias}, types) for b in it[2]]
+            binders = [_rewrite_binder(b, {alias}, types, consts) for b in it[2]]
             pn = _prefix(it[1], alias)
             display_names[pn] = _display_logical(alias, it[1])
             out.append(("leadsto", pn, binders,
@@ -376,7 +386,9 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
         param_map = {}
         for i, p in enumerate(cparams):
             pname = p[1]
-            param_map[pname] = arg_exprs[i]
+            # sync 引数式に alias.x 参照が含まれると展開後 AST に残るため、
+            # compose の alias アクセスを物理名へ書き換えてから代入する
+            param_map[pname] = _rewrite_expr(arg_exprs[i], aliases, set(), set(), set())
         for bit in cbody:
             bt = bit[0]
             if bt == "requires":
