@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from .model import FslError, resolve_action_name
-from .runtime import Monitor, _as_bool, eval_concrete
+from .runtime import Monitor, _EvalError, _as_bool, eval_concrete
 
 
-def _err(message, loc=None):
-    raise FslError(message, kind="acceptance", loc=loc)
+def _err(message, loc=None, kind="acceptance"):
+    raise FslError(message, kind=kind, loc=loc)
 
 
-def _literal_value(expr):
+def _literal_value(expr, spec, loc=None, kind="acceptance"):
     tag = expr[0]
     if tag == "num":
         return expr[1]
@@ -18,8 +18,11 @@ def _literal_value(expr):
     if tag == "none":
         return None
     if tag == "var":
-        return expr[1]
-    _err("acceptance action arguments must be literals")
+        name = expr[1]
+        if name in spec["consts"]:
+            return spec["consts"][name]
+        _err(f"undefined const '{name}' in {kind} action argument", loc=loc, kind=kind)
+    _err(f"{kind} action arguments must be literals", loc=loc, kind=kind)
 
 
 def _action_def(spec, name):
@@ -30,16 +33,31 @@ def _action_def(spec, name):
     return None
 
 
-def _params_for(spec, action_name, args, loc):
+def _params_for(spec, action_name, args, loc, kind="acceptance"):
+    args = _normal_args(args)
     act = _action_def(spec, action_name)
     if act is None:
-        _err(f"unknown action '{action_name}' in acceptance", loc=loc)
+        _err(f"unknown action '{action_name}' in {kind}", loc=loc, kind=kind)
     if len(args) != len(act["params"]):
-        _err(f"arity mismatch for action '{action_name}' in acceptance", loc=loc)
+        _err(f"arity mismatch for action '{action_name}' in {kind}", loc=loc, kind=kind)
     return {
-        p[0]: _literal_value(args[i])
+        p[0]: _literal_value(args[i], spec, loc=loc, kind=kind)
         for i, p in enumerate(act["params"])
     }
+
+
+def _normal_args(args):
+    return [arg for arg in (args or []) if arg is not None]
+
+
+def _step_args(args, spec, loc=None, kind="acceptance"):
+    out = []
+    for arg in _normal_args(args):
+        try:
+            out.append(_literal_value(arg, spec, loc=loc, kind=kind))
+        except FslError:
+            out.append(arg[1] if len(arg) > 1 else arg)
+    return out
 
 
 def replay_acceptance(spec, ac):
@@ -54,7 +72,10 @@ def replay_acceptance(spec, ac):
         candidates = aliases.get(name, [name])
         failures = []
         for candidate in candidates:
-            params = _params_for(spec, candidate, args, loc)
+            try:
+                params = _params_for(spec, candidate, args, loc, kind="acceptance")
+            except FslError as exc:
+                return _param_error_result(exc, ac, idx, name, args, spec, loc, "acceptance")
             result = mon.step(candidate, params)
             if result.get("ok"):
                 steps_out.append({"action": result["action"], "params": params})
@@ -68,12 +89,25 @@ def replay_acceptance(spec, ac):
                 "id": ac["id"],
                 "text": ac["text"],
                 "failed_step": idx,
-                "step": {"action": name, "args": [_literal_value(a) for a in args]},
+                "step": {"action": name, "args": _step_args(args, spec, loc=loc)},
                 "step_results": failures,
                 "loc": loc,
             }
 
-    expect_ok = _as_bool(eval_concrete(ac["expect"], mon._phys, {}, spec))
+    try:
+        expect_ok = _as_bool(eval_concrete(ac["expect"], mon._phys, {}, spec))
+    except _EvalError as exc:
+        return {
+            "ok": False,
+            "kind": "acceptance",
+            "id": ac["id"],
+            "text": ac["text"],
+            "failed_step": len(ac["steps"]),
+            "expect": ac["expect"],
+            "state": mon.state,
+            "loc": ac.get("loc"),
+            "message": exc.message,
+        }
     if not expect_ok:
         return {
             "ok": False,
@@ -110,6 +144,23 @@ def validate_acceptance(spec):
     return {"ok": True, "scenarios": scenarios}
 
 
+def _param_error_result(exc, item, idx, name, args, spec, loc, kind):
+    return {
+        "ok": False,
+        "kind": kind,
+        "id": item["id"],
+        "text": item["text"],
+        "failed_step": idx,
+        "step": {
+            "action": name,
+            "args": _step_args(args, spec, loc=loc, kind=kind),
+        },
+        "step_results": [],
+        "loc": loc,
+        "message": str(exc),
+    }
+
+
 def replay_forbidden(spec, fb):
     """Replay a must-forbid scenario: the setup steps must all be accepted, and
     the final step must be rejected (not enabled, or executing it violates an
@@ -134,7 +185,10 @@ def replay_forbidden(spec, fb):
         candidates = aliases.get(name, [name])
         failures = []
         for candidate in candidates:
-            params = _params_for(spec, candidate, args, loc)
+            try:
+                params = _params_for(spec, candidate, args, loc, kind="forbidden_setup")
+            except FslError as exc:
+                return _param_error_result(exc, fb, idx, name, args, spec, loc, "forbidden_setup")
             result = mon.step(candidate, params)
             if result.get("ok"):
                 steps_out.append({"action": result["action"], "params": params})
@@ -148,7 +202,7 @@ def replay_forbidden(spec, fb):
                 "id": fb["id"],
                 "text": fb["text"],
                 "failed_step": idx,
-                "step": {"action": name, "args": [_literal_value(a) for a in args]},
+                "step": {"action": name, "args": _step_args(args, spec, loc=loc, kind="forbidden_setup")},
                 "step_results": failures,
                 "loc": loc,
                 "hint": "forbidden の前提ステップは enabled で ok でなければならない(トレースが壊れている)。",
@@ -160,7 +214,10 @@ def replay_forbidden(spec, fb):
     candidates = aliases.get(name, [name])
     attempts = []
     for candidate in candidates:
-        params = _params_for(spec, candidate, args, loc)
+        try:
+            params = _params_for(spec, candidate, args, loc, kind="forbidden")
+        except FslError as exc:
+            return _param_error_result(exc, fb, len(steps) - 1, name, args, spec, loc, "forbidden")
         result = mon.step(candidate, params)
         attempts.append((params, result))
         if result.get("ok"):
@@ -170,7 +227,7 @@ def replay_forbidden(spec, fb):
                 "id": fb["id"],
                 "text": fb["text"],
                 "accepted_step": len(steps) - 1,
-                "step": {"action": name, "args": [_literal_value(a) for a in args]},
+                "step": {"action": name, "args": _step_args(args, spec, loc=loc, kind="forbidden")},
                 "accepted_trace": steps_out + [{"action": result["action"], "params": params}],
                 "state": result["state"],
                 "loc": fb.get("loc"),

@@ -393,10 +393,6 @@ def _killer_requirement(kind, result):
     req = result.get("requirement")
     if req:
         return req
-    if kind == "acceptance" and result.get("id"):
-        return {"id": result["id"], "text": result.get("text")}
-    if kind == "forbidden" and result.get("id"):
-        return {"id": result["id"], "text": result.get("text")}
     if kind == "refinement":
         action = result.get("impl_action") or {}
         return action.get("requirement")
@@ -475,12 +471,6 @@ def _requirement_index(spec):
             meta = item.get("meta")
             if meta and meta.get("id"):
                 reqs.setdefault(meta["id"], {"kills": 0})
-    for ac in spec.get("acceptance") or []:
-        if ac.get("id"):
-            reqs.setdefault(ac["id"], {"kills": 0})
-    for fb in spec.get("forbidden") or []:
-        if fb.get("id"):
-            reqs.setdefault(fb["id"], {"kills": 0})
     return reqs
 
 

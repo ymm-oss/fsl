@@ -4,6 +4,7 @@ from fslc import Monitor, build_spec, parse, verify
 from fslc.cli import exit_code, run_check, run_scenarios, run_testgen
 from fslc.explain import explain_file
 from fslc.model import eval_const
+from fslc.mutate import mutate_file
 from fslc.typestate import analyze
 
 
@@ -239,3 +240,137 @@ spec TestgenDefaultName {
 
     assert result["result"] == "generated", result
     assert result["output"] == "test_testgenDefaultName.py"
+
+
+def test_acceptance_action_argument_resolves_const(tmp_path):
+    src = """
+requirements ConstArgAcceptance {
+  const FIRST = 0
+  type Sub = 0..1
+  enum Screen { Browsing, CancelForm }
+  state { scr: Map<Sub, Screen> }
+  init { forall c: Sub { scr[c] = Browsing } }
+  requirement REQ-1 "cancel opens form" {
+    action tap_cancel(c: Sub) {
+      requires scr[c] == Browsing
+      scr[c] = CancelForm
+    }
+  }
+  acceptance AC-1 "const arg reaches form" {
+    tap_cancel(FIRST)
+    expect scr[FIRST] == CancelForm
+  }
+}
+"""
+    path = tmp_path / "const_arg_acceptance.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    assert run_check(str(path))["result"] == "ok"
+
+
+def test_acceptance_non_bool_expect_returns_error_envelope(tmp_path):
+    src = """
+requirements NonBoolExpect {
+  type Count = 0..1
+  state { x: Count }
+  init { x = 0 }
+  requirement REQ-1 "noop" {
+    action noop() { }
+  }
+  acceptance AC-1 "expect must be bool" {
+    noop()
+    expect x
+  }
+}
+"""
+    path = tmp_path / "non_bool_expect.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_check(str(path))
+
+    assert result["result"] == "error"
+    assert result["kind"] == "acceptance"
+    assert result["id"] == "AC-1"
+    assert result["failed_step"] == 1
+    assert "expected bool" in result["message"]
+
+
+def test_forbidden_param_errors_return_failed_step_with_forbidden_kind(tmp_path):
+    setup_unknown = """
+requirements ForbiddenUnknownSetup {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  requirement REQ-1 "pay" {
+    action pay(o: OrderId) {
+      requires order[o] == Cart
+      order[o] = Paid
+    }
+  }
+  forbidden FB-1 "bad setup action is structured" {
+    missing(0)
+    pay(0)
+    expect rejected
+  }
+}
+"""
+    final_arity = setup_unknown.replace(
+        "requirements ForbiddenUnknownSetup",
+        "requirements ForbiddenFinalArity",
+    ).replace(
+        "    missing(0)\n    pay(0)",
+        "    pay(0)\n    pay()",
+    )
+    setup_path = tmp_path / "forbidden_unknown_setup.fsl"
+    final_path = tmp_path / "forbidden_final_arity.fsl"
+    setup_path.write_text(setup_unknown, encoding="utf-8")
+    final_path.write_text(final_arity, encoding="utf-8")
+
+    setup_result = run_check(str(setup_path))
+    assert setup_result["result"] == "error"
+    assert setup_result["kind"] == "forbidden_setup"
+    assert setup_result["id"] == "FB-1"
+    assert setup_result["failed_step"] == 0
+    assert setup_result["step"]["action"] == "missing"
+
+    final_result = run_check(str(final_path))
+    assert final_result["result"] == "error"
+    assert final_result["kind"] == "forbidden"
+    assert final_result["id"] == "FB-1"
+    assert final_result["failed_step"] == 1
+    assert final_result["step"]["action"] == "pay"
+    assert "arity mismatch" in final_result["message"]
+
+
+def test_mutate_by_requirement_excludes_acceptance_and_forbidden_ids(tmp_path):
+    src = """
+requirements LoneAcceptanceStress {
+  type Count = 0..2
+  state { x: Count }
+  init { x = 0 }
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  acceptance AC-2 "one increment works" {
+    inc()
+    expect x == 1
+  }
+  forbidden FB-1 "third increment rejected" {
+    inc()
+    inc()
+    inc()
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "lone_acceptance_stress.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = mutate_file(str(path), depth=3, by_requirement=True, max_mutants=1000)
+
+    assert result["result"] == "mutated", result
+    assert "AC-2" not in result["by_requirement"]
+    assert "FB-1" not in result["by_requirement"]
+    assert result["by_requirement"] == {}

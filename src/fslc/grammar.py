@@ -777,7 +777,8 @@ class Ast(Transformer):
         return expr
 
     def acceptance_step(self, meta, name, *args):
-        return ("acceptance_step", name, list(args), _loc(meta))
+        # 空括弧 foo() は maybe_placeholders で (None,) になる — 0引数として扱う
+        return ("acceptance_step", name, [a for a in args if a is not None], _loc(meta))
 
     def acceptance_expect(self, meta, expr):
         return ("acceptance_expect", expr, _loc(meta))

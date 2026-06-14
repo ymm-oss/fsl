@@ -6,6 +6,29 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — acceptance/forbidden/mutate バッチ(Batch C)**。
+acceptance/forbidden シナリオ再生とミューテーション集計の 6件 + 検証中に発見した
+0引数ステップのパースバグ 1件を修正。
+
+### 修正
+- **acceptance/forbidden ステップの 0引数呼び出し(`noop()`)が `[None]` とパースされ
+  arity mismatch になる**バグを修正(`grammar.py`)。`maybe_placeholders` 由来の None を
+  除去(commit cca8627 の refinement 0引数写像と同系統)。既存例は常に引数付き呼び出し
+  だったため未発覚だった。Batch C のテスト作成中に発見。
+- **acceptance/forbidden の step 引数で `const` 参照が解決されず文字列のまま渡り
+  `bad_call` になる**問題を修正(`acceptance.py`)。`_literal_value` が `spec["consts"]`
+  を解決するよう変更(未定義 const は構造化エラー)。
+- **`expect` 式が非 bool のとき `_EvalError` が伝播し `run_check` が envelope を返さず
+  落ちる**問題を修正。expect 評価を捕捉し acceptance 失敗の構造化結果にする。
+- **forbidden の setup/final ステップで未知アクション・arity 不一致が構造化失敗 dict を
+  返さず例外送出**していた問題を修正。`failed_step` 付き結果を返し、kind も
+  `forbidden_setup`/`forbidden` に分離(共有 `_err` の `kind="acceptance"` 固定を解消)。
+- **`fslc mutate --by-requirement` の集計に acceptance/forbidden の id と kill が混入**
+  していた問題を修正(`mutate.py`)。DESIGN-mutate §4 のとおり requirement ブロックの
+  形式化のみを対象とし、AC/FB の id を除外(AC-2 等への `empty_formalization` 誤付与も解消)。
+
 ## [1.2.3] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — typestate バッチ(Batch B)**。`fslc typestate` の
@@ -242,7 +265,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/yumemi/fsl/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/yumemi/fsl/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/yumemi/fsl/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/yumemi/fsl/compare/v1.2.0...v1.2.1
