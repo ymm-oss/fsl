@@ -1,13 +1,63 @@
+from pathlib import Path
+
 from fslc import Monitor, build_spec, parse, verify
 from fslc.cli import exit_code, run_check, run_scenarios, run_testgen
 from fslc.explain import explain_file
 from fslc.model import eval_const
+from fslc.typestate import analyze
+
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _verify_fixture(tmp_path, name, src, depth=2):
     path = tmp_path / name
     path.write_text(src, encoding="utf-8")
     return verify(build_spec(parse(path.read_text(encoding="utf-8"))), depth)
+
+
+def _typestate_fixture(src):
+    return analyze(build_spec(parse(src)))
+
+
+def _only_entity_action(report, action_name):
+    actions = [
+        action
+        for entity in report["entities"]
+        for action in entity["actions"]
+        if action["action"] == action_name
+    ]
+    assert len(actions) == 1, report
+    return actions[0]
+
+
+def test_typestate_conjunctive_guard_extracts_from_state():
+    src = """
+spec TsConj {
+  enum St { A, B }
+  type Qty = 0..2
+  struct E { st: St }
+  state { e: E }
+  init { e = E { st: A } }
+  action go(q: Qty) {
+    requires e.st == A and q > 0
+    e.st = B
+  }
+}
+"""
+    go = _only_entity_action(_typestate_fixture(src), "go")
+
+    assert go["verdict"] == "derivable"
+    assert go["transitions"][0]["from"] == ["A"]
+
+
+def test_typestate_if_conditions_extract_branch_from_states():
+    path = ROOT / "examples" / "gallery" / "valid" / "tiny_traffic_light.fsl"
+    report = analyze(build_spec(parse(path.read_text(encoding="utf-8"))))
+    tick = _only_entity_action(report, "tick")
+
+    assert tick["verdict"] != "relational"
+    assert all(transition["from"] for transition in tick["transitions"])
 
 
 def test_leadsto_binder_where_skips_values_outside_filter(tmp_path):

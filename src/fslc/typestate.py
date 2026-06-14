@@ -111,11 +111,11 @@ def _var_loc(vname):
 
 
 def _enum_guard_states(expr, match, members):
-    """{entity_ref: {enum vals}} asserted `== E` (over `or`)."""
+    """{entity_ref: {enum vals}} asserted `== E` (over `or`/`and`)."""
     out = {}
     if not isinstance(expr, tuple):
         return out
-    if expr[0] == "bin" and expr[1] == "or":
+    if expr[0] == "bin" and expr[1] in ("or", "and"):
         for sub in (expr[2], expr[3]):
             for ref, vs in _enum_guard_states(sub, match, members).items():
                 out.setdefault(ref, set()).update(vs)
@@ -127,11 +127,25 @@ def _enum_guard_states(expr, match, members):
     return out
 
 
+def _copy_state_map(states):
+    return {ref: set(vs) for ref, vs in states.items()}
+
+
+def _and_path_states(base, constraint):
+    out = _copy_state_map(base)
+    for ref, vs in constraint.items():
+        if ref in out:
+            out[ref].intersection_update(vs)
+        else:
+            out[ref] = set(vs)
+    return out
+
+
 def _enum_assignments(stmts, match, members, field):
-    """[(entity_ref, enum_val, guarded)] for status assignments in a body."""
+    """[(entity_ref, enum_val, guarded, branch_states)] for status assignments."""
     out = []
 
-    def walk(stmt, guarded):
+    def walk(stmt, guarded, branch_states):
         if not isinstance(stmt, tuple):
             return
         if stmt[0] == "assign":
@@ -139,28 +153,42 @@ def _enum_assignments(stmts, match, members, field):
             ref = match(lv)
             # <status location> = Enum
             if ref is not None and isinstance(rhs, tuple) and rhs[0] == "var" and rhs[1] in members:
-                out.append((ref, rhs[1], guarded))
+                out.append((ref, rhs[1], guarded, _copy_state_map(branch_states)))
             # whole-entity struct literal  x = Struct { field: Enum, ... }  (field-based only)
             elif (field is not None and isinstance(rhs, tuple) and rhs[0] == "struct_lit"
                   and field in rhs[2] and lv[0] in ("var", "index")):
                 fv = rhs[2][field]
                 if isinstance(fv, tuple) and fv[0] == "var" and fv[1] in members:
-                    out.append((expr_src(_norm_index(lv)), fv[1], guarded))
+                    out.append((expr_src(_norm_index(lv)), fv[1], guarded,
+                                _copy_state_map(branch_states)))
         elif stmt[0] == "if":
-            for s in stmt[2] + stmt[3]:
-                walk(s, True)
+            cond_states = _enum_guard_states(stmt[1], match, members)
+            then_states = _and_path_states(branch_states, cond_states)
+
+            else_cond = {}
+            if _enum_is_status_only(stmt[1], match):
+                for ref, vs in cond_states.items():
+                    else_cond[ref] = set(members) - set(vs)
+            else_states = _and_path_states(branch_states, else_cond)
+
+            for s in stmt[2]:
+                walk(s, True, then_states)
+            for s in stmt[3]:
+                walk(s, True, else_states)
         elif stmt[0] == "forall_stmt":
             for s in stmt[2]:
-                walk(s, guarded)
+                walk(s, guarded, branch_states)
 
     for s in stmts:
-        walk(s, False)
+        walk(s, False, {})
     return out
 
 
 def _enum_is_status_only(expr, match):
     if not isinstance(expr, tuple):
         return False
+    if expr[0] == "bin" and expr[1] == "and":
+        return _enum_is_status_only(expr[2], match) and _enum_is_status_only(expr[3], match)
     if expr[0] == "bin" and expr[1] == "or":
         return _enum_is_status_only(expr[2], match) and _enum_is_status_only(expr[3], match)
     if expr[0] == "bin" and expr[1] == "==":
@@ -179,7 +207,7 @@ def _opt_guard_states(expr, vname):
     out = {}
     if not isinstance(expr, tuple):
         return out
-    if expr[0] == "bin" and expr[1] == "or":
+    if expr[0] == "bin" and expr[1] in ("or", "and"):
         for sub in (expr[2], expr[3]):
             for ref, vs in _opt_guard_states(sub, vname).items():
                 out.setdefault(ref, set()).update(vs)
@@ -199,31 +227,46 @@ def _opt_guard_states(expr, vname):
 def _opt_assignments(stmts, vname):
     out = []
 
-    def walk(stmt, guarded):
+    def walk(stmt, guarded, branch_states):
         if not isinstance(stmt, tuple):
             return
         if stmt[0] == "assign":
             lv, rhs = stmt[1], stmt[2]
             if _base_var(lv) == vname and lv[0] in ("var", "index"):
                 if isinstance(rhs, tuple) and rhs[0] == "none":
-                    out.append((expr_src(_norm_index(lv)), EMPTY, guarded))
+                    out.append((expr_src(_norm_index(lv)), EMPTY, guarded,
+                                _copy_state_map(branch_states)))
                 elif isinstance(rhs, tuple) and rhs[0] == "some":
-                    out.append((expr_src(_norm_index(lv)), FILLED, guarded))
+                    out.append((expr_src(_norm_index(lv)), FILLED, guarded,
+                                _copy_state_map(branch_states)))
         elif stmt[0] == "if":
-            for s in stmt[2] + stmt[3]:
-                walk(s, True)
+            cond_states = _opt_guard_states(stmt[1], vname)
+            then_states = _and_path_states(branch_states, cond_states)
+
+            else_cond = {}
+            if _opt_is_state_only(stmt[1], vname):
+                for ref, vs in cond_states.items():
+                    else_cond[ref] = {EMPTY, FILLED} - set(vs)
+            else_states = _and_path_states(branch_states, else_cond)
+
+            for s in stmt[2]:
+                walk(s, True, then_states)
+            for s in stmt[3]:
+                walk(s, True, else_states)
         elif stmt[0] == "forall_stmt":
             for s in stmt[2]:
-                walk(s, guarded)
+                walk(s, guarded, branch_states)
 
     for s in stmts:
-        walk(s, False)
+        walk(s, False, {})
     return out
 
 
 def _opt_is_state_only(expr, vname):
     if not isinstance(expr, tuple):
         return False
+    if expr[0] == "bin" and expr[1] == "and":
+        return _opt_is_state_only(expr[2], vname) and _opt_is_state_only(expr[3], vname)
     if expr[0] == "bin" and expr[1] == "or":
         return _opt_is_state_only(expr[2], vname) and _opt_is_state_only(expr[3], vname)
     if expr[0] == "bin" and expr[1] in ("==", "!="):
@@ -252,8 +295,20 @@ def _classify(action, guard_fn, assign_fn, only_fn):
             guards.setdefault(ref, set()).update(vs)
 
     transitions, verdict, diagnostics = [], "derivable", []
-    for ref, to_state, guarded in assigns:
-        froms = sorted(guards.get(ref, set()))
+    for assignment in assigns:
+        if len(assignment) == 3:
+            ref, to_state, guarded = assignment
+            branch_states = {}
+        else:
+            ref, to_state, guarded, branch_states = assignment
+
+        require_froms = set(guards.get(ref, set()))
+        branch_froms = set(branch_states.get(ref, set()))
+        if require_froms and branch_froms:
+            from_set = require_froms & branch_froms
+        else:
+            from_set = require_froms | branch_froms
+        froms = sorted(from_set)
         if not froms:
             verdict = "relational"
             diagnostics.append(

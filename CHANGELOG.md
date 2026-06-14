@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — typestate バッチ(Batch B)**。`fslc typestate` の
+from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relational` と誤判定し、エンティティの
+適用可否(applicability)を不当に `none` に落としていた。
+
+### 修正
+- **`requires` の合取式から from-state を抽出できず `relational` と誤判定**していた問題を
+  修正(`typestate.py`)。`requires e.st == A and q > 0` のような束縛で `and` ノードが
+  未処理だったため、`e.st == A` の from-state が拾えなかった。`_enum_guard_states` /
+  `_opt_guard_states` が `and` を `or` と同様に再帰処理するよう拡張。
+- **`if` 条件中の from-state が抽出されず、分岐遷移が `relational` と誤判定**されていた
+  問題を修正。`if light == Red { light = Green }` のような分岐で、囲み条件から各分岐の
+  from-state を導出する(status-only な `else` は補集合として扱う)。これにより
+  `tiny_traffic_light.tick` が `branching`(from-state 付き)として正しく分類され、
+  applicability が `full` になる。`typestate:325`(branching を `_emit_ts` に出す)も
+  これに伴い解消。
+
 ## [1.2.2] - 2026-06-15
 
 テーマ: **自動コード監査(issue #12)のトリアージ着手 — 健全性バッチ(Batch A)**。
@@ -224,7 +242,8 @@
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/yumemi/fsl/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/yumemi/fsl/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/yumemi/fsl/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/yumemi/fsl/compare/v1.1.0...v1.2.0
