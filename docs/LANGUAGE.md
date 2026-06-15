@@ -36,6 +36,7 @@ spec <Name> {
   }
 
   invariant <Name> { <式> }             // 全到達状態で成立(安全性)
+  trans <Name> { <式> }                 // 全到達遷移で成立(2状態安全性)
   reachable <Name> { <式> }             // 到達可能であること(witness が返る)
   leadsTo <Name> { <応答性質> }         // 有界応答性質(§1 参照)
   terminal { <式> }                     // 意図した終端状態(deadlock 検査から除外)
@@ -44,6 +45,9 @@ spec <Name> {
 
 `fair` は弱公平性注釈: そのアクションインスタンスが連続して enabled
 であり続けるなら、いつかは実行される前提。
+
+性質の階層: `invariant` は1状態安全性、`trans` は2状態安全性(`old()` で遷移前状態を参照可)、
+`leadsTo` は有界 liveness。
 
 `leadsTo` ブロック内の応答性質:
 
@@ -98,7 +102,7 @@ leadsTo <Name> {
 - Set: `Set {}` / `Set { 1, 2 }`、`.add(e)` `.remove(e)` `.contains(e)` `.size()`
 - Seq: `Seq {}` / `Seq { 1, 2 }`、`.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`、`==` は長さと全要素の等価
-- ensures 内のみ: `old(式)` で遷移前の状態を読む
+- ensures / trans 内のみ: `old(式)` で遷移前の状態を読む
 - leadsTo ブロック内のみ: `P ~> Q`(応答性質。一般式の演算子階層には含まれない)
 
 ## 4. 文(init / action 本体)
@@ -120,6 +124,8 @@ leadsTo <Name> {
   (分岐内の書き込みが消えるのを防ぐ)。
 - **requires**: すべて成立するときのみ enabled。
 - **ensures**: 遷移後の状態で検査。違反は `violation_kind: "ensures"`。
+- **trans**: 各実行ステップの遷移後状態で検査し、`old(式)` は遷移前状態で評価する。
+  違反は `violation_kind: "trans"`。
 
 ## 6. 自動チェック(書かなくても検査されるもの)
 
@@ -129,6 +135,7 @@ leadsTo <Name> {
 | 部分操作 | `pop()`/`head()`/`at(i)` 実行時に列が空でない・添字が範囲内、`/` `%` の除数が 0 でない | `violated` / `partial_op` / `_partial_<action>` |
 | action coverage | 各アクションが深さ K 以内に一度は enabled | `action_coverage` に阻害 requires の診断 |
 | デッドロック | 全アクションが disabled になる状態への到達 | warning(`--deadlock error` で violated) |
+| trans | 全到達遷移で2状態述語が成立するか | `violated` / `trans` / `trans` + trace |
 | leadsTo | 深さ K までのラッソ / デッドロック停滞で P ~> Q 違反 | `violated` / `leadsTo` / `bindings` + trace |
 
 - デッドロック警告にはどの状態で詰まったかが含まれる(例: `deadlock reachable at
@@ -185,11 +192,12 @@ mutated / explained / typestate、
 | `unknown_cti` | invariant は破られていないが帰納的でない | **CTI を読んで補助 invariant を足す**(§8) |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って修正 |
 
-`violation_kind`: `invariant` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`。
+`violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`。
 
 `verified` / `proved` で leadsTo を宣言している場合、
 `leads_to: { "<Name>": { "checked_to_depth": K } }` が付く
 (反例なしは深さ K までの有界保証。invariant の `verified` と同じ位置づけ)。
+`trans` を宣言している場合、成功出力には `transitions_checked: ["Name", ...]` が付く。
 
 ### coverage 診断(enabled にならないアクション)
 

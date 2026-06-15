@@ -37,8 +37,7 @@ spec FslcSession {
     status: SessionStatus,
     severity: Severity,     // ghost: CLI exit-code severity 0..3
     checked: Bool,          // ghost: current pipeline has passed check
-    ever_verified: Bool,    // ghost: verify returned success at least once
-    ever_tool_fault: Bool   // ghost: internal/unclassified failures are terminal
+    ever_verified: Bool     // ghost: verify returned success at least once
   }
 
   init {
@@ -46,7 +45,6 @@ spec FslcSession {
     severity = 0
     checked = false
     ever_verified = false
-    ever_tool_fault = false
   }
 
   action check_ok() {
@@ -162,10 +160,9 @@ spec FslcSession {
   }
 
   action tool_fault() {
-    requires not ever_tool_fault
+    requires status != ToolFault
     status = ToolFault
     severity = 3
-    ever_tool_fault = true
   }
 
   invariant SuccessRequiresCheck {
@@ -177,7 +174,7 @@ spec FslcSession {
 
   invariant ProvedImpliesVerified { status == Proved => ever_verified }
   invariant VerifiedImpliesEver { status == Verified => ever_verified }
-  invariant ToolFaultNotRepairable { ever_tool_fault => status == ToolFault }
+  trans ToolFaultNotRepairable { old(status) == ToolFault => status == ToolFault }
 
   invariant SuccessExitZero {
     (status == CheckOk or status == Verified or status == Proved or status == OkResult

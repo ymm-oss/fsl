@@ -16,6 +16,7 @@
 | [`DESIGN-dialects.md`](DESIGN-dialects.md) | 方言の実装仕様(宣言タグ・fsl-req・fsl-biz) |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | 非機能要件(対応表・離散時刻 SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | k 帰納法エンジン(proved / unknown_cti / CTI) |
+| [`DESIGN-trans.md`](DESIGN-trans.md) | `trans`(遷移 invariant / 2状態安全性) |
 | [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo・弱公平性(ラッソ反例)・respond シナリオ |
 | [`DESIGN-refinement.md`](DESIGN-refinement.md) | refinement 検査(写像ファイル・条件式) |
 | [`DESIGN-compose.md`](DESIGN-compose.md) | spec 合成(名前空間・同期アクション・internal) |

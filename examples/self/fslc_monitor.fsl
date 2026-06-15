@@ -14,14 +14,12 @@ spec FslcMonitor {
   state {
     status: MonitorStatus,
     processed: Count,       // ghost: accepted events before terminal result
-    rejected_at: Count,     // ghost: processed count at first rejected event
     rejected: Bool
   }
 
   init {
     status = Running
     processed = 0
-    rejected_at = 0
     rejected = false
   }
 
@@ -35,20 +33,23 @@ spec FslcMonitor {
     requires status == Running
     status = Nonconformant
     rejected = true
-    rejected_at = processed
   }
 
   action finish() {
     requires status == Running
+    requires not rejected
     status = Conformant
   }
 
-  invariant RejectIsSticky { rejected => status == Nonconformant }
-  invariant NoStepAfterReject { status == Nonconformant => processed == rejected_at }
+  trans RejectIsSticky { old(status) == Nonconformant => status == Nonconformant }
+  trans NoStepAfterReject { old(status) == Nonconformant => processed == old(processed) }
+  invariant RunningImpliesNotRejected { status == Running => not rejected }
+  invariant NonconformantImpliesRejected { status == Nonconformant => rejected }
   invariant ConformantImpliesAllOk { status == Conformant => not rejected }
 
   reachable ReachConformant { status == Conformant }
   reachable ReachNonconformant { status == Nonconformant }
+  reachable ReachMaxProcessed { processed == MAX_EVENTS }
 
   // Conformant / Nonconformant are intended terminal results, not deadlock bugs.
   terminal { status == Conformant or status == Nonconformant }

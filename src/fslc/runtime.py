@@ -518,7 +518,7 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         return a if a >= 0 else -a
     if tag == "old":
         if not in_ensures:
-            _err("old() is only allowed in ensures clauses", kind="type")
+            _err("old() is only allowed in ensures or trans clauses", kind="type")
         if old_state is None:
             _err("old() used without old state context")
         return eval_concrete(e[1], old_state, binds, spec, None, False)

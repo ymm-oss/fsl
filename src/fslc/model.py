@@ -601,6 +601,8 @@ def check_stage_usage(items):
                     _check_no_stage_stmts([body_item])
         elif tag == "invariant":
             _check_no_stage_expr(it[2])
+        elif tag == "trans":
+            _check_no_stage_expr(it[2])
         elif tag == "reachable":
             _check_no_stage_expr(it[2])
         elif tag == "leadsto":
@@ -847,13 +849,15 @@ def strict_tag_warnings(spec, requirement_ids=None):
         add_untagged("action", action)
     for inv in spec.get("user_invariants", []):
         add_untagged("invariant", inv)
+    for trans in spec.get("transitions", []):
+        add_untagged("trans", trans)
     for leadsto in spec.get("leadstos", []):
         add_untagged("leadsTo", leadsto)
     for reachable in spec.get("reachables", []):
         add_untagged("reachable", reachable)
 
     referenced = set()
-    for collection in ("actions", "user_invariants", "leadstos", "reachables"):
+    for collection in ("actions", "user_invariants", "transitions", "leadstos", "reachables"):
         for item in spec.get(collection, []):
             meta = item.get("meta")
             if meta and meta.get("id"):
@@ -917,6 +921,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     init = []
     actions = []
     invariants = []
+    transitions = []
     reachables = []
     leadstos = []
     terminal = None
@@ -962,6 +967,12 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "name": it[1],
                 "expr": it[2],
                 "implicit": False,
+                "loc": it[3],
+            }, it[4] if len(it) > 4 else None))
+        elif tag == "trans":
+            transitions.append(_with_meta({
+                "name": it[1],
+                "expr": it[2],
                 "loc": it[3],
             }, it[4] if len(it) > 4 else None))
         elif tag == "reachable":
@@ -1017,6 +1028,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "actions": actions,
         "invariants": all_invariants,
         "user_invariants": invariants,
+        "transitions": transitions,
         "reachables": reachables,
         "leadstos": leadstos,
         "terminal": terminal,

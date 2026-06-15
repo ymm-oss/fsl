@@ -11,7 +11,7 @@ spec_def: "spec" NAME "{" item* "}"
 compose_def: "compose" NAME "{" compose_item* "}"
 ?compose_item: use_def | internal_def | compose_state | compose_init
              | sync_action | action_def
-             | invariant_def | reachable_def | leadsto_def
+             | invariant_def | trans_def | reachable_def | leadsto_def
 use_def: "use" NAME "as" NAME "from" STRING
 internal_def: "internal" NAME "." NAME
 compose_state: "state" "{" var_decl ("," var_decl)* ","? "}"
@@ -39,7 +39,7 @@ mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
-     | invariant_def | reachable_def | leadsto_def | terminal_def
+     | invariant_def | trans_def | reachable_def | leadsto_def | terminal_def
 
 const_def: "const" NAME "=" expr
 type_def: "type" NAME "=" expr ".." expr
@@ -87,6 +87,7 @@ binder: NAME ":" qname ["where" expr] -> binder_typed
        | NAME "in" expr ".." expr -> binder_range
 
 invariant_def: "invariant" NAME meta_tag? "{" expr "}"
+trans_def: "trans" NAME meta_tag? "{" expr "}"
 reachable_def: "reachable" NAME meta_tag? "{" expr "}"
 terminal_def: "terminal" "{" expr "}"
 
@@ -196,11 +197,11 @@ requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def
                   | const_def | type_def | enum_def | struct_def
                   | state_def | init_def | req_action_def | time_def
-                  | invariant_def | reachable_def | leadsto_def
+                  | invariant_def | trans_def | reachable_def | leadsto_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def
 requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
-?requirement_item: req_action_def | invariant_def | reachable_def | leadsto_def | deadline_def
+?requirement_item: req_action_def | invariant_def | trans_def | reachable_def | leadsto_def | deadline_def
 req_action_def: req_fair_action | req_plain_action
 req_fair_action: _FAIR "action" NAME "(" [param ("," param)*] ")" maps_clause? meta_tag? "{" req_action_item* "}"
 req_plain_action: "action" NAME "(" [param ("," param)*] ")" maps_clause? meta_tag? "{" req_action_item* "}"
@@ -560,6 +561,15 @@ class Ast(Transformer):
             else:
                 e = r
         return ("invariant", n, e, _loc(meta), req_meta)
+
+    def trans_def(self, meta, n, *rest):
+        req_meta, e = None, None
+        for r in rest:
+            if isinstance(r, dict):
+                req_meta = r
+            else:
+                e = r
+        return ("trans", n, e, _loc(meta), req_meta)
 
     def reachable_def(self, meta, n, *rest):
         req_meta, e = None, None

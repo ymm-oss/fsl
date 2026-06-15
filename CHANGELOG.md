@@ -33,6 +33,9 @@
   よらず恒真になる invariant」を Z3 で静的検出する(kind `tautology_over_frozen`)。従来 verify も
   vacuity も見逃し mutate の生存率でしか露見しなかった骨抜き(恒真)invariant を、検証時に警告する。
   frozen 変数を参照しない/state を参照しない invariant は対象外。既存コーパス全体で偽陽性ゼロを確認。
+- **遷移 invariant `trans { }`(DOGFOOD-11 F24 対応)**: `trans Name { old(x) => ... }`
+  で action 横断の2状態安全性を直接宣言できる。BMC は各到達遷移、induction は step-case
+  で検査し、成功出力に `transitions_checked`、違反時に `violation_kind:"trans"` を返す。
 
 ### 修正
 - **デッドロック警告に状態を含める(DOGFOOD-11 F26 対応)**: `--deadlock warn` の警告

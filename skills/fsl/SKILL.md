@@ -77,6 +77,7 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
 | 自然言語のパターン | FSL 構文 |
 |---|---|
 | 「〜してはならない」「常に〜である」(禁止・不変) | `invariant`(安全性) |
+| 「ある状態から次状態への変化を禁止/制約する」(2状態安全性) | `trans`(`old()` で遷移前状態を参照) |
 | 「〜の場合だけ〜できる」(前提条件) | action の `requires` |
 | 「〜したら必ずいつか〜する」(応答・進行) | `leadsTo` + 進行を担うアクションに `fair` |
 | 「一度〜したら二度と〜できない」(履歴依存) | ゴースト変数(`ever_*`)+ invariant |
@@ -115,6 +116,7 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
 | result / violation_kind | 意味 | 次の一手 |
 |---|---|---|
 | `violated` / `invariant` | 反例あり(trace は最短) | trace の `changes` と `violating_bindings` を読み、ガード追加か invariant 修正 |
+| `violated` / `trans` | 2状態安全性の反例あり | trace の直前状態と違反ステップを比較し、ガード追加・action 修正・trans 修正を判断 |
 | `violated` / `type_bound` | 有界型が範囲外(自動検査) | `last_action` のガード不足。`requires` で範囲を守る(invariant を手書きしない) |
 | `violated` / `partial_op` | 空 Seq の pop/head、添字範囲外、除数 0 | `requires q.size() > 0` / `requires d != 0` か `if` でガード |
 | `violated` / `ensures` | 事後条件不成立 | 本体と ensures のどちらが正かを判断して修正 |
@@ -192,6 +194,7 @@ spec Cart {
   // 「stock[i] >= 0」のような境界 invariant は書かない(Qty=0..5 で自動検査)。
   // 下は非・境界の真の安全性 invariant の例(<式> の位置)。
   invariant QueueStaysEmpty { q.size() == 0 }   // q を触る action が無いので不変
+  trans StockNeverIncreases { stock[0] <= old(stock[0]) } // 2状態安全性
   reachable SoldOut { stock[0] == 0 }           // witness が返る
   leadsTo Served { cart is some(j) ~> cart == none }   // ~> は leadsTo 専用
   terminal { stock[0] == 0 }                    // 意図した終端状態(deadlock 検査から除外)
@@ -211,7 +214,9 @@ spec Cart {
   const から導出して書く — リテラルをハードコードすると容量変更に追従しない)。
 - **Map のネスト(`Map<K1, Map<K2,V>>`)は不可** → 2軸は積のドメイン型1本に
   平坦化(`type Cell = 0..ROOMS*SLOTS-1`)し、軸は `c / SLOTS`・`c % SLOTS` で復元。
-- 「X の後に Y が起きた」という**履歴**は状態で書けない → ゴースト変数
+- 「直前状態から次状態で X が保たれる」は `trans`。`old()` は `ensures` / `trans`
+  の中だけで使える。
+- 「X の後にいつか Y が起きた」という**履歴/応答**は状態で書けない → ゴースト変数
   (`ever_locked` 等)を足すか、応答性質なら `leadsTo`。
 - **意図した終端状態**(処理完了など、そこで止まるのが正しい状態)は deadlock 警告に
   なる → `terminal { <述語> }` で宣言する(`--deadlock ignore` を全体にかけると意図せぬ

@@ -264,6 +264,12 @@ def _inv_constraint(inv, state, spec, expr_cache):
         return eval_expr(inv["expr"], state, {}, spec)
 
 
+def _trans_constraint(trans, cur, nxt, spec, expr_cache):
+    with _eval_cache_scope(expr_cache, id(nxt)):
+        return eval_expr(
+            trans["expr"], nxt, {}, spec, old_state=cur, in_ensures=True)
+
+
 def _enum_phys_constraints(spec, state):
     """Physical enum range when not already covered by _bounds_* invariants."""
     cons = []
@@ -515,7 +521,7 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         return z3.If(a >= 0, a, -a)
     if tag == "old":
         if not in_ensures:
-            _err("old() is only allowed in ensures clauses", kind="type")
+            _err("old() is only allowed in ensures or trans clauses", kind="type")
         if old_state is None:
             _err("old() used without old state context")
         with _eval_cache_scope(None, None):
@@ -2700,6 +2706,10 @@ def _display_output(result, spec):
     out = dict(result)
     if "invariants_checked" in out:
         out["invariants_checked"] = [display_label(n, spec) for n in out["invariants_checked"]]
+    if "transitions_checked" in out:
+        out["transitions_checked"] = [
+            display_label(n, spec) for n in out["transitions_checked"]
+        ]
     if "reachables" in out:
         out["reachables"] = display_keyed(out["reachables"], spec)
     if "k_used" in out:
@@ -2708,6 +2718,8 @@ def _display_output(result, spec):
         out["leads_to"] = display_keyed(out["leads_to"], spec)
     if "invariant" in out:
         out["invariant"] = display_label(out["invariant"], spec)
+    if "trans" in out:
+        out["trans"] = display_label(out["trans"], spec)
     if "unreached" in out:
         out["unreached"] = [
             {**u, "name": display_label(u["name"], spec)} for u in out["unreached"]
@@ -2805,6 +2817,7 @@ def _bmc_explore(
     invariants, property_error = _select_invariants(spec, property_name)
     if property_error is not None:
         return property_error
+    transitions = spec.get("transitions", [])
 
     instances = build_instances(spec)
     expr_cache = {}
@@ -2914,6 +2927,31 @@ def _bmc_explore(
             passed_invariants.append(inv_cond)
         if passed_invariants:
             inv_s.add(*passed_invariants)
+
+        if t > 0:
+            for trans in transitions:
+                trans_cond = _trans_constraint(
+                    trans, states[t - 1], states[t], spec, expr_cache)
+                s.push()
+                s.add(z3.Not(trans_cond))
+                if s.check() == z3.sat:
+                    m = s.model()
+                    trace = _build_trace(m, states, choices, instances, spec, t)
+                    s.pop()
+                    return _attach_requirement({
+                        "result": "violated",
+                        "spec": spec["name"],
+                        "violation_kind": "trans",
+                        "trans": trans["name"],
+                        "invariant": trans["name"],
+                        "loc": trans.get("loc"),
+                        "violated_at_step": t,
+                        "violating_bindings": None,
+                        "last_action": _last_action(m, choices, instances, t, spec),
+                        "trace": trace,
+                        "transitions_checked": [tr["name"] for tr in transitions],
+                    }, trans)
+                s.pop()
 
         if t > 0:
             for idx, inst in enumerate(instances):
@@ -3108,6 +3146,7 @@ def _bmc_explore(
         "cover_info": cover_info,
         "leadsto_stutter_violation": leadsto_stutter_violation,
         "invariants_checked": [i["name"] for i in invariants],
+        "transitions_checked": [tr["name"] for tr in transitions],
     }
 
 
@@ -3145,6 +3184,8 @@ def verify(
             "spec": explored["spec"],
             "unreached": unreached,
             "depth": depth,
+            "invariants_checked": explored["invariants_checked"],
+            "transitions_checked": explored["transitions_checked"],
             "action_coverage": coverage,
             "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
         }, spec)
@@ -3189,6 +3230,7 @@ def verify(
         "spec": explored["spec"],
         "depth": depth,
         "invariants_checked": explored["invariants_checked"],
+        "transitions_checked": explored["transitions_checked"],
         "reachables": reachables_result,
         "action_coverage": coverage,
         "deadlock": deadlock_info,
@@ -3340,6 +3382,7 @@ def prove(
     invariants, property_error = _select_invariants(spec, property_name)
     if property_error is not None:
         return _display_output(property_error, spec)
+    transitions = spec.get("transitions", [])
 
     base = verify(
         spec,
@@ -3397,6 +3440,31 @@ def prove(
                 k_used[inv["name"]] = k
             s.pop()
 
+        if k == 1:
+            for trans in transitions:
+                trans_cond = _trans_constraint(trans, states[0], states[1], spec, expr_cache)
+                s.push()
+                s.add(z3.Not(trans_cond))
+                if s.check() == z3.sat:
+                    model = s.model()
+                    trace = _build_trace(model, states, choices, instances, spec, 1)
+                    s.pop()
+                    return _display_output(_attach_requirement({
+                        "result": "unknown_cti",
+                        "spec": spec["name"],
+                        "trans": trans["name"],
+                        "invariant": trans["name"],
+                        "k": 1,
+                        "cti": {
+                            "states": trace,
+                            "violated_at": 1,
+                        },
+                        "invariants_checked": [i["name"] for i in invariants],
+                        "transitions_checked": [tr["name"] for tr in transitions],
+                        "hint": _CTI_HINT,
+                    }, trans), spec)
+                s.pop()
+
         remaining = still_remaining
         if not remaining:
             break
@@ -3428,6 +3496,7 @@ def prove(
         "k_used": k_used,
         "base_depth": base_depth,
         "invariants_checked": [i["name"] for i in invariants],
+        "transitions_checked": [tr["name"] for tr in transitions],
         "action_coverage": base["action_coverage"],
         "reachables": base["reachables"],
         "warnings": warnings,
