@@ -110,6 +110,8 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
    `fslc testgen -o test_x.py`
    (実装適合 pytest 雛形)、`fslc replay --trace events.json`(ログ適合性)、
    `fslc refine impl.fsl abs.fsl mapping.fsl`(詳細仕様の忠実性検査)
+   注: verify/induction が保証するのは**仕様の内部整合**であって**実装が仕様契約を守るか**は別物。
+   実装適合まで要るなら `testgen`(Adapter 経由の pytest)/ `replay`(実行ログ照合)で実装に錨付けする。
 
 ## 修復プロトコル(結果 → 次の一手)
 
