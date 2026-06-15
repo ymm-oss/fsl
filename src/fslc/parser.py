@@ -2,8 +2,10 @@
 
 Raises ``lark.exceptions.UnexpectedInput`` on syntax errors and
 ``lark.exceptions.VisitError`` (wrapping an :class:`fslc.model.FslError`)
-on transform-time semantic errors. The CLI translates both into the
-machine-readable JSON error envelope.
+on grammar transform-time semantic errors. Compose/requirements expansion
+(``expand_compose`` / ``expand_requirements_with_display``) raises
+:class:`fslc.model.FslError` directly (not wrapped in ``VisitError``).
+The CLI translates all of these into the machine-readable JSON error envelope.
 """
 from .grammar import PARSER, Ast
 from .compose import expand_compose

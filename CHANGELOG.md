@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — runtime/refine/doc 整合バッチ(Batch E-c)**。
+設計解釈を要する項目を実機検証のうえ取捨選択して対応。
+
+### 修正
+- **`Monitor.step()` が requires より先に let を評価し、ガード未成立時に
+  `requires_failed` でなく `partial_op` を返す**問題を修正(`runtime.py`)。
+  `requires q.size() > 0` の後に `let h = q.head()` を書いたアクションを空キューで
+  呼ぶと、ガード失敗ではなく partial_op になっていた。let と requires をソース順に
+  interleave して評価し、ガードが落ちる枝では後続 let の partial op に到達しない
+  (DESIGN-v1 §5: let は後続 requires でのみ使用可)。
+- **`fslc refine` が action 写像の引数式の型検査をしていない**問題を修正
+  (`refine.py`)。DESIGN-refinement §3 に従い、abs アクションのパラメータ型と
+  写像引数式の静的型を照合する(型不明な場合は誤検知を避け検査をスキップ)。
+- (ドキュメント) `parser.py` の docstring に compose/requirements 展開が `FslError` を
+  直接送出する(VisitError で包まれない)旨を追記。DESIGN-bridge §3 の「生成物の
+  import は runtime と pytest のみ」の記述を、固定シード walk 用 `random` と
+  パス解決用 `pathlib` を許容するよう実装に合わせて明確化。
+
+### 備考(設計判断により今回は見送り、issue #12 で継続検討)
+- refinement の t=0 検査順序(`map_out_of_bounds` と init 対応): DESIGN-refinement §2 の
+  順序記述と「写像式バグを直接指摘する map_out_of_bounds の有用性」(§2)が緊張関係に
+  あり、既存テストは bounds 先を期待。現状維持とし保守者判断に委ねる。
+- Seq の head/pop/at の invariant 文脈での don't-care 化(BMC との整合): ガード付き
+  invariant は短絡で保護され実害が小さい一方、`in_invariant` 伝播は広範な変更となるため
+  見送り。
+- `parse()` の base_dir フォールバック / display_names 破棄: ライブラリ API の互換性に
+  影響するため見送り(CLI は parse_src + 親ディレクトリを使用済み)。
+
 ## [1.2.7] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — model/grammar 整合バッチ(Batch E-b)**。
@@ -323,7 +353,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.7...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.8...HEAD
+[1.2.8]: https://github.com/yumemi/fsl/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/yumemi/fsl/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/yumemi/fsl/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/yumemi/fsl/compare/v1.2.4...v1.2.5

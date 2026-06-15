@@ -1220,27 +1220,43 @@ def _partial_op_well_defined_concrete(site_expr, state, binds, spec):
     return True
 
 
+def _guard_loc_key(item):
+    loc = item.get("loc") or {}
+    # items without a loc keep their relative order (sort is stable)
+    return (loc.get("line", 0), loc.get("column", 0))
+
+
 def _eval_requires(requires, lets, state, param_binds, spec, source_lines=None, action_name=None):
     binds = dict(param_binds)
+    # Evaluate let bindings and requires guards in source order so that a guard
+    # that fails (e.g. `requires q.size() > 0`) short-circuits to requires_failed
+    # before a later `let h = q.head()` evaluates a partial op on the same state
+    # (DESIGN-v1 §5: a let is usable in subsequent requires only). An unguarded
+    # let that hits a partial op still raises and is reported as partial_op by step().
+    items = sorted(
+        [("let", it) for it in lets] + [("req", it) for it in requires],
+        key=lambda t: _guard_loc_key(t[1]),
+    )
     with _div_partial_op_checks():
-        for let in lets:
-            binds[let["name"]] = eval_concrete(let["expr"], state, binds, spec)
-        for req in requires:
+        for kind, item in items:
+            if kind == "let":
+                binds[item["name"]] = eval_concrete(item["expr"], state, binds, spec)
+                continue
             b = dict(binds)
             try:
-                ok = eval_concrete(req["expr"], state, b, spec)
+                ok = eval_concrete(item["expr"], state, b, spec)
             except _PartialOp as po:
                 pname = f"_partial_{action_name}" if action_name else po.name
                 return None, binds, {
                     "kind": "partial_op",
                     "name": pname,
-                    "loc": po.loc or req.get("loc"),
+                    "loc": po.loc or item.get("loc"),
                     "hint": _partial_op_hint(po),
                 }
             if not _as_bool(ok):
                 return False, binds, {
                     "kind": "requires_failed",
-                    "requires": _requires_text(req, source_lines),
+                    "requires": _requires_text(item, source_lines),
                 }
             for k, v in b.items():
                 if k not in param_binds:

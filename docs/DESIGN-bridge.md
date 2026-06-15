@@ -120,7 +120,9 @@ exit code: conformant = 0、nonconformant = 1、入力/仕様エラー = 2。
 fslc testgen <file.fsl> [--depth K] [-o <out.py>]    # 既定: test_<spec名小文字>.py を stdout
 ```
 
-生成物は**自己完結の pytest ファイル**(import は fslc.runtime と pytest のみ):
+生成物は**自己完結の pytest ファイル**(主たる依存は `fslc.runtime` と `pytest`。
+加えて、結線・再生に必要な標準ライブラリのみ — 固定シード擬似乱数 walk のための
+`random`(下記 3.)と SPEC パス解決のための `pathlib` — を import してよい):
 
 1. **Adapter スタブ**: ユーザーが実装を結線するクラス。
    ```python

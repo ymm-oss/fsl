@@ -518,6 +518,43 @@ def build_refinement(tree, impl_spec, abs_spec):
                     loc=m.get("loc"),
                 )
 
+    # static type check action-map argument expressions (DESIGN-refinement §3).
+    # Defensive: only flag when both expected and inferred types are determinable.
+    def _param_type(p):
+        tyname = p[3] if len(p) > 3 else None
+        if tyname and tyname in merged_types:
+            return merged_types[tyname]["ty"]
+        if tyname == "Int":
+            return ("int",)
+        if tyname == "Bool":
+            return ("bool",)
+        if len(p) >= 3 and isinstance(p[1], int) and isinstance(p[2], int):
+            return ("domain", p[1], p[2])
+        return None
+
+    for aname, amap in actions.items():
+        if amap.get("kind") != "map":
+            continue
+        impl_act = _find_abs_action(impl_spec, aname)
+        abs_act = _find_abs_action(abs_spec, amap["abs_action"])
+        if impl_act is None or abs_act is None:
+            continue
+        env = {}
+        for p in impl_act["params"]:
+            pt = _param_type(p)
+            if pt:
+                env[p[0]] = pt
+        for arg_expr, abs_p in zip(amap["arg_exprs"], abs_act["params"]):
+            expected = _param_type(abs_p)
+            got = _expr_static_type(arg_expr, merged_impl, env)
+            if expected and got and not _types_compatible(expected, got):
+                _err(
+                    f"action '{aname}' -> '{amap['abs_action']}' argument type "
+                    f"mismatch: expected {expected}, got {got}",
+                    kind="type",
+                    loc=amap.get("loc"),
+                )
+
     return {
         "name": name,
         "impl": impl_name,

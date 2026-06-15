@@ -594,6 +594,52 @@ requirements LoneAcceptanceStress {
     assert result["by_requirement"] == {}
 
 
+def test_refine_action_argument_type_mismatch_is_rejected(tmp_path):
+    from fslc.cli import run_refine
+
+    impl = """
+spec Impl488 {
+  enum St { A, B }
+  type N = 0..1
+  state { st: St }
+  init { st = A }
+  action go(n: N) { st = A }
+  invariant T { true }
+}
+"""
+    abs = """
+spec Abs488 {
+  enum St { A, B }
+  state { st: St }
+  init { st = A }
+  action astep(s: St) { st = s }
+  invariant T { true }
+}
+"""
+    mapping = """
+refinement R488 {
+  impl Impl488
+  abs Abs488
+  map st = st
+  action go(n) -> astep(n)
+}
+"""
+    (tmp_path / "impl488.fsl").write_text(impl, encoding="utf-8")
+    (tmp_path / "abs488.fsl").write_text(abs, encoding="utf-8")
+    (tmp_path / "map488.fsl").write_text(mapping, encoding="utf-8")
+
+    r = run_refine(
+        str(tmp_path / "impl488.fsl"),
+        str(tmp_path / "abs488.fsl"),
+        str(tmp_path / "map488.fsl"),
+        depth=2,
+    )
+    # domain arg `n` mapped into an enum parameter must be a type error
+    assert r["result"] == "error", r
+    assert r["kind"] == "type", r
+    assert "argument" in r["message"] and "mismatch" in r["message"], r
+
+
 def test_compose_rewrites_component_const_in_type_binder_and_param(tmp_path):
     # コンポーネントが const をレンジ/binder/param で使うと、展開時に const は
     # alias__ でプレフィクスされるが式中の参照が書き換えられず未解決になっていた。
