@@ -275,6 +275,30 @@ spec ConstDivisionRange {
     assert spec["types"]["K"]["hi"] == 5
 
 
+def test_monitor_full_seq_push_is_type_bound_not_partial_op():
+    # DESIGN-seq: an over-capacity push is a type_bound violation of the implicit
+    # _bounds_* length invariant (matching BMC), not a partial_op.
+    src = """
+spec PushFull {
+  type N = 0..2
+  state { q: Seq<N, 1> }
+  init { q = Seq {} }
+  action add() { q = q.push(0) }
+  invariant T { true }
+}
+"""
+    monitor = Monitor(src)
+    monitor.reset()
+
+    first = monitor.step("add", {})
+    assert first["ok"] is True, first
+
+    second = monitor.step("add", {})
+    assert second["ok"] is False, second
+    assert second["kind"] == "type_bound", second
+    assert second["name"] == "_bounds_q", second
+
+
 def test_eval_const_compile_time_division_uses_euclidean_negative_cases():
     assert eval_const(
         ("bin", "/", ("var", "NEG_THREE"), ("num", 2)),

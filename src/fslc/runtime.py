@@ -642,10 +642,14 @@ def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spe
                        old_state, in_ensures, loc=None):
     if method == "push":
         e = eval_concrete(args[0], state, binds, spec, old_state, in_ensures)
-        if length >= cap:
-            raise _PartialOp(loc, "_partial_seq_push")
+        # push is a total function: it always appends. Over-capacity is reported
+        # as a `type_bound` violation of the implicit `_bounds_*` length invariant
+        # (matching BMC / DESIGN-seq), not as a partial_op.
         nd = list(data)
-        nd[length] = e
+        if length < len(nd):
+            nd[length] = e
+        else:
+            nd.append(e)
         return ("seq_val", nd, length + 1, elem_ty, cap)
     if method == "pop":
         if length <= 0:

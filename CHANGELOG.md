@@ -6,6 +6,30 @@
 
 ## [Unreleased]
 
+## [1.2.9] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — 設計判断項目の決着(Batch E-c 続き)**。
+見送り扱いだった判断項目を実機検証のうえ、推奨に沿って対応。
+
+### 修正
+- **満杯 `Seq` への `push` を runtime(Monitor) が `partial_op` で報告**していたのを、
+  BMC / DESIGN-seq に合わせ **`type_bound`(暗黙の `_bounds_*` 長さ invariant 違反)** で
+  報告するよう修正(`runtime.py`)。同じ操作で BMC=`type_bound` / runtime=`partial_op` と
+  分かれていた適合(conformance)の忠実性ギャップを解消。push は全域関数として常に
+  追加し、容量超過は格納後の境界 invariant が検出する。
+- **`fslc refine` が impl 自身の invariant 違反をそのまま返す**件に注記を追加
+  (`refine.py`)。これは refinement の verdict ではなく refinement *入力*(impl spec)の
+  性質である旨を明示し、`refinement_failed` と混同されないようにした(LANGUAGE §10)。
+- (ドキュメント) `parse()` の docstring に、compose の表示名が必要なら `parse_src` を
+  使う旨を追記(`parse()` は `display_names` を捨てるため dotted alias が物理名で出る)。
+
+### 設計判断による現状維持(issue #12 に記録)
+- refinement の t=0 検査順序: DESIGN-refinement §2 の順序記述と `map_out_of_bounds` の
+  「写像式バグを直接指摘する」有用性が緊張関係にあり、既存テストは bounds 先を期待。
+  写像バグを的確に指摘する現状を維持し、§2 解釈は保守者判断に委ねる。
+- Seq head/pop/at の invariant 文脈 don't-care 化: ガード付き invariant は短絡で保護され
+  実害が小さく、`in_invariant` 伝播は広範な変更となるため現状維持。
+
 ## [1.2.8] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — runtime/refine/doc 整合バッチ(Batch E-c)**。
@@ -353,7 +377,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.8...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.9...HEAD
+[1.2.9]: https://github.com/yumemi/fsl/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/yumemi/fsl/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/yumemi/fsl/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/yumemi/fsl/compare/v1.2.5...v1.2.6

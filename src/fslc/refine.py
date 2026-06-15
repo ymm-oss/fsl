@@ -592,6 +592,16 @@ def refine(impl_spec, abs_spec, mapping, depth):
     """Check that impl refines abs under the mapping to bounded depth."""
     explored = _bmc_explore(impl_spec, depth, deadlock_mode="ignore")
     if explored["result"] != "explored":
+        # The impl spec is not internally consistent within the bound (e.g. it
+        # violates its own invariant). That is a property of the refinement
+        # *input*, not a refinement (refines/refinement_failed) verdict — make
+        # that explicit so it isn't mistaken for a fidelity failure (LANGUAGE §10).
+        explored = dict(explored)
+        explored["note"] = (
+            "this result is a property of the impl spec itself (a refinement "
+            "input), not a refinement failure; verify the impl spec independently "
+            "before checking refinement"
+        )
         return explored
 
     instances = explored["instances"]

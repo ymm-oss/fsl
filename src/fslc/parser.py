@@ -27,7 +27,14 @@ def parse_src(src, base_dir=None):
 
 
 def parse(src, base_dir=None):
-    """Parse FSL source text into the tuple-based AST (``("spec", name, items)``)."""
+    """Parse FSL source text into the tuple-based AST (``("spec", name, items)``).
+
+    Convenience wrapper that drops the ``display_names`` map returned by
+    :func:`parse_src`. For compose specs, pass ``base_dir`` so ``use`` paths
+    resolve relative to the spec directory; and use :func:`parse_src` (not this
+    wrapper) when you need ``display_names`` for ``build_spec`` — otherwise
+    dotted aliases (``cart.stock``) surface as physical names (``cart__stock``).
+    """
     ast, _ = parse_src(src, base_dir)
     return ast
 
