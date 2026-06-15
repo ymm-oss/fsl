@@ -1,0 +1,23 @@
+// ════════════════════════════════════════════════════════════════
+// 対照群: 安全性契約(支払いは承認後のみ)を破る設計。
+//
+// fast_pay() が提出直後に支払ってしまう。これを上位の pay に対応させると、
+// 上位の pay は Submitted では enabled でない(requires が Approved)ため、
+// refine が refinement_failed / abs_requires_failed で落ちる。
+//   → 安全性の逸脱は refine が捕まえる(= 安全性は伝播する)ことの実演。
+//
+// 注: fast_pay は終端状態 DPaid に飛ぶ。終端へ至る違反を refine が
+// 取りこぼしていた健全性バグ(fix: 6780015)の回帰例も兼ねる。
+// ════════════════════════════════════════════════════════════════
+spec DesignBypassesControl {
+  enum DSt { DSubmitted, DApproved, DRejected, DPaid }
+  state { d: DSt }
+  init { d = DSubmitted }
+
+  fair action approve() { requires d == DSubmitted   d = DApproved }
+  fair action reject()  { requires d == DSubmitted   d = DRejected }
+  fair action pay()     { requires d == DApproved     d = DPaid }
+
+  // 統制の近道: 承認を飛ばして支払う。
+  action fast_pay()     { requires d == DSubmitted    d = DPaid }
+}

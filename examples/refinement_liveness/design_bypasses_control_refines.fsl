@@ -1,0 +1,16 @@
+// 安全性を破る設計の写像。fast_pay を pay に対応させる(承認を飛ばす近道)。
+// refine は refinement_failed / abs_requires_failed で落ちる。
+refinement DesignBypassesControlRefinesPolicy {
+  impl DesignBypassesControl
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action approve()  -> approve()
+  action reject()   -> reject()
+  action pay()      -> pay()
+  action fast_pay() -> pay()
+}

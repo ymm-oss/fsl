@@ -50,10 +50,13 @@
 量化境界、refinement 写像境界、二重代入の配置、同時点で満たされる `leadsTo`
 を置いています。
 
-現時点で `adversarial/refine_mapping_boundary_map.fsl` は、正しい期待
-`refinement_failed/map_out_of_bounds` に対して `fslc` が `refines` を返します。
-これは `docs/DOGFOOD-6.md` に bug candidate として記録し、テストでは
-`xfail` で隔離しています。
+`adversarial/refine_mapping_boundary_map.fsl` は「完全展開のデッドロック →
+空虚 `refines`」バグ(`docs/DOGFOOD-6.md`)の回帰例。増分プレフィックス展開で
+解消済みで、現在は `refinement_failed/abs_state_mismatch`(jump 後 bump の
+更新結果 n=1 と α(n)=2 の不一致を境界検査より先に検出)を正しく返す。
+同根の残存ケース(違反遷移が**一部分岐だけ**終端に至る場合)は、各プレフィックスを
+step t までの制約だけで検査する修正で閉じた(`examples/refinement_liveness/`
+の `design_bypasses_control` が回帰例)。
 
 ## 壊れた例の読み方
 

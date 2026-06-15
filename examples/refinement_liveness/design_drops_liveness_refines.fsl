@@ -1,0 +1,19 @@
+// 設計 ⊒ 業務 の写像。route/heartbeat は内部詳細=stutter、裁定と支払いは対応。
+// 審査キュー(DAutoReview)は上位から見ればまだ「Submitted」。
+// この写像で refine は通る(= 安全性は満たす)が、上位の活性は伝播しない。
+refinement DesignDropsLivenessRefinesPolicy {
+  impl DesignDropsLiveness
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DAutoReview then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action route()     -> stutter
+  action heartbeat() -> stutter
+  action approve()   -> approve()
+  action reject()    -> reject()
+  action pay()       -> pay()
+}

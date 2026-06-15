@@ -1,0 +1,18 @@
+// design_drops_liveness_refines.fsl と同一の写像(spec 名だけ違う)。
+// fair の有無は写像に現れない — refine からは2つの設計は区別できない。
+refinement DesignKeepsLivenessRefinesPolicy {
+  impl DesignKeepsLiveness
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DAutoReview then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action route()     -> stutter
+  action heartbeat() -> stutter
+  action approve()   -> approve()
+  action reject()    -> reject()
+  action pay()       -> pay()
+}

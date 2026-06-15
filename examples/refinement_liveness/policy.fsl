@@ -1,0 +1,29 @@
+// ════════════════════════════════════════════════════════════════
+// 上位層(業務 policy)= 凍結する契約。
+//
+// この例が教えること:
+//   refinement(fslc refine)は「安全性」は下層へ伝播させるが、「活性」は
+//   伝播させない。まず上位層に2種の policy を置く:
+//     - 安全性: 支払いは承認後のみ(pay の requires = 統制ガードが契約本体)
+//     - 活性  : 提出された申請は必ずいつか裁定される(leadsTo)
+//   この契約が単体で proved になることを確かめ、下層がこれを refine したとき
+//   どちらが伝播するかを design_*.fsl で見る。
+// ════════════════════════════════════════════════════════════════
+spec ClaimPolicy {
+  enum St { Submitted, Approved, Rejected, Paid }
+  state { s: St }
+  init { s = Submitted }
+
+  // 裁定は両方とも fair。これが活性 policy の進行を担保する。
+  fair action approve() { requires s == Submitted   s = Approved }
+  fair action reject()  { requires s == Submitted   s = Rejected }
+
+  // 安全性契約の本体: 支払いは承認後のみ(このガードが「統制」)。
+  fair action pay()     { requires s == Approved     s = Paid }
+
+  // 活性 policy: 提出された申請は必ずいつか裁定される。
+  leadsTo EveryClaimDecided { s == Submitted ~> (s == Approved or s == Rejected) }
+
+  // 正例: 売り… ではなく支払い完了まで到達できる(過剰制約でないことの確認)。
+  reachable CanPay { s == Paid }
+}

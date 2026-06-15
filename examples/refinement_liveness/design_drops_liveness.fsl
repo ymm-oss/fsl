@@ -1,0 +1,37 @@
+// ════════════════════════════════════════════════════════════════
+// 下位層(設計)— ClaimPolicy を「忠実に」refine するが、活性を落とす設計。
+//
+// 実装寄りの詳細を足している:
+//   - route()    : 提出を審査キューに載せる内部ステップ(上位では無変化=stutter)
+//   - heartbeat(): 審査中のポーリング。上位状態を変えない内部ループ(=stutter)
+// そして上位では fair だった裁定(approve/reject)を、設計層では fair に
+// していない。refinement の写像は fair 注釈を要求しないため、これでも
+// 「忠実な refinement」のままになる。
+//
+// 上位 policy CTRL を設計層の語彙でも宣言しておく:
+//   - refine は通る(design_drops_liveness_refines.fsl)= 安全性は満たす
+//   - だが verify すると leadsTo が violated(ラッソ)= 活性は満たさない
+// → 活性は refine で伝播しないことの実演。
+// ════════════════════════════════════════════════════════════════
+spec DesignDropsLiveness {
+  enum DSt { DSubmitted, DAutoReview, DApproved, DRejected, DPaid }
+  type Phase = 0..1
+  state { d: DSt, phase: Phase }
+  init { d = DSubmitted   phase = 0 }
+
+  // 内部: 提出 → 審査キュー。上位から見れば「まだ Submitted」のまま。
+  action route() { requires d == DSubmitted   d = DAutoReview }
+
+  // 内部: 審査中のハートビート。上位状態を一切変えない純粋な stutter。
+  // phase を 0↔1 でトグルするだけなので無限に発火でき、進行を生まない。
+  action heartbeat() { requires d == DAutoReview   phase = 1 - phase }
+
+  // 裁定。上位では fair だったが、ここでは fair を付けていない(← 活性が落ちる原因)。
+  action approve() { requires d == DAutoReview   d = DApproved }
+  action reject()  { requires d == DAutoReview   d = DRejected }
+
+  fair action pay() { requires d == DApproved    d = DPaid }
+
+  // 上位の活性 policy を設計層の語彙で。verify すると violated になる。
+  leadsTo EveryClaimDecided { d == DSubmitted ~> (d == DApproved or d == DRejected) }
+}
