@@ -196,4 +196,15 @@ spec FslcSession {
 
   reachable ReachProved { status == Proved }
   reachable ReachToolFault { status == ToolFault }
+
+  // Intended terminal results: leaf states with no outgoing action (every
+  // success result plus the unrepairable ToolFault). Repairable failure states
+  // (Violated/ReachFailed/UnknownCti/Nonconformant/RefinementFailed) are NOT
+  // terminal — repair() re-enables them — so a genuine deadlock would still surface.
+  terminal {
+    status == Proved or status == ToolFault or status == OkResult
+      or status == Scenarios or status == Conformant or status == Generated
+      or status == Refines or status == Typestate or status == Mutated
+      or status == Explained
+  }
 }

@@ -49,4 +49,7 @@ spec FslcMonitor {
 
   reachable ReachConformant { status == Conformant }
   reachable ReachNonconformant { status == Nonconformant }
+
+  // Conformant / Nonconformant are intended terminal results, not deadlock bugs.
+  terminal { status == Conformant or status == Nonconformant }
 }

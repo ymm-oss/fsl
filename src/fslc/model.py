@@ -919,6 +919,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
     invariants = []
     reachables = []
     leadstos = []
+    terminal = None
+    terminal_loc = None
 
     for it in items:
         tag = it[0]
@@ -968,6 +970,11 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "expr": it[2],
                 "loc": it[3],
             }, it[4] if len(it) > 4 else None))
+        elif tag == "terminal":
+            if terminal is not None:
+                _err("duplicate terminal block", kind="semantics")
+            terminal = it[1]
+            terminal_loc = it[2] if len(it) > 2 else None
 
     if not state:
         _err("spec has no state block", kind="semantics")
@@ -1012,6 +1019,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "user_invariants": invariants,
         "reachables": reachables,
         "leadstos": leadstos,
+        "terminal": terminal,
+        "terminal_loc": terminal_loc,
         "warnings": warnings,
         "display_names": all_display_names,
         "implements": dialect_implements,

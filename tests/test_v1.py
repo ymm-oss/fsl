@@ -323,6 +323,8 @@ spec DeadEnd {
     assert all(isinstance(w, dict) and "message" in w for w in r["warnings"])
     dl = [w for w in r["warnings"] if "deadlock" in w["message"]]
     assert len(dl) == 1
+    assert "state:" in dl[0]["message"]
+    assert "x=1" in dl[0]["message"]
     assert r["deadlock"]["found"] is True
     assert "at_step" in r["deadlock"]
     assert "trace" in r["deadlock"]

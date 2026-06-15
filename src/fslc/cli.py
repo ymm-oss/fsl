@@ -195,7 +195,7 @@ def _read_spec(file):
 
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
-        strict_tags=False, requirements=None):
+        strict_tags=False, requirements=None, property_name=None):
     try:
         spec, source_lines = _read_spec(file)
         acc = _acceptance_error(spec)
@@ -209,6 +209,7 @@ def run_verify(
                 spec, k_ind, depth,
                 deadlock_mode=deadlock_mode,
                 vacuity_mode=vacuity_mode,
+                property_name=property_name,
             )
         else:
             out = verify(
@@ -217,6 +218,7 @@ def run_verify(
                 deadlock_mode=deadlock_mode,
                 source_lines=source_lines,
                 vacuity_mode=vacuity_mode,
+                property_name=property_name,
             )
         impl = _implements_result(spec, depth)
         if impl:
@@ -558,6 +560,7 @@ def main(argv=None):
                    help="max induction depth (induction engine only)")
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
     v.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
+    v.add_argument("--property", dest="property_name", default=None)
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
 
@@ -650,7 +653,8 @@ def main(argv=None):
                             engine=args.engine, k_ind=args.k_ind,
                             vacuity_mode=args.vacuity,
                             strict_tags=args.strict_tags,
-                            requirements=args.requirements)
+                            requirements=args.requirements,
+                            property_name=args.property_name)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

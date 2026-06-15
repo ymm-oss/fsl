@@ -22,8 +22,17 @@
   FSL でモデル化した3本(`fslc_session` = CLI 結果分類と終了コード severity、
   `fslc_monitor` = replay ランタイムの reject 粘着性、`refinement_algebra` = 安全性は
   伝播・活性は伝播しない)。いずれも proved。結果固定テスト `tests/test_self_examples.py`。
+- **`terminal { <述語> }` ブロック(DOGFOOD-11 F23 対応)**: 述語を満たす停止状態を
+  「意図した終端」として宣言し、デッドロック検査から除外する。`--deadlock ignore` が
+  全停止状態を一律に無視するのに対し、意図した停止だけを選別でき、予期せぬデッドロックは
+  引き続き検出される。`examples/self/fslc_session`・`fslc_monitor` が利用(LANGUAGE §1/§6)。
+- **`fslc verify --property <Name>`(DOGFOOD-11 F27 対応)**: 単一 invariant だけを検査する。
+  非空虚プローブで狙った invariant の違反を確認しやすくなる(存在しない名前は usage エラー=exit 2)。
 
 ### 修正
+- **デッドロック警告に状態を含める(DOGFOOD-11 F26 対応)**: `--deadlock warn` の警告
+  メッセージがどの状態で停止したかを示すようになった(例: `deadlock reachable at step 1
+  (state: status=ToolFault, ...)`)。状態は従来 JSON の `deadlock.trace` にのみ在った。
 - **`fslc refine` の健全性バグ**: impl の違反遷移が有界内で終端(deadlock)状態に
   至る場合、フル長トレース強制により違反が全モデルから除外され見逃されていた
   (深さを上げると検出が減る非単調挙動)。各プレフィックスを step t までの制約だけで

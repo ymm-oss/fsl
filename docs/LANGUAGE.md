@@ -38,6 +38,7 @@ spec <Name> {
   invariant <Name> { <式> }             // 全到達状態で成立(安全性)
   reachable <Name> { <式> }             // 到達可能であること(witness が返る)
   leadsTo <Name> { <応答性質> }         // 有界応答性質(§1 参照)
+  terminal { <式> }                     // 意図した終端状態(deadlock 検査から除外)
 }
 ```
 
@@ -130,6 +131,13 @@ leadsTo <Name> {
 | デッドロック | 全アクションが disabled になる状態への到達 | warning(`--deadlock error` で violated) |
 | leadsTo | 深さ K までのラッソ / デッドロック停滞で P ~> Q 違反 | `violated` / `leadsTo` / `bindings` + trace |
 
+- デッドロック警告にはどの状態で詰まったかが含まれる(例: `deadlock reachable at
+  step 1 (state: status=ToolFault, ...)`)。JSON の `deadlock.trace` にも全トレースが入る。
+- **意図した終端状態**(処理完了・最終結果など、そこで止まるのが正しい状態)は
+  `terminal { <述語> }` ブロックで宣言する。述語を満たす停止状態はデッドロック検査から
+  除外され、それ以外の予期せぬデッドロックは引き続き検出される。`--deadlock ignore` が
+  **全停止状態**を一律に無視するのに対し、`terminal` は**どの停止が意図的か**を選別できる。
+  例: `terminal { status == Done or status == Failed }`。
 - 「在庫は 0 以上」のような invariant は**書かない** — `type Qty = 0..N` にすれば
   自動検出される。
 - Seq への満杯 `push` も `type_bound` として自動検出される
@@ -143,6 +151,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC(既定 K=8、反例は最
                [--engine induction] [--k N]      # k帰納法: 無限深度証明
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # 空虚性検査(§15)
+               [--property <Name>]               # 単一 invariant だけを検査(プローブ用)
                [--strict-tags] [--requirements ids.txt]  # タグ突合(§15)
 fslc scenarios <file.fsl> [--depth K]            # 統合テスト雛形JSONを生成
 fslc replay    <file.fsl> --trace <events.json>  # イベントログの適合性検査(§12)

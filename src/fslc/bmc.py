@@ -30,6 +30,36 @@ def _warn(message, hint=None):
     return w
 
 
+def _format_state_summary(state):
+    def fmt(value):
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if value is None:
+            return "null"
+        if isinstance(value, dict):
+            return "{" + ", ".join(f"{k}: {fmt(v)}" for k, v in value.items()) + "}"
+        if isinstance(value, list):
+            return "[" + ", ".join(fmt(v) for v in value) + "]"
+        return str(value)
+
+    return ", ".join(f"{key}={fmt(value)}" for key, value in state.items())
+
+
+def _select_invariants(spec, property_name=None):
+    invariants = spec["invariants"]
+    if property_name is None:
+        return invariants, None
+    selected = [inv for inv in invariants if inv["name"] == property_name]
+    if selected:
+        return selected, None
+    available = ", ".join(inv["name"] for inv in invariants)
+    return [], {
+        "result": "error",
+        "kind": "usage",
+        "message": f"no such invariant: {property_name} (available: {available})",
+    }
+
+
 _VACUOUS_IMPLICATION_HINT = (
     "the antecedent is not reachable within this depth; check whether an action "
     "that should establish it is missing, or whether the antecedent expression is wrong"
@@ -2633,7 +2663,13 @@ def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cach
     return None
 
 
-def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn"):
+def _bmc_explore(
+        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn",
+        property_name=None):
+    invariants, property_error = _select_invariants(spec, property_name)
+    if property_error is not None:
+        return property_error
+
     instances = build_instances(spec)
     expr_cache = {}
     states = [make_state(spec, 0)]
@@ -2719,7 +2755,7 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False, vacuity_m
                     s.pop()
 
         passed_invariants = []
-        for inv in spec["invariants"]:
+        for inv in invariants:
             with _eval_cache_scope(expr_cache, id(states[t])):
                 inv_cond = eval_expr(inv["expr"], states[t], {}, spec)
             inv_s.push()
@@ -2830,6 +2866,11 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False, vacuity_m
             if enabled:
                 s.push()
                 s.add(_deadlock_from_enabled(enabled))
+                term_expr = spec.get("terminal")
+                if term_expr is not None:
+                    with _eval_cache_scope(expr_cache, id(states[t])):
+                        term_cond = eval_expr(term_expr, states[t], {}, spec)
+                    s.add(z3.Not(term_cond))
                 if s.check() == z3.sat:
                     m = s.model()
                     dl_trace = _build_trace(m, states, choices, instances, spec, t)
@@ -2847,9 +2888,11 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False, vacuity_m
                             "trace": dl_trace,
                         }
                     else:
+                        state_summary = _format_state_summary(dl_trace[-1]["state"])
                         dl_warn.append(_warn(
-                            f"deadlock reachable at step {t}",
-                            "add an enabled action or use --deadlock=ignore if intentional",
+                            f"deadlock reachable at step {t} (state: {state_summary})",
+                            "add an enabled action, declare intended stops in a terminal { } "
+                            "block, or use --deadlock=ignore if intentional",
                         ))
                 s.pop()
 
@@ -2925,11 +2968,20 @@ def _bmc_explore(spec, depth, deadlock_mode="warn", track_cover=False, vacuity_m
         "dl_warn": dl_warn,
         "cover_info": cover_info,
         "leadsto_stutter_violation": leadsto_stutter_violation,
+        "invariants_checked": [i["name"] for i in invariants],
     }
 
 
-def verify(spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn"):
-    explored = _bmc_explore(spec, depth, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode)
+def verify(
+        spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
+        property_name=None):
+    explored = _bmc_explore(
+        spec,
+        depth,
+        deadlock_mode=deadlock_mode,
+        vacuity_mode=vacuity_mode,
+        property_name=property_name,
+    )
     if explored["result"] != "explored":
         return _display_output(explored, spec)
 
@@ -2997,7 +3049,7 @@ def verify(spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="w
         "result": "verified",
         "spec": explored["spec"],
         "depth": depth,
-        "invariants_checked": [i["name"] for i in spec["invariants"]],
+        "invariants_checked": explored["invariants_checked"],
         "reachables": reachables_result,
         "action_coverage": coverage,
         "deadlock": deadlock_info,
@@ -3142,14 +3194,25 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
     }, spec)
 
 
-def prove(spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn"):
+def prove(
+        spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn",
+        property_name=None):
     """k-induction: base BMC then step-case invariant proof."""
-    base = verify(spec, base_depth, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode)
+    invariants, property_error = _select_invariants(spec, property_name)
+    if property_error is not None:
+        return _display_output(property_error, spec)
+
+    base = verify(
+        spec,
+        base_depth,
+        deadlock_mode=deadlock_mode,
+        vacuity_mode=vacuity_mode,
+        property_name=property_name,
+    )
     if base["result"] in ("violated", "reachable_failed", "error"):
         return base
 
     instances = build_instances(spec)
-    invariants = spec["invariants"]
     expr_cache = {}
 
     s = z3.Solver()

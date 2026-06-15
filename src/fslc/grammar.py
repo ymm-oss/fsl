@@ -39,7 +39,7 @@ mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
-     | invariant_def | reachable_def | leadsto_def
+     | invariant_def | reachable_def | leadsto_def | terminal_def
 
 const_def: "const" NAME "=" expr
 type_def: "type" NAME "=" expr ".." expr
@@ -88,6 +88,7 @@ binder: NAME ":" qname ["where" expr] -> binder_typed
 
 invariant_def: "invariant" NAME meta_tag? "{" expr "}"
 reachable_def: "reachable" NAME meta_tag? "{" expr "}"
+terminal_def: "terminal" "{" expr "}"
 
 leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body "}"
 meta_tag: STRING
@@ -568,6 +569,9 @@ class Ast(Transformer):
             else:
                 e = r
         return ("reachable", n, e, _loc(meta), req_meta)
+
+    def terminal_def(self, meta, e):
+        return ("terminal", e, _loc(meta))
 
     def _action_parts(self, meta, name, *rest):
         params, items, req_meta = [], [], None
