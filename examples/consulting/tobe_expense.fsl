@@ -1,13 +1,15 @@
 // ════════════════════════════════════════════════════════════════
-// 経費精算ワークフロー【To-Be(改革案)】— コンサルタント向けサンプル
+// Expense reimbursement workflow [To-Be (transformation proposal)] — consulting sample
 //
-// 改革の狙い: マネージャ承認がボトルネック(全件直列)なので、
-// 少額レーンを自動承認化して処理を速くする。
+// Aim of the transformation: manager approval is the bottleneck (all
+// claims serialized), so auto-approve the low-amount lane to speed up
+// processing.
 //
-// 重要なのは下の「tobe_refines_asis.fsl」— この改革案が As-Is の
-// 統制(承認を経ない支払いが無い等)を一切弱めていないことを
-// 機械検査できる。改革提案書に「統制は維持される(機械検証済み)」
-// と書ける根拠になる。
+// What matters is "tobe_refines_asis.fsl" below — it can machine-check
+// that this transformation proposal does not weaken any of the As-Is
+// controls (e.g. no payment without approval). It becomes the basis for
+// writing "the controls are maintained (machine-verified)" in the
+// transformation proposal document.
 // ════════════════════════════════════════════════════════════════
 business ToBeExpense {
 
@@ -20,11 +22,11 @@ business ToBeExpense {
     initial Draft
 
     transition submit       Draft     -> Submitted by Employee
-    // ★改革ポイント: 少額レーンは自動承認(どの申請が少額かは
-    //   要件定義層で決める詳細。この層では「自動承認という経路が
-    //   増える」ことだけを表す)
+    // ★Transformation point: the low-amount lane is auto-approved (which
+    //   claims count as low-amount is a detail decided in the requirements
+    //   layer; this layer only expresses that "an auto-approval path is added")
     transition auto_approve Submitted -> Approved  by System
-    // 高額レーンは従来どおりマネージャ承認
+    // The high-amount lane keeps manager approval as before
     transition mgr_approve  Submitted -> Approved  by Manager
     transition reject       Submitted -> Rejected  by Manager
     transition pay          Approved  -> Paid      by Finance
@@ -32,17 +34,17 @@ business ToBeExpense {
 
   kpi paid_claims counts Claim in Paid
 
-  // 統制は As-Is と同じものを維持する(弱めない)
-  policy CTRL-1 "提出された申請は必ず承認または差戻しの裁定を受ける" responds {
+  // The controls are kept identical to As-Is (not weakened)
+  policy CTRL-1 "A submitted claim must always be adjudicated for approval or rejection" responds {
     forall c: Claim {
       stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
     }
   }
-  policy CTRL-2 "承認された申請は必ず支払われる" responds {
+  policy CTRL-2 "An approved claim must always be paid" responds {
     forall c: Claim { stage(c) == Approved ~> stage(c) == Paid }
   }
 
-  goal CanComplete "申請から支払いまで完遂できる" {
+  goal CanComplete "The process can complete from claim to payment" {
     exists c: Claim { stage(c) == Paid }
   }
 }

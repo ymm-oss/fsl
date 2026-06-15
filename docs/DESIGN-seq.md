@@ -1,158 +1,170 @@
-# FSL v1.1 — `Seq<T, N>`(容量付き列)実装設計
+# FSL v1.1 — `Seq<T, N>` (capacity-bounded sequence) Implementation Design
 
-DESIGN-v1.md §10 の最後の v1.1 項目。FIFO キュー・追記ログなど「順序のある
-有界コレクション」を表現する。設計原則は既存と同じ: G1(生成しやすい)、
-G5(落とし穴の構造的排除 = 部分関数の暗黙チェック)、Set と同じ代入イディオム。
+The last v1.1 item in DESIGN-v1.md §10. It expresses "ordered bounded
+collections" such as FIFO queues and append-only logs. The design principles are
+the same as the existing ones: G1 (easy to generate), G5 (structural elimination
+of pitfalls = implicit checking of partial functions), and the same assignment
+idiom as Set.
 
-## 1. 構文と型
+## 1. Syntax and types
 
 ```fsl
 const CAP = 3
 state {
-  queue: Seq<JobId, CAP>,    // 容量は const か整数リテラル
+  queue: Seq<JobId, CAP>,    // capacity is a const or an integer literal
   log:   Seq<Qty, 5>
 }
 ```
 
-- `Seq<T, N>`: T は**スカラ型のみ**(ドメイン型 / enum / Bool / Int)。
-  N は正の定数式(整数リテラルまたは const 名)。
-- 使える位置: **状態変数の型のみ**。struct フィールド(BUG11 検証に追加)、
-  Map の値、Set の要素、Seq の要素には使えない — `check` 段階で
-  `kind: "type"` + hint で拒否。
-- リテラル: `Seq {}` / `Seq { 1, 2 }`(要素数 ≤ N。超過は check 時 type エラー)。
-  Set と同様、代入の右辺にのみ書ける。
+- `Seq<T, N>`: T is **a scalar type only** (domain type / enum / Bool / Int).
+  N is a positive constant expression (an integer literal or a const name).
+- Allowed positions: **the type of a state variable only**. It cannot be used in
+  a struct field (added to BUG11 checking), a Map value, a Set element, or a Seq
+  element — rejected at the `check` stage with `kind: "type"` + a hint.
+- Literals: `Seq {}` / `Seq { 1, 2 }` (number of elements ≤ N; exceeding it is a
+  type error at check time). As with Set, it can only be written on the
+  right-hand side of an assignment.
 
-## 2. 操作(すべて純粋・Set と同じ「再代入」イディオム)
+## 2. Operations (all pure, the same "reassignment" idiom as Set)
 
-| 式 | 意味 | 部分性 |
+| Expression | Meaning | Partiality |
 |---|---|---|
-| `q.size()` | 現在長 | なし |
-| `q.push(e)` | 末尾に追加した新しい列 | 満杯時は **type_bound**(§4) |
-| `q.pop()` | 先頭を除いた新しい列(FIFO dequeue) | 空のとき **partial_op**(§5) |
-| `q.head()` | 先頭要素 | 空のとき **partial_op**(§5) |
-| `q.at(i)` | i 番目(0 始まり) | 範囲外で **partial_op**(§5) |
-| `q.contains(e)` | ∃i < size: at(i) == e | なし |
-| `q == q2` / `!=` | 長さが等しく全要素が等しい(prefix 比較) | なし |
+| `q.size()` | current length | none |
+| `q.push(e)` | a new sequence with e appended at the end | **type_bound** when full (§4) |
+| `q.pop()` | a new sequence with the head removed (FIFO dequeue) | **partial_op** when empty (§5) |
+| `q.head()` | the head element | **partial_op** when empty (§5) |
+| `q.at(i)` | the i-th element (0-based) | **partial_op** when out of range (§5) |
+| `q.contains(e)` | ∃i < size: at(i) == e | none |
+| `q == q2` / `!=` | equal length and all elements equal (prefix comparison) | none |
 
-- v1.1 は FIFO に必要な最小セット。スタック用の `pop_last` 等は実例が
-  出てから(DESIGN-v1.md の方針)。
-- `q = q.push(x)`、`q = q.pop()` のように再代入で使う(Set の `add`/`remove` と同形)。
-- 同一アクション内での `q = q.push(a).push(b)` はメソッドチェーンとして合法。
+- v1.1 is the minimal set needed for FIFO. Stack operations such as `pop_last`
+  come once a real example arises (the DESIGN-v1.md policy).
+- Use it via reassignment such as `q = q.push(x)`, `q = q.pop()` (the same form
+  as Set's `add`/`remove`).
+- `q = q.push(a).push(b)` within a single action is legal as a method chain.
 
-## 3. ロワリング
+## 3. Lowering
 
-物理変数(既存の `__` 分割方式):
+Physical variables (the existing `__` split scheme):
 
-- `q__data`: `Map<0..N-1, T>`(Z3 Array)
+- `q__data`: `Map<0..N-1, T>` (Z3 Array)
 - `q__len`: Int
 
-各操作:
+Each operation:
 
 - `size()` → `q__len`
-- `push(e)` → data' = Store(data, len, e)、len' = len + 1(無条件。§4 参照)
-- `pop()` → data' = ∀i < N-1: data'[i] = data[i+1](シフト)、len' = len - 1
+- `push(e)` → data' = Store(data, len, e), len' = len + 1 (unconditional; see §4)
+- `pop()` → data' = ∀i < N-1: data'[i] = data[i+1] (shift), len' = len - 1
 - `head()` → `Select(data, 0)`
-- `at(i)` → `Select(data, i)`(i は式。範囲クランプはしない — §5 のチェックが守る)
+- `at(i)` → `Select(data, i)` (i is an expression. No range clamping — the check of §5 protects it)
 - `contains(e)` → `Or(And(0 < len, data[0] == e), ..., And(N-1 < len, data[N-1] == e))`
-  (N で有界展開)
+  (bounded unrolling by N)
 - `==` → `len1 == len2 ∧ ∀i ∈ [0, N-1]: i < len1 => data1[i] == data2[i]`
-- リテラル `Seq { a, b }` → data[0]=a, data[1]=b, len=2(残りは don't care)
+- literal `Seq { a, b }` → data[0]=a, data[1]=b, len=2 (the rest are don't-care)
 
-len を超える tail の値は **don't care**(制約しない・読まれない・表示しない)。
+Tail values beyond len are **don't-care** (not constrained, not read, not displayed).
 
-## 4. 自動境界チェック(`_bounds_q`)
+## 4. Automatic bounds check (`_bounds_q`)
 
 ```
 0 <= q__len <= N
-∧ ∀i ∈ [0, N-1]: i < q__len => (lo <= q__data[i] <= hi)   // T が有界型のとき
+∧ ∀i ∈ [0, N-1]: i < q__len => (lo <= q__data[i] <= hi)   // when T is a bounded type
 ```
 
-- 満杯時の `push` は len = N+1 になり `_bounds_q` 違反 → 通常の
-  `violated` / `violation_kind: "type_bound"`。修復ヒントはバインディングと
-  last_action から自明(requires `q.size() < N` を足す)。
-  これは「境界は assume せず check する」の既存設計(§3 設計判断)と同一。
-- induction の step 前提にも他の `_bounds_*` と同様に入る(幽霊 CTI 防止)。
+- A `push` when full makes len = N+1 and violates `_bounds_q` → the usual
+  `violated` / `violation_kind: "type_bound"`. The repair hint is obvious from
+  the bindings and last_action (add a requires `q.size() < N`). This is identical
+  to the existing design "do not assume bounds, check them" (the design decision in §3).
+- It also enters the step premise of induction like the other `_bounds_*` (to prevent ghost CTIs).
 
-## 5. 部分操作の暗黙チェック(`partial_op` — 新 violation_kind)
+## 5. Implicit checking of partial operations (`partial_op` — a new violation_kind)
 
-`pop()` / `head()` / `at(i)` は部分関数。**アクション本体・requires・ensures 内**
-に現れた場合、その操作の well-definedness を暗黙の検査として遷移に付ける:
+`pop()` / `head()` / `at(i)` are partial functions. When they appear **inside an
+action body / requires / ensures**, the well-definedness of that operation is
+attached to the transition as an implicit check:
 
-- 検査内容: アクションが発火する遷移において
-  `pop`/`head` → `q.size() > 0`、`at(i)` → `0 <= i < q.size()`。
-- 違反時は `violated`、`violation_kind: "partial_op"`、`invariant` フィールドは
-  `"_partial_<action名>"`、loc は当該式、hint:
-  `"guard the action with requires q.size() > 0 (or bound the index)"`。
-  トレース付き(ensures 違反と同じ機構に相乗りできる)。
-- **requires 内の扱い**(評価順序): requires 連言の評価は短絡しないため、
-  `requires q.size() > 0` と `requires q.head() == x` が並ぶ場合、
-  partial_op チェックは「**全 requires が成立する遷移**」に対してのみ行う
-  (= ガードが落ちる枝では head() の garbage は読まれない扱い)。
-  これにより標準イディオム(ガード requires を先に書く)が正しく通る。
-- **invariant / reachable 内**: 暗黙チェックは付けない(状態性質に「発火」は
-  ないため)。範囲外読みの値は**未規定**(don't care)。ガード付きイディオム
-  `forall k in 0..CAP-1 { k < q.size() => P(q.at(k)) }` を LANGUAGE 文書で
-  標準形として示す。ガードなしで garbage を読む invariant は
-  spurious violation になり得るが、トレースを見れば分かる(v1.1 の割り切り。
-  警告は出さない)。
+- Check content: in the transition where the action fires,
+  `pop`/`head` → `q.size() > 0`, `at(i)` → `0 <= i < q.size()`.
+- On violation, `violated`, `violation_kind: "partial_op"`, the `invariant` field
+  is `"_partial_<action name>"`, loc is the expression in question, hint:
+  `"guard the action with requires q.size() > 0 (or bound the index)"`.
+  With a trace (it can ride on the same mechanism as ensures violations).
+- **Treatment inside requires** (evaluation order): since the evaluation of the
+  requires conjunction does not short-circuit, when `requires q.size() > 0` and
+  `requires q.head() == x` appear side by side, the partial_op check is performed
+  only on **the transition where all requires hold** (= in the branch where the
+  guard fails, head()'s garbage is treated as not read). This makes the standard
+  idiom (writing the guard requires first) pass correctly.
+- **Inside invariant / reachable**: no implicit check is attached (a state
+  property has no "firing"). The value of an out-of-range read is **unspecified**
+  (don't-care). Present the guarded idiom
+  `forall k in 0..CAP-1 { k < q.size() => P(q.at(k)) }` as the standard form in
+  the LANGUAGE document. An invariant that reads garbage without a guard can
+  yield a spurious violation, but looking at the trace makes it clear (a v1.1
+  pragmatic call; no warning is emitted).
 
-  **エンジン間の差異(既知)**: 無ガードの部分 Seq 演算(`head`/`pop`/`at`)を含む
-  invariant は、`verify`/`prove`(BMC)では don't care 値を**記号的**に読む(任意の値で
-  反例を探す)一方、runtime の `Monitor`(具象インタプリタ・適合テスト)では具体的に
-  範囲外読みとなり `partial_op` を返す。don't care は本質的に「記号的=任意 vs 具象=単一」
-  であり、無ガード invariant の両エンジン一致は原理的に保証できない。**ガード付き
-  イディオムで書けば両エンジンの結果は一致する**(検証済み)。したがって invariant /
-  reachable で部分 Seq 演算を使う場合はサイズガードを付けることを強く推奨する。
+  **Inter-engine difference (known)**: an invariant containing an unguarded
+  partial Seq operation (`head`/`pop`/`at`) reads the don't-care value
+  **symbolically** in `verify`/`prove` (BMC) (searching for a counterexample with
+  any value), whereas in the runtime `Monitor` (the concrete interpreter /
+  conformance test) it becomes a concrete out-of-range read and returns
+  `partial_op`. don't-care is essentially "symbolic = any vs concrete = single,"
+  and agreement of both engines on an unguarded invariant cannot be guaranteed in
+  principle. **If written with the guarded idiom, the results of both engines
+  agree** (verified). Therefore, when using a partial Seq operation in an
+  invariant / reachable, attaching a size guard is strongly recommended.
 
-## 6. JSON 表示
+## 6. JSON display
 
-- 状態表示: `"queue": [1, 2]`(len プレフィックスを論理値の配列で。空は `[]`)
-- diff(`changes`): 列全体の from/to(`"queue": {"from": [1], "to": [1, 2]}`)。
-  要素単位 diff はしない(シフトで全要素が動くため)。
-- `violating_bindings` / CTI / scenarios も同表示(既存の
-  `logical_state_values` に seq 分岐を追加するだけで全出力が揃う)。
+- State display: `"queue": [1, 2]` (up to len, as an array of logical values; empty is `[]`).
+- diff (`changes`): the from/to of the whole sequence (`"queue": {"from": [1], "to": [1, 2]}`).
+  No per-element diff (because a shift moves all elements).
+- `violating_bindings` / CTI / scenarios use the same display (all output lines up
+  by just adding a seq branch to the existing `logical_state_values`).
 
-## 7. check 段階の検証強化(BUG11 の一般化)
+## 7. Strengthened verification at the check stage (generalization of BUG11)
 
-state 変数の型を**ホワイトリスト**で検証する(現状 `Map<K, Set<K>>` が
-check を素通りして verify で誤メッセージになる問題の修正を含む):
+Verify the type of a state variable with a **whitelist** (including the fix for
+the problem where `Map<K, Set<K>>` currently passes through check and produces a
+wrong message at verify):
 
 ```
 scalar   := Int | Bool | domain | enum
-state 変数として合法:
-  scalar | Option<scalar> | struct(全フィールドが scalar)
+legal as a state variable:
+  scalar | Option<scalar> | struct (all fields scalar)
   | Map<bounded-scalar, scalar | Option<scalar> | struct>
   | Set<bounded-scalar>
   | Seq<scalar, N>
 ```
 
-- 上記以外(Map の値に Set/Map/Seq、Set の要素に struct/Option など)は
-  check で `kind: "type"` + 「v1 で合法な型の組合せ」を示す hint で拒否。
-- 回帰テスト: `Map<K, Set<K>>` が check 段階で type エラーになること。
+- Anything other than the above (Set/Map/Seq as a Map value, struct/Option as a
+  Set element, etc.) is rejected at check with `kind: "type"` + a hint showing
+  "the type combinations legal in v1."
+- Regression test: `Map<K, Set<K>>` becomes a type error at the check stage.
 
-## 8. テスト計画
+## 8. Test plan
 
-1. **FIFO 基本**: push×2 → head が最初の要素、pop → head が2番目、size 整合。
-   reachable で witness を確認。
-2. **満杯 push**: 容量2に3回 push → `violated` / `type_bound` / `_bounds_*`。
-3. **空 pop / 空 head**: ガードなしアクション → `violated` / `partial_op` /
-   loc とヒント。ガード付き(requires q.size() > 0)なら verified。
-4. **requires 内 head のガードイディオム**: `requires q.size() > 0` +
-   `requires q.head() == 0` の2句 → 空状態でアクションが disabled になるだけで
-   partial_op 違反にはならない。
-5. **at + forall ガードイディオム invariant**: 追記ログの
-   `forall k in 0..N-1 { k < log.size() => log.at(k) <= k }` 型が verified。
-6. **Seq ==**: `q.push(1) == q2` 形の requires が正しく働く(struct == の
-   regression と同型)。
-7. **contains**。
-8. **JSON 表示**: 状態が配列、内部名(`__data`/`__len`)が出ない。
-9. **check 拒否**: struct フィールドの Seq、`Map<K, Seq<...>>`、`Map<K, Set<K>>`、
-   要素数 > N のリテラル。
-10. **induction**: FIFO 仕様が proved になる(_bounds_q が前提に入ることの確認)。
-11. **scenarios**: FIFO 仕様で cover_* と reach_* が生成される。
+1. **FIFO basics**: push×2 → head is the first element, pop → head is the second,
+   size consistent. Confirm a witness via reachable.
+2. **push when full**: capacity 2 with 3 pushes → `violated` / `type_bound` / `_bounds_*`.
+3. **empty pop / empty head**: an unguarded action → `violated` / `partial_op` /
+   loc and hint. With a guard (requires q.size() > 0) it is verified.
+4. **guard idiom for head inside requires**: the two clauses `requires q.size() > 0`
+   + `requires q.head() == 0` → in the empty state the action merely becomes
+   disabled and there is no partial_op violation.
+5. **at + forall guard idiom invariant**: an append-only-log type
+   `forall k in 0..N-1 { k < log.size() => log.at(k) <= k }` is verified.
+6. **Seq ==**: a requires of the form `q.push(1) == q2` works correctly
+   (isomorphic to the struct == regression).
+7. **contains**.
+8. **JSON display**: the state is an array, and internal names (`__data`/`__len`) do not appear.
+9. **check rejection**: a Seq in a struct field, `Map<K, Seq<...>>`, `Map<K, Set<K>>`,
+   and a literal with more than N elements.
+10. **induction**: the FIFO spec becomes proved (confirming that _bounds_q enters the premise).
+11. **scenarios**: cover_* and reach_* are generated for the FIFO spec.
 
-## 9. ドキュメント反映
+## 9. Reflecting into documentation
 
-- DESIGN-v1.md §3 に Seq 小節と §10 ロードマップの v1.1 完了マークを追記。
-- 文法 EBNF(§4)に `Seq` 型とリテラルを追加。
-- `violation_kind` の列挙(§7.2)に `"partial_op"` を追加。
+- Add a Seq subsection to DESIGN-v1.md §3 and a v1.1 completion mark to the §10 roadmap.
+- Add the `Seq` type and literal to the grammar EBNF (§4).
+- Add `"partial_op"` to the `violation_kind` enumeration (§7.2).

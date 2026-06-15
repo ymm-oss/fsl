@@ -1,116 +1,135 @@
-# FSL v2.0 — refinement 検査 実装設計
+# FSL v2.0 — Refinement Checking Implementation Design
 
-DESIGN-v1.md §10 v2.0「複数 spec の合成と refinement」の refinement 側。
-「詳細仕様(impl)が抽象仕様(abs)の振る舞いを外れない」ことを
-**refinement mapping による有界シミュレーション検査**で確かめる。
+The refinement side of DESIGN-v1.md §10 v2.0 "Composition of multiple specs and
+refinement." It verifies that "a detailed spec (impl) does not deviate from the
+behavior of an abstract spec (abs)" via **bounded simulation checking using a
+refinement mapping**.
 
-ユースケース: 抽象仕様を先に proved にし、実装に近い詳細仕様(キャッシュ、
-中間状態、最適化を含む)が抽象仕様に**忠実**であることを機械検査する。
-LLM ワークフローでは「abs を人間/LLM がレビュー → impl は LLM が自由に
-詳細化 → refine 検査が忠実性を担保」という分業になる。
+Use case: first get the abstract spec to proved, then mechanically verify that
+the detailed spec close to the implementation (including caches, intermediate
+states, optimizations) is **faithful** to the abstract spec. In the LLM
+workflow this becomes a division of labor: "a human/LLM reviews abs → the LLM
+freely refines impl → the refine check guarantees faithfulness."
 
-## 1. マッピングファイル
+## 1. The Mapping File
 
-第3のファイル(impl/abs どちらの spec も汚さない):
+A third file (it pollutes neither the impl nor the abs spec):
 
 ```fsl
 refinement CartImplRefinesCart {
-  impl CartImpl                       // 詳細仕様の spec 名(ファイルは CLI で渡す)
-  abs  ShoppingCart                   // 抽象仕様の spec 名
+  impl CartImpl                       // spec name of the detailed spec (file passed on the CLI)
+  abs  ShoppingCart                   // spec name of the abstract spec
 
-  // 抽象状態変数ごとに、impl 状態からの写像式を与える(全変数必須)
+  // For each abstract state variable, give the mapping expression from the impl state (all variables required)
   map stock[i: ItemId] = impl_stock[i] - reserved[i]
   map cart[u: UserId]  = impl_cart[u]
   map revenue          = ledger
 
-  // impl アクション → abs アクションの対応(全 impl アクション必須)
-  action impl_checkout(u) -> checkout(u)     // パラメータは式でもよい
-  action rebalance(i)     -> stutter          // 内部アクション(absでは何も起きない)
+  // Correspondence of impl action → abs action (all impl actions required)
+  action impl_checkout(u) -> checkout(u)     // parameters may be expressions
+  action rebalance(i)     -> stutter          // internal action (nothing happens in abs)
 }
 ```
 
-- `map <abs_var> = <式>` — スカラ抽象変数。式は impl の状態変数・const を参照。
-- `map <abs_var>[<binder>] = <式>` — Map/Seq 等の要素ごと写像。binder は
-  abs 側のキー型を走る(Seq は `map q = <impl の Seq 式>` の全体写像のみ —
-  v2.0 では Seq は同型写像(impl 側にも Seq があり式で渡す)に限る)。
-- `action <impl_action>(<仮引数列>) -> <abs_action>(<式列>) | stutter`
-  仮引数は impl アクションのパラメータ名(順序一致)。abs 側引数は
-  それらと impl 状態を使う式。
-- 文法は既存 .fsl と同居させない(`refinement` をトップレベルに持つ
-  **独立ファイル**。parse は同じ Lark 文法に `refinement_def` を足す)。
+- `map <abs_var> = <expr>` — a scalar abstract variable. The expression
+  references the impl's state variables and consts.
+- `map <abs_var>[<binder>] = <expr>` — per-element mapping of a Map/Seq etc.
+  The binder ranges over the abs-side key type (Seq is limited to the
+  whole-mapping form `map q = <impl Seq expr>` only — in v2.0, Seq is limited to
+  an isomorphic mapping (there is a Seq on the impl side too, passed as an
+  expression)).
+- `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
+  The formal parameters are the parameter names of the impl action (matching
+  order). The abs-side arguments are expressions using them and the impl state.
+- The grammar does not coexist with existing `.fsl` files (an **independent
+  file** with `refinement` at the top level. Parsing adds `refinement_def` to
+  the same Lark grammar).
 
-## 2. 検査の意味論(有界前方シミュレーション)
+## 2. Checking Semantics (Bounded Forward Simulation)
 
-α(s) := マッピングが定める impl 状態 → abs 状態の写像。
+α(s) := the mapping that defines the impl state → abs state mapping.
 
-1. **init 対応**: impl の初期状態 s₀ について、α(s₀) が abs の init 制約を
-   満たすこと。反例: `refinement_failed` / `at: "init"`。
-2. **遷移対応**: impl の到達可能な遷移 s →[a, params] s' について:
-   - `a -> stutter` の場合: **α(s') == α(s)**(論理等価 §は leadsTo の
-     `_logical_eq` を流用)。
-   - `a(p…) -> b(e…)` の場合: abs アクション b のインスタンス(引数 = e の
-     評価値)が α(s) で **enabled**(requires 成立)であり、かつ b の更新を
-     α(s) に適用した結果が **α(s') と論理等価**であること。
-3. 検査は impl の BMC 展開(深さ K)上で行う: 各ステップ t、各 impl
-   インスタンスについて「choice が当該インスタンス ∧ 対応条件の否定」が
-   sat なら違反。impl のトレース + α 前後の abs 状態を反例として返す。
+1. **init correspondence**: for the impl's initial state s₀, α(s₀) satisfies the
+   abs init constraints. Counterexample: `refinement_failed` / `at: "init"`.
+2. **transition correspondence**: for a reachable impl transition
+   s →[a, params] s':
+   - `a -> stutter` case: **α(s') == α(s)** (logical equality reuses leadsTo's
+     `_logical_eq`).
+   - `a(p…) -> b(e…)` case: the instance of abs action b (arguments = the
+     evaluated values of e) is **enabled** in α(s) (its requires hold), and the
+     result of applying b's update to α(s) is **logically equal to α(s')**.
+3. The check is done over the impl's BMC expansion (depth K): at each step t,
+   for each impl instance, if "the choice is that instance ∧ the negation of the
+   correspondence condition" is sat, it is a violation. The impl trace + the abs
+   states before and after α are returned as the counterexample.
 
-abs 側の invariant は検査しない(abs を別途 verify/prove するのが前提。
-ただし α(s₀..s_K) が abs invariant を破る場合は通常それ自体が遷移対応違反に
-現れる)。abs 側の自動境界(_bounds_*)も同様にスコープ外 — ただし
-α の値が abs の型範囲を外れることは遷移対応違反として自然に検出される
-(b の更新結果と一致し得ないため)とは限らないので、**α(s_t) の型境界
-検査だけは追加で行う**(`map_out_of_bounds` 違反。写像式のバグの典型を
-直接指摘できる)。
+The abs-side invariants are not checked (verifying/proving abs separately is the
+premise. However, if α(s₀..s_K) breaks an abs invariant, that usually manifests
+as a transition-correspondence violation itself). The abs-side automatic bounds
+(_bounds_*) are likewise out of scope — however, it is not necessarily the case
+that α's value escaping the abs type range is detected naturally as a
+transition-correspondence violation (because it cannot match b's update result),
+so **the type-bounds check of α(s_t) alone is performed additionally**
+(`map_out_of_bounds` violation; this can directly point out the typical mapping
+expression bug).
 
-**検査順序**:
-- **ステップ間 (t>0)**: 遷移対応の検査(s_{t-1}→s_t)を α(s_t) の型境界検査より
-  **先**に行う。ガード緩和などで遷移対応と境界違反が同時に起きる場合、根本原因で
-  ある `abs_requires_failed` を優先して報告する。境界検査は直前ステップの遷移対応が
-  成立した後の α(s_t) に対してのみ適用する。
-- **初期状態 (t=0)**: 型境界検査(`map_out_of_bounds`)を init 対応検査より**先**に
-  行う。init 対応は α(s₀) が abs の型範囲内にあることをほぼ含意するため(範囲外なら
-  通常 init 対応も失敗する)、範囲逸脱を一般的な「init 不一致」ではなく
-  `map_out_of_bounds` として報告した方が、写像式バグ(範囲外の初期値を生む典型)を
-  直接指摘でき有用なため。範囲内だが値が異なる不一致は従来どおり init 対応違反
-  (`abs_state_mismatch`)として報告される。
+**Check order**:
+- **Between steps (t>0)**: the transition-correspondence check (s_{t-1}→s_t) is
+  done **before** the type-bounds check of α(s_t). When transition
+  correspondence and a bounds violation occur simultaneously, e.g. due to guard
+  weakening, prioritize reporting the root cause `abs_requires_failed`. The
+  bounds check is applied only to α(s_t) after the previous step's transition
+  correspondence has held.
+- **Initial state (t=0)**: the type-bounds check (`map_out_of_bounds`) is done
+  **before** the init-correspondence check. Because init correspondence nearly
+  implies that α(s₀) is within the abs type range (if out of range, init
+  correspondence usually also fails), reporting a range escape as
+  `map_out_of_bounds` rather than as a general "init mismatch" can directly
+  point out the mapping-expression bug (the typical one that produces an
+  out-of-range initial value), which is more useful. A mismatch that is in
+  range but with a different value is reported as before as an
+  init-correspondence violation (`abs_state_mismatch`).
 
-## 2.5 写像式の条件式(v2.2 — DOGFOOD-3 F9 の解消)
+## 2.5 Conditional Expressions in Mapping Expressions (v2.2 — Resolving DOGFOOD-3 F9)
 
-**マッピングファイルの式に限り**、条件式を許す:
+**Only in the expressions of the mapping file** is a conditional expression
+allowed:
 
 ```fsl
 refinement SeatImplRefinesBooking {
   impl SeatBookingImpl
   abs  SeatBooking
 
-  // 状態タグに依存する Option 値の写像が書ける
+  // A mapping of an Option value that depends on a state tag can be written
   map seats[s: SeatId] =
     if slots[s].st == Sold then slots[s].holder else none
 
   action sell(s, u)    -> book(s, u)
   action hold(s, u)    -> stutter
   action expire(s)     -> stutter
-  action confirm(s)    -> book(... )   // 等
+  action confirm(s)    -> book(... )   // etc.
 }
 ```
 
-- 構文: `if <expr> then <expr> else <expr>`(else 必須。ネスト可。
-  `then`/`else` は写像式文法内でのみキーワード)。**通常の .fsl 仕様
-  ファイルでは使えない**(grammar 上、refinement 内の式にのみ現れる)。
-- 型規則: then/else の両腕は同じ論理型。Option 同士(none を含む)、
-  enum 同士、Int/ドメイン同士、Bool 同士、struct 同士を許す。型不一致は
-  check 時 `kind: "type"`。
-- 意味論(ロワリング): Z3 の `If`。腕が Option のときは
-  present/value をそれぞれ ite で合成(`If(c, p1, p2)` / `If(c, v1, v2)`)、
-  struct はフィールドごとに ite(if 文の既存マージと同じ規約)。
-  none 腕の value は don't care(自由変数でよい — present が false なら
-  読まれない)。
-- 使える位置: `map` の右辺と、`action ... -> b(<式列>)` の引数式。
-- eval_expr に AST ノード `("ite", c, a, b)` を追加する(汎用実装)が、
-  本体仕様の文法からは生成されない。将来、一般式に開放する場合は
-  partial_op のパス条件などの追加設計が必要なため、本リリースでは
-  開放しない(LANGUAGE.md にもこの限定を明記)。
+- Syntax: `if <expr> then <expr> else <expr>` (else required; nesting allowed.
+  `then`/`else` are keywords only inside the mapping-expression grammar). It
+  **cannot be used in ordinary .fsl spec files** (grammatically, it appears only
+  in expressions inside refinement).
+- Typing rule: both arms of then/else are the same logical type. Option vs
+  Option (including none), enum vs enum, Int/domain vs Int/domain, Bool vs Bool,
+  struct vs struct are allowed. A type mismatch is `kind: "type"` at check time.
+- Semantics (lowering): Z3's `If`. When the arms are Option, present/value are
+  each composed with ite (`If(c, p1, p2)` / `If(c, v1, v2)`); a struct is ite
+  per field (the same convention as the existing merge of an if statement). The
+  value of a none arm is don't care (a free variable is fine — if present is
+  false it is not read).
+- Allowed positions: the right-hand side of `map`, and the argument expressions
+  of `action ... -> b(<expr list>)`.
+- An AST node `("ite", c, a, b)` is added to eval_expr (a general-purpose
+  implementation), but it is not generated from the body-spec grammar. If in the
+  future this is opened to general expressions, additional design such as the
+  path condition of partial_op would be needed, so it is not opened in this
+  release (this limitation is also stated in LANGUAGE.md).
 
 ## 3. CLI / JSON
 
@@ -118,7 +137,7 @@ refinement SeatImplRefinesBooking {
 fslc refine <impl.fsl> <abs.fsl> <mapping.fsl> [--depth K]
 ```
 
-成功:
+Success:
 
 ```json
 { "fsl": "1.0", "result": "refines", "impl": "CartImpl", "abs": "ShoppingCart",
@@ -126,7 +145,7 @@ fslc refine <impl.fsl> <abs.fsl> <mapping.fsl> [--depth K]
   "action_map": { "impl_checkout": "checkout", "rebalance": "stutter" } }
 ```
 
-違反:
+Violation:
 
 ```json
 { "fsl": "1.0", "result": "refinement_failed",
@@ -136,73 +155,86 @@ fslc refine <impl.fsl> <abs.fsl> <mapping.fsl> [--depth K]
   "impl_action": { "name": "rebalance", "params": {...}, "loc": ... },
   "kind": "abs_requires_failed" | "abs_state_mismatch" | "stutter_changed_abs"
         | "map_out_of_bounds",
-  "impl_trace": [ ...既存トレース形式... ],
-  "abs_before": { ...α(s) の論理状態... },
-  "abs_after_expected": { ...b 適用後... } | null,
+  "impl_trace": [ ...existing trace format... ],
+  "abs_before": { ...logical state of α(s)... },
+  "abs_after_expected": { ...after applying b... } | null,
   "abs_after_actual": { ...α(s') ... },
-  "mismatch": ["stock[1]", ...],            // 等価が破れた論理パス(分かる範囲)
+  "mismatch": ["stock[1]", ...],            // logical paths where equality broke (as far as known)
   "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action" }
 ```
 
-exit: refines = 0、refinement_failed = 1、エラー = 2/3。
+exit: refines = 0, refinement_failed = 1, error = 2/3.
 
-静的検査(`kind: "type"` エラー、exit 2):
-- map されていない abs 状態変数 / 存在しない変数・アクション名
-- 対応の無い impl アクション
-- 写像式・引数式の型不一致(abs 側の期待型と照合)
-- abs に ensures がある場合: 対応検査は「requires + 本体更新」で行うため
-  ensures は **abs 側で別途検証済みであること**を前提とする(note に明記)
+Static checks (`kind: "type"` error, exit 2):
+- An abs state variable that is not mapped / a nonexistent variable or action
+  name
+- An impl action with no correspondence
+- A type mismatch of a mapping expression or argument expression (matched
+  against the expected type on the abs side)
+- When abs has ensures: since the correspondence check is done with "requires +
+  body update," ensures is **assumed to be separately verified on the abs side**
+  (stated in the note)
 
-## 4. 実装ノート
+## 4. Implementation Notes
 
-- 2つの spec を同一 Z3 コンテキストで扱う。abs 側の状態は具象変数を
-  作らず、**α(s_t) を式として構築**する(map 式を impl 状態変数上で
-  評価したものを abs の論理変数に対応付ける dict)。abs アクションの
-  requires / 更新は既存 `eval_expr` / `compute_updates` に
-  「状態 dict = α の式 dict」を渡せばそのまま動く(物理変数名が一致する
-  ように α を**物理レベル**で組み立てる: Option は present/value、
-  struct はフィールド分割、Seq は data/len)。
-- Map の要素ごと写像 `map stock[i] = 式` は、abs の物理 Map 変数に対する
-  Lambda/Store 構築ではなく、**読み出し側で代替**する: abs 式評価中の
-  `Select(stock, k)` を `式[i := k]` に置換できるよう、α を「物理変数名 →
-  (Z3 式 または キー付き式テンプレート)」として持ち、eval_expr の var 解決
-  にフックを足す…のは侵襲的なので、**キーを有界列挙して Z3 の
-  K(ArraySort) + Store の連鎖で具象 Array 式を組む**(キーは有界なので
-  Store の列で正確に書ける)。こちらが既存コードに手を入れずに済む。
-- stutter / 対応の検査式は step t ごと・インスタンスごとに push/pop。
-  PERF1 の共有展開・式キャッシュの上で動かす。
-- 反例の `abs_before/after` 表示は `logical_state_values` を α の式 dict を
-  モデルで評価した値に適用。
+- The two specs are handled in the same Z3 context. The abs-side state does not
+  create concrete variables; **α(s_t) is built as an expression** (a dict
+  associating the map expressions, evaluated over the impl state variables, to
+  the abs logical variables). The abs action's requires/update work as is if you
+  pass "state dict = α's expression dict" to the existing
+  `eval_expr` / `compute_updates` (build α at the **physical level** so that
+  physical variable names match: Option is present/value, struct is field-split,
+  Seq is data/len).
+- The per-element map mapping `map stock[i] = expr` is **substituted on the read
+  side** rather than as a Lambda/Store construction over the abs's physical Map
+  variable: hold α as "physical variable name → (Z3 expression or keyed
+  expression template)" so that `Select(stock, k)` during abs expression
+  evaluation can be replaced by `expr[i := k]`, and add a hook to eval_expr's var
+  resolution… that is invasive, so instead **enumerate the keys boundedly and
+  build a concrete Array expression with a chain of Z3 K(ArraySort) + Store** (the
+  keys are bounded, so a sequence of Stores can write it exactly). This one
+  avoids touching existing code.
+- The stutter / correspondence check expressions are push/pop per step t and per
+  instance. They run on top of PERF1's shared expansion and expression cache.
+- The counterexample's `abs_before/after` display applies `logical_state_values`
+  to the values obtained by evaluating α's expression dict in the model.
 
-## 5. テスト計画(tests/test_refine.py)+ サンプル
+## 5. Test Plan (tests/test_refine.py) + Sample
 
-サンプル: `specs/cart_impl.fsl`(ShoppingCart の詳細化。例: 予約済み在庫
-`reserved` を持ち、`reserve`(stutter 相当の内部状態変更だが abs の stock を
-変えないよう map が `impl_stock - reserved` で吸収)→ `impl_checkout` が
-reserve 済みを消費)+ `specs/cart_refines.fsl`(マッピング)。
+Sample: `specs/cart_impl.fsl` (a refinement of ShoppingCart. Example: it has
+reserved stock `reserved`, and `reserve` (an internal state change equivalent to
+a stutter, but the map absorbs it with `impl_stock - reserved` so as not to
+change abs's stock) → `impl_checkout` consumes the reserved stock) +
+`specs/cart_refines.fsl` (the mapping).
 
-1. **正例**: cart_impl が ShoppingCart を refine する(refines / exit 0)。
-2. **stutter 違反**: 内部アクションが map 後の abs 状態を変えてしまう改変
-   → stutter_changed_abs、mismatch に変数パス。
-3. **requires 違反**: impl がガードを緩めた改変(abs の checkout の
-   `stock[i] > 0` に対応する状況を impl が許す)→ abs_requires_failed。
-4. **更新不一致**: map 式のバグ(符号ミス等)→ abs_state_mismatch。
-5. **init 不一致** → at: "init"。
-6. **静的検査**: map 漏れ / 未知アクション / 対応漏れ → kind: type、exit 2。
-7. **境界**: 写像値が abs の型範囲外 → map_out_of_bounds。
-8. 既存機能の回帰なし(refine は完全に独立した CLI パス)。
+1. **Positive case**: cart_impl refines ShoppingCart (refines / exit 0).
+2. **stutter violation**: a modification where an internal action changes the
+   post-map abs state → stutter_changed_abs, with the variable path in mismatch.
+3. **requires violation**: a modification where impl weakens a guard (impl allows
+   a situation corresponding to abs's checkout `stock[i] > 0`) →
+   abs_requires_failed.
+4. **update mismatch**: a bug in the map expression (sign error etc.) →
+   abs_state_mismatch.
+5. **init mismatch** → at: "init".
+6. **static checks**: missing map / unknown action / missing correspondence →
+   kind: type, exit 2.
+7. **bounds**: the mapping value is out of the abs type range → map_out_of_bounds.
+8. No regression of existing features (refine is a completely independent CLI
+   path).
 
-## 6. ドキュメント反映
+## 6. Documentation Reflection
 
-- LANGUAGE.md に「refinement」節(マッピング構文・検査内容・ワークフロー)。
-- DESIGN-v1.md §10 に注記。README にコマンド追記。
+- A "refinement" section in LANGUAGE.md (mapping syntax, check content,
+  workflow).
+- A note in DESIGN-v1.md §10. Add the command to the README.
 
-## 7. 連鎖検査(写像合成 / v2.x)
+## 7. Chain Checking (Mapping Composition / v2.x)
 
-層連鎖 業務 ⊒ 要件 ⊒ 設計 … の end-to-end 忠実性を、隣接写像を合成して
-**最下位 ⊒ 最上位を直接**検査する。従来は隣接ペアを個別に `refine` するだけで、
-末端が最上位の契約を保つことは推移律を暗黙に信頼するか、合成写像を手書きする
-しかなかった。
+For a layer chain business ⊒ requirements ⊒ design …, check end-to-end
+faithfulness by composing adjacent mappings to **directly check lowest ⊒
+highest**. Previously you could only `refine` adjacent pairs individually, and
+ensuring the bottom preserves the top's contract meant either implicitly trusting
+transitivity or hand-writing the composed mapping.
 
 CLI:
 
@@ -210,31 +242,37 @@ CLI:
 fslc refine <low> <mid> <map_lm> <top> <map_mt> [<next> <map> ...] [--depth K]
 ```
 
-最初の `(impl abs map)` の後に `(abs map)` を続けるたびに層が1つ伸びる。
-`mappings[i]` は `specs[i]` を impl、`specs[i+1]` を abs とする。
+After the first `(impl abs map)`, each appended `(abs map)` extends the chain by
+one layer. `mappings[i]` treats `specs[i]` as impl and `specs[i+1]` as abs.
 
-**健全性**: fslc の refine はステップ局所検査(各 impl 遷移を同ステップの abs
-遷移/stutter に対応づける)なので、有界 refinement は同一深さ K で推移的。
-低→中 と 中→高 がともに深さ K で refine するなら、stutter はステップ番号を
-増やさないため 低→高 も深さ K で refine する。よって合成検査は
-「全隣接リンクが深さ K で成り立つ」ことと**等価**(実証 `examples/refinement_chain`、
-スパイクで mid/bot/top の3層 + indexed map + parameterized action を確認)。
+**Soundness**: fslc's refine is a step-local check (it maps each impl transition
+to an abs transition/stutter at the same step), so bounded refinement is
+transitive at the same depth K. If both low→mid and mid→top refine at depth K,
+then since stutter does not increment the step number, low→top also refines at
+depth K. Therefore the chain check is **equivalent** to "all adjacent links hold
+at depth K" (demonstrated by `examples/refinement_chain`; a spike confirmed
+3 layers mid/bot/top + indexed map + parameterized action).
 
-**実装** (`refine_chain`):
+**Implementation** (`refine_chain`):
 
-- 状態写像は **Z3 レベルで合成**する: α_AC(s) =
-  `build_alpha(build_alpha(s, map_AB, A, B), map_BC, B, C)`。`build_alpha` の出力
-  (B の物理状態を A 上の Z3 式で表した dict)をそのまま次の `build_alpha` の
-  入力状態に渡す。AST 置換を避けるので indexed map・Option・struct・Seq も
-  既存 `eval_expr` のままで合成される。
-- アクション対応は畳み込みで合成する: `a -> stutter` は stutter、`a -> b -> c` は
-  b の仮引数を a の写像引数式で束縛して合成。引数式が**中間層の状態**を読む
-  場合のみ未対応(`kind: type` エラー。実用上、引数はパラメータ参照が大半)。
-- 検査本体は既存 `refine()` を合成 α(`alpha_fn`)と合成アクション対応で実行する
-  (検査ループは無改変)。
-- 失敗時は隣接リンクを順に再検査し、最初に壊れたリンクを `failed_link:
-  {from, to, kind}` で返す(合成 end-to-end トレースより原因が特定しやすい)。
+- The state mapping is **composed at the Z3 level**: α_AC(s) =
+  `build_alpha(build_alpha(s, map_AB, A, B), map_BC, B, C)`. The output of
+  `build_alpha` (a dict expressing B's physical state in Z3 expressions over A)
+  is passed as is to the input state of the next `build_alpha`. Since AST
+  substitution is avoided, indexed map, Option, struct, and Seq are also composed
+  with the existing `eval_expr` unchanged.
+- The action correspondence is composed by folding: `a -> stutter` is stutter,
+  `a -> b -> c` binds b's formal parameters to a's mapping argument expressions
+  and composes. It is unsupported only when the argument expression reads the
+  **intermediate-layer state** (`kind: type` error; in practice, arguments are
+  mostly parameter references).
+- The check body runs the existing `refine()` with the composed α (`alpha_fn`)
+  and the composed action correspondence (the check loop is unmodified).
+- On failure, the adjacent links are re-checked in order, and the first broken
+  link is returned as `failed_link: {from, to, kind}` (the cause is easier to
+  pinpoint than from a composed end-to-end trace).
 
-**伝播の前提(活性は別)**: 連鎖が `refines` でも、伝播するのは安全性のみ。
-最上位の活性(`leadsTo`/`responds`)は各層で再 verify する(`DESIGN-layers.md`
-§6 の注、`examples/refinement_liveness`)。
+**Propagation premise (liveness is separate)**: even if the chain is `refines`,
+only safety propagates. The top-level liveness (`leadsTo`/`responds`) is re-
+verified at each layer (see the note in `DESIGN-layers.md` §6,
+`examples/refinement_liveness`).

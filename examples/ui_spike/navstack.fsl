@@ -14,8 +14,8 @@ spec NavStack {
   action back() {
     requires depth > 0
     depth = depth - 1
-    cur = hist[depth - 1]            // 同時代入: depth は旧値で読む
+    cur = hist[depth - 1]            // simultaneous assignment: depth is read at its old value
   }
-  reachable CanGoDeep { depth == 2 }                    // 2階層潜れる
-  reachable BackedToNonHome { depth == 1 and cur != Home }  // 戻った先が非Home画面
+  reachable CanGoDeep { depth == 2 }                    // can go two levels deep
+  reachable BackedToNonHome { depth == 1 and cur != Home }  // after going back, the screen is non-Home
 }

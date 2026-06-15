@@ -1,7 +1,7 @@
-// fsl-ui スパイク(issue #9): 返品申請の画面フローを素の fsl で手書き。
-// screen=enum / navigate=action / ガード=requires / 袋小路なし=leadsTo /
-// 全画面到達=reachable / 二重送信防止=invariant。新構文は使わない。
-// 注: 画面名 Done は abs の St.Paid と被らないよう改名(enum 衝突回避。下記 F 参照)。
+// fsl-ui spike (issue #9): the screen flow of a return request, hand-written in plain fsl.
+// screen=enum / navigate=action / guard=requires / no dead ends=leadsTo /
+// all screens reachable=reachable / no double submit=invariant. No new syntax is used.
+// Note: the screen name Done is renamed so it does not clash with abs's St.Paid (avoiding an enum collision; see F below).
 spec ReturnUI {
   type Amount = 0..3
   const AUTO_LIMIT = 1

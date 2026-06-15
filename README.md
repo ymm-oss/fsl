@@ -1,279 +1,279 @@
 # FSL — AI-Native Formal Specification Language
 
-FSL は、**生成AIが書き・検証し・修正する**ことを第一目標に設計した、
-アプリ開発向けの形式仕様言語です。検証器 `fslc` は Lark + Z3 により
-**有界モデル検査(BMC)** と **k 帰納法による無限深度証明** を行い、結果を常に
-**機械可読な JSON** で返します（LLM の write→verify→repair ループ用）。
-仕様から統合テスト雛形を生成する `fslc scenarios` も備えます。
+FSL is a formal specification language for application development, designed with
+the primary goal of being **written, verified, and repaired by generative AI**.
+The verifier `fslc` uses Lark + Z3 to perform **bounded model checking (BMC)**
+and **infinite-depth proofs via k-induction**, and always returns results as
+**machine-readable JSON** (for the LLM write→verify→repair loop).
+It also includes `fslc scenarios`, which generates integration-test scaffolds from a spec.
 
-仕様は**コンサル(business)/ 要件(requirements)/ 設計(spec)の3層方言**で書け、
-refinement で連鎖して要件 ID が全診断に透過する。非機能要件も SLA(離散時刻)まで対応。
-言語仕様・意味論・出力 JSON は [`docs/LANGUAGE.md`](docs/LANGUAGE.md)、
-文書全体の見取り図は [`docs/README.md`](docs/README.md) を参照。
+Specs can be written in **three layered dialects — consulting (business) / requirements / design (spec)** —
+chained via refinement so that requirement IDs propagate transparently across all diagnostics. Non-functional requirements are also supported, down to SLAs (discrete time).
+For the language specification, semantics, and output JSON see [`docs/LANGUAGE.md`](docs/LANGUAGE.md);
+for a map of all the documentation see [`docs/README.md`](docs/README.md).
 
-## 最初にやること
+## First steps
 
-FSL の基本的な使い方は、**人が FSL 構文を覚えて手書きすることではなく**、
-`fslc` と Agent Skill を入れたうえで、AI エージェントに仕様を書かせ、
-検証結果を読ませながら修正させる流れです。
+The basic way to use FSL is **not** for a person to memorize the FSL syntax and write it by hand;
+instead, you install `fslc` and the Agent Skill and then have an AI agent write the spec,
+reading the verification results as it repairs it.
 
-1. **FSL とスキルをインストールする**
+1. **Install FSL and the skill**
 
    ```bash
-   # GitHub から ZIP を落として解凍した場合
+   # If you downloaded and unzipped the ZIP from GitHub
    cd ~/Downloads/fsl-main
    bash install.sh
 
-   # GitHub CLI を使う場合
+   # If you use the GitHub CLI
    gh repo clone ymm-oss/fsl ~/.fsl
    bash ~/.fsl/install.sh
    ```
 
-   標準インストールでは、検証器 `fslc` と Claude Code 用スキル
-   `~/.claude/skills/fsl` が入ります。別プロジェクトでも AI に
-   FSL を書かせたい場合は、このスキルを読み込ませてください。
+   A standard install gives you the verifier `fslc` and the Claude Code skill
+   `~/.claude/skills/fsl`. If you want AI to write FSL in another project too,
+   load this skill there.
 
-2. **AI エージェントに、FSL スキルを使って作るよう依頼する**
+2. **Ask an AI agent to build it using the FSL skill**
 
    ```text
-   FSL スキルを使って、キャンセル申請フローの要件仕様を書いて。
-   承認済み注文だけキャンセル可能、出荷後は不可、返金は二重実行不可。
-   検証して、問題があれば修正して、問題なくなるまで回して。
+   Using the FSL skill, write a requirements spec for a cancellation request flow.
+   Only approved orders can be canceled; cancellation after shipping is not allowed; refunds must not run twice.
+   Verify it, fix any problems, and keep iterating until there are none.
    ```
 
-   PM・コンサル向けなら、自然文の業務ルールや受け入れ基準をそのまま渡して
-   構いません。AI はスキル内の言語リファレンスと修復プロトコルに従い、
-   `.fsl` ファイルを作成して `fslc` で検証します。
+   For PM/consulting use, you can hand over natural-language business rules or acceptance criteria as-is.
+   The AI follows the language reference and repair protocol in the skill,
+   creates the `.fsl` file, and verifies it with `fslc`.
 
-   **注意:** 検証器が保証するのは「書かれた仕様の範囲で矛盾や反例がないこと」です。
-   人間は、AI が書いた仕様が元の業務ルール・要件・例外条件を正しく表しているか、
-   反例が出た場合に修正後の解釈が業務として妥当かを確認してください。
+   **Note:** what the verifier guarantees is "no contradictions or counterexamples within the scope of what is written in the spec."
+   A human should confirm that the spec the AI wrote correctly represents the original business rules, requirements, and exceptional conditions,
+   and, when a counterexample appears, that the revised interpretation is reasonable as a matter of business.
 
-3. **必要ならテストや実装接続まで生成してもらう**
+3. **If needed, have it generate tests and implementation hookup too**
 
-   受け入れ基準のシナリオ化、pytest 適合性テスト雛形、既存イベントログの
-   仕様適合性検査まで、同じ `.fsl` 仕様からつなげられます。これも
-   「この仕様からテスト雛形も作って」「このログが仕様に合うか検査して」と
-   AI に依頼すれば十分です。
+   Turning acceptance criteria into scenarios, pytest conformance-test scaffolds, and conformance checking
+   of existing event logs against the spec can all be chained from the same `.fsl` spec. For this too,
+   it is enough to ask the AI: "also build test scaffolds from this spec" or "check whether this log conforms to the spec."
 
-## ディレクトリ構成
+## Directory layout
 
 ```
 fsl/
 ├── README.md
-├── pyproject.toml          # 依存 (lark, z3-solver) と fslc コマンドの定義
+├── pyproject.toml          # dependencies (lark, z3-solver) and the fslc command definition
 ├── docs/
-│   ├── README.md           # docs の見取り図(まずここ)
-│   ├── LANGUAGE.md         # 言語リファレンス — 仕様を書くならこれ
-│   ├── DESIGN-*.md         # 設計書(言語/3層方言/NFR/各機能 — 計12本)
-│   └── DOGFOOD-1..7.md     # ドッグフーディング所見(バグ・発見の記録)
-├── specs/                  # サンプル仕様 (*.fsl) — 正しいものは全て k=1 で proved
-│   ├── cart_v1.fsl         #   Option / ensures / reachable の基本形
-│   ├── cart_v1_buggy.fsl   #   ガード欠落 — type_bound 違反の最短反例が返る
+│   ├── README.md           # map of docs (start here)
+│   ├── LANGUAGE.md         # language reference — read this if you are writing specs
+│   ├── DESIGN-*.md         # design documents (language / three-layer dialects / NFR / each feature — 12 in total)
+│   └── DOGFOOD-1..7.md     # dogfooding findings (record of bugs and discoveries)
+├── specs/                  # sample specs (*.fsl) — all the correct ones are proved at k=1
+│   ├── cart_v1.fsl         #   basic form of Option / ensures / reachable
+│   ├── cart_v1_buggy.fsl   #   missing guard — returns the shortest type_bound violation counterexample
 │   ├── order_workflow.fsl  #   enum / struct / Set / sum
-│   ├── auth_lockout.fsl    #   ロックアウト + ゴースト変数 + 補助 invariant
-│   ├── inventory_reservation.fsl  # 保存則 invariant
-│   ├── payment.fsl         #   部分返金 + 台帳 + 補助 invariant
-│   ├── rate_limiter.fsl    #   トークンバケット
-│   ├── mutex_queue.fsl     #   FIFO ミューテックス (Option + Seq)
-│   ├── job_pipeline.fsl    #   リトライ付きジョブキュー (Seq + struct)
-│   ├── audit_log.fsl       #   追記ログ + Seq 集約イディオム
-│   ├── order_system.fsl    #   compose: cart_v1 + payment 同期 checkout/capture
-│   ├── bank{,_impl,_refines,_system}.fsl  # refinement + compose の連鎖
-│   ├── seat_booking*.fsl   #   条件写像つき refinement
-│   ├── repair_loop.fsl     #   fslc 自身のワークフローの自己仕様
-│   └── cart_{buggy,fixed}.fsl     # v0 互換サンプル
+│   ├── auth_lockout.fsl    #   lockout + ghost variable + auxiliary invariant
+│   ├── inventory_reservation.fsl  # conservation-law invariant
+│   ├── payment.fsl         #   partial refunds + ledger + auxiliary invariant
+│   ├── rate_limiter.fsl    #   token bucket
+│   ├── mutex_queue.fsl     #   FIFO mutex (Option + Seq)
+│   ├── job_pipeline.fsl    #   job queue with retries (Seq + struct)
+│   ├── audit_log.fsl       #   append-only log + Seq aggregation idiom
+│   ├── order_system.fsl    #   compose: cart_v1 + payment with synchronized checkout/capture
+│   ├── bank{,_impl,_refines,_system}.fsl  # refinement + compose chain
+│   ├── seat_booking*.fsl   #   refinement with a conditional mapping
+│   ├── repair_loop.fsl     #   self-spec of fslc's own workflow
+│   └── cart_{buggy,fixed}.fsl     # v0-compatible samples
 ├── examples/
-│   ├── pm/                 # PM/PdM 向け(解約フロー: 業務+要件)
-│   ├── consulting/         # コンサル向け(As-Is/To-Be 統制検査)
-│   ├── e2e/                # 3役統合(コンサル→PM→エンジニア→実装)
-│   ├── gallery/            # 事例ギャラリー(正例/不正例カタログ/adversarial)
-│   ├── bank/               # 素の Python 実装への適合テスト(8/8)
-│   ├── layers/             # 3層チェーン(business → requirements → 設計)
-│   └── nfr/                # 離散時刻 SLA(urgency 規律・時間予算 invariant)
-├── src/fslc/               # 検証器パッケージ
-│   ├── __init__.py         #   公開API: parse / build_spec / verify
-│   ├── __main__.py         #   python -m fslc 用
-│   ├── grammar.py          #   Lark 文法 + AST トランスフォーマ
+│   ├── pm/                 # for PM/PdM (cancellation flow: business + requirements)
+│   ├── consulting/         # for consulting (As-Is/To-Be control checks)
+│   ├── e2e/                # three-role integration (consulting → PM → engineer → implementation)
+│   ├── gallery/            # case-study gallery (valid examples / invalid-example catalog / adversarial)
+│   ├── bank/               # conformance tests against a plain Python implementation (8/8)
+│   ├── layers/             # three-layer chain (business → requirements → design)
+│   └── nfr/                # discrete-time SLA (urgency discipline, time-budget invariant)
+├── src/fslc/               # verifier package
+│   ├── __init__.py         #   public API: parse / build_spec / verify
+│   ├── __main__.py         #   for python -m fslc
+│   ├── grammar.py          #   Lark grammar + AST transformer
 │   ├── parser.py           #   parse(src) -> AST
-│   ├── model.py            #   build_spec / 型→Z3sort / 定数評価 / FslError
-│   ├── bmc.py              #   verify / prove(k帰納法) / scenarios / トレース生成
-│   ├── runtime.py          #   Monitor 具象インタプリタ (Z3 不要)
-│   ├── testgen.py          #   pytest 適合性テスト雛形生成
-│   └── cli.py              #   CLI と JSON 出力・エラー封筒
-└── tests/                  # pytest (v0互換 / v1 / induction / scenarios / runtime /
-                            #         方言 / NFR / 独立オラクル照合・trace健全性)
+│   ├── model.py            #   build_spec / type→Z3 sort / constant evaluation / FslError
+│   ├── bmc.py              #   verify / prove (k-induction) / scenarios / trace generation
+│   ├── runtime.py          #   Monitor concrete interpreter (no Z3 required)
+│   ├── testgen.py          #   pytest conformance-test scaffold generation
+│   └── cli.py              #   CLI and JSON output / error envelope
+└── tests/                  # pytest (v0-compat / v1 / induction / scenarios / runtime /
+                            #         dialects / NFR / independent-oracle cross-checking, trace soundness)
 ```
 
-## いちばん簡単：実行ファイルをダウンロードするだけ（Python 不要）
+## Easiest of all: just download the executable (no Python needed)
 
-`fslc` は**スタンドアロン単一バイナリ**として配布しています。Python のインストールも
-`pip` も `git` も不要です。GitHub の **Releases** から自分の OS 用のファイルを
-1つ落とすだけで動きます。
+`fslc` is distributed as a **standalone single binary**. You need neither a Python install,
+`pip`, nor `git`. Just grab the one file for your OS from GitHub **Releases**
+and it runs.
 
-| OS / アーキ | ダウンロードするファイル |
+| OS / arch | File to download |
 | --- | --- |
-| macOS (Apple Silicon, M1〜) | `fslc-macos-arm64` |
+| macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
 | Linux (x86_64) | `fslc-linux-x64` |
 | Linux (ARM64) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |
 
 ```bash
-# 例: macOS (Apple Silicon)
+# Example: macOS (Apple Silicon)
 chmod +x fslc-macos-arm64
 ./fslc-macos-arm64 verify spec.fsl
 ```
 
-> **macOS の注意**: ダウンロードした実行ファイルは Gatekeeper によりブロックされます。
-> 初回だけ検疫属性を外してください:
+> **macOS note**: a downloaded executable will be blocked by Gatekeeper.
+> The first time only, remove the quarantine attribute:
 > `xattr -d com.apple.quarantine ./fslc-macos-arm64`
-> （または Finder で右クリック →「開く」を一度実行）。
+> (or right-click in Finder → "Open" once).
 
-各ファイルには `*.sha256` を併せて添付しています。検証は
-`shasum -a 256 -c fslc-macos-arm64.sha256` で行えます。
+Each file ships with a companion `*.sha256`. You can verify it with
+`shasum -a 256 -c fslc-macos-arm64.sha256`.
 
-> このバイナリは z3 のネイティブライブラリまで同梱済みで、`verify` を含む
-> すべての機能が外部依存なしで動作します。スキル連携や editable 開発が必要な方は、
-> 下記のセットアップ手順を使ってください。
+> This binary bundles even z3's native library, so all features including `verify`
+> work with no external dependencies. If you need skill integration or editable development,
+> use the setup instructions below.
 
-## かんたんセットアップ（PM・コンサル・非エンジニアの方）
+## Easy setup (for PMs, consultants, and non-engineers)
 
-プログラミングの知識は不要です。次の3ステップだけ:
+No programming knowledge is required. Just these three steps:
 
-1. **ダウンロード** — ブラウザで GitHub の ymm-oss/fsl を開き、緑の
-   **「Code」▾ → 「Download ZIP」** をクリック(公開リポジトリなのでログイン不要)。
-   ダウンロードした zip をダブルクリックで解凍。
-2. **ターミナルを開く**（Mac なら「ターミナル.app」、アプリ検索で "terminal")。
-3. 解凍してできたフォルダで**インストールコマンドを実行**:
+1. **Download** — open ymm-oss/fsl on GitHub in your browser and click the green
+   **"Code" ▾ → "Download ZIP"** (no login needed, since it is a public repository).
+   Double-click the downloaded zip to unzip it.
+2. **Open a terminal** (on Mac, "Terminal.app"; search your apps for "terminal").
+3. In the folder you unzipped, **run the install command**:
 
    ```bash
-   cd ~/Downloads/fsl-main      # 解凍先のフォルダ名に合わせてください
+   cd ~/Downloads/fsl-main      # adjust to the name of the folder you unzipped
    bash install.sh
    ```
 
-これで FSL 本体が `~/.fsl` に、`fslc` コマンドが `~/.local/bin/fslc` に、
-Claude Code 用スキルが `~/.claude/skills/fsl` に配置されます
-(配置後はダウンロードしたフォルダを削除して構いません)。
+This places FSL itself in `~/.fsl`, the `fslc` command in `~/.local/bin/fslc`, and
+the Claude Code skill in `~/.claude/skills/fsl`
+(once placed, you can delete the folder you downloaded).
 
-> GitHub CLI を使う方・エンジニアの方は、`gh auth login` 済みなら次の1行でも:
+> For those who use the GitHub CLI, or engineers: if you have run `gh auth login`, this one line also works:
 > `gh repo clone ymm-oss/fsl ~/.fsl && bash ~/.fsl/install.sh`
 
-インストールされるもの:
+What gets installed:
 
-- `fslc` コマンド（`~/.local/bin/fslc` から利用）
-- Claude Code 用スキル（`~/.claude/skills/fsl`）
-- PM 向け・コンサル向けのサンプル（`examples/pm/`, `examples/consulting/`）
+- the `fslc` command (used from `~/.local/bin/fslc`)
+- the Claude Code skill (`~/.claude/skills/fsl`)
+- samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
 
-Windows の方は WSL を利用するか、開発者向け手順（PowerShell）を参照してください。
+Windows users should use WSL or refer to the developer instructions (PowerShell).
 
-アンインストール:
+Uninstall:
 
 ```bash
 rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl
 ```
 
-## 開発者向けセットアップ
+## Developer setup
 
-まずリポジトリを取得します:
+First get the repository:
 
 ```bash
 git clone https://github.com/ymm-oss/fsl && cd fsl
 ```
 
-依存は `lark`（純Python）と `z3-solver`（ネイティブ libz3 を同梱した
-ビルド済み wheel）の2つだけ。**C++ コンパイラや別途の Z3 インストールは不要**で、
-Mac / Windows / Linux いずれも `pip install` だけで完結します（要 Python 3.9+）。
+There are only two dependencies: `lark` (pure Python) and `z3-solver`
+(a prebuilt wheel that bundles the native libz3). **No C++ compiler or separate Z3 install is needed**,
+and on Mac / Windows / Linux it is all done with just `pip install` (requires Python 3.9+).
 
 **Mac / Linux:**
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate         # fish の場合: source .venv/bin/activate.fish
-pip install -e ".[dev]"           # lark, z3-solver, pytest を導入し fslc を editable インストール
+source .venv/bin/activate         # for fish: source .venv/bin/activate.fish
+pip install -e ".[dev]"           # installs lark, z3-solver, pytest and does an editable install of fslc
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
 py -m venv .venv
-.venv\Scripts\Activate.ps1        # cmd の場合: .venv\Scripts\activate.bat
+.venv\Scripts\Activate.ps1        # for cmd: .venv\Scripts\activate.bat
 pip install -e ".[dev]"
 ```
 
-venv を有効化せずに直接実行することもできます:
-`./.venv/bin/python -m fslc ...`（Windows は `.venv\Scripts\python -m fslc ...`）。
+You can also run it directly without activating the venv:
+`./.venv/bin/python -m fslc ...` (on Windows, `.venv\Scripts\python -m fslc ...`).
 
-## CLI を直接使う場合
+## Using the CLI directly
 
 ```bash
-fslc check  specs/cart_v1.fsl                    # 構文・型のみ(高速ループ)
-fslc verify specs/cart_v1.fsl --depth 8          # BMC: verified + 最短反例/witness
-fslc verify specs/cart_v1.fsl --engine induction # k帰納法: proved(無限深度)
-fslc scenarios specs/cart_v1.fsl                 # 統合テスト雛形 JSON を生成
-fslc replay specs/cart_v1.fsl --trace events.json  # イベントログの適合性検査
-fslc testgen specs/cart_v1.fsl -o test_cart_v1.py  # pytest 適合性テスト雛形を生成
+fslc check  specs/cart_v1.fsl                    # syntax/types only (fast loop)
+fslc verify specs/cart_v1.fsl --depth 8          # BMC: verified + shortest counterexample/witness
+fslc verify specs/cart_v1.fsl --engine induction # k-induction: proved (infinite depth)
+fslc scenarios specs/cart_v1.fsl                 # generate integration-test scaffold JSON
+fslc replay specs/cart_v1.fsl --trace events.json  # conformance check of an event log
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py  # generate a pytest conformance-test scaffold
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
-                                                  # 詳細仕様が抽象仕様を refine するか検査
-fslc verify specs/order_system.fsl --depth 8    # compose: cart + payment を同期合成
+                                                  # check whether the detailed spec refines the abstract spec
+fslc verify specs/order_system.fsl --depth 8    # compose: synchronized composition of cart + payment
 
-# 妥当性確認スイート(仕様 ≠ 意図 のギャップを塞ぐ。docs/DESIGN-{forbidden,vacuity,...} 参照)
-fslc verify specs/cart_v1.fsl --vacuity error   # 空虚な性質(前件/trigger 不到達・恒真 requires)を検出
-fslc verify specs/cart_v1.fsl --strict-tags     # タグなし宣言(捏造候補)・未参照要件(欠落候補)を突合
-fslc mutate specs/cart_v1.fsl                    # 仕様ミューテーション: 性質がどれだけ挙動を拘束するか測る
-fslc explain specs/cart_v1.fsl                   # 骨格列挙 + 反実仮想(このルールが無いとこうなる)
-fslc typestate specs/order_workflow.fsl --ts    # 状態機械→幽霊型の適用可否判定 + TS 雛形
-# (requirements 方言では forbidden ブロックで「拒否されるべき操作列」も書ける)
+# Validation suite (closes the gap between spec ≠ intent; see docs/DESIGN-{forbidden,vacuity,...})
+fslc verify specs/cart_v1.fsl --vacuity error   # detect vacuous properties (unreachable antecedent/trigger, always-true requires)
+fslc verify specs/cart_v1.fsl --strict-tags     # match untagged declarations (fabrication candidates) and unreferenced requirements (omission candidates)
+fslc mutate specs/cart_v1.fsl                    # spec mutation: measure how much the properties constrain behavior
+fslc explain specs/cart_v1.fsl                   # skeleton enumeration + counterfactuals (what would happen without this rule)
+fslc typestate specs/order_workflow.fsl --ts    # state machine → applicability check for phantom types + TS scaffold
+# (in the requirements dialect, the forbidden block can also write "operation sequences that should be rejected")
 
-# インストールせずモジュール実行でも可
+# Can also be run as a module without installing
 python -m fslc verify specs/cart_v1_buggy.fsl
 ```
 
-出力は常に JSON（stdout）。終了コード: 0 = verified / proved / refines /
-conformant / generated / mutated / explained / typestate、1 = violated /
-refinement_failed / reachable_failed / unknown_cti / nonconformant、
-2 = 仕様エラー（`error`／空虚性 `--vacuity error` 含む）、3 = 内部エラー。
-`cart_v1_buggy.fsl` は自動境界チェック（`type_bound`）の最短反例トレースを返します。
+The output is always JSON (stdout). Exit codes: 0 = verified / proved / refines /
+conformant / generated / mutated / explained / typestate; 1 = violated /
+refinement_failed / reachable_failed / unknown_cti / nonconformant;
+2 = spec error (`error`, including vacuity under `--vacuity error`); 3 = internal error.
+`cart_v1_buggy.fsl` returns the shortest counterexample trace for the automatic bounds check (`type_bound`).
 
-## AI エージェント向けスキル
+## Skill for AI agents
 
-FSL は学習データに存在しない言語のため、AI エージェント(Claude Code 等)が
-仕様を書く際は **Agent Skill** で言語仕様と修復プロトコルを文脈に供給する。
-配布・発見しやすいよう正本をリポジトリ直下の [`skills/fsl/`](skills/fsl/) に置く:
+Because FSL is a language not present in training data, when an AI agent (such as Claude Code)
+writes a spec, the **Agent Skill** supplies the language specification and repair protocol into context.
+For easy distribution and discovery, the canonical copy lives at [`skills/fsl/`](skills/fsl/) at the repository root:
 
-- [`skills/fsl/SKILL.md`](skills/fsl/SKILL.md) — ワークフロー・修復プロトコル・最小構文
-- [`skills/fsl/reference.md`](skills/fsl/reference.md) — 凝縮版の完全言語リファレンスカード
+- [`skills/fsl/SKILL.md`](skills/fsl/SKILL.md) — workflow / repair protocol / minimal syntax
+- [`skills/fsl/reference.md`](skills/fsl/reference.md) — condensed, complete language-reference card
 
-このリポジトリで作業する Claude Code には `.claude/skills/fsl`(→ `skills/fsl`
-へのシンボリックリンク)経由で自動認識される。別プロジェクトで使う場合は
-`skills/fsl/` をそのプロジェクトの `.claude/skills/` か `~/.claude/skills/` に
-コピーするか、`gh` のスキル拡張で `skills/` を配布元に指定する。
-詳細は [`skills/README.md`](skills/README.md)。
+Claude Code working in this repository recognizes it automatically via `.claude/skills/fsl`
+(a symbolic link to `skills/fsl`). To use it in another project,
+copy `skills/fsl/` into that project's `.claude/skills/` or into `~/.claude/skills/`,
+or point the `gh` skill extension at `skills/` as the distribution source.
+See [`skills/README.md`](skills/README.md) for details.
 
-## テスト
+## Tests
 
 ```bash
 pytest
 ```
 
-301 テスト(+69 skip)が全機能(v0互換 / 型システム / k帰納法 / leadsTo /
-scenarios / runtime / refine / compose / 3層方言 / NFR)を検証します(約260秒)。
-両評価器(Z3・具象 Monitor)は witness 再生の差分テストで相互検証され、さらに
-**Z3 非依存の総当たりオラクル**(`tests/oracle.py`)で偽陰性(本来 violated/
-refinement_failed を verified/proved/refines と誤る見逃し)を照合しています。
+301 tests (+69 skipped) verify all features (v0-compat / type system / k-induction / leadsTo /
+scenarios / runtime / refine / compose / three-layer dialects / NFR) (about 260 seconds).
+The two evaluators (Z3 and the concrete Monitor) cross-check each other via differential tests of witness replay, and in addition
+a **Z3-independent brute-force oracle** (`tests/oracle.py`) checks for false negatives (misses where something that should be violated/
+refinement_failed is wrongly reported as verified/proved/refines).
 
-## ライブラリ API
+## Library API
 
 ```python
 from fslc import parse, build_spec, verify, prove
 
 spec   = build_spec(parse(open("specs/cart_v1.fsl").read()))
-result = verify(spec, depth=8)              # BMC。dict（CLI と同じ構造）
-result = prove(spec, k_ind=1, base_depth=8) # k帰納法（proved / unknown_cti）
+result = verify(spec, depth=8)              # BMC. dict (same structure as the CLI)
+result = prove(spec, k_ind=1, base_depth=8) # k-induction (proved / unknown_cti)
 ```
 
-## ライセンス
+## License
 
-[Apache License 2.0](LICENSE) の下で配布します。Copyright 2026 Ryoichi Izumita。
+Distributed under the [Apache License 2.0](LICENSE). Copyright 2026 Ryoichi Izumita.
 
-依存する `lark` と `z3-solver` はいずれも MIT License です(Apache-2.0 と互換)。
-詳細は [`NOTICE`](NOTICE) を参照してください。
+The dependencies `lark` and `z3-solver` are both under the MIT License (compatible with Apache-2.0).
+See [`NOTICE`](NOTICE) for details.

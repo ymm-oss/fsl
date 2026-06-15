@@ -1,4 +1,4 @@
-// topic: 食事する哲学者のデッドロック観察
+// topic: dining philosophers deadlock observation
 // scale: medium
 // features: Map<Option>, symmetry, reachable deadlock-shaped state
 // expected-command: verify --depth 6 --deadlock warn

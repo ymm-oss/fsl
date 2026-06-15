@@ -1,71 +1,72 @@
-# FSL v3 — 方言実装設計(DESIGN-layers.md の段階1〜3の詳細)
+# FSL v3 — Dialect Implementation Design (details of Stages 1–3 in DESIGN-layers.md)
 
-アーキテクチャと動機は DESIGN-layers.md。本書は実装可能レベルの仕様。
-不変の大原則: **カーネルの意味論に変更を加えない**。方言は AST 展開
-(compose と同型)、メタデータは表示への配管のみ。
+Architecture and motivation are in DESIGN-layers.md. This document is an
+implementation-level specification. Inviolable guiding principle:
+**make no changes to the kernel semantics**. Dialects are AST expansion
+(isomorphic to compose); metadata is plumbing into display only.
 
-## 段階1: トレーサビリティ・メタデータ配管
+## Stage 1: Traceability Metadata Plumbing
 
-### 1.1 カーネル構文: 宣言タグ
+### 1.1 Kernel syntax: declaration tags
 
-invariant / reachable / leadsTo / action(fair 含む)の宣言で、
-**ブロック開始 `{` の直前に省略可能な文字列リテラル**を許す:
+For invariant / reachable / leadsTo / action (including fair) declarations,
+allow **an optional string literal immediately before the opening `{`** of the block:
 
 ```fsl
-invariant PerUserCap "REQ-7: ユーザー毎の購入上限" { ... }
-reachable SoldOut "AC-3: 売り切れに到達できる" { ... }
-leadsTo Served "REQ-9: カートは必ず処理される" { P ~> Q }
-action submit(c: Case, a: Amount) "REQ-1: 閾値以下は自動承認" { ... }
+invariant PerUserCap "REQ-7: per-user purchase cap" { ... }
+reachable SoldOut "AC-3: sold-out state is reachable" { ... }
+leadsTo Served "REQ-9: a cart is always processed" { P ~> Q }
+action submit(c: Case, a: Amount) "REQ-1: at or below the threshold is auto-approved" { ... }
 ```
 
-- 文字列は `"ID: 原文"` 形式。**最初の `:` で分割**して
-  `meta = {"id": "REQ-7", "text": "ユーザー毎の購入上限"}`。
-  `:` が無ければ `{"id": 全文, "text": null}`。前後空白は strip。
-- AST → spec dict の各要素(invariant/reachable/leadsto/action)に
-  `meta` キー(無タグなら None)。
-- 既存仕様(タグなし)の出力は**バイト単位で不変**であること。
+- The string is in `"ID: text"` form. **Split on the first `:`** to get
+  `meta = {"id": "REQ-7", "text": "per-user purchase cap"}`.
+  If there is no `:`, then `{"id": <whole string>, "text": null}`. Strip leading/trailing whitespace.
+- Each AST → spec dict element (invariant/reachable/leadsto/action) gets a
+  `meta` key (None if untagged).
+- The output of existing specs (untagged) must remain **byte-for-byte unchanged**.
 
-### 1.2 JSON 出力への透過
+### 1.2 Pass-through into JSON output
 
-`meta` を持つ要素が関与する出力に `"requirement": {"id", "text"}` を付与:
+Add `"requirement": {"id", "text"}` to output that involves elements carrying `meta`:
 
-| 出力 | requirement の出所 |
+| Output | Source of requirement |
 |---|---|
-| violated(invariant / leadsTo) | 違反した invariant / leadsTo の meta |
-| violated(ensures / partial_op) | 当該 action の meta |
-| unknown_cti | 帰納的でなかった invariant の meta |
-| coverage 診断オブジェクト(covered: false) | 当該 action の meta |
-| scenarios の reach_* / respond_* | 性質の meta |
-| scenarios の cover_* | action の meta |
+| violated (invariant / leadsTo) | meta of the violated invariant / leadsTo |
+| violated (ensures / partial_op) | meta of the action in question |
+| unknown_cti | meta of the invariant that was not inductive |
+| coverage diagnostic object (covered: false) | meta of the action in question |
+| scenarios reach_* / respond_* | meta of the property |
+| scenarios cover_* | meta of the action |
 
-- `_bounds_*` / `_partial_*` などの自動生成要素は meta なし(従来どおり)。
-- refine 出力への透過は段階2(implements)で行う。
-- 新サブコマンドは作らない(`fslc trace` は段階2以降で検討)。
+- Auto-generated elements such as `_bounds_*` / `_partial_*` carry no meta (as before).
+- Pass-through into refine output is done in Stage 2 (implements).
+- Do not add new subcommands (`fslc trace` is considered in Stage 2 or later).
 
-### 1.3 テスト(tests/test_meta.py)
+### 1.3 Tests (tests/test_meta.py)
 
-タグ付き invariant 違反 / coverage false / unknown_cti / scenarios の
-requirement フィールド、`:` なしタグ、タグなし仕様の出力不変(既存全テスト
-green がその証明)、check がタグ付き構文を受理。
+The requirement field for a tagged invariant violation / coverage false /
+unknown_cti / scenarios, a tag without a `:`, output invariance for untagged
+specs (all existing tests green is the proof), and that check accepts tagged syntax.
 
-## 段階2: fsl-req 方言
+## Stage 2: the fsl-req dialect
 
-ファイル拡張子は `.fsl` のまま(トップレベルキーワードで判別)。
-`requirements <Name> { ... }` をトップレベルに追加し、**展開器
-`src/fslc/dialects.py` の `expand_requirements(ast, base_dir) -> ast`** が
-カーネル AST(通常の spec)に変換する。compose と同じ配線位置。
+The file extension stays `.fsl` (discriminated by the top-level keyword).
+Add `requirements <Name> { ... }` at top level, and the expander
+**`expand_requirements(ast, base_dir) -> ast` in `src/fslc/dialects.py`**
+converts it into kernel AST (an ordinary spec). The same wiring point as compose.
 
-### 2.1 構文
+### 2.1 Syntax
 
 ```fsl
 requirements ReturnSystemReq {
-  implements ReturnPolicy from "return_policy.fsl" {   // 省略可
+  implements ReturnPolicy from "return_policy.fsl" {   // optional
     map cases[c: CaseId] = if sys[c].st == New then Requested else ...
     map refunded = paid_count
-    // action 対応は branches の maps 句と通常 action の maps 句から自動収集
+    // action correspondences are collected automatically from the maps clauses of branches and of ordinary actions
   }
 
-  // 型・状態・init はカーネル構文そのまま(暗黙の状態は作らない)
+  // types, states, init are kernel syntax as-is (no implicit state is created)
   type CaseId = 0..2
   type Amount = 0..3
   const AUTO_LIMIT = 1
@@ -74,7 +75,7 @@ requirements ReturnSystemReq {
   state { sys: Map<CaseId, RCase>, paid_count: Int }
   init { ... }
 
-  requirement REQ-1 "閾値以下の返品は自動承認される" {
+  requirement REQ-1 "returns at or below the threshold are auto-approved" {
     action submit(c: CaseId, a: Amount) {
       requires sys[c].st == New
       requires a > 0
@@ -89,7 +90,7 @@ requirements ReturnSystemReq {
     }
   }
 
-  requirement REQ-2 "支払いは承認後のみ" {
+  requirement REQ-2 "payment only after approval" {
     fair action pay(c: CaseId) maps refund(c) {
       requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
       sys[c].st = Paid
@@ -98,7 +99,7 @@ requirements ReturnSystemReq {
     invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }
   }
 
-  acceptance AC-1 "小額は自動承認され支払われる" {
+  acceptance AC-1 "small amounts are auto-approved and paid" {
     submit(0, 1)
     pay(0)
     expect sys[0].st == Paid
@@ -106,58 +107,64 @@ requirements ReturnSystemReq {
 }
 ```
 
-### 2.2 展開規則
+### 2.2 Expansion rules
 
-1. `requirement <ID> "<text>" { items }` → 中身の action / invariant /
-   reachable / leadsTo をトップレベルへ持ち上げ、各要素に
-   `meta = {id: ID, text}` を付与(段階1の機構)。ID は `REQ-1` 形式の
-   識別子トークン(英数字とハイフン)。
-2. `branches { when <cond> { 文... } maps <abs対応> ... }` →
-   アクションを分岐ごとに分割: `submit__b1`, `submit__b2`(表示名は
-   `submit[a <= AUTO_LIMIT]` 形式 — 表示名マップは compose の機構を流用)。
-   各分割アクション = 元の requires + when 条件 + 分岐本体。
-   when 条件は**網羅・排他をチェックしない**(enabled の通常意味論に任せる。
-   重なれば両方 enabled、漏れれば disabled — coverage 診断が検出する)。
-3. `maps <abs_action>(<args>) | stutter`(action 修飾 / branches 内)→
-   `implements` ブロックの map 群と合成して **refinement AST を内部生成**。
-4. `implements ... { map ... }` がある場合、verify / check 時に
-   **上位層への refine 検査を同時実行**し、結果 JSON に
-   `"implements": {"abs": "ReturnPolicy", "result": "refines" | {...違反}}` を
-   追加する(refine が失敗しても verify 自体の結果は別建てで返す)。
-   refine 違反 JSON には関与した impl action の `requirement` を透過(§1.2 拡張)。
-5. `acceptance <ID> "<text>" { <action呼び出し>...  expect <式> }` →
-   (a) スキーマ: 確定ステップ列。展開時に**具象 Monitor で再生**し、
-   各ステップ ok + 最後に expect が真であることを check 時に検証
-   (失敗は `kind: "acceptance"` のエラーで AC ID + 失敗ステップを報告)。
-   (b) scenarios 出力に `kind: "acceptance"` のシナリオとして埋め込み
-   (steps / expected_states は再生結果から構築)→ testgen に自然に流れる。
-6. 展開後 spec の名前は `requirements` の名前。それ以外の項目
-   (type/enum/struct/state/init/トップレベル action 等)はそのまま透過。
+1. `requirement <ID> "<text>" { items }` → lift the contained action /
+   invariant / reachable / leadsTo to top level and attach
+   `meta = {id: ID, text}` to each element (the Stage 1 mechanism). The ID is
+   an identifier token of the form `REQ-1` (alphanumerics and hyphens).
+2. `branches { when <cond> { stmts... } maps <abs-correspondence> ... }` →
+   split the action per branch: `submit__b1`, `submit__b2` (the display names
+   are of the form `submit[a <= AUTO_LIMIT]` — the display-name map reuses the
+   compose mechanism). Each split action = the original requires + the when
+   condition + the branch body. The when conditions are **not checked for
+   exhaustiveness or exclusivity** (left to the ordinary enabled semantics:
+   if they overlap, both are enabled; if there is a gap, it is disabled — the
+   coverage diagnostic detects it).
+3. `maps <abs_action>(<args>) | stutter` (action modifier / inside branches) →
+   compose it with the map group in the `implements` block to **internally
+   generate a refinement AST**.
+4. When an `implements ... { map ... }` is present, at verify / check time
+   **also run a refine check against the upper layer**, and add
+   `"implements": {"abs": "ReturnPolicy", "result": "refines" | {...violation}}`
+   to the result JSON (even if refine fails, the verify result itself is
+   returned separately). The refine-violation JSON passes through the
+   `requirement` of the impl action involved (extension of §1.2).
+5. `acceptance <ID> "<text>" { <action call>...  expect <expr> }` →
+   (a) Schema: a fixed step sequence. At expansion time, **replay it with the
+   concrete Monitor** and verify at check time that each step is ok and that
+   expect is true at the end (failure is reported as a `kind: "acceptance"`
+   error with the AC ID + the failing step).
+   (b) Embed it in the scenarios output as a `kind: "acceptance"` scenario
+   (steps / expected_states are built from the replay result) → it flows
+   naturally into testgen.
+6. The name of the expanded spec is the name of `requirements`. All other items
+   (type/enum/struct/state/init/top-level actions, etc.) pass through unchanged.
 
-### 2.3 テスト(tests/test_req_dialect.py)
+### 2.3 Tests (tests/test_req_dialect.py)
 
-返品要件(§2.1 とほぼ同じ)を fixture に:
-- check ok / verify verified(+ implements.refines)/ induction proved
-- branches の分割が coverage に表示名で現れる(`submit[a <= AUTO_LIMIT]`)
-- 違反を仕込んだ変種で requirement {id, text} が反例に載る
-- acceptance: 正例が scenarios に出る / expect を偽にした変種が check 時に
-  `kind: "acceptance"` で落ちて AC ID を指す
-- implements の写像を壊した変種 → implements.result が refinement_failed
-- 既存全テスト不変
+Use the return requirements (almost the same as §2.1) as a fixture:
+- check ok / verify verified (+ implements.refines) / induction proved
+- the branch split appears in coverage with display names (`submit[a <= AUTO_LIMIT]`)
+- in a variant seeded with a violation, the requirement {id, text} appears in the counterexample
+- acceptance: the positive example appears in scenarios / a variant that makes
+  expect false fails at check time with `kind: "acceptance"` and points to the AC ID
+- a variant that breaks the implements mapping → implements.result is refinement_failed
+- all existing tests unchanged
 
-## 段階3: fsl-biz 方言
+## Stage 3: the fsl-biz dialect
 
-`business <Name> { ... }` をトップレベルに追加。展開器
-`expand_business(ast) -> ast`(他ファイル参照なし)。
+Add `business <Name> { ... }` at top level. The expander
+`expand_business(ast) -> ast` (no references to other files).
 
-### 3.1 構文
+### 3.1 Syntax
 
 ```fsl
 business ReturnHandling {
-  actor Customer, Manager                  // → enum Actor { Customer, Manager }(参照されなければ省略可な情報注釈)
+  actor Customer, Manager                  // → enum Actor { Customer, Manager } (an informational annotation, omittable if not referenced)
   case Return = 0..2                       // → type Return = 0..2
 
-  process Return {                         // case 型ごとに1プロセス
+  process Return {                         // one process per case type
     stages Requested, Approved, Rejected, Refunded   // → enum ReturnStage
     initial Requested
     transition approve  Requested -> Approved by Manager
@@ -166,60 +173,65 @@ business ReturnHandling {
   }
 
   kpi refunded counts Return in Refunded   // → state refunded: Int +
-                                           //   refund 遷移で +1 + 整合 invariant
+                                           //   +1 on the refund transition + a consistency invariant
 
-  policy PAY-1 "返金は承認済みケースのみ" invariant {
-    // 式中で stage(c) が使える(c は case 型の束縛変数)
-    forall c: Return { stage(c) == Refunded => true }   // 例
+  policy PAY-1 "refunds only for approved cases" invariant {
+    // stage(c) is available in expressions (c is a case-type bound variable)
+    forall c: Return { stage(c) == Refunded => true }   // example
   }
-  policy PAY-2 "申請は必ず裁定される" responds {
+  policy PAY-2 "every request is eventually adjudicated" responds {
     forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
   }
-  goal AllSettled "全件が完了しうる" {
+  goal AllSettled "all cases can complete" {
     forall c: Return { stage(c) == Refunded or stage(c) == Rejected }
   }
 }
 ```
 
-### 3.2 展開規則
+### 3.2 Expansion rules
 
-1. `case X = lo..hi` → `type X = lo..hi`。
+1. `case X = lo..hi` → `type X = lo..hi`.
 2. `process X { stages S1..Sn  initial Si  transition t A -> B by Actor }` →
    - `enum XStage { S1, ..., Sn }`
-   - `state { x_stage: Map<X, XStage> }`(変数名はプロセス名の小文字 +
-     `_stage`)+ `init { forall c: X { x_stage[c] = Si } }`
-   - 遷移ごとに `fair action <t>(c: X) "by <Actor>" {
-       requires x_stage[c] == A   x_stage[c] = B  [kpi更新] }`
-     (by は meta.text に載せる: `meta = {id: t, text: "by Manager"}`。
-      policy 由来でないので requirement とは別フィールド `"actor"` でもよい —
-      実装単純さ優先で meta.text に "by Manager" を入れる形でよい)
-   - 同名遷移ラベルの重複は type エラー。
+   - `state { x_stage: Map<X, XStage> }` (the variable name is the lowercased
+     process name + `_stage`) + `init { forall c: X { x_stage[c] = Si } }`
+   - per transition, `fair action <t>(c: X) "by <Actor>" {
+       requires x_stage[c] == A   x_stage[c] = B  [kpi update] }`
+     (`by` goes into meta.text: `meta = {id: t, text: "by Manager"}`.
+      Since it is not policy-derived, a separate field `"actor"` from
+      requirement is also acceptable — for implementation simplicity it is fine
+      to put "by Manager" into meta.text)
+   - duplicate transition labels with the same name are a type error.
 3. `kpi k counts X in S` → `state { k: Int }` + init 0 +
-   S へ**入る**全遷移で `k = k + 1`(S から出る遷移があれば type エラー —
-   v3 では減算 KPI は未対応と明文化)+
-   `invariant _kpi_k { k == count(c: X where x_stage(c) == S) }`(自動)。
-4. `policy <ID> "<text>" invariant { 式 }` → invariant(meta 付き)。
-   `policy ... responds { P ~> Q }` → leadsTo(meta 付き)。
-   `goal <ID> "<text>" { 式 }` → reachable(meta 付き)。
-   式中の `stage(c)` は当該 case 型の束縛変数 c に対し `x_stage[c]` に
-   書き換える(束縛の型からプロセスを特定。曖昧なら type エラー)。
-5. `actor` 宣言は名簿(transition の by の検証に使う。未宣言 actor は
-   type エラー)。それ以外の意味論なし。
+   `k = k + 1` on every transition that **enters** S (if there is a transition
+   leaving S it is a type error — it is stated explicitly that decrementing KPIs
+   are unsupported in v3) +
+   `invariant _kpi_k { k == count(c: X where x_stage(c) == S) }` (automatic).
+4. `policy <ID> "<text>" invariant { expr }` → invariant (with meta).
+   `policy ... responds { P ~> Q }` → leadsTo (with meta).
+   `goal <ID> "<text>" { expr }` → reachable (with meta).
+   `stage(c)` in an expression is rewritten to `x_stage[c]` for the case-type
+   bound variable c in question (the process is identified from the type of the
+   binding; ambiguity is a type error).
+5. The `actor` declaration is a roster (used to validate the `by` of a
+   transition; an undeclared actor is a type error). No other semantics.
 
-### 3.3 テスト(tests/test_biz_dialect.py)
+### 3.3 Tests (tests/test_biz_dialect.py)
 
-§3.1 の返品プロセスを fixture に: check ok / verify verified /
-induction proved / policy 違反変種で requirement(=policy ID+text)が
-反例に載る / kpi 整合 invariant の自動生成 / goal が reachable として
-witness / 未宣言 actor・KPI 減算の type エラー / 既存全テスト不変。
-さらに examples/layers の return_policy.fsl をこの方言で書き直した
-`return_policy_biz.fsl` が、既存 return_refines.fsl(の abs 名調整版)で
-**要件層から refine できる**こと(= 方言展開後のカーネル仕様が手書きと
-同等であることの実証)。
+Use the return process of §3.1 as a fixture: check ok / verify verified /
+induction proved / a policy-violating variant carries the requirement
+(= policy ID+text) in the counterexample / automatic generation of the kpi
+consistency invariant / the goal is witnessed as reachable / type errors for
+an undeclared actor and a decrementing KPI / all existing tests unchanged.
+Furthermore, `return_policy_biz.fsl`, which rewrites examples/layers'
+return_policy.fsl in this dialect, can **be refined from the requirements layer**
+by the existing return_refines.fsl (with adjusted abs names) (= demonstration
+that the kernel spec after dialect expansion is equivalent to a hand-written one).
 
-## 段階4: 3層ドッグフーディング
+## Stage 4: three-layer dogfooding
 
-返品ドメインを3層フルで: fsl-biz(業務)← fsl-req(要件; implements)←
-fsl(設計; 永続化や再試行などの実装詳細を追加して refine)← examples の
-Adapter 実装。所見は DOGFOOD-4.md。LANGUAGE.md・skills/fsl への方言の
-追記もここで行う。
+The return domain across all three layers: fsl-biz (business) ← fsl-req
+(requirements; implements) ← fsl (design; adding implementation details such as
+persistence and retry, then refine) ← the Adapter implementation in examples.
+Findings in DOGFOOD-4.md. Additions of the dialects to LANGUAGE.md and skills/fsl
+are also done here.

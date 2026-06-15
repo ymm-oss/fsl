@@ -1,21 +1,23 @@
 // ════════════════════════════════════════════════════════════════
-// 解約フロー(要件定義層)— PM/PdM 向けサンプル
+// Cancellation flow (requirements layer) — sample for PM/PdM
 //
-// ビジネス層(cancel_flow.fsl)を「システムの要件」に詳細化したもの。
-// requirement ブロックに要件 ID と原文をそのまま書く。
+// Refines the business layer (cancel_flow.fsl) into "system requirements".
+// The requirement blocks carry the requirement ID and original text verbatim.
 //
 //   fslc verify examples/pm/cancel_system.fsl --deadlock ignore
 //
-// 1コマンドで (1) 要件同士の矛盾検査 と (2) ビジネス層との整合検査
-// (implements)が同時に走る。要件違反の反例には、壊れた要件の ID と
-// 原文がそのまま表示される。受け入れ基準(acceptance)は検証時に
-// 自動再生され、そのまま開発チームの統合テスト雛形になる。
+// A single command runs both (1) the consistency check among requirements and
+// (2) the conformance check against the business layer (implements) at once.
+// A requirement-violation counterexample shows the ID and original text of the
+// broken requirement verbatim. The acceptance criteria are automatically
+// replayed during verification and serve directly as the dev team's
+// integration-test template.
 // ════════════════════════════════════════════════════════════════
 requirements CancelSystemReq {
 
-  // ── ビジネス層との対応宣言 ─────────────────────────────
-  // 「このシステム要件は、業務フロー CancelFlow を逸脱しない」を
-  // 機械検査するための対応表。システムの画面状態 → 業務ステージ。
+  // ── Correspondence declaration with the business layer ─────────────────────────────
+  // A mapping table for machine-checking that "these system requirements do not
+  // deviate from the CancelFlow business flow". Maps system screen states -> business stages.
   implements CancelFlow from "cancel_flow.fsl" {
     map sub_stage[c: Sub] =
       if scr[c].st == Browsing    then Active
@@ -27,11 +29,11 @@ requirements CancelSystemReq {
     map retained = retain_count
   }
 
-  // ── システムの状態(画面と内部フラグ)──────────────────
+  // ── System state (screens and internal flags) ──────────────────
   type Sub = 0..2
-  // 画面の状態。業務ステージより1段具体的(画面名で書く)
+  // Screen state. One level more concrete than the business stage (named by screen)
   enum Screen { Browsing, CancelForm, OfferDialog, ThanksStay, GoodbyePage }
-  struct SubView { st: Screen, offered: Bool }   // offered: オファー提示済みフラグ
+  struct SubView { st: Screen, offered: Bool }   // offered: flag for "offer already shown"
 
   state {
     scr: Map<Sub, SubView>,
@@ -44,24 +46,24 @@ requirements CancelSystemReq {
     retain_count = 0
   }
 
-  // ── 要件(ID と原文をそのまま書く)──────────────────────
+  // ── Requirements (written with the ID and original text verbatim) ──────────────────────
 
-  requirement REQ-1 "解約ボタンを押すと解約フォームに遷移する" {
+  requirement REQ-1 "Pressing the cancel button transitions to the cancellation form" {
     fair action tap_cancel(c: Sub) maps request_cancel(c) {
       requires scr[c].st == Browsing
       scr[c].st = CancelForm
     }
   }
 
-  requirement REQ-2 "解約フォーム送信時、救済オファーを1契約につき1回だけ提示する" {
+  requirement REQ-2 "On cancellation-form submission, show the retention offer exactly once per subscription" {
     fair action submit_cancel(c: Sub) maps show_offer(c) {
       requires scr[c].st == CancelForm
-      requires not scr[c].offered        // 二重提示の禁止(1回だけ)
+      requires not scr[c].offered        // No double-showing (only once)
       scr[c] = SubView { st: OfferDialog, offered: true }
     }
   }
 
-  requirement REQ-3 "オファー承諾で継続(サンクス画面)、辞退で解約完了画面へ" {
+  requirement REQ-3 "Accepting the offer goes to retention (thanks screen); declining goes to the cancellation-complete screen" {
     fair action accept(c: Sub) maps accept_offer(c) {
       requires scr[c].st == OfferDialog
       scr[c].st = ThanksStay
@@ -72,15 +74,15 @@ requirements CancelSystemReq {
       scr[c].st = GoodbyePage
       churn_count = churn_count + 1
     }
-    // カウンタの定義そのものを要件として明文化(数え漏れ・二重計上の防止)
+    // Codify the counter definitions themselves as a requirement (preventing missed counts / double counting)
     invariant CountsMatchScreens {
       churn_count  == count(c: Sub where scr[c].st == GoodbyePage)
         and retain_count == count(c: Sub where scr[c].st == ThanksStay)
     }
   }
 
-  requirement REQ-4 "オファーは提示済みの契約に再提示されない" {
-    // 「offered フラグはオファー画面以降で必ず立っている」
+  requirement REQ-4 "An offer is not re-shown to a subscription that has already been shown one" {
+    // "The offered flag is always set from the offer screen onward"
     invariant OfferedFlagConsistent {
       forall c: Sub {
         (scr[c].st == OfferDialog or scr[c].st == ThanksStay or scr[c].st == GoodbyePage)
@@ -89,19 +91,19 @@ requirements CancelSystemReq {
     }
   }
 
-  // ── 受け入れ基準(そのままテストになる)─────────────────
-  // 検証時に1ステップずつ自動再生され、expect が成り立たなければ
-  // どのステップで崩れたかを指して失敗する。scenarios / testgen に
-  // 流れて、開発チームの統合テスト雛形になる。
+  // ── Acceptance criteria (which become tests directly) ─────────────────
+  // Replayed step by step automatically during verification; if an expect
+  // does not hold, the failure points to the step at which it broke. These
+  // flow into scenarios / testgen and become the dev team's integration-test template.
 
-  acceptance AC-1 "承諾フロー: 申請→提示→承諾で継続になる" {
+  acceptance AC-1 "Acceptance flow: request -> show -> accept results in retention" {
     tap_cancel(0)
     submit_cancel(0)
     accept(0)
     expect scr[0].st == ThanksStay and retain_count == 1
   }
 
-  acceptance AC-2 "辞退フロー: 申請→提示→辞退で解約が成立する" {
+  acceptance AC-2 "Decline flow: request -> show -> decline completes the cancellation" {
     tap_cancel(1)
     submit_cancel(1)
     decline(1)

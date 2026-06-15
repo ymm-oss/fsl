@@ -5,7 +5,7 @@
 // a log whose events all pass returns conformant. leadsTo is intentionally not
 // checked by replay.
 //
-// probe: ConformantImpliesAllOk を `status == Conformant => rejected` に壊すと violated@1
+// probe: breaking ConformantImpliesAllOk into `status == Conformant => rejected` yields violated@1
 spec FslcMonitor {
   const MAX_EVENTS = 3
   type Count = 0..MAX_EVENTS

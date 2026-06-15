@@ -1,60 +1,59 @@
-# ドッグフーディング第3回 — フルワークフロー実証 (2026-06-11)
+# Dogfooding Round 3 — Full Workflow Demonstration (2026-06-11)
 
-v2.0/v2.1 の全レイヤを貫通する「FSL の想定する開発の流れ」を、新ドメイン
-(二層台帳の銀行口座+監査ログ)で最初から最後まで実走した。
+We ran "the development flow FSL envisions" — penetrating every layer of v2.0/v2.1 — end to end on a new domain
+(a bank account with a two-tier ledger + audit log).
 
-## ワークフローと結果
+## Workflow and Results
 
-| 段階 | 成果物 | 結果 |
+| Stage | Artifact | Result |
 |---|---|---|
-| 1. 抽象仕様 | `specs/bank.fsl`(即時残高の口座) | **proved (k=1)** 一発 |
-| 2. 詳細化 | `specs/bank_impl.fsl`(cleared + pending の二層台帳) | **proved (k=1)** 一発 |
-| 3. 忠実性検査 | `specs/bank_refines.fsl`(`balance = cleared + pending`) | **refines** 一発。settle は stutter、withdraw のガード強化(cleared のみ)も正しく許容 |
-| 4. 合成 | `specs/bank_system.fsl`(bank_impl + audit_log、同期アクション+internal) | verified + **proved (k=1)**。横断 invariant `audit.balance == cleared + pending + withdrawn` がコンポーネントの Seq 集約 invariant と共存して帰納的 |
-| 5. 実装接続 | `examples/bank/`(素の Python 実装 + testgen 生成ハーネス + Adapter 結線) | **8/8 passed**(シナリオ再生7 + Monitor をオラクルとする100ステップランダムウォーク) |
+| 1. Abstract spec | `specs/bank.fsl` (an account with immediate balance) | **proved (k=1)** on the first try |
+| 2. Refinement | `specs/bank_impl.fsl` (a two-tier cleared + pending ledger) | **proved (k=1)** on the first try |
+| 3. Faithfulness check | `specs/bank_refines.fsl` (`balance = cleared + pending`) | **refines** on the first try. settle is a stutter, and the strengthened withdraw guard (cleared only) is correctly permitted |
+| 4. Composition | `specs/bank_system.fsl` (bank_impl + audit_log, synchronized actions + internal) | verified + **proved (k=1)**. The cross-cutting invariant `audit.balance == cleared + pending + withdrawn` is inductive while coexisting with the components' Seq aggregation invariant |
+| 5. Implementation hookup | `examples/bank/` (a plain Python implementation + testgen-generated harness + Adapter wiring) | **8/8 passed** (7 scenario replays + a 100-step random walk with Monitor as the oracle) |
 
-`examples/bank/bank.py` は FSL を一切知らない普通のアプリコード。Adapter
-(約20行)の結線だけで、仕様から生成された適合テストが実装の正しさを検査する
-— これが DESIGN-v1 以来の「仕様と実装の橋」の完成形。
+`examples/bank/bank.py` is ordinary app code that knows nothing about FSL. With only the Adapter wiring (about 20 lines),
+conformance tests generated from the spec check the implementation's correctness — this is the finished form of the
+"bridge between spec and implementation" envisioned since DESIGN-v1.
 
-## 発見(2件 — いずれも修正済み)
+## Discoveries (2 — both fixed)
 
-### BUG16: testgen の生成関数名に表示名のドットが混入(SyntaxError)
+### BUG16: testgen mixes display-name dots into the generated function names (SyntaxError)
 
-合成仕様のシナリオ名(`reach_bank.Settled`)がそのまま関数名になり、生成
-ファイルが import 不能だった。識別子サニタイズ+衝突連番+docstring に元名
-保持で修正。compose の表示名対応(`__` → `.`)の波及漏れという、第2回 F6 と
-同系の「表示レイヤの境界」バグ。
+The composed spec's scenario names (`reach_bank.Settled`) became function names verbatim, making the generated
+file un-importable. Fixed with identifier sanitization + collision-numbering + preserving the original name in a
+docstring. A "display-layer boundary" bug of the same family as round 2's F6 — a missed propagation of compose's
+display-name handling (`__` → `.`).
 
-### BUG17: testgen の cwd 相対パス埋め込み / Monitor のパス・ソース誤判別
+### BUG17: testgen embeds a cwd-relative path / Monitor mis-classifies path vs. source
 
-生成物が `SPEC_PATH = 'specs/...'` を埋め込むためリポジトリルート以外から
-実行不能。さらに Monitor が存在しないパス文字列を FSL ソースとして parse し、
-io エラーであるべき失敗が UnexpectedCharacters になる(修復プロトコル違反)。
-生成ファイル起点の相対パス解決+Monitor のパス判別で修正。
+The artifact embeds `SPEC_PATH = 'specs/...'`, so it cannot run from anywhere but the repository root. Furthermore,
+Monitor parses a nonexistent path string as FSL source, so a failure that should be an io error becomes
+UnexpectedCharacters (a repair-protocol violation). Fixed with relative-path resolution anchored at the generated
+file + path classification in Monitor.
 
-## 所見
+## Findings
 
-- **F8: ワークフロー全段が「一発」で通った。** 第1・2回と異なり仕様起因の
-  CTI も反例も出ていない。抽象→詳細→合成の各段で proved を維持したまま
-  進める「段階的詳細化」が、このツールチェーンの実際の使い心地として成立する。
-- **F9: refinement の写像式に条件式が書けない。**(v2.2 で解消)当初候補
-  だった座席予約ドメインでは `map seats[s] = (st == Sold ? some(holder) : none)`
-  相当が必要で、FSL に条件式が無いため写像で表現できず、ドメインを変えた。
-  → **写像式限定の `if-then-else` 式**として実装(DESIGN-refinement §2.5)。
-  断念した座席予約ドメインそのものが2件目の実例となり、
-  `specs/seat_booking{,_impl}.fsl` + `seat_refines.fsl` で
-  `map seats[s] = if slots[s].st == Sold then slots[s].holder else none` が
-  refines を通ることを確認(抽象側の count 集約が条件付き写像値の上で
-  正しく評価される)。通常仕様の式文法には開放していない。
-- **F10: Adapter の結線規約は十分明確。** observe() の射影(表示名キー、
-  Seq は list、Option は None|値)は LANGUAGE.md の規約どおりで迷いなし。
-  ランダムウォークが settle の「nothing to settle」ガードと spec の
-  `requires pending > 0` の一致を自動で突き合わせてくれるのが実用上強い。
+- **F8: every stage of the workflow passed "on the first try".** Unlike rounds 1 and 2, no spec-induced CTIs or
+  counterexamples appeared. "Stepwise refinement" — proceeding through abstract → detailed → composed while keeping
+  proved at each stage — holds up as the actual feel of using this toolchain.
+- **F9: a conditional expression cannot be written in a refinement mapping expression.** (resolved in v2.2) The
+  seat-reservation domain we initially considered needed something equivalent to
+  `map seats[s] = (st == Sold ? some(holder) : none)`, and since FSL had no conditional expression, it could not be
+  expressed as a mapping, so we changed the domain.
+  → Implemented as an **`if-then-else` expression restricted to mapping expressions** (DESIGN-refinement §2.5).
+  The abandoned seat-reservation domain itself became a second concrete example, and we confirmed that
+  `map seats[s] = if slots[s].st == Sold then slots[s].holder else none` passes refines in
+  `specs/seat_booking{,_impl}.fsl` + `seat_refines.fsl` (the abstract side's count aggregation evaluates correctly
+  over the conditional mapping value). It is not opened up to the ordinary spec expression grammar.
+- **F10: the Adapter wiring convention is clear enough.** observe()'s projection (display-name keys, Seq as list,
+  Option as None|value) follows the LANGUAGE.md convention with no hesitation. It is practically powerful that the
+  random walk automatically reconciles settle's "nothing to settle" guard with the spec's `requires pending > 0`.
 
-## 統計
+## Statistics
 
-- 新規仕様5本(bank / bank_impl / bank_refines / bank_system / examples)、
-  リポジトリの proved 仕様は計13本(buggy サンプル2本を除く全部)
-- 新規バグ2件(BUG16/17)はいずれも生成系・橋渡し系。検証コア(BMC /
-  induction / refine / compose の意味論)の欠陥は今回ゼロ
+- 5 new specs (bank / bank_impl / bank_refines / bank_system / examples), bringing the repository's proved specs to
+  13 total (everything except the 2 buggy samples)
+- The 2 new bugs (BUG16/17) are both in the generation/bridge subsystems. Zero defects in the verification core
+  (BMC / induction / refine / compose semantics) this round.

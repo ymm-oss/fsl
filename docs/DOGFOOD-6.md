@@ -1,10 +1,11 @@
 # DOGFOOD-6: Example Gallery Bug Hunt
 
-`examples/gallery/` の各ファイルは期待結果を宣言し、`tests/test_gallery.py` が
-実際の `fslc` JSON と比較する。通常の仕様記述ミスは修正済み。以下は期待と
-実出力が一致せず、仕様側ではなく `fslc` 側の候補として残したもの。
+Each file in `examples/gallery/` declares its expected result, and `tests/test_gallery.py`
+compares it against the actual `fslc` JSON. Ordinary spec-authoring mistakes have been fixed.
+The following are cases where the expectation and the actual output disagreed, left as candidates
+on the `fslc` side rather than the spec side.
 
-## BUG-001: refinement が抽象 action の requires 違反を見逃す
+## BUG-001: refinement misses a requires violation of an abstract action
 
 - reproduction file: `examples/gallery/errors/refinement_failed_map.fsl`
 - command:
@@ -31,8 +32,8 @@
   `Not(requires_ok)` violation condition, so the likely issue is in how the explored
   implementation step / action instance / singleton parameter binding is constrained
   when checking the mapped transition.
-- test status: `tests/test_gallery.py` で期待 `refinement_failed`/`abs_requires_failed` を検証(xfail 解除済み)。
-- **fixed**: refine が `_bmc_explore` の「深さちょうど depth」の完全展開ソルバーを再利用しており、impl が depth 手前でデッドロックすると展開が unsat → 全違反検査が unsat=見逃しになっていた。refine 内で到達可能な各プレフィックスを増分構築し、unsat になった深さで打ち切る方式に変更(src/fslc/refine.py)。
+- test status: `tests/test_gallery.py` verifies the expected `refinement_failed`/`abs_requires_failed` (xfail removed).
+- **fixed**: refine was reusing `_bmc_explore`'s "exactly depth" full-unrolling solver, so when the impl deadlocked before reaching depth, the unrolling became unsat → every violation check came out unsat = missed. Changed refine to build each reachable prefix incrementally and stop at the depth where it becomes unsat (src/fslc/refine.py).
 
 ## BUG-002: refinement map out-of-bounds is missed when impl/abs type names collide
 
@@ -60,5 +61,5 @@
   refinement bound checking or static map typing is resolving the shared type name
   through the implementation type environment instead of the abstract one, or otherwise
   treating the mapped alpha value as already abstract-bounded.
-- test status: `tests/test_gallery.py` で期待 `refinement_failed`/`abs_state_mismatch` を検証(xfail 解除済み)。
-- **fixed**: BUG-001 と同じ「完全展開のデッドロック→空虚 refines」が根本原因。増分プレフィックス展開で解消。期待 kind は `map_out_of_bounds` ではなく `abs_state_mismatch`(jump 後 bump の更新結果 n=1 と α(n)=2 の不一致を境界検査より先に検出)であることを確認し、gallery の期待を実際に合わせた(どちらも refinement_failed である点は不変)。
+- test status: `tests/test_gallery.py` verifies the expected `refinement_failed`/`abs_state_mismatch` (xfail removed).
+- **fixed**: the root cause is the same "full-unrolling deadlock → vacuous refines" as BUG-001. Resolved by incremental prefix unrolling. We confirmed the expected kind is `abs_state_mismatch`, not `map_out_of_bounds` (the mismatch between bump's update result n=1 after jump and α(n)=2 is detected before the bound check), and aligned the gallery's expectation to the actual result (both being refinement_failed is unchanged).

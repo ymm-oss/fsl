@@ -1,17 +1,18 @@
 // ════════════════════════════════════════════════════════════════
-// 設計→要件 refinement 対応表【エンジニアの成果物】
+// Design→requirements refinement mapping table [Engineer deliverable]
 //
-// 誰が書くか:
-//   エンジニアが、設計層の内部状態・内部アクションを PM 要件の語彙へ
-//   どう見せるかを宣言する。
+// Who writes it:
+//   The engineer declares how the design layer's internal state and
+//   internal actions are presented in the vocabulary of the PM requirements.
 //
-// 何のために書くか:
-//   支払い submit/confirm や outbox など、実装寄りの詳細を追加しても、
-//   PM 要件から見た振る舞いが増えていないことを検査する。
+// Why it is written:
+//   To check that even after adding implementation-oriented detail such as
+//   payment submit/confirm and the outbox, the behavior as viewed from the
+//   PM requirements has not grown.
 //
-// 注意:
-//   2_requirements.fsl の submit は branches で分割されているため、
-//   対応先は内部名 submit__b1 / submit__b2 を使う。
+// Note:
+//   Because submit in 2_requirements.fsl is split via branches, the
+//   correspondence targets use the internal names submit__b1 / submit__b2.
 // ════════════════════════════════════════════════════════════════
 refinement DesignRefinesRequirements {
   impl ExpenseDesign

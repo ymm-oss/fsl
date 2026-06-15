@@ -1,4 +1,4 @@
-// 設計 ⊒ 要件。audit は要件層では見えない内部ステップ=stutter。
+// design ⊒ requirements. audit is an internal step invisible at the requirements layer = stutter.
 refinement ChainBotRefinesMid {
   impl ChainBot
   abs  ChainMid

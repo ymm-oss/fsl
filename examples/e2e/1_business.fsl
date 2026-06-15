@@ -1,71 +1,81 @@
 // ════════════════════════════════════════════════════════════════
-// 経費精算 To-Be【コンサルタントの成果物】— fsl-biz 方言
+// Expense reimbursement To-Be [Consultant deliverable] — fsl-biz dialect
 //
-// 誰が書くか:
-//   業務改革を設計するコンサルタントが、現場・経理・統制担当と合意した
-//   「あるべき業務プロセス」を、紙の業務フローと同じ粒度で書く。
+// Who writes it:
+//   The consultant who designs the business transformation writes the
+//   "to-be business process" agreed with the front line, finance, and
+//   the controls owners, at the same granularity as a paper business flow.
 //
-// 何のために書くか:
-//   少額経費はシステムで自動承認し、高額経費は従来どおりマネージャが
-//   裁定する。改革で処理速度を上げても、「提出放置」「承認後未払い」
-//   という統制リスクを増やしていないことを機械検査する。
+// Why it is written:
+//   Low-amount expenses are auto-approved by the system, and high-amount
+//   expenses are adjudicated by a manager as before. The goal is to
+//   machine-check that speeding up processing through the transformation
+//   does not increase the control risks of "submissions left unattended"
+//   and "approved but unpaid".
 //
-// 読み方:
-//   process が業務フロー図、policy が監査・統制ルール、kpi が経営指標、
-//   goal が「この業務が実際に完了まで流れる」ことの確認点。
-//   実装の画面名・API名・DB名はまだ一切出さない。
+// How to read it:
+//   process is the business flow diagram, policy is the audit/control
+//   rules, kpi is the management metric, and goal is the checkpoint that
+//   "this process actually flows through to completion". No implementation
+//   screen names, API names, or DB names appear yet.
 // ════════════════════════════════════════════════════════════════
 business ExpenseToBe {
 
   actor Employee, Manager, Finance, System
 
-  // 検証対象は申請3件分。小さく見えるが、状態の組み合わせは十分にあり、
-  // 「承認を飛ばす」「支払いだけ増える」などの統制抜けはここで再現する。
+  // The verification target is 3 claims. It looks small, but the
+  // combinations of states are plenty, and control gaps such as
+  // "skipping approval" or "payment count increasing on its own" are
+  // reproduced here.
   case Claim = 0..2
 
-  // ── 業務プロセス(紙のフロー図と1対1)───────────────────
+  // ── Business process (one-to-one with the paper flow diagram) ─────
   process Claim {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
 
     transition submit       Draft     -> Submitted by Employee
 
-    // 改革ポイント: 少額レーンは System が自動承認する。
-    // 「いくらまでを少額とするか」は PM の要件層で決める詳細。
+    // Transformation point: the low-amount lane is auto-approved by the System.
+    // "Up to what amount counts as low-amount" is a detail decided in the
+    // PM's requirements layer.
     transition auto_approve Submitted -> Approved  by System
 
-    // 高額レーンは統制上の人手裁定を残す。
+    // The high-amount lane keeps the manual adjudication required for control.
     transition mgr_approve  Submitted -> Approved  by Manager
     transition reject       Submitted -> Rejected  by Manager
 
-    // 支払いは承認後に Finance が実行する。
+    // Payment is executed by Finance after approval.
     transition pay          Approved  -> Paid      by Finance
   }
 
-  // 経営指標: 支払い完了件数。kpi は同名のカウンタ整合 invariant を
-  // 自動生成するため、支払い件数の数え漏れ・二重計上も検査対象になる。
+  // Management metric: the number of completed payments. Because kpi
+  // auto-generates a same-named counter-consistency invariant, undercounting
+  // and double-counting of payments are also part of the verification target.
   kpi paid_claims counts Claim in Paid
 
-  // ── 統制ポリシー──────────────────────────────────────
-  // ID と原文をそのまま書く。違反した場合、JSON の反例にはこの ID と
-  // 原文が載るため、監査・PM・エンジニアが同じ失敗を見られる。
+  // ── Control policies ─────────────────────────────────────────────
+  // Write the ID and the original text verbatim. On violation, the JSON
+  // counterexample carries this ID and original text, so the auditor, the
+  // PM, and the engineer all see the same failure.
 
-  policy CTRL-1 "提出された申請は必ず裁定を受ける" responds {
+  policy CTRL-1 "A submitted claim must always be adjudicated" responds {
     forall c: Claim {
       stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
     }
   }
 
-  policy CTRL-2 "承認された申請は必ず支払われる" responds {
+  policy CTRL-2 "An approved claim must always be paid" responds {
     forall c: Claim {
       stage(c) == Approved ~> stage(c) == Paid
     }
   }
 
-  // ── ゴール────────────────────────────────────────────
-  // 「そもそも Draft から Paid まで到達できるのか」を確認する。
-  // ここが reachable_failed になる改革案は、統制以前に業務として詰まっている。
-  goal CanPay "申請から承認を経て支払い完了に至るケースが存在する" {
+  // ── Goal ─────────────────────────────────────────────────────────
+  // Confirm "whether it is even possible to reach Paid from Draft".
+  // A transformation proposal where this becomes reachable_failed is
+  // stuck as a business process before controls even come into play.
+  goal CanPay "There exists a case that reaches completed payment via approval from a claim" {
     exists c: Claim { stage(c) == Paid }
   }
 }

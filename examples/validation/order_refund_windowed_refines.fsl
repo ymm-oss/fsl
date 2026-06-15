@@ -10,5 +10,5 @@ refinement WindowedRefinesBase {
   action ship(o)   -> ship(o)
   action cancel(o) -> cancel(o)
   action refund(o) -> refund(o)
-  action tick()    -> stutter           // 時間進行は抽象契約から不可視のはず
+  action tick()    -> stutter           // time advance should be invisible to the abstract contract
 }

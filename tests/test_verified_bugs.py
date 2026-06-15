@@ -50,7 +50,7 @@ spec StageOutsideBusiness {
 
     assert result["result"] == "error", result
     assert result["kind"] == "type"
-    assert result["message"] == "stage(...) は business 方言でのみ使用可"
+    assert result["message"] == "stage(...) is only allowed in the business dialect"
 
 
 def test_stage_helper_remains_allowed_in_business_dialect(tmp_path):
@@ -665,8 +665,9 @@ refinement R488 {
 
 
 def test_compose_rewrites_component_const_in_type_binder_and_param(tmp_path):
-    # コンポーネントが const をレンジ/binder/param で使うと、展開時に const は
-    # alias__ でプレフィクスされるが式中の参照が書き換えられず未解決になっていた。
+    # When a component uses a const in a range/binder/param, on expansion the
+    # const gets prefixed with alias__ but the references in the expression were
+    # not rewritten, leaving them unresolved.
     comp = """
 spec Counter {
   const CAP = 2
@@ -689,11 +690,11 @@ compose CounterSys {
     cpath = tmp_path / "counter_sys.fsl"
     cpath.write_text(compose, encoding="utf-8")
 
-    # check が通る(展開後の c__N = 0..c__CAP が解決される)
+    # check passes (the expanded c__N = 0..c__CAP resolves)
     checked = run_check(str(cpath))
     assert checked["result"] == "ok", checked
 
-    # verify も通り、境界 invariant が効く
+    # verify passes too, and the bound invariant holds
     ast, dn = parse_src(compose, str(tmp_path))
     spec = build_spec(ast, dn)
     vr = verify(spec, 5)

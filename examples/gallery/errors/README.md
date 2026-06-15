@@ -1,7 +1,7 @@
 # Invalid Spec Catalog
 
-このディレクトリは、診断種別ごとの最小例です。以下は実際に `fslc` で確認した
-JSON 出力の抜粋です。
+This directory holds minimal examples for each diagnostic kind. Below are excerpts
+of JSON output actually confirmed with `fslc`.
 
 ```json
 // parse_missing_expression.fsl
@@ -68,8 +68,9 @@ JSON 出力の抜粋です。
 {"result":"refines","checked_to_depth":3,"impl":"GalleryRefinementImpl","abs":"GalleryRefinementAbs","action_map":{"approve_i":"approve","quick_pay_i":"pay"}}
 ```
 
-`refinement_failed_map.fsl` は正しくは `refinement_failed/abs_requires_failed` を
-期待しています。実出力との差分は `docs/DOGFOOD-6.md` の `BUG-001` です。
+`refinement_failed_map.fsl` is correctly expected to give
+`refinement_failed/abs_requires_failed`. The diff from the actual output is
+`BUG-001` in `docs/DOGFOOD-6.md`.
 
 ```json
 // error_acceptance_false_expect.fsl

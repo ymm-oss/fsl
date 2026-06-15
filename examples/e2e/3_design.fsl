@@ -1,17 +1,21 @@
 // ════════════════════════════════════════════════════════════════
-// 経費精算カーネル設計【エンジニアの成果物】— FSL kernel spec
+// Expense reimbursement kernel design [Engineer deliverable] — FSL kernel spec
 //
-// 誰が書くか:
-//   エンジニアが、PM 要件を実装可能な内部状態・アクションへ詳細化する。
+// Who writes it:
+//   The engineer refines the PM requirements into implementable internal
+//   state and actions.
 //
-// 何のために書くか:
-//   要件層には無い実装寄りの詳細として、支払いを submit/confirm の
-//   2段階に分け、通知 outbox を追加する。それでも PM 要件から見ると
-//   「承認済みだけが支払われ、支払い件数が一致する」ことを refinement で検査する。
+// Why it is written:
+//   As implementation-oriented detail not present in the requirements
+//   layer, payment is split into two phases, submit/confirm, and a
+//   notification outbox is added. Even so, refinement checks that, viewed
+//   from the PM requirements, "only approved claims are paid and the
+//   payment count matches".
 //
-// 読み方:
-//   ここから先は API・ジョブ・通知キューに近い粒度。FSL 非依存の Python 実装は
-//   この spec から生成した conformance harness に接続する。
+// How to read it:
+//   From here on, the granularity is close to APIs, jobs, and notification
+//   queues. The FSL-independent Python implementation connects to the
+//   conformance harness generated from this spec.
 // ════════════════════════════════════════════════════════════════
 spec ExpenseDesign {
   type Claim = 0..2

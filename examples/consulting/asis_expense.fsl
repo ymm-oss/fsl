@@ -1,57 +1,59 @@
 // ════════════════════════════════════════════════════════════════
-// 経費精算ワークフロー【As-Is(現行業務)】— コンサルタント向けサンプル
+// Expense reimbursement workflow [As-Is (current operations)] — consulting sample
 //
-// ヒアリング結果(現行の業務フローと社内規程)をそのまま検査可能な
-// 形で書いたもの。実行:
+// The interview results (the current business flow and internal
+// regulations) written directly in a verifiable form. Run:
 //
 //   fslc verify examples/consulting/asis_expense.fsl \
 //        --engine induction --deadlock ignore
 //
-// proved = 「現行規程はどんな処理順序でも矛盾しない」。
-// 規程同士が矛盾していれば、違反した規程の ID・原文・再現手順が返る。
+// proved = "the current regulations are consistent under any processing order".
+// If the regulations contradict each other, the ID, original text, and
+// reproduction steps of the violated regulation are returned.
 // ════════════════════════════════════════════════════════════════
 business AsIsExpense {
 
-  // 登場部署・役割(遷移の「誰がやるか」)
+  // Departments / roles involved (the "who does it" of transitions)
   actor Employee, Manager, Finance
 
-  // 検証する世界: 同時に流れる申請3件分(小さな世界で十分)
+  // The world to verify: 3 claims flowing concurrently (a small world is enough)
   case Claim = 0..2
 
-  // ── 現行プロセス(ヒアリングで得たフロー図と1対1)──────────
+  // ── Current process (one-to-one with the flow diagram from interviews) ──
   process Claim {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
 
-    // 申請(従業員)
+    // Submission (employee)
     transition submit      Draft     -> Submitted by Employee
-    // 承認・差戻し(マネージャ)— 現行は金額によらず全件マネージャ承認
+    // Approval / rejection (manager) — currently all claims need manager approval regardless of amount
     transition mgr_approve Submitted -> Approved  by Manager
     transition reject      Submitted -> Rejected  by Manager
-    // 支払い(経理)— 承認済みのものだけ
+    // Payment (finance) — only approved claims
     transition pay         Approved  -> Paid      by Finance
   }
 
-  // ── KPI(数え漏れ・二重計上は自動検査される)─────────────
+  // ── KPI (undercounting / double-counting are checked automatically) ────
   kpi paid_claims counts Claim in Paid
 
-  // ── 社内規程(統制)— ID と原文ごと書く ─────────────────
-  // ※「支払いは承認後のみ」はプロセス構造そのものが保証している
-  //   (Paid への矢印は Approved からしか無い)。下の2本は
-  //   構造だけでは言えない「放置しない」系の統制。
+  // ── Internal regulations (controls) — written with ID and original text ──
+  // Note: "payment only after approval" is guaranteed by the process
+  //   structure itself (the arrow into Paid only comes from Approved). The
+  //   two below are "do not leave unattended" controls that the structure
+  //   alone cannot express.
 
-  policy CTRL-1 "提出された申請は必ず承認または差戻しの裁定を受ける" responds {
+  policy CTRL-1 "A submitted claim must always be adjudicated for approval or rejection" responds {
     forall c: Claim {
       stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
     }
   }
 
-  policy CTRL-2 "承認された申請は必ず支払われる" responds {
+  policy CTRL-2 "An approved claim must always be paid" responds {
     forall c: Claim { stage(c) == Approved ~> stage(c) == Paid }
   }
 
-  // ── ゴール(現行プロセスで業務が完遂できることの確認)──────
-  goal CanComplete "申請から支払いまで完遂できる" {
+  // ── Goal (confirming the current process can complete the business) ────
+  goal CanComplete "The process can complete from claim to payment" {
     exists c: Claim { stage(c) == Paid }
   }
 }

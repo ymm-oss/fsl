@@ -1,18 +1,22 @@
 // ════════════════════════════════════════════════════════════════
-// 経費精算システム要件【PM の成果物】— fsl-req 方言
+// Expense reimbursement system requirements [PM deliverable] — fsl-req dialect
 //
-// 誰が書くか:
-//   PM/PdM が、業務層の To-Be を壊さない範囲で、プロダクト要件として
-//   金額・閾値・受け入れ基準まで具体化する。
+// Who writes it:
+//   The PM/PdM makes the requirements concrete as product requirements —
+//   down to amounts, thresholds, and acceptance criteria — within the
+//   bounds of not breaking the business-layer To-Be.
 //
-// 何のために書くか:
-//   コンサルタントの「少額は自動承認、高額はマネージャ裁定」という改革を、
-//   AUTO_LIMIT という判断可能なルールへ落とし込む。implements により、
-//   要件が業務プロセス ExpenseToBe を逸脱していないことも同時に検査する。
+// Why it is written:
+//   It distills the consultant's transformation of "low amounts are
+//   auto-approved, high amounts are adjudicated by a manager" into a
+//   decidable rule called AUTO_LIMIT. Via implements, it also
+//   simultaneously checks that the requirements do not deviate from the
+//   business process ExpenseToBe.
 //
-// 読み方:
-//   requirement はチケットや要求仕様書の原文に相当する。acceptance は
-//   そのままシナリオ・実装適合テストの雛形になる。
+// How to read it:
+//   requirement corresponds to the original text of a ticket or
+//   requirements document. acceptance becomes, as is, the template for
+//   scenarios and implementation-conformance tests.
 // ════════════════════════════════════════════════════════════════
 requirements ExpenseRequirements {
 
@@ -52,7 +56,7 @@ requirements ExpenseRequirements {
     paid_count = 0
   }
 
-  requirement REQ-1 "申請者は金額を入力して経費申請を提出できる" {
+  requirement REQ-1 "The applicant can submit an expense claim by entering an amount" {
     fair action submit(c: Claim, a: Amount) {
       requires req[c].st == ReqDraft
       requires a > 0
@@ -67,7 +71,7 @@ requirements ExpenseRequirements {
     }
   }
 
-  requirement REQ-2 "AUTO_LIMIT 以下の申請はシステムが自動承認する" {
+  requirement REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system" {
     fair action auto_approve(c: Claim) maps auto_approve(c) {
       requires req[c].st == ReqAutoReview
       requires req[c].amount <= AUTO_LIMIT
@@ -75,7 +79,7 @@ requirements ExpenseRequirements {
     }
   }
 
-  requirement REQ-3 "AUTO_LIMIT を超える申請はマネージャが承認または差戻しする" {
+  requirement REQ-3 "Claims above AUTO_LIMIT are approved or rejected by a manager" {
     fair action mgr_approve(c: Claim) maps mgr_approve(c) {
       requires req[c].st == ReqManagerReview
       requires req[c].amount > AUTO_LIMIT
@@ -89,7 +93,7 @@ requirements ExpenseRequirements {
     }
   }
 
-  requirement REQ-4 "承認済み申請だけを支払い、支払い件数は Paid 状態の件数と一致する" {
+  requirement REQ-4 "Only approved claims are paid, and the payment count matches the number of claims in the Paid state" {
     fair action pay(c: Claim) maps pay(c) {
       requires req[c].st == ReqAutoApproved or req[c].st == ReqManagerApproved
       req[c].st = ReqPaid
@@ -101,14 +105,14 @@ requirements ExpenseRequirements {
     }
   }
 
-  acceptance AC-1 "承認フロー: 少額申請は自動承認され支払われる" {
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
     submit(0, 1)
     auto_approve(0)
     pay(0)
     expect req[0].st == ReqPaid and paid_count == 1
   }
 
-  acceptance AC-2 "差戻しフロー: 高額申請はマネージャ差戻しで終了する" {
+  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
     submit(1, 2)
     mgr_reject(1)
     expect req[1].st == ReqRejected and paid_count == 0

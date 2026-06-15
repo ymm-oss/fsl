@@ -1,6 +1,6 @@
-// topic: 自動販売機
+// topic: vending machine
 // scale: small
-// features: Map, Option, 有界在庫, ensures, reachable
+// features: Map, Option, bounded inventory, ensures, reachable
 // expected-command: verify --depth 6 --deadlock ignore
 // expected-result: verified
 spec GallerySmallVendingMachine {

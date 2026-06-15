@@ -1,73 +1,70 @@
-# ドッグフーディング第2回 — 所見 (2026-06-11)
+# Dogfooding Round 2 — Findings (2026-06-11)
 
-v1.1 全機能(Seq / k 帰納法 / unsat core 診断 / scenarios)を実戦投入し、
-**「proved を標準とする運用」**(BMC verified で止めず、CTI → 補助 invariant で
-無限深度証明まで持っていく)を評価した。仕様3本: `specs/mutex_queue.fsl`
-(FIFO ミューテックス)、`specs/job_pipeline.fsl`(リトライ付きジョブパイプライン)、
-`specs/audit_log.fsl`(追記専用監査ログ)。
+We put all of v1.1's features (Seq / k-induction / unsat core diagnostics / scenarios) into real use and
+evaluated **"a workflow where proved is the standard"** (not stopping at BMC verified, but going all the way
+to an unbounded-depth proof via CTI → auxiliary invariants). Three specs: `specs/mutex_queue.fsl`
+(FIFO mutex), `specs/job_pipeline.fsl` (job pipeline with retries),
+`specs/audit_log.fsl` (append-only audit log).
 
-## 結果サマリ
+## Results Summary
 
-| 仕様 | BMC (depth 8) | induction | CTI ラウンド数 |
+| Spec | BMC (depth 8) | induction | CTI rounds |
 |---|---|---|---|
-| mutex_queue | verified、coverage 全 true | **proved (k=1)** | 0(初版がそのまま帰納的) |
-| job_pipeline | verified、coverage 全 true | **proved (k=1)** | 1(NoDupQueue 追加) |
-| audit_log | verified | **proved (k=1)** | 0(厳密版 invariant でも) |
+| mutex_queue | verified, coverage all true | **proved (k=1)** | 0 (the first draft was already inductive) |
+| job_pipeline | verified, coverage all true | **proved (k=1)** | 1 (added NoDupQueue) |
+| audit_log | verified | **proved (k=1)** | 0 (even with the strict invariant) |
 
-第1回の仕様も含め、**リポジトリの正しい仕様 10 本すべてが k=1 で proved**。
+Including the round 1 specs, **all 10 correct specs in the repository are proved at k=1**.
 
-## proved 運用の評価
+## Evaluation of the proved Workflow
 
-- **job_pipeline の CTI は一読で原因が分かった**: `queue = [0, 0, 0]`(同一ジョブの
-  3重エントリ)という幽霊状態。pop が先頭の1個しか除かないため、残った重複の
-  状態遷移で `QueuedAreQueued` が破れる。補助 invariant
-  `NoDupQueue`(キュー重複なし)1本で proved に変わった。
-  第1回の auth_lockout / payment と合わせ、**CTI → 補助 invariant ループは
-  3/3 で1ラウンド収束**。CTI の表示品質(論理値・enum 名・changes)が
-  この収束速度に直接効いている。
-- 補助 invariant はすべて「それ自体がドメインの真実」(キュー重複なし、
-  返金は Captured のみ、attempts=3 ならロック)であり、証明のための
-  人工物にならなかった。仕様の質が上がる副作用がある。
+- **The job_pipeline CTI made its cause obvious on first read**: a ghost state `queue = [0, 0, 0]` (the same job
+  entered three times). Since pop removes only the single front element, the state transition over the remaining
+  duplicates breaks `QueuedAreQueued`. A single auxiliary invariant `NoDupQueue` (no duplicates in the queue)
+  flipped it to proved. Together with round 1's auth_lockout / payment, **the CTI → auxiliary invariant loop
+  converged in one round 3/3**. The display quality of the CTI (logical values, enum names, changes) directly
+  drives this convergence speed.
+- Every auxiliary invariant was "itself a domain truth" (no duplicates in the queue, refunds only from Captured,
+  locked when attempts=3) and never became an artifact existing only for the proof. A nice side effect is that
+  spec quality goes up.
 
-## 新しい発見
+## New Discoveries
 
-### F5: インデックス・ドメイン型による Seq 集約イディオム(良い驚き)
+### F5: a Seq aggregation idiom using an index domain type (a pleasant surprise)
 
-設計時は「Seq に集約(sum)は書けない」と想定していたが、実際は:
+At design time we assumed "you can't write aggregation (sum) over a Seq", but in practice:
 
 ```fsl
-type Idx = 0..3   // 容量-1 までを覆うドメイン型
+type Idx = 0..3   // a domain type covering up to capacity-1
 invariant BalanceMatchesLog {
   balance == sum(i: Idx of log.at(i) where i < log.size())
 }
 ```
 
-`at()` が性質文脈で全域(範囲外は don't care)+ `where` ガードの組合せで
-**live prefix の畳み込みが書ける**。audit_log の厳密 invariant
-(残高 = ログ合計)がこれで書け、しかも k=1 で proved になった。
-LANGUAGE ドキュメントに標準イディオムとして載せるべき。
+The combination of `at()` being total in property contexts (out-of-range is don't-care) plus the `where` guard
+lets you **fold over the live prefix**. audit_log's strict invariant (balance = log sum) can be written this way,
+and it even came out proved at k=1. This should be documented as a standard idiom in the LANGUAGE doc.
 
-### F6: scenarios の最短トレースは前提条件の連鎖を正しく解く
+### F6: scenarios' shortest trace correctly solves the chain of preconditions
 
-`cover_finish_fail` が `submit → start → finish_retry → start → finish_fail`
-を生成。finish_fail には `tries >= 1` が必要で、そのために retry を先に
-経由する5手の最短列を正しく組んでいる。統合テスト雛形として実用品質。
+`cover_finish_fail` generates `submit → start → finish_retry → start → finish_fail`.
+finish_fail requires `tries >= 1`, and to get there it correctly assembles the 5-step shortest sequence that
+passes through retry first. Practical quality as an integration test skeleton.
 
-### F7: 「ハンドオフが起きた」を状態だけで言えない(F1 の再確認)
+### F7: "a handoff happened" cannot be stated by state alone (re-confirming F1)
 
-mutex_queue の `HandoffHappened` は `holder == some(1)` で書いたが、
-acquire_free(1) でも step 1 で成立してしまい「handoff の結果」を特定できない。
-第1回 F1(過去を語る性質にはゴースト変数が必要)と同根。v2.0 `leadsTo` の
-動機付け実例として追加。
+mutex_queue's `HandoffHappened` was written as `holder == some(1)`, but acquire_free(1) also satisfies it at step 1,
+so it cannot pin down "the result of a handoff". Same root as round 1's F1 (properties about the past need a ghost
+variable). Added as a motivating example for v2.0's `leadsTo`.
 
-## バグ
+## Bugs
 
-今回の3仕様+プローブでは**新規バグ 0 件**。
-(Seq 実装ラウンドのレビューで BUG15(if ガード内 partial_op の誤検出)と
-check 素通り2件(容量超過リテラル、`Map<K, Set<K>>`)を事前に検出・修正済み。
-詳細は DESIGN-seq.md と commit d8e2ecf)
+For these three specs + probes, **0 new bugs**.
+(In review during the Seq implementation round, BUG15 (false detection of partial_op inside an if guard) and
+two check pass-throughs (a capacity-overflow literal, `Map<K, Set<K>>`) were detected and fixed beforehand.
+Details in DESIGN-seq.md and commit d8e2ecf.)
 
-## 性能
+## Performance
 
-3仕様とも depth 8 の BMC + induction が数秒以内。PERF1 修正後の
-エンコーディングは Seq のシフト ite が入っても安定している。
+For all three specs, BMC + induction at depth 8 finished within a few seconds. The post-PERF1-fix encoding is
+stable even with Seq's shift ites added.

@@ -367,11 +367,11 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
         mapping = build_refinement(parse_refinement(mapping_src), impl_spec, abs_spec)
         if not rest:
             return _envelope(refine(impl_spec, abs_spec, mapping, depth))
-        # 連鎖: rest = [abs2, map2, abs3, map3, ...] を (abs, map) ペアで畳む
+        # Chain: rest = [abs2, map2, abs3, map3, ...] folded as (abs, map) pairs
         if len(rest) % 2 != 0:
             return _envelope({
                 "result": "error", "kind": "io",
-                "message": "refine 連鎖は最初の mapping の後に (abs map) ペアを並べる",
+                "message": "refine chain must list (abs map) pairs after the first mapping",
             })
         specs = [impl_spec, abs_spec]
         mappings = [mapping]
@@ -548,7 +548,7 @@ def main(argv=None):
                     version=f"fslc {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("version", help="バージョンを表示")
+    sub.add_parser("version", help="show the version")
 
     c = sub.add_parser("check")
     c.add_argument("file")
@@ -597,14 +597,14 @@ def main(argv=None):
     rf.add_argument("abs")
     rf.add_argument("mapping")
     rf.add_argument("rest", nargs="*",
-                    help="連鎖検査: さらに (abs map) を並べると end-to-end で合成検査する")
+                    help="chain check: appending more (abs map) pairs runs an end-to-end composed check")
     rf.add_argument("--depth", type=int, default=8)
 
     ts = sub.add_parser("typestate",
-                        help="設計 spec から typestate(幽霊型)の適用可否を判定し TS 雛形を出す")
+                        help="decide whether typestate (ghost types) applies to a design spec and emit a TS template")
     ts.add_argument("file")
     ts.add_argument("--ts", action="store_true",
-                    help="JSON ではなく導出可能なエンティティの TypeScript だけを stdout に出す")
+                    help="emit only the derivable entities' TypeScript to stdout instead of JSON")
 
     args = ap.parse_args(argv)
 

@@ -1,11 +1,12 @@
 // ════════════════════════════════════════════════════════════════
-// 解決策: design_drops_liveness.fsl と「approve/reject に fair を付けた」点
-// だけが違う設計。
+// Resolution: a design that differs from design_drops_liveness.fsl only in that
+// "approve/reject are marked fair".
 //
-// 活性は refine では伝播しないので、下位層で別途担保するしかない。ここでは
-// 進行を担うアクションに fair を付けて、設計層でも leadsTo が成り立つように
-// する。これで refine も verify(leadsTo)も両方通る。
-//   → 「活性 policy は各層で再 verify + 進行アクションに fair」の実演。
+// Since liveness does not propagate through refine, it must be secured separately
+// at the lower layer. Here we mark the actions responsible for progress as fair so
+// that leadsTo holds at the design layer too. With this, both refine and
+// verify (leadsTo) pass.
+//   -> a demonstration of "re-verify the liveness policy at each layer + mark progress actions fair".
 // ════════════════════════════════════════════════════════════════
 spec DesignKeepsLiveness {
   enum DSt { DSubmitted, DAutoReview, DApproved, DRejected, DPaid }
@@ -16,8 +17,8 @@ spec DesignKeepsLiveness {
   action route() { requires d == DSubmitted   d = DAutoReview }
   action heartbeat() { requires d == DAutoReview   phase = 1 - phase }
 
-  // ← 唯一の違い: 裁定を fair にした。弱公平性により、審査中に裁定が
-  //   継続して enabled なら必ずいつか発火する → 活性が回復する。
+  // <- the only difference: adjudication is made fair. By weak fairness, if
+  //   adjudication stays continuously enabled during review it eventually fires -> liveness is recovered.
   fair action approve() { requires d == DAutoReview   d = DApproved }
   fair action reject()  { requires d == DAutoReview   d = DRejected }
 

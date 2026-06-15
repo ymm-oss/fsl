@@ -2470,11 +2470,13 @@ def _requires_vacuity_candidates(instances, spec):
     suppress = {}
     for idx, inst in enumerate(instances):
         if inst["action_def"].get("sync"):
-            # compose の同期アクションは対象外: 句は複数成分からの継承複製であり、
-            # 成分間の同一ガード(例: bank_system の deposit_audited が bank と
-            # audit の両方から `a > 0` を継承)は「各成分が自分の契約を自衛する」
-            # 設計どおりで、除去可能な冗長ではない。各句は成分 spec 単体の
-            # verify で正しい文脈の検査を受ける(検出損失なし)。
+            # Synchronized compose actions are excluded: their clauses are
+            # inherited copies from multiple components, and an identical guard
+            # shared across components (e.g. bank_system's deposit_audited
+            # inheriting `a > 0` from both bank and audit) is the intended
+            # design where "each component defends its own contract", not
+            # removable redundancy. Each clause is checked in the right context
+            # by verifying the component spec on its own (no loss of detection).
             continue
         aname = inst["action"]
         action_pending = pending.setdefault(aname, {})

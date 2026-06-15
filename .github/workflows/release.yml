@@ -1,25 +1,25 @@
 name: release-binaries
 
-# v* タグを push すると、各 OS/アーキ向けのスタンドアロン単一バイナリを
-# PyInstaller でビルドし、GitHub Release に添付する。
-# 生成物は Python 不要で「ダウンロードして実行」できる（z3 ネイティブlib同梱）。
+# When a v* tag is pushed, build standalone single-file binaries for each
+# OS/architecture with PyInstaller and attach them to the GitHub Release.
+# The artifacts are "download and run" with no Python required (the native z3 lib is bundled).
 #
 #   git tag v1.1.0 && git push origin v1.1.0
 #
-# 手動確認したいときは Actions タブから workflow_dispatch でも起動可能
-# (この場合 Release への添付はスキップし、artifact として残す)。
+# For manual verification, it can also be triggered via workflow_dispatch from the Actions tab
+# (in that case the attach-to-Release step is skipped and the result is kept as an artifact).
 
 on:
   push:
     tags:
       - "v*"
-  # 手動実行。main に入ると Actions タブの "Run workflow" から起動でき、
-  # 任意のブランチでビルド + smoke test を試走できる
-  # (Release 添付ステップは tag ガードのためスキップされ、artifact のみ残る)。
+  # Manual run. Once on main, it can be triggered via "Run workflow" in the Actions tab,
+  # allowing a trial build + smoke test on any branch
+  # (the Release-attach step is skipped by the tag guard, leaving only artifacts).
   workflow_dispatch:
 
 permissions:
-  contents: write   # Release への asset 添付に必要
+  contents: write   # Required to attach assets to the Release
 
 jobs:
   build:
@@ -47,22 +47,22 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          # z3-solver / lark / 本体すべて wheel または純Python。
-          # 幅広い wheel が揃う 3.12 を採用。
+          # z3-solver / lark / the project itself are all wheels or pure Python.
+          # Use 3.12, for which a wide range of wheels is available.
           python-version: "3.12"
 
       - name: Install build dependencies
-        # z3-solver は wheel 限定 (--only-binary)。最新版が当該 OS/アーキの wheel を
-        # 持たない場合 (例: 4.16.0.0 に macOS arm64 wheel が無い)、pip は wheel のある
-        # 直近バージョンへ自動で後退する。これを付けないと sdist のソースビルドに
-        # 落ちて "Unable to build Z3" で失敗する。
+        # z3-solver is wheel-only (--only-binary). If the latest version lacks a wheel
+        # for the given OS/arch (e.g. 4.16.0.0 has no macOS arm64 wheel), pip automatically
+        # falls back to the most recent version that has a wheel. Without this, it falls back
+        # to a source build of the sdist and fails with "Unable to build Z3".
         run: |
           python -m pip install --upgrade pip
           python -m pip install --only-binary=z3-solver . pyinstaller
 
       - name: Build standalone binary
-        # --collect-all z3   : z3 のネイティブ libz3(.so/.dylib/.dll) を同梱
-        # --copy-metadata fslc: importlib.metadata でのバージョン解決を維持
+        # --collect-all z3   : bundle z3's native libz3 (.so/.dylib/.dll)
+        # --copy-metadata fslc: preserve version resolution via importlib.metadata
         run: >
           pyinstaller --onefile --name fslc
           --collect-all z3
@@ -70,9 +70,10 @@ jobs:
           --distpath dist
           packaging/fslc_entry.py
 
-      # 検証済みで反例を持たない既知の仕様を決め打ちで使う。
-      # find|head などで任意の .fsl を拾うと、デモ用に反例を含む仕様を引いた際
-      # verify が非ゼロ終了し、ランナーのファイル順次第で flaky になる。
+      # Use a fixed, known spec that is verified and has no counterexample.
+      # Picking an arbitrary .fsl via find|head can grab a demo spec that contains a
+      # counterexample, causing verify to exit non-zero and making the run flaky
+      # depending on the runner's file ordering.
       - name: Smoke test (binary must self-contain Python + z3)
         if: runner.os != 'Windows'
         run: |

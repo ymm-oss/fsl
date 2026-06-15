@@ -1,48 +1,56 @@
-# コンサルタント向けサンプル — 業務改革の As-Is / To-Be 統制検査
+# Consultant-oriented sample — As-Is / To-Be control checking for business transformation
 
-**業務プロセスと社内規程を「機械が検査できる文書」として書く**例です。
-題材は経費精算ワークフローの改革提案:
+An example of **writing business processes and internal policies as "documents a
+machine can check."** The subject is a reform proposal for an expense-reimbursement
+workflow:
 
-> 現行(As-Is)は全件マネージャ承認で滞留している。
-> 改革案(To-Be)では少額レーンを自動承認化して処理を速くしたい。
-> **ただし統制(承認を経ない支払いが無い等)は一切弱めない。**
+> The current process (As-Is) routes every case through manager approval and is
+> backlogged.
+> The reform proposal (To-Be) wants to speed things up by auto-approving a
+> low-amount lane.
+> **However, the controls (no payment without approval, etc.) must not be weakened
+> in any way.**
 
-| ファイル | 内容 |
+| File | Contents |
 |---|---|
-| [`asis_expense.fsl`](asis_expense.fsl) | 現行業務(ヒアリング結果): プロセス+統制規程 CTRL-1/2+KPI |
-| [`tobe_expense.fsl`](tobe_expense.fsl) | 改革案: 自動承認レーンを追加、統制は維持 |
-| [`tobe_refines_asis.fsl`](tobe_refines_asis.fsl) | **改革の統制検査**: To-Be の業務対応表(自動承認 = 承認行為) |
+| [`asis_expense.fsl`](asis_expense.fsl) | Current operations (interview results): process + control policies CTRL-1/2 + KPI |
+| [`tobe_expense.fsl`](tobe_expense.fsl) | Reform proposal: adds an auto-approval lane, keeps the controls |
+| [`tobe_refines_asis.fsl`](tobe_refines_asis.fsl) | **Control check of the reform**: To-Be's business mapping table (auto-approval = approval act) |
 
-## 何が嬉しいか(3点)
+## Why this is valuable (3 points)
 
-1. **ヒアリング結果の矛盾が、提案前に機械で見つかる。** 規程を原文ごと書くと、
-   「申請が放置される進行順序は無いか」「規程同士が衝突しないか」を全数検査
-   できる(As-Is/To-Be とも全規程を無限深度で証明済み)。
-2. **「改革しても統制は守られる」を提案書に証拠付きで書ける。** 下のコマンド
-   1行が「To-Be のあらゆる業務の流れは As-Is でも許された流れに対応する
-   (=新しい抜け道を作っていない)」ことを検査する。
-3. **提案がそのまま下流につながる。** この業務層を要件定義
-   (`requirements`、`examples/pm/` 参照)→ 設計 → 実装テストまで
-   refinement で連鎖でき、コンサル成果物が「死んだ文書」にならない。
+1. **Contradictions in the interview results are found by machine, before the
+   proposal is made.** Writing the policies verbatim lets you exhaustively check
+   "is there any ordering in which a request gets stuck?" and "do any policies
+   conflict with each other?" (both As-Is and To-Be have all policies proved at
+   unbounded depth).
+2. **You can write "the controls hold even after the reform" into the proposal,
+   with evidence.** The single command line below checks that "every business
+   flow allowed by To-Be corresponds to a flow that was also allowed under As-Is
+   (i.e., it introduces no new loopholes)."
+3. **The proposal flows straight downstream.** This business layer can be chained
+   by refinement to requirements definition (`requirements`, see `examples/pm/`)
+   → design → implementation tests, so the consulting deliverable does not become
+   a "dead document."
 
-## 動かし方
+## How to run
 
 ```bash
-# 現行・改革案それぞれの規程の証明
+# Prove the policies of the current and reform proposals respectively
 fslc verify examples/consulting/asis_expense.fsl --engine induction --deadlock ignore
 fslc verify examples/consulting/tobe_expense.fsl --engine induction --deadlock ignore
 
-# 改革の統制検査(To-Be ⊒ As-Is)
+# Control check of the reform (To-Be ⊒ As-Is)
 fslc refine examples/consulting/tobe_expense.fsl \
             examples/consulting/asis_expense.fsl \
             examples/consulting/tobe_refines_asis.fsl --depth 6
-# → {"result": "refines", ...} = 統制は維持されている
+# → {"result": "refines", ...} = the controls are preserved
 ```
 
-## 「統制が破られるとどう見えるか」の実例
+## A worked example of "what it looks like when a control is broken"
 
-改革案に「承認を飛ばす即時払いレーン」(`quick_pay: Submitted -> Paid`)が
-紛れ込んだ、という想定で検査すると:
+Suppose an "immediate-payment lane that skips approval" (`quick_pay: Submitted -> Paid`)
+slips into the reform proposal. Checking it gives:
 
 ```json
 {
@@ -55,17 +63,20 @@ fslc refine examples/consulting/tobe_expense.fsl \
 }
 ```
 
-読み方: **どの業務(quick_pay)が**、**どの統制を破るか**(As-Is の支払いは
-承認済みが前提 = `abs_requires_failed`)、**最短の再現手順(申請→即時払いの
-2手)**。「この改革案は現行統制からの逸脱を含む」をレビュー会の前に
-機械が指摘してくれる。
+How to read it: **which business activity (quick_pay)** breaks **which control**
+(As-Is payments presuppose prior approval = `abs_requires_failed`), and **the
+shortest reproduction steps (submit → immediate-pay, 2 moves)**. The machine
+points out "this reform proposal contains a deviation from the current controls"
+before the review meeting.
 
-## 書き方の要点
+## Key points for writing
 
-- プロセス図の矢印 = `transition`、規程 = `policy ID "原文"`、
-  経営指標 = `kpi`、業務ゴール = `goal`。
-- As-Is と To-Be は別ファイルに書き、対応表(`refinement`)で結ぶ。
-  「To-Be の自動承認は As-Is のマネージャ承認に相当する(承認という
-  統制行為に変わりはない)」のような**解釈そのものを対応表に明示**する —
-  ここが監査で問われる判断であり、機械はその解釈の下での無矛盾を保証する。
-- 検証する世界は小さくてよい(申請3件)。バグは小さな世界でも再現する。
+- Arrows in the process diagram = `transition`, policies = `policy ID "verbatim text"`,
+  business metrics = `kpi`, business goals = `goal`.
+- Write As-Is and To-Be in separate files and connect them with a mapping table
+  (`refinement`). **Make the interpretation itself explicit in the mapping table** —
+  for example, "To-Be's auto-approval corresponds to As-Is's manager approval
+  (it is still the control act of approving)." This is the judgment that gets
+  questioned in an audit, and the machine guarantees consistency under that
+  interpretation.
+- The world you verify can be small (3 claims). Bugs reproduce even in a small world.

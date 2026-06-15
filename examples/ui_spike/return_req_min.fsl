@@ -1,4 +1,4 @@
-// 要件層のエッセンス(単一ケース): 承認後のみ支払い・台帳整合。
+// The essence of the requirements layer (single case): payment only after approval, ledger consistency.
 spec ReturnReqMin {
   type Amount = 0..3
   enum St { New, Approved, Paid }

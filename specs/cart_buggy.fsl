@@ -1,12 +1,12 @@
-// ショッピングカートの設計仕様(バグ入り)
-// 2ユーザー・2商品・各在庫1個の小スコープで検査する
+// Shopping cart design spec (with a bug)
+// Checked in a small scope: 2 users, 2 products, 1 unit of stock each
 spec ShoppingCart {
-  const MAXU = 1   // ユーザー id: 0..1
-  const MAXI = 1   // 商品   id: 0..1
+  const MAXU = 1   // user id: 0..1
+  const MAXI = 1   // product id: 0..1
 
   state {
-    stock: Map<Int, Int>,   // 商品ごとの在庫数
-    cart:  Map<Int, Int>    // ユーザーのカート内商品 (-1 = 空)
+    stock: Map<Int, Int>,   // stock count per product
+    cart:  Map<Int, Int>    // product in each user's cart (-1 = empty)
   }
 
   init {
@@ -26,7 +26,7 @@ spec ShoppingCart {
 
   action checkout(u in 0..MAXU) {
     requires cart[u] != -1
-    // バグ: 在庫の有無を確認せずに引き落としている
+    // Bug: decrements stock without checking whether any is available
     stock[cart[u]] = stock[cart[u]] - 1
     cart[u] = -1
   }

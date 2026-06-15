@@ -1,17 +1,17 @@
 // ════════════════════════════════════════════════════════════════
-// 下位層(設計)— ClaimPolicy を「忠実に」refine するが、活性を落とす設計。
+// Lower layer (design) — a design that refines ClaimPolicy "faithfully" but drops liveness.
 //
-// 実装寄りの詳細を足している:
-//   - route()    : 提出を審査キューに載せる内部ステップ(上位では無変化=stutter)
-//   - heartbeat(): 審査中のポーリング。上位状態を変えない内部ループ(=stutter)
-// そして上位では fair だった裁定(approve/reject)を、設計層では fair に
-// していない。refinement の写像は fair 注釈を要求しないため、これでも
-// 「忠実な refinement」のままになる。
+// It adds implementation-oriented detail:
+//   - route()    : an internal step that puts a submission on the review queue (no change at the upper layer = stutter)
+//   - heartbeat(): polling during review. An internal loop that does not change upper-layer state (= stutter)
+// And it does not mark the adjudications (approve/reject), which were fair at the
+// upper layer, as fair at the design layer. Since the refinement mapping does not
+// require fair annotations, this still remains a "faithful refinement".
 //
-// 上位 policy CTRL を設計層の語彙でも宣言しておく:
-//   - refine は通る(design_drops_liveness_refines.fsl)= 安全性は満たす
-//   - だが verify すると leadsTo が violated(ラッソ)= 活性は満たさない
-// → 活性は refine で伝播しないことの実演。
+// We also declare the upper-layer policy CTRL in the design layer's vocabulary:
+//   - refine passes (design_drops_liveness_refines.fsl) = safety is satisfied
+//   - but verify shows leadsTo violated (a lasso) = liveness is not satisfied
+// -> a demonstration that liveness does not propagate through refine.
 // ════════════════════════════════════════════════════════════════
 spec DesignDropsLiveness {
   enum DSt { DSubmitted, DAutoReview, DApproved, DRejected, DPaid }
@@ -19,19 +19,19 @@ spec DesignDropsLiveness {
   state { d: DSt, phase: Phase }
   init { d = DSubmitted   phase = 0 }
 
-  // 内部: 提出 → 審査キュー。上位から見れば「まだ Submitted」のまま。
+  // Internal: submission -> review queue. From the upper layer this is still "Submitted".
   action route() { requires d == DSubmitted   d = DAutoReview }
 
-  // 内部: 審査中のハートビート。上位状態を一切変えない純粋な stutter。
-  // phase を 0↔1 でトグルするだけなので無限に発火でき、進行を生まない。
+  // Internal: a heartbeat during review. A pure stutter that does not change upper-layer state at all.
+  // It only toggles phase between 0 and 1, so it can fire forever and produces no progress.
   action heartbeat() { requires d == DAutoReview   phase = 1 - phase }
 
-  // 裁定。上位では fair だったが、ここでは fair を付けていない(← 活性が落ちる原因)。
+  // Adjudication. It was fair at the upper layer, but here it is not marked fair (<- the cause of liveness being dropped).
   action approve() { requires d == DAutoReview   d = DApproved }
   action reject()  { requires d == DAutoReview   d = DRejected }
 
   fair action pay() { requires d == DApproved    d = DPaid }
 
-  // 上位の活性 policy を設計層の語彙で。verify すると violated になる。
+  // The upper-layer liveness policy in the design layer's vocabulary. verify makes this violated.
   leadsTo EveryClaimDecided { d == DSubmitted ~> (d == DApproved or d == DRejected) }
 }

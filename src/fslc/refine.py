@@ -631,10 +631,11 @@ def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
     s.set(unsat_core=True)
     s.add(*init_cons_impl)
 
-    # 到達可能なプレフィックスだけを展開する。impl が depth より手前で
-    # デッドロックすると「深さちょうど depth」の完全展開は充足不能になり、
-    # 全ての違反検査が unsat=見逃しとなって空虚に refines を返してしまう。
-    # step_cons[k] = 遷移制約 states[k] -> states[k+1](プレフィックス検査用に保存)。
+    # Only expand reachable prefixes. If impl deadlocks before depth, a full
+    # expansion at "exactly depth" becomes unsatisfiable, so every violation
+    # check turns into unsat (a miss) and we vacuously return refines.
+    # step_cons[k] = transition constraint states[k] -> states[k+1] (saved for
+    # prefix checking).
     step_cons = []
     for step in range(depth):
         if s.check() != z3.sat:
@@ -649,18 +650,20 @@ def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
         reachable = s.check() == z3.sat
         s.pop()
         if not reachable:
-            break  # この遷移は到達不能(デッドロック)— ここで打ち切る
+            break  # this transition is unreachable (deadlock) — stop here
         s.add(*cons)
         step_cons.append(cons)
         states.append(nxt)
         choices.append(ch)
     ctx = {"states": states, "choices": choices, "instances": instances}
 
-    # 各プレフィックスは「step t までの制約だけ」を持つ専用ソルバ sp で検査する。
-    # 全遷移を積んだ s で検査すると、後続を持てない違反遷移(有界内で deadlock/
-    # 終端状態に至るもの)が全モデルから除外され、違反を取りこぼす(深さを上げると
-    # 検出が減る非単調バグ)。sp は t の増加に合わせて遷移を逐次追加するだけで、
-    # 未来の遷移を一切要求しない。
+    # Each prefix is checked with a dedicated solver sp that holds "only the
+    # constraints up to step t". Checking on s, which has stacked all
+    # transitions, excludes violating transitions that cannot have a successor
+    # (those reaching a deadlock/terminal state within the bound) from every
+    # model, missing the violation (a non-monotonic bug where raising the depth
+    # reduces detection). sp only appends transitions incrementally as t grows
+    # and never demands any future transition.
     sp = z3.Solver()
     sp.set(unsat_core=True)
     sp.add(*init_cons_impl)

@@ -1,4 +1,4 @@
-"""examples/self — fslc 自身の設計契約を FSL で検証する。"""
+"""examples/self — verify fslc's own design contracts in FSL."""
 import json
 import os
 import subprocess
@@ -25,7 +25,7 @@ CASES = [
 
 
 def test_terminal_block_suppresses_intended_deadlock_warnings():
-    """terminal { } のおかげで意図した終端状態が deadlock 警告にならない。"""
+    """Thanks to terminal { }, intended terminal states do not raise deadlock warnings."""
     for filename in ("fslc_session.fsl", "fslc_monitor.fsl"):
         out = run_verify(str(E / filename), depth=8, deadlock_mode="warn")
         assert out["result"] == "verified"

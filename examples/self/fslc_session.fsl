@@ -8,7 +8,7 @@
 //   exit 2: error with user-facing kind parse / semantics / io
 //   exit 3: error kind internal, or any unclassified result
 //
-// probe: SuccessRequiresCheck を `not checked` に壊すと violated@1
+// probe: breaking SuccessRequiresCheck into `not checked` yields violated@1
 spec FslcSession {
   type Severity = 0..3
   enum SessionStatus {

@@ -1,4 +1,4 @@
-// topic: TCP風ハンドシェイク
+// topic: TCP-style handshake
 // scale: small
 // features: enum state machine, fair progress, leadsTo, reachable
 // expected-command: verify --depth 6 --deadlock ignore

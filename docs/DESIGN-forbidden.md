@@ -1,58 +1,62 @@
-# FSL — `forbidden`(負の受け入れ基準 / must-forbid)実装設計
+# FSL — `forbidden` (negative acceptance criteria / must-forbid) implementation design
 
-動機: issue #3(妥当性確認ロードマップ #1 の類型4/6)。`acceptance`(must-allow)は
-「この操作列は通る」を check 時に再生検証するが、「この操作列は**拒否されるべき**」
-(must-forbid)を書く手段がなかった。ガード漏れ等の**過小制約**は、安全性 invariant を
-1つも破らずに「禁止すべき操作」を受理してしまうため verify では沈黙する。`forbidden` は
-その沈黙を破る独立チャネル(別エージェントが NL とアクション署名だけから正負トレースを
-書く交差検証の受け皿)。
+Motivation: issue #3 (category 4/6 of validation roadmap #1). `acceptance` (must-allow)
+re-checks at check time that "this operation sequence passes," but there was no way to express
+that "this operation sequence **must be rejected**" (must-forbid). **Under-constraint** such as
+a missing guard accepts an "operation that should be forbidden" without breaking a single safety
+invariant, so verify stays silent about it. `forbidden` is an independent channel that breaks
+that silence (a receiver for cross-validation in which a separate agent writes positive and
+negative traces from the NL and action signatures alone).
 
-## 1. 構文(requirements 方言)
+## 1. Syntax (requirements dialect)
 
 ```fsl
-forbidden FB-1 "出荷後のキャンセルは拒否される" {
-  pay(0)  ship(0)        // 前提(セットアップ): すべて enabled で ok
-  cancel(0)              // 最後のステップ: 拒否されることを期待
+forbidden FB-1 "cancellation after shipping is rejected" {
+  pay(0)  ship(0)        // premise (setup): all enabled and ok
+  cancel(0)              // last step: expected to be rejected
   expect rejected
 }
 ```
 
-`acceptance_def` の写し。`expect rejected` はインラインマーカー(`acceptance` の
-`expect <式>` と違い状態述語を評価しない)。`FB-1` は `REQ_ID` トークンに合致。
+A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `acceptance`'s
+`expect <expr>`, it does not evaluate a state predicate). `FB-1` matches the `REQ_ID` token.
 
-## 2. 意味論(具象 Monitor 再生、check 時)
+## 2. Semantics (concrete Monitor replay, at check time)
 
-- 前提ステップ `steps[0..n-2]` は全て `ok`(enabled かつ違反なし)であること。
-- **最後のステップが拒否**されれば成功。拒否は2系統:
-  - (a) **not-enabled**(`requires_failed` / 範囲外 `bad_call`)— **主用途**。
-    安全性 invariant に見えない「ガードによる正しい禁止」。
-  - (b) **実行すると違反**(`invariant` / `type_bound` / `partial_op` / `ensures`)。
-    ただし違反状態が到達可能 ⇒ **spec 自体が verify で violated** を意味する
-    (ケースbは「forbidden は満たすが spec はバグ」のシグナル)。出力の
-    `rejected_by` がこの区別を担う。
-- 最後のステップが `ok`(=受理された)→ `kind: "forbidden"` エラー + `accepted_trace`。
-- 前提ステップが `ok` でない → `kind: "forbidden_setup"`(トレース不正、成功扱いにしない)。
-- ステップ0個 → `kind: "forbidden"` エラー(最低1ステップ必要)。
+- The premise steps `steps[0..n-2]` must all be `ok` (enabled and no violation).
+- Success if the **last step is rejected**. Rejection has two forms:
+  - (a) **not-enabled** (`requires_failed` / out-of-range `bad_call`) — the **primary use**.
+    A "correct prohibition by a guard" that is invisible as a safety invariant.
+  - (b) **violation on execution** (`invariant` / `type_bound` / `partial_op` / `ensures`).
+    But a reachable violating state ⇒ means **the spec itself is violated under verify**
+    (case b is the signal "forbidden is satisfied but the spec is buggy"). The output's
+    `rejected_by` carries this distinction.
+- Last step `ok` (= accepted) → `kind: "forbidden"` error + `accepted_trace`.
+- A premise step is not `ok` → `kind: "forbidden_setup"` (the trace is malformed; not treated
+  as success).
+- Zero steps → `kind: "forbidden"` error (at least one step is required).
 
-## 3. 波及(検証エンジン・Monitor は無改修)
+## 3. Ripple (verification engine and Monitor unmodified)
 
-- grammar.py: `forbidden_def`(`expect rejected` インライン)+ トランスフォーマ。
-- dialects.py: `("__forbidden", …)` 収集。model.py: `spec["forbidden"]` へ格納。
-- acceptance.py: `replay_forbidden` / `validate_forbidden`。`replay_acceptance` の
-  写しで、差分は「前提は全 ok / 最後は ok:False を期待 / `expect` 状態評価なし」。
-  `Monitor.step()` が requires_failed / invariant / type_bound / partial_op / ensures
-  いずれの拒否でも `ok:False` + `kind` を返すため、(a)(b) とも step() の戻りだけで判定。
-- cli.py: `_forbidden_error` を check / verify 両経路へ。bmc.py: `scenarios` に
-  `forbidden_<ID>`(`rejected_by` 付き)を出力 → testgen のネガティブテストへ。
+- grammar.py: `forbidden_def` (`expect rejected` inline) + transformer.
+- dialects.py: `("__forbidden", …)` collection. model.py: store into `spec["forbidden"]`.
+- acceptance.py: `replay_forbidden` / `validate_forbidden`. A copy of `replay_acceptance`,
+  differing in "premise all ok / last expected to be ok:False / no `expect` state evaluation."
+  Because `Monitor.step()` returns `ok:False` + `kind` for rejection via requires_failed /
+  invariant / type_bound / partial_op / ensures, both (a) and (b) are decided from step()'s
+  return alone.
+- cli.py: `_forbidden_error` wired into both the check and verify paths. bmc.py: emits
+  `forbidden_<ID>` (with `rejected_by`) into `scenarios` → for testgen's negative tests.
 
-## 4. テスト(tests/test_forbidden.py)
+## 4. Tests (tests/test_forbidden.py)
 
-ケースa満足 + scenario / 受理 → `kind:"forbidden"` + accepted_trace / setup 破損 →
-`forbidden_setup` / ケースb(rejected_by=type_bound かつ verify violated)/ 空ステップ /
-verify ゲートが BMC 前に発火。gallery 正例(`small_forbidden_guarded_cancel.fsl` → verified)
-と誤り例(`forbidden_op_accepted.fsl` → error/forbidden)。
+Case-a satisfied + scenario / accepted → `kind:"forbidden"` + accepted_trace / broken setup →
+`forbidden_setup` / case b (rejected_by=type_bound and verify violated) / empty steps / the
+verify gate fires before BMC. Gallery positive example (`small_forbidden_guarded_cancel.fsl` →
+verified) and incorrect example (`forbidden_op_accepted.fsl` → error/forbidden).
 
-## 5. 関連
+## 5. Related
 
-`acceptance`(DESIGN-bridge / DESIGN-dialects)の双対。過小制約の検出は #4 vacuity
-(`always_true_requires`)・#6 mutate と相補。経緯: 実走 DOGFOOD-9、ロードマップ #1。
+The dual of `acceptance` (DESIGN-bridge / DESIGN-dialects). Detecting under-constraint is
+complementary to #4 vacuity (`always_true_requires`) and #6 mutate. Origin: live run
+DOGFOOD-9, roadmap #1.

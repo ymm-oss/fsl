@@ -1,60 +1,71 @@
-# FSL — 空虚性検査(vacuity)実装設計
+# FSL — vacuity check implementation design
 
-動機: issue #4(ロードマップ #1 の類型5)。次の仕様はいずれも verified になるが
-何も検査していない: 前件が到達不能な含意 invariant(`P => Q` で P が起きない)、
-トリガが到達不能な leadsTo(`P ~> Q` で P が起きない)、到達状態で常に真の requires 句
-(死に飾り)。空虚な verified は過小制約と並ぶ最大の見逃し源。従来 `kind:"vacuous"` は
-init 充足不能のみを指していた。
+Motivation: issue #4 (category 5 of roadmap #1). Each of the following specs becomes verified
+yet checks nothing: an implication invariant whose antecedent is unreachable (`P => Q` where P
+never happens), a leadsTo whose trigger is unreachable (`P ~> Q` where P never happens), and a
+requires clause that is always true in reachable states (a dead ornament). Vacuous verified, on
+par with under-constraint, is the biggest source of missed bugs. Conventionally `kind:"vacuous"`
+referred only to init unsatisfiability.
 
 ## 1. CLI
 
-`fslc verify <f> [--vacuity warn|error|ignore]`(既定 warn、deadlock と同形)。
-- `warn`: warnings に載せる(結果は verified / proved のまま)
-- `error`: 検出時 `{"result":"error","kind":<検出種>,"findings":[…]}` → **exit 2**
-  (反例トレースが無いので violated/exit 1 でなく、init 充足不能の `vacuous` と同族)
-- `ignore`: 検査スキップ
+`fslc verify <f> [--vacuity warn|error|ignore]` (default warn, the same shape as deadlock).
+- `warn`: list in warnings (the result stays verified / proved)
+- `error`: on detection `{"result":"error","kind":<detected kind>,"findings":[…]}` → **exit 2**
+  (no counterexample trace, so not violated/exit 1, in the same family as init-unsatisfiable
+  `vacuous`)
+- `ignore`: skip the check
 
-## 2. 3つの検査(verified / proved 経路でのみ)
+## 2. Three checks (only on the verified / proved path)
 
-1. **`vacuous_implication`**: `forall*` 直下の単一 `=>` を持つ **user invariant** の
-   前件が depth K 内で sat にならない。前件の存在閉包は AST を `("exists", binder, A)` で
-   包んで既存 `eval_expr` に渡す(新評価器なし)。暗黙の `_bounds_*` は対象外
-   (Seq live-prefix は含意形であり自動生成物への警告はノイズ)。
-2. **`vacuous_leadsto`**: leadsTo のトリガ P を同様に存在閉包で検査。
-3. **`always_true_requires`**: 各 requires 句 j について **先行句の文脈付き**で
-   `sat(句1..j-1 ∧ ¬句j)` が全到達状態×全インスタンスで unsat なら警告。文脈付きに
-   する理由は (a) Monitor 短絡(BUG-020)との整合 (b) 冗長句(`st==Paid` の後の
-   `st!=Cancelled`)も検出 (c) let 内 partial op の Z3 全域符号化による spurious sat は
-   「警告を出さない」方向にしか働かず安全。**coverage false のアクション**(既に
-   never-enabled 警告あり)と **compose 同期アクション**は対象外。
+1. **`vacuous_implication`**: the antecedent of a **user invariant** with a single `=>`
+   directly under `forall*` does not become sat within depth K. The existential closure of the
+   antecedent is fed to the existing `eval_expr` by wrapping the AST with
+   `("exists", binder, A)` (no new evaluator). Implicit `_bounds_*` are out of scope (Seq
+   live-prefix is in implication form, and warnings on auto-generated items would be noise).
+2. **`vacuous_leadsto`**: check the leadsTo trigger P with the same existential closure.
+3. **`always_true_requires`**: for each requires clause j, warn if **with the context of the
+   preceding clauses** `sat(clause 1..j-1 ∧ ¬clause j)` is unsat over all reachable states ×
+   all instances. The reasons for using context are (a) consistency with Monitor short-circuit
+   (BUG-020), (b) detecting redundant clauses too (`st!=Cancelled` after `st==Paid`), and
+   (c) spurious sat from the whole-domain Z3 encoding of a let-internal partial op works only in
+   the "do not emit a warning" direction and is safe. **Coverage-false actions** (already warned
+   never-enabled) and **compose-synchronized actions** are out of scope.
 
-### compose 同期アクションを除外する理由(重要)
+### Reason for excluding compose-synchronized actions (important)
 
-`deposit_audited = bank.submit_deposit || audit.deposit` は bank と audit の双方から
-`requires a > 0` を継承する。これは「各成分が自分の契約を自衛する」設計どおりの複製で、
-除去可能な冗長ではない(audit_log 単体では当然必要)。名前推測でなく compose 展開が
-立てる sync マーカー(action dict の `sync`)で除外。各句は成分 spec 単体の verify で
-正しい文脈の検査を受けるため検出損失はゼロ。
+`deposit_audited = bank.submit_deposit || audit.deposit` inherits `requires a > 0` from both
+bank and audit. This is duplication exactly as designed ("each component defends its own
+contract"), not a removable redundancy (it is naturally required for audit_log alone). Excluded
+not by name guessing but by the sync marker that compose expansion sets (the action dict's
+`sync`). Each clause is checked in the right context by the verify of the component spec alone,
+so there is zero detection loss.
 
-## 3. 波及(検証エンジン本体は無改修、`_bmc_explore` への相乗りのみ)
+## 3. Ripple (the verification engine core is unmodified; only a piggyback onto `_bmc_explore`)
 
-- bmc.py: `pending_reachables` ループと同型の `pending_vacuity`(含意前件 + leadsTo
-  トリガ)を単一展開に相乗り。requires 恒真は coverage ループに「先行句 ∧ ¬句」の
-  sat を追加。文脈付き候補は「型空間上で先行句から論理的に含意される句」のみに
-  事前フィルタ(`_requires_clause_locally_implied`)し、容量ガード系の有界偽陽性を排除。
-- 出力: warnings に `{kind, name(表示名), loc, requirement, message, hint}`。
-  prove() は base verify から warning が透過。scenarios は `vacuity_mode="ignore"`。
-- hint は修復を誤らせない: 恒真 requires は「句を消せ」でなく「モデルの不足か冗長かを
-  判断」(深い depth や induction では効く可能性)。
+- bmc.py: `pending_vacuity` (implication antecedents + leadsTo triggers), isomorphic to the
+  `pending_reachables` loop, piggybacks on a single expansion. requires tautology adds the sat
+  of "preceding clauses ∧ ¬clause" to the coverage loop. Context-bearing candidates are
+  pre-filtered to only "clauses logically implied by the preceding clauses over the type space"
+  (`_requires_clause_locally_implied`), excluding bounded false positives from capacity-guard
+  families.
+- Output: `{kind, name(display name), loc, requirement, message, hint}` in warnings. prove()
+  passes warnings through transparently from the base verify. scenarios uses
+  `vacuity_mode="ignore"`.
+- The hint avoids misdirecting the repair: a tautological requires says not "delete the clause"
+  but "judge whether the model is lacking or redundant" (it may take effect at greater depth or
+  under induction).
 
-## 4. テスト(tests/test_vacuity.py)
+## 4. Tests (tests/test_vacuity.py)
 
-警告3種(表示名・loc・requirement)/ forall 包み / 文脈付き冗長句 / 抑制2種
-(coverage false・sync)/ violated 経路で非表示 / induction 透過 / error(exit 2)・ignore /
-**コーパス偽陽性ゼロ門番**(specs/ + examples/ + gallery/valid 一括)。gallery
-`vacuous_implication_warning.fsl`(`--vacuity error`)。
+The three warning kinds (display name, loc, requirement) / forall wrapping / context-bearing
+redundant clause / two suppressions (coverage false, sync) / not shown on the violated path /
+induction pass-through / error (exit 2) and ignore / **corpus zero-false-positive gatekeeper**
+(specs/ + examples/ + gallery/valid in one batch). Gallery
+`vacuous_implication_warning.fsl` (`--vacuity error`).
 
-## 5. 関連
+## 5. Related
 
-過小制約・空形式化の検出で #3 forbidden・#6 mutate と相補。有界検査なので警告文言は
-「within depth K」を明示。ロードマップ #1。
+Complementary to #3 forbidden and #6 mutate in detecting under-constraint and empty
+formalization. Because it is a bounded check, the warning wording makes "within depth K"
+explicit. Roadmap #1.

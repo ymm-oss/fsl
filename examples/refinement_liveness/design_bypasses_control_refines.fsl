@@ -1,5 +1,5 @@
-// 安全性を破る設計の写像。fast_pay を pay に対応させる(承認を飛ばす近道)。
-// refine は refinement_failed / abs_requires_failed で落ちる。
+// Mapping of the design that breaks safety. fast_pay is mapped to pay (a shortcut that skips approval).
+// refine fails with refinement_failed / abs_requires_failed.
 refinement DesignBypassesControlRefinesPolicy {
   impl DesignBypassesControl
   abs  ClaimPolicy

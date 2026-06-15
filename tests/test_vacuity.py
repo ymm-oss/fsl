@@ -230,9 +230,11 @@ def test_vacuity_error_and_ignore_modes(tmp_path):
 
 
 def test_compose_sync_duplicate_component_guards_not_flagged(tmp_path):
-    # 同期アクションは複数成分から requires を継承する。成分間で同一のガード
-    # (各成分が自分の契約を自衛する設計どおりの複製)を「先行句から恒真」と
-    # 誤検出しないこと。specs/bank_system.fsl の deposit_audited と同じ形。
+    # A synchronized action inherits its requires from multiple components.
+    # An identical guard shared across components (a by-design duplicate where
+    # each component defends its own contract) must not be misflagged as
+    # "tautological given a preceding clause". Same shape as deposit_audited in
+    # specs/bank_system.fsl.
     (tmp_path / "a.fsl").write_text(textwrap.dedent("""
     spec CompA {
       type Amount = 0..2
@@ -284,9 +286,9 @@ def test_verified_sample_corpus_has_no_vacuity_false_positives():
     paths = sorted({p for root in roots for p in root.rglob("*.fsl")})
     checked = 0
     for path in paths:
-        # gallery/errors・adversarial・injected は意図的に欠陥のある仕様の置き場。
-        # 「正解コーパスに偽陽性ゼロ」スイープの対象外(injected は専用の
-        # tests/test_injection_bench.py が扱う)。
+        # gallery/errors, adversarial, and injected hold intentionally-flawed specs.
+        # They are out of scope for the "zero false positives on the correct corpus"
+        # sweep (injected is handled by the dedicated tests/test_injection_bench.py).
         posix = path.as_posix()
         if ("gallery/errors" in posix or "gallery/adversarial" in posix
                 or "gallery/injected" in posix):

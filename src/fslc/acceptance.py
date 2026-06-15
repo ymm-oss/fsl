@@ -208,7 +208,7 @@ def replay_forbidden(spec, fb):
                 "step": {"action": name, "args": _step_args(args, spec, loc=loc, kind="forbidden_setup")},
                 "step_results": failures,
                 "loc": loc,
-                "hint": "forbidden の前提ステップは enabled で ok でなければならない(トレースが壊れている)。",
+                "hint": "the setup steps of a forbidden case must be enabled and ok (the trace is broken).",
             }
 
     # Final step: must be rejected. If any candidate is accepted, the spec
@@ -234,7 +234,7 @@ def replay_forbidden(spec, fb):
                 "accepted_trace": steps_out + [{"action": result["action"], "params": params}],
                 "state": result["state"],
                 "loc": fb.get("loc"),
-                "hint": "この操作は拒否されるべきだが受理された。ガードか invariant が不足している可能性。",
+                "hint": "this operation should have been rejected but was accepted. A guard or invariant may be missing.",
             }
 
     last_params, last_result = attempts[-1]

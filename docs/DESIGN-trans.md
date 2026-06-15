@@ -1,11 +1,12 @@
-# FSL — `trans`(遷移 invariant / 2状態安全性)実装設計
+# FSL — `trans` (transition invariant / two-state safety) implementation design
 
-動機: DOGFOOD-11 F24。self-spec で「Reject 以後は Nonconformant のまま」
-「ToolFault 以後は修復不能」のような**遷移禁止**を表明したいが、従来は
-ghost 変数 + 1状態 invariant、または action guard への埋め込みで間接表現するしか
-なかった。`trans` は action 横断の2状態安全性を直接書く構文。
+Motivation: DOGFOOD-11 F24. In the self-spec we want to assert **transition prohibitions** such
+as "after Reject it stays Nonconformant" or "after ToolFault it is unrepairable," but
+conventionally the only way to express this indirectly was a ghost variable + a one-state
+invariant, or embedding it into an action guard. `trans` is syntax for writing cross-action
+two-state safety directly.
 
-## 1. 構文
+## 1. Syntax
 
 ```fsl
 trans RejectIsSticky {
@@ -13,56 +14,60 @@ trans RejectIsSticky {
 }
 ```
 
-`trans <Name> [meta_tag] { <expr> }` は `invariant` / `reachable` / `leadsTo` と同じ
-トップレベル性質宣言。`old(<expr>)` は `ensures` と同じ構文で使える。
+`trans <Name> [meta_tag] { <expr> }` is a top-level property declaration, the same as
+`invariant` / `reachable` / `leadsTo`. `old(<expr>)` can be used with the same syntax as in
+`ensures`.
 
-## 2. 意味論
+## 2. Semantics
 
-`trans P` は全到達遷移 `σ -> σ'` について、式を `σ'` で評価し、`old(e)` だけを
-`σ` で評価する。つまり action 個別の `ensures` を、spec 全体に一般化した
-2状態述語である。
+`trans P` evaluates, for every reachable transition `σ -> σ'`, the expression at `σ'`, with only
+`old(e)` evaluated at `σ`. That is, it is a two-state predicate that generalizes an action's
+individual `ensures` to the whole spec.
 
-- `t = 0` には prior state が無いので検査しない。
-- 違反は `result:"violated"`, `violation_kind:"trans"`, `trans:"Name"` と最短 trace。
-- 成功出力は既存の `invariants_checked` を保ったまま `transitions_checked` を追加する。
+- At `t = 0` there is no prior state, so it is not checked.
+- A violation gives `result:"violated"`, `violation_kind:"trans"`, `trans:"Name"` and the
+  shortest trace.
+- The success output keeps the existing `invariants_checked` and adds `transitions_checked`.
 
 ## 3. BMC
 
-`_bmc_explore` は既存 invariant 検査の直後、`t >= 1` の各ステップで全 `trans` を評価する:
+`_bmc_explore` evaluates all `trans` immediately after the existing invariant check, at each
+step with `t >= 1`:
 
 ```
 eval_expr(expr, states[t], {}, spec, old_state=states[t-1], in_ensures=True)
 ```
 
-`old()` のゲートは `ensures` と同じ評価経路を再利用する。ユーザー向けエラーは
-「ensures または trans 内のみ」と表現し、trans 文脈で誤解を招かないようにする。
+The gating of `old()` reuses the same evaluation path as `ensures`. The user-facing error is
+phrased as "only inside ensures or trans," to avoid being misleading in a trans context.
 
 ## 4. Induction
 
-Base case は従来どおり BMC を実行するため、到達可能な `trans` 違反は通常の
-`violated` として返る。
+The base case runs BMC as before, so a reachable `trans` violation is returned as an ordinary
+`violated`.
 
-Step case では `Inv(σ0)` と `T(σ0, σ1)` の下で各 `trans(σ0, σ1)` を検査する。
-`¬trans` が satisfiable なら `proved` にせず、`unknown_cti` として2状態 CTI を返す。
-これは「全 invariant を満たすが到達不能かもしれない始状態から、trans を破る遷移がある」
-という既存 CTI の読み方と同じ。
+The step case checks each `trans(σ0, σ1)` under `Inv(σ0)` and `T(σ0, σ1)`. If `¬trans` is
+satisfiable, it is not `proved` but returned as `unknown_cti` with a two-state CTI. This is the
+same reading as the existing CTI: "from an initial state that satisfies every invariant but may
+be unreachable, there is a transition that breaks trans."
 
 ## 5. Temporal Hierarchy
 
-- `invariant`: 1状態安全性。全到達状態で成立する。
-- `trans`: 2状態安全性。全到達遷移で成立し、`old()` が使える。
-- `leadsTo`: liveness。深さ K までのラッソ / 停滞反例を探す。
+- `invariant`: one-state safety. Holds in every reachable state.
+- `trans`: two-state safety. Holds over every reachable transition, and `old()` can be used.
+- `leadsTo`: liveness. Searches for a lasso / stagnation counterexample up to depth K.
 
-「一度 X になったら次の全ステップで X を保つ」は `trans`。
-「X になったらいつか Y」は `leadsTo`。
+"Once X holds, keep X for all following steps" is `trans`. "If X, then eventually Y" is
+`leadsTo`.
 
-## 6. `forbidden` との違い
+## 6. Difference from `forbidden`
 
-`forbidden` は具体的な操作列が拒否されることを check 時に再生する負の受け入れ基準。
-ガード漏れのような「このトレースは通ってはいけない」を、人間が列挙した trace で検査する。
+`forbidden` is a negative acceptance criterion that replays at check time that a concrete
+operation sequence is rejected. It checks "this trace must not pass," such as a missing guard,
+against a human-enumerated trace.
 
-`trans` は trace を列挙せず、全 action・全パラメータ・全到達遷移に量化された性質を
-BMC / induction で検査する。具体例:
+`trans` does not enumerate traces; it checks a property quantified over all actions, all
+parameters, and all reachable transitions via BMC / induction. Concrete example:
 
 ```fsl
 trans ToolFaultNotRepairable {
@@ -70,5 +75,6 @@ trans ToolFaultNotRepairable {
 }
 ```
 
-これは「ToolFault から抜ける任意の遷移」を禁止する。`forbidden` で同じ意図を書くには
-抜け道候補の操作列を個別に列挙する必要があり、新しい action が増えたときに漏れやすい。
+This forbids "any transition that exits ToolFault." Writing the same intent with `forbidden`
+requires enumerating each escape-route candidate operation sequence individually, which is easy
+to miss when a new action is added.

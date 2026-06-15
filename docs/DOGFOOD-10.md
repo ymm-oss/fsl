@@ -1,80 +1,84 @@
-# DOGFOOD-10: 誤り注入ベンチマーク — 検出器の捕捉率を類型×機構で測る (2026-06-14)
+# DOGFOOD-10: Fault-Injection Benchmark — Measuring Detector Catch Rate by Type × Mechanism (2026-06-14)
 
-issue #8。#3〜#7 で実装した検出器群を、**正解仕様に既知の誤りを注入して回し、
-何が何を捕まえるか**を測った。ロードマップ #1 の提案自体を検証可能にする効果測定。
+issue #8. We ran the detector suite implemented in #3–#7 by **injecting known errors into correct specs and
+measuring what catches what**. An effectiveness measurement that makes roadmap #1's own proposal verifiable.
 
-ハーネス: `tests/test_injection_bench.py`(gallery の「期待宣言→JSON 照合」を多検出器に
-拡張)。コーパス: `examples/gallery/injected/`(3ドメイン × 7注入種 = 21仕様。各仕様に
-`// inject:` `// expect-detector:` `// expect-signal:` 宣言ヘッダ)。実測行列は
-`examples/gallery/injected/MATRIX.json` に再生成される。
+Harness: `tests/test_injection_bench.py` (extends the gallery's "expectation declaration → JSON match" to multiple
+detectors). Corpus: `examples/gallery/injected/` (3 domains × 7 injection kinds = 21 specs. Each spec has a
+`// inject:` `// expect-detector:` `// expect-signal:` declaration header). The measured matrix is regenerated into
+`examples/gallery/injected/MATRIX.json`.
 
-ドメイン: `bank`(specs/bank*)、`order_workflow`(specs/order_workflow)、
-`return_system`(examples/layers の返品)。
+Domains: `bank` (specs/bank*), `order_workflow` (specs/order_workflow),
+`return_system` (the returns domain in examples/layers).
 
-## 結果: 捕捉率行列(3/3 で安定、予測と完全一致)
+## Result: Catch-Rate Matrix (stable 3/3, exact match with prediction)
 
-各注入が**予測どおりのレーンでのみ**捕捉され、他検出器はすべて素通り(各セル
-caught/not-caught は3ドメインとも一致。`surprises: []` = 予測との乖離ゼロ)。
+Each injection is caught **only in the predicted lane**, and all other detectors pass it through (each cell's
+caught/not-caught matches across all 3 domains. `surprises: []` = zero divergence from prediction).
 
-| 注入(類型) | verify | --vacuity | --strict-tags | strict-tags +ids | mutate | forbidden/acc |
+| Injection (type) | verify | --vacuity | --strict-tags | strict-tags +ids | mutate | forbidden/acc |
 |---|---|---|---|---|---|---|
-| ガード過剰強化(過剰3) | **✓** | – | – | – | – | – |
-| 前件不到達 invariant(空虚5) | – | **✓** | – | – | – | – |
-| NLにない制約追加(捏造7) | – | – | **✓** | – | – | – |
-| 要件落とし(欠落7) | – | – | **✗** | **✓** | – | – |
-| invariant 弱化(過小4) | – | – | – | – | **✓** | – |
-| 境界反転 `<=↔<`(取違6) | – | – | – | – | – | **✓** |
-| ガード弱化(過小4) | – | – | – | – | – | **✓** |
+| guard over-strengthening (over-constraint 3) | **✓** | – | – | – | – | – |
+| invariant with unreachable antecedent (vacuous 5) | – | **✓** | – | – | – | – |
+| adding a constraint not in the NL (fabrication 7) | – | – | **✓** | – | – | – |
+| dropping a requirement (omission 7) | – | – | **✗** | **✓** | – | – |
+| invariant weakening (under-constraint 4) | – | – | – | – | **✓** | – |
+| boundary flip `<=↔<` (mistake 6) | – | – | – | – | – | **✓** |
+| guard weakening (under-constraint 4) | – | – | – | – | – | **✓** |
 
-(✓=捕捉、✗=同検出器だが条件未充足で非捕捉、–=無効)
+(✓ = caught, ✗ = the same detector but the condition is not met so not caught, – = not applicable)
 
-## 知見
+## Insights
 
-- **F18: 各検出器に重ならないレーンがある。** 7注入のどれも「全部が捕まえる」状態に
-  ならず、**ちょうど1つの機構**が捕まえた。冗長でも空隙でもない設計が実測で裏づいた。
-  verify(過剰)/ vacuity(空虚)/ strict-tags(捏造)/ mutate(過小=invariant)/
-  forbidden(過小=ガード, 取違)が住み分ける。
+- **F18: each detector has a non-overlapping lane.** None of the 7 injections ends up in a "everything catches it"
+  state; **exactly one mechanism** caught each. A design that is neither redundant nor leaving gaps was backed up by
+  measurement. verify (over-constraint) / vacuity (vacuous) / strict-tags (fabrication) / mutate
+  (under-constraint = invariant) / forbidden (under-constraint = guard, mistake) divide up the territory.
 
-- **F19: 取違(境界反転)とガード弱化は、独立チャネル(forbidden/acceptance)でしか
-  捕まらない。** verify・vacuity・strict-tags・mutate はすべて素通り。これらは
-  「内部整合は完璧だが意図と違う」誤りで、**仕様を書いた本人以外が NL から書く正負
-  トレース**が唯一の網。#3 forbidden / D4 の存在意義が数値で確定した。
+- **F19: a mistake (boundary flip) and guard weakening are caught only by an independent channel
+  (forbidden/acceptance).** verify, vacuity, strict-tags, and mutate all pass them through. These are
+  "internally perfectly consistent but different from intent" errors, and **positive/negative traces written from
+  the NL by someone other than the spec's author** are the only net. The reason for #3 forbidden / D4 to exist is
+  fixed numerically.
 
-- **F20: 純粋な欠落は要件レジストリが無いと原理的に検出不能。** 要件落とし注入は
-  `--strict-tags`(プレーン)では**非捕捉**、`--requirements ids.txt` を与えた
-  `strict-tags +ids` でのみ捕捉。仕様が一度も言及しない要件の不在は、外部の宣言
-  (ids 登録 / 空 requirement ブロック)があって初めて見える。
+- **F20: pure omission is undetectable in principle without a requirements registry.** The dropped-requirement
+  injection is **not caught** with `--strict-tags` (plain), and caught only with `strict-tags +ids` given
+  `--requirements ids.txt`. The absence of a requirement the spec never once mentions becomes visible only with an
+  external declaration (ids registration / an empty requirement block).
 
-- **F21: invariant 弱化は mutate の差分でしか見えない。** 弱化後の単体 verify は通る
-  (より弱い invariant)。`fslc mutate` の survivor 数が baseline 比で増えること
-  (本ハーネスは baseline→injected の survivor 増を caught と判定)で検出。単発実行
-  では「survivor が多い」だけなので、**baseline との比較が条件**。
+- **F21: invariant weakening is visible only in mutate's delta.** Standalone verify of the weakened spec passes
+  (a weaker invariant). It is detected by `fslc mutate`'s survivor count increasing relative to baseline (this
+  harness judges a survivor increase from baseline → injected as caught). A single run only says "many survivors",
+  so **comparison against baseline is the condition**.
 
-## 検出網の穴(→ 残る守備範囲)
+## Holes in the Detection Net (→ remaining territory)
 
-行列上「全注入が1レーンで捕捉」だが、F19/F20 のとおり**自動だけでは閉じない**:
+On the matrix "every injection is caught in one lane", but per F19/F20 **it does not close with automation alone**:
 
-1. **取違・ガード弱化**: forbidden/acceptance が要るが、その正負トレースは**人間または
-   独立エージェントが NL から書く**入力。自動生成されない。
-2. **欠落**: ids レジストリの整備が前提。
-3. これらの最終的な砦は **逆翻訳 diff(D5、skills/fsl の運用)** — 原文を見ていない
-   エージェントが `.fsl` を自然文化して要件と項目突合する。本ベンチは「自動検出器の
-   守備範囲」を確定し、その**外側**を独立チャネル/逆翻訳が担う構図を実証した。
+1. **Mistake / guard weakening**: forbidden/acceptance is needed, and its positive/negative traces are input
+   **written from the NL by a human or an independent agent**. Not auto-generated.
+2. **Omission**: a maintained ids registry is the prerequisite.
+3. The final bastion for these is **back-translation diff (D5, the skills/fsl workflow)** — an agent that has not
+   seen the original text renders the `.fsl` into natural language and reconciles items against the requirements.
+   This benchmark fixes the "territory of the automatic detectors" and demonstrates the picture in which the
+   **outside** of it is borne by the independent channel / back-translation.
 
-新規 issue 化が要る「未カバーの類型」は**無し**(全注入に対応レーンが存在)。ただし
-上記1〜3は「検出器の穴」ではなく「**人間/独立チャネルの入力が前提**」という運用条件
-として skills/fsl と #2 に記録済み。
+There is **no "uncovered type"** requiring a new issue (every injection has a corresponding lane). However, 1–3
+above are not "holes in the detectors" but operating conditions of "**human / independent-channel input is the
+prerequisite**", and are already recorded in skills/fsl and #2.
 
-## スコープ外(将来)
+## Out of Scope (future)
 
-当初案の「スキル版数別の生成品質測定」(素のスキル/+メモ/+正例ペアで別AIに形式化させ
-誤り率比較)は非決定的なライブ実験のため本ベンチから分離した(DOGFOOD-8 盲検可記述性の
-系統。別の手動 DOGFOOD として将来)。
+The original idea of "measuring generation quality by skill version" (have a different AI formalize with the plain
+skill / +memo / +positive-example pair and compare error rates) was separated out from this benchmark because it is
+a non-deterministic live experiment (lineage of DOGFOOD-8 blind writability. A separate manual DOGFOOD in the
+future).
 
-## 再現
+## Reproduction
 
 ```bash
-./.venv/bin/python -m pytest tests/test_injection_bench.py -q   # 行列を MATRIX.json に再生成
+./.venv/bin/python -m pytest tests/test_injection_bench.py -q   # regenerates the matrix into MATRIX.json
 ```
 
-モデル/検出器更新時に再実行できる較正資産。21注入 × 6検出器を約60秒で測る。
+A calibration asset that can be re-run when the model/detectors are updated. Measures 21 injections × 6 detectors in
+about 60 seconds.

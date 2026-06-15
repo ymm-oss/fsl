@@ -1,78 +1,81 @@
-# FSL v1 言語設計書
+# FSL v1 Language Design Document
 
-本書は FSL(AI-Native Formal Specification Language)の v1 設計を定める。
-v0 プロトタイプ([`LANGUAGE.md`](LANGUAGE.md))のコンセプトを引き継ぎ、
-v0 で明示された制限(型の貧弱さ・安全性のみ・有界のみ・実装との橋なし)に
-答える。**v1 は v0 の完全上位互換**であり、既存の `.fsl` はそのまま検証できる。
+This document defines the v1 design of FSL (AI-Native Formal Specification Language).
+It carries forward the concepts of the v0 prototype ([`LANGUAGE.md`](LANGUAGE.md))
+and answers the limitations made explicit in v0 (impoverished types, safety only,
+bounded only, no bridge to implementation). **v1 is a complete superset of v0**:
+existing `.fsl` files verify unchanged.
 
 ---
 
-## 1. コンセプトの確認と評価基準
+## 1. Restating the Concept and the Evaluation Criteria
 
-FSL の第一目標は「**生成AIが書き・検証し・修正する**」こと。
-v1 のすべての機能追加・却下は、次の 5 基準で判断した。
+The primary goal of FSL is to be **written, verified, and repaired by generative AI**.
+Every v1 feature addition or rejection was judged against the following 5 criteria.
 
-| # | 基準 | 意味 |
+| # | Criterion | Meaning |
 |---|---|---|
-| G1 | **生成確率** | LLM が一発で正しく書ける確率を最大化する。学習分布に近い構文(TS/Python/Rust 風)を選び、同じことを書く方法は原則 1 つにする |
-| G2 | **修正可能性** | 失敗したとき、出力 JSON だけから「どこを・なぜ・どうすれば」が機械的に決まる。すべての診断に位置情報と修正ヒントを付ける |
-| G3 | **検証の即応性** | 数秒で返る。有界・小スコープがデフォルト。write→verify→repair ループのレイテンシが第一 |
-| G4 | **意味の単純さ** | 「1ステップ=1アクションの原子実行」「同時代入」以外の意味論を増やさない。すべての新構文は既存意味論への糖衣か有界展開で説明できること |
-| G5 | **落とし穴の構造的排除** | 番兵値(-1)・非有界量化・空虚な仕様・暗黙の範囲逸脱といった「LLM がやりがちな仕様バグ」を、型と自動チェックで言語から消す |
+| G1 | **Generation probability** | Maximize the probability that an LLM writes it correctly on the first try. Choose syntax close to the training distribution (TS/Python/Rust-like), and as a rule provide exactly one way to write a given thing |
+| G2 | **Repairability** | When it fails, "where, why, and how to fix it" is mechanically determined from the output JSON alone. Every diagnostic carries location information and a repair hint |
+| G3 | **Verification responsiveness** | Returns in seconds. Bounded and small-scope by default. The latency of the write→verify→repair loop comes first |
+| G4 | **Semantic simplicity** | Do not add semantics beyond "one step = atomic execution of one action" and "simultaneous assignment." Every new construct must be explainable as sugar over existing semantics or as bounded expansion |
+| G5 | **Structural elimination of pitfalls** | Remove "spec bugs LLMs tend to make" — sentinel values (-1), unbounded quantification, vacuous specs, implicit range escapes — from the language itself, via types and automatic checks |
 
-v0 自身が G5 違反の見本を含んでいる:サンプルの `cart: Map<Int, Int>` は
-「-1 = 空」という番兵値を使い、`NoNegativeStock` は本来「在庫数は 0 以上の量」
-という**型の事実**を invariant として手書きしている。v1 の型システムは
-この 2 つを言語側で吸収する。
+v0 itself contains an exhibit of a G5 violation: the sample's `cart: Map<Int, Int>`
+uses a sentinel value where "-1 = empty," and `NoNegativeStock` hand-writes as an
+invariant what is really a **fact of the type** — "stock quantity is a non-negative
+amount." The v1 type system absorbs both of these on the language side.
 
 ---
 
-## 2. v1 で何が変わるか(総覧)
+## 2. What Changes in v1 (Overview)
 
-| 領域 | v0 | v1 |
+| Area | v0 | v1 |
 |---|---|---|
-| ドメイン | `const MAXU = 1` + `u in 0..MAXU` を毎回書く | `type UserId = 0..1` を宣言し `u: UserId` で参照 |
-| 値の不在 | `-1` などの番兵値 | `Option<T>`(`none` / `some(e)` / `is some(x)`) |
-| 状態の語彙 | Int の魔法数 | `enum Status { Draft, Placed, ... }` |
-| エンティティ | 平行するマップ群を手で管理 | `struct Order { status: Status, qty: Qty }` |
-| 集まり | `Map<Int, Bool>` を手で特性関数化 | `Set<T>`(`contains` / `add` / `remove` / `size`) |
-| 範囲逸脱 | invariant を手書き | 有界型の**自動境界チェック**(暗黙 invariant) |
-| アクション本体 | 代入と forall のみ | `let` / `if-else` / `ensures`(事後条件) |
-| 集約 | 書けない | `count(...)` / `sum(...)`(有界展開) |
-| 性質 | invariant(安全性)のみ | + `reachable`(到達可能性=シナリオ検査) |
-| 自動チェック | action coverage、init 充足性 | + 型境界、デッドロック検査 |
-| 出力 JSON | 全状態のみのトレース | + ステップ間 **state diff**、全診断に `loc`、スキーマバージョン |
-| CLI | `verify` のみ | + `check`(構文・型のみの高速ループ用) |
-| 証明 | 有界のみ | k 帰納法エンジンと CTI 修復プロトコルを規定(実装は v1.1) |
+| Domain | Write `const MAXU = 1` + `u in 0..MAXU` every time | Declare `type UserId = 0..1` and reference via `u: UserId` |
+| Absence of value | Sentinel values such as `-1` | `Option<T>` (`none` / `some(e)` / `is some(x)`) |
+| Vocabulary of state | Magic numbers in Int | `enum Status { Draft, Placed, ... }` |
+| Entities | Manually manage parallel maps | `struct Order { status: Status, qty: Qty }` |
+| Collections | Hand-build a characteristic function with `Map<Int, Bool>` | `Set<T>` (`contains` / `add` / `remove` / `size`) |
+| Range escape | Hand-written invariant | **Automatic bounds checking** of bounded types (implicit invariant) |
+| Action body | Assignment and forall only | `let` / `if-else` / `ensures` (postcondition) |
+| Aggregation | Inexpressible | `count(...)` / `sum(...)` (bounded expansion) |
+| Properties | invariant (safety) only | + `reachable` (reachability = scenario check) |
+| Automatic checks | action coverage, init satisfiability | + type bounds, deadlock check |
+| Output JSON | Trace of full states only | + per-step **state diff**, `loc` on every diagnostic, schema version |
+| CLI | `verify` only | + `check` (for the fast syntax/type-only loop) |
+| Proof | Bounded only | Specifies the k-induction engine and the CTI repair protocol (implementation in v1.1) |
 
-**却下した案**(理由は各節):文字列型、非有界量化、フル LTL、修飾付き enum
-参照(`Status.Paid`)、モジュール/インポート、ユーザー定義関数。
+**Rejected proposals** (rationale in each section): string types, unbounded
+quantification, full LTL, qualified enum references (`Status.Paid`),
+modules/imports, user-defined functions.
 
 ---
 
-## 3. 型システム
+## 3. Type System
 
-### 3.1 ドメイン型(有界部分範囲)
+### 3.1 Domain Types (Bounded Subrange)
 
 ```fsl
-type UserId = 0..2        // 0,1,2 の 3 値
+type UserId = 0..2        // the 3 values 0,1,2
 type Qty    = 0..5
 ```
 
-- 整数の有界部分範囲に名前を付ける。範囲の両端はコンパイル時整数
-  (リテラル、`const`、その四則)。
-- **量化のドメインになる**: `forall u: UserId { ... }`。v0 の
-  `forall u in 0..MAXU:` の繰り返し記述を消す(G1: 範囲の不一致という
-  典型的な生成ミスを構造的に防ぐ)。
-- **自動境界チェック**: ドメイン型を持つ状態変数(マップの値・struct の
-  フィールドを含む、再帰的)には、暗黙の invariant
-  `_bounds_<変数名>` が生成され、ユーザー invariant と同様に検査される。
-  init を含む全到達状態で範囲逸脱があれば `violated` になる(§7.4)。
-  - 設計判断: 境界は **assume(前提)ではなく check(検査)** する。
-    assume にすると範囲逸脱バグが「その状態は存在しない」ことにされて
-    隠蔽される(G5)。
-  - 帰結: v0 サンプルの `NoNegativeStock` は `type Qty = 0..N` を使えば
-    **書かなくても自動検出される**。
+- Names a bounded integer subrange. Both endpoints of the range are
+  compile-time integers (literals, `const`, or their arithmetic).
+- **Becomes a domain for quantification**: `forall u: UserId { ... }`. This
+  eliminates the repeated `forall u in 0..MAXU:` of v0 (G1: structurally
+  prevents the typical generation error of a mismatched range).
+- **Automatic bounds checking**: state variables of a domain type (including
+  map values and struct fields, recursively) get an implicit invariant
+  `_bounds_<variable name>` generated, which is checked just like a user
+  invariant. If a range escape occurs in any reachable state including init,
+  the result becomes `violated` (§7.4).
+  - Design decision: bounds are **checked, not assumed**. Treating them as
+    assumptions would hide range-escape bugs by declaring "that state does not
+    exist" (G5).
+  - Consequence: the v0 sample's `NoNegativeStock`, if you use
+    `type Qty = 0..N`, is **detected automatically without being written**.
 
 ### 3.2 enum
 
@@ -80,12 +83,13 @@ type Qty    = 0..5
 enum Status { Draft, Placed, Paid, Shipped, Cancelled }
 ```
 
-- メンバ名は spec 全体でグローバルに一意でなければならない(重複は
-  `name` エラー)。参照は非修飾(`Placed`)のみ。
-  - 却下: `Status.Paid` 修飾形の併存。書き方が 2 つになると LLM の出力が
-    揺れ、diff も汚れる(G1)。一意性チェックで衝突は検出できる。
-- トレース・反例 JSON には**メンバ名がそのまま**現れる(`"status": "Paid"`)。
-  数値エンコードを LLM に見せない(G2)。
+- Member names must be globally unique across the whole spec (duplicates are a
+  `name` error). References are unqualified (`Placed`) only.
+  - Rejected: coexistence of the `Status.Paid` qualified form. Having two ways
+    to write it makes the LLM's output waver and pollutes diffs (G1). The
+    uniqueness check can detect collisions.
+- The trace and counterexample JSON show the **member name verbatim**
+  (`"status": "Paid"`). The numeric encoding is never shown to the LLM (G2).
 
 ### 3.3 Option
 
@@ -93,21 +97,22 @@ enum Status { Draft, Placed, Paid, Shipped, Cancelled }
 state { cart: Map<UserId, Option<ItemId>> }
 ```
 
-- リテラル `none` / `some(式)`。
-- 判定と取り出しは `is` パターンで行う:
-  - `cart[u] is none` — 空である
-  - `cart[u] is some(i)` — 値があり、**`i` を束縛する**。`requires` に
-    書いた場合、束縛はそのアクション本体の残り全体(後続の requires・
-    代入・ensures)で使える
-  - 単純比較 `cart[u] == none` / `!= none` も可(束縛が不要なとき)
-  - Option の `==` / `!=` が許されるのは **`none` との比較のみ**。
-    `x == some(e)` や Option 同士の比較は `type` エラーとし、
-    `is some(v)` への書き換えヒントを返す(G1「同じことを書く方法は
-    1 つ」、G5「サイレントな誤りの排除」)
-- 部分関数(`value(x)` / `x!` のような unwrap)は**提供しない**。
-  ガードなし unwrap という未定義動作の入り口を作らないため(G5)。
-  取り出しは必ず `is some(x)` を通る=全域。
-- JSON 上は `null` または値で表示される。
+- Literals `none` / `some(expr)`.
+- Testing and extraction are done with the `is` pattern:
+  - `cart[u] is none` — is empty
+  - `cart[u] is some(i)` — a value is present, and **binds `i`**. When written
+    in `requires`, the binding is usable throughout the rest of that action body
+    (subsequent requires, assignments, ensures)
+  - Simple comparisons `cart[u] == none` / `!= none` are also allowed (when no
+    binding is needed)
+  - `==` / `!=` on Option is allowed **only for comparison against `none`**.
+    `x == some(e)` or comparison between two Options is a `type` error, with a
+    rewrite hint toward `is some(v)` (G1 "one way to write a given thing,"
+    G5 "eliminating silent errors")
+- Partial functions (an unwrap like `value(x)` / `x!`) are **not provided**, so
+  as not to create an entry point to the undefined behavior of a guardless
+  unwrap (G5). Extraction always passes through `is some(x)` = total.
+- In JSON it is shown as `null` or the value.
 
 ### 3.4 struct
 
@@ -116,14 +121,15 @@ struct Order { status: Status, qty: Qty }
 state  { orders: Map<OrderId, Order> }
 ```
 
-- フィールドアクセス `orders[o].status`、フィールド単位の代入
-  `orders[o].status = Shipped`、リテラル
-  `orders[o] = Order { status: Draft, qty: 0 }`。
-- 等価 `==` はフィールドごとの等価。v2.1 から `Option<スカラ>` フィールドは
-  直接書ける(`struct Res { item: Option<ItemId> }`)。Option フィールドの等価は
-  `none` 同士を同値とし、present のときだけ value を比較する論理等価。
-  struct のネスト(struct を含む struct)、Set/Map/Seq フィールド、
-  `Option<Option<...>>` や `Option<Set/Map/Seq/struct>` は不可。
+- Field access `orders[o].status`, per-field assignment
+  `orders[o].status = Shipped`, literal
+  `orders[o] = Order { status: Draft, qty: 0 }`.
+- Equality `==` is field-by-field equality. From v2.1, an `Option<scalar>`
+  field can be written directly (`struct Res { item: Option<ItemId> }`).
+  Equality of an Option field treats two `none`s as equal and compares values
+  only when present — a logical equality. Nested structs (a struct containing a
+  struct), Set/Map/Seq fields, `Option<Option<...>>`, and
+  `Option<Set/Map/Seq/struct>` are not allowed.
 
 ### 3.5 Set
 
@@ -131,15 +137,16 @@ state  { orders: Map<OrderId, Order> }
 state { shipped: Set<OrderId> }
 ```
 
-- 要素型は有界型(ドメイン型・enum)に限る。
-- 操作はメソッド風(G1: LLM の手癖に一致):
+- The element type is restricted to a bounded type (domain type or enum).
+- Operations are method-style (G1: matches the LLM's habits):
   - `s.contains(e)` : Bool
-  - `s.add(e)` / `s.remove(e)` : 新しい集合(式。代入の右辺で使う)
+  - `s.add(e)` / `s.remove(e)` : a new set (an expression; use on the
+    right-hand side of an assignment)
   - `s.size()` : Int
-- リテラル: `Set {}`(空)、`Set { 0, 2 }`。
-- JSON 上は**ソート済み配列**で表示(`"shipped": [0, 2]`)。
+- Literals: `Set {}` (empty), `Set { 0, 2 }`.
+- In JSON it is shown as a **sorted array** (`"shipped": [0, 2]`).
 
-### 3.6 Seq(v1.1)
+### 3.6 Seq (v1.1)
 
 ```fsl
 const CAP = 3
@@ -149,47 +156,52 @@ state {
 }
 ```
 
-- 容量 `N` 付きの FIFO 列。要素型 `T` はスカラ型のみ。`N` は正の定数式
-  (整数リテラルまたは `const` 名)。
-- **状態変数の型としてのみ**使用可能(Map の値・Set の要素・Seq の要素には
-  不可。struct フィールドにも不可だが `Option<Seq<...>>` も不可 —
-  `check` で `kind: "type"` + hint)。
-- 操作(純粋・再代入イディオム): `size()` / `push(e)` / `pop()` /
-  `head()` / `at(i)` / `contains(e)` / `==` / `!=`。
-- リテラル: `Seq {}` / `Seq { 1, 2 }`(要素数 ≤ N)。
-- `pop()` / `head()` / `at(i)` は部分関数。アクション本体・`requires`・
-  `ensures` 内では **暗黙の well-definedness 検査**(`partial_op`)が付く。
-  `requires q.size() > 0` 等のガードイディオムと併用する(G5)。
-- 満杯時の `push` は暗黙境界 invariant `_bounds_<変数>` 違反
-  (`violation_kind: "type_bound"`)。
-- JSON 上は長さプレフィックスの配列(`"queue": [1, 2]`、空は `[]`)。
-  diff は列全体の `{from, to}`。
+- A FIFO sequence with capacity `N`. The element type `T` must be a scalar
+  type. `N` is a positive constant expression (an integer literal or a `const`
+  name).
+- Usable **only as the type of a state variable** (not as a map value, set
+  element, or sequence element; not as a struct field either, and
+  `Option<Seq<...>>` is also disallowed — `check` reports `kind: "type"` + hint).
+- Operations (pure, re-assignment idiom): `size()` / `push(e)` / `pop()` /
+  `head()` / `at(i)` / `contains(e)` / `==` / `!=`.
+- Literals: `Seq {}` / `Seq { 1, 2 }` (element count ≤ N).
+- `pop()` / `head()` / `at(i)` are partial functions. Inside an action body,
+  `requires`, or `ensures`, an **implicit well-definedness check**
+  (`partial_op`) is attached. Use it together with a guard idiom such as
+  `requires q.size() > 0` (G5).
+- A `push` when full violates the implicit bounds invariant `_bounds_<variable>`
+  (`violation_kind: "type_bound"`).
+- In JSON it is a length-prefixed array (`"queue": [1, 2]`, empty is `[]`).
+  The diff is a `{from, to}` over the whole sequence.
 
 ### 3.7 Map
 
-- `Map<K, V>`: **K は有界型(ドメイン型・enum)でなければならない**。
-  これによりトレース表示が全域になり、量化・集約が常に有界になる。
-- v0 互換: `Map<Int, ·>` は引き続き受理するが、`fslc check` /
-  `verify` の `warnings` に非推奨警告と機械的な書き換えヒント
-  (「`type K = 0..N` を宣言して置換せよ」)を載せる。
+- `Map<K, V>`: **K must be a bounded type (domain type or enum)**. This makes
+  the trace display total and keeps quantification and aggregation always
+  bounded.
+- v0 compatibility: `Map<Int, ·>` is still accepted, but `fslc check` /
+  `verify` puts a deprecation warning and a mechanical rewrite hint
+  ("declare `type K = 0..N` and replace") in `warnings`.
 
 ### 3.8 Int / Bool
 
-- そのまま残す。`Int` は非有界(Z3 整数)。集計値(売上合計など)に使う。
-  非有界変数には自動境界チェックは付かない。
+- Kept as is. `Int` is unbounded (a Z3 integer). Use it for aggregate values
+  (such as total revenue). Unbounded variables do not get automatic bounds
+  checking.
 
-### 3.9 文字列は提供しない(設計判断)
+### 3.9 No String Type (Design Decision)
 
-仕様レベルで文字列の中身に意味があることはまれで、ほぼ常に「有限個の
-区別される値」で十分。`enum` か不透明なドメイン型で表す。
-Z3 の文字列理論は遅く G3 に反し、LLM は文字列比較の表記揺れで
-ミスしやすい(G5)。エラーメッセージでこの方針へ誘導する。
+It is rare for the contents of a string to carry meaning at the spec level;
+almost always "a finite number of distinguished values" suffices. Represent
+this with an `enum` or an opaque domain type. Z3's string theory is slow and
+violates G3, and LLMs are prone to mistakes from notational variation in string
+comparison (G5). Error messages steer toward this policy.
 
 ---
 
-## 4. 構文
+## 4. Syntax
 
-### 4.1 文法(EBNF)
+### 4.1 Grammar (EBNF)
 
 ```ebnf
 spec          ::= "spec" NAME "{" item* "}"
@@ -205,7 +217,7 @@ field         ::= NAME ":" type
 
 state_def     ::= "state" "{" var_decl ("," var_decl)* ","? "}"
 var_decl      ::= NAME ":" type
-type          ::= "Int" | "Bool" | NAME            // NAME = ドメイン/enum/struct
+type          ::= "Int" | "Bool" | NAME            // NAME = domain/enum/struct
                 | "Map" "<" type "," type ">"
                 | "Set" "<" type ">"
                 | "Seq" "<" type "," const_expr ">"
@@ -214,8 +226,8 @@ type          ::= "Int" | "Bool" | NAME            // NAME = ドメイン/enum/s
 init_def      ::= "init" "{" stmt* "}"
 
 action_def    ::= "action" NAME "(" (param ("," param)*)? ")" "{" action_item* "}"
-param         ::= NAME ":" NAME                     // 有界型
-                | NAME "in" const_expr ".." const_expr   // v0 互換
+param         ::= NAME ":" NAME                     // bounded type
+                | NAME "in" const_expr ".." const_expr   // v0 compatibility
 action_item   ::= "requires" expr
                 | "ensures" expr
                 | "let" NAME "=" expr
@@ -226,18 +238,18 @@ stmt          ::= lvalue "=" expr
                 | "forall" binder ":"? "{" stmt* "}"
 lvalue        ::= NAME ("[" expr "]")? ("." NAME)?
 binder        ::= NAME ":" NAME ("where" expr)?
-                | NAME "in" const_expr ".." const_expr   // v0 互換
+                | NAME "in" const_expr ".." const_expr   // v0 compatibility
 
 invariant_def ::= "invariant" NAME "{" expr "}"
 reachable_def ::= "reachable" NAME "{" expr "}"
 ```
 
-式:
+Expressions:
 
 ```ebnf
 expr        ::= quant | imp
 quant       ::= ("forall" | "exists") binder ("{" expr "}" | ":" expr)
-imp         ::= or_e ("=>" imp)?                    // 右結合
+imp         ::= or_e ("=>" imp)?                    // right-associative
 or_e        ::= and_e ("or" and_e)*
 and_e       ::= not_e ("and" not_e)*
 not_e       ::= "not" not_e | is_e
@@ -255,90 +267,101 @@ atom        ::= INT | "true" | "false" | "none"
               | "some" "(" expr ")"
               | "Set" "{" (expr ("," expr)*)? "}"
               | "Seq" "{" (expr ("," expr)*)? "}"
-              | NAME "{" NAME ":" expr ("," NAME ":" expr)* "}"  // struct リテラル
+              | NAME "{" NAME ":" expr ("," NAME ":" expr)* "}"  // struct literal
               | "count" "(" NAME ":" NAME "where" expr ")"
               | "sum" "(" NAME ":" NAME "of" expr ("where" expr)? ")"
               | "min" "(" expr "," expr ")"
               | "max" "(" expr "," expr ")"
               | "abs" "(" expr ")"
-              | "old" "(" expr ")"                  // ensures 内のみ
+              | "old" "(" expr ")"                  // inside ensures only
               | NAME
               | "(" expr ")"
 ```
 
-予約語: `spec state init action requires ensures invariant reachable
+Reserved words: `spec state init action requires ensures invariant reachable
 const type enum struct let if else forall exists in where is and or not
 true false none some old count sum min max abs Int Bool Map Set Seq Option`
 
-### 4.2 量化と集約
+### 4.2 Quantification and Aggregation
 
-- `forall u: UserId { 式 }` / `exists i: ItemId { 式 }` — ドメイン型・enum
-  上の有界量化。v0 形式 `forall i in 0..MAXI: 式` も引き続き有効。
-- `where` 付きは糖衣: `forall x: T where p { q }` ≡ `forall x: T { p => q }`、
-  `exists x: T where p { q }` ≡ `exists x: T { p and q }`。
-- `count(o: OrderId where 述語)` — 述語を満たす個体数。
-- `sum(o: OrderId of 式 [where 述語])` — 式の総和(述語を満たす個体のみ)。
-- すべて宣言済みドメイン上の**有界展開**であり、非有界量化は書けない
-  (G3/G5: 構文レベルで排除)。
+- `forall u: UserId { expr }` / `exists i: ItemId { expr }` — bounded
+  quantification over a domain type or enum. The v0 form
+  `forall i in 0..MAXI: expr` also remains valid.
+- The `where` form is sugar: `forall x: T where p { q }` ≡
+  `forall x: T { p => q }`, `exists x: T where p { q }` ≡
+  `exists x: T { p and q }`.
+- `count(o: OrderId where predicate)` — the number of individuals satisfying
+  the predicate.
+- `sum(o: OrderId of expr [where predicate])` — the sum of the expression
+  (over individuals satisfying the predicate only).
+- All are **bounded expansions** over a declared domain; unbounded
+  quantification cannot be written (G3/G5: excluded at the syntax level).
 
-### 4.3 スタイル規約(生成 LLM 向け正準形)
+### 4.3 Style Conventions (Canonical Form for Generating LLMs)
 
-仕様の正準的な書き方を言語仕様の一部として定める。生成のたびに表記が
-揺れると diff ベースの修復が壊れるため(G2)。
+The canonical way to write a spec is defined as part of the language
+specification. If the notation wavers on every generation, diff-based repair
+breaks (G2).
 
-- インデント 2 スペース、1 行 1 文。
-- 命名: アクション = `snake_case` の動詞句、invariant / reachable /
-  type / enum / struct = `PascalCase`、const = `UPPER_SNAKE`。
-- `requires` はアクション本体の先頭にまとめる(`let`・`is some` 束縛が
-  必要な場合のみ間に挟む)。`ensures` は末尾。
-- v1 の新規仕様ではドメイン型を使い、`const` + `in lo..hi` は使わない。
-
----
-
-## 5. アクションの意味論
-
-仕様は遷移系 (S, I, →) を定める。S は状態変数の付値全体、I は `init` を
-満たす状態の集合、→ は以下で定まる遷移関係。v0 の意味論を一切変えずに
-拡張する(G4)。
-
-1. **アクションインスタンス** = アクション名 × パラメータ値(宣言された
-   有界ドメインの全組み合わせを列挙)。
-2. **enabled**: すべての `requires` が現状態 σ で真(`is some(x)` は
-   「値が存在する」が真、かつ x をその値に束縛)。
-3. **1 ステップ** = enabled なインスタンスのうち**いずれか 1 つ**が
-   原子的に実行される(インターリービング)。非決定性はこの選択のみ。
-   enabled なインスタンスの更新は決定的。
-4. **同時代入**: 本体の右辺・`if` 条件・`let` の値はすべて**旧状態** σ を
-   読む。代入されなかった変数は変化しない(フレーム条件は自動)。
-5. **`let x = 式`**: 旧状態で評価した値を束縛。宣言以降の requires・文・
-   ensures で使える。
-6. **`if c { ... } else { ... }`**: c は旧状態で評価。実行されなかった
-   分岐の変数はフレーム条件に従い不変。
-7. **書き込み衝突**:
-   - 同一実行経路上で同じ**スカラ変数**(または同じ struct フィールド)へ
-     2 度代入 → `semantics` エラー(ほぼ確実にバグ)。
-   - **マップ**は同一セルへの書き込みをテキスト順で合成(後勝ち)。
-     `forall` ループで別セルに書く通常用途は無干渉。構文上同一の添字へ
-     2 度書いている場合は `check` が警告。
-8. **`ensures p`**: 事後条件。enabled で遷移 σ → σ' が起きたとき、p が
-   σ' で真であることを検査する。p の中の `old(式)` は σ で評価される。
-   違反は invariant 違反と同形式の反例(§7.2)で報告する。
-   - 採用理由: Dafny / 契約プログラミングの形で LLM の学習分布に強く
-     存在し(G1)、「更新を書き間違えた」ことをそのアクションの行に
-     局所化して報告できる(G2)。
+- Indentation 2 spaces, one statement per line.
+- Naming: action = `snake_case` verb phrase; invariant / reachable / type /
+  enum / struct = `PascalCase`; const = `UPPER_SNAKE`.
+- Group `requires` at the head of the action body (interleave only when a
+  `let` or `is some` binding is needed). Put `ensures` at the end.
+- In new v1 specs, use domain types; do not use `const` + `in lo..hi`.
 
 ---
 
-## 6. 性質と自動チェック
+## 5. Action Semantics
 
-### 6.1 invariant(安全性)
+A spec defines a transition system (S, I, →). S is the set of all assignments
+to state variables, I is the set of states satisfying `init`, and → is the
+transition relation defined below. It extends v0 semantics without changing them
+at all (G4).
 
-v0 と同じ。初期状態を含む全到達状態で成立を要求。
+1. **Action instance** = action name × parameter values (enumerating all
+   combinations of the declared bounded domains).
+2. **enabled**: every `requires` is true in the current state σ (`is some(x)`
+   means "a value exists" is true, and binds x to that value).
+3. **One step** = **any one** of the enabled instances executes atomically
+   (interleaving). Nondeterminism is in this choice only; the update of an
+   enabled instance is deterministic.
+4. **Simultaneous assignment**: the right-hand sides of the body, `if`
+   conditions, and `let` values all read the **old state** σ. Variables not
+   assigned do not change (the frame condition is automatic).
+5. **`let x = expr`**: binds the value evaluated in the old state. Usable in
+   requires, statements, and ensures from the declaration onward.
+6. **`if c { ... } else { ... }`**: c is evaluated in the old state. Variables
+   in the branch not executed remain unchanged per the frame condition.
+7. **Write conflicts**:
+   - Assigning the same **scalar variable** (or the same struct field) twice on
+     the same execution path → `semantics` error (almost certainly a bug).
+   - **Maps** compose writes to the same cell in textual order (last wins).
+     The normal use of writing to a different cell in a `forall` loop is
+     non-interfering. If the same index is syntactically written twice, `check`
+     warns.
+8. **`ensures p`**: postcondition. When enabled and a transition σ → σ' occurs,
+   it checks that p is true in σ'. `old(expr)` inside p is evaluated in σ. A
+   violation is reported with the same counterexample format as an invariant
+   violation (§7.2).
+   - Reason for adoption: it strongly exists in the LLM's training distribution
+     in the form of Dafny / contract programming (G1), and lets a "miswritten
+     update" be reported localized to that action's line (G2).
 
-v0 では invariant が 1 つもないとエラーだったが、v1 では型境界の暗黙
-invariant が常に存在するため**エラーにしない**(警告は出す)。
+---
 
-### 6.2 reachable(到達可能性=シナリオ検査)
+## 6. Properties and Automatic Checks
+
+### 6.1 invariant (Safety)
+
+Same as v0. Requires it to hold in all reachable states, including the initial
+state.
+
+In v0, having no invariant at all was an error, but in v1 the implicit invariant
+of type bounds is always present, so it is **not an error** (a warning is
+issued).
+
+### 6.2 reachable (Reachability = Scenario Check)
 
 ```fsl
 reachable FullLifecycle {
@@ -346,58 +369,62 @@ reachable FullLifecycle {
 }
 ```
 
-「この状態に**到達できる経路が存在する**」ことの表明。アプリ仕様の
-「ユーザーは購入を完了できる」というハッピーパスの検査に当たる。
+An assertion that "there **exists a path that can reach** this state." It
+corresponds to checking the happy path "the user can complete a purchase" in an
+app spec.
 
-- BMC では深さ K 以内の充足判定そのもので、追加コストはほぼない(G3)。
-- 成功時は**witness トレース**(その状態に至る実行列)を JSON で返す。
-  これは v2 の実装橋(統合テスト雛形の生成)の入力になる。
-- 失敗は「ガードが強すぎる/init が間違っている」ことの兆候であり、
-  action coverage(空虚性検査)の一般化に当たる。
-- 設計判断: フル LTL や `eventually` は採用しない。公平性のない
-  インターリービング+有界検査では「いつか必ず」は意味を持たず、
-  LLM にも人間にも誤解を招く(G4)。活性は v2 で公平性注釈とともに
-  導入する(§10)。
+- In BMC it is the satisfiability decision itself within depth K, so the added
+  cost is nearly nil (G3).
+- On success it returns a **witness trace** (the execution sequence leading to
+  that state) in JSON. This becomes the input for the v2 implementation bridge
+  (generating integration-test templates).
+- Failure is a sign of "guards too strong / init wrong," and corresponds to a
+  generalization of action coverage (the vacuity check).
+- Design decision: full LTL or `eventually` is not adopted. Under unfair
+  interleaving + bounded checking, "eventually always" carries no meaning and
+  misleads both LLMs and humans (G4). Liveness is introduced in v2 along with
+  fairness annotations (§10).
 
-### 6.3 自動チェック(仕様に書かなくても常に走る)
+### 6.3 Automatic Checks (Always Run, Even Without Being Written in the Spec)
 
-| チェック | 内容 | 報告 |
+| Check | Content | Report |
 |---|---|---|
-| init 充足性 | 初期状態が存在するか | `error` / `kind: "vacuous"`(v0 と同じ) |
-| 型境界 | 有界型の全状態変数が全到達状態で範囲内か | `violated` / `invariant: "_bounds_<var>"` |
-| action coverage | 各アクションが深さ K 以内に一度でも enabled になるか | `verified` 内 `action_coverage` + 警告(v0 と同じ) |
-| デッドロック | enabled なインスタンスが 1 つもない到達状態の有無 | 既定は警告+到達トレース。`--deadlock=error` で `violated` に昇格、`--deadlock=ignore` で抑止(意図的な終端状態を持つ仕様向け) |
+| init satisfiability | Whether an initial state exists | `error` / `kind: "vacuous"` (same as v0) |
+| type bounds | Whether all state variables of bounded types stay in range in all reachable states | `violated` / `invariant: "_bounds_<var>"` |
+| action coverage | Whether each action becomes enabled at least once within depth K | `action_coverage` inside `verified` + warning (same as v0) |
+| deadlock | Whether there is a reachable state with no enabled instance | Default is warning + reach trace. `--deadlock=error` promotes to `violated`; `--deadlock=ignore` suppresses (for specs with intentional terminal states) |
 
 ---
 
-## 7. 検証器インターフェース
+## 7. Verifier Interface
 
 ### 7.1 CLI
 
 ```
-fslc check  <file.fsl>                          # 構文・名前・型検査のみ(高速ループ用)
-fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
+fslc check  <file.fsl>                          # syntax/name/type check only (for the fast loop)
+fslc verify <file.fsl> [--depth K]              # BMC (default K=8)
                        [--engine bmc|induction] # induction: §9
-                       [--k N]                  # 最大帰納深さ(既定 1、induction のみ)
+                       [--k N]                  # max induction depth (default 1, induction only)
                        [--deadlock warn|error|ignore]
 ```
 
-- 出力は常に **stdout への単一 JSON オブジェクト**(v0 と同じ)。
-- 終了コード: `0` = verified / proved(全 reachable 充足を含む)、
-  `1` = violated / reachable_failed、`2` = 仕様エラー(parse/type/…)、
-  `3` = 検証器内部エラー。
-- BMC は深さ 0 から順に検査するため、返る反例は**最短**である(保証として
-  明文化。LLM に渡すトレースは短いほど修復精度が上がる)。
+- Output is always a **single JSON object to stdout** (same as v0).
+- Exit codes: `0` = verified / proved (including all reachable satisfied),
+  `1` = violated / reachable_failed, `2` = spec error (parse/type/…),
+  `3` = verifier internal error.
+- Because BMC checks in order from depth 0, the returned counterexample is the
+  **shortest** (stated explicitly as a guarantee: the shorter the trace handed
+  to the LLM, the higher the repair accuracy).
 
-### 7.2 出力 JSON スキーマ v1
+### 7.2 Output JSON Schema v1
 
-全出力は共通エンベロープを持つ:
+All output has a common envelope:
 
 ```json
 { "fsl": "1.0", "result": "...", "spec": "OrderWorkflow", ... }
 ```
 
-**verified(有界検証成功):**
+**verified (bounded verification success):**
 
 ```json
 {
@@ -407,7 +434,7 @@ fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
   "depth": 8,
   "invariants_checked": ["ShippedWasPaid", "RevenueConsistent", "_bounds_orders"],
   "reachables": {
-    "FullLifecycle": { "witnessed_at_step": 3, "witness": [ /* トレース */ ] }
+    "FullLifecycle": { "witnessed_at_step": 3, "witness": [ /* trace */ ] }
   },
   "action_coverage": { "place": true, "pay": true, "ship": true, "cancel": true },
   "deadlock": { "found": false },
@@ -416,7 +443,7 @@ fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
 }
 ```
 
-**violated(invariant / ensures / 型境界の違反):**
+**violated (violation of invariant / ensures / type bounds):**
 
 ```json
 {
@@ -425,7 +452,7 @@ fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
   "spec": "ShoppingCart",
   "violation_kind": "invariant",        // "invariant" | "ensures" | "type_bound" | "partial_op" | "deadlock"
   "invariant": "_bounds_stock",
-  "loc": { "line": 8, "column": 5 },    // 違反した性質(または ensures)の位置
+  "loc": { "line": 8, "column": 5 },    // location of the violated property (or ensures)
   "violated_at_step": 4,
   "violating_bindings": [ { "i": 0 } ],
   "last_action": { "name": "checkout", "params": { "u": 1 },
@@ -442,17 +469,20 @@ fslc verify <file.fsl> [--depth K]              # BMC(既定 K=8)
 }
 ```
 
-v0 からの差分:
+Differences from v0:
 
-- `changes`: 各ステップの**状態差分**。キーは射影パスの平坦文字列
-  (`"stock[0]"`, `"orders[2].status"`)、値は `{from, to}`。LLM は全状態を
-  読まずに「どのアクションが何を壊したか」を追える(G2)。
-- `last_action`: 違反直前に実行されたアクションと**その定義位置**。
-  修復の第一候補(requires の追加先)を直接指す。
-- 値の表示: enum はメンバ名、Option は `null`/値、Set はソート済み配列。
-- `violating_bindings` は入れ子 forall に一般化(`[{"u":1,"i":0}]` の形)。
+- `changes`: the **state diff** of each step. Keys are flattened strings of
+  projection paths (`"stock[0]"`, `"orders[2].status"`), values are
+  `{from, to}`. The LLM can track "which action broke what" without reading the
+  whole state (G2).
+- `last_action`: the action executed just before the violation and **its
+  definition location**. It points directly at the first repair candidate
+  (where to add a requires).
+- Value display: enum is the member name, Option is `null`/value, Set is a
+  sorted array.
+- `violating_bindings` generalizes to nested forall (the form `[{"u":1,"i":0}]`).
 
-**reachable_failed(シナリオ到達不能):**
+**reachable_failed (scenario unreachable):**
 
 ```json
 {
@@ -466,7 +496,7 @@ v0 からの差分:
 }
 ```
 
-**error(構文・名前・型・意味エラー):**
+**error (syntax / name / type / semantic error):**
 
 ```json
 {
@@ -480,51 +510,56 @@ v0 からの差分:
 }
 ```
 
-エラー分類は固定の閉集合とし、各分類が持つフィールドをスキーマで保証する
-(`parse`/`name`/`type`/`semantics` は必ず `loc` を持つ)。
+The error classification is a fixed closed set, and the fields each
+classification has are guaranteed by the schema (`parse`/`name`/`type`/
+`semantics` always have `loc`).
 
-### 7.3 値の表示とロワリングの不可視性
+### 7.3 Value Display and the Invisibility of Lowering
 
-内部エンコーディング(enum の整数化、Option の存在ビット、struct の
-フィールド分割)は **JSON に一切漏らさない**。LLM が見る語彙は仕様の
-語彙と一致させる(G2)。これはスキーマ上の保証であり、テスト対象とする。
+Internal encodings (the integer-ization of enums, the presence bit of Option,
+the field splitting of structs) are **never leaked into the JSON**. The
+vocabulary the LLM sees is made to match the vocabulary of the spec (G2). This
+is a schema-level guarantee and is treated as a test target.
 
 ---
 
-## 8. 修復プロトコル(LLM の行動指針)
+## 8. Repair Protocol (Behavioral Guide for the LLM)
 
-各 `result` に対する推奨の機械的修復手順。fslc のドキュメントおよび
-システムプロンプト素材として提供する。
+The recommended mechanical repair procedure for each `result`. Provided as fslc
+documentation and as system-prompt material.
 
-| result / kind | 読むべきフィールド | 推奨アクション |
+| result / kind | Fields to read | Recommended action |
 |---|---|---|
-| `error` / `parse` | `loc`, `expected` | 当該行の構文を `expected` に従い修正。再 `check` |
-| `error` / `name`・`type` | `loc`, `hint` | 宣言の追加・型の変更。再 `check` |
-| `violated` / `invariant`・`type_bound` | `last_action`, `changes`, `violating_bindings` | まず `last_action` の `requires` 不足を疑う(最頻のバグ)。トレース上の `changes` が意図通りなら invariant 側の誤りを疑う |
-| `violated` / `ensures` | `last_action`, `changes` | 当該アクションの更新式と ensures のどちらが仕様意図か判断して片方を直す |
-| `violated` / `partial_op` | `last_action`, `hint`, `trace` | `requires q.size() > 0` 等でガードを追加するか、空状態で発火しないよう requires を強化する |
-| `violated` / `deadlock` | `trace` | 終端状態が意図的なら `--deadlock=ignore`、そうでなければガードを弱めるか脱出アクションを追加 |
-| `reachable_failed` | `action_coverage`, `hint` | coverage が false のアクションの `requires` と `init` を疑う。次に `--depth` を増やす |
-| `verified` だが `action_coverage` に false | `warnings` | 空虚性。requires と init の矛盾を修正 |
-| `unknown_cti`(v1.1, §9) | `cti` | CTI 状態を排除する補助 invariant を追加して再実行 |
+| `error` / `parse` | `loc`, `expected` | Fix the syntax on that line per `expected`. Re-`check` |
+| `error` / `name`/`type` | `loc`, `hint` | Add a declaration or change the type. Re-`check` |
+| `violated` / `invariant`/`type_bound` | `last_action`, `changes`, `violating_bindings` | First suspect a missing `requires` on `last_action` (the most frequent bug). If `changes` in the trace is as intended, suspect an error on the invariant side |
+| `violated` / `ensures` | `last_action`, `changes` | Decide which of the action's update expression and the ensures is the spec intent, and fix the other |
+| `violated` / `partial_op` | `last_action`, `hint`, `trace` | Add a guard with `requires q.size() > 0` etc., or strengthen the requires so it does not fire in the empty state |
+| `violated` / `deadlock` | `trace` | If the terminal state is intentional, use `--deadlock=ignore`; otherwise weaken a guard or add an escape action |
+| `reachable_failed` | `action_coverage`, `hint` | Suspect the `requires` and `init` of the action whose coverage is false. Next, increase `--depth` |
+| `verified` but `action_coverage` has false | `warnings` | Vacuity. Fix the contradiction between requires and init |
+| `unknown_cti` (v1.1, §9) | `cti` | Add an auxiliary invariant that excludes the CTI state and re-run |
 
-設計上の含意: **このテーブルが閉じている**(どの出力にも次の一手がある)
-ことが v1 の出力スキーマの設計要件である。新しい診断を追加するときは、
-推奨アクションを同時に定義しなければならない。
+Design implication: that **this table is closed** (every output has a next move)
+is a design requirement of the v1 output schema. When adding a new diagnostic,
+the recommended action must be defined at the same time.
 
 ---
 
-## 9. 帰納的証明エンジン(v1.1)
+## 9. Inductive Proof Engine (v1.1)
 
-詳細アルゴリズム・健全性条件・テスト計画は `docs/DESIGN-induction.md` を参照。
+For the detailed algorithm, soundness conditions, and test plan, see
+`docs/DESIGN-induction.md`.
 
-`--engine induction` は k 帰納法で invariant の**無限深度証明**を試みる。
+`--engine induction` attempts an **unbounded-depth proof** of invariants by
+k-induction.
 
-- **base**: 通常 BMC(深さ `--depth`)。違反すれば通常の `violated`。
-- **step**: 自由状態列 σ₀..σₖ(init なし)で「全 invariant 成立かつ連続遷移」を
-  仮定し、対象 invariant が σₖ で破れるかを Z3 で判定。全 invariant が
-  unsat → `result: "proved"`。sat → `unknown_cti`(到達可能とは限らない CTI)。
-- induction 出力に `deadlock` フィールドは含めない。
+- **base**: ordinary BMC (depth `--depth`). If violated, an ordinary `violated`.
+- **step**: over a free state sequence σ₀..σₖ (no init), assuming "all
+  invariants hold and the transitions are consecutive," decide with Z3 whether
+  the target invariant breaks at σₖ. All invariants unsat → `result: "proved"`.
+  sat → `unknown_cti` (a CTI that is not necessarily reachable).
+- induction output does not include a `deadlock` field.
 
 **proved:**
 
@@ -564,78 +599,84 @@ v0 からの差分:
 }
 ```
 
-CTI →「補助 invariant の提案」は LLM が得意な帰納的一般化であり、
-人間の専門家が行う invariant 強化ループをそのまま write→verify→repair
-ループに乗せる。これが FSL の AI ネイティブ設計の v1 における中心的な賭けである。
+CTI → "proposing an auxiliary invariant" is the kind of inductive
+generalization an LLM is good at, and puts the invariant-strengthening loop that
+human experts perform directly onto the write→verify→repair loop. This is the
+central bet of FSL's AI-native design in v1.
 
 ---
 
-## 10. ロードマップ
+## 10. Roadmap
 
-- **v1.0(本書のコア)**: 型システム(ドメイン/enum/Option/struct/Set)、
-  `let`/`if`/`is`、`ensures`、`reachable`、`count`/`sum`、自動境界チェック、
-  デッドロック検査、JSON v1(diff・loc・スキーマ版数)、`fslc check`。
-- **v1.1**: k 帰納法エンジン(§9、実装済み)、`fslc scenarios`(reachable witness と
-  coverage トレースから統合テスト雛形 JSON を生成=実装との橋の第一歩)、
-  `Seq<T, N>`(容量付き列。配列+長さでエンコード、**実装済み**)、unsat core による
-  「どの requires が enabled を阻んでいるか」ヒント。
-- **v2.0**: 公平性注釈(`fair action ...`)と有界 `leadsTo`(**実装済み lite**:
-  `DESIGN-temporal.md` 参照)、実装橋の本体(**実装済み**:
-  `DESIGN-bridge.md` — `fslc.runtime.Monitor` / `fslc replay` / `fslc testgen`)、
-  複数 spec の合成(**実装済み**: `DESIGN-compose.md` — `compose` / 同期アクション /
-  `internal` / `specs/order_system.fsl`)と refinement(**実装済み**:
-  `DESIGN-refinement.md` — `fslc refine`)。**v2.0 ロードマップの項目はすべて実装済み。**
+- **v1.0 (the core of this document)**: the type system (domain/enum/Option/
+  struct/Set), `let`/`if`/`is`, `ensures`, `reachable`, `count`/`sum`,
+  automatic bounds checking, deadlock check, JSON v1 (diff, loc, schema
+  version), `fslc check`.
+- **v1.1**: the k-induction engine (§9, implemented), `fslc scenarios`
+  (generate integration-test template JSON from reachable witnesses and
+  coverage traces = the first step of the implementation bridge),
+  `Seq<T, N>` (capacity-bounded sequence, encoded as array + length,
+  **implemented**), unsat-core hint for "which requires blocks enabled."
+- **v2.0**: fairness annotations (`fair action ...`) and bounded `leadsTo`
+  (**implemented lite**: see `DESIGN-temporal.md`), the body of the
+  implementation bridge (**implemented**: `DESIGN-bridge.md` —
+  `fslc.runtime.Monitor` / `fslc replay` / `fslc testgen`), composition of
+  multiple specs (**implemented**: `DESIGN-compose.md` — `compose` /
+  synchronized actions / `internal` / `specs/order_system.fsl`), and
+  refinement (**implemented**: `DESIGN-refinement.md` — `fslc refine`).
+  **All items of the v2.0 roadmap are implemented.**
 
 ---
 
-## 11. v0 からの移行
+## 11. Migration from v0
 
-v0 仕様は無修正で v1 検証器を通る(完全上位互換)。ただし以下の非推奨
-警告が `warnings` に載り、それぞれ機械的書き換えヒントを伴う:
+v0 specs pass through the v1 verifier unmodified (a complete superset). However,
+the following deprecation warnings appear in `warnings`, each accompanied by a
+mechanical rewrite hint:
 
-| v0 の書き方 | v1 の推奨 |
+| v0 style | v1 recommendation |
 |---|---|
 | `const MAXI = 1` + `i in 0..MAXI` | `type ItemId = 0..1` + `i: ItemId` |
-| `Map<Int, V>` | `Map<ItemId, V>`(有界キー) |
-| 番兵値(`-1` = 空) | `Option<T>` |
-| 「値は 0 以上」の手書き invariant | ドメイン型の自動境界チェック |
+| `Map<Int, V>` | `Map<ItemId, V>` (bounded key) |
+| Sentinel value (`-1` = empty) | `Option<T>` |
+| Hand-written invariant "value is ≥ 0" | Automatic bounds checking of a domain type |
 
 ---
 
-## 12. 実装方針(現行コードベースへのロワリング)
+## 12. Implementation Approach (Lowering onto the Current Codebase)
 
-すべての新機能は既存の `grammar.py` / `model.py` / `bmc.py` の構造
-(タプル AST → spec dict → Z3 有界展開)の上に、**意味論を変えずに**
-ロワリングできる:
+Every new feature can be lowered onto the existing structure of `grammar.py` /
+`model.py` / `bmc.py` (tuple AST → spec dict → Z3 bounded expansion) **without
+changing semantics**:
 
-| 構文 | ロワリング |
+| Construct | Lowering |
 |---|---|
-| ドメイン型 | Int + 範囲メタデータ。量化・パラメータ展開は既存の `eval_const` 機構をそのまま使用。境界は暗黙 invariant として `spec["invariants"]` に追加 |
-| enum | `0..n-1` の Int。表示時にメンバ名へ逆引き |
-| `Option<T>` | (present: Bool, value: T) のペア。`Map<K, Option<V>>` はマップ 2 本。`is some(x)` → present 制約+束縛 |
-| struct | フィールドごとに変数/マップを分割(`orders__status` など)。`==` はフィールド等価の連言 |
-| `Set<T>` | `Map<T, Bool>`(特性関数)。`size()` は有界和 Σ ite(m[i],1,0) |
-| `count` / `sum` | 有界展開(既存の forall 展開と同型) |
-| `if` | 分岐ごとに pend を計算し、変数ごとに `ite(c, then, else)` で合成 |
-| `let` / `is some` 束縛 | `binds` 辞書の拡張(現在の量化束縛と同機構。Int 値に加え Z3 式の束縛を許す) |
-| `ensures` | 各遷移の事後状態に対する追加チェック(BMC の invariant 検査と同じ push/pop) |
-| `reachable` | 各深さでの充足判定(invariant 検査と極性が逆なだけ) |
-| デッドロック | 「全インスタンスの requires の連言の否定」の充足判定 |
-| `changes` diff | トレース構築時に隣接状態の表示値を比較するだけ(検証コストゼロ) |
-| 位置情報 `loc` | Lark の `propagate_positions=True` で AST にメタデータを付与 |
+| Domain type | Int + range metadata. Quantification and parameter expansion use the existing `eval_const` machinery as is. Bounds are added to `spec["invariants"]` as an implicit invariant |
+| enum | Int over `0..n-1`. Reverse-mapped to member names on display |
+| `Option<T>` | A (present: Bool, value: T) pair. `Map<K, Option<V>>` is two maps. `is some(x)` → present constraint + binding |
+| struct | Split into per-field variables/maps (`orders__status`, etc.). `==` is the conjunction of field equalities |
+| `Set<T>` | `Map<T, Bool>` (characteristic function). `size()` is the bounded sum Σ ite(m[i],1,0) |
+| `count` / `sum` | Bounded expansion (isomorphic to the existing forall expansion) |
+| `if` | Compute pend per branch, and compose per variable with `ite(c, then, else)` |
+| `let` / `is some` binding | Extension of the `binds` dict (the same mechanism as the current quantifier binding; allows binding Z3 expressions in addition to Int values) |
+| `ensures` | An additional check against the post-state of each transition (same push/pop as the BMC invariant check) |
+| `reachable` | A satisfiability decision at each depth (just the opposite polarity of the invariant check) |
+| deadlock | A satisfiability decision of "the negation of the conjunction of requires over all instances" |
+| `changes` diff | Just comparing the display values of adjacent states during trace construction (zero verification cost) |
+| location info `loc` | Attaching metadata to the AST with Lark's `propagate_positions=True` |
 
 ---
 
-## 付録 A: v1 によるショッピングカート
+## Appendix A: Shopping Cart in v1
 
-v0 の `cart_buggy.fsl` / `cart_fixed.fsl` と同じモデルの v1 版。
-番兵値が消え、`NoNegativeStock` は型に吸収される。
+The v1 version of the same model as v0's `cart_buggy.fsl` / `cart_fixed.fsl`.
+The sentinel value is gone, and `NoNegativeStock` is absorbed into the type.
 
 ```fsl
 spec ShoppingCart {
   type UserId = 0..1
   type ItemId = 0..1
-  type Qty    = 0..3        // 在庫は 0..3 — 負になれば自動的に違反
+  type Qty    = 0..3        // stock is 0..3 — if it goes negative it is automatically violated
 
   state {
     stock: Map<ItemId, Qty>,
@@ -659,23 +700,23 @@ spec ShoppingCart {
 
   action checkout(u: UserId) {
     requires cart[u] is some(i)
-    requires stock[i] > 0          // ← この行を消すと _bounds_stock 違反が最短 4 手で返る
+    requires stock[i] > 0          // ← removing this line returns a _bounds_stock violation in a shortest 4 steps
     stock[i] = stock[i] - 1
     cart[u] = none
     ensures stock[i] == old(stock[i]) - 1
   }
 
   reachable SoldOut {
-    forall i: ItemId { stock[i] == 0 }   // 全在庫を売り切る経路が存在する(ガード過剰の検出)
+    forall i: ItemId { stock[i] == 0 }   // a path exists that sells out all stock (detects over-strong guards)
   }
 }
 ```
 
-invariant を 1 行も書いていないのに、バグ版(在庫ガードなし)は
-`_bounds_stock` 違反として検出される。これが §1 G5「落とし穴の構造的排除」
-の具体例である。
+Even without writing a single line of invariant, the buggy version (no stock
+guard) is detected as a `_bounds_stock` violation. This is a concrete example of
+§1 G5 "structural elimination of pitfalls."
 
-## 付録 B: 注文ワークフロー(enum / struct / Set / 集約のショーケース)
+## Appendix B: Order Workflow (a Showcase of enum / struct / Set / Aggregation)
 
 ```fsl
 spec OrderWorkflow {
@@ -743,6 +784,6 @@ spec OrderWorkflow {
 }
 ```
 
-`RevenueConsistent` のような**集計の整合性**は、アプリ開発で最も多い
-仕様バグ(返金漏れ・二重計上)に対応し、v0 では表現できなかったクラスの
-性質である。
+**Consistency of aggregates** such as `RevenueConsistent` corresponds to the
+most common spec bugs in app development (missed refunds, double counting), and
+is a class of property that v0 could not express.

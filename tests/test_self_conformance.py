@@ -1,4 +1,4 @@
-"""実装適合の錨: fslc_session / fslc_monitor モデルと実 CLI 挙動の一致を検査する。"""
+"""Implementation-conformance anchors: check that the fslc_session / fslc_monitor models match the real CLI behavior."""
 from __future__ import annotations
 
 import json
@@ -22,7 +22,7 @@ PY = ROOT / ".venv/bin/python"
 USER_ERROR_KINDS = frozenset({"parse", "semantics", "io", "usage", "type"})
 
 # ---------------------------------------------------------------------------
-# (b) fslc_session 錨 — check→verify→induction パイプライン
+# (b) fslc_session anchor — check→verify→induction pipeline
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -66,8 +66,9 @@ CORPUS: tuple[CorpusCase, ...] = (
 )
 
 
-# (b-2) 追加 subcommand 錨。tool_fault (exit 3) は内部エラーを安全に誘発できないため
-# モデルには在るが実装錨は未整備 — 下記コーパスにも含めない。
+# (b-2) Additional subcommand anchors. tool_fault (exit 3) cannot be triggered
+# safely as an internal error, so it exists in the model but has no implementation
+# anchor yet — and is not included in the corpus below.
 @dataclass(frozen=True)
 class SubcommandAnchorCase:
     id: str
@@ -151,10 +152,10 @@ SUBCOMMAND_CORPUS: tuple[SubcommandAnchorCase, ...] = (
 
 
 # ---------------------------------------------------------------------------
-# (a) fslc_monitor 錨 — 実 replay 実行の観測をモデルへ写像
+# (a) fslc_monitor anchor — map observations of a real replay run onto the model
 # ---------------------------------------------------------------------------
 
-# specs/cart_v1.fsl: add_to_cart は cart[u]==none のときのみ enabled。
+# specs/cart_v1.fsl: add_to_cart is enabled only when cart[u]==none.
 CART_OK_EVENTS: tuple[dict[str, Any], ...] = (
     {"action": "add_to_cart", "params": {"u": 0, "i": 0}},
     {"action": "checkout", "params": {"u": 0}},
@@ -202,7 +203,7 @@ def _parse_stdout(proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 
 def run_model_pipeline(case: CorpusCase) -> PipelineRun:
-    """fslc_session のパイプラインに忠実に CLI を実行する。"""
+    """Run the CLI faithfully following the fslc_session pipeline."""
     run = PipelineRun(case_id=case.id, spec_path=case.path)
     spec = str(case.path)
 
@@ -239,7 +240,7 @@ def run_model_pipeline(case: CorpusCase) -> PipelineRun:
 
 
 def run_subcommand_anchor(case: SubcommandAnchorCase) -> PipelineRun:
-    """check ok 後に単一 subcommand を実行し、結果を記録する。"""
+    """Run a single subcommand after check ok and record the result."""
     run = PipelineRun(case_id=case.id, spec_path=case.check_path)
     spec = str(case.check_path)
 
@@ -425,7 +426,7 @@ def replay_out_to_monitor_actions(
     replay_out: dict[str, Any],
     events: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
-    """実 replay 結果を fslc_monitor の action 列へ写像する。"""
+    """Map a real replay result onto the fslc_monitor action sequence."""
     actions: list[dict[str, str]] = []
     if replay_out["result"] == "conformant":
         for _ in events:
@@ -456,7 +457,7 @@ def run_monitor_replay(trace_events: list[dict[str, str]]) -> tuple[dict[str, An
 
 
 # ---------------------------------------------------------------------------
-# (b) fslc_session 既存コーパス
+# (b) fslc_session existing corpus
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("case", CORPUS, ids=[c.id for c in CORPUS])
@@ -503,7 +504,7 @@ def test_negative_traces_are_nonconformant(trace_events: list[dict[str, str]]):
 
 
 # ---------------------------------------------------------------------------
-# (b-1) verify_user_error 追加後の self-spec 健全性
+# (b-1) self-spec soundness after adding verify_user_error
 # ---------------------------------------------------------------------------
 
 def test_fslc_session_self_spec_still_verifies():
@@ -533,7 +534,7 @@ def test_fslc_session_self_spec_still_verifies():
 
 
 def test_fslc_session_mutate_kill_rate_not_degraded():
-    """verify_user_error 追加後も mutate kill-rate が大きく落ちないこと。"""
+    """The mutate kill-rate does not drop substantially after adding verify_user_error."""
     proc = _run_fslc("mutate", str(SESSION_SPEC), "--depth", "8")
     out = _parse_stdout(proc)
     assert out["result"] == "mutated", out
@@ -543,7 +544,7 @@ def test_fslc_session_mutate_kill_rate_not_degraded():
 
 
 # ---------------------------------------------------------------------------
-# (b-2) 拡張 subcommand 錨
+# (b-2) extended subcommand anchors
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("case", SUBCOMMAND_CORPUS, ids=[c.id for c in SUBCOMMAND_CORPUS])
@@ -563,7 +564,7 @@ def test_subcommand_anchor_session_replay_conformant(case: SubcommandAnchorCase)
 
 
 # ---------------------------------------------------------------------------
-# (a) fslc_monitor 錨
+# (a) fslc_monitor anchor
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -590,14 +591,14 @@ def test_monitor_anchor_conformant_replay(
 
 
 def test_monitor_anchor_stops_at_first_reject():
-    """最初の拒否で停止し、以降のイベントが処理されない (NoStepAfterReject)。"""
+    """Stop at the first rejection so subsequent events are not processed (NoStepAfterReject)."""
     events = list(CART_REJECT_EVENTS)
     replay_out, rc = run_spec_replay(CART_SPEC, events)
     assert replay_out["result"] == "nonconformant", replay_out
     assert replay_out["failed_at_event"] == 1, replay_out
     assert rc == 1
 
-    # reject 後の checkout (index 2) は処理されていない
+    # the checkout (index 2) after the reject is not processed
     failed_at = replay_out["failed_at_event"]
     assert failed_at < len(events) - 1
 

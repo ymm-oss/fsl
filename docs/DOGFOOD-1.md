@@ -1,31 +1,31 @@
-# ドッグフーディング第1回 — 所見 (2026-06-11)
+# Dogfooding Round 1 — Findings (2026-06-11)
 
-実ドメイン仕様4本(`specs/auth_lockout.fsl`, `specs/inventory_reservation.fsl`,
-`specs/payment.fsl`, `specs/rate_limiter.fsl`)+ エッジプローブ7本で v1.0 を実地評価した。
+We field-tested v1.0 against four real-domain specs (`specs/auth_lockout.fsl`, `specs/inventory_reservation.fsl`,
+`specs/payment.fsl`, `specs/rate_limiter.fsl`) plus seven edge probes.
 
-## 結果サマリ
+## Results Summary
 
-| 仕様 | 結果 |
+| Spec | Result |
 |---|---|
-| auth_lockout (depth 8) | verified。witness: LockedOut@3, RecoveredAfterLock@5。coverage 全 true |
-| inventory_reservation (depth 5) | verified(48秒)。AllHeld@3。**depth 8 は推定30分超で打ち切り**(PERF1) |
-| payment (depth 6) | verified(4.3秒)。FullyRefunded@3。coverage 全 true |
-| rate_limiter (depth 6) | verified(0.2秒)。Exhausted@4。coverage 全 true |
+| auth_lockout (depth 8) | verified. witness: LockedOut@3, RecoveredAfterLock@5. coverage all true |
+| inventory_reservation (depth 5) | verified (48s). AllHeld@3. **depth 8 aborted after an estimated 30+ minutes** (PERF1) |
+| payment (depth 6) | verified (4.3s). FullyRefunded@3. coverage all true |
+| rate_limiter (depth 6) | verified (0.2s). Exhausted@4. coverage all true |
 
-## 新規バグ
+## New Bugs
 
-### BUG11: struct フィールドの複合型を check が素通しし、verify で内部エラー
+### BUG11: check passes a composite struct field type, then verify hits an internal error
 
-- `struct S { v: Option<K> }` → 当時は check ok、verify で `kind: "internal", message: "'s__v'"`(生 KeyError)。
-  v2.1 では `Option<scalar>` フィールドとして正式に合法化済み。
-- `struct Outer { i: Inner }`(struct ネスト、設計 §3.4 で「v1 不可」と明記)→ 同様に `"'o__i'"`
-- `struct S { members: Set<K> }` → verify で見当違いな semantics エラー
-- **期待動作**: `check_spec` が struct フィールド型を検証し、domain / enum / Bool / Int /
-  `Option<scalar>` 以外(Set / Map / Seq / struct / nested Option)は `kind: "type"` + hint
-  (例: "struct fields must be scalar or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields")で拒否。
-  修復プロトコル(§8)の「全ての失敗に次の一手」原則に従う。
+- `struct S { v: Option<K> }` → at the time, check ok, but verify hit `kind: "internal", message: "'s__v'"` (raw KeyError).
+  In v2.1 this is now formally legalized as an `Option<scalar>` field.
+- `struct Outer { i: Inner }` (struct nesting, explicitly marked "not allowed in v1" in design §3.4) → likewise `"'o__i'"`
+- `struct S { members: Set<K> }` → verify raises a misleading semantics error
+- **Expected behavior**: `check_spec` validates struct field types and rejects anything other than domain / enum / Bool / Int /
+  `Option<scalar>` (Set / Map / Seq / struct / nested Option) with `kind: "type"` + hint
+  (e.g. "struct fields must be scalar or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields").
+  This follows the "every failure has a next move" principle of the repair protocol (§8).
 
-### BUG12: ネストした if/else の排他分岐を「double assignment」と誤検出
+### BUG12: exclusive branches of a nested if/else mis-detected as a "double assignment"
 
 ```fsl
 action step() {
@@ -34,93 +34,91 @@ action step() {
 }
 ```
 
-- → `semantics: double assignment to 'x' on the same execution path`(誤り。3つの代入は全て排他パス)
-- 原因: `bmc.py` の `run_into_if`(ネスト if 用)が then/else の評価間で `scalar_writes` を
-  save/restore しない。外側 if の `run_branch`(L572-576)は正しくリセットしている。
-- **期待動作**: `run_into_if` も分岐ごとに `scalar_writes` を退避・復元し、
-  排他パス間の同一変数代入を許す(真の同一パス二重代入は引き続き検出)。
+- → `semantics: double assignment to 'x' on the same execution path` (wrong; the three assignments are all on exclusive paths)
+- Cause: `run_into_if` in `bmc.py` (used for nested ifs) does not save/restore `scalar_writes` between the then/else evaluations.
+  The outer if's `run_branch` (L572-576) resets it correctly.
+- **Expected behavior**: `run_into_if` should also save and restore `scalar_writes` per branch,
+  permitting the same variable to be assigned across exclusive paths (true same-path double assignment is still detected).
 
-### BUG13: `is some(x)` を含む invariant の違反時に JSON 直列化でクラッシュ
+### BUG13: when an invariant containing `is some(x)` is violated, JSON serialization crashes
 
 ```fsl
-invariant Match { c is some(j) => j == target }   // 違反させると…
+invariant Match { c is some(j) => j == target }   // when violated…
 ```
 
-- → `TypeError: Object of type ArithRef is not JSON serializable` の生トレースバック。
-  違反検出はできているのに出力で死ぬ(LLM 修復ループにとって最悪の失敗形態)。
-- 原因: `eval_expr` の is-pattern が `binds` に Z3 式(ArithRef)を残し、
-  `violating_bindings`(bmc.py:935-937)が `_public_bindings(dict(binds))` で
-  生の Z3 AST を結果 dict に流す。
-- **期待動作**: bindings の値は `model.eval(...)` で具体値化し、enum は表示名へ逆引きして出力。
-  あるいは pattern 束縛変数は bindings から除外。違反 JSON は常に直列化可能であること。
+- → raw traceback `TypeError: Object of type ArithRef is not JSON serializable`.
+  The violation is detected, but output dies (the worst failure mode for an LLM repair loop).
+- Cause: the is-pattern in `eval_expr` leaves a Z3 expression (ArithRef) in `binds`, and
+  `violating_bindings` (bmc.py:935-937) passes the raw Z3 AST into the result dict via `_public_bindings(dict(binds))`.
+- **Expected behavior**: bindings values should be concretized via `model.eval(...)`, with enums reverse-mapped to display names on output.
+  Alternatively, exclude pattern-bound variables from bindings. The violation JSON must always be serializable.
 
-### BUG14: if の後の代入が分岐内の書き込みを黙って上書き(検出の非対称)
+### BUG14: an assignment after an if silently overwrites a write inside the branch (asymmetric detection)
 
 ```fsl
 action go() {
   if flag { x = 1 }
-  x = 2          // ← エラーにならず、x = 1 が黙って消える
+  x = 2          // ← no error, and x = 1 silently disappears
 }
 ```
 
-- `x = 2` を if の**前**に置くと正しく double assignment エラーになるが、**後**に置くと
-  素通りし、flag が真でも x は 2 になる(仕様作者の意図と無言で乖離 = 健全性問題)。
-- 原因: `compute_updates` の if 処理が分岐評価後に `scalar_writes` を if 以前の状態へ
-  復元するため、分岐内の書き込み記録が後続文から見えない。トップレベル
-  (`run` の if)とネスト(`run_into_if`)の両方に存在。
-- **期待動作**: if の処理後、then/else 各分岐で書かれたスカラキーの**和集合**を
-  `scalar_writes` に記録し、後続の同一変数代入をエラーにする。
+- Placing `x = 2` **before** the if correctly raises a double assignment error, but placing it **after** lets it
+  pass through, and x ends up 2 even when flag is true (a silent divergence from the author's intent = a soundness problem).
+- Cause: the if handling in `compute_updates` restores `scalar_writes` to its pre-if state after evaluating the branches,
+  so writes recorded inside a branch are invisible to subsequent statements. Present in both top-level
+  (`run`'s if) and nested (`run_into_if`) handling.
+- **Expected behavior**: after handling an if, record the **union** of scalar keys written in the then/else branches into
+  `scalar_writes`, so a subsequent assignment to the same variable is an error.
 
-### PERF1: BMC が深さ方向に指数的(1ステップ約4倍)
+### PERF1: BMC is exponential in depth (about 4x per step)
 
-- `inventory_reservation.fsl`: 状態 = Map×2(struct 値含む)、アクション3(インスタンス約36/step)、
-  sum() 入り invariant×1。実測: depth 2 = 0.46s、depth 4 = 7.8s、depth 5 = 48s
-  (約4倍/step)。depth 8 は推定30分超で打ち切り。
-- 構造的な要因(bmc.py):
-  1. `reachable` ごとに**新しい Solver で全展開をやり直す**(verify 本体 + R 本 × 全展開)
-  2. ensures 検査が instance × ensures ごとに `_eval_requires` を再評価して push/pop
-  3. 全 struct 代入が ite ツリーを生成し、深さ方向に式が複合的に膨張する可能性
-- v1.1 で対応方針を検討(インクリメンタルソルバー共有、式キャッシュ、代入の中間変数化など)。
+- `inventory_reservation.fsl`: state = Map×2 (including struct values), 3 actions (~36 instances/step),
+  and one invariant containing sum(). Measured: depth 2 = 0.46s, depth 4 = 7.8s, depth 5 = 48s
+  (about 4x per step). depth 8 aborted after an estimated 30+ minutes.
+- Structural factors (bmc.py):
+  1. each `reachable` **redoes the full unrolling in a fresh Solver** (verify body + R times × full unrolling)
+  2. the ensures check re-evaluates `_eval_requires` and does push/pop for every instance × ensures
+  3. every struct assignment generates an ite tree, and expressions can compound and blow up along depth
+- Mitigation approaches considered for v1.1 (incremental solver sharing, expression caching, intermediate-variable assignments, etc.).
 
-## 表現力の所見(言語設計へのフィードバック)
+## Expressiveness Findings (feedback for language design)
 
-- **F1: 「過去」を語る到達性にはゴースト変数が必要。** auth_lockout の
-  「ロックされた後に復帰できる」は `ever_locked` ゴースト変数で表現した。
-  ワークアラウンドとしては素直だが、v2.0 の `leadsTo` の実例として記録。
-- **F2: `is some(j)` の束縛スコープは `=>` の右辺まで届く**(probe2 で確認、verified も正しい)。
-  ただし設計書 §3.3 にスコープ規定が無い — 「`is` を含む論理式の中で、`is` の評価が
-  true となる文脈でのみ束縛が有効」と明文化すべき。
-- **F3: struct に Option フィールドが書けないと不便な実例が出た。**(v2.1 で解消)
-  inventory_reservation は本来 `Res { item: Option<ItemId> }` と書きたかったが、
-  enum 状態(Free のとき item は無意味な 0)で回避した。v2.1 では
-  `Option<scalar>` フィールドを合成ロワリングで直接扱う。
-- **F4: 機能の直交組合せは概ね健全。** let 経由の lvalue 添字、struct 一括代入、
-  sum の算術式本体+複合 where、count/min/max/abs、Set<Enum>、ゴースト変数、
-  const + min によるクランプ — いずれも期待どおり動作(probe2/4/5、auth_lockout で確認)。
+- **F1: reachability that talks about the "past" requires a ghost variable.** auth_lockout's
+  "can recover after being locked out" was expressed with an `ever_locked` ghost variable.
+  As a workaround it is straightforward, but recorded as a concrete example motivating v2.0's `leadsTo`.
+- **F2: the binding scope of `is some(j)` reaches the right-hand side of `=>`** (confirmed in probe2; verified is also correct).
+  However, design doc §3.3 has no scoping rule — it should be made explicit that "within a logical expression containing `is`,
+  the binding is in effect only in contexts where the `is` evaluation is true".
+- **F3: a real example surfaced where not being able to write an Option field in a struct is inconvenient.** (resolved in v2.1)
+  inventory_reservation really wanted to be written as `Res { item: Option<ItemId> }`, but it was worked around with an
+  enum state (item is a meaningless 0 when Free). In v2.1, `Option<scalar>` fields are handled directly via synthetic lowering.
+- **F4: orthogonal feature combinations are largely sound.** lvalue subscripts via let, bulk struct assignment,
+  sum with an arithmetic-expression body + composite where, count/min/max/abs, Set<Enum>, ghost variables,
+  and clamping via const + min — all behave as expected (confirmed in probe2/4/5 and auth_lockout).
 
-## プローブ一覧(回帰テスト化候補)
+## Probe List (candidates for regression tests)
 
-| プローブ | 内容 | 結果 |
+| Probe | Content | Result |
 |---|---|---|
-| probe1 | Option を struct フィールドに | v2.1 で OK(`Option<scalar>` のみ) |
-| probe2 | `is some(j)` 束縛が `=>` 右辺に届くか | OK(verified) |
-| probe2n | probe2 の負例(violated になるべき) | BUG13(JSON クラッシュ) |
-| probe3 | `else { if … else … }` ネスト | BUG12(誤 double assignment) |
-| probe4 / 4n | Set<Enum> の正例/負例 | OK / OK(violated@1) |
-| probe5 | count/max/abs + reachable で count | OK(witness@2) |
-| probe6 | struct ネスト(設計上不可) | BUG11 同類(internal error) |
-| probe7 | Set を struct フィールドに | BUG11 同類(誤メッセージ) |
-| probe8 / 8r | if の後/前の同一変数代入 | BUG14(後: 素通り / 前: 検出) |
+| probe1 | Option as a struct field | OK in v2.1 (`Option<scalar>` only) |
+| probe2 | does the `is some(j)` binding reach the RHS of `=>` | OK (verified) |
+| probe2n | negative case of probe2 (should be violated) | BUG13 (JSON crash) |
+| probe3 | `else { if … else … }` nesting | BUG12 (false double assignment) |
+| probe4 / 4n | positive/negative case of Set<Enum> | OK / OK (violated@1) |
+| probe5 | count/max/abs + count under reachable | OK (witness@2) |
+| probe6 | struct nesting (not allowed by design) | same class as BUG11 (internal error) |
+| probe7 | Set as a struct field | same class as BUG11 (wrong message) |
+| probe8 / 8r | same-variable assignment after/before an if | BUG14 (after: pass-through / before: detected) |
 
-## 対応状況
+## Status
 
-- BUG11 / BUG12 / BUG13: **修正済み**(codex ラウンド、回帰テスト6件追加)。
-  BUG11 のうち `Option<scalar>` フィールドは v2.1 で合法化、その他の複合フィールドは type error。
-- BUG14: **修正済み**(if 分岐の書き込み和集合を後続文へ伝播。回帰テスト追加)
-- PERF1: **解消**。展開の共有(invariant/reachable/deadlock/coverage が単一展開に相乗り)、
-  遷移の Implies 形化、式キャッシュ、検証済み invariant の強化により:
-  - inventory depth 5: 48s → 2.2s、depth 8: 30分超 → **5.4s**
-  - テストスイート全体: 57s → **3.5s**
-  - プロファイル結論: ボトルネックは Python 側でなく Z3 ソルバー時間
-    (reachable ごとの全再展開が支配的だった)
-- 計33テスト green。全サンプル仕様の結果不変。
+- BUG11 / BUG12 / BUG13: **fixed** (codex round, 6 regression tests added).
+  Of BUG11, `Option<scalar>` fields are legalized in v2.1; the other composite fields are a type error.
+- BUG14: **fixed** (propagates the union of branch writes to subsequent statements; regression test added)
+- PERF1: **resolved**. Sharing the unrolling (invariant/reachable/deadlock/coverage all ride on a single unrolling),
+  Implies-form transitions, expression caching, and strengthening with proven invariants give:
+  - inventory depth 5: 48s → 2.2s, depth 8: 30+ min → **5.4s**
+  - whole test suite: 57s → **3.5s**
+  - profiling conclusion: the bottleneck is Z3 solver time, not the Python side
+    (full re-unrolling per reachable was dominant)
+- 33 tests green in total. Results unchanged for all sample specs.

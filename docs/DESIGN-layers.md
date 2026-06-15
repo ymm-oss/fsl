@@ -1,72 +1,78 @@
-# FSL v3 — 共通カーネル + 3方言アーキテクチャ設計
+# FSL v3 — Shared Kernel + Three-Dialect Architecture Design
 
-コンサルティング(業務)・要求/要件定義・設計/実装の3層で FSL を使い、
-層間を透過的に連携させる。結論: **可能。カーネルは既に存在し、3層の背骨
-(refinement 連鎖)は現行 fslc で動く**(§2 のスパイクで実証済み)。
-必要なのは各層の語彙を与える方言フロントエンドと、トレーサビリティの
-メタデータ配管のみ。
+Use FSL across the three layers of consulting (business), requirements
+definition, and design/implementation, connecting the layers transparently.
+Conclusion: **feasible. The kernel already exists, and the backbone of the three
+layers (the refinement chain) works with the current fslc** (demonstrated by the
+spike in §2). What is needed is only a dialect frontend that gives each layer its
+vocabulary, plus traceability metadata plumbing.
 
-## 1. アーキテクチャ
+## 1. Architecture
 
 ```
- 方言1: fsl-biz(コンサル)   方言2: fsl-req(要件)   方言3: fsl(設計; 現行)
+ Dialect 1: fsl-biz (consulting)   Dialect 2: fsl-req (requirements)   Dialect 3: fsl (design; current)
    actor/process/stage/        requirement/usecase/      spec/state/action/
    policy/kpi/handoff          acceptance/actor          invariant/...
-        │ 展開(AST変換)            │ 展開(AST変換)           │ そのまま
+        │ expand (AST transform)    │ expand (AST transform)   │ as-is
         ▼                          ▼                         ▼
- ┌───────────────────────────── 共通カーネル ─────────────────────────────┐
- │ 有界遷移系 + invariant / reachable / leadsTo(+fair)+ 自動検査         │
- │ BMC / k帰納法 / unsat core 診断 / scenarios / refinement / compose     │
- │ JSON 修復プロトコル / 具象 Monitor / replay / testgen                  │
+ ┌───────────────────────────── shared kernel ─────────────────────────────┐
+ │ bounded transition system + invariant / reachable / leadsTo (+fair) + automatic checks │
+ │ BMC / k-induction / unsat core diagnosis / scenarios / refinement / compose     │
+ │ JSON repair protocol / concrete Monitor / replay / testgen                  │
  └────────────────────────────────────────────────────────────────────────┘
         ▲                          ▲                         ▲
         └── refinement ────────────┴── refinement ───────────┘
-            (業務 ⊒ 要件)              (要件 ⊒ 設計)        + testgen/replay → 実装
+            (business ⊒ requirements)   (requirements ⊒ design)   + testgen/replay → implementation
 ```
 
-- **カーネル = 現行 fslc の意味論そのもの**。新しい検証機能は不要。
-- **方言 = フロントエンドの AST 変換**。compose で実証済みのパターン
-  (`expand_compose`)と同型: 展開後は通常のカーネル仕様なので、
-  BMC・帰納法・scenarios・Monitor・refine が**無修正で**全方言に効く。
-- **層間連携 = refinement 連鎖**。業務層を先に proved にし、要件層が
-  業務層を refine し、設計層が要件層を refine し、実装は testgen/replay で
-  設計層に適合する。各層の**安全性**の検証成果(invariant・統制ガード・
-  観測可能な振る舞いの包含)は下の層に「忠実性」として伝播する。
-  **ただし活性(leadsTo/responds)は伝播しない** — refinement は stutter を
-  許すため、上位の応答性質を担保していた進行を下位が止めても忠実な
-  refinement のままになりうる。活性 policy は各層で再 verify する(§6 の注を参照)。
+- **The kernel = the semantics of the current fslc itself**. No new verification feature is needed.
+- **A dialect = an AST transform in the frontend**. Isomorphic to the pattern
+  proven by compose (`expand_compose`): after expansion it is an ordinary kernel
+  spec, so BMC, induction, scenarios, Monitor, and refine all apply to every
+  dialect **without modification**.
+- **Inter-layer connection = the refinement chain**. The business layer is
+  proved first, the requirements layer refines the business layer, the design
+  layer refines the requirements layer, and the implementation conforms to the
+  design layer via testgen/replay. The verification results for each layer's
+  **safety** (invariants, control guards, inclusion of observable behavior)
+  propagate downward to the lower layer as "fidelity."
+  **However, liveness (leadsTo/responds) does not propagate** — because
+  refinement permits stutter, even if a lower layer halts the progress that
+  guaranteed an upper-layer response property, it can remain a faithful
+  refinement. Liveness policies are re-verified at each layer (see the note in §6).
 
-## 2. 実証スパイク(現行カーネルでの2層連携)
+## 2. Proof spike (two-layer connection on the current kernel)
 
-返品承認ドメインで実施(2026-06-11、無修正の fslc v2.x):
+Carried out on the return-approval domain (2026-06-11, unmodified fslc v2.x):
 
-- **コンサル層** `ReturnPolicy`: 業務ステージ(Requested→Approved/Rejected→
-  Refunded)+ ポリシー2本(会計整合 invariant、「申請は必ず裁定される」
-  leadsTo)→ **proved**
-- **要件層** `ReturnSystem`: 金額・自動承認閾値・マネージャ承認キューを追加
-  → **proved**
-- **層間** `SystemRefinesPolicy`: enum→enum のネスト条件写像
-  (`if st == New then Requested else if ...`)で **refines**。
-  自動承認は業務の「承認」に、キュー投入は stutter に対応
+- **Consulting layer** `ReturnPolicy`: business stages (Requested→Approved/Rejected→
+  Refunded) + two policies (an accounting-consistency invariant and a "every
+  request is always adjudicated" leadsTo) → **proved**
+- **Requirements layer** `ReturnSystem`: adds amounts, an auto-approval threshold,
+  and a manager-approval queue → **proved**
+- **Inter-layer** `SystemRefinesPolicy`: **refines** via a nested conditional
+  enum→enum mapping (`if st == New then Requested else if ...`). Auto-approval
+  corresponds to the business "approval," and queue insertion corresponds to stutter.
 
-スパイクから得た方言設計への入力:
-- **(L1) 条件付きアクション対応が要る**: 「submit は金額次第で業務上の
-  approve または何も起きない」を、現行は submit_small/submit_large への
-  **アクション分割**で表現した。req 方言の展開器はこの分割を自動化する
-  (§4.2 の `branches`)。
-- **(L2) 業務語彙はそのままカーネルに落ちる**: process=enum+Map、
-  policy=invariant/leadsTo、actor=ドメイン型、KPI=ゴーストカウンタ。
-  新しい意味論はひとつも要らなかった。
+Inputs to the dialect design obtained from the spike:
+- **(L1) conditional action correspondence is required**: "depending on the
+  amount, submit performs the business approve or nothing happens" was expressed
+  in the current version by an **action split** into submit_small/submit_large.
+  The req dialect's expander automates this split (the `branches` of §4.2).
+- **(L2) the business vocabulary maps straight onto the kernel**: process=enum+Map,
+  policy=invariant/leadsTo, actor=domain type, KPI=ghost counter. Not a single
+  new semantic was needed.
 
-## 3. 方言1: fsl-biz(コンサル)
+## 3. Dialect 1: fsl-biz (consulting)
 
-対象成果物: 業務プロセス定義、ポリシー(業務ルール)、As-Is/To-Be 比較、
-プロセス健全性の検査(「この規程ではこの状態に到達できない」の機械検出)。
+Target artifacts: business process definitions, policies (business rules),
+As-Is/To-Be comparison, process soundness checking (machine detection of "this
+state is unreachable under this regulation").
 
 ```fsl-biz
 business ReturnHandling {
   actor Customer, Manager
-  case Return = 0..2                       // 業務ケース(→ ドメイン型)
+  case Return = 0..2                       // business case (→ domain type)
 
   process Return {                         // → enum Stage + Map<Case, Stage>
     stage Requested -> Approved  by Manager : approve
@@ -74,129 +80,145 @@ business ReturnHandling {
     stage Approved  -> Refunded  by System  : refund
   }
 
-  kpi refunded counts Return in Refunded   // → ゴーストカウンタ + 整合 invariant
+  kpi refunded counts Return in Refunded   // → ghost counter + consistency invariant
 
-  policy NoRefundWithoutApproval invariant { ... }   // 式はカーネル式
+  policy NoRefundWithoutApproval invariant { ... }   // the expression is a kernel expression
   policy EveryRequestDecided responds {              // → leadsTo + fair
     Return in Requested ~> Return in Approved or Rejected
   }
 }
 ```
 
-展開規則: `process` → enum + `Map<CaseId, Stage>` + 遷移ごとの action
-(`by <actor>` はアクションのメタデータ。actor がパラメータを持つ遷移は
-actor 型のパラメータに)。`kpi ... counts` → Int ゴースト + 自動 invariant
-`kpi == count(...)`。`responds` → fair + leadsTo。
+Expansion rules: `process` → enum + `Map<CaseId, Stage>` + an action per
+transition (`by <actor>` is action metadata; a transition whose actor has a
+parameter becomes a parameter of the actor type). `kpi ... counts` → Int ghost +
+automatic invariant `kpi == count(...)`. `responds` → fair + leadsTo.
 
-**この層が扱わないもの(明文化)**: 実時間・SLA 時間値、確率、金額の
-連続量、組織図・文書の散文部分。FSL は「コンサル成果物のうち検査可能な
-骨格」を担い、文書を置き換えない。
+**What this layer does not handle (stated explicitly)**: real time, SLA time
+values, probability, continuous quantities of money, org charts, and the prose
+parts of documents. FSL carries "the checkable skeleton of consulting artifacts"
+and does not replace the documents.
 
-コンサル価値(カーネル機能の言い換え): 規程の矛盾 = invariant 違反、
-死んだプロセスステップ = action coverage false + 阻害規程の unsat core、
-業務ゴール到達不能 = reachable_failed、放置されるケース = leadsTo 反例、
-As-Is/To-Be の整合 = refinement。
+Consulting value (a restatement of kernel features): regulatory contradiction =
+invariant violation, dead process step = action coverage false + the unsat core
+of the blocking regulation, unreachable business goal = reachable_failed,
+neglected cases = leadsTo counterexample, As-Is/To-Be consistency = refinement.
 
-## 4. 方言2: fsl-req(要求・要件定義)
+## 4. Dialect 2: fsl-req (requirements definition)
 
-対象成果物: 要件(ID + 原文 + 形式化)、ユースケース、受け入れ基準。
+Target artifacts: requirements (ID + original text + formalization), use cases,
+acceptance criteria.
 
-### 4.1 構文
+### 4.1 Syntax
 
 ```fsl-req
 requirements ReturnSystemReq {
-  implements ReturnHandling from "return_policy.fslb"   // 上位層への refinement 宣言
+  implements ReturnHandling from "return_policy.fslb"   // refinement declaration against the upper layer
 
   actor Customer, Manager
   id Case = 0..2
   value Amount = 0..3
   const AUTO_LIMIT = 1
 
-  requirement REQ-1 "閾値以下の返品は自動承認される" {
+  requirement REQ-1 "returns at or below the threshold are auto-approved" {
     action submit(c: Case, a: Amount) by Customer {
       requires state(c) == New
       requires a > 0
-      branches {                                  // ← L1: 条件分岐対応の自動分割
+      branches {                                  // ← L1: automatic split for conditional branching
         when a <= AUTO_LIMIT -> AutoApproved  maps approve(c)
         when a >  AUTO_LIMIT -> MgrQueue      maps stutter
       }
     }
   }
 
-  requirement REQ-3 "全ての申請はいつか裁定される" responds { ... }
+  requirement REQ-3 "every request is eventually adjudicated" responds { ... }
 
-  acceptance AC-1 "小額は即時承認" {
+  acceptance AC-1 "small amounts are approved immediately" {
     submit(0, 1)  expect state(0) == AutoApproved
   }
 }
 ```
 
-### 4.2 展開規則
+### 4.2 Expansion rules
 
-- `requirement` ブロック → 中身のカーネル要素(action/invariant/leadsTo)に
-  **`req_id` / `req_text` メタデータを付与**。全 JSON 出力(violated /
-  unknown_cti / coverage 診断 / scenarios)に `requirement: {id, text}` が
-  載る — 「どの要件が壊れたか」が反例に原文付きで現れる(§6)。
-- `branches` → when 条件を requires に足した複数アクションへ自動分割
-  (`submit__1`, `submit__2`; 表示は `submit[a<=AUTO_LIMIT]`)。`maps` 句から
-  上位層への refinement 写像の action 対応を**自動生成**。
-- `implements ... from` → 状態写像(`maps` 句と stage 対応宣言)から
-  refinement ファイル相当を合成し、`fslc verify` 時に**上位層への refine 検査を
-  同時実行**(検査結果 JSON に `refines_upper: true/false`)。
-- `acceptance` → 既知の steps + expect を持つ**確定シナリオ**。replay 機構で
-  検査し、scenarios 出力にもそのまま入る(= 受け入れテストが下流の
-  testgen に流れて実装の適合テストになる)。
+- `requirement` block → **attach `req_id` / `req_text` metadata** to the
+  contained kernel elements (action/invariant/leadsTo). All JSON output
+  (violated / unknown_cti / coverage diagnostics / scenarios) carries
+  `requirement: {id, text}` — "which requirement broke" appears in the
+  counterexample together with the original text (§6).
+- `branches` → automatic split into multiple actions with the when condition
+  added to requires (`submit__1`, `submit__2`; displayed as
+  `submit[a<=AUTO_LIMIT]`). The action correspondence of the refinement mapping
+  to the upper layer is **auto-generated** from the `maps` clauses.
+- `implements ... from` → synthesize a refinement-file equivalent from the state
+  mapping (the `maps` clauses and stage-correspondence declarations), and at
+  `fslc verify` time **also run the refine check against the upper layer**
+  (the check result JSON has `refines_upper: true/false`).
+- `acceptance` → a **fixed scenario** with known steps + expect. Checked via the
+  replay mechanism, and it also enters the scenarios output as-is (= the
+  acceptance test flows into downstream testgen and becomes a conformance test
+  for the implementation).
 
-**この層が扱わないもの**: (執筆当時の記述 — その後 DESIGN-nfr.md で権限・
-監査・容量・信頼性挙動・離散時刻 SLA まで対応済み。残る対象外は確率・
-パーセンタイル・実時間 ms・ユーザビリティ)。要件文書の
-うち状態と振る舞いに還元できるものだけを形式化する。
+**What this layer does not handle**: (description at the time of writing —
+since then DESIGN-nfr.md has added support for authorization, audit, capacity,
+reliability behavior, and discrete-time SLAs. What remains out of scope is
+probability, percentiles, real-time ms, and usability). Only what in requirement
+documents can be reduced to state and behavior is formalized.
 
-## 5. 方言3: fsl(設計; 現行)
+## 5. Dialect 3: fsl (design; current)
 
-現行言語そのまま。要件層に対して `fslc refine` し、実装に対して
-testgen/replay/Monitor で接続する(全部実装済み)。
+The current language as-is. `fslc refine` against the requirements layer, and
+connect to the implementation via testgen/replay/Monitor (all implemented).
 
-## 6. 透過連携の3メカニズム
+## 6. The three mechanisms of transparent connection
 
-1. **refinement 連鎖**(実証済み): 業務 ⊒ 要件 ⊒ 設計。違反は
-   どの層の遷移がどの上位対応を破ったかを、**上位層の語彙で**表示
-   (`abs_before/after` は業務ステージ名で出る — 既存の表示機構)。
+1. **Refinement chain** (proven): business ⊒ requirements ⊒ design. A violation
+   displays which layer's transition broke which upper correspondence, **in the
+   upper layer's vocabulary** (`abs_before/after` come out as business stage
+   names — an existing display mechanism).
 
-   **【注】伝播するもの／しないもの**: refinement(`fslc refine` の検査内容)が
-   保証するのは**安全性の包含** — 上位の invariant とガード(統制)が下位でも
-   破られないこと。これは下層へ伝播する。**活性(leadsTo/responds)は伝播しない**:
-   refinement は stutter(下位が上位状態を変えない内部ステップ)を許すので、
-   上位で `fair` により担保していた進行を下位が落としても refine は通る
-   (写像は fair 注釈を要求しない)。したがって §2 スパイクの業務 leadsTo
-   「申請は必ず裁定される」は、設計層が業務層を refine しても**自動では
-   継承されない**。対応: (a) 活性 policy は各層で個別に `verify` する
-   (進行を担う下位アクションに `fair` を付ける)、または (b) 写像規約で
-   fairness 保存を要求する。これは前方シミュレーション一般の性質
-   (safety は保存し liveness は保存しない)であり、fslc の不具合ではない。
-   実例: 提出を内部キューに載せた後、非 fair な裁定の代わりに stutter ループを
-   回し続ける設計は refine を通るが、業務 leadsTo を破る(`verify` で
-   leadsTo 反例=ラッソが出る)。
-2. **トレーサビリティ・メタデータ**(新規・配管のみ): `req_id`/`policy_id` を
-   カーネル AST のノードに載せ、全 JSON 出力へ透過。設計層の反例から
-   「REQ-1(原文)に違反」が直接出る。横断クエリ
-   `fslc trace REQ-1`(どの層のどの要素が REQ-1 に由来するか)も同じ
-   メタデータから生成。
-3. **成果物の下方流動**: 業務層の leadsTo → 要件層の respond 要件の雛形、
-   要件層の acceptance → 設計層の scenarios → 実装の testgen。
-   逆方向は反例の上方表示(設計層の CTI を要件 ID で注釈)。
+   **[Note] what propagates / what does not**: what refinement (the content
+   checked by `fslc refine`) guarantees is **inclusion of safety** — that the
+   upper invariants and guards (controls) are not broken in the lower layer
+   either. This propagates downward. **Liveness (leadsTo/responds) does not
+   propagate**: because refinement permits stutter (an internal step where the
+   lower layer does not change the upper state), even if the lower layer drops
+   the progress that the upper layer guaranteed via `fair`, refine still passes
+   (the mapping does not require fair annotations). Therefore the business
+   leadsTo "every request is always adjudicated" of the §2 spike is **not
+   inherited automatically** even when the design layer refines the business
+   layer. Remedies: (a) `verify` liveness policies individually at each layer
+   (put `fair` on the lower action that bears the progress), or (b) require
+   fairness preservation by mapping convention. This is a general property of
+   forward simulation (safety is preserved, liveness is not), and is not an fslc
+   defect. Concrete example: a design that, after placing the submission on an
+   internal queue, keeps spinning a stutter loop instead of a non-fair
+   adjudication passes refine but breaks the business leadsTo (`verify` produces
+   a leadsTo counterexample = a lasso).
+2. **Traceability metadata** (new; plumbing only): put `req_id`/`policy_id` on
+   nodes of the kernel AST and pass them through into all JSON output. From the
+   design layer's counterexample, "violates REQ-1 (original text)" comes out
+   directly. A cross-cutting query `fslc trace REQ-1` (which element in which
+   layer derives from REQ-1) is also generated from the same metadata.
+3. **Downward flow of artifacts**: business-layer leadsTo → a template for the
+   requirements-layer respond requirement, requirements-layer acceptance →
+   design-layer scenarios → implementation testgen. The reverse direction is the
+   upward display of counterexamples (annotating a design-layer CTI with the
+   requirement ID).
 
-## 7. 段階計画
+## 7. Phased plan
 
-| 段階 | 内容 | 規模感 |
+| Stage | Content | Scale |
 |---|---|---|
-| 0 | スパイク(§2)を `examples/layers/` として整備 + 本設計書 | 済/小 |
-| 1 | **メタデータ配管**: req_id/text を AST→全 JSON 出力に透過(方言に先行して価値が出る: 現行 fsl でも `// @req REQ-1` 注釈で使える) | 小 |
-| 2 | **fsl-req 方言**: requirement/acceptance/branches/implements。展開器は compose と同型。`branches` の自動分割と refinement 自動合成が中核 | 中(compose 1ラウンド相当) |
-| 3 | **fsl-biz 方言**: process/policy/kpi。展開器 + 業務語彙での表示 | 中 |
-| 4 | 3層ドッグフーディング(コンサル文書を起点に3層+実装まで通す) | 中 |
+| 0 | Organize the spike (§2) as `examples/layers/` + this design document | done/small |
+| 1 | **Metadata plumbing**: pass req_id/text through from AST → all JSON output (delivers value ahead of dialects: usable even in current fsl via `// @req REQ-1` annotations) | small |
+| 2 | **fsl-req dialect**: requirement/acceptance/branches/implements. The expander is isomorphic to compose. The automatic split of `branches` and the automatic synthesis of refinement are the core | medium (about one compose round) |
+| 3 | **fsl-biz dialect**: process/policy/kpi. The expander + display in business vocabulary | medium |
+| 4 | Three-layer dogfooding (run all three layers + implementation, starting from a consulting document) | medium |
 
-リスクと退路: 方言が漏れる抽象(検証失敗時にカーネル概念が露出する)に
-なる懸念には、層ごとの修復プロトコル表(skills の方言版)で対応する。
-方言を作りすぎない原則: **新しい意味論をカーネルに足さない**。方言で
-表現できないものは「その層の文書に書く(FSL の外)」と整理する。
+Risks and fallback: the concern that a dialect becomes a leaky abstraction
+(kernel concepts are exposed on verification failure) is addressed by a
+per-layer repair-protocol table (a dialect edition of the skills). Principle of
+not making too many dialects: **do not add new semantics to the kernel**. What
+cannot be expressed in a dialect is organized as "write it in that layer's
+document (outside FSL)."

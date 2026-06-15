@@ -1,5 +1,5 @@
-// design_drops_liveness_refines.fsl と同一の写像(spec 名だけ違う)。
-// fair の有無は写像に現れない — refine からは2つの設計は区別できない。
+// The same mapping as design_drops_liveness_refines.fsl (only the spec name differs).
+// The presence or absence of fair does not appear in the mapping — refine cannot distinguish the two designs.
 refinement DesignKeepsLivenessRefinesPolicy {
   impl DesignKeepsLiveness
   abs  ClaimPolicy

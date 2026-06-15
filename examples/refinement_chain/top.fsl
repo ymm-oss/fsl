@@ -1,4 +1,4 @@
-// 連鎖の最上位(業務契約)。申請は Open→Done に進む。
+// Top of the chain (business contract). A request moves from Open to Done.
 spec ChainTop {
   type Id = 0..1
   enum TSt { TOpen, TDone }

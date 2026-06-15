@@ -7,14 +7,14 @@ requirements GalleryAcceptanceFalseExpect {
   state { st: St }
   init { st = New }
 
-  requirement REQ-1 "完了操作" {
+  requirement REQ-1 "Finish operation" {
     action finish(k: K) {
       requires st == New
       st = Done
     }
   }
 
-  acceptance AC-1 "完了後は New ではない" {
+  acceptance AC-1 "After finishing, the state is not New" {
     finish(0)
     expect st == New
   }

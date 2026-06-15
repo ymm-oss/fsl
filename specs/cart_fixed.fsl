@@ -1,6 +1,6 @@
-// ショッピングカートの設計仕様(修正版)
-// checkout に在庫ガードを追加。アクションは原子的なので
-// 「確認→引き落とし」の競合はこのモデルでは起きない
+// Shopping cart design spec (fixed version)
+// Adds a stock guard to checkout. Since actions are atomic,
+// the "check -> decrement" race cannot occur in this model.
 spec ShoppingCart {
   const MAXU = 1
   const MAXI = 1
@@ -27,7 +27,7 @@ spec ShoppingCart {
 
   action checkout(u in 0..MAXU) {
     requires cart[u] != -1
-    requires stock[cart[u]] > 0   // 修正: 在庫がある場合のみ決済できる
+    requires stock[cart[u]] > 0   // Fix: checkout only allowed when stock is available
     stock[cart[u]] = stock[cart[u]] - 1
     cart[u] = -1
   }

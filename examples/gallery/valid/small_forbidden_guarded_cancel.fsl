@@ -1,21 +1,21 @@
 // expected-command: verify --depth 6 --deadlock ignore
 // expected-result: verified
-// `forbidden` (must-forbid) — 正例。cancel が Paid のみガードされているので
-// 「出荷後のキャンセル」は not-enabled で拒否され、forbidden が満たされる。
-// 安全性 invariant では捕まらない過小制約を、negative トレースで検査する。
+// `forbidden` (must-forbid) — positive example. Because cancel is guarded to Paid only,
+// "cancel after shipping" is not-enabled and rejected, so forbidden is satisfied.
+// It checks, via a negative trace, an under-constraint that a safety invariant would not catch.
 requirements ForbiddenGuardedCancel {
   type OrderId = 0..1
   enum OSt { Cart, Paid, Shipped, Cancelled }
   state { order: Map<OrderId, OSt> }
   init { forall o: OrderId { order[o] = Cart } }
 
-  requirement REQ-1 "注文ライフサイクル" {
+  requirement REQ-1 "Order lifecycle" {
     action pay(o: OrderId)    { requires order[o] == Cart  order[o] = Paid }
     action ship(o: OrderId)   { requires order[o] == Paid  order[o] = Shipped }
     action cancel(o: OrderId) { requires order[o] == Paid  order[o] = Cancelled }
   }
 
-  forbidden FB-1 "出荷後のキャンセルは拒否される" {
+  forbidden FB-1 "Cancellation after shipping is rejected" {
     pay(0)  ship(0)
     cancel(0)
     expect rejected

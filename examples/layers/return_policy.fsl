@@ -12,10 +12,10 @@ business ReturnHandling {
 
   kpi refunded counts Return in Refunded
 
-  policy PAY-2 "申請は必ず裁定される" responds {
+  policy PAY-2 "Every request is eventually decided" responds {
     forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
   }
-  goal AllSettled "全件が完了しうる" {
+  goal AllSettled "All cases can be completed" {
     forall c: Return { stage(c) == Refunded or stage(c) == Rejected }
   }
 }

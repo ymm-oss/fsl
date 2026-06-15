@@ -20,11 +20,11 @@ OLD_RETURN_POLICY_SRC = r'''spec ReturnPolicy {
     refunded = refunded + 1
   }
 
-  // ポリシー: 返金件数は Refunded 件数と常に一致(会計整合)
+  // policy: the refund count always matches the number of Refunded cases (accounting consistency)
   invariant RefundLedgerConsistent {
     refunded == count(c: CaseId where cases[c] == Refunded)
   }
-  // ポリシー(応答性): 申請は必ずいつか裁定される
+  // policy (responsiveness): every request is eventually decided
   leadsTo EveryRequestDecided {
     forall c: CaseId {
       cases[c] == Requested ~> (cases[c] == Approved or cases[c] == Rejected or cases[c] == Refunded)

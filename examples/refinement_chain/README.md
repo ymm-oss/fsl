@@ -1,40 +1,42 @@
-# refine 連鎖モード — end-to-end の忠実性を1コマンドで
+# refine chaining mode — end-to-end fidelity in one command
 
-層連鎖(業務 ⊒ 要件 ⊒ 設計 …)の伝播は、隣接ペアを個別に `refine` しても
-**末端 ⊒ 最上位** を直接確かめる手段が無く、推移律を暗黙に信頼するしかなかった
-(写像を手書きで合成すれば確かめられるが、取り違えやすい)。
+Propagation through a layer chain (business ⊒ requirements ⊒ design …) had no way
+to directly confirm **bottom ⊒ top** even when `refine` was run on each adjacent
+pair individually; you had to implicitly trust transitivity (you could confirm it
+by composing the mappings by hand, but that is easy to get wrong).
 
-`fslc refine` は **(spec, 写像) を並べて連鎖検査**できる。隣接写像を合成
-(α_AC = α_BC ∘ α_AB、アクション対応 a→b→c / stutter)し、最下位 ⊒ 最上位を
-**直接**検査する。有界 refinement は同一深さで推移的なので、これは
-「全隣接リンクが成り立つ」ことと等価で健全(`docs/DESIGN-refinement.md` §7)。
+`fslc refine` can **check a chain by listing (spec, mapping) pairs**. It composes
+the adjacent mappings (α_AC = α_BC ∘ α_AB, action correspondence a→b→c / stutter)
+and checks bottom ⊒ top **directly**. Since bounded refinement is transitive at
+the same depth, this is equivalent to and as sound as "all adjacent links hold"
+(`docs/DESIGN-refinement.md` §7).
 
-## 登場人物(3層: 業務 ⊒ 要件 ⊒ 設計)
+## Cast (3 layers: business ⊒ requirements ⊒ design)
 
-| ファイル | 層 | 追加した詳細 |
+| File | Layer | Detail added |
 |---|---|---|
-| `top.fsl` | 業務 (`ChainTop`) | Open → Done |
-| `mid.fsl` | 要件 (`ChainMid`) | 審査ステップ `Review` を追加 |
-| `bot.fsl` | 設計 (`ChainBot`) | 監査ステップ `Audit` をさらに追加 |
-| `bot_refines_mid.fsl` | 設計 ⊒ 要件 | `audit` は要件層では stutter |
-| `mid_refines_top.fsl` | 要件 ⊒ 業務 | `start_review` は業務層では stutter |
+| `top.fsl` | Business (`ChainTop`) | Open → Done |
+| `mid.fsl` | Requirements (`ChainMid`) | adds a review step `Review` |
+| `bot.fsl` | Design (`ChainBot`) | adds an audit step `Audit` on top |
+| `bot_refines_mid.fsl` | design ⊒ requirements | `audit` is a stutter in the requirements layer |
+| `mid_refines_top.fsl` | requirements ⊒ business | `start_review` is a stutter in the business layer |
 
-## 実行
+## Run
 
 ```bash
 E=examples/refinement_chain
 
-# 隣接(従来どおり1ペアずつ)
+# Adjacent (one pair at a time, as before)
 fslc refine $E/bot.fsl $E/mid.fsl $E/bot_refines_mid.fsl --depth 6   # refines
 fslc refine $E/mid.fsl $E/top.fsl $E/mid_refines_top.fsl --depth 6   # refines
 
-# 連鎖: (spec 写像) を続けて並べると end-to-end で合成検査する
+# Chain: listing (spec mapping) in sequence does a composed end-to-end check
 fslc refine $E/bot.fsl \
             $E/mid.fsl $E/bot_refines_mid.fsl \
             $E/top.fsl $E/mid_refines_top.fsl --depth 6
 ```
 
-連鎖検査の出力(成功):
+Output of the chain check (success):
 
 ```json
 { "result": "refines", "impl": "ChainBot", "abs": "ChainTop",
@@ -42,17 +44,19 @@ fslc refine $E/bot.fsl \
   "chain": ["ChainBot", "ChainMid", "ChainTop"] }
 ```
 
-`action_map` は合成済み(`audit`/`start_review` は最上位では stutter、`finish` は
-最上位 `finish` に対応)。`chain` に層の並びが出る。
+`action_map` is composed (`audit`/`start_review` are stutters at the top, `finish`
+corresponds to the top-layer `finish`). `chain` shows the order of the layers.
 
-## 見どころ
+## Highlights
 
-- **直接 end-to-end**: 最下位 `ChainBot` の振る舞いが、合成 α で最上位
-  `ChainTop` の語彙に写され、業務契約を破らないことを1コマンドで確認できる。
-- **壊れたリンクの特定**: どこかの隣接写像が忠実性を破ると、結果は
-  `refinement_failed` に加えて `failed_link: {from, to, kind}` で**最初に
-  壊れたリンク**を指す(`tests/test_refinement_chain_example.py` 参照)。
-- **合成の中身**: indexed map(`st[c]`)も parameterized action(`finish(c)`)も
-  合成される。引数式が中間層の状態を読む場合のみ未対応(その旨の型エラー)。
+- **Direct end-to-end**: the behavior of the bottom layer `ChainBot` is mapped by
+  the composed α into the vocabulary of the top layer `ChainTop`, and you can
+  confirm in one command that it does not break the business contract.
+- **Pinpointing a broken link**: if some adjacent mapping breaks fidelity, the
+  result is `refinement_failed` plus `failed_link: {from, to, kind}` pointing to
+  **the first link that broke** (see `tests/test_refinement_chain_example.py`).
+- **Inside the composition**: both indexed maps (`st[c]`) and parameterized actions
+  (`finish(c)`) are composed. It is unsupported only when an argument expression
+  reads an intermediate layer's state (a type error to that effect).
 
-検査: `tests/test_refinement_chain_example.py`。
+Checked by: `tests/test_refinement_chain_example.py`.

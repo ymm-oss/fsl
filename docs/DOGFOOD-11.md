@@ -1,79 +1,104 @@
-# DOGFOOD-11: メタ循環ドッグフーディング — fslc 自身の設計契約を FSL で検証し、検出器の盲点を炙り出す (2026-06-15)
+# DOGFOOD-11: Meta-Circular Dogfooding — Verifying fslc's Own Design Contract in FSL to Expose the Detectors' Blind Spots (2026-06-15)
 
-DOGFOOD 1-10 は banking、reservation、SLA など外部ドメインを対象にしてきた。
-今回は初めて fslc 自身の振る舞い契約をモデル化したメタ循環ドッグフーディングである。
-成果物は `examples/self/` の3仕様。
+DOGFOOD 1-10 targeted external domains such as banking, reservation, and SLA. This time, for the first time, we
+modeled fslc's own behavioral contract — meta-circular dogfooding. The artifacts are the 3 specs in
+`examples/self/`.
 
-## 結果
+## Results
 
-- `fslc_session` は CLI exit-code severity classification を形式的に証明した。success requires check pass、proved⊒verified、internal errors non-repairable。
-- `fslc_monitor` は replay reject-stickiness を証明した。once nonconformant is irreversible、conformant only when all steps ok。
-- 修正後の `refinement_algebra` は "safety propagates, liveness does not" を非自明に検査する。
+- `fslc_session` formally proved the CLI exit-code severity classification: success requires check pass,
+  proved⊒verified, internal errors non-repairable.
+- `fslc_monitor` proved replay reject-stickiness: once nonconformant is irreversible, conformant only when all steps
+  ok.
+- After the fix, `refinement_algebra` non-trivially checks "safety propagates, liveness does not".
 
-## 知見
+## Insights
 
-- **F22 (最重要・検出器の盲点):** --vacuity も単発 verify も「一度も代入されない state 変数上の恒真 invariant(死んだゴースト)」を検出しない。refinement_algebra 初稿は verified・vacuity警告0なのに mutate kill-rate 6.4%(73/78 survived)。他2本は 71%/67%。mutate の生存率が骨抜きの唯一の指標だった(DOGFOOD-10 F21「invariant弱化は mutate でしか見えない」の延長線)。改善候補: vacuity 検査が「どのアクションからも代入されない変数だけを参照する invariant/後件」を静的に警告できると安価に閉じる。
+- **F22 (most important, a detector blind spot):** neither --vacuity nor a single verify detects a "tautological
+  invariant over a state variable that is never assigned (a dead ghost)". The first draft of refinement_algebra was
+  verified with 0 vacuity warnings, yet its mutate kill-rate was 6.4% (73/78 survived). The other 2 were 71%/67%.
+  The mutate survival rate was the only indicator of hollowing (an extension of DOGFOOD-10 F21 "invariant weakening
+  is visible only in mutate"). Improvement candidate: it closes cheaply if the vacuity check can statically warn on
+  an "invariant/consequent that references only variables that are assigned by no action".
 
-- **F23 (設計/言語ギャップ):** 意図した終端状態(proved/conformant/tool_fault 等)を宣言する構文が無く、--deadlock ignore を全体にかけるしかない → 意図せぬ deadlock も同時に隠れる。repair_loop.fsl も同理由で --deadlock ignore 必須。per-state/per-action の terminal/final 注釈があれば意図した停止とバグを区別できる。
+- **F23 (design/language gap):** there is no syntax to declare an intended terminal state (proved/conformant/
+  tool_fault, etc.), so the only option is to apply --deadlock ignore globally → unintended deadlocks get hidden at
+  the same time. repair_loop.fsl also requires --deadlock ignore for the same reason. A per-state/per-action
+  terminal/final annotation would distinguish intended halting from a bug.
 
-- **F24 (言語ギャップ):** 「この状態からこのアクションは起動不可/この遷移は禁止」を直接表明する性質構文が無く、ghost+guard で間接表現するしかない。3本すべてで発生(RejectIsSticky / NoStepAfterReject / ToolFaultNotRepairable)。
+- **F24 (language gap):** there is no property syntax to directly assert "from this state this action cannot fire /
+  this transition is forbidden", so it can only be expressed indirectly with ghost+guard. Occurred in all 3
+  (RejectIsSticky / NoStepAfterReject / ToolFaultNotRepairable).
 
-- **F25 (表現力):** refinement の反射性・推移性のような関係/代数的性質を公理として書けず、状態機械として「過程を模擬」するしかない。これが F22 の死んだゴースト罠を招きやすい(refinement_algebra が実証)。
+- **F25 (expressiveness):** relational/algebraic properties like reflexivity and transitivity of refinement cannot
+  be written as axioms; one can only "simulate the process" as a state machine. This tends to invite the dead-ghost
+  trap of F22 (demonstrated by refinement_algebra).
 
-- **F26 (軽微):** --deadlock=warn の警告メッセージ文字列が deadlock 状態名を欠く("deadlock reachable at step N" のみ)。JSON の deadlock.trace には最終状態まで入っている(bmc.py:2851 が文字列に載せていないだけ)。
+- **F26 (minor):** the --deadlock=warn warning message string lacks the deadlock state name ("deadlock reachable at
+  step N" only). The JSON deadlock.trace contains the full final state (bmc.py:2851 just doesn't put it in the
+  string).
 
-- **F27 (テスト容易性):** 単一 invariant だけを狙って検査する手段(--property/--invariant 相当)が無い。verify は全 invariant を一括検査し「最初に見つかった違反」を報告するため、非空虚プローブで特定の invariant(例: SafetyPropagates)の violation を確認したくても、より汎用の invariant(SafetyPreservedAtEveryLayer)が先に報告されてしまい、狙った invariant が報告対象になるよう条件を絞る手間が要る。probe の精度向上のため単一性質指定オプションが候補。
+- **F27 (testability):** there is no means to check targeting a single invariant only (an equivalent of
+  --property/--invariant). verify checks all invariants at once and reports "the first violation found", so even
+  when you want to confirm a violation of a specific invariant (e.g. SafetyPropagates) with a non-vacuity probe, a
+  more general invariant (SafetyPreservedAtEveryLayer) gets reported first, requiring effort to narrow conditions so
+  the targeted invariant becomes the reported one. A single-property option is a candidate to improve probe
+  precision.
 
-## 改修状況
+## Modification Status
 
-調査で見つけた所見のうち、コード改修に着手したもの:
+Of the findings the investigation surfaced, those for which code modification was begun:
 
-| 所見 | 対応 | 状態 |
+| Finding | Action | Status |
 |---|---|---|
-| F23(意図停止の宣言) | `terminal { <述語> }` ブロックを新設(grammar/model/bmc)。述語を満たす停止状態を deadlock 検査から除外。examples/self を terminal 化し `--deadlock ignore` 依存を解消 | **完了**(`94cf68f`) |
-| F26(deadlock 状態表示) | warn メッセージに状態を含める。例 `deadlock reachable at step 1 (state: status=ToolFault, ...)` | **完了**(`94cf68f`) |
-| F27(単一 invariant 検査) | `verify --property <Name>` を追加。存在しない名前は usage エラー(exit 2) | **完了**(`94cf68f`) |
-| F22(死んだゴースト恒真) | `--vacuity` に「どのアクションも代入しない frozen 変数を init 値に固定したとき、動的変数の値によらず恒真になる invariant」を Z3 で静的検出(kind `tautology_over_frozen`)。frozen 変数を全く参照しない/state を参照しない invariant は対象外。refinement_algebra の自明な baseline ゴーストを整理(mutate kill-rate 77.2% 維持)。既存コーパス全体で偽陽性ゼロを確認 | **完了** |
-| F24(遷移禁止構文) | 遷移 invariant `trans { old(x) => ... }` を新設(grammar/model/bmc/runtime)。action 横断の2状態安全性を直接宣言でき、self-spec の sticky/不可逆性質を ghost なしで表現。BMC + induction step-case + replay で検査(DESIGN-trans.md) | **完了** |
-| F25(代数的性質の表現力) | 言語の本質的限界。改修対象外 | 見送り |
+| F23 (declaring intended halting) | Added a new `terminal { <predicate> }` block (grammar/model/bmc). Halting states satisfying the predicate are excluded from the deadlock check. Made examples/self terminal and removed the `--deadlock ignore` dependency | **done** (`94cf68f`) |
+| F26 (deadlock state display) | Include the state in the warn message. E.g. `deadlock reachable at step 1 (state: status=ToolFault, ...)` | **done** (`94cf68f`) |
+| F27 (single-invariant check) | Added `verify --property <Name>`. A nonexistent name is a usage error (exit 2) | **done** (`94cf68f`) |
+| F22 (dead-ghost tautology) | Added to `--vacuity` a Z3 static detection of an "invariant that becomes a tautology regardless of the dynamic variables' values, when frozen variables assigned by no action are fixed to their init values" (kind `tautology_over_frozen`). Invariants that reference no frozen variable / reference no state are excluded. Tidied refinement_algebra's trivial baseline ghosts (mutate kill-rate held at 77.2%). Confirmed zero false positives across the entire existing corpus | **done** |
+| F24 (transition-forbidden syntax) | Added a new transition invariant `trans { old(x) => ... }` (grammar/model/bmc/runtime). Two-state safety across actions can be declared directly, expressing the self-spec's sticky/irreversibility properties without a ghost. Checked by BMC + induction step-case + replay (DESIGN-trans.md) | **done** |
+| F25 (expressiveness of algebraic properties) | An essential limit of the language. Out of scope for modification | deferred |
 
-## 実装適合の錨(モデル検証 → 実装検証)
+## Anchoring to Implementation Conformance (Model Verification → Implementation Verification)
 
-当初 self-spec は **fslc の設計契約を記述したモデル**であり、`verify`/induction が証明したのは
-**モデルの内部整合**だけだった。モデルと実コード(`src/fslc/cli.py`)の間にリンクが無く、
-「実装がこの契約を守るか」は未検証 — fslc が保証するのは「書かれた仕様の内部整合」であって
-「仕様が実態に忠実か」ではない、という本プロジェクトの核心ギャップが self-spec にも当てはまっていた。
+Initially the self-spec was **a model describing fslc's design contract**, and what `verify`/induction proved was
+only **the model's internal consistency**. There was no link between the model and the real code (`src/fslc/cli.py`),
+so "does the implementation uphold this contract" was unverified — the core gap of this project (what fslc
+guarantees is "internal consistency of the written spec", not "fidelity of the spec to reality") applied to the
+self-spec too.
 
-`tests/test_self_conformance.py` でこのギャップを埋めた。多様な outcome を出す spec コーパスに
-実 CLI のパイプライン(check → verify → induction)を走らせ:
-1. 各 result とプロセス exit code が `exit_code()` の severity 表に一致(実 exit code を直接検査)、
-2. `ProvedImpliesVerified` / `SuccessRequiresCheck` が実結果で成立、
-3. 実結果列を `fslc_session` のアクション列へ写像し `fslc replay` が **conformant**(実 CLI の遷移が
-   モデル状態機械に適合)、
-4. 契約違反の手書きトレースが **nonconformant**(`verify_ok` 単独は `requires status==CheckOk` で
-   reject = 錨に歯がある負の対照)。
+`tests/test_self_conformance.py` filled this gap. It runs the real CLI pipeline (check → verify → induction) over a
+spec corpus producing diverse outcomes, and:
+1. each result and the process exit code match `exit_code()`'s severity table (the real exit code is checked
+   directly),
+2. `ProvedImpliesVerified` / `SuccessRequiresCheck` hold on the real results,
+3. the real result sequence is mapped onto `fslc_session`'s action sequence and `fslc replay` is **conformant**
+   (the real CLI's transitions conform to the model state machine),
+4. a hand-written contract-violating trace is **nonconformant** (`verify_ok` alone is rejected by
+   `requires status==CheckOk` = the anchor has teeth, a negative control).
 
-これでメタ循環ドッグフーディングは「モデル検証」から「**実装適合検証**」に引き上がった。
+With this, meta-circular dogfooding was lifted from "model verification" to "**implementation-conformance
+verification**".
 
-被覆はその後さらに拡張した:
-- **fslc_session**: 核の check→verify→induction に加え、verify 時の user error
-  (`verify_user_error` アクションを追加。check は構文/型のみ通すが verify が semantics
-  エラーになる no_actions.fsl 等)、および補助 subcommand(scenarios/explain/mutate/typestate/
-  refine 成功・失敗/replay conformant・nonconformant)を実 CLI で走らせてアクションへ写像し
-  conformant を確認。
-- **fslc_monitor**: 実 `Monitor`/`run_replay` をガード付き spec(cart_v1)の正常/途中拒否/空ログで
-  走らせ、「最初の拒否で停止し以降未処理(`failed_at_event` とログ長で確認)」が NoStepAfterReject に
-  一致することを直接 assert + monitor へ replay。負の対照(reject 後 step_ok 等)は nonconformant。
+Coverage was then extended further:
+- **fslc_session**: in addition to the core check→verify→induction, a verify-time user error
+  (added a `verify_user_error` action; check passes only syntax/type but verify becomes a semantics error, e.g.
+  no_actions.fsl), and the auxiliary subcommands (scenarios/explain/mutate/typestate/refine success·failure/replay
+  conformant·nonconformant) are run against the real CLI, mapped onto actions, and confirmed conformant.
+- **fslc_monitor**: runs the real `Monitor`/`run_replay` on a guarded spec (cart_v1) for normal / mid-way reject /
+  empty log, directly asserting that "halt on the first reject and process nothing afterward (confirmed via
+  `failed_at_event` and log length)" matches NoStepAfterReject + replays it into the monitor. The negative controls
+  (step_ok after reject, etc.) are nonconformant.
 
-未錨は **tool_fault(内部エラー=exit 3)のみ** — 内部エラーを意図的に起こさないため(モデルには残す)。
-モデル契約と実挙動の食い違いは現コーパス範囲で皆無。
+The only unanchored case is **tool_fault (internal error = exit 3)** — because internal errors are not triggered
+deliberately (it is kept in the model). Within the current corpus, there is no discrepancy between the model
+contract and the real behavior.
 
-## 再現
+## Reproduction
 
 ```bash
 E=examples/self
 
-# fslc_session / fslc_monitor は terminal { } 宣言済みなので --deadlock ignore は不要
+# fslc_session / fslc_monitor have terminal { } declarations, so --deadlock ignore is not needed
 ./.venv/bin/python -m fslc check  $E/fslc_session.fsl
 ./.venv/bin/python -m fslc verify $E/fslc_session.fsl
 ./.venv/bin/python -m fslc verify $E/fslc_session.fsl --engine induction

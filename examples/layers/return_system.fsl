@@ -17,7 +17,7 @@ requirements ReturnSystemReq {
   state { sys: Map<CaseId, RCase>, paid_count: Int }
   init { forall c: CaseId { sys[c] = RCase { st: New, amount: 0 } }  paid_count = 0 }
 
-  requirement REQ-1 "閾値以下の返品は自動承認される" {
+  requirement REQ-1 "Returns at or below the threshold are auto-approved" {
     fair action submit(c: CaseId, a: Amount) {
       requires sys[c].st == New
       requires a > 0
@@ -27,11 +27,11 @@ requirements ReturnSystemReq {
       }
     }
   }
-  requirement REQ-2 "閾値超はマネージャが裁定する" {
+  requirement REQ-2 "Returns above the threshold are decided by a manager" {
     fair action mgr_approve(c: CaseId) maps approve(c) { requires sys[c].st == MgrQueue  sys[c].st = MgrApproved }
     fair action mgr_reject(c: CaseId)  maps reject(c)  { requires sys[c].st == MgrQueue  sys[c].st = MgrRejected }
   }
-  requirement REQ-3 "支払いは承認後のみ・台帳整合" {
+  requirement REQ-3 "Payment only after approval; ledger stays consistent" {
     fair action pay(c: CaseId) maps refund(c) {
       requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
       sys[c].st = Paid
@@ -39,7 +39,7 @@ requirements ReturnSystemReq {
     }
     invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }
   }
-  acceptance AC-1 "小額は自動承認され支払われる" {
+  acceptance AC-1 "Small amounts are auto-approved and paid" {
     submit(0, 1)
     pay(0)
     expect sys[0].st == Paid

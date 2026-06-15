@@ -1,4 +1,4 @@
-// topic: 2フェーズコミット
+// topic: two-phase commit
 // scale: medium
 // features: coordinator phase, participant votes, count, safety invariant
 // expected-command: verify --depth 8 --engine induction --deadlock ignore

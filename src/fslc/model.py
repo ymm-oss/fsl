@@ -559,7 +559,7 @@ def _check_no_stage_expr(expr):
         return
     if expr and expr[0] == "stage":
         loc = expr[2] if len(expr) > 2 else None
-        _err("stage(...) は business 方言でのみ使用可", kind="type", loc=loc)
+        _err("stage(...) is only allowed in the business dialect", kind="type", loc=loc)
     for part in expr[1:]:
         if isinstance(part, tuple):
             _check_no_stage_expr(part)

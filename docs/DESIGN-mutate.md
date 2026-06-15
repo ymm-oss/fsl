@@ -1,57 +1,60 @@
-# FSL — `fslc mutate`(仕様ミューテーション)実装設計
+# FSL — `fslc mutate` (spec mutation) implementation design
 
-動機: issue #6(ロードマップ #1 の類型4/7)。invariant が弱すぎる・足りない仕様は
-verified のまま沈黙する(過小制約)。「性質群がモデル挙動をどれだけ拘束しているか」を
-測る機構がなかった。タグがあっても「その形式化が実際に何かを拘束しているか」(意味的
-トレーサビリティ)は #5 の存在チェックでは見えない。DOGFOOD-7 で fslc 自身に手で行った
-mutation proof の製品化。
+Motivation: issue #6 (category 4/7 of roadmap #1). A spec whose invariants are too weak or
+missing stays silently verified (under-constraint). There was no mechanism to measure "how much
+the set of properties constrains the model's behavior." Even when tags are present, "whether
+that formalization actually constrains anything" (semantic traceability) is invisible to #5's
+existence check. This productizes the mutation proof done by hand on fslc itself in DOGFOOD-7.
 
 ## 1. CLI
 
-`fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]`。
-出力 `result:"mutated"`、**exit 0 固定**(scenarios/testgen 同族の生成系。survivor は
-失敗でなくレビュー用データ。`--fail-on-survivors` は将来)。
+`fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]`. Output
+`result:"mutated"`, **exit 0 always** (a generator in the same family as scenarios/testgen;
+survivors are review data, not failures. `--fail-on-survivors` is future work).
 
-## 2. 変異は spec dict でなく **方言展開後のカーネル AST**
+## 2. Mutate the **dialect-expanded kernel AST**, not the spec dict
 
-`parse_src` が返すカーネル AST `("spec", name, items)`(compose/requirements/business は
-展開済み)を変異し、**ミュータントごとに `build_spec` を再実行**してから検査する。理由:
-1. **型境界 ±1 変異は `build_spec` が生成する `_bounds_*` invariant の再生成を要する**
-   — spec dict 直接変異では stale になり変異が効かない。
-2. `phys_vars` 等の派生整合を build_spec に任せられる。
-3. 方言を一様に扱える。文法・検証エンジンには触れない。
+It mutates the kernel AST `("spec", name, items)` returned by `parse_src` (with
+compose/requirements/business already expanded), and **re-runs `build_spec` for each mutant**
+before checking. Reasons:
+1. **The type-bound ±1 mutation requires regenerating the `_bounds_*` invariants that
+   `build_spec` produces** — directly mutating the spec dict leaves them stale and the mutation
+   has no effect.
+2. Derived consistency such as `phys_vars` can be left to build_spec.
+3. Dialects are handled uniformly. The grammar and verification engine are untouched.
 
-### 変異オペレータ(決定的列挙、乱数なし)
+### Mutation operators (deterministic enumeration, no randomness)
 
-| op | 模擬する誤り | AST 操作 |
+| op | error simulated | AST operation |
 |---|---|---|
-| requires 除去 | ガード漏れ | body から `("requires", …)` 削除 |
-| requires 否定 | 条件取り違え | `("not", e)` で包む |
-| 代入除去 | 更新漏れ | `("assign", …)` 削除 |
-| enum 入替 | 遷移先取り違え | `("var", member)` を同 enum の別メンバへ |
-| 整数/境界 ±1 | off-by-one | `("num", n)`±1、`("type", n, lo, hi)` の lo/hi ±1 |
-| then/else 交換 | 分岐取り違え | 両分岐非空の `if` を swap |
-| fair 除去 | leadsTo 公平性前提の欠落 | action の fair True→False |
+| requires removal | missing guard | delete `("requires", …)` from body |
+| requires negation | mistaken condition | wrap with `("not", e)` |
+| assignment removal | missing update | delete `("assign", …)` |
+| enum swap | wrong transition target | change `("var", member)` to another member of the same enum |
+| integer/bound ±1 | off-by-one | `("num", n)`±1, `("type", n, lo, hi)`'s lo/hi ±1 |
+| then/else swap | mistaken branch | swap an `if` whose both branches are non-empty |
+| fair removal | missing leadsTo fairness assumption | flip the action's fair True→False |
 
-## 3. kill オラクルと baseline ゲート
+## 3. Kill oracle and baseline gate
 
-各ミュータント = mutated AST → `build_spec` → **`verify`(BMC, depth K) + acceptance/
-forbidden 再生 + implements refine**。いずれかが violated/reachable_failed/error/
-refinement_failed を返すか build_spec が FslError → **killed**(killer 記録)。全て clean →
-**SURVIVED**。induction は使わない(`unknown_cti` は kill 判定が曖昧かつ遅い)。
-**baseline ゲート**: 変異前が verified でなければ refuse(buggy 仕様では全 mutant が自明に
-殺され無意味)。
+Each mutant = mutated AST → `build_spec` → **`verify` (BMC, depth K) + acceptance/forbidden
+replay + implements refine**. If any of these returns violated/reachable_failed/error/
+refinement_failed, or build_spec raises FslError → **killed** (killer recorded). All clean →
+**SURVIVED**. Induction is not used (`unknown_cti` makes the kill decision ambiguous and slow).
+**Baseline gate**: if the pre-mutation spec is not verified, refuse (in a buggy spec every
+mutant is killed trivially, which is meaningless).
 
-## 4. `--by-requirement`(要件ストレスレポート)— 逆向きの定義
+## 4. `--by-requirement` (requirement stress report) — the reverse definition
 
-「invariant を外して何が壊れるか」は**安全性では原理的に空回りする**: invariant を
-削除すると検査対象が減るだけで違反は生じない(単調性)。invariant は「**挙動の変異を
-捕まえる**」ことでしか働きを示せない。したがって正しい機械化は逆向き: kill オラクルが
-各ミュータントの killer を記録 → `killed_by` の requirement タグで集計。**どの挙動変異も
-殺さなかった requirement = 空形式化**として `empty_formalization` 警告。v1 は first-killer
-記録で「観測下限」と明記(sole-killer 冗長分析は将来)。
+"What breaks if you remove an invariant" is **fundamentally a no-op for safety**: deleting an
+invariant only reduces what is checked and produces no violation (monotonicity). An invariant
+can only demonstrate its work by **catching a behavior mutation**. Hence the correct
+mechanization is reversed: the kill oracle records each mutant's killer → aggregate by the
+`killed_by` requirement tag. **A requirement that killed no behavior mutation = an empty
+formalization**, warned as `empty_formalization`. v1 records the first-killer and explicitly
+labels this "lower observation bound" (sole-killer redundancy analysis is future work).
 
-## 5. 出力 / 波及
+## 5. Output / ripple
 
 ```json
 {"result":"mutated","spec":"…","depth":8,"baseline":"verified",
@@ -61,13 +64,15 @@ refinement_failed を返すか build_spec が FslError → **killed**(killer 記
  "notes":["mutant cap 200 reached: 37 dropped"]}
 ```
 
-新規 `src/fslc/mutate.py`。決定的列挙 + `--max-mutants` 打ち切りは `notes` に明示
-(silent cap 禁止)。coverage-false アクションの survivor は「baseline で死んでいる」と注記、
-同値ミュータントはレビューキュー(ハード失敗にしない)。**検証エンジン無改修**。
+New `src/fslc/mutate.py`. Deterministic enumeration + `--max-mutants` truncation is made
+explicit in `notes` (no silent cap). Survivors of coverage-false actions are annotated as
+"dead at baseline," and equivalent mutants go to a review queue (not a hard failure).
+**The verification engine is unmodified.**
 
-## 6. テスト / 関連
+## 6. Tests / related
 
-tests/test_mutate.py: cart_v1 ガード除去 → `_bounds_stock` kill / 型境界+1 kill(AST 変異+
-rebuild の証拠)/ 間引き invariant survivor / `empty_formalization` / baseline 拒否 /
-coverage-false 注記 / 打ち切り注記 / コーパス安定性 / exit 0。#5 strict-tags の意味レベル
-拡張であり、#7 explain の反実仮想はこの kill を invariant 別に物語化したもの。ロードマップ #1。
+tests/test_mutate.py: cart_v1 guard removal → `_bounds_stock` kill / type-bound +1 kill
+(evidence of AST mutation + rebuild) / thinned-invariant survivor / `empty_formalization` /
+baseline refusal / coverage-false annotation / truncation annotation / corpus stability /
+exit 0. A semantic-level extension of #5 strict-tags; #7 explain's counterfactuals narrate
+these kills per invariant. Roadmap #1.

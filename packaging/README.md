@@ -1,20 +1,22 @@
-# スタンドアロンバイナリのビルド
+# Building the standalone binary
 
-`fslc` を Python 不要の単一実行ファイルとして配布するための仕組み。
-リリース時は `.github/workflows/release.yml` が各 OS/アーキで自動ビルドし、
-GitHub Release に添付する（`v*` タグの push が契機）。
+The mechanism for distributing `fslc` as a single executable file that does not
+require Python. On release, `.github/workflows/release.yml` builds automatically
+for each OS/arch and attaches the result to the GitHub Release (triggered by
+pushing a `v*` tag).
 
-## 仕組み
+## How it works
 
-- ツール: [PyInstaller](https://pyinstaller.org/) の `--onefile`
-- 依存の同梱:
-  - `--collect-all z3` … z3 のネイティブ libz3(`.dylib`/`.so`/`.dll`) を取り込む
-    （唯一のネイティブ依存。これさえ入れば `verify` まで外部依存なしで動く）
-  - `--copy-metadata fslc` … `importlib.metadata.version("fslc")` を frozen 環境でも
-    解決できるようにする（無いと `--version` が fallback の `1.0.0` になる）
-- エントリ: `packaging/fslc_entry.py`（`fslc.cli.main` を呼ぶだけ）
+- Tool: PyInstaller's [`--onefile`](https://pyinstaller.org/)
+- Bundling dependencies:
+  - `--collect-all z3` … pulls in z3's native libz3 (`.dylib`/`.so`/`.dll`)
+    (the only native dependency; with just this, even `verify` works with no
+    external dependencies)
+  - `--copy-metadata fslc` … makes `importlib.metadata.version("fslc")` resolvable
+    even in a frozen environment (without it, `--version` falls back to `1.0.0`)
+- Entry point: `packaging/fslc_entry.py` (just calls `fslc.cli.main`)
 
-## ローカルでビルドして試す
+## Build and try locally
 
 ```bash
 python3 -m venv /tmp/fsl-build && source /tmp/fsl-build/bin/activate
@@ -25,37 +27,41 @@ pyinstaller --onefile --name fslc \
   --copy-metadata fslc \
   packaging/fslc_entry.py
 
-# 生成物: dist/fslc （Windows は dist/fslc.exe）
+# Output: dist/fslc (dist/fslc.exe on Windows)
 ./dist/fslc --version
 ./dist/fslc verify examples/pm/cancel_flow.fsl
 ```
 
-生成されるバイナリは ~37MB（z3 込み）。`--onefile` は起動時に自己展開するため
-初回起動がわずかに遅い。
+The generated binary is ~37MB (including z3). Because `--onefile` self-extracts at
+startup, the first launch is slightly slow.
 
-## リリース手順
+## Release procedure
 
 ```bash
 git tag v1.1.0
 git push origin v1.1.0
 ```
 
-これで全プラットフォームのビルドが走り、`fslc-<os>-<arch>` と `*.sha256` が
-Release に添付される。手元で動作だけ確認したいときは Actions タブから
-`workflow_dispatch` で起動（この場合は Release 添付をスキップし artifact として残す）。
+This kicks off the build for all platforms, and `fslc-<os>-<arch>` and `*.sha256`
+are attached to the Release. When you just want to confirm it works locally, launch
+it from the Actions tab with `workflow_dispatch` (in that case, the Release
+attachment is skipped and it is kept as an artifact).
 
-## 制約・メモ
+## Constraints / notes
 
-- **クロスビルド不可**: 各 OS/アーキは対応する runner 上でビルドする必要がある
-  （PyInstaller はクロスコンパイルしない）。matrix で対応済み。
-- **macOS の署名/公証なし**: ダウンロードした実行ファイルは Gatekeeper で
-  検疫される。利用側で `xattr -d com.apple.quarantine <file>` が必要。
-  正式な公証には Apple Developer 証明書が要る（現状は範囲外）。
-- **macOS Intel (x86_64) は対象外**: GitHub の `macos-13` (Intel) ランナーが
-  枯渇して queued のまま着手されないため matrix から外している。Apple Silicon
-  移行が進み Intel mac 需要も縮小中。必要になったら `macos-13` / `target:
-  macos-x64` / `asset: fslc-macos-x64` の行を `build` matrix に戻すだけでよい
-  (z3 は x86_64 wheel を持つのでビルド自体は他 mac と同一レシピで通る)。
-- **z3-solver は wheel 限定** (`--only-binary=z3-solver`): 最新版が当該 OS/アーキの
-  wheel を持たない場合に pip がソースビルドへ落ちて失敗するのを防ぐ。pip は
-  wheel のある直近バージョンへ自動で後退する。
+- **No cross-building**: each OS/arch must be built on the corresponding runner
+  (PyInstaller does not cross-compile). Handled by the matrix.
+- **No macOS signing/notarization**: a downloaded executable is quarantined by
+  Gatekeeper. On the user side, `xattr -d com.apple.quarantine <file>` is required.
+  Proper notarization requires an Apple Developer certificate (currently out of
+  scope).
+- **macOS Intel (x86_64) is out of scope**: GitHub's `macos-13` (Intel) runners are
+  exhausted and stay queued without being picked up, so it is removed from the
+  matrix. The Apple Silicon migration is advancing and Intel Mac demand is
+  shrinking. If it becomes necessary, just restore the
+  `macos-13` / `target: macos-x64` / `asset: fslc-macos-x64` lines to the `build`
+  matrix (z3 has an x86_64 wheel, so the build itself passes with the same recipe
+  as the other Macs).
+- **z3-solver is wheel-only** (`--only-binary=z3-solver`): prevents pip from falling
+  back to a source build and failing when the latest version lacks a wheel for that
+  OS/arch. pip automatically falls back to the most recent version that has a wheel.

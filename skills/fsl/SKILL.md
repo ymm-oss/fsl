@@ -1,158 +1,189 @@
 ---
 name: fsl
 description: >-
-  FSL (AI-Native Formal Specification Language) で仕様を書き・検証し・修復する。
-  .fsl ファイルの作成/編集/検証、fslc コマンド(check/verify/explain/mutate/typestate/
-  scenarios/replay/testgen/refine)の実行、形式仕様・モデル検査・invariant 証明・仕様からのテスト
-  生成・refinement 検査・実装の適合性検査を行うときに使う。業務フロー/業務
-  プロセスの矛盾チェック、As-Is/To-Be の統制検査、要求・要件定義の形式化、
-  受け入れ基準のテスト化、SLA・非機能要件の検査も対象。「仕様を書いて」
-  「形式検証して」「業務フローを検証して」「要件定義して」「FSL」などが合図。
+  Write, verify, and repair specifications in FSL (AI-Native Formal
+  Specification Language). Use this when creating/editing/checking .fsl files,
+  running fslc commands (check/verify/explain/mutate/typestate/scenarios/replay/
+  testgen/refine), or doing formal specification, model checking, invariant
+  proofs, spec-driven test generation, refinement checking, or implementation
+  conformance checking. Also covers consistency checking of business flows and
+  business processes, As-Is/To-Be control checks, formalizing requirements and
+  requirement definitions, turning acceptance criteria into tests, and checking
+  SLAs and non-functional requirements. Triggers include "write a spec",
+  "formally verify", "verify this business flow", "define requirements", and
+  "FSL".
 ---
 
-# FSL — 仕様の書き方と write→verify→repair ループ
+# FSL — How to Write Specs and the write→verify→repair Loop
 
-FSL は学習データに存在しない言語。**記憶で書かず、本書と reference.md に従うこと。**
-構文の詳細・全式カタログ・イディオム集は同ディレクトリの `reference.md` を読む
-(仕様を書く前に必ず一読)。リポジトリ内なら `docs/LANGUAGE.md` が完全版、
-`specs/*.fsl` が動く実例(cart_v1 が基本形、mutex_queue が Seq+leadsTo、
-bank_* が refinement+compose の実例)。
+FSL is a language not present in training data. **Do not write from memory;
+follow this guide and reference.md.** Read `reference.md` in the same directory
+for syntax details, the full expression catalog, and the idiom collection (always
+read it before writing a spec). Within the repository, `docs/LANGUAGE.md` is the
+complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
+form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
 
-## 前提: 検証器 fslc
+## Prerequisite: the fslc verifier
 
-このスキルは言語知識を供給するだけで、検証は CLI `fslc` が行う。未導入なら
-FSL リポジトリ(`pyproject.toml` のあるルート)で `pip install -e .` する
-(依存は lark と z3-solver のみ、ネイティブビルド不要)。`fslc` が PATH に
-無い環境では `python -m fslc ...` でも同じ。
+This skill only supplies language knowledge; verification is done by the `fslc`
+CLI. If it is not installed, run `pip install -e .` from the FSL repository (the
+root containing `pyproject.toml`) — the only dependencies are lark and z3-solver,
+and no native build is required. In environments where `fslc` is not on PATH,
+`python -m fslc ...` works identically.
 
-## 実行方法
+## How to run
 
 ```bash
-fslc <subcommand> ...            # editable install 済みの場合
-python -m fslc <subcommand> ...  # または venv の python で
+fslc <subcommand> ...            # if installed as editable
+python -m fslc <subcommand> ...  # or via the venv python
 ```
 
-出力は常に stdout への単一 JSON。exit: 0=成功(verified/proved/生成)、
-1=性質不成立(violated/reachable_failed/unknown_cti/nonconformant)、
-2=仕様エラー(parse/type/semantics/io)、3=内部エラー。
+Output is always a single JSON document on stdout. exit: 0=success
+(verified/proved/generated), 1=property not satisfied
+(violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
+(parse/type/semantics/io), 3=internal error.
 
-## 仕様を書く前: 形式化メモ(チャットに出す。別ファイルにしない)
+## Before writing a spec: the formalization memo (post it in chat; do not make a separate file)
 
-自然言語の要件・業務ルール・コードから FSL を起こすとき、**いきなり `.fsl` を
-書かない**。まず**形式化メモ**をチャットに出し、人間の確認を受けてから仕様化する。
-fslc が保証するのは「書かれた仕様の内部整合」であって「仕様が元の意図に忠実か」では
-ない — そのギャップ(AI の取り違え・要件の取りこぼし・勝手な補完)はこのメモで潰す。
-メモは思考と確認の足場であって成果物ではないので、**別ファイルにはしない**
-(軽量ループを保つ。成果物は `.fsl` 本体だけ):
+When deriving FSL from natural-language requirements, business rules, or code,
+**do not jump straight to writing `.fsl`**. First post a **formalization memo** in
+chat and get human confirmation before formalizing. What fslc guarantees is the
+"internal consistency of the spec as written," not whether "the spec is faithful
+to the original intent" — that gap (AI misreadings, dropped requirements,
+arbitrary gap-filling) is closed by this memo. The memo is scaffolding for
+thinking and confirmation, not a deliverable, so **do not make a separate file**
+for it (keep the loop lightweight; the only deliverable is the `.fsl` itself):
 
-- **用語集と台帳**: 状態変数の候補、アクション(誰が・いつ enabled か)、
-  enum / ドメイン型の候補と値域
-- **要件の正規化**: 要件ごとに トリガ / 制約 / 例外 / **境界の含意**(以上か超か、
-  以前か以後か、含むか含まないか)を一行ずつ。ここが取り違えの最頻発地点
-- **仮定台帳**: 原文が曖昧だった箇所、採った解釈、その理由(下記のとおり仕様へ移す)
-- **人間への質問**: 仕様化では決められない判断(業務ルールの優先順位・例外の優先など)
+- **Glossary and ledger**: candidate state variables, actions (who, and when
+  enabled), and candidate enums / domain types with their value ranges
+- **Requirement normalization**: for each requirement, one line each for trigger /
+  constraint / exception / **boundary implications** (at-least vs. greater-than,
+  before vs. after, inclusive vs. exclusive). This is where misreadings most
+  frequently occur
+- **Assumption ledger**: places where the source was ambiguous, the interpretation
+  taken, and the reason (carried over into the spec as described below)
+- **Questions for the human**: judgments that cannot be decided during
+  formalization (priority of business rules, precedence of exceptions, etc.)
 
-人間が読むのはこのメモと検証器の反例だけでよい — **論理式を直接レビューさせない**。
-メモに人間の確認・修正が入ってから `.fsl` を書く。
+The human only needs to read this memo and the verifier's counterexamples —
+**do not make them review logical formulas directly**. Write the `.fsl` only after
+the memo has received human confirmation or correction.
 
-### 仮定だけは仕様に残す(別メモファイルではなく .fsl に畳む)
+### Keep only the assumptions in the spec (fold them into the .fsl, not a separate memo file)
 
-メモの大半はチャットで消えてよいが、**仮定台帳だけは消すと後で「なぜこの解釈に
-したか」を辿れず困る**。別ファイルにすると仕様との同期が崩れるので、**`.fsl` 本体に
-コメント / タグで残す**:
+Most of the memo can disappear into chat, but **if the assumption ledger is
+discarded, you later cannot trace "why this interpretation was chosen," which is a
+problem**. A separate file would drift out of sync with the spec, so **keep it in
+the `.fsl` itself as comments / tags**:
 
-- グローバルな仮定 → 仕様冒頭に台帳ブロック: `// ASSUME-1: 在庫は同時に1ユーザーのみ予約`
-- 特定のガード / invariant を正当化する仮定 → その宣言にタグを付ける:
-  `invariant OnePerUser "ASSUME-1: 同時予約は1ユーザー" { ... }`
+- Global assumptions → a ledger block at the top of the spec:
+  `// ASSUME-1: stock is reserved by only one user at a time`
+- An assumption justifying a specific guard / invariant → tag that declaration:
+  `invariant OnePerUser "ASSUME-1: only one user reserves at a time" { ... }`
 
-こうすると仮定が仕様と一緒に動き、PR でも見え、将来の `--strict-tags` 検査が
-「意図した仮定(タグ付き)」と「根拠のない捏造(タグなし)」を区別できる。
+This way assumptions travel with the spec, are visible in PRs, and a future
+`--strict-tags` check can distinguish "intended assumptions (tagged)" from
+"unfounded fabrications (untagged)."
 
-## 自然言語 → 構文の対応(形式化メモから仕様へ)
+## Natural language → syntax mapping (from the formalization memo to the spec)
 
-要件の正規化(上記メモ)で切り出した文を、次の対応で構文に落とす。reference.md §8 の
-イディオム集が「FSL → 正しい書き方」なのに対し、これは「自然言語 → どの構文か」の逆引き。
-**この表に載らない自由作文の論理式は取り違えやすいので、形式化メモで人間確認の印を付ける。**
+Map the sentences extracted during requirement normalization (the memo above) to
+syntax using the following correspondence. Whereas the idiom collection in
+reference.md §8 goes "FSL → the correct way to write it," this is the reverse
+lookup "natural language → which construct." **Free-form logical formulas not
+covered by this table are easy to misread, so mark them for human confirmation in
+the formalization memo.**
 
-| 自然言語のパターン | FSL 構文 |
+| Natural-language pattern | FSL construct |
 |---|---|
-| 「〜してはならない」「常に〜である」(禁止・不変) | `invariant`(安全性) |
-| 「ある状態から次状態への変化を禁止/制約する」(2状態安全性) | `trans`(`old()` で遷移前状態を参照) |
-| 「〜の場合だけ〜できる」(前提条件) | action の `requires` |
-| 「〜したら必ずいつか〜する」(応答・進行) | `leadsTo` + 進行を担うアクションに `fair` |
-| 「一度〜したら二度と〜できない」(履歴依存) | ゴースト変数(`ever_*`)+ invariant |
-| 「〜に到達できる / 到達できてしまう」(可能性) | `reachable`(witness、または過剰制約の検出) |
-| 「K 回 / K tick 以内に〜」(期限) | requirements の `time` + `deadline`(reference §11) |
-| 数の上限・下限・非負 | ドメイン型 `type T = lo..hi`(境界 invariant は手書きしない) |
-| 「以下 / 未満 / 以上 / 超」「以前 / 以後」 | `<= / < / >= / >`。**境界の含意はメモで明示**(最頻発の取り違え) |
-| 「合計が〜と一致」「件数が〜」(集計整合) | `sum(...)` / `count(...)` の invariant |
+| "must never" / "always the case" (prohibition, invariance) | `invariant` (safety) |
+| "prohibit/constrain a change from one state to the next" (two-state safety) | `trans` (use `old()` to reference the pre-transition state) |
+| "can only do X when Y" (precondition) | an action's `requires` |
+| "once X happens, Y must eventually happen" (response, progress) | `leadsTo` + `fair` on the action that drives progress |
+| "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
+| "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
+| "within K times / K ticks" (deadline) | requirements `time` + `deadline` (reference §11) |
+| upper/lower bound or non-negativity of a number | domain type `type T = lo..hi` (do not hand-write boundary invariants) |
+| "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
+| "the total equals X" / "the count is X" (aggregate consistency) | an invariant over `sum(...)` / `count(...)` |
 
-## 標準ワークフロー(proved を標準とする)
+## Standard workflow (treat proved as the standard)
 
-1. 仕様を書く → `fslc check file.fsl`(構文・型のみ、速い。エラーの `loc`/`expected`/`hint` に従って修正)
-   要件トレーサビリティを厳格に見るときは `--strict-tags`
-   (必要なら `--requirements ids.txt`)を付ける。ok/verified/proved のときだけ、
-   タグなし宣言や未参照要件 ID が warning になる。
-2. `fslc verify file.fsl --depth 8` → 結果ごとの対応は下表
-3. verified になったら `fslc verify file.fsl --engine induction` → `proved` で完了
-   (注: `--depth K` はステップ K を**含む**。`proved` が無限深度になるのは
-   invariant のみで、**leadsTo は深さ K までの有界検査のまま** — 状態が単調にしか
-   進まない非循環の仕様なら、最長実行長より大きい `--depth` で再 verify すれば
-   全実行を被覆できる)
-4. 必要に応じて: `fslc explain file.fsl --depth 8`
-   (仕様の骨格、暗黙の型境界/partial_op 検査、user invariant ごとの
-   「このルールが無ければ」の反実仮想、reachable/scenarios witness を
-   決定的 JSON で出す。PM/コンサルには論理式ではなく具体トレースの裁定を頼む)、
+1. Write the spec → `fslc check file.fsl` (syntax and types only, fast; fix
+   following the error's `loc`/`expected`/`hint`).
+   When checking requirement traceability strictly, add `--strict-tags`
+   (and `--requirements ids.txt` if needed). Only when the result is
+   ok/verified/proved do untagged declarations and unreferenced requirement IDs
+   become warnings.
+2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
+3. Once verified, run `fslc verify file.fsl --engine induction` → done at `proved`
+   (note: `--depth K` **includes** step K. Only invariants become infinite-depth
+   under `proved`; **leadsTo remains a bounded check up to depth K** — for an
+   acyclic spec whose state advances monotonically, re-verifying with a `--depth`
+   larger than the longest execution length covers all executions)
+4. As needed: `fslc explain file.fsl --depth 8`
+   (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
+   checks, a "what if this rule were absent" counterfactual for each user
+   invariant, and reachable/scenarios witnesses. For PMs/consultants, ask them to
+   adjudicate concrete traces rather than logical formulas),
    `fslc mutate file.fsl --depth 8 --by-requirement`
-   (仕様の性質群がモデル変異をどれだけ殺すかを見る。survivor は失敗ではなく、
-   invariant / acceptance / forbidden の不足候補。baseline が verified でない仕様では
-   変異レポートを出さず baseline 結果を返す)、`fslc scenarios`(統合テスト雛形 JSON)、
+   (shows how many model mutations the spec's properties kill; a survivor is not a
+   failure but a candidate for a missing invariant / acceptance / forbidden. For a
+   spec whose baseline is not verified, it emits no mutation report and returns the
+   baseline result), `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
-   (実装適合 pytest 雛形)、`fslc replay --trace events.json`(ログ適合性)、
-   `fslc refine impl.fsl abs.fsl mapping.fsl`(詳細仕様の忠実性検査)
-   注: verify/induction が保証するのは**仕様の内部整合**であって**実装が仕様契約を守るか**は別物。
-   実装適合まで要るなら `testgen`(Adapter 経由の pytest)/ `replay`(実行ログ照合)で実装に錨付けする。
+   (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
+   (log conformance), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
+   of a detailed spec).
+   Note: what verify/induction guarantees is the **internal consistency of the
+   spec**, which is separate from **whether the implementation honors the spec
+   contract**. If implementation conformance is also required, anchor to the
+   implementation with `testgen` (pytest via an Adapter) / `replay` (matching
+   against execution logs).
 
-## 修復プロトコル(結果 → 次の一手)
+## Repair protocol (result → next move)
 
-| result / violation_kind | 意味 | 次の一手 |
+| result / violation_kind | Meaning | Next move |
 |---|---|---|
-| `violated` / `invariant` | 反例あり(trace は最短) | trace の `changes` と `violating_bindings` を読み、ガード追加か invariant 修正 |
-| `violated` / `trans` | 2状態安全性の反例あり | trace の直前状態と違反ステップを比較し、ガード追加・action 修正・trans 修正を判断 |
-| `violated` / `type_bound` | 有界型が範囲外(自動検査) | `last_action` のガード不足。`requires` で範囲を守る(invariant を手書きしない) |
-| `violated` / `partial_op` | 空 Seq の pop/head、添字範囲外、除数 0 | `requires q.size() > 0` / `requires d != 0` か `if` でガード |
-| `violated` / `ensures` | 事後条件不成立 | 本体と ensures のどちらが正かを判断して修正 |
-| `violated` / `leadsTo` | 応答性質の反例(ラッソ/停滞) | trace の `loop_start` を確認。進行を担うアクションに `fair` を付けるか仕様を修正 |
-| `reachable_failed` | 到達したい状態に届かない | `action_coverage` の `blocking_requires`(unsat core)を読む。ガード緩和/アクション追加/`--depth` 増 |
-| `unknown_cti` | invariant は真だが帰納的でない | **CTI の開始状態 = 全 invariant を満たす幽霊状態。それを排除する補助 invariant(ドメインの真実であるもの)を追加して再実行。** 実績: 1ラウンド収束(例: 「キューに重複なし」「返金は Captured のみ」) |
-| warning / `vacuous_implication` | 含意 invariant の前件が depth 内で一度も到達しない | 前件を成立させる action / reachable 正例が欠けていないか、前件式が意図と逆・強すぎでないかを確認。単に後件を弱めない |
-| warning / `vacuous_leadsto` | leadsTo のトリガが depth 内で到達しない | トリガ状態に入る action / ガード / 初期条件を確認。応答先(Q)ではなく、まず P が実際に起きる仕様かを見る |
-| warning / `always_true_requires` | 先行 requires の文脈下で、その requires 句が制約として効いていない | 句が冗長なのか、その句が効く状態へ到達する経路が欠けているのかを判断。自動的に削除しない |
-| warning / `tautology_over_frozen` | どのアクションも代入しない frozen 変数だけに依存し、動的に恒真になっている invariant(死んだゴースト=骨抜き) | その変数を `const` 化するか、変更すべきアクションの欠落を疑う。invariant が「契約を検査しているつもりで何も検査していない」サイン |
-| `error` / `parse` | 構文エラー | `loc` と `expected`(候補トークン)に従う |
-| `error` / `type` | 型エラー | `hint` に従う(例: `x == some(e)` → `x is some(v)` で束縛して比較) |
-| `error` / `semantics` | 二重代入など | 同一パスで同じ変数に2回代入しない(if の then/else は別パスなので可) |
-| `error` / `vacuous` | init が充足不能(矛盾した代入など) | init を見直す。1つの状態変数に矛盾する値を与えていないか確認。範囲外の値による違反は別物で `violated`/`type_bound` になる |
-| `refinement_failed` / `abs_requires_failed` | 詳細層の遷移が上位層のガードを破る(例: 承認を飛ばす近道) | `impl_action` と `impl_trace` を読む。詳細層にガードを足すか、対応(`maps`/写像)の解釈を見直す |
-| `refinement_failed` / `abs_state_mismatch`・`stutter_changed_abs`・`map_out_of_bounds` | 写像の不整合(更新が対応しない / stutter なのに上位状態が変わる / 写像値が型範囲外) | `mismatch` のパスと `abs_before/after` を比較。写像式か action 対応を修正 |
-| verify 内 `implements.result: violated` | 要件層が上位(業務)層から逸脱 | `implements.violation` の中身は refinement_failed と同形。上と同じ手順 + 要件側の `requirement` を確認 |
-| `error` / `acceptance` | 受け入れ基準の再生が失敗 | 失敗した AC の ID とステップが返る。手順の前提(状態)か expect のどちらが正かを判断して修正 |
-| `error` / `forbidden` | 拒否されるべき操作列が受理された(過小制約。安全性 invariant では沈黙する種類) | `accepted_trace` が受理経路。最後の操作を enabled にしている requires が緩い → ガードを追加するか仕様を見直す |
-| `error` / `forbidden_setup` | forbidden の前提(最後以外の)ステップが enabled でない(トレース不正) | セットアップ手順を見直す。最後以外はそこへ到達する手順であり、成功扱いにはならない |
+| `violated` / `invariant` | Counterexample found (trace is shortest) | Read the trace's `changes` and `violating_bindings`; add a guard or fix the invariant |
+| `violated` / `trans` | Two-state safety counterexample found | Compare the trace's previous state with the violating step; decide between adding a guard, fixing the action, or fixing the trans |
+| `violated` / `type_bound` | Bounded type out of range (automatic check) | Insufficient guard on `last_action`. Keep within range via `requires` (do not hand-write an invariant) |
+| `violated` / `partial_op` | pop/head on an empty Seq, index out of range, or divisor 0 | Guard with `requires q.size() > 0` / `requires d != 0` or an `if` |
+| `violated` / `ensures` | Postcondition not satisfied | Decide whether the body or the ensures is correct, and fix accordingly |
+| `violated` / `leadsTo` | Response-property counterexample (lasso / stall) | Check the trace's `loop_start`. Either add `fair` to the action that drives progress, or fix the spec |
+| `reachable_failed` | A state you want to reach is unreachable | Read `action_coverage`'s `blocking_requires` (unsat core). Loosen a guard / add an action / increase `--depth` |
+| `unknown_cti` | The invariant is true but not inductive | **The CTI's starting state = a phantom state satisfying all invariants. Add an auxiliary invariant (one that is a domain truth) that excludes it, then re-run.** Track record: converges in one round (e.g. "no duplicates in the queue," "refunds only from Captured") |
+| warning / `vacuous_implication` | The antecedent of an implication invariant is never reached within depth | Check whether an action / reachable witness that makes the antecedent hold is missing, or whether the antecedent expression is reversed or too strong relative to intent. Do not simply weaken the consequent |
+| warning / `vacuous_leadsto` | The leadsTo trigger is not reached within depth | Check the action / guard / initial condition for entering the trigger state. Look first at whether P (not the response target Q) actually occurs in the spec |
+| warning / `always_true_requires` | Under the context of the preceding requires, this requires clause is not effective as a constraint | Decide whether the clause is redundant or whether a path to the state where the clause bites is missing. Do not delete it automatically |
+| warning / `tautology_over_frozen` | An invariant that depends only on frozen variables no action ever assigns to, and is dynamically always true (a dead ghost = hollow) | Make the variable `const`, or suspect a missing action that should change it. A sign that the invariant "thinks it is checking a contract but checks nothing" |
+| `error` / `parse` | Syntax error | Follow `loc` and `expected` (candidate tokens) |
+| `error` / `type` | Type error | Follow the `hint` (e.g. `x == some(e)` → bind with `x is some(v)` and compare) |
+| `error` / `semantics` | Double assignment, etc. | Do not assign to the same variable twice on the same path (an if's then/else are separate paths, so it is allowed) |
+| `error` / `vacuous` | init is unsatisfiable (contradictory assignments, etc.) | Review init. Check that you are not giving one state variable contradictory values. A violation from an out-of-range value is different and becomes `violated`/`type_bound` |
+| `refinement_failed` / `abs_requires_failed` | A detailed-layer transition breaks an upper-layer guard (e.g. a shortcut skipping approval) | Read `impl_action` and `impl_trace`. Add a guard to the detailed layer, or review the interpretation of the correspondence (`maps` / mapping) |
+| `refinement_failed` / `abs_state_mismatch` / `stutter_changed_abs` / `map_out_of_bounds` | Mapping inconsistency (an update has no correspondence / a stutter nonetheless changes upper-layer state / a mapped value is out of the type's range) | Compare the `mismatch` path with `abs_before/after`. Fix the mapping expression or the action correspondence |
+| `implements.result: violated` within verify | The requirements layer deviates from the upper (business) layer | The contents of `implements.violation` have the same shape as refinement_failed. Same procedure as above + check the `requirement` on the requirements side |
+| `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
+| `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
+| `error` / `forbidden_setup` | A precondition (non-final) step of the forbidden is not enabled (invalid trace) | Review the setup procedure. The non-final steps are there to reach that point and are not treated as success |
 
-coverage が `false` のアクションは `blocking_requires` が「どの requires が
-阻んでいるか」を句単位で特定している。silent に無視しないこと。
+For an action whose coverage is `false`, `blocking_requires` pinpoints "which
+requires is blocking it" on a per-clause basis. Do not silently ignore it.
 
-反例を受けて**解釈を変えた**(ガードを足した・invariant を緩めた・例外の扱いを
-決めた)ときは、その判断を仮定台帳(`.fsl` の `// ASSUME-n:` コメント / タグ)に
-追記する。verified にする最短経路はしばしば「仕様を弱めること」なので、何を
-なぜ弱めたかが残っていないと、後から骨抜き修復と正当な修正を区別できない。
+When a counterexample makes you **change an interpretation** (added a guard,
+loosened an invariant, decided how to handle an exception), record that judgment in
+the assumption ledger (the `// ASSUME-n:` comments / tags in the `.fsl`). The
+shortest path to verified is often "weakening the spec," so without a record of
+what was weakened and why, you later cannot distinguish a hollowing-out repair from
+a legitimate fix.
 
-## 最小構文(詳細・全カタログは reference.md)
+## Minimal syntax (details and the full catalog are in reference.md)
 
-下記はそのまま `fslc check` を通る自己完結の雛形(Map/Option/Seq の要素型は
-全てドメイン型として宣言してある — **使う型は必ず `type ... = lo..hi` か `enum`
-で宣言する**。未宣言だと `unknown type` の型エラーになる):
+The following is a self-contained template that passes `fslc check` as-is (the
+element types of Map/Option/Seq are all declared as domain types — **every type
+you use must be declared with `type ... = lo..hi` or `enum`**; an undeclared type
+becomes an `unknown type` error):
 
 ```fsl
 spec Cart {
@@ -160,7 +191,7 @@ spec Cart {
   type ItemId = 0..1
   type UserId = 0..1
   type JobId  = 0..1
-  type Qty    = 0..5                     // ドメイン型 = 有界整数。範囲は自動検査
+  type Qty    = 0..5                     // domain type = bounded integer; range is checked automatically
   enum St { Open, Closed }
   struct Order { st: St, qty: Qty, buyer: Option<UserId> }
 
@@ -180,113 +211,139 @@ spec Cart {
     cart = some(i)
   }
 
-  fair action abandon() {                // 常に可能なので Served(下記)が成立する
+  fair action abandon() {                // always possible, so Served (below) holds
     requires cart != none
     cart = none
   }
 
-  fair action checkout(u: UserId) {      // fair = 弱公平(leadsTo 用)
-    requires cart is some(i)             // i がここで束縛される
+  fair action checkout(u: UserId) {      // fair = weak fairness (for leadsTo)
+    requires cart is some(i)             // i is bound here
     requires stock[i] > 0
-    stock[i] = stock[i] - 1              // 右辺は全て旧状態を読む(同時代入)
+    stock[i] = stock[i] - 1              // every RHS reads the old state (simultaneous assignment)
     cart = none
     ensures stock[i] == old(stock[i]) - 1
   }
 
-  // 「stock[i] >= 0」のような境界 invariant は書かない(Qty=0..5 で自動検査)。
-  // 下は非・境界の真の安全性 invariant の例(<式> の位置)。
-  invariant QueueStaysEmpty { q.size() == 0 }   // q を触る action が無いので不変
-  trans StockNeverIncreases { stock[0] <= old(stock[0]) } // 2状態安全性
-  reachable SoldOut { stock[0] == 0 }           // witness が返る
-  leadsTo Served { cart is some(j) ~> cart == none }   // ~> は leadsTo 専用
-  terminal { stock[0] == 0 }                    // 意図した終端状態(deadlock 検査から除外)
+  // Do not write a boundary invariant like "stock[i] >= 0" (Qty=0..5 checks it automatically).
+  // Below is an example of a genuine, non-boundary safety invariant (in the <expr> position).
+  invariant QueueStaysEmpty { q.size() == 0 }   // unchanging since no action touches q
+  trans StockNeverIncreases { stock[0] <= old(stock[0]) } // two-state safety
+  reachable SoldOut { stock[0] == 0 }           // a witness is returned
+  leadsTo Served { cart is some(j) ~> cart == none }   // ~> is leadsTo-only
+  terminal { stock[0] == 0 }                    // intended terminal state (excluded from the deadlock check)
 }
 ```
 
-## 絶対に守る規則(構造的落とし穴)
+## Rules to always follow (structural pitfalls)
 
-- **番兵値(-1 等)禁止 → `Option<T>`**。`x == some(e)` は型エラー —
-  `x is some(v)` で取り出す。`== none` / `!= none` は可。
-- **「0以上」系 invariant を手書きしない** → `type Qty = 0..N` で自動検査される。
-- 同一実行パスでの**二重代入はエラー**。if の後に分岐内と同じ変数へ代入もエラー。
-- Set/Seq の更新は**再代入**: `s = s.add(x)`、`q = q.pop()`。
-- Seq の `pop/head/at` と `/` `%` の除数は**必ずガード**(requires か if)。忘れは partial_op で検出される。
-- invariant で Seq を語るときは添字ガード:
-  `forall i in 0..CAP-1 { i < q.size() => P(q.at(i)) }`(範囲は `0..CAP-1` と
-  const から導出して書く — リテラルをハードコードすると容量変更に追従しない)。
-- **Map のネスト(`Map<K1, Map<K2,V>>`)は不可** → 2軸は積のドメイン型1本に
-  平坦化(`type Cell = 0..ROOMS*SLOTS-1`)し、軸は `c / SLOTS`・`c % SLOTS` で復元。
-- 「直前状態から次状態で X が保たれる」は `trans`。`old()` は `ensures` / `trans`
-  の中だけで使える。
-- 「X の後にいつか Y が起きた」という**履歴/応答**は状態で書けない → ゴースト変数
-  (`ever_locked` 等)を足すか、応答性質なら `leadsTo`。
-- **意図した終端状態**(処理完了など、そこで止まるのが正しい状態)は deadlock 警告に
-  なる → `terminal { <述語> }` で宣言する(`--deadlock ignore` を全体にかけると意図せぬ
-  deadlock まで隠れる)。terminal に含めない停止は引き続き検出される。
+- **No sentinel values (-1, etc.) → use `Option<T>`**. `x == some(e)` is a type
+  error — extract with `x is some(v)`. `== none` / `!= none` are allowed.
+- **Do not hand-write "non-negative"-style invariants** → `type Qty = 0..N` checks
+  them automatically.
+- A **double assignment on the same execution path is an error**. Assigning to the
+  same variable after an if as inside a branch is also an error.
+- Updates to Set/Seq are **re-assignments**: `s = s.add(x)`, `q = q.pop()`.
+- Seq `pop/head/at` and the divisor of `/` `%` **must always be guarded** (requires
+  or if). Forgetting is detected as partial_op.
+- When talking about a Seq in an invariant, use an index guard:
+  `forall i in 0..CAP-1 { i < q.size() => P(q.at(i)) }` (write the range as
+  `0..CAP-1`, derived from the const — hard-coding a literal will not track a
+  capacity change).
+- **Nested Maps (`Map<K1, Map<K2,V>>`) are not allowed** → flatten two axes into a
+  single product domain type (`type Cell = 0..ROOMS*SLOTS-1`) and recover the axes
+  with `c / SLOTS` and `c % SLOTS`.
+- "X is preserved from the previous state to the next state" is `trans`. `old()`
+  can only be used inside `ensures` / `trans`.
+- A **history/response** like "Y happened sometime after X" cannot be written with
+  state — add a ghost variable (`ever_locked`, etc.), or use `leadsTo` for a
+  response property.
+- An **intended terminal state** (processing complete, etc. — a state where
+  stopping is correct) would become a deadlock warning → declare it with
+  `terminal { <predicate> }` (applying `--deadlock ignore` globally hides even
+  unintended deadlocks). Stops not included in terminal continue to be detected.
 
-## 推奨プラクティス(任意 — リスクに応じて。小さな仕様では省いてよい)
+## Recommended practices (optional — by risk; may be skipped for small specs)
 
-上の「絶対に守る規則」と違い、ここは**義務ではない**。重い手順を全仕様に課すと
-軽量ループが死ぬので、重要な制約・高リスク仕様にだけ効かせればよい。
+Unlike the "rules to always follow" above, this is **not mandatory**. Imposing
+heavy procedures on every spec kills the lightweight loop, so apply them only to
+important constraints and high-risk specs.
 
-- **正例とのペア**: invariant を書いたら、その境界近傍で「許されるべき挙動がまだ
-  可能」なことを示す `reachable` か `acceptance` を1本添えると、ガードの掛けすぎ
-  (過剰制約)と空虚な invariant を自分で検出できる。修復でガードを強めたときに特に
-  有効。例: 在庫を減らす仕様に `reachable SoldOut { stock[0] == 0 }` を添えると
-  「売り切りまで到達できる=ガード過剰でない」が確認できる。
-- **1要件=1宣言**: 巨大な連言 invariant を避け、要件単位で宣言を分ける。反例の
-  `requirement` タグが効き、診断が読みやすく、どの要件が壊れたか1往復で分かる。
-- **ドメインサイジング**: 個体間の相互作用を語る性質はエンティティ3個体以上
-  (2だと対称性でバグが隠れる)、容量は「上限+1」を試せる値、検査は depth 8 +
-  induction を標準にする。
-- **交差検証(高リスク仕様のみ)**: 決済・権限など誤りが重大な仕様は、(a) 原文を
-  見ていない別エージェントに `.fsl` を自然文へ翻訳させ要件リストと項目別に突合する、
-  (b) state スキーマを固定して2エージェントに独立に dynamics+性質を書かせ、互いの
-  `scenarios` を相手の仕様で `replay` して不一致を炙り出す。コストが高いので限定運用。
+- **Pair with a positive example**: when you write an invariant, attach one
+  `reachable` or `acceptance` near its boundary showing that "behavior that should
+  be allowed is still possible." This lets you self-detect over-guarding
+  (over-constraint) and vacuous invariants. Especially effective when a repair
+  strengthened a guard. Example: attaching `reachable SoldOut { stock[0] == 0 }` to
+  a stock-decrementing spec confirms "selling out is reachable = not over-guarded."
+- **One requirement = one declaration**: avoid a huge conjunctive invariant and
+  split declarations per requirement. The counterexample's `requirement` tag then
+  bites, diagnostics are easier to read, and which requirement broke is clear in
+  one round-trip.
+- **Domain sizing**: for properties about interactions between entities, use at
+  least 3 entities (with 2, symmetry hides bugs); make capacities values where you
+  can try "limit + 1"; and standardize checks at depth 8 + induction.
+- **Cross-validation (high-risk specs only)**: for specs where errors are serious,
+  such as payments or permissions, (a) have a separate agent that has not seen the
+  source translate the `.fsl` into natural language and reconcile it item-by-item
+  against the requirements list, or (b) fix the state schema and have two agents
+  independently write the dynamics + properties, then `replay` each other's
+  `scenarios` against the other's spec to expose discrepancies. Costly, so use it
+  selectively.
 
-## 役割別の入口(まず実例を読む)
+## Entry points by role (read the examples first)
 
-| 立場 | 読む実例 | 主に書く構文 |
+| Role | Examples to read | Constructs mainly written |
 |---|---|---|
-| コンサル(業務フロー・規程・As-Is/To-Be) | `examples/consulting/`、`examples/pm/cancel_flow.fsl` | `business`(reference.md §10) |
-| PM / PdM(要件定義・受け入れ基準) | `examples/pm/`、`examples/e2e/2_requirements.fsl` | `requirements`(同 §10)+ NFR(同 §11) |
-| エンジニア(設計・実装接続) | `examples/e2e/`(3役の連鎖全体)、`examples/bank/` | `spec`(本書)+ refine 写像 + Adapter(同 §9) |
+| Consultant (business flows, regulations, As-Is/To-Be) | `examples/consulting/`, `examples/pm/cancel_flow.fsl` | `business` (reference.md §10) |
+| PM / PdM (requirement definition, acceptance criteria) | `examples/pm/`, `examples/e2e/2_requirements.fsl` | `requirements` (same, §10) + NFR (same, §11) |
+| Engineer (design, implementation connection) | `examples/e2e/` (the whole three-role chain), `examples/bank/` | `spec` (this guide) + refine mapping + Adapter (same, §9) |
 
-3役を1ドメインで貫通する旗艦例は `examples/e2e/`(経費精算)。
+The flagship example threading all three roles through one domain is
+`examples/e2e/` (expense reimbursement).
 
-## 3層方言(コンサル / 要件 / 設計)
+## Three-layer dialects (consulting / requirements / design)
 
-仕様は3つの層で書ける。**業務 ⊒ 要件 ⊒ 設計 ⊒ 実装**を refinement で連鎖させる
-(構文は reference.md §10)。どの層もカーネルに展開されるので
-verify/induction/scenarios/Monitor は同じに使える:
+A spec can be written in three layers. Chain **business ⊒ requirements ⊒ design ⊒
+implementation** via refinement (syntax in reference.md §10). Every layer expands
+to the kernel, so verify/induction/scenarios/Monitor are used identically:
 
-- `business Name { process/policy/kpi/goal }` — コンサル層。規程の矛盾=invariant
-  違反、死んだ業務ステップ=coverage 診断、業務ゴール到達不能=reachable_failed
-- `requirements Name { requirement REQ-1 "原文" {...} / acceptance / branches /
-  implements Abs from "file" {map ...} }` — 要件層。`implements` があると verify が
-  上位層への refine を同時実行(結果 JSON の `implements`)。`acceptance` は
-  check 時に再生検証され scenarios → testgen に流れる。`forbidden`(must-forbid)は
-  逆に「拒否されるべき操作列」を書き、最後のステップが拒否される(not-enabled か
-  違反)ことを check 時に検証する — 受理されたら `kind: "forbidden"`。安全性
-  invariant では沈黙する過小制約(ガード漏れ)を捕まえる独立チャネル(別エージェントに
-  NL から正負トレースを書かせる交差検証の受け皿)
-- 設計層は通常の `spec`(本書の主対象)。要件層へ `fslc refine` で接続
-- **トレーサビリティ**: 宣言の `{` 直前に `"ID: 原文"` タグ。violated / CTI /
-  coverage / scenarios に `requirement: {id, text}` が載る — 反例を読んだら
-  必ず requirement を見て、その要件の意図に沿って修復すること
+- `business Name { process/policy/kpi/goal }` — the consulting layer. Regulation
+  contradiction = invariant violation, dead business step = coverage diagnostic,
+  unreachable business goal = reachable_failed
+- `requirements Name { requirement REQ-1 "source" {...} / acceptance / branches /
+  implements Abs from "file" {map ...} }` — the requirements layer. With
+  `implements`, verify simultaneously runs the refine to the upper layer (the
+  `implements` field in the result JSON). `acceptance` is replay-checked at check
+  time and flows scenarios → testgen. `forbidden` (must-forbid) conversely writes
+  an "operation sequence that should be rejected" and verifies at check time that
+  the last step is rejected (not-enabled or a violation) — if accepted,
+  `kind: "forbidden"`. An independent channel for catching under-constraint
+  (missing guards) that a safety invariant stays silent about (a receptacle for
+  cross-validation where a separate agent writes positive/negative traces from NL)
+- The design layer is an ordinary `spec` (the main subject of this guide). Connect
+  it to the requirements layer with `fslc refine`
+- **Traceability**: a `"ID: source"` tag immediately before a declaration's `{`.
+  `requirement: {id, text}` appears in violated / CTI / coverage / scenarios — when
+  you read a counterexample, always look at the requirement and repair in line with
+  that requirement's intent
 
-## 高度な機能(必要になったら reference.md の該当節)
+## Advanced features (the relevant reference.md section, when needed)
 
-- **非機能要件**: 権限・監査・容量・信頼性挙動は通常の invariant/leadsTo で書ける。SLA/タイムアウトは requirements の `time`+`deadline`(reference.md §11)
-- **Seq の集約**: `sum(i: Idx of log.at(i) where i < log.size())`(Idx は容量を覆うドメイン型)
-- **合成**: `compose X { use A as a from "a.fsl" ... }`、同期アクション
-  `action s(..) = a.act(..) || b.act2(..) { .. }`、`internal a.act`
-- **refinement**: 写像ファイル(`map abs_var = 式`、`action impl -> abs(..) | stutter`、
-  写像式限定の `if c then a else b`)+ `fslc refine`
-- **実装接続**: `fslc testgen` 生成ファイルの Adapter(reset/step/observe)を
-  実装に結線。observe は仕様の論理状態と同形(enum は名前、Option は None|値、
-  Seq は list、合成は `alias.var` キー)
-- **幽霊型(typestate)**: `fslc typestate file.fsl [--ts]` — 状態機械(enum 値の
-  struct フィールド / state 変数 / `Option<_>` スロット)をホスト言語の typestate に
-  どこまで写せるか判定(derivable / branching / relational)。全遷移が型化可能なら
-  applicability=full。`--ts` で導出可能分の TypeScript 雛形を出力(reference.md §7)
+- **Non-functional requirements**: permissions, auditing, capacity, and
+  reliability behavior can be written with ordinary invariant/leadsTo. SLA/timeout
+  use the requirements `time`+`deadline` (reference.md §11)
+- **Aggregation over Seq**: `sum(i: Idx of log.at(i) where i < log.size())` (Idx is
+  a domain type covering the capacity)
+- **Composition**: `compose X { use A as a from "a.fsl" ... }`, synchronized
+  actions `action s(..) = a.act(..) || b.act2(..) { .. }`, `internal a.act`
+- **refinement**: a mapping file (`map abs_var = expr`,
+  `action impl -> abs(..) | stutter`, the mapping-expression-only
+  `if c then a else b`) + `fslc refine`
+- **Implementation connection**: wire the Adapter (reset/step/observe) of the file
+  generated by `fslc testgen` into the implementation. observe has the same shape
+  as the spec's logical state (enum as a name, Option as None|value, Seq as a list,
+  composition as `alias.var` keys)
+- **Ghost types (typestate)**: `fslc typestate file.fsl [--ts]` — determines how
+  far a state machine (a struct field with enum values / a state variable /
+  an `Option<_>` slot) can be mapped onto the host language's typestate (derivable /
+  branching / relational). If all transitions are typeable, applicability=full.
+  `--ts` outputs a TypeScript skeleton for the derivable portion (reference.md §7)

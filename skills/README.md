@@ -1,39 +1,45 @@
 # skills/
 
-配布用の Agent Skill 置き場。GitHub 上から見つけやすいよう、また
-`gh` のスキル拡張や手動コピーで配布できるよう、リポジトリ直下に置いている。
+A place for distributable Agent Skills. They are placed at the repository root so
+they are easy to find on GitHub and can be distributed via the `gh` skill extension
+or by manual copy.
 
 ## fsl
 
-[`fsl/`](fsl/) — FSL(本リポジトリの形式仕様言語)を AI エージェントに
-教えるスキル。FSL は学習データに存在しない言語なので、エージェントが仕様を
-書くにはこのスキルで言語仕様と修復プロトコルを文脈に供給する必要がある。
+[`fsl/`](fsl/) — a skill that teaches FSL (this repository's formal specification
+language) to AI agents. FSL is a language that does not exist in training data, so
+for an agent to write specs, this skill must supply the language specification and
+the repair protocol into context.
 
-- [`fsl/SKILL.md`](fsl/SKILL.md) — ワークフロー、結果→次の一手の修復プロトコル表、
-  最小構文、構造的に守るべき規則(スキル起動時に読まれる本体)
-- [`fsl/reference.md`](fsl/reference.md) — 凝縮版の完全言語リファレンスカード
-  (compose / refinement / 全式カタログ / イディオム集)
+- [`fsl/SKILL.md`](fsl/SKILL.md) — workflow, the result→next-move repair protocol
+  table, minimal syntax, and the rules to follow structurally (the main body read
+  when the skill is invoked)
+- [`fsl/reference.md`](fsl/reference.md) — a condensed full language reference card
+  (compose / refinement / a catalog of all expressions / a collection of idioms)
 
 ## fsl-design-review
 
-[`fsl-design-review/`](fsl-design-review/) — FSL を使った設計検討・設計レビューの
-手続きスキル。設計案・変種・拡張・変更を「凍結した契約(抽象 spec)への
-refinement」として記述し、`fslc refine` の結果を設計原則(SOLID の LSP/OCP、
-契約による設計など)の語彙で報告する。手続きが背骨で、原則は各ステップの
-判断レンズとして登場する。FSL 構文は fsl スキルに委譲(併用前提)。
+[`fsl-design-review/`](fsl-design-review/) — a procedure skill for design study and
+design review using FSL. It describes a design proposal, variant, extension, or
+change as a "refinement to a frozen contract (abstract spec)" and reports the result
+of `fslc refine` in the vocabulary of design principles (SOLID's LSP/OCP, design by
+contract, etc.). The procedure is the spine, and the principles appear as judgment
+lenses at each step. FSL syntax is delegated to the fsl skill (intended to be used
+together).
 
-- [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — 5ステップの手続き、
-  検査結果→設計判断の翻訳表、原則↔機構の対応表、抽象層の規律
+- [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — the 5-step procedure,
+  the check-result→design-judgment translation table, the principle↔mechanism
+  correspondence table, and the discipline of the abstract layer
 
-### インストール
+### Installation
 
-**Claude Code(このリポジトリ内)**: `.claude/skills/` 配下に各スキルへの
-シンボリックリンクがあるため追加作業は不要。
+**Claude Code (inside this repository)**: no extra work is needed, because there are
+symbolic links to each skill under `.claude/skills/`.
 
-**他プロジェクトで使う**: `skills/fsl/`(および必要なら `skills/fsl-design-review/`)
-を対象プロジェクトの `.claude/skills/`、またはユーザ全体の `~/.claude/skills/` に
-コピーする。`gh` のスキル拡張を使う場合は本ディレクトリ(`skills/`)を配布元として
-指定する。
+**Using it in another project**: copy `skills/fsl/` (and, if needed,
+`skills/fsl-design-review/`) into the target project's `.claude/skills/`, or into
+the user-wide `~/.claude/skills/`. If you use the `gh` skill extension, specify this
+directory (`skills/`) as the distribution source.
 
-検証器 `fslc` 本体は別途必要(リポジトリルートで `pip install -e .`。
-依存は lark と z3-solver のみ)。
+The verifier `fslc` itself is required separately (`pip install -e .` at the
+repository root; the only dependencies are lark and z3-solver).

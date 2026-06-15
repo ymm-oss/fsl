@@ -1,53 +1,53 @@
-# docs/ 見取り図
+# docs/ Map
 
-## まず読むもの
+## Start here
 
-| 文書 | 内容 |
+| Document | Contents |
 |---|---|
-| [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **形式手法と FSL 入門**。非専門家向けの背景説明、AI 駆動開発での位置づけ、導入 PoC 観点 |
-| [`LANGUAGE.md`](LANGUAGE.md) | **言語リファレンス**(全構文・意味論・CLI・イディオム・3層方言・NFR)。仕様を書くならこれ |
-| [`DESIGN-v1.md`](DESIGN-v1.md) | 言語設計書(設計原理 G1-G5・型システムの設計判断・修復プロトコル・ロードマップ) |
+| [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **Introduction to formal methods and FSL**. Background for non-specialists, the role of FSL in AI-driven development, and considerations for an introductory PoC |
+| [`LANGUAGE.md`](LANGUAGE.md) | **Language reference** (full syntax, semantics, CLI, idioms, the three-layer dialects, and NFRs). Read this if you are writing specifications |
+| [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
 
-## アーキテクチャ・機能別の実装設計(DESIGN-*)
+## Implementation design by architecture and feature (DESIGN-*)
 
-| 文書 | 対象 |
+| Document | Subject |
 |---|---|
-| [`DESIGN-layers.md`](DESIGN-layers.md) | **共通カーネル+3方言**(コンサル/要件/設計)の全体構想と実証 |
-| [`DESIGN-dialects.md`](DESIGN-dialects.md) | 方言の実装仕様(宣言タグ・fsl-req・fsl-biz) |
-| [`DESIGN-nfr.md`](DESIGN-nfr.md) | 非機能要件(対応表・離散時刻 SLA: time/urgent/age/deadline) |
-| [`DESIGN-induction.md`](DESIGN-induction.md) | k 帰納法エンジン(proved / unknown_cti / CTI) |
-| [`DESIGN-trans.md`](DESIGN-trans.md) | `trans`(遷移 invariant / 2状態安全性) |
-| [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo・弱公平性(ラッソ反例)・respond シナリオ |
-| [`DESIGN-refinement.md`](DESIGN-refinement.md) | refinement 検査(写像ファイル・条件式) |
-| [`DESIGN-compose.md`](DESIGN-compose.md) | spec 合成(名前空間・同期アクション・internal) |
-| [`DESIGN-bridge.md`](DESIGN-bridge.md) | 実装橋(runtime Monitor / replay / testgen) |
-| [`DESIGN-scenarios.md`](DESIGN-scenarios.md) | scenarios・coverage の unsat core 診断 |
-| [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N>(partial_op・型ホワイトリスト) |
-| [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | struct の Option フィールド |
-| [`DESIGN-divmod.md`](DESIGN-divmod.md) | 整数除算 `/`・剰余 `%`(ゼロ除算の全域定義・partial_op・Euclidean) |
-| [`DESIGN-forbidden.md`](DESIGN-forbidden.md) | `forbidden`(負の受け入れ基準 / must-forbid)— 過小制約の検出 |
-| [`DESIGN-vacuity.md`](DESIGN-vacuity.md) | 空虚性検査(前件不到達 invariant / trigger 不到達 leadsTo / 恒真 requires) |
-| [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md) | `--strict-tags` lint(タグなし宣言・未参照要件の突合) |
-| [`DESIGN-mutate.md`](DESIGN-mutate.md) | `fslc mutate`(仕様ミューテーション・要件ストレスレポート) |
-| [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain`(骨格列挙・反実仮想・witness 物語化) |
-| [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate`(状態機械→幽霊型の適用可否判定 + TS 雛形) |
-| [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui(画面遷移方言)スパイク所見・展開規則案・go/no-go(#9) |
+| [`DESIGN-layers.md`](DESIGN-layers.md) | **Shared kernel + three dialects** (consulting / requirements / design): overall concept and validation |
+| [`DESIGN-dialects.md`](DESIGN-dialects.md) | Implementation spec for the dialects (declaration tags, fsl-req, fsl-biz) |
+| [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
+| [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
+| [`DESIGN-trans.md`](DESIGN-trans.md) | `trans` (transition invariant / two-state safety) |
+| [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |
+| [`DESIGN-refinement.md`](DESIGN-refinement.md) | Refinement checking (mapping files, conditional expressions) |
+| [`DESIGN-compose.md`](DESIGN-compose.md) | Spec composition (namespaces, synchronized actions, internal) |
+| [`DESIGN-bridge.md`](DESIGN-bridge.md) | Implementation bridge (runtime Monitor / replay / testgen) |
+| [`DESIGN-scenarios.md`](DESIGN-scenarios.md) | scenarios and the unsat-core diagnostics for coverage |
+| [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N> (partial_op, type whitelist) |
+| [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | Option fields in structs |
+| [`DESIGN-divmod.md`](DESIGN-divmod.md) | Integer division `/` and remainder `%` (total definition of division by zero, partial_op, Euclidean) |
+| [`DESIGN-forbidden.md`](DESIGN-forbidden.md) | `forbidden` (negative acceptance criteria / must-forbid) — detecting under-constraint |
+| [`DESIGN-vacuity.md`](DESIGN-vacuity.md) | Vacuity checking (invariants whose antecedent is unreachable, leadsTo whose trigger is unreachable, always-true requires) |
+| [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md) | The `--strict-tags` lint (matching untagged declarations and unreferenced requirements) |
+| [`DESIGN-mutate.md`](DESIGN-mutate.md) | `fslc mutate` (spec mutation, requirement stress report) |
+| [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain` (skeleton enumeration, counterfactuals, witness narration) |
+| [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate` (applicability check for state machine → typestate + TS scaffold) |
+| [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 
-## ドッグフーディング記録(DOGFOOD-*)
+## Dogfooding records (DOGFOOD-*)
 
-各機能を実戦投入した所見とバグ・発見の記録。設計判断の根拠になっている。
+Findings, bugs, and discoveries from putting each feature into real use. These form the basis of the design decisions.
 
-1. [`DOGFOOD-1.md`](DOGFOOD-1.md) — v1.0 実地評価(BUG11-14・PERF1 発見)
-2. [`DOGFOOD-2.md`](DOGFOOD-2.md) — proved 標準運用・Seq(集約イディオム発見)
-3. [`DOGFOOD-3.md`](DOGFOOD-3.md) — フルワークフロー(抽象→refine→compose→実装)
-4. [`DOGFOOD-4.md`](DOGFOOD-4.md) — 3層方言の貫通(要件 ID の層横断診断)
-5. [`DOGFOOD-5.md`](DOGFOOD-5.md) — NFR / 離散時刻 SLA
-6. [`DOGFOOD-6.md`](DOGFOOD-6.md) — 事例ギャラリーのバグ狩り(refine の見逃し2件)
-7. [`DOGFOOD-7.md`](DOGFOOD-7.md) — 正解オラクル試験群(Monitor BFS・trace 健全性・BUG-020)
-8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — 盲検可記述性テスト(G1 の外部検証)
-9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — 妥当性確認ワークフローの実走(メモ→正例ペア→修復)
-10. [`DOGFOOD-10.md`](DOGFOOD-10.md) — 誤り注入ベンチマーク(検出器の捕捉率を類型×機構で測定)
+1. [`DOGFOOD-1.md`](DOGFOOD-1.md) — v1.0 field evaluation (found BUG11-14, PERF1)
+2. [`DOGFOOD-2.md`](DOGFOOD-2.md) — proved as standard practice, Seq (discovery of the aggregation idiom)
+3. [`DOGFOOD-3.md`](DOGFOOD-3.md) — full workflow (abstract → refine → compose → implementation)
+4. [`DOGFOOD-4.md`](DOGFOOD-4.md) — penetration of the three-layer dialects (cross-layer diagnostics by requirement ID)
+5. [`DOGFOOD-5.md`](DOGFOOD-5.md) — NFR / discrete-time SLA
+6. [`DOGFOOD-6.md`](DOGFOOD-6.md) — bug hunt in the example gallery (two refine misses)
+7. [`DOGFOOD-7.md`](DOGFOOD-7.md) — golden-oracle test suite (Monitor BFS, trace soundness, BUG-020)
+8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — blind expressibility test (external validation of G1)
+9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — real run of the validation workflow (memo → positive-example pair → repair)
+10. [`DOGFOOD-10.md`](DOGFOOD-10.md) — fault-injection benchmark (measuring detector capture rate by category × mechanism)
 
-実例は [`../specs/`](../specs/)(単体仕様)と [`../examples/`](../examples/)
-(bank: 実装適合 / layers: 3層チェーン / nfr: SLA)に。
-AI エージェント向けスキルは [`../skills/fsl/`](../skills/fsl/)。
+Worked examples are in [`../specs/`](../specs/) (standalone specs) and [`../examples/`](../examples/)
+(bank: implementation conformance / layers: three-layer chain / nfr: SLA).
+The skill for AI agents is at [`../skills/fsl/`](../skills/fsl/).

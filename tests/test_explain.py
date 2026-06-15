@@ -77,7 +77,7 @@ def test_cancel_flow_dialect_carries_requirement_text_in_skeleton_and_witnesses(
     props = _by_name(out["skeleton"]["properties"])
     assert props["POL-1"]["requirement"] == {
         "id": "POL-1",
-        "text": "解約申請には必ず救済オファーを提示する",
+        "text": "A cancellation request must always be met with a retention offer",
     }
     assert "policy POL-1" in props["POL-1"]["body_text"]
 

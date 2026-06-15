@@ -1,8 +1,9 @@
-"""examples/refinement_chain — refine 連鎖モード(写像合成)。
+"""examples/refinement_chain — refine chain mode (mapping composition).
 
-隣接 (spec, 写像) を並べると end-to-end の忠実性を合成検査できる。
-有界 refinement は同一深さで推移的なので、合成検査は全隣接リンクが
-成り立つことと等価(DESIGN-refinement §7)。
+Listing adjacent (spec, mapping) pairs lets you check end-to-end fidelity as a
+composition. Bounded refinement is transitive at the same depth, so the
+composed check is equivalent to every adjacent link holding
+(DESIGN-refinement §7).
 """
 from pathlib import Path
 
@@ -32,15 +33,15 @@ def test_chain_refines_end_to_end_with_composed_action_map():
     assert r["impl"] == "ChainBot"
     assert r["abs"] == "ChainTop"
     assert r["chain"] == ["ChainBot", "ChainMid", "ChainTop"]
-    # 合成済み: audit/start_review は最上位では stutter、finish は finish に対応
+    # composed: audit/start_review are stutter at the top level, finish maps to finish
     assert r["action_map"] == {
         "start_review": "stutter", "audit": "stutter", "finish": "finish",
     }
 
 
 def test_chain_pinpoints_first_broken_link(tmp_path):
-    # bot_refines_mid を壊す: audit(内部 stutter) を mid.finish に対応させると
-    # α(BAudit)=MReview のまま finish が MDone を期待 → bot⊒mid が破れる。
+    # Break bot_refines_mid: mapping audit (an internal stutter) to mid.finish
+    # leaves α(BAudit)=MReview while finish expects MDone → bot⊒mid breaks.
     broken = (E / "bot_refines_mid.fsl").read_text(encoding="utf-8").replace(
         "action audit(c)        -> stutter", "action audit(c)        -> finish(c)")
     bad = tmp_path / "bot_refines_mid_bad.fsl"

@@ -1,4 +1,4 @@
-// 中間層(要件)。審査ステップ Review を追加。
+// Middle layer (requirements). Adds a review step, Review.
 spec ChainMid {
   type Id = 0..1
   enum MSt { MOpen, MReview, MDone }

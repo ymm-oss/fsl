@@ -1,6 +1,6 @@
-// topic: ターンスタイル
+// topic: turnstile
 // scale: tiny
-// features: Bool, 有界カウンタ, reachable, ensures
+// features: Bool, bounded counter, reachable, ensures
 // expected-command: verify --depth 4 --engine induction --deadlock ignore
 // expected-result: proved
 spec GalleryTinyTurnstile {

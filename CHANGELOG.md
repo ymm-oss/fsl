@@ -1,460 +1,447 @@
-# 変更履歴 (Changelog)
+# Changelog
 
-本プロジェクトの変更履歴。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/)、
-バージョニングは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
-各バージョンは git のアノテーションタグ(`v1.0.x`)に対応する。
+The change history of this project. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and versioning follows [Semantic Versioning](https://semver.org/). Each version corresponds to an annotated git tag (`v1.0.x`).
 
 ## [Unreleased]
 
-テーマ: **層連鎖の伝播レビュー(fsl-design-review)** — refinement が安全性は
-伝播させるが活性は伝播させないことの確定と、end-to-end 連鎖検査の追加。
+Theme: **propagation review for layer chains (fsl-design-review)** — establishing that
+refinement propagates safety but not liveness, and adding end-to-end chain checking.
 
-### 追加
-- **`fslc refine` 連鎖モード(写像合成)**: `(spec 写像)` を続けて並べると、
-  隣接写像を合成(状態 α_AC = α_BC ∘ α_AB、アクション a→b→c / stutter)して
-  **最下位 ⊒ 最上位を直接**検査する。成功時は合成 `action_map` と `chain`、失敗時は
-  最初に壊れたリンク `failed_link` を返す。有界 refinement は同一深さで推移的なので
-  合成検査は全隣接リンク成立と等価(`DESIGN-refinement` §7、例 `examples/refinement_chain`)。
-  状態写像は Z3 レベルで合成し indexed map・Option・struct も既存 eval で扱う。
-- 例 `examples/refinement_liveness`(安全性は伝播・活性は伝播しない・fair で解決)、
-  `examples/refinement_chain`(連鎖検査)とそれぞれの検査テスト。
-- **メタ循環ドッグフーディング用の self-spec 群** `examples/self/`: fslc 自身の設計契約を
-  FSL でモデル化した3本(`fslc_session` = CLI 結果分類と終了コード severity、
-  `fslc_monitor` = replay ランタイムの reject 粘着性、`refinement_algebra` = 安全性は
-  伝播・活性は伝播しない)。いずれも proved。結果固定テスト `tests/test_self_examples.py`。
-- **`terminal { <述語> }` ブロック(DOGFOOD-11 F23 対応)**: 述語を満たす停止状態を
-  「意図した終端」として宣言し、デッドロック検査から除外する。`--deadlock ignore` が
-  全停止状態を一律に無視するのに対し、意図した停止だけを選別でき、予期せぬデッドロックは
-  引き続き検出される。`examples/self/fslc_session`・`fslc_monitor` が利用(LANGUAGE §1/§6)。
-- **`fslc verify --property <Name>`(DOGFOOD-11 F27 対応)**: 単一 invariant だけを検査する。
-  非空虚プローブで狙った invariant の違反を確認しやすくなる(存在しない名前は usage エラー=exit 2)。
-- **死んだゴースト恒真の vacuity 検出(DOGFOOD-11 F22 対応・最重要)**: `--vacuity` が
-  「どのアクションも代入しない frozen な state 変数を init 値に固定したとき、動的変数の値に
-  よらず恒真になる invariant」を Z3 で静的検出する(kind `tautology_over_frozen`)。従来 verify も
-  vacuity も見逃し mutate の生存率でしか露見しなかった骨抜き(恒真)invariant を、検証時に警告する。
-  frozen 変数を参照しない/state を参照しない invariant は対象外。既存コーパス全体で偽陽性ゼロを確認。
-- **遷移 invariant `trans { }`(DOGFOOD-11 F24 対応)**: `trans Name { old(x) => ... }`
-  で action 横断の2状態安全性を直接宣言できる。BMC は各到達遷移、induction は step-case
-  で検査し、成功出力に `transitions_checked`、違反時に `violation_kind:"trans"` を返す。
+### Added
+- **`fslc refine` chain mode (mapping composition)**: when you line up successive `(spec mapping)`,
+  it composes adjacent mappings (states α_AC = α_BC ∘ α_AB, actions a→b→c / stutter) and
+  checks **bottom ⊒ top directly**. On success it returns the composed `action_map` and `chain`; on failure it returns
+  the first broken link, `failed_link`. Because bounded refinement is transitive at the same depth,
+  the composition check is equivalent to all adjacent links holding (`DESIGN-refinement` §7, example `examples/refinement_chain`).
+  State mappings are composed at the Z3 level, and indexed maps, Option, and structs are handled by the existing eval.
+- Examples `examples/refinement_liveness` (safety propagates, liveness does not, resolved with fair) and
+  `examples/refinement_chain` (chain checking), each with its own checking test.
+- **A set of self-specs for meta-circular dogfooding** in `examples/self/`: three specs that model fslc's own design contracts
+  in FSL (`fslc_session` = CLI result classification and exit-code severity,
+  `fslc_monitor` = stickiness of replay-runtime rejection, `refinement_algebra` = safety
+  propagates, liveness does not). All are proved. Pinned-result test `tests/test_self_examples.py`.
+- **`terminal { <predicate> }` block (addressing DOGFOOD-11 F23)**: declares a halting state satisfying the predicate
+  as an "intended terminal" and excludes it from deadlock checking. Whereas `--deadlock ignore`
+  uniformly ignores all halting states, this lets you single out only the intended halts, while unexpected deadlocks are
+  still detected. Used by `examples/self/fslc_session` and `fslc_monitor` (LANGUAGE §1/§6).
+- **`fslc verify --property <Name>` (addressing DOGFOOD-11 F27)**: checks just a single invariant.
+  This makes it easier to confirm a violation of a targeted invariant with a non-vacuous probe (a nonexistent name is a usage error = exit 2).
+- **Vacuity detection of dead-ghost tautologies (addressing DOGFOOD-11 F22, top priority)**: `--vacuity`
+  now statically detects with Z3 an "invariant that, when a frozen state variable assigned by no action is pinned to its init value, becomes
+  always true regardless of the values of dynamic variables" (kind `tautology_over_frozen`). It warns at verification time about
+  hollow (always-true) invariants that previously both verify and vacuity missed, surfacing only via mutate's survival rate.
+  Invariants that do not reference a frozen variable / do not reference state are out of scope. Confirmed zero false positives across the existing corpus.
+- **Transition invariant `trans { }` (addressing DOGFOOD-11 F24)**: `trans Name { old(x) => ... }`
+  lets you directly declare cross-action two-state safety. BMC checks each reachable transition, induction checks it in the step case,
+  successful output includes `transitions_checked`, and a violation returns `violation_kind:"trans"`.
 
-### 修正
-- **デッドロック警告に状態を含める(DOGFOOD-11 F26 対応)**: `--deadlock warn` の警告
-  メッセージがどの状態で停止したかを示すようになった(例: `deadlock reachable at step 1
-  (state: status=ToolFault, ...)`)。状態は従来 JSON の `deadlock.trace` にのみ在った。
-- **`fslc refine` の健全性バグ**: impl の違反遷移が有界内で終端(deadlock)状態に
-  至る場合、フル長トレース強制により違反が全モデルから除外され見逃されていた
-  (深さを上げると検出が減る非単調挙動)。各プレフィックスを step t までの制約だけで
-  検査する専用ソルバに変更して解消。回帰テストを追加(`docs/DOGFOOD-6.md` の
-  「空虚 refines」バグ類の残存ケース)。
+### Fixed
+- **Include the state in the deadlock warning (addressing DOGFOOD-11 F26)**: the `--deadlock warn` warning
+  message now shows which state it halted in (e.g. `deadlock reachable at step 1
+  (state: status=ToolFault, ...)`). The state was previously only in the JSON `deadlock.trace`.
+- **Soundness bug in `fslc refine`**: when an impl's violating transition reached a terminal (deadlock) state within the bound,
+  forcing a full-length trace excluded the violation from all models, so it was missed
+  (a non-monotonic behavior where raising the depth reduced detection). Resolved by switching to a dedicated solver that
+  checks each prefix with only the constraints up to step t. Added a regression test (a residual case of the
+  "vacuous refines" bug class in `docs/DOGFOOD-6.md`).
 
-### ドキュメント
-- **層連鎖の伝播主張を安全性に再スコープ**: `DESIGN-layers` §1/§6 と `LANGUAGE` §10 に、
-  refinement は安全性(invariant・統制ガード・振る舞いの包含)を伝播させるが活性
-  (`leadsTo`/`responds`)は stutter のため伝播させないこと、活性は各層で再 verify
-  + 進行アクションに `fair` が要ることを明記。
-- **`docs/DOGFOOD-11.md`**(メタ循環ドッグフーディング所見): `--vacuity`/単発 verify が
-  「一度も代入されない変数上の恒真 invariant(死んだゴースト)」を見逃し mutate kill-rate
-  でのみ露見する盲点(F22)、意図した終端状態を宣言する構文の不在(F23)、遷移禁止を
-  直接表明できない点(F24)、関係/代数的性質の表現力限界(F25)、deadlock warn の
-  メッセージが状態名を欠く点(F26)、単一 invariant 指定の不在(F27)を記録。
+### Documentation
+- **Rescoped the layer-chain propagation claim to safety**: in `DESIGN-layers` §1/§6 and `LANGUAGE` §10,
+  made explicit that refinement propagates safety (invariants, control guards, behavioral inclusion) but not liveness
+  (`leadsTo`/`responds`), because of stuttering, and that liveness must be re-verified at each layer
+  with `fair` required on progress actions.
+- **`docs/DOGFOOD-11.md`** (meta-circular dogfooding findings): records the blind spots where `--vacuity`/single verify
+  miss "an always-true invariant over a variable that is never assigned (a dead ghost)" and it surfaces only via mutate kill-rate
+  (F22), the absence of syntax for declaring intended terminal states (F23), the inability to directly
+  assert a forbidden transition (F24), the expressiveness limits for relational/algebraic properties (F25), the deadlock-warn
+  message lacking the state name (F26), and the absence of a single-invariant selector (F27).
 
-### ライセンス / 配布(OSS 公開準備)
-- **ライセンスを Apache License 2.0 に確定**(権利者: Copyright 2026 Ryoichi Izumita)。
-  `LICENSE`(全文)・`NOTICE` を追加。pyproject の license を SPDX 式 `Apache-2.0` に更新
-  (従来は `MIT` 表記のみで LICENSE ファイル無し)、authors・urls・classifiers・keywords を整備。
-  全 Python ソースに `SPDX-License-Identifier: Apache-2.0` ヘッダを付与。依存(lark / z3-solver)は
-  いずれも MIT で Apache-2.0 と互換。
-- 公開リポジトリ URL を `github.com/ymm-oss/fsl` に更新(README / install.sh / CHANGELOG 内のリンク、
-  非公開前提の文言を公開向けに修正)。生成物の検索インデックス `docs/index.bleve/` を追跡対象から外し
-  `.gitignore` 化、Claude Code のローカル設定も無視対象に追加。
+### License / distribution (preparing for OSS release)
+- **Finalized the license as Apache License 2.0** (rights holder: Copyright 2026 Ryoichi Izumita).
+  Added `LICENSE` (full text) and `NOTICE`. Updated pyproject's license to the SPDX form `Apache-2.0`
+  (previously only the `MIT` label with no LICENSE file), and tidied up authors, urls, classifiers, and keywords.
+  Added an `SPDX-License-Identifier: Apache-2.0` header to all Python sources. The dependencies (lark / z3-solver) are
+  both MIT and compatible with Apache-2.0.
+- Updated the public repository URL to `github.com/ymm-oss/fsl` (links in README / install.sh / CHANGELOG,
+  and reworded private-assumption phrasing for public release). Removed the generated search index `docs/index.bleve/` from tracking,
+  added it to `.gitignore`, and also added Claude Code's local settings to the ignore list.
 
 ## [1.2.10] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — 設計判断2件の決着(文書整合)**。コードは現状維持が
-妥当と分析し、DESIGN 文書を実態・意図に整合させた。
+Theme: **audit triage (issue #12) — settling two design decisions (doc alignment)**. We analyzed that
+keeping the code as-is is appropriate and aligned the DESIGN documents with the actual state and intent.
 
-### ドキュメント
-- **DESIGN-refinement §2 の検査順序**を実態に整合。t>0(ステップ間)は遷移対応を型境界
-  検査より先に、t=0(初期状態)は型境界検査(`map_out_of_bounds`)を init 対応より先に
-  行うことを明記。t=0 で範囲逸脱はほぼ init 不一致を伴うため、写像式バグを直接指摘
-  できる `map_out_of_bounds` を優先する設計意図(§2 の目的)を反映(従来の順序記述の
-  自己矛盾を解消)。
-- **DESIGN-seq §5** に、無ガードの部分 Seq 演算(`head`/`pop`/`at`)を含む invariant の
-  エンジン間差異を明記。`verify`/`prove`(BMC)は don't care を記号的に読み、runtime の
-  `Monitor` は具象的に `partial_op` を返す。don't care は記号的 vs 具象で本質的に一致
-  保証がないため、サイズガード付きイディオムを強く推奨(ガード版は両エンジン一致を検証
-  済み)。
+### Documentation
+- **Aligned the check ordering in DESIGN-refinement §2** with reality. For t>0 (between steps), the transition correspondence is checked
+  before the type-bound check; for t=0 (initial state), the type-bound check (`map_out_of_bounds`) is done before the init correspondence.
+  Because at t=0 a range escape almost always accompanies an init mismatch, we prioritize `map_out_of_bounds`, which can directly point at
+  a mapping-expression bug — reflecting the design intent (the purpose in §2), and resolving the
+  self-contradiction in the previous ordering description.
+- Made explicit in **DESIGN-seq §5** the cross-engine difference for invariants containing unguarded partial Seq operations
+  (`head`/`pop`/`at`). `verify`/`prove` (BMC) read don't-cares symbolically, while the runtime
+  `Monitor` concretely returns `partial_op`. Because there is essentially no guarantee that a don't-care matches between symbolic and concrete,
+  we strongly recommend the size-guarded idiom (the guarded version is verified to agree across both engines).
 
 ## [1.2.9] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — 設計判断項目の決着(Batch E-c 続き)**。
-見送り扱いだった判断項目を実機検証のうえ、推奨に沿って対応。
+Theme: **audit triage (issue #12) — settling design-decision items (continuation of Batch E-c)**.
+Items previously treated as deferred were addressed in line with the recommendation, after verifying on real hardware.
 
-### 修正
-- **満杯 `Seq` への `push` を runtime(Monitor) が `partial_op` で報告**していたのを、
-  BMC / DESIGN-seq に合わせ **`type_bound`(暗黙の `_bounds_*` 長さ invariant 違反)** で
-  報告するよう修正(`runtime.py`)。同じ操作で BMC=`type_bound` / runtime=`partial_op` と
-  分かれていた適合(conformance)の忠実性ギャップを解消。push は全域関数として常に
-  追加し、容量超過は格納後の境界 invariant が検出する。
-- **`fslc refine` が impl 自身の invariant 違反をそのまま返す**件に注記を追加
-  (`refine.py`)。これは refinement の verdict ではなく refinement *入力*(impl spec)の
-  性質である旨を明示し、`refinement_failed` と混同されないようにした(LANGUAGE §10)。
-- (ドキュメント) `parse()` の docstring に、compose の表示名が必要なら `parse_src` を
-  使う旨を追記(`parse()` は `display_names` を捨てるため dotted alias が物理名で出る)。
+### Fixed
+- **A `push` to a full `Seq` was reported by the runtime (Monitor) as `partial_op`**; changed to report it as
+  **`type_bound`** (a violation of the implicit `_bounds_*` length invariant), to match BMC / DESIGN-seq
+  (`runtime.py`). This resolved the conformance fidelity gap where the same operation split into BMC=`type_bound` / runtime=`partial_op`.
+  push always appends as a total function, and exceeding capacity is detected by the post-store bounds invariant.
+- Added a note about the case where **`fslc refine` returns an impl's own invariant violation as-is**
+  (`refine.py`). Clarified that this is a property of the refinement *input* (the impl spec), not the refinement verdict,
+  so it is not confused with `refinement_failed` (LANGUAGE §10).
+- (Documentation) Added to `parse()`'s docstring that if you need compose's display names you should use `parse_src`
+  (`parse()` discards `display_names`, so dotted aliases appear under their physical names).
 
-### 設計判断による現状維持(issue #12 に記録)
-- refinement の t=0 検査順序: DESIGN-refinement §2 の順序記述と `map_out_of_bounds` の
-  「写像式バグを直接指摘する」有用性が緊張関係にあり、既存テストは bounds 先を期待。
-  写像バグを的確に指摘する現状を維持し、§2 解釈は保守者判断に委ねる。
-- Seq head/pop/at の invariant 文脈 don't-care 化: ガード付き invariant は短絡で保護され
-  実害が小さく、`in_invariant` 伝播は広範な変更となるため現状維持。
+### Kept as-is by design decision (recorded in issue #12)
+- The t=0 check ordering for refinement: there is tension between the ordering description in DESIGN-refinement §2 and
+  `map_out_of_bounds`'s usefulness for "directly pointing at a mapping-expression bug," and existing tests expect bounds-first.
+  We keep the current behavior, which precisely points at mapping bugs, and leave the §2 interpretation to maintainer judgment.
+- Don't-care handling of Seq head/pop/at in invariant context: a guarded invariant is protected by short-circuiting,
+  so the practical harm is small, and `in_invariant` propagation would be a broad change, so we keep the current behavior.
 
 ## [1.2.8] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — runtime/refine/doc 整合バッチ(Batch E-c)**。
-設計解釈を要する項目を実機検証のうえ取捨選択して対応。
+Theme: **audit triage (issue #12) — runtime/refine/doc alignment batch (Batch E-c)**.
+Items requiring design interpretation were addressed selectively after verifying on real hardware.
 
-### 修正
-- **`Monitor.step()` が requires より先に let を評価し、ガード未成立時に
-  `requires_failed` でなく `partial_op` を返す**問題を修正(`runtime.py`)。
-  `requires q.size() > 0` の後に `let h = q.head()` を書いたアクションを空キューで
-  呼ぶと、ガード失敗ではなく partial_op になっていた。let と requires をソース順に
-  interleave して評価し、ガードが落ちる枝では後続 let の partial op に到達しない
-  (DESIGN-v1 §5: let は後続 requires でのみ使用可)。
-- **`fslc refine` が action 写像の引数式の型検査をしていない**問題を修正
-  (`refine.py`)。DESIGN-refinement §3 に従い、abs アクションのパラメータ型と
-  写像引数式の静的型を照合する(型不明な場合は誤検知を避け検査をスキップ)。
-- (ドキュメント) `parser.py` の docstring に compose/requirements 展開が `FslError` を
-  直接送出する(VisitError で包まれない)旨を追記。DESIGN-bridge §3 の「生成物の
-  import は runtime と pytest のみ」の記述を、固定シード walk 用 `random` と
-  パス解決用 `pathlib` を許容するよう実装に合わせて明確化。
+### Fixed
+- Fixed an issue where **`Monitor.step()` evaluated let before requires and, when the guard did not hold, returned
+  `partial_op` instead of `requires_failed`** (`runtime.py`).
+  Calling an action that writes `let h = q.head()` after `requires q.size() > 0` on an empty queue
+  produced a partial_op rather than a guard failure. Now let and requires are interleaved in source order, and
+  on the branch where the guard fails, the subsequent let's partial op is never reached
+  (DESIGN-v1 §5: let is usable only in subsequent requires).
+- Fixed an issue where **`fslc refine` did not type-check the argument expressions of action mappings**
+  (`refine.py`). Per DESIGN-refinement §3, it now matches the abs action's parameter types against
+  the static types of the mapping argument expressions (when a type is unknown it skips the check to avoid false positives).
+- (Documentation) Added to `parser.py`'s docstring that compose/requirements expansion raises `FslError`
+  directly (not wrapped in VisitError). Clarified the DESIGN-bridge §3 statement that "generated artifacts
+  import only runtime and pytest" to match the implementation, which also allows `random` for fixed-seed walks
+  and `pathlib` for path resolution.
 
-### 備考(設計判断により今回は見送り、issue #12 で継続検討)
-- refinement の t=0 検査順序(`map_out_of_bounds` と init 対応): DESIGN-refinement §2 の
-  順序記述と「写像式バグを直接指摘する map_out_of_bounds の有用性」(§2)が緊張関係に
-  あり、既存テストは bounds 先を期待。現状維持とし保守者判断に委ねる。
-- Seq の head/pop/at の invariant 文脈での don't-care 化(BMC との整合): ガード付き
-  invariant は短絡で保護され実害が小さい一方、`in_invariant` 伝播は広範な変更となるため
-  見送り。
-- `parse()` の base_dir フォールバック / display_names 破棄: ライブラリ API の互換性に
-  影響するため見送り(CLI は parse_src + 親ディレクトリを使用済み)。
+### Remarks (deferred this time by design decision; continued in issue #12)
+- The t=0 check ordering for refinement (`map_out_of_bounds` and init correspondence): there is tension between
+  the ordering description in DESIGN-refinement §2 and "the usefulness of map_out_of_bounds for directly pointing at a mapping-expression bug" (§2),
+  and existing tests expect bounds-first. We keep the current behavior and leave it to maintainer judgment.
+- Don't-care handling of Seq head/pop/at in invariant context (alignment with BMC): a guarded
+  invariant is protected by short-circuiting, so the practical harm is small, while `in_invariant` propagation would be a broad change, so we
+  defer it.
+- `parse()`'s base_dir fallback / discarding display_names: this affects the compatibility of the library API,
+  so we defer it (the CLI already uses parse_src + the parent directory).
 
 ## [1.2.7] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — model/grammar 整合バッチ(Batch E-b)**。
-LANGUAGE.md / DESIGN-v1 とコードの drift 4件を修正。
+Theme: **audit triage (issue #12) — model/grammar alignment batch (Batch E-b)**.
+Fixed 4 drifts between LANGUAGE.md / DESIGN-v1 and the code.
 
-### 修正
-- **`Set<Bool>` / `Map<Bool, ·>` が型エラーで拒否**されていた問題を修正。LANGUAGE.md §2 は
-  有界スカラに Bool を含む。`is_bounded_scalar_type` に Bool を追加し、Z3 エンコード・
-  `domain_range`・暗黙境界 invariant・runtime 具体評価・refinement の写像・display を
-  Bool キー/要素に対応(`_z3_domain_value`/`_map_domain`/`_display_map_key`)。
-- **`fslc check` が action ゼロの spec を意味エラーで拒否**していた問題を修正。LANGUAGE.md
-  §7.1 で check は構文・名前・型のみ。`build_spec(semantic_check=...)` を導入し、action
-  ゼロの拒否は verify/prove/scenarios 側のみで行う(check は ok、verify は従来どおり)。
-- **business 方言専用の `stage(...)` が通常 spec で check を通過し verify で評価不能になる**
-  問題を修正。`check_stage_usage` を build_spec の意味検査に追加し、kernel spec 中の
-  `stage(...)` を type エラーで拒否(business 展開後の spec には残らないため business は
-  従来どおり)。
-- **`Map<Int, ·>` の非推奨警告が domain 型を持つ spec でしか出ない**問題を修正。条件を外し、
-  Int キー Map を使うすべての spec で非推奨警告(書き換えヒント付き)を出す。
-- (テスト) `test_cart::test_fixed_verifies` の警告アサーションを堅牢化。Map<Int> 警告が
-  常時出るようになったため「全警告が Map<Int」という空真前提が脆くなっていた。期待する
-  2件の Map<Int 非推奨警告の存在を確認する形に変更(verify の advisory 警告と共存可)。
+### Fixed
+- Fixed an issue where **`Set<Bool>` / `Map<Bool, ·>` were rejected as type errors**. LANGUAGE.md §2 includes
+  Bool among the bounded scalars. Added Bool to `is_bounded_scalar_type`, and made the Z3 encoding,
+  `domain_range`, the implicit bounds invariant, the runtime concrete evaluation, refinement mappings, and display
+  support Bool keys/elements (`_z3_domain_value`/`_map_domain`/`_display_map_key`).
+- Fixed an issue where **`fslc check` rejected a spec with zero actions as a semantic error**. In LANGUAGE.md
+  §7.1, check is syntax/name/types only. Introduced `build_spec(semantic_check=...)`, and the rejection of zero
+  actions is now done only on the verify/prove/scenarios side (check is ok, verify is as before).
+- Fixed an issue where **the business-dialect-only `stage(...)` passed check in a regular spec and then could not be evaluated by verify**.
+  Added `check_stage_usage` to build_spec's semantic check, rejecting `stage(...)` in a kernel spec as a type error
+  (since it does not remain in the spec after business expansion, business is unaffected).
+- Fixed an issue where **the deprecation warning for `Map<Int, ·>` was only emitted for a spec with a domain type**. Removed the condition so that
+  a deprecation warning (with a rewrite hint) is emitted for every spec using an Int-key Map.
+- (Test) Hardened the warning assertion in `test_cart::test_fixed_verifies`. Because the Map<Int> warning now
+  always fires, the vacuously-true premise that "all warnings are Map<Int" had become fragile. Changed it to confirm the presence of
+  the expected 2 Map<Int deprecation warnings (which can coexist with verify's advisory warnings).
 
 ## [1.2.6] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — explain/testgen バッチ(Batch E-a)**。
+Theme: **audit triage (issue #12) — explain/testgen batch (Batch E-a)**.
 
-### 修正
-- **`fslc explain` が init ブロックの弱化を反実仮想探索から一律除外**していた問題を
-  修正(`explain.py`)。init で確立される user invariant(例 audit_log.fsl の
-  BalanceNonNegative)が「反実仮想なし」と誤報告されていた。init 弱化も探索対象に含め、
-  診断に `origin: "init"` / `label: "init weakening"` を付す。
-- **`fslc explain` の acceptance/forbidden witness の `requirement` が None**になる
-  問題を修正。reqs に acceptance/forbidden の id/text を登録し、scenario の
-  `acceptance`/`forbidden` フィールドも requirement 解決に含める。
-- **`fslc testgen` が forbidden シナリオの拒否検査を生成しない**問題を修正
-  (`testgen.py`)。setup steps 再生に加え、最終ステップを実行して拒否される
-  (`ok==False`、必要なら `rejected_by` kind 一致)ことを assert する pytest を生成する。
-- compose 展開(Batch D)の回帰テストを追加(type/binder_range/param_range の const
-  プレフィクスと sync 引数の alias アクセス書き換えを検証)。
+### Fixed
+- Fixed an issue where **`fslc explain` uniformly excluded weakening of the init block from the counterfactual search**
+  (`explain.py`). A user invariant established in init (e.g. BalanceNonNegative in audit_log.fsl)
+  was misreported as "no counterfactual." Now init weakening is also included in the search, and
+  the diagnostic is tagged with `origin: "init"` / `label: "init weakening"`.
+- Fixed an issue where **the `requirement` of `fslc explain`'s acceptance/forbidden witnesses became None**.
+  Registered the id/text of acceptance/forbidden in reqs, and included the scenario's
+  `acceptance`/`forbidden` fields in requirement resolution.
+- Fixed an issue where **`fslc testgen` did not generate the rejection check for forbidden scenarios**
+  (`testgen.py`). In addition to replaying the setup steps, it now generates a pytest that runs the final step and asserts that it is rejected
+  (`ok==False`, and the `rejected_by` kind matches when required).
+- Added a regression test for compose expansion (Batch D) (verifying the const prefix for type/binder_range/param_range
+  and the alias-access rewriting of sync arguments).
 
 ## [1.2.5] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — compose 展開バッチ(Batch D)**。コンポーネントの
-`const` をレンジ/binder/param/sync 引数で参照したとき、展開時に const は `alias__` で
-プレフィクスされるのに式中の参照が書き換えられず未解決になる問題を修正。
+Theme: **audit triage (issue #12) — compose expansion batch (Batch D)**. Fixed an issue where, when a component's
+`const` was referenced in a range/binder/param/sync argument, at expansion time the const was prefixed with `alias__`
+but the reference in the expression was not rewritten, leaving it unresolved.
 
-### 修正
-- **コンポーネントの `type T = 0..MAX` の domain 境界式が書き換えられず未解決**になる
-  問題を修正(`compose.py` `_prefix_component_items`)。展開後 `alias__MAX` と不整合だった。
-- **`binder_range`(`forall k in 0..MAX`)・`param_range`(`action f(n in 0..MAX)`)の
-  lo/hi 式が書き換えられない**問題を修正。`_rewrite_binder`/`_rewrite_params` が
-  コンポーネントの const 集合を受け取り、レンジ境界の const 参照をプレフィクスする。
-- **sync 引数式中の `alias.x` 参照が書き換えられず展開後 AST に残る**問題を修正
-  (`_expand_sync_action`)。代入前に `_rewrite_expr` で物理名へ解決する。
-- 「同期引数の型不一致」の静的検査(DESIGN-compose §2)は compose 層に型推論が無いため
-  今回は未実装とし、`build_spec` 後段の型検査に委ねる(arity 検査は従来どおり実施)。
+### Fixed
+- Fixed an issue where **the domain bound expression of a component's `type T = 0..MAX` was not rewritten and went unresolved**
+  (`compose.py` `_prefix_component_items`). After expansion it was inconsistent with `alias__MAX`.
+- Fixed an issue where **the lo/hi expressions of `binder_range` (`forall k in 0..MAX`) and `param_range` (`action f(n in 0..MAX)`)
+  were not rewritten**. `_rewrite_binder`/`_rewrite_params` now receive the component's const set and
+  prefix const references in range bounds.
+- Fixed an issue where **`alias.x` references in sync argument expressions were not rewritten and remained in the post-expansion AST**
+  (`_expand_sync_action`). They are now resolved to physical names with `_rewrite_expr` before assignment.
+- The static check for "type mismatch of synchronized arguments" (DESIGN-compose §2) is not implemented this time, since the compose layer
+  has no type inference; it is left to the type check after `build_spec` (the arity check is still performed as before).
 
 ## [1.2.4] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — acceptance/forbidden/mutate バッチ(Batch C)**。
-acceptance/forbidden シナリオ再生とミューテーション集計の 6件 + 検証中に発見した
-0引数ステップのパースバグ 1件を修正。
+Theme: **audit triage (issue #12) — acceptance/forbidden/mutate batch (Batch C)**.
+Fixed 6 items in acceptance/forbidden scenario replay and mutation aggregation, plus 1 parse bug for
+zero-argument steps found during verification.
 
-### 修正
-- **acceptance/forbidden ステップの 0引数呼び出し(`noop()`)が `[None]` とパースされ
-  arity mismatch になる**バグを修正(`grammar.py`)。`maybe_placeholders` 由来の None を
-  除去(commit cca8627 の refinement 0引数写像と同系統)。既存例は常に引数付き呼び出し
-  だったため未発覚だった。Batch C のテスト作成中に発見。
-- **acceptance/forbidden の step 引数で `const` 参照が解決されず文字列のまま渡り
-  `bad_call` になる**問題を修正(`acceptance.py`)。`_literal_value` が `spec["consts"]`
-  を解決するよう変更(未定義 const は構造化エラー)。
-- **`expect` 式が非 bool のとき `_EvalError` が伝播し `run_check` が envelope を返さず
-  落ちる**問題を修正。expect 評価を捕捉し acceptance 失敗の構造化結果にする。
-- **forbidden の setup/final ステップで未知アクション・arity 不一致が構造化失敗 dict を
-  返さず例外送出**していた問題を修正。`failed_step` 付き結果を返し、kind も
-  `forbidden_setup`/`forbidden` に分離(共有 `_err` の `kind="acceptance"` 固定を解消)。
-- **`fslc mutate --by-requirement` の集計に acceptance/forbidden の id と kill が混入**
-  していた問題を修正(`mutate.py`)。DESIGN-mutate §4 のとおり requirement ブロックの
-  形式化のみを対象とし、AC/FB の id を除外(AC-2 等への `empty_formalization` 誤付与も解消)。
+### Fixed
+- Fixed a bug where **a zero-argument call (`noop()`) in an acceptance/forbidden step was parsed as `[None]` and
+  caused an arity mismatch** (`grammar.py`). Removed the None coming from `maybe_placeholders`
+  (same kind as the refinement zero-argument mapping in commit cca8627). It went undetected because existing examples always used calls with arguments.
+  Found while writing the Batch C tests.
+- Fixed an issue where **a `const` reference in an acceptance/forbidden step argument was not resolved and was passed as a bare string,
+  causing `bad_call`** (`acceptance.py`). Changed `_literal_value` to resolve `spec["consts"]`
+  (an undefined const is a structured error).
+- Fixed an issue where **when the `expect` expression was non-bool, `_EvalError` propagated and `run_check` crashed without returning an envelope**.
+  Now expect evaluation is caught and turned into a structured acceptance-failure result.
+- Fixed an issue where **unknown actions / arity mismatches in forbidden setup/final steps raised an exception instead of returning a structured failure dict**.
+  Now it returns a result with `failed_step`, and the kind is also split into
+  `forbidden_setup`/`forbidden` (resolving the shared `_err`'s fixed `kind="acceptance"`).
+- Fixed an issue where **the aggregation of `fslc mutate --by-requirement` mixed in acceptance/forbidden ids and kills**
+  (`mutate.py`). Per DESIGN-mutate §4 it now targets only the formalization of the requirement block,
+  excluding AC/FB ids (also resolving the erroneous `empty_formalization` attached to AC-2, etc.).
 
 ## [1.2.3] - 2026-06-15
 
-テーマ: **監査トリアージ(issue #12) — typestate バッチ(Batch B)**。`fslc typestate` の
-from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relational` と誤判定し、エンティティの
-適用可否(applicability)を不当に `none` に落としていた。
+Theme: **audit triage (issue #12) — typestate batch (Batch B)**. Fixed 2 from-state
+extraction misses in `fslc typestate`. Both misjudged a sound transition as `relational` and unduly dropped the entity's
+applicability to `none`.
 
-### 修正
-- **`requires` の合取式から from-state を抽出できず `relational` と誤判定**していた問題を
-  修正(`typestate.py`)。`requires e.st == A and q > 0` のような束縛で `and` ノードが
-  未処理だったため、`e.st == A` の from-state が拾えなかった。`_enum_guard_states` /
-  `_opt_guard_states` が `and` を `or` と同様に再帰処理するよう拡張。
-- **`if` 条件中の from-state が抽出されず、分岐遷移が `relational` と誤判定**されていた
-  問題を修正。`if light == Red { light = Green }` のような分岐で、囲み条件から各分岐の
-  from-state を導出する(status-only な `else` は補集合として扱う)。これにより
-  `tiny_traffic_light.tick` が `branching`(from-state 付き)として正しく分類され、
-  applicability が `full` になる。`typestate:325`(branching を `_emit_ts` に出す)も
-  これに伴い解消。
+### Fixed
+- Fixed an issue where **the from-state could not be extracted from a conjunction in `requires`, leading to a misjudgment as `relational`**
+  (`typestate.py`). For a binding like `requires e.st == A and q > 0`, the `and` node was
+  unhandled, so the from-state `e.st == A` was not picked up. Extended `_enum_guard_states` /
+  `_opt_guard_states` to recurse over `and` the same way as `or`.
+- Fixed an issue where **the from-state in an `if` condition was not extracted, leading to branch transitions being misjudged as `relational`**.
+  For a branch like `if light == Red { light = Green }`, it now derives each branch's from-state from the enclosing condition
+  (a status-only `else` is treated as the complement). With this,
+  `tiny_traffic_light.tick` is correctly classified as `branching` (with a from-state), and
+  applicability becomes `full`. `typestate:325` (emitting branching to `_emit_ts`) is also resolved accordingly.
 
 ## [1.2.2] - 2026-06-15
 
-テーマ: **自動コード監査(issue #12)のトリアージ着手 — 健全性バッチ(Batch A)**。
-44件(未検証42 + 検証済み未修正2)を 7並列の検証＋実機再現でトリアージし、健全性・
-正しさに直結する 5件を修正。いずれも実 CLI 動作で確認済み。
+Theme: **starting triage of the automated code audit (issue #12) — soundness batch (Batch A)**.
+We triaged 44 items (42 unverified + 2 verified-but-unfixed) via 7-way parallel verification and real reproduction, and fixed the 5
+that directly bear on soundness/correctness. All confirmed against real CLI behavior.
 
-### 修正
-- **`Set<有界スカラ>` に暗黙の型境界 invariant が付かず、範囲外要素が見逃される**問題を
-  修正(`model.py`/`bmc.py`/`runtime.py`)。`Set<Id>`(Id=0..3)に `s.add(99)` しても
-  `verified` のままだった(偽の検証成功)。`set_bounds` AST ノードを導入し、全要素が
-  要素型の範囲内であることを Z3 ForAll / 具体評価で検査する(明示初期化された集合に
-  対する偽陽性は出ない)。
-- **`Map<Int, 有界値>` の値境界 invariant が生成されず、範囲外の値が見逃される**問題を
-  修正。`Map<Int, Qty>`(Qty=0..5)に `m[0] = 99` しても `verified` のままだった。
-  `map_value_bounds` AST ノードを導入し、Int キー Map の実効ドメイン(`_map_domain` の
-  既存規約 `0..max(consts)`)上で値型の境界を検査する。
-- **`fslc explain` の `--max-mutants` が弱化探索の前に早期終了**していた問題を修正
-  (`explain.py`)。打ち切りを `enumerate_mutants` 全体の index ではなく実際に処理した
-  弱化ミュータント数で行うよう変更(反実仮想の取りこぼしを解消)。
-- **invariant 評価中の `_PartialOp`(部分演算)が `step()` から例外として漏れる**問題を
-  修正(`runtime.py`)。invariant 式が 0 除算・空 Seq の head 等を踏むと例外が伝播し、
-  DESIGN-bridge §1.2「step() は常に結果 dict を返す」契約に反していた。`partial_op`
-  違反として構造化結果を返す。
-- **`fslc testgen` が `-o` 省略時に `NameError`(`parse` 未 import)で全壊**していた問題を
-  修正(`testgen.py`)。`default_output_name` が未 import の `parse` を呼んでいた。
-  `generate_test_file` と同じく `parse_src(src, base_dir)` を使い、compose 仕様の相対
-  パス解決のため spec ファイルの親ディレクトリを base_dir として渡す。
+### Fixed
+- Fixed an issue where **a `Set<bounded scalar>` got no implicit type-bound invariant, so out-of-range elements were missed**
+  (`model.py`/`bmc.py`/`runtime.py`). `s.add(99)` into a `Set<Id>` (Id=0..3) stayed
+  `verified` (a false verification success). Introduced the `set_bounds` AST node, which checks via Z3 ForAll / concrete evaluation that all elements are
+  within the element type's range (no false positive for an explicitly initialized set).
+- Fixed an issue where **the value-bound invariant for `Map<Int, bounded value>` was not generated, so out-of-range values were missed**.
+  `m[0] = 99` into a `Map<Int, Qty>` (Qty=0..5) stayed `verified`.
+  Introduced the `map_value_bounds` AST node, which checks the value type's bound over the Int-key Map's effective domain
+  (the existing convention `0..max(consts)` of `_map_domain`).
+- Fixed an issue where **`fslc explain`'s `--max-mutants` terminated early before the weakening search**
+  (`explain.py`). Changed the cutoff to count actually-processed weakening mutants rather than the index across the whole
+  `enumerate_mutants` (resolving the loss of counterfactuals).
+- Fixed an issue where **a `_PartialOp` (partial operation) during invariant evaluation leaked from `step()` as an exception**
+  (`runtime.py`). When an invariant expression hit a division by zero, the head of an empty Seq, etc., the exception propagated,
+  violating the DESIGN-bridge §1.2 contract that "step() always returns a result dict." It now returns a structured result as a `partial_op`
+  violation.
+- Fixed an issue where **`fslc testgen` completely broke with a `NameError` (`parse` not imported) when `-o` was omitted**
+  (`testgen.py`). `default_output_name` was calling the unimported `parse`.
+  Like `generate_test_file`, it now uses `parse_src(src, base_dir)` and passes the spec file's parent directory as base_dir
+  for relative-path resolution of compose specs.
 
 ## [1.2.1] - 2026-06-15
 
-テーマ: **自動コード監査(composer-2.5)で検出した検証済みバグの修正**。検証器の健全性に
-関わる 1 件を含む 3 件を修正(issue #13/#14/#15)。いずれも実 CLI 動作で確認済み。
+Theme: **fixing verified bugs detected by the automated code audit (composer-2.5)**. Fixed 3 items
+including 1 bearing on the verifier's soundness (issues #13/#14/#15). All confirmed against real CLI behavior.
 
-### 修正
-- **`leadsTo` 束縛の `where` 句が破棄され誤った `violated` を報告**していた問題を修正
-  (issue #13)。`expand_leadsto_bindings`(`bmc.py`)が binder の `where` を捨てて全
-  ドメイン値を列挙していたため、`forall p: T where p > 0` でも `p = 0` を別束縛として
-  検査し、where を満たさない値で偽の反例を出しうる(検証器の健全性)。`where` を具体評価
-  して列挙をフィルタするよう修正。あわせて `init_constraints` の `run_collect` が
-  ネストした `forall` の `where` を無視していた過剰拘束(unsat)も修正。
-- **欠落 spec ファイルが `kind:"internal"`/exit 3 で報告**されていた問題を修正
-  (issue #14)。`run_check`/`run_scenarios`(`cli.py`)で `except FileNotFoundError`
-  が `except Exception` より後にあり到達不能だった。順序を入れ替え、io エラーは
-  LANGUAGE.md §7 どおり `kind:"io"`/exit 2 になるよう修正。
-- **コンパイル時整数の除算 `/` が未実装**(`+ - *` のみ)だった問題を修正(issue #15)。
-  DESIGN-v1 §3.1 の「四則」に合わせ `eval_const`(`model.py`)に除算を追加。意味論は
-  ランタイム(`_euc_div`、ユークリッド除算)と一致させ、0 除算は `kind:"type"` の
-  コンパイルエラーにする。`type K = 0..(MAX / 2)` のような range bound が通るように。
+### Fixed
+- Fixed an issue where **the `where` clause of a `leadsTo` binding was discarded and a wrong `violated` was reported**
+  (issue #13). Because `expand_leadsto_bindings` (`bmc.py`) dropped the binder's `where` and enumerated all
+  domain values, even `forall p: T where p > 0` checked `p = 0` as a separate binding,
+  potentially producing a spurious counterexample at a value not satisfying where (verifier soundness). Fixed to concretely evaluate `where`
+  and filter the enumeration. Also fixed the over-constraint (unsat) where `init_constraints`'s `run_collect`
+  ignored the `where` of a nested `forall`.
+- Fixed an issue where **a missing spec file was reported as `kind:"internal"`/exit 3**
+  (issue #14). In `run_check`/`run_scenarios` (`cli.py`), the `except FileNotFoundError`
+  came after `except Exception` and was unreachable. Reordered them so io errors become
+  `kind:"io"`/exit 2 per LANGUAGE.md §7.
+- Fixed an issue where **compile-time integer division `/` was unimplemented** (only `+ - *`) (issue #15).
+  Per the "four arithmetic operations" in DESIGN-v1 §3.1, added division to `eval_const` (`model.py`). Its semantics
+  match the runtime (`_euc_div`, Euclidean division), and division by zero is a compile error of `kind:"type"`.
+  So that a range bound like `type K = 0..(MAX / 2)` passes.
 
 ## [1.2.0] - 2026-06-14
 
-テーマ: **AI 形式化の妥当性確認(validation)スイート**(roadmap #1 完了)。検査器が
-保証する「仕様の内部整合」と「仕様が元の意図に忠実か」のギャップを埋める検出器群を
-追加し、AI が書く仕様の誤り(過小制約・空虚・欠落/捏造・取違)に検出網を掛ける。
-書く前の規律(形式化メモ・推奨プラクティス)はスキルに、効果は誤り注入ベンチで実測。
+Theme: **the validation suite for AI formalization** (roadmap #1 completed). Added a set of detectors that close the gap
+between the "internal consistency of the spec" that the verifier guarantees and "whether the spec is faithful to the original intent,"
+casting a detection net over the errors AI writes into a spec (under-constraint, vacuity, omission/fabrication, mix-up).
+The discipline before writing (formalization memo, recommended practices) goes into the skill, and the effect is measured on an error-injection bench.
 
-### 修正
-- **refinement の 0引数 abstract アクション写像**(`action foo() -> bar()`)が
-  `expects 0 arguments` の偽エラーで落ちていた問題を修正(`grammar.py` の
-  `mapped_action_target`/`req_mapped_action_target` で `maybe_placeholders` 由来の
-  None を除去)。既存仕様は 0引数 impl を全て `stutter` に写していたため未発覚。
-  fsl-ui スパイク(#9)の副産物。
+### Fixed
+- Fixed an issue where **a refinement zero-argument abstract action mapping** (`action foo() -> bar()`)
+  failed with the spurious error `expects 0 arguments` (removing the None coming from `maybe_placeholders` in `grammar.py`'s
+  `mapped_action_target`/`req_mapped_action_target`). It went undetected because existing specs all mapped zero-argument impls
+  to `stutter`. A byproduct of the fsl-ui spike (#9).
 
-### 追加
-- **fsl-ui スパイク**(#9): 画面遷移方言の検討。返品申請の画面フローを素の fsl で
-  手書きし、verified + proved、かつ要件層への refine も成立することを確認
-  (`examples/ui_spike/`、所見は `docs/DESIGN-ui.md`)。カーネルの意味論変更なしに
-  画面フローを表現でき、方言は AST 糖衣として成立する見込み(go/no-go は DESIGN-ui)。
-- **`fslc explain`(issue #7)**を追加。仕様の骨格(state/action/requires/writes/
-  properties/暗黙の型境界・partial_op 検査)を loc ベースの原文切り出しと構造走査で
-  JSON 化し、user invariant ごとに requires/代入/fair 除去の反実仮想トレースを
-  `mutate`/`verify` 機構の再利用で生成する。反実仮想が depth K で見つからない
-  invariant はエラーにせず明示し、reachable/scenarios witness も段階的な記述へ整形する。
-- **`fslc typestate`(設計 spec → typestate / 幽霊型の適用可否判定 + TS 雛形)**を追加。
-  `(エンティティ, action)` ごとに、from-state が**エンティティ自身の状態に対する局所
-  ガード**(`requires e.status == S`)なら `derivable`、`if` 内のデータ依存 to-state なら
-  `branching`、**状態を代入するのに局所ガードが無い**(前提が queue 等の外部構造に住む)
-  なら `relational` と判定する。`relational`/`branching` は型に出さず、理由(diagnostics)
-  と action の要件 ID(business 層の `transition ... by <actor>` 等)を添えて runtime/
-  検証義務として残す。エンティティ単位の `applicability` は全遷移が `derivable`/
-  `branching` のときだけ `full`(理解できなかった遷移を取りこぼして full を名乗らない)。
-  対応する状態機械は **enum 値の struct フィールド・enum 値の state 変数(business
-  `process`/stages)・`Option<_>` スロット(none/some ≈ Empty/Filled)**の3形。
-  `--ts` で導出可能エンティティの TypeScript だけを stdout に出す。出力は他コマンドと
-  同じ JSON エンベロープ(`result:"typestate"`、exit 0)。
-- **`fslc mutate`**(issue #6)を追加。方言展開後の kernel AST に決定的な単一変異
-  (requires 削除/否定、代入削除、enum 入替、整数/型境界 ±1、then/else 交換、
-  fair 削除)を加え、mutant ごとに `build_spec` し直して BMC/acceptance/forbidden/
-  refinement で殺せるかを JSON 報告する。baseline が clean でない仕様は変異せず
-  baseline 結果を返す。`--by-requirement` は殺した性質の requirement tag で集計し、
-  ゼロ kill を `empty_formalization` として警告する。survivor はレビュー用データで、
-  `mutate` の exit は常に 0。
-- **`--strict-tags` lint**(issue #5)を `fslc check` / `fslc verify` に追加。
-  ok/verified/proved の成功結果でのみ、タグなし action/invariant/reachable/leadsTo と
-  未参照要件 ID(`--requirements ids.txt` および requirements 方言の `requirement`
-  ブロック)を warning として出力する。方言生成の `tick` / `_kpi_*` は明示マーカーで
-  除外し、既定(フラグなし)の出力は従来どおり。
-- **vacuity checks**(issue #4)を `fslc verify` に追加。verified/proved 経路で
-  `vacuous_implication`(含意 invariant の不到達前件)、`vacuous_leadsto`
-  (leadsTo トリガ不到達)、`always_true_requires`(先行 requires 文脈下で常に真の
-  requires 句)を warning として出力する。`--vacuity warn|error|ignore`
-  (既定 warn)を追加し、error は `result:"error"` / exit 2 にする。
-  coverage false のアクションと compose 同期アクションは `always_true_requires`
-  の対象外(同期アクションの句は成分からの継承複製 — 成分間の同一ガードは
-  各成分が契約を自衛する設計どおりで、成分 spec 単体の verify で検査される)。
-- **`forbidden`(負の受け入れ基準 / must-forbid)**(issue #3)を requirements 方言に追加。
-  `forbidden FB-1 "原文" { <手順> expect rejected }` は「拒否されるべき操作列」を書き、
-  前提ステップは全て ok・**最後のステップが拒否**される(not-enabled か invariant/
-  type_bound/partial_op/ensures 違反)ことを check 時に具象 Monitor で検証する。受理
-  されたら `kind: "forbidden"`(安全性 invariant では沈黙する過小制約=ガード漏れの
-  検出)、前提が未 enabled なら `kind: "forbidden_setup"`。scenarios に `forbidden_<ID>`
-  を出力(`rejected_by` 付き)し testgen のネガティブテストへ流れる。検証エンジン・
-  Monitor は無改修。
+### Added
+- **The fsl-ui spike** (#9): a study of a screen-transition dialect. We hand-wrote the screen flow of a return-request flow in plain fsl,
+  and confirmed it is verified + proved and that the refine into the requirements layer also holds
+  (`examples/ui_spike/`, findings in `docs/DESIGN-ui.md`). Screen flows can be expressed without changing the kernel semantics,
+  and the dialect looks viable as AST sugar (go/no-go in DESIGN-ui).
+- Added **`fslc explain` (issue #7)**. It turns a spec's skeleton (state/action/requires/writes/
+  properties/implicit type bounds and partial_op checks) into JSON via loc-based source excerpting and structural traversal, and, per
+  user invariant, generates a counterfactual trace of removing requires/assignment/fair, reusing the
+  `mutate`/`verify` machinery. For invariants where no counterfactual is found at depth K, it does not error but states so explicitly,
+  and shapes reachable/scenarios witnesses into a staged narration.
+- Added **`fslc typestate` (design spec → typestate / applicability check for phantom types + TS scaffold)**.
+  For each `(entity, action)`, it judges `derivable` if the from-state is a **local guard on the entity's own state**
+  (`requires e.status == S`), `branching` if it is a data-dependent to-state inside an `if`, and `relational`
+  if it **assigns a state but has no local guard** (the premise lives in an external structure such as a queue).
+  `relational`/`branching` are not exposed in the type; they remain as runtime/verification obligations along with reasons (diagnostics)
+  and the action's requirement IDs (the business-layer `transition ... by <actor>`, etc.). An entity's `applicability` is
+  `full` only when all transitions are `derivable`/`branching` (it does not claim full while dropping transitions it could not understand).
+  The corresponding state machines come in three forms: **enum-valued struct fields, enum-valued state variables (the business
+  `process`/stages), and `Option<_>` slots (none/some ≈ Empty/Filled)**.
+  `--ts` emits to stdout the TypeScript only for derivable entities. The output is the same JSON envelope as the other commands
+  (`result:"typestate"`, exit 0).
+- Added **`fslc mutate`** (issue #6). It applies a deterministic single mutation
+  (delete/negate requires, delete an assignment, swap enums, ±1 on integer/type bounds, swap then/else,
+  delete fair) to the post-dialect-expansion kernel AST, re-runs `build_spec` per mutant, and reports in JSON whether it can be killed
+  by BMC/acceptance/forbidden/refinement. A spec whose baseline is not clean is not mutated and returns the
+  baseline result. `--by-requirement` aggregates by the requirement tag of the killed property and warns on a
+  zero kill as `empty_formalization`. Survivors are review data, and `mutate`'s exit is always 0.
+- Added the **`--strict-tags` lint** (issue #5) to `fslc check` / `fslc verify`.
+  Only for ok/verified/proved successful results, it emits as warnings the untagged action/invariant/reachable/leadsTo and
+  unreferenced requirement IDs (`--requirements ids.txt` and the requirements-dialect `requirement`
+  block). The dialect-generated `tick` / `_kpi_*` are excluded by an explicit marker, and the default (no flag)
+  output is as before.
+- Added **vacuity checks** (issue #4) to `fslc verify`. On the verified/proved path it emits as warnings
+  `vacuous_implication` (the unreachable antecedent of an implication invariant), `vacuous_leadsto`
+  (an unreachable leadsTo trigger), and `always_true_requires` (a requires clause that is always true
+  under the preceding requires context). Added `--vacuity warn|error|ignore`
+  (default warn), where error makes it `result:"error"` / exit 2.
+  Actions with coverage false and compose synchronized actions are out of scope for `always_true_requires`
+  (a synchronized action's clauses are inherited copies from its components — an identical guard across components is by design,
+  with each component defending its own contract, and is checked by verifying the component spec alone).
+- Added **`forbidden` (negative acceptance criteria / must-forbid)** (issue #3) to the requirements dialect.
+  `forbidden FB-1 "source text" { <steps> expect rejected }` writes an "operation sequence that should be rejected,"
+  and at check time the concrete Monitor verifies that all setup steps are ok and **the final step is rejected**
+  (either not-enabled or an invariant/type_bound/partial_op/ensures violation). If it is
+  accepted, `kind: "forbidden"` (detecting under-constraint = a missing guard that a safety invariant would stay silent on);
+  if the setup is not enabled, `kind: "forbidden_setup"`. It outputs `forbidden_<ID>`
+  to scenarios (with `rejected_by`) and flows into testgen's negative tests. The verification engine and
+  Monitor are unmodified.
 
-### ドキュメント / ワークフロー
-- **AI形式化の妥当性確認(validation)ワークフロー**(issue #2)をスキルに追加。
-  検証器が保証する「内部整合」と、元の意図への忠実性のギャップを埋める規律:
-  書く前の**形式化メモ**(チャット出力、仮定のみ `.fsl` の `// ASSUME-n:`
-  コメント/タグへ畳む)、**自然言語→構文の逆引き表**、修復時に仮定台帳へ
-  追記する規律、**推奨プラクティス**(正例ペア・1要件1宣言・ドメインサイジング・
-  高リスク仕様の交差検証 — すべて任意。重い手順は義務化しない)。
-- 上記ワークフローの実走記録 `docs/DOGFOOD-9.md` と例
-  `examples/validation/order_refund.fsl`(proved)を追加。正例ペア
-  `reachable FullyRefunded` が「安全性 invariant は通るのに返金経路が死ぬ」初版を
-  `reachable_failed` で検出する様子を実証。
-- `docs/README.md` の DOGFOOD 索引を 1-9 に補完(6/7/8 の未掲載も解消)。
+### Documentation / workflow
+- Added the **validation workflow for AI formalization** (issue #2) to the skill.
+  The discipline that closes the gap between the "internal consistency" the verifier guarantees and faithfulness to the original intent:
+  a **formalization memo** before writing (chat output, with only assumptions folded into the `.fsl` as `// ASSUME-n:`
+  comments/tags), a **natural-language→syntax reverse-lookup table**, the discipline of appending to the assumption ledger during repair,
+  and **recommended practices** (positive-example pairs, one requirement = one declaration, domain sizing,
+  cross-verification of high-risk specs — all optional; heavy procedures are not mandated).
+- Added a real-run record of the above workflow, `docs/DOGFOOD-9.md`, and the example
+  `examples/validation/order_refund.fsl` (proved). Demonstrated how the positive-example pair
+  `reachable FullyRefunded` catches with `reachable_failed` a first version where "the safety invariant passes but the refund path is dead."
+- Filled out the DOGFOOD index in `docs/README.md` to 1-9 (also resolving the unlisted 6/7/8).
 
 ## [1.1.0] - 2026-06-12
 
-### 追加
-- **整数除算 `/` と剰余 `%`**(算術に追加、`*` と同位)。ゼロ除算は両評価器で
-  全域的に 0 と定義(Z3 符号化も明示固定)し、アクション文脈では除数 != 0 を
-  暗黙の `partial_op` として検査。負数は Euclidean(`0 <= a%b < |b|`)。
-  → 2次元データを単一キーに平坦化したときの軸復元(`c / SLOTS` 等)が書ける。
+### Added
+- **Integer division `/` and remainder `%`** (added to arithmetic, at the same precedence as `*`). Division by zero is
+  defined totally as 0 in both evaluators (and explicitly pinned in the Z3 encoding), and in an action context the divisor != 0 is
+  checked as an implicit `partial_op`. Negatives are Euclidean (`0 <= a%b < |b|`).
+  → This lets you write axis recovery (`c / SLOTS`, etc.) when 2D data is flattened into a single key.
 
-### ドキュメント / イディオム
-- **2次元データの平坦化イディオム**(Map のネスト不可 → 積ドメイン型1本+`/` `%`)を
-  LANGUAGE.md・スキルに追記。
-- **離散時刻 SLA の明文化**: `time`/`deadline` の配置規則、`age` の意味論、
-  `urgent` = 時間凍結という意味。特に「常時 enabled なアクションを urgent に
-  すると deadline が空虚に成立する罠」と、正しい **deadline-urgency パターン**
-  (期限到達時のみ enabled なガード付きアクションだけを urgent に)を明記。
-  公式例 `examples/nfr/support_sla.fsl` を追加(proved)。
-- 盲検可記述性テスト(`docs/DOGFOOD-8.md`、n=3): スキル単体で別エージェントが
-  新規ドメインを proved にできることを外部検証。上記ドキュメント改善はこの
-  テストが surface したギャップに対応するもの。
+### Documentation / idioms
+- Added to LANGUAGE.md and the skill the **idiom for flattening 2D data** (Maps cannot be nested → a single product-domain type + `/` `%`).
+- **Codifying discrete-time SLAs**: the placement rules for `time`/`deadline`, the semantics of `age`, and the meaning of
+  `urgent` = freezing time. In particular, made explicit the **trap of making an always-enabled action urgent, which makes the
+  deadline hold vacuously**, and the correct **deadline-urgency pattern**
+  (make urgent only a guarded action that is enabled only when the deadline is reached).
+  Added the official example `examples/nfr/support_sla.fsl` (proved).
+- A blind expressibility test (`docs/DOGFOOD-8.md`, n=3): external validation that another agent, using the skill alone, can get a
+  new domain to proved. The above documentation improvements address the gaps this test surfaced.
 
 ## [1.0.3] - 2026-06-12
 
-### 追加
-- `CHANGELOG.md`(本ファイル)を追加。リリースごとの変更を一望できるようにした。
+### Added
+- Added `CHANGELOG.md` (this file), so the changes per release can be seen at a glance.
 
 ## [1.0.2] - 2026-06-12
 
-### 修正
-- **BUG-020**: `Monitor.enabled()` が、ガード付きの部分操作を含む `let`
-  (例: `requires queue.size() > 0` の後の `let j = queue.head()`)で
-  `_PartialOp` 例外を送出していた問題を修正。`requires` を先に評価して短絡し、
-  ガードを満たさないアクションは単に enabled でないものとして扱う。`step()`
-  実行時の `partial_op` 検出は従来どおり維持。`fslc verify` は元々正しく、
-  影響は runtime Monitor / replay / testgen。
+### Fixed
+- **BUG-020**: Fixed an issue where `Monitor.enabled()` raised a `_PartialOp` exception on a `let` containing a guarded partial operation
+  (e.g. `let j = queue.head()` after `requires queue.size() > 0`).
+  Now `requires` is evaluated first and short-circuits, so an action that does not satisfy its guard is simply treated as not enabled. The
+  `partial_op` detection during `step()` execution is maintained as before. `fslc verify` was already correct, and
+  the impact was on the runtime Monitor / replay / testgen.
 
-### 品質保証(テスト)
-- Z3 非依存の**総当たり正解オラクル**(`tests/oracle.py`)を追加。Monitor の
-  具象意味論で有界到達可能状態を BFS 全探索し、invariant 違反・到達性・
-  デッドロックの真値を BMC 判定と照合(偽陰性=見逃しを検出)。
-- 反例トレース・witness の**具象再生健全性**、**refinement 独立オラクル**、
-  **メタモルフィック**(ガード除去→違反化、リネーム不変、深さ単調性)、
-  **ロバストネス**(JSON 直列化・exit code 整合・内部名非漏出)の各テスト群を追加。
-- テスト総数 208 → 301(+69 skip、約260秒)。
+### Quality assurance (tests)
+- Added a **Z3-independent brute-force ground-truth oracle** (`tests/oracle.py`). It BFS-exhausts the bounded reachable states with the Monitor's
+  concrete semantics and cross-checks the ground truth of invariant violations, reachability, and
+  deadlock against the BMC verdict (detecting false negatives = misses).
+- Added test suites for **concrete-replay soundness** of counterexample traces and witnesses, an **independent refinement oracle**,
+  **metamorphic** properties (guard removal → violation, rename invariance, depth monotonicity), and
+  **robustness** (JSON serialization, exit-code consistency, no leakage of internal names).
+- Total tests 208 → 301 (+69 skipped, about 260 seconds).
 
-### ドキュメント
-- README をテスト数・docs 一覧・examples ツリー等で現状に更新。
+### Documentation
+- Updated the README to the current state with test count, docs list, examples tree, etc.
 
 ## [1.0.1] - 2026-06-12
 
-### 修正
-- **refine のソンドネスバグ**: impl が探索深さの手前でデッドロックすると、
-  完全展開が充足不能になり全ての違反検査が見逃され、誤って `refines` を
-  返していた問題を修正。到達可能な各プレフィックスを増分検査し、unsat に
-  なった深さで打ち切る方式に変更(統制違反の見逃しを解消)。
+### Fixed
+- **A soundness bug in refine**: when the impl deadlocked just short of the search depth,
+  the full expansion became unsatisfiable so all violation checks were missed, and it wrongly
+  returned `refines`. Fixed by switching to incrementally checking each reachable prefix and cutting off
+  at the depth where it became unsat (resolving the miss of control violations).
 
-### 追加
-- `fslc version` / `fslc --version` / `-V`(バージョン表示)。
+### Added
+- `fslc version` / `fslc --version` / `-V` (version display).
 
 ## [1.0.0] - 2026-06-11
 
-実質的な初版。FSL(AI ネイティブ形式仕様言語)と検証器 `fslc`。
+The de facto first release. FSL (AI-native formal specification language) and the verifier `fslc`.
 
-### コア検証
-- **BMC**(有界モデル検査、最短反例)/ **k 帰納法**(`--engine induction`、
-  無限深度 `proved` と `unknown_cti`→補助 invariant ループ)。
-- `invariant` / `reachable`(witness)/ `leadsTo` + 弱公平性(`fair`、
-  ラッソ反例)。自動チェック: 型境界・部分操作(`partial_op`)・
-  action coverage(unsat core 診断)・デッドロック。
-- 型システム: ドメイン型・enum・struct(`Option<スカラ>` フィールド可)・
-  `Option<T>` / `Map` / `Set` / `Seq<T, N>`。
+### Core verification
+- **BMC** (bounded model checking, shortest counterexample) / **k-induction** (`--engine induction`,
+  infinite-depth `proved` and `unknown_cti`→auxiliary-invariant loop).
+- `invariant` / `reachable` (witness) / `leadsTo` + weak fairness (`fair`,
+  lasso counterexamples). Automatic checks: type bounds, partial operations (`partial_op`),
+  action coverage (unsat-core diagnostics), and deadlock.
+- Type system: domain types, enum, struct (`Option<scalar>` fields allowed),
+  `Option<T>` / `Map` / `Set` / `Seq<T, N>`.
 
-### 実装橋・合成・詳細化
-- `fslc scenarios`(統合テスト雛形)、`fslc replay`(ログ適合性)、
-  `fslc testgen`(pytest 適合性雛形)、`fslc.runtime.Monitor`(具象実行)。
-- `fslc refine`(refinement mapping による忠実性検査、写像式の条件式対応)。
-- `compose`(名前空間付き合成・同期アクション・`internal`)。
+### Implementation bridge, composition, refinement
+- `fslc scenarios` (integration-test scaffold), `fslc replay` (log conformance),
+  `fslc testgen` (pytest conformance scaffold), `fslc.runtime.Monitor` (concrete execution).
+- `fslc refine` (fidelity checking via refinement mapping, with conditional expressions in mapping expressions).
+- `compose` (namespaced composition, synchronized actions, `internal`).
 
-### 3層方言とトレーサビリティ
-- `business`(コンサル)/ `requirements`(要件、`branches`・`acceptance`・
-  `implements`)/ `spec`(設計)を refinement で連鎖。
-- 宣言タグ `"ID: 原文"` で要件 ID を全診断(反例・CTI・coverage・scenarios)へ透過。
+### The three-layer dialects and traceability
+- `business` (consulting) / `requirements` (requirements, with `branches`, `acceptance`,
+  `implements`) / `spec` (design), chained via refinement.
+- The declaration tag `"ID: source text"` propagates requirement IDs into all diagnostics (counterexamples, CTIs, coverage, scenarios).
 
-### 非機能要件
-- 権限・監査・容量・信頼性の挙動はイディオムで、SLA/タイムアウトは
-  離散時刻(`time` / `urgent` / `age` / `deadline`)で検査。
+### Non-functional requirements
+- Behaviors for authorization, audit, capacity, and reliability are done with idioms, while SLAs/timeouts are checked with
+  discrete time (`time` / `urgent` / `age` / `deadline`).
 
-### 配布・利用
-- 事例ギャラリー(正例 / 不正例カタログ / adversarial)、PM・コンサル・3役統合の
-  example、素の Python 実装への適合テスト例。
-- ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
+### Distribution and use
+- A case-study gallery (valid examples / invalid-example catalog / adversarial), examples for PM/consulting/three-role integration, and
+  an example conformance test against a plain Python implementation.
+- A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
 [Unreleased]: https://github.com/ymm-oss/fsl/compare/v1.2.10...HEAD
 [1.2.10]: https://github.com/ymm-oss/fsl/compare/v1.2.9...v1.2.10

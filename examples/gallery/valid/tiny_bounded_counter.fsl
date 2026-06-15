@@ -1,4 +1,4 @@
-// topic: 上限付きカウンタ
+// topic: bounded counter
 // scale: tiny
 // features: domain type, requires guard, reachable
 // expected-command: verify --depth 4 --engine induction --deadlock ignore

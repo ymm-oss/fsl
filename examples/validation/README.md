@@ -1,33 +1,40 @@
-# validation — 妥当性確認ワークフローの実走例
+# validation — a worked run of the validation workflow
 
-「内部整合(verify)は通るが、元の意図からズレた仕様」を、書く前・書いた後の
-規律でどう捕まえるかの実走成果物。経緯と知見は [`../../docs/DOGFOOD-9.md`](../../docs/DOGFOOD-9.md)。
+A worked deliverable showing how to catch "a spec that passes internal consistency
+(verify) but drifts from the original intent" through discipline both before and
+after writing. The background and findings are in
+[`../../docs/DOGFOOD-9.md`](../../docs/DOGFOOD-9.md).
 
-| ファイル | 内容 |
+| File | Contents |
 |---|---|
-| [`order_refund.fsl`](order_refund.fsl) | 注文の支払い・キャンセル・返金フロー(在庫付き)の設計層 spec = **凍結した契約**。proved |
-| [`order_refund_windowed.fsl`](order_refund_windowed.fsl) | 設計変種: **返金期間ウィンドウ付き**(ASSUME-5 で先送りした R5 の設計層実装案)。proved |
-| [`order_refund_windowed_refines.fsl`](order_refund_windowed_refines.fsl) | 上の写像(tick は stutter)。**refines** — 契約を壊さず期間制限を追加できる(OCP/LSP) |
-| [`order_refund_instant.fsl`](order_refund_instant.fsl) | **負例プローブ**: cancel を飛ばす「即時返金」。単体では verified |
-| [`order_refund_instant_refines.fsl`](order_refund_instant_refines.fsl) | 上の写像。**refinement_failed / abs_requires_failed** — `pay → instant_refund` の2手で契約迂回が出る |
+| [`order_refund.fsl`](order_refund.fsl) | Design-layer spec of an order payment/cancel/refund flow (with stock) = **the frozen contract**. proved |
+| [`order_refund_windowed.fsl`](order_refund_windowed.fsl) | A design variant: **with a refund-period window** (a design-layer implementation proposal for R5, deferred in ASSUME-5). proved |
+| [`order_refund_windowed_refines.fsl`](order_refund_windowed_refines.fsl) | The mapping for the above (tick is a stutter). **refines** — a time limit can be added without breaking the contract (OCP/LSP) |
+| [`order_refund_instant.fsl`](order_refund_instant.fsl) | **A negative probe**: an "instant refund" that skips cancel. verified on its own |
+| [`order_refund_instant_refines.fsl`](order_refund_instant_refines.fsl) | The mapping for the above. **refinement_failed / abs_requires_failed** — a contract bypass appears in the 2 moves `pay → instant_refund` |
 
-## このサンプルが示すこと
+## What this sample demonstrates
 
-- **形式化メモ**で要件の「境界の含意」を書く前に洗い出す(出荷"後"はキャンセル不可
-  = Shipped を含む、など)。メモはチャットに出しファイルにしない。
-- **仮定は `.fsl` に ASSUME タグ/コメントで畳む**(別メモファイルにしない)。
-- **正例ペア(`reachable FullyRefunded`)が「沈黙して verified」を可視化する**:
-  返金期間を設計層に素朴に持ち込んだ初版は、安全性 invariant は全て成立するのに
-  返金経路が丸ごと死んでいた。正例ペアが `reachable_failed` で検出し、coverage が
-  `refund` を名指しした(invariant だけなら素通りしていた)。
-- **設計検討は契約適合の検査に翻訳できる**(fsl-design-review スキルの実走):
-  窓付き変種は抽象契約を1行も編集せずに refines(先送り判断 ASSUME-5 の機械検証)。
-  逆に「即時返金」は**単体 verify では何も破らない**のに refine が契約迂回を
-  最短2手で示す — verify では見えない設計逸脱を refinement が捕まえる実例。
+- **A formalization note** surfaces the "boundary implications" of a requirement
+  before writing it (e.g., "no cancel *after* shipping" = includes Shipped). The
+  note goes in chat, not into a file.
+- **Assumptions are folded into the `.fsl`** with ASSUME tags/comments (not into a
+  separate note file).
+- **A positive-example pair (`reachable FullyRefunded`) makes "silently verified"
+  visible**: the first version that naively brought the refund period into the
+  design layer had all safety invariants holding, yet the entire refund path was
+  dead. The positive-example pair detected it with `reachable_failed`, and coverage
+  named `refund` (invariants alone would have passed it silently).
+- **Design review can be translated into a contract-conformance check** (a worked
+  run of the fsl-design-review skill): the windowed variant refines without editing
+  a single line of the abstract contract (machine verification of the deferral
+  decision ASSUME-5). Conversely, the "instant refund" **breaks nothing under
+  verify alone**, yet refine shows a contract bypass in the shortest 2 moves — a
+  worked example where refinement catches a design deviation invisible to verify.
 
 ```bash
-fslc verify examples/validation/order_refund.fsl --engine induction            # proved(契約)
-fslc verify examples/validation/order_refund_windowed.fsl --engine induction   # proved(変種)
+fslc verify examples/validation/order_refund.fsl --engine induction            # proved (contract)
+fslc verify examples/validation/order_refund_windowed.fsl --engine induction   # proved (variant)
 fslc refine examples/validation/order_refund_windowed.fsl \
             examples/validation/order_refund.fsl \
             examples/validation/order_refund_windowed_refines.fsl --depth 8    # refines

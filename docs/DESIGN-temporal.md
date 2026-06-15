@@ -1,12 +1,13 @@
-# FSL v2.0-lite — 有界 `leadsTo` と公平性注釈 実装設計
+# FSL v2.0-lite — Bounded `leadsTo` and Fairness Annotations Implementation Design
 
-DESIGN-v1.md §10 v2.0 の最初の2項目。動機は DOGFOOD-1 F1 / DOGFOOD-2 F7:
-「X の後にいつか Y」(応答性質)が状態のみでは書けない。
+The first two items of DESIGN-v1.md §10 v2.0. The motivation is DOGFOOD-1 F1 /
+DOGFOOD-2 F7: "eventually Y after X" (a response property) cannot be written with
+state alone.
 
-## 1. 構文
+## 1. Syntax
 
 ```fsl
-fair action release_handoff() { ... }       // 公平性注釈(弱公平)
+fair action release_handoff() { ... }       // fairness annotation (weak fairness)
 
 leadsTo WaiterGetsLock {
   forall p: ProcId {
@@ -15,26 +16,30 @@ leadsTo WaiterGetsLock {
 }
 ```
 
-- `leadsTo <Name> { <lt> }` をトップレベル項目に追加。
-  `lt := <expr> "~>" <expr> | "forall" binder "{" lt "}"`(forall は外側にのみ、
-  ネスト可。`~>` は leadsTo ブロック内専用の演算子で、一般式には使えない)。
-- `fair` はアクション定義の前置修飾子。意味は**弱公平**(そのインスタンスが
-  連続して enabled であり続けるなら、いつかは実行される)。
+- Add `leadsTo <Name> { <lt> }` as a top-level item.
+  `lt := <expr> "~>" <expr> | "forall" binder "{" lt "}"` (forall only on the
+  outside, nesting allowed. `~>` is an operator exclusive to the leadsTo block
+  and cannot be used in general expressions).
+- `fair` is a prefix modifier on an action definition. Its meaning is **weak
+  fairness** (if that instance stays continuously enabled, it is eventually
+  executed).
 
-## 2. 意味論
+## 2. Semantics
 
-`P ~> Q`: 全実行で「P が成立した時点から、同時点を含むいつか Q が成立する」。
-(P と Q が同時成立なら直ちに満たされる。)
+`P ~> Q`: in every execution, "from the point where P holds, Q holds at some
+point including that same point." (If P and Q hold simultaneously, it is
+satisfied immediately.)
 
-反例は無限実行であり、有限状態系では**ラッソ**(prefix + 繰り返しループ)
-または**デッドロック停滞**(その状態で永遠に停止)として有限表現できる:
+A counterexample is an infinite execution, which in a finite-state system can be
+finitely represented as a **lasso** (prefix + repeating loop) or a **deadlock
+stall** (stopping forever in that state):
 
-### 2.1 ラッソ反例
+### 2.1 Lasso Counterexample
 
-位置 i < j ≤ K について、
+For positions i < j ≤ K,
 
 ```
-loop(i, j)   := states[j] ==L states[i]                  // 論理状態等価(§2.3)
+loop(i, j)   := states[j] ==L states[i]                  // logical state equality (§2.3)
 violation    := ∃ i < j ≤ K, ∃ p < j:
                   loop(i, j)
                 ∧ P(states[p])
@@ -42,70 +47,77 @@ violation    := ∃ i < j ≤ K, ∃ p < j:
                 ∧ fairness_ok(i, j)                       // §2.2
 ```
 
-- `¬Q` の範囲が `[min(i,p), j-1]` なのは、ループ内の全状態は無限に再訪される
-  ため、p がループ内にあっても prefix にあっても「p 以降+ループ全体」で
-  Q が一度も成立しないことが必要だから。
-- K は `--depth` を流用。展開は verify の共有展開(`_bmc_explore`)に相乗りし、
-  leadsTo ごとに push/pop で1クエリ。i, j, p は K ≤ 10 程度なので
-  **有界展開(Or の列挙)**でよい(整数変数より素直でデバッグしやすい)。
+- The range of `¬Q` is `[min(i,p), j-1]` because all states inside the loop are
+  revisited infinitely often, so whether p is inside the loop or in the prefix,
+  Q must never hold over "p onward + the entire loop."
+- K reuses `--depth`. The expansion piggybacks on verify's shared expansion
+  (`_bmc_explore`), with one query per leadsTo via push/pop. Since i, j, p are on
+  the order of K ≤ 10, a **bounded expansion (enumeration of Or)** suffices (it
+  is more straightforward and easier to debug than integer variables).
 
-### 2.2 弱公平性によるラッソの除外
+### 2.2 Excluding Lassos by Weak Fairness
 
-`fair` の付いたアクションの各インスタンス a について:
+For each instance a of an action annotated `fair`:
 
 ```
 fairness_ok(i, j) := ∀ a ∈ FairInstances:
-    (∃ q ∈ [i, j-1]: ¬enabled_a(states[q]))     // ループ中に一度 disabled になる
-  ∨ (∃ q ∈ [i, j-1]: choices[q] == a)           // またはループ中に実行される
+    (∃ q ∈ [i, j-1]: ¬enabled_a(states[q]))     // becomes disabled at least once in the loop
+  ∨ (∃ q ∈ [i, j-1]: choices[q] == a)           // or is executed at least once in the loop
 ```
 
-連続 enabled なのに一度も実行されないループは「現実には起きない」として
-反例から除外する。`fair` のないアクションには制約なし。
+A loop that is continuously enabled yet never executed is excluded from
+counterexamples as "does not happen in reality." Actions without `fair` have no
+constraint.
 
-### 2.3 論理状態等価 `==L`
+### 2.3 Logical State Equality `==L`
 
-ループ検出の状態比較は**物理変数の生比較ではなく論理等価**で行う:
+The state comparison for loop detection is done by **logical equality, not raw
+comparison of physical variables**:
 
-- スカラ / Map / Set: 物理変数の等価
-- `Option`: present 同士が等しく、`present => value 等しい`(absent 時の
-  value は don't care)
-- `Seq`: `len` 等しく、`∀ idx < len: data 等しい`(tail は don't care)
+- scalar / Map / Set: equality of physical variables
+- `Option`: presents equal, and `present => values equal` (value when absent is
+  don't care)
+- `Seq`: `len` equal, and `∀ idx < len: data equal` (the tail is don't care)
 
-生比較だと don't care 部分の差で同一論理状態のループを見逃す
-(= 反例の見逃し。有界検査としても精度を落とさないため必須)。
+With raw comparison, a difference in the don't-care part would miss a loop of the
+same logical state (= missing a counterexample; required so as not to degrade
+precision even for a bounded check).
 
-### 2.4 デッドロック停滞反例
+### 2.4 Deadlock Stall Counterexample
 
-states[j] で全アクションが disabled(デッドロック)の場合、実行はそこで
-永遠に停滞する:
+If all actions are disabled (deadlock) at states[j], the execution stalls there
+forever:
 
 ```
 violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
     deadlock(states[j]) ∧ P(states[p]) ∧ ∀ q ∈ [p, j]: ¬Q(states[q])
 ```
 
-(公平性はデッドロック状態では適用しない — enabled なものが無いため。)
+(Fairness is not applied in a deadlock state — there is nothing enabled.)
 
-### 2.5 forall 付き leadsTo
+### 2.5 leadsTo with forall
 
-`forall x: T { P(x) ~> Q(x) }` はインスタンスごとに展開し、**各束縛で独立に**
-§2.1/§2.4 を検査する(1つでも反例があれば violated。反例 JSON に
-`bindings` を含める)。
+`forall x: T { P(x) ~> Q(x) }` is expanded per instance, and §2.1/§2.4 are
+checked **independently for each binding** (if even one has a counterexample it
+is violated; the counterexample JSON includes `bindings`).
 
-## 3. 検査の位置づけと結果
+## 3. Positioning and Result of the Check
 
-- **violated(反例あり)は確定的な違反**(ラッソは実在の無限実行)。
-- **反例なしは「深さ K まで反例なし」の有界保証**(K を超える prefix を持つ
-  ラッソは見えない)。invariant の `verified` と同じ位置づけで、
-  `leads_to` フィールドに `checked_to_depth` を載せる。
-- `--engine induction` でも leadsTo は **base case(BMC)側で同じ検査**を行い、
-  `proved` は invariant に対する主張のままとする(leadsTo の無限深度証明は
-  v2.0 本体のスコープ外)。`proved` 出力の `leads_to` にも
-  `checked_to_depth` を載せ、note で区別する。
+- **violated (counterexample found) is a definite violation** (the lasso is a
+  real infinite execution).
+- **No counterexample is a bounded guarantee of "no counterexample up to
+  depth K"** (a lasso with a prefix exceeding K is not seen). It has the same
+  positioning as `verified` for invariants, and puts `checked_to_depth` in the
+  `leads_to` field.
+- With `--engine induction` too, leadsTo performs **the same check on the base
+  case (BMC) side**, and `proved` remains a claim about invariants (the
+  unbounded-depth proof of leadsTo is out of scope for the v2.0 body). The
+  `leads_to` of the `proved` output also carries `checked_to_depth`, and the note
+  distinguishes them.
 
 ## 4. JSON
 
-### 4.1 違反
+### 4.1 Violation
 
 ```json
 {
@@ -123,13 +135,14 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 }
 ```
 
-- `trace` は既存形式(state / action / changes)。末尾状態はループ先頭
-  (`loop_start`)と論理等価。デッドロック停滞反例では `stutter: true` で
-  `loop_start` の代わりに最終ステップで停滞。
-- `pending_since`: P が成立した(以後 Q が来ない)ステップ。
-- exit code は他の violated と同じ 1。
+- `trace` is the existing format (state / action / changes). The final state is
+  logically equal to the loop head (`loop_start`). In a deadlock-stall
+  counterexample, `stutter: true` and, instead of `loop_start`, it stalls at the
+  final step.
+- `pending_since`: the step where P held (and Q does not come thereafter).
+- The exit code is 1, same as other violated.
 
-### 4.2 成功時(verified / proved への追記)
+### 4.2 On Success (Addition to verified / proved)
 
 ```json
 "leads_to": {
@@ -137,59 +150,68 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 }
 ```
 
-## 5. 実装ノート
+## 5. Implementation Notes
 
-- **grammar.py**: `leadsTo_def`、`~>`(`LEADSTO_OP`)、`fair` 修飾子。
-  AST: `("leadsto", name, binders, P, Q, loc)`(binders は外側 forall の列)、
-  action に `fair: bool`。
-- **model.py**: spec dict に `leadstos`、action/instance に `fair` を伝播。
-  ホワイトリスト検証は変更なし。`~>` が一般式に現れたら parse エラーになる
-  文法にする(式階層に入れない)。
+- **grammar.py**: `leadsTo_def`, `~>` (`LEADSTO_OP`), the `fair` modifier.
+  AST: `("leadsto", name, binders, P, Q, loc)` (binders is the list of the outer
+  forall), `fair: bool` on the action.
+- **model.py**: propagate `leadstos` into the spec dict, and `fair` into the
+  action/instance. The whitelist validation is unchanged. Make the grammar such
+  that `~>` appearing in a general expression is a parse error (do not put it in
+  the expression hierarchy).
 - **bmc.py**:
-  - `_logical_eq(spec, s1, s2)` — §2.3 の論理等価を返すヘルパ
-    (phys_vars のメタデータ — option の present/value、seq の data/len — を
-    使って組み立てる)。
-  - leadsTo 検査は `_bmc_explore` 後(verify の reachable 処理と同様)に、
-    共有ソルバー上で leadsTo × 束縛ごとに push/pop:
-    `s.add(Or over (i,j,p) of [loop ∧ P ∧ ¬Q列 ∧ fairness_ok])` → sat なら
-    モデルから (i, j, p) を特定(各 (i,j,p) 候補に selector Bool を付けて
-    モデルで読む)してトレース構築。
-  - enabled_a は coverage 検査と同じ `_eval_requires` の連言を再利用
-    (expr_cache が効く)。
-  - デッドロック停滞(§2.4)は既存 deadlock 検査の enabled 式を再利用。
-  - 性能: クエリは leadsTo 束縛ごとに1回。式サイズは O(K² · (|P|+|Q|+|Fair|·K))。
-    K=8、束縛数 ≤ 容量程度なら問題ない(PERF1 の共有展開上で動く)。
-- **cli.py**: 変更最小(violation_kind が増えるだけ)。
-- **scenarios**: leadsTo は対象外(将来: pending→達成のトレースを
-  シナリオ化する余地をコメントで残す)。
+  - `_logical_eq(spec, s1, s2)` — a helper that returns the logical equality of
+    §2.3 (built using the phys_vars metadata — Option's present/value, Seq's
+    data/len).
+  - The leadsTo check, after `_bmc_explore` (like verify's reachable handling),
+    runs on the shared solver per leadsTo × binding with push/pop:
+    `s.add(Or over (i,j,p) of [loop ∧ P ∧ ¬Q sequence ∧ fairness_ok])` → if sat,
+    identify (i, j, p) from the model (attach a selector Bool to each (i,j,p)
+    candidate and read it from the model) and build the trace.
+  - enabled_a reuses the same `_eval_requires` conjunction as the coverage check
+    (expr_cache works).
+  - The deadlock stall (§2.4) reuses the enabled expression of the existing
+    deadlock check.
+  - Performance: one query per leadsTo binding. The expression size is
+    O(K² · (|P|+|Q|+|Fair|·K)). For K=8 and a number of bindings on the order of
+    the capacity, there is no problem (it runs on top of PERF1's shared
+    expansion).
+- **cli.py**: minimal changes (only a new violation_kind).
+- **scenarios**: leadsTo is out of scope (future: leave a comment about the
+  possibility of turning a pending→achieved trace into a scenario).
 
-## 6. テスト計画(tests/test_temporal.py)
+## 6. Test Plan (tests/test_temporal.py)
 
-1. **stutter 反例**: P になった後デッドロックして Q が来ない仕様 →
-   violated / leadsTo / stutter: true。
-2. **ラッソ反例(公平性なし)**: noop 自己ループがある mutex で
-   `waiters.contains(p) ~> holder == some(p)` → violated、trace に
-   loop_start、hint に fair の提案。
-3. **公平性で証明**: 2 の release_handoff(と必要なら他)に `fair` を付ける
-   → 反例消滅(leads_to.checked_to_depth が返る)。noop ループは
-   「release_handoff が enabled なのに実行されない」ため除外されることの確認。
-4. **同時成立**: P ∧ Q が同時に立つ遷移 → 違反にならない。
-5. **forall leadsTo**: 束縛ごとの検査。violated 時に bindings が返る。
-6. **論理等価ループ**: Seq の don't-care tail だけが異なる同一論理状態の
-   ループが検出される(生比較だと見逃すケースを再現して回帰テスト化)。
-7. **既存互換**: leadsTo を含まない仕様の verify/proved 出力が完全不変。
-8. **induction との併用**: leadsTo 付き仕様の `--engine induction` が
-   proved + leads_to.checked_to_depth を返す。
+1. **stutter counterexample**: a spec that deadlocks after becoming P so Q never
+   comes → violated / leadsTo / stutter: true.
+2. **lasso counterexample (no fairness)**: a mutex with a noop self-loop,
+   `waiters.contains(p) ~> holder == some(p)` → violated, loop_start in trace, a
+   `fair` suggestion in the hint.
+3. **proof with fairness**: annotate `fair` on 2's release_handoff (and others
+   if needed) → the counterexample disappears (leads_to.checked_to_depth is
+   returned). Confirm that the noop loop is excluded because
+   "release_handoff is enabled yet not executed."
+4. **simultaneous satisfaction**: a transition where P ∧ Q hold at the same time
+   → not a violation.
+5. **forall leadsTo**: a check per binding. bindings is returned on violated.
+6. **logical-equality loop**: a loop of the same logical state differing only in
+   the don't-care tail of a Seq is detected (reproduce the case that raw
+   comparison would miss and make it a regression test).
+7. **existing compatibility**: the verify/proved output of a spec without
+   leadsTo is completely unchanged.
+8. **combined with induction**: `--engine induction` of a spec with leadsTo
+   returns proved + leads_to.checked_to_depth.
 
-## 7. leadsTo のシナリオ化(v2.1 で実装)
+## 7. Scenario-ization of leadsTo (Implemented in v2.1)
 
-`fslc scenarios` に応答シナリオを追加する。leadsTo `P ~> Q`(束縛ごと)に
-ついて、**P が成立してから Q が成立するまでの最短トレース**を生成する:
+Add a response scenario to `fslc scenarios`. For a leadsTo `P ~> Q` (per
+binding), generate the **shortest trace from when P holds until Q holds**:
 
-- 探索: 共有展開上で「∃p ≤ t: P(states[p]) ∧ Q(states[t]) ∧
-  ∀q ∈ [p, t-1]: ¬Q(states[q])」を t = 0..K の順に push/pop で判定し、
-  最初に sat になった t のモデルからトレースを構築(p もモデルから特定)。
-- シナリオ形:
+- Search: on the shared expansion, decide "∃p ≤ t: P(states[p]) ∧ Q(states[t]) ∧
+  ∀q ∈ [p, t-1]: ¬Q(states[q])" in order of t = 0..K via push/pop, and build the
+  trace from the model of the first t that becomes sat (p is also identified from
+  the model).
+- Scenario form:
 
 ```json
 {
@@ -205,22 +227,25 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 }
 ```
 
-- P が深さ K 内で一度も成立しない束縛はシナリオを生成せず、warnings に
-  `{message: "leadsTo <name> <bindings>: P never holds within depth K", hint}` を
-  載せる(silent cap にしない)。
-- P∧Q 同時成立(pending_at == satisfied_at)も正当なシナリオとして生成する。
-- 実装位置: scenarios() の reachable シナリオ生成と同じ場所に相乗り。
-  名前は `respond_<性質名>` + 束縛サフィックス(`_p0` 形。サニタイズは
-  testgen 側の既存機構が処理)。
-- テスト: mutex_queue(WaiterGetsLock × 3束縛)でシナリオが生成され
-  steps の Monitor 再生で pending→satisfied が確認できること、
-  P が成立しない束縛の warnings、testgen 生成物が import 可能なこと。
+- A binding where P never holds within depth K generates no scenario, and puts
+  `{message: "leadsTo <name> <bindings>: P never holds within depth K", hint}` in
+  warnings (not a silent cap).
+- P∧Q simultaneous satisfaction (pending_at == satisfied_at) is also generated as
+  a legitimate scenario.
+- Implementation location: piggybacks on the same place as the reachable
+  scenario generation in scenarios(). The name is `respond_<property name>` +
+  binding suffix (the `_p0` form; sanitization is handled by the existing
+  mechanism on the testgen side).
+- Tests: with mutex_queue (WaiterGetsLock × 3 bindings), scenarios are generated
+  and the Monitor replay of steps confirms pending→satisfied; the warnings for a
+  binding where P does not hold; and that the testgen output is importable.
 
-## 8. ドキュメント反映
+## 8. Documentation Reflection
 
-- DESIGN-v1.md §10 の v2.0 項目に「実装済み(lite): fair / leadsTo」を注記。
-- LANGUAGE.md: §3 に `~>`(leadsTo ブロック専用)、§1 に `fair` と
-  `leadsTo`、§6 表に leadsTo、§9 イディオム集に「履歴ゴースト変数 vs
-  leadsTo の使い分け」(状態の事実 → ゴースト、応答性質 → leadsTo)を追記。
-- mutex_queue.fsl に `fair` + `WaiterGetsLock` を追加して実例とする
-  (DOGFOOD-2 F7 の解消)。
+- Note "implemented (lite): fair / leadsTo" on the v2.0 item of DESIGN-v1.md §10.
+- LANGUAGE.md: add `~>` (leadsTo block only) to §3, `fair` and `leadsTo` to §1,
+  leadsTo to the §6 table, and "history ghost variable vs leadsTo: when to use
+  which" to the §9 idiom collection (a fact of state → ghost, a response
+  property → leadsTo).
+- Add `fair` + `WaiterGetsLock` to mutex_queue.fsl as a worked example (resolving
+  DOGFOOD-2 F7).

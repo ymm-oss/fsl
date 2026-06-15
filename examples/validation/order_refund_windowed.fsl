@@ -1,6 +1,8 @@
-// 設計変種: 返金期間ウィンドウ付き(DOGFOOD-9 ASSUME-5 で先送りした R5 の設計層実装案)
-// 抽象契約 examples/validation/order_refund.fsl を一切編集せずに、
-// cancel 後 WINDOW tick 以内のみ refund 可能という制限を詳細層で追加する。
+// Design variant: with a refund-period window (a design-layer implementation
+// proposal for R5, which DOGFOOD-9 ASSUME-5 deferred).
+// Without editing the abstract contract examples/validation/order_refund.fsl at all,
+// it adds at the detail layer the restriction that refund is possible only within
+// WINDOW ticks after cancel.
 spec OrderRefundWindowed {
   const CAP = 2
   const WINDOW = 2
@@ -8,13 +10,13 @@ spec OrderRefundWindowed {
   type Cnt = 0..3
   enum OSt { Cart, Paid, Shipped, Cancelled, Refunded }
   type Stock = 0..CAP
-  type Age = 0..WINDOW                  // WINDOW = 期限切れの番地(refund は age < WINDOW のみ)
+  type Age = 0..WINDOW                  // WINDOW = the expiry mark (refund only while age < WINDOW)
 
   state {
     order: Map<OrderId, OSt>,
     stock: Stock,
     refunded_total: Cnt,
-    age: Map<OrderId, Age>              // cancel からの経過 tick(詳細層にのみ存在)
+    age: Map<OrderId, Age>              // ticks elapsed since cancel (exists only at the detail layer)
   }
   init {
     forall o: OrderId { order[o] = Cart }
@@ -37,15 +39,15 @@ spec OrderRefundWindowed {
     requires order[o] == Paid
     order[o] = Cancelled
     stock = stock + 1
-    age[o] = 0                          // ウィンドウ開始
+    age[o] = 0                          // window starts
   }
   action refund(o: OrderId) {
     requires order[o] == Cancelled
-    requires age[o] < WINDOW            // ← 追加された時間ガード(事前条件の強化方向)
+    requires age[o] < WINDOW            // <- added time guard (a precondition strengthening)
     order[o] = Refunded
     refunded_total = refunded_total + 1
   }
-  action tick() {                       // 時間進行(詳細層の内部事象)
+  action tick() {                       // time advance (an internal event of the detail layer)
     forall o: OrderId {
       if order[o] == Cancelled and age[o] < WINDOW {
         age[o] = age[o] + 1
@@ -60,8 +62,8 @@ spec OrderRefundWindowed {
     refunded_total == count(o: OrderId where order[o] == Refunded)
   }
 
-  // 正例ペア: ウィンドウ内の返金は依然可能(過剰制約の検出)
+  // Positive-example pair: refund within the window is still possible (detects over-constraint)
   reachable FullyRefunded { exists o: OrderId { order[o] == Refunded } }
-  // 正例ペア: 期限切れが実際に起きる(ウィンドウ機構が死に飾りでない)
+  // Positive-example pair: expiry actually happens (the window mechanism is not dead decoration)
   reachable WindowExpired { exists o: OrderId { order[o] == Cancelled and age[o] == WINDOW } }
 }

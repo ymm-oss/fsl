@@ -1,150 +1,150 @@
-# 形式手法と FSL 入門
+# Introduction to Formal Methods and FSL
 
-## 目的
+## Purpose
 
-本書は、AI 駆動開発に FSL(AI-Native Formal Specification Language)を導入する前提として、形式手法の基本的な考え方、FSL の位置づけ、ビジネスレベルから実装・QA までの利用方法、導入判断に必要な確認事項を整理する。
+This document organizes the basic ideas of formal methods, the role of FSL (AI-Native Formal Specification Language), how to use it from the business level through implementation and QA, and the points needed to decide on adoption — all as a foundation for introducing FSL into AI-driven development.
 
-対象読者は、事業責任者、PM/PdM、QA、エンジニア、AI 駆動開発プロセスの設計者である。形式手法やモデル検査の専門知識は前提にしない。
+The intended readers are business owners, PMs/PdMs, QA, engineers, and designers of AI-driven development processes. No prior expertise in formal methods or model checking is assumed.
 
-## なぜ FSL が必要なのか
+## Why FSL is needed
 
-生成 AI によって、仕様の整理、実装、テスト作成、リファクタリングの速度は上がる。一方で、AI が仕様をそれらしく補完する、例外系を落とす、実装とテストが同じ誤解に基づいて生成される、といったリスクも増える。
+Generative AI speeds up organizing specifications, implementation, writing tests, and refactoring. At the same time, it increases risks such as AI plausibly filling in specifications, dropping exceptional cases, and generating implementation and tests from the same misunderstanding.
 
-従来の自然言語の仕様書と通常のテストだけでは、AI が高速に作る差分を継続的に検査しきれない。特に、ビジネスルール、要件、設計、実装、QA が別々の成果物として管理されていると、上位の意図が下位の実装やテストに正しく反映されたかを確認しにくい。
+Conventional natural-language specification documents and ordinary tests alone cannot continuously keep up with checking the diffs that AI produces at high speed. In particular, when business rules, requirements, design, implementation, and QA are managed as separate artifacts, it becomes hard to confirm whether the upper-level intent is correctly reflected in the lower-level implementation and tests.
 
-FSL は、この問題に対して、ビジネスルールや要件を機械が検査できる契約として記述するために使う。AI が生成した仕様、実装、テストを、その契約に照らして検査し、矛盾、抜け道、到達不能なフロー、実装の逸脱を早い段階で見つけることが目的である。
+FSL is used to address this problem by describing business rules and requirements as contracts that a machine can check. The goal is to check AI-generated specifications, implementations, and tests against those contracts, and to find contradictions, loopholes, unreachable flows, and implementation deviations at an early stage.
 
-もう一つ重要なのは、FSL が「大規模で重い形式仕様を人間が時間をかけて書く」前提ではなく、生成 AI が小さな仕様を素早く作り、検証器の反例を見ながら直す前提に立つ点である。そのため、決済や承認のような高リスク領域だけでなく、画面遷移、ウィザード、モーダル、二重送信防止、小さなフラグ管理のような日常的な状態管理にも適用しやすい。
+Another important point is that FSL is not premised on humans spending a long time writing large, heavyweight formal specifications; it is premised on generative AI quickly producing small specifications and fixing them while looking at the verifier's counterexamples. As a result, it applies easily not only to high-risk areas such as payments and approvals, but also to everyday state management such as screen transitions, wizards, modals, double-submission prevention, and small flag management.
 
-## FSL があると何が嬉しいのか
+## What is the benefit of having FSL
 
-FSL を使うと、仕様を「読むもの」だけでなく「検査できるもの」として扱える。これにより、AI 駆動開発の各工程で次の効果が得られる。
+With FSL, you can treat specifications not only as something to "read" but as something to "check." This yields the following effects at each stage of AI-driven development.
 
-- 仕様の曖昧さ、矛盾、例外系の抜けを実装前に見つけられる
-- 起きてはいけない状態に到達する操作列を、反例トレースとして確認できる
-- 小さな画面遷移や状態フラグの組み合わせを、実装前に状態機械として確認できる
-- 必要な業務ゴールや受け入れ基準に到達できるかを検査できる
-- 受け入れ基準を `fslc scenarios` で実行シナリオ化できる
-- 仕様から `fslc testgen` で pytest の適合テスト雛形を生成できる
-- 実装のイベントログを `fslc replay` で再生し、仕様違反を検査できる
-- ビジネス、要件、設計、実装テストを refinement で縦につなげられる
-- AI が作ったコードやテストを、AI 自身の説明ではなく検証器の結果で確認できる
+- Find ambiguities, contradictions, and missing exceptional cases in specifications before implementation
+- Confirm, as a counterexample trace, the operation sequence that reaches a state that must never occur
+- Confirm combinations of small screen transitions and state flags as a state machine before implementation
+- Check whether necessary business goals and acceptance criteria can be reached
+- Turn acceptance criteria into executable scenarios with `fslc scenarios`
+- Generate pytest conformance-test scaffolds from a specification with `fslc testgen`
+- Replay an implementation's event log with `fslc replay` and check for specification violations
+- Connect business, requirements, design, and implementation tests vertically through refinement
+- Confirm AI-produced code and tests by the verifier's results rather than by the AI's own explanation
 
-要するに、FSL はコード生成を直接速くする道具ではなく、AI が高速に作る成果物を継続的に検査するための外部基準である。
+In short, FSL is not a tool that directly speeds up code generation; it is an external standard for continuously checking the artifacts that AI produces at high speed.
 
-## 要約
+## Summary
 
-通常の仕様書は自然言語で書かれるため、人間には読みやすい一方で、曖昧さ、解釈差、矛盾、例外系の抜けが残りやすい。形式手法は、仕様を機械が検査できる形で記述し、「起きてはいけない状態に到達しないか」「必要な状態に到達できるか」「操作の順序によってルールが破れないか」を検証するための方法である。
+Ordinary specification documents are written in natural language, which makes them easy for humans to read but prone to leaving ambiguity, differences in interpretation, contradictions, and missing exceptional cases. Formal methods are an approach for describing specifications in a form a machine can check, and for verifying questions such as "does it reach a state that must never occur?", "can it reach the states it needs to?", and "can the rules be broken by some order of operations?".
 
-FSL は、この形式手法をアプリケーション開発、特に生成 AI を用いた開発プロセスに接続するための形式仕様言語である。ビジネスルール、要件、設計仕様、実装適合テストを同じ検証ループに載せ、AI が生成した仕様・コード・テストを機械的に検査するためのハーネスとして使う。
+FSL is a formal specification language for connecting these formal methods to application development, especially to development processes that use generative AI. It puts business rules, requirements, design specifications, and implementation-conformance tests on the same verification loop, and serves as a harness for mechanically checking AI-generated specifications, code, and tests.
 
-FSL の導入価値は、コード生成を直接速くすることではなく、生成 AI が高速に作る成果物に対して、継続的に検査可能な外部基準を与える点にある。また、生成 AI が仕様作成の初期コストを下げるため、従来の形式手法では割に合わなかった小さな状態管理にも、軽量な検査として使える。
+The value of adopting FSL is not in directly speeding up code generation, but in providing a continuously checkable external standard for the artifacts that generative AI produces at high speed. Moreover, because generative AI lowers the initial cost of authoring specifications, FSL can be used as a lightweight check even for small state management that conventional formal methods would not have been worth the effort.
 
-## 形式手法とは何か
+## What are formal methods
 
-形式手法とは、システムの仕様や設計を数学的・機械的に扱える形で記述し、その性質を検査または証明する技術の総称である。
+Formal methods is the collective term for techniques that describe a system's specification or design in a form that can be handled mathematically and mechanically, and that check or prove its properties.
 
-ソフトウェア開発で典型的に確認したい性質は、以下のようなものである。
+The properties one typically wants to confirm in software development are like the following.
 
-- 承認されていない注文は出荷できない
-- キャンセル済みの申請は支払い処理に進まない
-- 在庫の予約数と確定数が矛盾しない
-- 権限を持たないユーザーは状態を変更できない
-- キューに入ったジョブはいずれ処理される
-- SLA を超過した処理が放置されない
+- An unapproved order cannot be shipped
+- A cancelled application does not proceed to payment processing
+- The reserved quantity and committed quantity of inventory do not contradict each other
+- A user without permission cannot change the state
+- A job placed in the queue is eventually processed
+- A process that exceeds its SLA is not left unattended
 
-自然言語でもこれらは書ける。しかし自然言語のままだと、仕様が本当に一貫しているか、どの操作順序でも破れないか、例外系で抜け道がないかを機械的に確認できない。
+These can be written in natural language as well. But in natural-language form, you cannot mechanically confirm whether the specification is truly consistent, whether it cannot be broken under any order of operations, or whether there are loopholes in the exceptional cases.
 
-形式手法では、システムを「状態」と「操作」と「守るべき性質」に分けて扱う。
+Formal methods handle a system by separating it into "states," "operations," and "properties that must hold."
 
 ```text
-状態:
-  注文は Draft / Submitted / Approved / Cancelled / Shipped のいずれか
+States:
+  An order is one of Draft / Submitted / Approved / Cancelled / Shipped
 
-操作:
+Operations:
   submit / approve / cancel / ship
 
-不変条件:
-  Approved でない注文は Shipped にならない
-  Cancelled の注文は Shipped にならない
+Invariants:
+  An order that is not Approved does not become Shipped
+  A Cancelled order does not become Shipped
 ```
 
-検証器は、定義された範囲の状態と操作の組み合わせを探索し、条件を破る操作列がないかを調べる。違反があれば、最短の反例トレースとして「どの操作順序で壊れるか」を返す。
+The verifier explores the combinations of states and operations within the defined range and checks whether there is any operation sequence that breaks the conditions. If there is a violation, it returns "in what order of operations it breaks" as the shortest counterexample trace.
 
-## テストとの違い
+## Difference from testing
 
-テストは、開発者や QA が選んだ具体例を確認する。
+A test confirms a concrete example chosen by a developer or QA.
 
 ```text
-1. 注文を作成する
-2. 承認する
-3. 出荷する
-4. 出荷済みになることを確認する
+1. Create an order
+2. Approve it
+3. Ship it
+4. Confirm that it becomes Shipped
 ```
 
-これは重要だが、確認しているのは選ばれた一本の経路である。形式手法では、仕様として定義した範囲内で、操作の順序や状態の組み合わせを探索する。
+This is important, but what it confirms is a single chosen path. Formal methods explore the orders of operations and combinations of states within the range defined as the specification.
 
 ```text
-どの順序で submit / approve / cancel / ship が呼ばれても、
-Approved でない注文が Shipped にならないか。
+No matter what order submit / approve / cancel / ship are called in,
+an order that is not Approved never becomes Shipped.
 ```
 
-したがって、形式手法はテストの代替ではない。役割は異なる。
+Therefore, formal methods are not a replacement for testing. Their roles differ.
 
-| 観点 | 通常のテスト | 形式手法 |
+| Aspect | Ordinary testing | Formal methods |
 |---|---|---|
-| 確認対象 | 選んだ具体例 | 定義した状態空間 |
-| 主な強み | 実装・UI・外部連携を確認できる | 仕様の矛盾や抜け道を早期に見つける |
-| 主な弱み | 未選択のケースは漏れる | モデル化した範囲外は検査できない |
-| 成果物 | テストコード、テストケース | 形式仕様、反例、証明、生成シナリオ |
+| Target of confirmation | Chosen concrete examples | The defined state space |
+| Main strength | Can confirm implementation, UI, and external integrations | Finds specification contradictions and loopholes early |
+| Main weakness | Unselected cases are missed | Cannot check anything outside the modeled range |
+| Artifacts | Test code, test cases | Formal specifications, counterexamples, proofs, generated scenarios |
 
-実務では、形式手法で仕様・設計の安全性を確認し、その結果から生成されたシナリオやテスト雛形を通常のテストに接続するのが現実的である。
+In practice, the realistic approach is to confirm the safety of specifications and designs with formal methods, and to connect the scenarios and test scaffolds generated from those results to ordinary testing.
 
-## AI 駆動開発で形式手法が必要になる理由
+## Why formal methods become necessary in AI-driven development
 
-生成 AI は、実装、テスト、ドキュメント、リファクタリングを高速化する。一方で、以下のリスクも増える。
+Generative AI accelerates implementation, testing, documentation, and refactoring. At the same time, the following risks increase.
 
-- AI が仕様をそれらしく補完する
-- 実装とテストが同じ誤解に基づいて生成される
-- 例外系や境界条件が抜ける
-- レビュー対象の差分が大きくなり、人間が追い切れない
-- 自然言語の仕様変更が、下位の設計や実装に正しく反映されたか確認しにくい
+- AI plausibly fills in specifications
+- Implementation and tests are generated from the same misunderstanding
+- Exceptional cases and boundary conditions are missed
+- The diff to review grows large, and humans cannot keep up
+- It becomes hard to confirm whether a natural-language specification change was correctly reflected in the lower-level design and implementation
 
-このため、AI 駆動開発では、AI の出力をそのまま信頼するのではなく、外部の検査基準を用意する必要がある。
+For this reason, in AI-driven development you need to prepare an external checking standard rather than trusting the AI's output as is.
 
-形式仕様は、その検査基準になる。
+Formal specifications become that checking standard.
 
 ```text
-人間がビジネス意図を定義する
+A human defines the business intent
   ↓
-AI が形式仕様の初稿を書く
+AI writes a first draft of the formal specification
   ↓
-検証器が矛盾・反例・到達不能を返す
+The verifier returns contradictions, counterexamples, and unreachability
   ↓
-AI が反例を読んで修正案を出す
+AI reads the counterexamples and proposes fixes
   ↓
-人間がビジネス判断として採否を決める
+A human makes the business decision on whether to adopt them
 ```
 
-このループにより、AI は単なるコード生成器ではなく、検証器からのフィードバックを受けて仕様と実装を修復する作業者として使える。
+Through this loop, AI can be used not merely as a code generator, but as a worker that repairs specifications and implementations in response to feedback from the verifier.
 
-## 従来の形式手法との使い方の違い
+## Difference in usage from conventional formal methods
 
-従来の形式手法は、仕様を正確にモデル化する専門知識と作業時間が必要だったため、導入対象が安全性の高いシステムや複雑な基盤設計に偏りやすかった。実務上は、「検査したい気持ちはあるが、形式仕様を書くコストに見合わない」小さな機能が多い。
+Conventional formal methods required the expertise and working time to model specifications accurately, so adoption tended to be biased toward high-safety systems and complex infrastructure design. In practice, there are many small features for which "we'd like to check it, but it isn't worth the cost of writing a formal specification."
 
-FSL は、生成 AI が仕様の初稿を書き、`fslc` が機械的に反例を返し、AI がその反例を読んで修正案を出す前提にすることで、このコスト構造を変える。人間が最初から完全な形式仕様を書くのではなく、人間は業務意図、禁止したい状態、到達したい状態を与え、AI と検証器のループで仕様を具体化する。
+FSL changes this cost structure by being premised on generative AI writing the first draft of a specification, `fslc` mechanically returning counterexamples, and AI reading those counterexamples to propose fixes. Rather than a human writing a complete formal specification from the start, the human supplies the business intent, the states to forbid, and the states to reach, and the specification is fleshed out through the loop between AI and the verifier.
 
-このため、FSL は「重要な中核業務だけに使う大きな道具」ではなく、「状態が少しでも絡む箇所を短時間で確認する小さな道具」としても使える。たとえば、以下のような仕様は、数個の状態と数個の action だけで検査できる。
+For this reason, FSL can be used not only as "a large tool used only for important core business," but also as "a small tool for quickly checking any place where state is even slightly involved." For example, the following specifications can be checked with just a few states and a few actions.
 
-- 編集画面で未保存変更がある場合だけ確認モーダルを出す
-- 保存済みの申請だけを送信できる
-- 送信中は二重送信できない
-- エラー後は再試行できるが、成功後は再試行できない
-- 権限のないユーザーは状態を進められない
+- Show a confirmation modal on the edit screen only when there are unsaved changes
+- Allow only saved applications to be submitted
+- Prevent double submission while submitting
+- Allow retry after an error, but not after success
+- A user without permission cannot advance the state
 
-この粒度では、FSL は正式な設計書というより、状態遷移のレビュー補助、AI 生成コードの外部基準、QA 観点の具体化として使うのが現実的である。
+At this granularity, the realistic use of FSL is not as a formal design document, but as an aid to reviewing state transitions, an external standard for AI-generated code, and a concretization of QA perspectives.
 
-たとえば、編集画面の未保存確認は次のような小さな状態機械として扱える。
+For example, the unsaved-changes confirmation on an edit screen can be treated as the following small state machine.
 
 ```fsl
 spec EditScreenFlow {
@@ -211,13 +211,13 @@ spec EditScreenFlow {
 }
 ```
 
-この程度の仕様でも、「未保存でないのに確認モーダルへ遷移する」「編集画面以外で送信中になる」「戻る確認に到達できない」といった状態遷移の抜けを検査対象にできる。
+Even a specification of this size can make state-transition gaps such as "transitioning to the confirmation modal when not dirty," "becoming submitting outside the edit screen," and "being unable to reach the back-confirmation" into targets for checking.
 
-## FSL とは何か
+## What is FSL
 
-FSL は、生成 AI が書き、検証し、修復することを前提に設計された、アプリケーション開発向けの形式仕様言語である。検証器 `fslc` は、仕様に対して構文・型検査、モデル検査、k 帰納法、シナリオ生成、実装適合テスト生成、ログ再生、refinement 検査を行う。
+FSL is a formal specification language for application development, designed on the premise that generative AI writes, verifies, and repairs it. The verifier `fslc` performs syntax and type checking, model checking, k-induction, scenario generation, implementation-conformance test generation, log replay, and refinement checking against a specification.
 
-FSL の特徴は、形式仕様をエンジニアリングの設計層だけに閉じず、ビジネス・要件・設計・実装接続まで縦に扱う点である。
+A distinguishing feature of FSL is that it does not confine formal specifications to the engineering design layer alone, but handles them vertically from business through requirements, design, and the implementation connection.
 
 ```text
 Business FSL
@@ -229,7 +229,7 @@ Design Spec FSL
 Implementation / QA
 ```
 
-主なコマンドは以下である。
+The main commands are as follows.
 
 ```bash
 fslc check file.fsl
@@ -241,36 +241,36 @@ fslc replay file.fsl --trace events.json
 fslc refine impl.fsl abs.fsl mapping.fsl
 ```
 
-## FSL が扱うレイヤー
+## The layers FSL handles
 
-FSL では、同じドメインを複数の粒度で扱える。
+FSL lets you handle the same domain at multiple granularities.
 
-### ビジネス層
+### Business layer
 
-業務ルール、規程、ポリシー、KPI、業務ゴールを扱う。目的は、業務として矛盾したルールがないか、禁止状態に到達しないか、必要な業務ゴールに到達できるかを確認することである。
+Handles business rules, regulations, policies, KPIs, and business goals. The purpose is to confirm whether there are contradictory rules as a business matter, whether forbidden states are reached, and whether the necessary business goals can be reached.
 
-例:
+Examples:
 
-- 返品は出荷後 30 日以内に限る
-- 承認済みの経費だけが支払い対象になる
-- 支払い済みの申請は差し戻せない
+- Returns are limited to within 30 days after shipment
+- Only approved expenses become eligible for payment
+- A paid application cannot be sent back
 
-### 要件層
+### Requirements layer
 
-PM/PdM が扱う要求、受け入れ基準、例外系、分岐を記述する。要件 ID と原文を残すことで、検証結果や反例から元の要求へ追跡できる。
+Describes the requests, acceptance criteria, exceptional cases, and branches that PMs/PdMs handle. By retaining the requirement ID and the original text, you can trace from verification results and counterexamples back to the original request.
 
-例:
+Examples:
 
-- `REQ-1: 注文は在庫確保後にのみ確定できる`
-- `AC-1: 在庫がない場合は注文確定できない`
+- `REQ-1: An order can be committed only after inventory is secured`
+- `AC-1: An order cannot be committed when there is no inventory`
 
-### 設計層
+### Design layer
 
-実装に近い状態機械、データ構造、アクション、非同期処理、外部連携の状態を記述する。ここでは invariant、reachable、leadsTo、refinement mapping などを使い、要件層を設計層が満たしているかを確認する。
+Describes the state machines, data structures, actions, asynchronous processing, and external-integration states that are close to the implementation. Here you use invariant, reachable, leadsTo, refinement mappings, and so on to confirm whether the design layer satisfies the requirements layer.
 
-### 実装・QA 層
+### Implementation / QA layer
 
-`fslc scenarios` で仕様から実行シナリオを生成し、`fslc testgen` で pytest の適合テスト雛形を生成する。実装とは Adapter を介して接続する。
+Generate executable scenarios from a specification with `fslc scenarios`, and generate pytest conformance-test scaffolds with `fslc testgen`. The implementation is connected through an Adapter.
 
 ```python
 class Adapter:
@@ -284,186 +284,186 @@ class Adapter:
         ...
 ```
 
-Adapter は、FSL の action を実装の API やサービス呼び出しに対応させ、実装の現在状態を FSL の state と同じ形で観測する役割を持つ。
+The Adapter's role is to map FSL actions to the implementation's APIs or service calls, and to observe the implementation's current state in the same form as the FSL state.
 
-## ハーネスエンジニアリングでの位置づけ
+## Role in harness engineering
 
-AI 駆動開発におけるハーネスエンジニアリングでは、FSL は生成 AI を拘束する検証ハーネスとして使う。
+In harness engineering for AI-driven development, FSL is used as a verification harness that constrains generative AI.
 
 ```text
-自然文仕様
-  ↓ AI が FSL 化
-FSL 仕様
+Natural-language specification
+  ↓ AI turns it into FSL
+FSL specification
   ↓ verify / scenarios / testgen
-検証ハーネス
-  ↓ AI が実装・Adapter を生成
-実装
+Verification harness
+  ↓ AI generates the implementation and Adapter
+Implementation
   ↓ pytest / replay / monitor
-適合判定
+Conformance decision
 ```
 
-特に重要なのは、テストコードも AI が生成する状況では、テストが実装の誤解に追従してしまう危険がある点である。FSL を先に置くことで、実装とテストの両方を外部仕様に従わせることができる。
+Particularly important is that when test code is also generated by AI, there is a danger that the tests follow the implementation's misunderstanding. By placing FSL first, you can make both the implementation and the tests conform to an external specification.
 
-## 想定ユースケース
+## Anticipated use cases
 
-FSL は、すべての機能に一律で適用するものではない。導入の入口は大きく二つある。
+FSL is not something to apply uniformly to every feature. There are broadly two entry points for adoption.
 
-一つは、状態遷移や業務ルールの誤りが重大な領域である。これは従来の形式手法に近い使い方で、ビジネス上のリスクが高い箇所を重点的に検査する。
+One is areas where errors in state transitions or business rules are serious. This is a usage close to conventional formal methods, focusing checking on places with high business risk.
 
-適用効果が高い領域:
+Areas where the effect is high:
 
-- 決済、返金、請求
-- 申請、承認、差し戻し
-- 予約、在庫、在庫引当
-- 権限、認可、監査ログ
-- キュー、ジョブ、非同期処理
-- SLA、タイムアウト、リトライ
-- 契約状態、プラン変更、解約
+- Payments, refunds, billing
+- Applications, approvals, send-backs
+- Reservations, inventory, inventory allocation
+- Permissions, authorization, audit logs
+- Queues, jobs, asynchronous processing
+- SLA, timeout, retry
+- Contract states, plan changes, cancellation
 
-もう一つは、生成 AI が仕様作成を支援することで初めて割に合う、小さな状態管理である。こちらは、仕様書を重く作るというより、実装前の状態遷移レビューや、AI 生成コードに対する軽量な外部基準として使う。
+The other is small state management that becomes worthwhile only because generative AI assists with authoring the specification. Here, rather than producing a heavyweight specification document, you use it for pre-implementation state-transition review and as a lightweight external standard for AI-generated code.
 
-小さく使いやすい領域:
+Areas that are small and easy to use:
 
-- 画面遷移、戻る、キャンセル、確認モーダル
-- 編集中、未保存、保存中、保存済み、エラーの UI 状態
-- ウィザード、ステップフォーム、オンボーディング
-- 二重送信防止、ローディング中の操作禁止
-- retry / pending / succeeded / failed の非同期状態
-- feature flag、権限、ロールによる操作可否
-- 小さなキュー、通知、バッジ、既読・未読状態
+- Screen transitions, back, cancel, confirmation modals
+- UI states of editing, unsaved, saving, saved, error
+- Wizards, step forms, onboarding
+- Double-submission prevention, forbidding operations while loading
+- Asynchronous states of retry / pending / succeeded / failed
+- Feature flags, permissions, operation availability by role
+- Small queues, notifications, badges, read/unread states
 
-適用優先度が低い領域:
+Areas with low adoption priority:
 
-- 静的な表示だけの画面
-- 単純な CRUD
-- ビジネス制約の少ない UI 装飾
-- 状態遷移がほとんどない処理
+- Screens with only static display
+- Simple CRUD
+- UI decoration with few business constraints
+- Processing with almost no state transitions
 
-判断基準は、「状態が何個あるか」ではなく、「操作順序やフラグの組み合わせで、意図しない状態に入りうるか」である。状態が 3 個、フラグが 2 個でも、戻る、キャンセル、再試行、権限分岐が絡むなら FSL 化する価値がある。
+The criterion is not "how many states there are," but "whether some combination of operation order and flags can enter an unintended state." Even with 3 states and 2 flags, if back, cancel, retry, or permission branching is involved, it is worth turning into FSL.
 
-## 導入プロセス案
+## Proposed adoption process
 
-開発初期だけでなく、仕様策定済み・開発一部開始済みのプロジェクトにも導入できる。その場合は、全体を一度に FSL 化するのではなく、リスクの高い業務フロー、または小さくても状態分岐が多い画面・機能を一つ選ぶ。
+FSL can be introduced not only at the start of development, but also into projects where the specification is already settled or development has partly begun. In that case, rather than turning everything into FSL at once, choose one high-risk business flow, or one screen/feature that is small but has many state branches.
 
-軽量に始める場合:
+When starting lightweight:
 
-1. 画面、状態、フラグ、操作を列挙する
-2. 「起きてはいけない状態」と「到達できるべき状態」を自然文で書く
-3. AI に小さな `spec` の初稿を作らせる
-4. `fslc check` と `fslc verify` を実行する
-5. 反例トレースを見て、仕様の抜け、UI 挙動の抜け、実装方針の誤りを直す
-6. 必要なら `fslc scenarios` で代表シナリオを QA 観点や E2E テストに渡す
+1. Enumerate the screens, states, flags, and operations
+2. Write, in natural language, the "states that must never occur" and the "states that should be reachable"
+3. Have the AI produce a first draft of a small `spec`
+4. Run `fslc check` and `fslc verify`
+5. Look at the counterexample traces and fix specification gaps, UI-behavior gaps, and errors in the implementation approach
+6. If needed, pass representative scenarios from `fslc scenarios` to QA perspectives or E2E tests
 
-実装適合まで接続する場合:
+When connecting all the way to implementation conformance:
 
-1. 対象フローを選ぶ
-2. 既存仕様書、チケット、QA 観点、実装コードを集める
-3. AI に FSL の初稿を作らせる
-4. `fslc check` で構文と型を確認する
-5. `fslc verify` で反例や到達不能を確認する
-6. 反例を仕様バグ、実装バグ、未定義要件、モデル化ミスに分類する
-7. `fslc scenarios` でシナリオを生成する
-8. `fslc testgen` で pytest 雛形を生成する
-9. Adapter を実装に接続する
-10. CI に verify と pytest を組み込む
+1. Choose the target flow
+2. Gather existing specification documents, tickets, QA perspectives, and implementation code
+3. Have the AI produce a first draft of the FSL
+4. Confirm syntax and types with `fslc check`
+5. Confirm counterexamples and unreachability with `fslc verify`
+6. Classify counterexamples into specification bugs, implementation bugs, undefined requirements, and modeling mistakes
+7. Generate scenarios with `fslc scenarios`
+8. Generate pytest scaffolds with `fslc testgen`
+9. Connect the Adapter to the implementation
+10. Incorporate verify and pytest into CI
 
-どちらの導入方法でも、FSL の導入効果を局所的に検証できる。軽量な使い方では Adapter や CI 接続まで急がず、まず「状態遷移の誤りを検証器で見つけられるか」を確認するだけでもよい。
+With either adoption method, you can verify the effect of adopting FSL locally. In the lightweight usage, you need not rush to the Adapter or CI connection; it is fine to first just confirm "whether you can find state-transition errors with the verifier."
 
-## 評価観点
+## Evaluation perspectives
 
-FSL 導入の可否を判断する際は、以下を確認する。
+When deciding whether to adopt FSL, confirm the following.
 
-### 仕様面
+### Specification side
 
-- 対象ドメインに明確な状態遷移があるか
-- 禁止状態、不変条件、到達したい状態を定義できるか
-- 例外系や境界条件が業務上重要か
-- 既存仕様書に曖昧な箇所が残っていないか
+- Does the target domain have clear state transitions?
+- Can you define forbidden states, invariants, and states you want to reach?
+- Are exceptional cases and boundary conditions important for the business?
+- Do any ambiguities remain in the existing specification documents?
 
-### 実装面
+### Implementation side
 
-- 実装を初期状態に戻せるか
-- FSL の action に対応する API や関数を呼び出せるか
-- 現在状態を `observe()` で取得または射影できるか
-- ステージングやテスト環境でイベントログを取得できるか
+- Can the implementation be reset to its initial state?
+- Can you call the APIs or functions that correspond to the FSL actions?
+- Can the current state be obtained or projected via `observe()`?
+- Can you obtain event logs in the staging or test environment?
 
-### QA 面
+### QA side
 
-- 既存の受け入れ基準をシナリオ化できるか
-- QA 観点が状態遷移や不変条件として表現できるか
-- 生成シナリオが既存 E2E テストの補完になるか
-- 反例トレースをレビュー可能な形で扱えるか
+- Can the existing acceptance criteria be turned into scenarios?
+- Can QA perspectives be expressed as state transitions or invariants?
+- Do the generated scenarios complement the existing E2E tests?
+- Can counterexample traces be handled in a reviewable form?
 
-### 組織面
+### Organization side
 
-- 人間が最終判断すべきビジネスルールが明確か
-- AI が生成した FSL をレビューする担当がいるか
-- CI で検証失敗を止める運用が可能か
-- 仕様変更時に FSL も変更する責任範囲が明確か
+- Is it clear which business rules humans should make the final decision on?
+- Is there someone to review the AI-generated FSL?
+- Is it operationally feasible to stop on verification failure in CI?
+- Is the scope of responsibility clear for also changing the FSL when the specification changes?
 
-## 注意点
+## Caveats
 
-FSL は万能ではない。形式仕様が正しいことと、プロダクトとして正しいことは別である。FSL は、書かれたルールの範囲で検査する。ルール自体が間違っていれば、検証結果もその誤ったルールに基づく。
+FSL is not omnipotent. A formal specification being correct and a product being correct are two different things. FSL checks within the range of the written rules. If the rules themselves are wrong, the verification results are based on those wrong rules too.
 
-また、実装適合テストでは Adapter の品質が重要になる。`observe()` が実装状態を正しく反映していなければ、実装が壊れていてもテストが通る可能性がある。Adapter は、AI に生成させてもよいが、人間によるレビュー対象として扱うべきである。
+Also, in implementation-conformance testing, the quality of the Adapter matters. If `observe()` does not correctly reflect the implementation's state, a test may pass even when the implementation is broken. The Adapter may be generated by AI, but it should be treated as an object for human review.
 
-FSL の導入は、すべての仕様を形式化する活動ではない。重要なのは、事業・品質上のリスクが高いルールを、機械的に検査できる形に落とすことである。
+Adopting FSL is not an activity of formalizing every specification. What matters is reducing the rules with high business and quality risk into a form that can be checked mechanically.
 
-## 照会したい事項
+## Items to inquire about
 
-導入検討にあたり、関係者に確認したい事項は以下である。
+When considering adoption, the items to confirm with stakeholders are as follows.
 
-1. 現在の開発プロセスで、仕様解釈のズレや例外系の漏れが問題になっている領域はどこか。
-2. AI が生成した実装やテストに対して、外部基準として使える仕様は存在するか。
-3. 最初の FSL 化対象として、決済、承認、在庫、権限、非同期処理などの高リスク領域、または画面遷移、未保存変更、二重送信防止などの小さな状態管理を一つ選べるか。
-4. 既存の受け入れ基準は、状態遷移シナリオとして表現できるか。
-5. 実装側に Adapter を接続するための API、DB 状態、イベントログ、テスト環境は用意できるか。
-6. FSL の検証結果を CI や PR レビューの判断材料として扱えるか。
-7. 仕様変更時に、ビジネス層、要件層、設計層、実装テストのどこまで更新対象にするか。
+1. In the current development process, where are the areas where misaligned interpretation of specifications or missing exceptional cases are a problem?
+2. Does a specification exist that can be used as an external standard against AI-generated implementations and tests?
+3. As the first target to turn into FSL, can you choose one high-risk area such as payments, approvals, inventory, permissions, or asynchronous processing, or one piece of small state management such as screen transitions, unsaved changes, or double-submission prevention?
+4. Can the existing acceptance criteria be expressed as state-transition scenarios?
+5. Can the implementation side prepare the APIs, DB state, event logs, and test environment needed to connect an Adapter?
+6. Can the FSL verification results be treated as input for CI or PR-review decisions?
+7. When the specification changes, up to which of the business layer, requirements layer, design layer, and implementation tests will be in scope for updates?
 
-## 初回 PoC 案
+## Proposed initial PoC
 
-初回 PoC は、2 週間以内に完了できる範囲に限定する。
+Limit the initial PoC to a scope that can be completed within two weeks.
 
-軽量 PoC の対象:
+Target of a lightweight PoC:
 
-- 状態遷移が分かりやすい画面や小機能を 1 つ選ぶ
-- 例: 編集画面の未保存確認、送信中の二重送信防止、エラー後の再試行、権限別操作、ウィザードの戻る・キャンセル
+- Choose one screen or small feature whose state transitions are easy to understand
+- Examples: unsaved-changes confirmation on an edit screen, double-submission prevention while submitting, retry after an error, operations by permission, back/cancel in a wizard
 
-軽量 PoC の成果物:
+Deliverables of a lightweight PoC:
 
-- 小さな `spec`
-- `fslc verify` の結果
-- 反例トレースまたは `proved` の結果
-- 必要なら `fslc scenarios` のシナリオ JSON
-- 検出された UI 仕様の抜け、状態遷移の抜け、QA 観点の一覧
+- A small `spec`
+- The result of `fslc verify`
+- A counterexample trace, or a `proved` result
+- If needed, the scenario JSON from `fslc scenarios`
+- A list of the detected UI-specification gaps, state-transition gaps, and QA perspectives
 
-実装接続 PoC の対象:
+Target of an implementation-connected PoC:
 
-- 状態遷移が明確な業務フローを 1 つ選ぶ
-- 例: 注文キャンセル、承認フロー、在庫引当、返金、権限変更
+- Choose one business flow with clear state transitions
+- Examples: order cancellation, approval flow, inventory allocation, refund, permission change
 
-実装接続 PoC の成果物:
+Deliverables of an implementation-connected PoC:
 
-- `business` または `requirements` の FSL 仕様
-- 実装寄りの `spec`
-- `fslc verify` の結果
-- `fslc scenarios` のシナリオ JSON
-- `fslc testgen` で生成した pytest 雛形
-- 実装に接続した最小 Adapter
-- 検出された仕様バグ、実装バグ、未定義要件の一覧
+- A `business` or `requirements` FSL specification
+- An implementation-oriented `spec`
+- The result of `fslc verify`
+- The scenario JSON from `fslc scenarios`
+- The pytest scaffold generated by `fslc testgen`
+- A minimal Adapter connected to the implementation
+- A list of the detected specification bugs, implementation bugs, and undefined requirements
 
-成功条件:
+Success conditions:
 
-- 既存仕様から曖昧な点または未定義の例外系を発見できる
-- 小さな状態管理であれば、状態遷移の抜けや不要な状態を反例として確認できる
-- 主要な受け入れ基準をシナリオ化できる
-- 実装接続 PoC であれば、実装適合テストを少なくとも一部実行できる
-- AI が反例トレースを読んで修正案を出せる
-- 関係者が、通常の仕様書やテストだけでは得にくい価値を確認できる
+- You can discover ambiguous points or undefined exceptional cases from the existing specification
+- For small state management, you can confirm state-transition gaps or unnecessary states as counterexamples
+- You can turn the main acceptance criteria into scenarios
+- For an implementation-connected PoC, you can run at least part of the implementation-conformance tests
+- AI can read a counterexample trace and propose a fix
+- Stakeholders can confirm value that is hard to obtain with ordinary specification documents and tests alone
 
-## 結論
+## Conclusion
 
-形式手法は、仕様を人間の文章から機械的に検査できる契約へ変換するための考え方である。FSL は、その考え方を AI 駆動開発に接続し、ビジネスルール、要件、設計、実装、QA を一つの検証可能な流れに統合するための道具である。
+Formal methods is an approach for transforming a specification from human prose into a contract that can be checked mechanically. FSL is a tool for connecting that approach to AI-driven development and integrating business rules, requirements, design, implementation, and QA into a single verifiable flow.
 
-AI が開発速度を上げるほど、仕様の一貫性と実装適合性を機械的に検査する仕組みが重要になる。FSL は、そのための垂直統合された検証ハーネスとして利用できる。
+The more AI raises development speed, the more important a mechanism becomes for mechanically checking the consistency of specifications and the conformance of implementations. FSL can be used as a vertically integrated verification harness for that purpose.

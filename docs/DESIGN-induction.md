@@ -1,83 +1,93 @@
-# FSL k 帰納法エンジン — 実装設計(v1.1、DESIGN-v1.md §9 の詳細化)
+# FSL k-Induction Engine — Implementation Design (v1.1, elaboration of DESIGN-v1.md §9)
 
-本書は `--engine induction` の実装可能レベルの仕様。§9 のプロトコル(`proved` /
-`unknown_cti` / JSON 形)は確定済みであり、ここでは意味論・アルゴリズム・
-既存コードへの組み込み・エッジケースを規定する。
+This document is an implementation-level specification of `--engine induction`.
+The protocol of §9 (`proved` / `unknown_cti` / JSON shape) is finalized; here we
+specify the semantics, the algorithm, the integration into existing code, and
+edge cases.
 
-## 1. 目的と非目的
+## 1. Goals and non-goals
 
-- **目的**: invariant(ユーザー定義+自動 `_bounds_*`)の**無限深度証明**。
-  成功時 `result: "proved"`。BMC の「深さ K まで違反なし」を「全到達状態で成立」に格上げする。
-- **非目的(v1.1 では扱わない)**:
-  - `reachable` の証明(`reachable` は有界 witness 探索のままでよい。
-    induction 実行時も BMC と同じ方法で witness を探す — 深さは `--depth` を流用)
-  - `ensures` の帰納的証明(ensures は1遷移の性質なので帰納不要 — §5 参照)
-  - IC3/PDR(CTI からの自動補強はやらない。CTI を LLM に返すのが v1.1 の賭け)
+- **Goal**: **unbounded-depth proof** of invariants (user-defined + automatic
+  `_bounds_*`). On success, `result: "proved"`. It promotes BMC's "no violation
+  up to depth K" to "holds in every reachable state."
+- **Non-goals (not handled in v1.1)**:
+  - Proof of `reachable` (`reachable` may remain a bounded witness search;
+    induction also searches for a witness the same way as BMC — depth reuses `--depth`)
+  - Inductive proof of `ensures` (ensures is a single-transition property, so
+    induction is unnecessary — see §5)
+  - IC3/PDR (no automatic strengthening from CTIs. Returning the CTI to the LLM
+    is the v1.1 bet)
 
-## 2. アルゴリズム
+## 2. Algorithm
 
-入力: spec、最大帰納深さ `K_ind`(CLI `--k`、既定 1、上限 4 程度)、
-BMC 深さ `K_bmc`(`--depth`、base case と reachable witness に使用)。
+Inputs: spec, maximum induction depth `K_ind` (CLI `--k`, default 1, upper bound
+around 4), BMC depth `K_bmc` (`--depth`, used for the base case and the
+reachable witness).
 
-Inv(s) := 全 invariant(ユーザー + `_bounds_*`)の連言。
-T(s, s') := 既存 `transition()` と同一の遷移関係(choice 変数込み)。
-Init(s) := 既存 `init_constraints()`。
+Inv(s) := the conjunction of all invariants (user + `_bounds_*`).
+T(s, s') := the same transition relation as the existing `transition()` (including choice variables).
+Init(s) := the existing `init_constraints()`.
 
-### 2.1 Base case(基底)
+### 2.1 Base case
 
-既存 BMC をそのまま深さ `K_bmc` で実行する(コード再利用)。violated なら
-通常の violated JSON を返して終了(反例は実トレースであり、ここで返すのが最善)。
+Run the existing BMC at depth `K_bmc` as-is (code reuse). If violated, return the
+usual violated JSON and stop (the counterexample is a real trace, and returning
+it here is best).
 
-注: 教科書的 k-induction の base は「深さ k-1 まで」だが、FSL では
-**base = 通常 BMC(深さ K_bmc ≥ k)** とする。base を深めに走らせるほど
-偽 CTI(実は到達可能な違反)を実トレース付き violated として先に検出でき、
-LLM への応答品質が上がる。
+Note: the base of textbook k-induction is "up to depth k-1," but in FSL we take
+**base = ordinary BMC (depth K_bmc ≥ k)**. The deeper the base is run, the more
+false CTIs (violations that are actually reachable) can be detected first as
+violated with a real trace, improving the quality of the response to the LLM.
 
-### 2.2 Step case(帰納段)
+### 2.2 Step case
 
-k = 1, 2, ..., K_ind の順に試す。各 k について、**invariant ごとに**判定する
-(連言まるごとではなく個別に。理由: どの invariant が帰納的でないかを
-特定して JSON で返すため):
+Try k = 1, 2, ..., K_ind in order. For each k, decide **per invariant** (not the
+whole conjunction at once, but individually; reason: to identify and return in
+JSON which invariant is not inductive):
 
 ```
-変数: 自由状態列 σ_0 .. σ_k(init 制約は付けない)
-制約:
-  ∀ t ∈ [0, k-1]:  Inv(σ_t)            // 過去 k 状態で全 invariant 成立
-  ∀ t ∈ [0, k-1]:  T(σ_t, σ_{t+1})     // 連続遷移
-  ¬ inv_i(σ_k)                          // 対象 invariant が k 状態目で破れる
+variables: free state sequence σ_0 .. σ_k (no init constraint)
+constraints:
+  ∀ t ∈ [0, k-1]:  Inv(σ_t)            // all invariants hold in the past k states
+  ∀ t ∈ [0, k-1]:  T(σ_t, σ_{t+1})     // consecutive transitions
+  ¬ inv_i(σ_k)                          // the target invariant breaks at state k
 ```
 
-- **unsat** → inv_i は k-帰納的。次の invariant へ。
-- **sat** → モデルから CTI を抽出(§3)。k < K_ind なら k+1 で再試行。
-  k = K_ind でも sat なら `unknown_cti` を返す。
+- **unsat** → inv_i is k-inductive. Move to the next invariant.
+- **sat** → extract the CTI from the model (§3). If k < K_ind, retry at k+1.
+  If still sat at k = K_ind, return `unknown_cti`.
 
-全 invariant が(それぞれ何らかの k ≤ K_ind で)unsat になれば `proved`。
+If all invariants become unsat (each at some k ≤ K_ind), then `proved`.
 
-重要: 個別判定の前提 Inv(σ_t) は**全 invariant の連言**を仮定してよい
-(相互帰納。標準的かつ健全 — 全部の同時帰納より強い前提で各々を示す)。
+Important: the premise Inv(σ_t) of the per-invariant decision may assume the
+**conjunction of all invariants** (mutual induction; standard and sound — each is
+proven under a stronger premise than simultaneous induction of all).
 
-### 2.3 健全性メモ(実装者向け)
+### 2.3 Soundness notes (for implementers)
 
-- 前提に Init を**入れない**こと(入れると BMC と同じになり証明にならない)。
-- `_bounds_*` も Inv に含める。bounded 型の変数は step case では自由変数に
-  なるため、bounds を仮定しないと「範囲外の幽霊状態」由来の偽 CTI が大量に出る。
-  (bounds の **check** は base case が担っており、step の前提に入れても
-  隠蔽は起きない — base で全到達状態の bounds 違反は検出済みのため。)
-- enum / Option の物理エンコーディング制約(例: enum 値 ∈ [0, n-1]、
-  `present == false` のとき value は don't care)のうち、型として常に成り立つ
-  べきものは step の前提に追加する。さもないと物理エンコーディング上
-  ありえない CTI が出る。具体的には:
-  - enum フィールド/変数 v: `0 <= v < len(members)` (これは `_bounds_*` が
-    enum を含むなら不要。含まれていなければ明示追加)
-  - Option: 追加制約不要(present/value とも任意の組合せが意味を持つ)
-- deadlock 検査は induction では行わない(deadlock は到達可能性の性質)。
-  `deadlock` フィールドは `--engine induction` の出力に含めない。
-- action coverage も base case(BMC)側の結果をそのまま使う。
+- Do **not** put Init into the premise (doing so makes it the same as BMC and not a proof).
+- Include `_bounds_*` in Inv too. Since variables of bounded type become free
+  variables in the step case, without assuming the bounds a large number of false
+  CTIs originating from "ghost states out of range" appear. (The **check** of the
+  bounds is borne by the base case, so putting them into the step premise causes
+  no masking — because bounds violations across all reachable states are already
+  detected in the base.)
+- Among the physical-encoding constraints of enum / Option (e.g. enum value ∈
+  [0, n-1], value is don't-care when `present == false`), add those that should
+  always hold as a type to the step premise. Otherwise CTIs that are impossible
+  under the physical encoding appear. Concretely:
+  - enum field/variable v: `0 <= v < len(members)` (unnecessary if `_bounds_*`
+    includes the enum; if not, add it explicitly)
+  - Option: no additional constraint needed (any combination of present/value is meaningful)
+- Deadlock checking is not done in induction (deadlock is a reachability
+  property). The `deadlock` field is not included in the output of
+  `--engine induction`.
+- Action coverage also uses the base-case (BMC) result as-is.
 
-## 3. CTI(counterexample to induction)の抽出
+## 3. Extracting the CTI (counterexample to induction)
 
-step case が sat のとき、モデルから k+1 状態のトレースを構築する。
-JSON(§9 で確定済みの形を多状態に一般化):
+When the step case is sat, build a trace of k+1 states from the model.
+JSON (the shape finalized in §9, generalized to multiple states):
 
 ```json
 {
@@ -96,25 +106,26 @@ JSON(§9 で確定済みの形を多状態に一般化):
 }
 ```
 
-- `states` の表示は既存 `_build_trace` の論理値復元(`logical_state_values`)を
-  そのまま使う(enum 名逆引き、Option null/値、struct dict、`__` 内部名なし)。
-- §9 の `cti: {state, action, next_state}` 形(k=1 用)は、この一般形の
-  別名とせず**一般形に統一**する(k=1 でも `states` 配列、長さ2)。
-  DESIGN-v1.md §9 の JSON 例は本書の形に追従して更新すること。
-- 終了コードは **2 でも 1 でもなく 0 でもなく**、新設はせず `1` を使う
-  (「性質は未確立」のカテゴリ。修復ループは result 文字列で分岐するので
-  終了コードの粒度は不要)。
+- The display of `states` uses the existing `_build_trace` logical-value recovery
+  (`logical_state_values`) as-is (enum name reverse lookup, Option null/value,
+  struct dict, no `__` internal names).
+- The §9 `cti: {state, action, next_state}` shape (for k=1) is **not** an alias
+  but is **unified into this general form** (even for k=1, a `states` array of
+  length 2). The JSON example in DESIGN-v1.md §9 should be updated to follow this document's shape.
+- The exit code is **not 2, not 1 of a new kind, and not 0**, but reuses `1`
+  without introducing a new one (the "property not yet established" category;
+  the repair loop branches on the result string, so exit-code granularity is unnecessary).
 
-## 4. CLI / JSON の変更点
+## 4. CLI / JSON changes
 
 ```
 fslc verify <file.fsl> --engine induction [--k N] [--depth K]
 ```
 
-- `--engine bmc`(既定)は完全に従来動作。コードパスも共有部以外触らない。
-- `--k N`: 最大帰納深さ K_ind。既定 1。
-- `--depth K`: base case の BMC 深さ + reachable witness 探索深さ。既定 8。
-- 成功時の出力:
+- `--engine bmc` (default) behaves exactly as before. Code paths are untouched outside the shared parts.
+- `--k N`: maximum induction depth K_ind. Default 1.
+- `--depth K`: BMC depth of the base case + reachable witness search depth. Default 8.
+- Output on success:
 
 ```json
 {
@@ -125,69 +136,72 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
   "k_used": { "ShippedWasPaid": 1, "RevenueConsistent": 2, "_bounds_orders": 1 },
   "base_depth": 8,
   "invariants_checked": [...],
-  "action_coverage": {...},        // base case の BMC から
-  "reachables": {...},             // base case 側で witness 探索した結果
+  "action_coverage": {...},        // from the base-case BMC
+  "reachables": {...},             // result of the witness search on the base-case side
   "warnings": [...]
 }
 ```
 
-- `proved` の終了コードは 0。
-- reachable が見つからない場合は従来どおり `reachable_failed`(exit 1)が
-  proved より**優先**される(性質が全部成立して初めて 0)。
-- 既存スキーマとの整合: `violated` 時の形は BMC と完全同一(base case が
-  返すため自動的にそうなる)。
+- The exit code of `proved` is 0.
+- If a reachable is not found, `reachable_failed` (exit 1) takes **precedence**
+  over proved as before (0 only when all properties hold).
+- Consistency with the existing schema: the `violated` shape is completely
+  identical to BMC (it is so automatically because the base case returns it).
 
-## 5. 既存コードへの組み込み(bmc.py)
+## 5. Integration into existing code (bmc.py)
 
-新関数 `prove(spec, k_ind, base_depth, deadlock_mode)`:
+New function `prove(spec, k_ind, base_depth, deadlock_mode)`:
 
-1. `verify(spec, base_depth, ...)` を呼ぶ(= base case + reachables + coverage)。
-   - `violated` / `reachable_failed` / `error` ならそのまま返す。
-2. step case 用に状態列 σ_0..σ_k を `make_state(spec, t)`(名前衝突回避の
-   ため `@ind{t}` などの suffix)で作り、共通ソルバーに
-   Inv(σ_0..σ_{k-1}) と T を積む。
-3. invariant ごとに push / ¬inv_i(σ_k) / check / pop。
-4. 全部 unsat → verify の結果 dict を `result: "proved"` に組み替えて返す。
-   どれか sat → CTI 抽出して `unknown_cti`。
-5. k をインクリメントするとき、σ_{k+1} と Inv(σ_k)・T(σ_k, σ_{k+1}) を
-   **追加するだけ**で再利用できる(ソルバーを作り直さない)。
-   ただし「Inv(σ_k) を前提に追加」は k での ¬inv_i 検査と矛盾しないよう
-   pop 後に行うこと。
+1. Call `verify(spec, base_depth, ...)` (= base case + reachables + coverage).
+   - If `violated` / `reachable_failed` / `error`, return as-is.
+2. For the step case, build the state sequence σ_0..σ_k with `make_state(spec, t)`
+   (a suffix such as `@ind{t}` to avoid name collisions), and push Inv(σ_0..σ_{k-1})
+   and T onto a shared solver.
+3. Per invariant: push / ¬inv_i(σ_k) / check / pop.
+4. All unsat → reshape the verify result dict to `result: "proved"` and return.
+   Any sat → extract the CTI and `unknown_cti`.
+5. When incrementing k, you can reuse by **only adding** σ_{k+1} and Inv(σ_k)·
+   T(σ_k, σ_{k+1}) (do not rebuild the solver). However, "adding Inv(σ_k) to the
+   premise" must be done after the pop so as not to conflict with the ¬inv_i check at k.
 
-実装ノート:
-- `eval_expr(inv, σ_t, {}, spec)` は既存のまま使える(状態 dict を差し替える
-  だけ)。`transition(spec, instances, σ_t, σ_{t+1}, ch_t)` も同様。
-- choice 変数は step 用に別名(`__ind_choice@t`)。
-- PERF1 の解決(展開共有)が前提。完了後のコードベースに乗せること。
+Implementation notes:
+- `eval_expr(inv, σ_t, {}, spec)` can be used as-is (just swap the state dict).
+  `transition(spec, instances, σ_t, σ_{t+1}, ch_t)` likewise.
+- Choice variables get a separate name for the step (`__ind_choice@t`).
+- The resolution of PERF1 (expansion sharing) is a prerequisite. Build on top of the post-completion codebase.
 
-## 6. テスト計画(回帰スイートに追加するもの)
+## 6. Test plan (to be added to the regression suite)
 
-1. **proved になる仕様**: `specs/cart_v1.fsl` は SoldOut witness があるので
-   そのまま proved + reachables を確認(k=1 で全 invariant が帰納的のはず。
-   もし CTI が出るなら、それ自体が「bounds を前提に入れ忘れ」等の実装バグの兆候)。
-2. **counter ラッチ**(確実に k=1 で proved):
+1. **A spec that becomes proved**: `specs/cart_v1.fsl` has a SoldOut witness, so
+   confirm it is proved + reachables as-is (all invariants should be inductive at
+   k=1; if a CTI appears, that itself is a sign of an implementation bug such as
+   "forgot to put bounds in the premise").
+2. **counter latch** (reliably proved at k=1):
    `state { x: Int }  init { x = 0 }  action inc() { requires x < 5  x = x + 1 }
    invariant XRange { x >= 0 and x <= 5 }`
-3. **unknown_cti になる仕様**(帰納的でない真の invariant):
+3. **A spec that becomes unknown_cti** (a true but non-inductive invariant):
    `state { x: Int, y: Int }  init { x = 0  y = 0 }
    action step() { requires x < 4  x = x + 1  y = y + 1 }
-   invariant Sync { y <= 4 }` — Sync は真(y は x と同期して 4 で止まる)だが
-   x との結び付き(補助 invariant `x == y`)なしでは帰納的でない。
-   CTI が返り、`states` が JSON 直列化可能で、hint があること。
-   さらに `invariant Aux { x == y }` を足すと **proved** に変わること
-   (= LLM 補強ループの end-to-end 検証)。
-4. **base で violated**: cart_v1_buggy が induction でも従来と同一の
-   violated JSON(最短反例)を返すこと。
-5. **CLI**: `--engine induction` の exit code(proved=0, unknown_cti=1)、
-   `engine`/`k_used` フィールドの存在。
-6. **k=2 が必要な仕様**(k_used に 2 が現れる例):
+   invariant Sync { y <= 4 }` — Sync is true (y stays in sync with x and stops at
+   4) but is not inductive without its tie to x (the auxiliary invariant `x == y`).
+   A CTI is returned, `states` is JSON-serializable, and a hint is present.
+   Furthermore, adding `invariant Aux { x == y }` changes it to **proved**
+   (= end-to-end verification of the LLM strengthening loop).
+4. **violated in the base**: cart_v1_buggy returns, under induction, the same
+   violated JSON (shortest counterexample) as before.
+5. **CLI**: the exit code of `--engine induction` (proved=0, unknown_cti=1), and
+   the presence of the `engine`/`k_used` fields.
+6. **A spec that requires k=2** (an example where 2 appears in k_used):
+   one-step-delayed following such as
    `state { a: Bool, b: Bool }  init { a = false  b = false }
-   action flip() { a = not a  b = a }` のような 1 手遅れ追従で
-   `invariant Lag { b => a }` … 実装後に実例で調整してよい(コメント参照)。
-   作りにくければ k=2 ケースは「Aux を抜いた Sync で k=2..4 を試して全部 sat」
-  (= k 反復が回ること)の検証で代替可。
+   action flip() { a = not a  b = a }` with
+   `invariant Lag { b => a }` … may be tuned with a real example after
+   implementation (see the comment). If hard to construct, the k=2 case may be
+   substituted by verifying "with Aux removed, Sync is tried at k=2..4 and all
+   are sat" (= that the k iteration runs).
 
-## 7. DESIGN-v1.md への反映
+## 7. Reflecting back into DESIGN-v1.md
 
-実装完了時に §9 を本書へのポインタ+確定 JSON 形(states 配列形)に更新し、
-§7.1 の `--engine induction` から「v1.1」の注記を外す。
+On implementation completion, update §9 to a pointer to this document + the
+finalized JSON shape (states-array form), and remove the "v1.1" note from
+`--engine induction` in §7.1.

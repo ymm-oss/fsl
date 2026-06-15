@@ -67,7 +67,7 @@ GALLERY_CASES = [
         "adversarial/refine_mapping_boundary_map.fsl",
         "refine refine_mapping_boundary_impl.fsl refine_mapping_boundary_abs.fsl refine_mapping_boundary_map.fsl --depth 2",
         "refinement_failed",
-        # jump 後の状態不一致(bump は n=1 だが α(n)=2)を境界検査より先に検出する
+        # detect the post-jump state mismatch (bump is n=1 but α(n)=2) before the boundary check
         "abs_state_mismatch",
     ),
     GalleryCase("adversarial/clever_double_assignment_placement.fsl", "verify --depth 3", "error", "semantics"),

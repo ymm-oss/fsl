@@ -1,118 +1,125 @@
-# FSL v3.1 — 非機能要件(NFR)の取り扱い 設計
+# FSL v3.1 — design for handling non-functional requirements (NFR)
 
-結論: **NFR の過半は既存カーネルで扱え、時間(SLA/タイムアウト)は離散時刻
-構文の追加で扱える。確率・パーセンタイル・実時間は対象外**(正直な線引き)。
-カーネル意味論は変更しない(時間構文も方言展開)。
+Conclusion: **the majority of NFRs can be handled by the existing kernel, and time
+(SLA/timeout) can be handled by adding discrete-time syntax. Probability, percentiles,
+and real time are out of scope** (an honest boundary). The kernel semantics are not
+changed (the time syntax is also a dialect expansion).
 
-## 1. NFR カテゴリ → FSL 対応表(本設計の全体像)
+## 1. NFR category → FSL mapping table (overview of this design)
 
-| NFR カテゴリ | 扱い | 機構 |
+| NFR category | Handling | Mechanism |
 |---|---|---|
-| セキュリティ/権限(「X できるのは管理者のみ」) | **今日から可** | ロール状態 + requires + invariant(イディオム化) |
-| 監査/コンプライアンス(「全操作が記録される」) | **今日から可** | bank_system の監査パターン(横断 invariant) |
-| 容量/上限(「キューは N まで」「同時 M 件」) | **今日から可** | 有界型・Seq 容量・count invariant |
-| 信頼性の挙動(フェイルオーバー・縮退・復旧) | **今日から可** | 故障注入アクション + モード状態 + 復旧 leadsTo(イディオム化) |
-| 性能/SLA(「K tick 以内に完了」)・タイムアウト | **本設計で追加** | `time` ブロック(離散時刻)+ `deadline` |
-| スループット率・99.9%・パーセンタイル・実時間(ms) | **対象外** | 確率/定量意味論が必要(PRISM 等の領域)。文書に書く |
-| ユーザビリティ・保守性 | 対象外 | 形式化対象外 |
+| Security/authorization ("only admins can X") | **possible today** | role state + requires + invariant (idiomatized) |
+| Audit/compliance ("all operations are recorded") | **possible today** | bank_system's audit pattern (cross-cutting invariant) |
+| Capacity/limit ("queue up to N", "M concurrent") | **possible today** | bounded type / Seq capacity / count invariant |
+| Reliability behavior (failover, degradation, recovery) | **possible today** | fault-injection action + mode state + recovery leadsTo (idiomatized) |
+| Performance/SLA ("complete within K ticks") / timeout | **added in this design** | `time` block (discrete time) + `deadline` |
+| Throughput rate / 99.9% / percentile / real time (ms) | **out of scope** | requires probabilistic/quantitative semantics (the domain of PRISM etc.). Document it |
+| Usability / maintainability | out of scope | not a target for formalization |
 
-## 2. 実証スパイク(2026-06-12、無修正カーネル)
+## 2. Demonstration spike (2026-06-12, unmodified kernel)
 
-「ワーカー1・処理2tick・リクエスト2件、SLA: 受理から4tick以内に完了」を
-手書きカーネルで構成(tick アクション+age カウンタ+urgency 規律):
+"1 worker, processing 2 ticks, 2 requests, SLA: complete within 4 ticks of acceptance"
+was constructed by hand in the kernel (tick action + age counter + urgency discipline):
 
-- **BMC**: verified(SLA は深さ内で成立)
-- **負例**(urgency を外す= tick がいつでも可)→ `violated` /
-  `submit → tick×5` の**飢餓トレース** + `requirement: NFR-1(原文)`
-- **帰納証明**: 補助 invariant 6本(構造3: 排他・serving⇒pending・
-  busy⇒serving / **時間予算3**: `age[serving] + busy <= 4`、待機者の
-  予算、サービス開始前は age=0)を CTI 4ラウンドで導出して **proved**
+- **BMC**: verified (the SLA holds within the depth)
+- **Counterexample** (remove urgency = tick is always possible) → `violated` /
+  the **starvation trace** of `submit → tick×5` + `requirement: NFR-1 (original text)`
+- **Inductive proof**: 6 auxiliary invariants (3 structural: mutual exclusion,
+  serving⇒pending, busy⇒serving / **3 time-budget**: `age[serving] + busy <= 4`, the
+  waiter's budget, age=0 before service starts) were derived over 4 CTI rounds to reach
+  **proved**
 
-知見: (a) SLA は安全性(age 上限 invariant)として検査できる。
-(b) **urgency 規律が本質** — 「緊急アクションが enabled の間は時間が進まない」
-を tick のガードに織り込まないと、インターリービングが常に飢餓反例を作る。
-(c) BMC 検査は即動く。帰納証明は時間予算 invariant の階梯が必要で、
-未時間化仕様(1ラウンド収束)より重い(4ラウンド)— 既定は BMC、証明は
-オプトインと位置づける。
+Findings: (a) an SLA can be checked as a safety property (an age-upper-bound invariant).
+(b) **the urgency discipline is essential** — unless "time does not advance while an
+urgent action is enabled" is woven into the tick guard, interleaving always produces a
+starvation counterexample.
+(c) BMC checking works immediately. The inductive proof requires a ladder of time-budget
+invariants and is heavier (4 rounds) than an untimed spec (1-round convergence) — the
+default is BMC, and the proof is positioned as opt-in.
 
-## 3. 構文(`requirements` 方言に追加)
+## 3. Syntax (added to the `requirements` dialect)
 
 ```fsl
 requirements OrderProcessingReq {
-  ...型・state・init・requirement...
+  ...types, state, init, requirement...
 
   time {
-    urgent start, finish                       // enabled の間 tick を禁止
-    age waitAge[r: Req] while pending[r]       // tick で +1、条件偽で 0 リセット
-    age idleAge while queue.size() == 0        // スカラ形も可
+    urgent start, finish                       // forbid tick while enabled
+    age waitAge[r: Req] while pending[r]       // +1 on tick, reset to 0 when condition is false
+    age idleAge while queue.size() == 0        // scalar form is also allowed
   }
 
-  requirement NFR-1 "受理されたリクエストは4tick以内に完了する" {
+  requirement NFR-1 "an accepted request completes within 4 ticks" {
     deadline waitAge <= 4
   }
 }
 ```
 
-### 3.1 展開規則(すべて既存カーネル構文へ)
+### 3.1 Expansion rules (all into existing kernel syntax)
 
-`time` ブロック(`requirements` 内に高々1つ):
+The `time` block (at most one inside `requirements`):
 
 1. `age m[x: T] while P` →
-   - 上限 `cap = max(その age を参照する deadline の K) + 1`(参照する
-     deadline が無ければ type エラー「unused age」)
-   - `type _AgeM = 0..cap` 相当のドメイン + `state { m: Map<T, _AgeM> }` +
-     init 0(スカラ形は `m: _AgeM`)
-2. `urgent a, b, ...` → 列挙された(展開後の)アクション名を検証
-   (branches 分割前の名前で書く: `urgent submit` は分割後の全分岐に適用)。
-3. tick アクションを自動生成:
+   - upper bound `cap = max(K of the deadlines referencing this age) + 1` (a type error
+     "unused age" if no deadline references it)
+   - a domain equivalent to `type _AgeM = 0..cap` + `state { m: Map<T, _AgeM> }` + init 0
+     (the scalar form is `m: _AgeM`)
+2. `urgent a, b, ...` → validate the enumerated (post-expansion) action names
+   (written with the names before branches splitting: `urgent submit` applies to all
+   branches after splitting).
+3. Auto-generate the tick action:
    ```
    action tick() {
-     requires not (exists <urgent各アクションの全パラメータ束縛> { その requires 連言 })
+     requires not (exists <all parameter bindings of each urgent action> { their requires conjunction })
      forall x: T { if P { if m[x] < cap { m[x] = m[x] + 1 } } else { m[x] = 0 } }
-     ...全 age について同様...
+     ...similarly for all ages...
    }
    ```
-   urgent の requires が is-束縛を含む場合もそのまま exists 内に埋め込める
-   (カーネル式)。`tick` という名前のユーザーアクションが既にあれば type エラー。
-4. `deadline m <= K`(requirement 内)→ meta 付き invariant
-   `forall x: T { m[x] <= K }`(スカラは `m <= K`)。
-   deadline は time ブロックで宣言された age のみ参照可。
+   When an urgent's requires contains an is-binding, it can be embedded directly inside
+   the exists (a kernel expression). A type error if a user action named `tick` already
+   exists.
+4. `deadline m <= K` (inside a requirement) → a meta-tagged invariant
+   `forall x: T { m[x] <= K }` (the scalar is `m <= K`).
+   A deadline may only reference an age declared in the time block.
 
-### 3.2 意味論ノート(ドキュメントに明記すること)
+### 3.2 Semantics notes (to be stated explicitly in the documentation)
 
-- tick は他のアクションと同じ1ステップ。「K tick 以内」= 「P が連続して
-  成立する間に tick は高々 K 回」。
-- urgency は**モデリング上の前提**(「システムは暇なときに仕事を先延ばし
-  しない」)。urgent を指定しなければ大半の deadline は飢餓反例で落ちる —
-  それは検査が正しく「スケジューリング前提が無い」ことを指摘している。
-- deadline 違反の反例トレースには tick が並ぶ(待ち時間が見える)。
-- 帰納証明には時間予算の補助 invariant(`age + 残り作業 <= K` 型)が
-  必要になることが多い。CTI から導出する(§2 の実例を examples に置く)。
-- deadlock 検査との関係: tick が requires を持つため「全 urgent が
-  disabled かつ時間も進めない」状態は deadlock として検出される(正しい)。
+- A tick is one step like any other action. "within K ticks" = "at most K ticks while P
+  holds continuously".
+- Urgency is a **modeling premise** ("the system does not defer work when idle"). If
+  urgent is not specified, most deadlines fail with a starvation counterexample — that
+  is the check correctly pointing out that "there is no scheduling premise".
+- The counterexample trace of a deadline violation lines up ticks (the waiting time is
+  visible).
+- The inductive proof often needs time-budget auxiliary invariants (of the
+  `age + remaining work <= K` form). Derive them from CTIs (place the worked example
+  of §2 in examples).
+- Relationship with deadlock checking: since tick has a requires, a state where "all
+  urgent are disabled and time cannot advance" is detected as a deadlock (correct).
 
-## 4. 既存カーネルで足りる NFR のイディオム化(ドキュメントのみ)
+## 4. Idiomatizing NFRs the existing kernel suffices for (documentation only)
 
-LANGUAGE.md / skills に「NFR の書き方」節を追加:
+Add an "how to write NFRs" section to LANGUAGE.md / skills:
 
-- **権限**: `requires role[u] == Admin`、invariant
-  `forall x { sensitive_done[x] => done_by_admin[x] }`(ゴースト)
-- **監査完全性**: bank_system パターン(`audit.balance == ... + withdrawn`)
-- **容量**: 型境界 + `requires q.size() < CAP`(枯渇時の挙動も action で明示)
-- **信頼性の挙動**: `action crash() { mode = Degraded }` 等の故障注入 +
+- **Authorization**: `requires role[u] == Admin`, invariant
+  `forall x { sensitive_done[x] => done_by_admin[x] }` (ghost)
+- **Audit completeness**: the bank_system pattern (`audit.balance == ... + withdrawn`)
+- **Capacity**: type bounds + `requires q.size() < CAP` (make the exhaustion behavior
+  explicit in an action too)
+- **Reliability behavior**: fault injection such as `action crash() { mode = Degraded }` +
   `invariant DegradedRefusesWrites` + `fair action recover` +
   `leadsTo CrashRecovers { mode == Degraded ~> mode == Normal }`
 
-## 5. 実装計画
+## 5. Implementation plan
 
-1. `expand_requirements` に time/deadline/urgent を追加(§3.1)。
-2. テスト(tests/test_nfr.py): §2 のスパイクを方言で書いた fixture が
-   (a) BMC verified、(b) urgent を外した変種が violated + 飢餓トレース +
-   requirement、(c) 補助 invariant を足した版が proved、(d) unused age /
-   未知 urgent / tick 名衝突 / time ブロック重複の type エラー、
-   (e) 既存全テスト不変。
-3. examples/nfr/: 手書きカーネル版(証明済み・補助 invariant 込み)と
-   方言版を並置 + README。
-4. LANGUAGE.md(§13 に time/deadline、新節「NFR の書き方」)、
-   skills/fsl(SKILL.md の規則+reference.md)、DOGFOOD-5.md(本スパイクの
-   記録)。
+1. Add time/deadline/urgent to `expand_requirements` (§3.1).
+2. Tests (tests/test_nfr.py): a fixture writing the §2 spike in the dialect, that is
+   (a) BMC verified, (b) a variant with urgent removed is violated + starvation trace +
+   requirement, (c) a version with auxiliary invariants added is proved, (d) type errors
+   for unused age / unknown urgent / tick-name collision / duplicate time block,
+   (e) all existing tests unchanged.
+3. examples/nfr/: a hand-written kernel version (proved, with auxiliary invariants) and
+   the dialect version side by side + README.
+4. LANGUAGE.md (time/deadline in §13, a new "how to write NFRs" section), skills/fsl
+   (SKILL.md rules + reference.md), DOGFOOD-5.md (record of this spike).

@@ -1,4 +1,4 @@
-"""fslc にバージョン表示があり、ライブラリ版・パッケージ版と一致すること。"""
+"""fslc reports a version, and it matches both the library and package versions."""
 import subprocess
 import sys
 from pathlib import Path

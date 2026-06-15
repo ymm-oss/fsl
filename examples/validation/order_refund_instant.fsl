@@ -1,6 +1,7 @@
-// 負例プローブ(レビューに歯があることの確認):
-// 「即時返金」— cancel を経ずに Paid から直接 Refunded へ。
-// UX 短縮の名目でありがちな近道だが、抽象契約の「refund は Cancelled のみ」を迂回する。
+// Negative probe (confirming the review has teeth):
+// "instant refund" — going directly from Paid to Refunded without passing through cancel.
+// A common shortcut taken in the name of streamlining UX, but it bypasses the
+// abstract contract's "refund only from Cancelled".
 spec OrderRefundInstant {
   const CAP = 2
   type OrderId = 0..2
@@ -34,7 +35,7 @@ spec OrderRefundInstant {
     order[o] = Cancelled
     stock = stock + 1
   }
-  action instant_refund(o: OrderId) {   // ← 近道: キャンセル手続きを飛ばす
+  action instant_refund(o: OrderId) {   // <- shortcut: skips the cancellation step
     requires order[o] == Paid
     order[o] = Refunded
     stock = stock + 1

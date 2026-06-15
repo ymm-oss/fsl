@@ -1,20 +1,22 @@
 // ════════════════════════════════════════════════════════════════
-// 注文の支払い・キャンセル・返金フロー(在庫付き)— 設計層 spec
+// Order payment / cancel / refund flow (with stock) — design-layer spec.
 //
-// 妥当性確認ワークフロー(形式化メモ → 仕様 → 正例ペア → 修復)の実走成果物。
-// 経緯は docs/DOGFOOD-9.md。仮定は下の ASSUME タグに畳んである。
+// A worked deliverable of the validation workflow (formalization note -> spec ->
+// positive-example pair -> repair). Background is in docs/DOGFOOD-9.md.
+// Assumptions are folded into the ASSUME tags below.
 //
 //   fslc verify examples/validation/order_refund.fsl --engine induction
 // ════════════════════════════════════════════════════════════════
 spec OrderRefund {
-  // ASSUME-1: 単一SKU。在庫初期 CAP=2。相互作用を見るため注文3件。
-  // ASSUME-2: キャンセルは支払い済みかつ未出荷(Paid)のみ。「出荷後はキャンセル不可」。
-  // ASSUME-3: キャンセル時に在庫を即時戻す(返金完了時ではない)。
-  // ASSUME-4: 返金は全額のみ。金額はモデル化せず件数台帳で扱う(MODEL)。
-  // ASSUME-5: 「返金は一定期間内」(元要件 R5)は離散時刻 SLA。設計層では扱わず、
-  //           返金可否は「キャンセル済みなら可能」とする。期間検査は requirements
-  //           層の time+deadline に委ねる(初版で window フラグとして持ち込んだら
-  //           返金が到達不能になり、reachable FullyRefunded が検出した。DOGFOOD-9)。
+  // ASSUME-1: single SKU. Initial stock CAP=2. Three orders, to exercise interactions.
+  // ASSUME-2: cancellation is allowed only when paid and not yet shipped (Paid). "No cancel after shipping."
+  // ASSUME-3: stock is returned immediately on cancel (not at refund completion).
+  // ASSUME-4: refunds are full-amount only. Amounts are not modeled; we track a count ledger (MODEL).
+  // ASSUME-5: "refunds within a fixed window" (original requirement R5) is a discrete-time SLA.
+  //           Not handled at the design layer; refundability is simply "possible if cancelled".
+  //           The window check is delegated to time+deadline at the requirements layer
+  //           (an initial version that brought a window flag into the design layer made
+  //           refund unreachable, which reachable FullyRefunded detected. See DOGFOOD-9).
   const CAP = 2
   type OrderId = 0..2
   type Cnt = 0..3
@@ -42,26 +44,26 @@ spec OrderRefund {
     requires order[o] == Paid
     order[o] = Shipped
   }
-  action cancel(o: OrderId) "ASSUME-2: 出荷後はキャンセル不可" {
+  action cancel(o: OrderId) "ASSUME-2: no cancel after shipping" {
     requires order[o] == Paid
     order[o] = Cancelled
     stock = stock + 1
   }
   action refund(o: OrderId) {
-    requires order[o] == Cancelled       // ASSUME-5: 期間ガードは上位層
+    requires order[o] == Cancelled       // ASSUME-5: the window guard lives at the upper layer
     order[o] = Refunded
     refunded_total = refunded_total + 1
   }
 
-  // 安全性: 在庫の保存則。保有(Paid/Shipped)中の数と在庫の和は一定。
+  // Safety: stock conservation. The sum of held units (Paid/Shipped) and stock is constant.
   invariant StockConserved {
     stock + count(o: OrderId where (order[o] == Paid or order[o] == Shipped)) == CAP
   }
-  // 安全性: 返金台帳の整合。二重返金は状態機械(Cancelled→Refunded 一方向)が防ぐ。
+  // Safety: refund-ledger consistency. Double refunds are prevented by the state machine (one-way Cancelled->Refunded).
   invariant RefundLedger {
     refunded_total == count(o: OrderId where order[o] == Refunded)
   }
 
-  // 正例ペア(P4): 返金まで到達できることを検査 — 過剰制約/空虚を炙り出す。
+  // Positive-example pair (P4): check that refund is reachable — surfaces over-constraint / vacuity.
   reachable FullyRefunded { exists o: OrderId { order[o] == Refunded } }
 }

@@ -1,96 +1,115 @@
-# FSL — fsl-ui(画面遷移・UIステート方言)スパイク所見と設計
+# FSL — fsl-ui (screen-transition / UI-state dialect): spike findings and design
 
-issue #9。デザイン系方言の検討。**スコープはインタラクション設計(画面遷移・UIステート)
-に限定**(ビジュアルデザインは遷移系の意味論を持たずカーネルで検査できないため対象外。
-DESIGN-layers の原則と整合)。本書はスパイク(素の fsl で手書き → 検証 → 要件層へ refine)
-の所見と、go の場合の展開規則案。実走資産は `examples/ui_spike/`。
+issue #9. Exploration of a design-family dialect. **The scope is limited to interaction
+design (screen transitions / UI state)** (visual design has no transition-system
+semantics and cannot be checked by the kernel, so it is out of scope. Consistent with
+the DESIGN-layers principle). This document covers the findings of the spike (handwrite
+in plain fsl → verify → refine into the requirements layer) and a proposed expansion
+rule set if we go. The running assets are in `examples/ui_spike/`.
 
-## スパイクの結論: 技術的実現性は確認(conditional GO)
+## Spike conclusion: technical feasibility confirmed (conditional GO)
 
-返品ドメインの申請画面フロー(Form → Submitting → ReadyToPay/MgrPending → Done/Error)を
-**素の fsl で手書きし、検証も要件層への refine も通った**。カーネルの意味論変更は不要で、
-fsl-ui は AST 展開(糖衣)として成立する見込み。
+A returns-domain application screen flow (Form → Submitting → ReadyToPay/MgrPending →
+Done/Error) was **handwritten in plain fsl, and both verification and refinement into
+the requirements layer passed**. No change to the kernel semantics is needed, and fsl-ui
+looks viable as an AST expansion (syntactic sugar).
 
-## 確認できたこと
+## What was confirmed
 
-### 1. 素の fsl が画面フローを完全に表現する(新意味論ゼロ)
+### 1. Plain fsl fully expresses screen flows (zero new semantics)
 
-| デザイン上の問い | カーネル機能 | スパイク結果 |
+| Design question | Kernel feature | Spike result |
 |---|---|---|
-| 全画面に到達できるか(デッドスクリーン) | `reachable` | CanDone/CanError/CanMgr 全 witness |
-| 袋小路・無限ローディングがないか | `leadsTo` | `SubmitResolves: Submitting ~> not Submitting` proved |
-| ガード付き遷移の整合 | `requires` | フォーム空で submit 不可 等 |
-| 二重送信防止 | `invariant` | `submitting => screen == Submitting` proved |
-| 画面=状態 / 遷移=操作 | `enum` / `action` | そのまま |
+| Are all screens reachable (dead screens)? | `reachable` | CanDone/CanError/CanMgr all witnessed |
+| No dead ends / infinite loading? | `leadsTo` | `SubmitResolves: Submitting ~> not Submitting` proved |
+| Consistency of guarded transitions | `requires` | submit impossible with an empty form, etc. |
+| Double-submit prevention | `invariant` | `submitting => screen == Submitting` proved |
+| Screen = state / transition = operation | `enum` / `action` | as-is |
 
-`ReturnUI` は **verified + proved(k=1)**。
+`ReturnUI` is **verified + proved (k=1)**.
 
-### 2. UI フローは要件層を refine する(アーキテクチャ検証)
+### 2. The UI flow refines the requirements layer (architecture verification)
 
-`fsl-req ⊒ fsl-ui`(設計層の兄弟として並走)が機械的に成立。UI フロー(impl)が
-要件エッセンス(abs)を **refines**:
-- UI 専用ステップ(enter_amount/submit/resp_mgr/resp_error/retry)→ `stutter`
-- ドメインをコミットするステップ(resp_auto/mgr_approved → approve、pay → pay)→ 要件アクション
+`fsl-req ⊒ fsl-ui` (running alongside as a sibling of the design layer) holds
+mechanically. The UI flow (impl) **refines** the requirements essence (abs):
+- UI-only steps (enter_amount/submit/resp_mgr/resp_error/retry) → `stutter`
+- Steps that commit the domain (resp_auto/mgr_approved → approve, pay → pay) →
+  requirement actions
 
-これが #9 の核心価値「要件の受け入れ基準ステップ列に画面パスが存在するか」を機械検査で
-担保することの実証(「要件は定義したが UI に導線がない」を反例付きで検出できる)。
+This demonstrates that #9's core value — "does a screen path exist for the acceptance-
+criteria step sequence of a requirement?" — can be guaranteed by a mechanical check
+(it can detect, with a counterexample, "the requirement is defined but the UI has no
+path to it").
 
-## 見つかった落とし穴(展開器が吸収すべきもの)
+## Pitfalls found (things the expander should absorb)
 
-### F-UI-1(バグ・修正済み): refinement の 0引数 abstract アクション写像
+### F-UI-1 (bug, fixed): refinement's 0-argument abstract action mapping
 
-`action pay() -> pay()`(0引数 impl → 0引数 abstract)が `expects 0 arguments` の偽エラーで
-落ちた。原因は Lark `maybe_placeholders` が空括弧を `(None,)` にし、引数1個と数えていたこと。
-既存 refinement は 0引数 impl を全て `stutter` に写していたため未発覚。`grammar.py` の
-`mapped_action_target` / `req_mapped_action_target` で None を除去して修正(本スパイクの副産物)。
+`action pay() -> pay()` (0-arg impl → 0-arg abstract) failed with a spurious
+`expects 0 arguments` error. The cause was that Lark's `maybe_placeholders` turns empty
+parentheses into `(None,)`, counting it as one argument. It went undetected because
+existing refinement mapped all 0-arg impls to `stutter`. Fixed by stripping None in
+`mapped_action_target` / `req_mapped_action_target` in `grammar.py` (a byproduct of this
+spike).
 
-### F-UI-2: 下書き(フォーム入力)状態は写像でゲートせよ
+### F-UI-2: gate draft (form-input) state with the mapping
 
-`map amt = amount` と直結すると、フォーム入力(未コミット)が抽象ビューに漏れ
-`stutter_changed_abs`。`map amt = if screen == ReadyToPay or screen == Done then amount else 0`
-と**コミット済み画面でのみ可視化**する状態タグ写像が必要(seat_booking と同型)。
-UI フロー特有の「下書き vs 確定」の区別。
+Directly wiring `map amt = amount` leaks form input (uncommitted) into the abstract view
+(`stutter_changed_abs`). A state-tag mapping that **makes it visible only on committed
+screens** is needed:
+`map amt = if screen == ReadyToPay or screen == Done then amount else 0` (isomorphic to
+seat_booking). The "draft vs. confirmed" distinction characteristic of UI flows.
 
-### F-UI-3(重要): 画面名とドメイン状態名の enum 衝突
+### F-UI-3 (important): enum collision between screen names and domain state names
 
-UI の `Screen.Paid` と要件の `St.Paid` が同名だと、写像式 `if screen == Paid then Paid` の
-右辺が impl 側 enum に解決され `abs_state_mismatch`。**画面名はドメイン状態名と被りやすい**
-ので fsl-ui の頻出ハザード。スパイクでは `Done` に改名して回避。
-→ 展開器は画面 enum を名前空間化(例 `ui_Screen`)して衝突を構造的に防ぐべき。
+If the UI's `Screen.Paid` and the requirement's `St.Paid` share a name, the right-hand
+side of the mapping expression `if screen == Paid then Paid` resolves to the impl-side
+enum, giving `abs_state_mismatch`. **Screen names easily clash with domain state names**,
+so this is a frequent hazard for fsl-ui. In the spike it was avoided by renaming to
+`Done`.
+→ The expander should namespace the screen enum (e.g., `ui_Screen`) to structurally
+prevent the collision.
 
-### F-UI-4: back stack は Seq でなく Map+depth
+### F-UI-4: the back stack is Map+depth, not Seq
 
-戻る(LIFO)に対し `Seq<T,N>` は FIFO で不向き。`Map<Depth,Screen> + depth` イディオムで
-表現でき(`NavStack` が verified)、満杯は depth のガード/type_bound、空 back は
-`requires depth > 0`。同時代入のため `cur = hist[depth - 1]` は depth の旧値を読む点に注意。
-新カーネル不要だが**展開器がこのイディオムを生成すべき**(手書きは煩雑)。
+For back (LIFO), `Seq<T,N>` is FIFO and unsuitable. It can be expressed with the
+`Map<Depth,Screen> + depth` idiom (`NavStack` is verified); full is a guard/type_bound on
+depth, and empty back is `requires depth > 0`. Note that because of simultaneous
+assignment, `cur = hist[depth - 1]` reads the old value of depth. No new kernel is needed,
+but **the expander should generate this idiom** (handwriting is cumbersome).
 
-## 展開規則案(go の場合、`expand_ui`、compose/expand_business と同型)
+## Proposed expansion rules (if we go, `expand_ui`, isomorphic to compose/expand_business)
 
-| 方言構文(案) | カーネル展開 |
+| Dialect syntax (proposed) | Kernel expansion |
 |---|---|
-| `screen S { A, B, ... }` | `enum ui_S { A, ... }`(名前空間化、F-UI-3 対策)+ `state { screen: ui_S }` |
+| `screen S { A, B, ... }` | `enum ui_S { A, ... }` (namespaced, F-UI-3 countermeasure) + `state { screen: ui_S }` |
 | `navigate <act> A -> B [requires …]` | `action <act> { requires screen == A … screen = B }` |
-| `back`(有効時) | `Map<Depth,Screen> + depth` イディオム生成(F-UI-4) |
-| `modal M over A { … }` | サブ画面 enum + 復帰遷移 |
-| `loading`/`async` 状態 | 画面 × 非同期状態の struct/直積(糖衣の効かせ方は要検討) |
-| `implements <Req> from "…" { map … }` | 要件層への refinement 自動生成(F-UI-2/3 を写像生成で吸収) |
+| `back` (when valid) | generate the `Map<Depth,Screen> + depth` idiom (F-UI-4) |
+| `modal M over A { … }` | sub-screen enum + return transition |
+| `loading`/`async` state | struct/product of screen × async state (how to apply the sugar needs further study) |
+| `implements <Req> from "…" { map … }` | auto-generate refinement into the requirements layer (absorbing F-UI-2/3 via mapping generation) |
 
-## この層が扱わないもの(FSL の外)
+## What this layer does not handle (outside FSL)
 
-ビジュアルデザイン(色・タイポ・レイアウト・美的判断)、ユーザビリティ、アニメーション。
-遷移系の意味論を持たないものは各層の文書に書く(カーネルに展開しない大原則)。
+Visual design (color, typography, layout, aesthetic judgment), usability, animation.
+Things without transition-system semantics are documented in each layer's docs (the
+fundamental principle of not expanding into the kernel).
 
-## 進め方 / go-no-go
+## How to proceed / go-no-go
 
-- 技術リスクはスパイクで除去済み(表現可能・refine 可能・新カーネル不要)。
-- 残る設計作業は **back stack 糖衣** と **画面 enum の名前空間化**(F-UI-3/4。いずれも特定済み)。
-- 想定ユーザーは デザインエンジニア/ハンドオフ検証、または **AI が Figma フロー図を fsl-ui に
-  転記して検査**(AI-Native の立ち位置)。デザイナー直書きは非現実的。
-- **判断**: UI フロー検査の需要があれば go(`expand_ui` + テスト + ドッグフーディング)。
-  需要が薄ければ、当面は「素の fsl で画面フローを書く」運用(本スパイクの ReturnUI が雛形)で
-  十分価値が出る。**F-UI-1 の修正は方言と独立に有用なので先行マージ済み。**
+- The technical risk has been eliminated by the spike (expressible, refinable, no new
+  kernel needed).
+- The remaining design work is the **back-stack sugar** and the **namespacing of the
+  screen enum** (F-UI-3/4, both identified).
+- The intended users are design engineers / handoff verification, or **an AI
+  transcribing a Figma flow diagram into fsl-ui and checking it** (the AI-Native
+  position). Designers writing it directly is unrealistic.
+- **Decision**: go if there is demand for UI-flow checking (`expand_ui` + tests +
+  dogfooding). If demand is thin, the operation of "write screen flows in plain fsl" (the
+  spike's ReturnUI as a template) delivers enough value for now. **The F-UI-1 fix is
+  useful independently of the dialect, so it has already been merged ahead.**
 
-## 不変の原則
+## Invariant principle
 
-カーネルの意味論に変更を加えない。方言は AST 展開のみ。表現できないものは層の文書に書く。
+Do not change the kernel semantics. Dialects are AST expansion only. Things that cannot
+be expressed are documented in the layer's docs.

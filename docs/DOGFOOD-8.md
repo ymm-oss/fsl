@@ -1,111 +1,112 @@
-# DOGFOOD-8: 盲検可記述性テスト(G1 の外部検証・第1回)
+# DOGFOOD-8: Blind Writability Test (External Validation of G1 — Round 1)
 
-## 目的
-このプロジェクト唯一の未検証コア命題 **G1「作者以外でも FSL を書けるか」** を測る。
-具体的には「**スキル文書(SKILL.md + reference.md)だけ**を頼りに、作者の文脈を
-持たない別エージェントが、**既存例に無い新規ドメイン**の自然文要件を、構文の
-手助けなしで proved な仕様にできるか」。
+## Goal
+To measure this project's one unverified core proposition, **G1 "can anyone other than the author write FSL?"**.
+Concretely: "relying on **the skill docs alone (SKILL.md + reference.md)**, can a separate agent with none of the
+author's context turn natural-language requirements for **a new domain not in the existing examples** into a proved
+spec, without syntax hand-holding?"
 
-## 設計(公正性のための制約)
-- 被験: 本セッションの文脈を持たない別エージェント(general-purpose、同一モデル系)。
-- 参照は `skills/fsl/SKILL.md` と `skills/fsl/reference.md` の **2文書のみ**。
-  `specs/`・`examples/`・`docs/`・`src/` の閲覧禁止(例の丸写しを排除し、
-  「スキル単体が教師として十分か」を測る)。
-- 題材: 会議室予約(3室×4スロット×3人、ダブルブッキング禁止、キャンセルで解放、
-  1人最大2件、満杯/2件保持への到達)。既存仕様に無い新規ドメイン。
-- 緑にするための invariant 骨抜きを禁止。過程をログ。
-- 結果は観察者(私)が独立に再検証 + 意味ギャラリー(要件を捉えているか)を監査。
+## Design (constraints for fairness)
+- Subject: a separate agent with none of this session's context (general-purpose, same model family).
+- References are the **2 documents only**: `skills/fsl/SKILL.md` and `skills/fsl/reference.md`.
+  Reading `specs/`, `examples/`, `docs/`, and `src/` is forbidden (to exclude copying examples verbatim and to
+  measure "whether the skill alone is a sufficient teacher").
+- Subject matter: meeting-room booking (3 rooms × 4 slots × 3 people, no double booking, cancellation frees a slot,
+  at most 2 per person, reaching full / holding 2). A new domain not in the existing specs.
+- Hollowing out the invariant to make it green is forbidden. The process is logged.
+- The result is independently re-verified by the observer (me) + audited with a semantic gallery (does it capture
+  the requirements).
 
-## 結果: 成功
-- 被験は **fslc 3回(check / verify / induction)・検証フェーズの修正0回**で
-  **proved**(induction k=1、補助 invariant 不要)に到達。
-- 独立再検証(別ディレクトリで再現): check ok / verify verified(coverage 両 true、
-  reachable は RoomFull@4・SomeoneHoldsTwo@2 で witness)/ induction proved。
-- **invariant の非骨抜きを確認**: `AtMostTwoPerUser` のガードを外すと
-  violated@3 → 実質的な安全性で proved されている。
-- 6要件すべて忠実に表現。ダブルブッキング禁止は `Map<Cell, Option<UserId>>`
-  (1セル≤1保持者=型として2保持者が表現不可)+ reserve の空きガードで
-  **構造的に**防止 — 明示 invariant より強く、被験は「明示行が無い」ことを
-  正直に留保として報告した(骨抜き invariant を足さなかった判断は適切)。
+## Result: success
+- The subject reached **proved** (induction k=1, no auxiliary invariant needed) with **3 fslc runs (check / verify /
+  induction) and 0 fixes in the verification phase**.
+- Independent re-verification (reproduced in a separate directory): check ok / verify verified (both coverage true,
+  reachable witnessed by RoomFull@4 and SomeoneHoldsTwo@2) / induction proved.
+- **Confirmed non-hollowing**: removing the guard of `AtMostTwoPerUser` gives violated@3 → it is proved with a
+  substantive safety property.
+- All 6 requirements were faithfully expressed. No double booking is prevented **structurally** by
+  `Map<Cell, Option<UserId>>` (1 cell ≤ 1 holder = two holders are unrepresentable as a type) + reserve's
+  empty-slot guard — stronger than an explicit invariant, and the subject honestly reported "there is no explicit
+  line" as a reservation (the judgment not to add a hollow invariant was appropriate).
 
-## 浮かび上がった改善点(本テストの主産物)
-- **F-A(スキルの文書ギャップ)**: 2次元データの定石が無い。素直な
-  `Map<RoomId, Map<SlotId, …>>` は state ホワイトリスト違反(Map のネスト不可)。
-  被験は reference.md §2 から自力で気づき、(room,slot)を単一ドメイン型 `Cell` に
-  平坦化して回避したが、**「ネストしたい時は単一キーに平坦化 or struct 値」**の
-  一言が SKILL.md にあると詰まりが減る。安価な改善。
-- **F-B(言語の表現力ギャップ)**: 除算・剰余が無い(`+ - *` のみ)。Cell を平坦化
-  すると「Cell から room を復元」(`c / SLOTS`)ができず、「室0が満杯」を
-  リテラル範囲 `c <= 3` でハードコードせざるを得なかった。SKILL.md の
-  「境界をハードコードするな」という助言と機能が噛み合わない局面。`/`・`%`
-  (有界なので展開可能)の追加、または平坦化を要する仕様向けの定石提示が候補。
+## Improvement Points Surfaced (the main product of this test)
+- **F-A (a documentation gap in the skill)**: there is no standard recipe for 2-dimensional data. The naive
+  `Map<RoomId, Map<SlotId, …>>` violates the state whitelist (nested Map not allowed). The subject figured this out
+  on its own from reference.md §2 and worked around it by flattening (room, slot) into a single domain type `Cell`,
+  but a one-liner in SKILL.md saying **"when you want to nest, flatten to a single key or use a struct value"** would
+  reduce the snag. A cheap improvement.
+- **F-B (an expressiveness gap in the language)**: there is no division or modulo (`+ - *` only). When you flatten
+  Cell, you cannot "recover the room from Cell" (`c / SLOTS`), so we had to hard-code "room 0 is full" as the
+  literal range `c <= 3`. A spot where the SKILL.md advice "don't hard-code boundaries" clashes with the feature
+  set. Candidates: adding `/` and `%` (boundable, so expandable), or presenting a recipe for specs that require
+  flattening.
 
-## 限界(過大評価しないために)
-- **n=1**: 1ドメイン・1試行。肯定的シグナルであって証明ではない。
-- 被験は同一モデル系の AI であり、人間 PM ではない。測れたのは
-  「README が主経路と謳う **AI 著述**を、スキル単体が支えられるか」であり、
-  これは現実の主用途に一致する。人間の可記述性は別途の被験が要る。
-- ドメインが比較的素直(状態機械化しやすい)。より絡んだ要件・大きい境界
-  (PERF への当たり)・履歴/応答性質を要する題材での追試が必要。
+## Limits (so as not to overstate)
+- **n=1**: 1 domain, 1 trial. A positive signal, not a proof.
+- The subject is an AI of the same model family, not a human PM. What was measured is "whether the skill alone can
+  support the **AI authoring** that the README touts as the main path", which matches the real main use case. Human
+  writability needs a separate subject.
+- The domain is relatively straightforward (easy to cast as a state machine). A follow-up is needed on subject
+  matter that requires more tangled requirements, larger boundaries (hitting PERF), or history/responsiveness
+  properties.
 
-## 次の一手(優先順)
-1. F-A をスキルに追記(安価・即効)。
-2. ドメイン・難度を変えた盲検追試を数本(n を増やす)。特に leadsTo/ゴースト変数を
-   要する「履歴」系、SLA を要する時間系。
-3. F-B(除算/剰余)は言語判断。2件目の実需が出てから。
-4. 人間 PM を被験とする盲検(私には実行不可、運用側で)。
+## Next Moves (in priority order)
+1. Add F-A to the skill (cheap, immediately effective).
+2. A few more blind follow-up tests with varied domains/difficulty (increase n). Especially "history"-type matter
+   that needs leadsTo/ghost variables, and time-based matter that needs an SLA.
+3. F-B (division/modulo) is a language decision. After a second real need surfaces.
+4. A blind test with a human PM as the subject (not executable by me; on the operations side).
 
 ---
 
-# 第2回(2026-06-12): 難度を上げた追試 ×2(n=3 に)
+# Round 2 (2026-06-12): Harder Follow-up Tests ×2 (to n=3)
 
-F-A(2次元定石)・F-B(`/` `%`)反映後のスキルで、より難しい性質を要求する
-新規ドメイン2本を同条件(スキル2文書のみ・既存例閲覧禁止)で実施。
+With the skill updated to reflect F-A (2D recipe) and F-B (`/` `%`), we ran 2 new domains requiring harder
+properties under the same conditions (the 2 skill docs only, reading existing examples forbidden).
 
-## 結果サマリ
+## Results Summary
 
-| 被験 | ドメイン(要求機能) | 結果 | 修正ラウンド |
+| Subject | Domain (required features) | Result | Fix rounds |
 |---|---|---|---|
-| ②a | 障害チケット(履歴ゴースト+leadsTo/fair) | **proved**(初稿一発) | 0 |
-| ②b | サポート一次応答 SLA(time/urgent/age/deadline) | **proved** | 2(+自発実験4回) |
+| ②a | incident ticketing (history ghost + leadsTo/fair) | **proved** (first draft, one try) | 0 |
+| ②b | support first-response SLA (time/urgent/age/deadline) | **proved** | 2 (+4 self-initiated experiments) |
 
-両仕様とも観察者が独立再現し、**非空虚を監査済み**: ②a は reopen アクションを
-足すと violated(要件タグ REQ-4 付き)、②b は deadline を `<= 2` に下げると
-violated・urgent を消すと violated(境界がちょうど効いている)。
+Both specs were independently reproduced by the observer and **audited as non-vacuous**: ②a goes violated when a
+reopen action is added (with requirement tag REQ-4), and ②b goes violated when deadline is lowered to `<= 2` and
+violated when urgent is removed (the boundary is exactly effective).
 
-## 主産物②b: 「空虚 SLA の罠」の発見(被験の自力発見・独立確認済み)
+## Main Product ②b: Discovery of the "Vacuous SLA Trap" (found by the subject, independently confirmed)
 
-常時 enabled になり得るアクション(応答そのもの)を `urgent` にすると
-**時間が凍結し、`deadline <= 0` ですら verified になる**(空虚)。被験はこれを
-自発的な空虚実験(deadline を 0/2 に振る)で検出し、**deadline-urgency
-パターン**(期限到達時にのみ enabled になる `respond_due` 型のガード付き
-アクションだけを urgent にする)を再発明した。観察者の確認では既存文書・
-examples/nfr のどこにもこの罠の明示は無く、**スキル単体の最大の意味論ギャップ**
-だった。→ 罠とパターンを reference.md / LANGUAGE.md に明文化し、被験の仕様を
-`examples/nfr/support_sla.fsl` として公式例化(proved)。
+Making an action that can always be enabled (the response itself) `urgent` causes **time to freeze, and even
+`deadline <= 0` comes out verified** (vacuous). The subject detected this through a self-initiated vacuity
+experiment (sweeping deadline over 0/2) and re-invented the **deadline-urgency pattern** (make only a guarded action
+of the `respond_due` type, which becomes enabled only when the deadline is reached, urgent). On the observer's
+check, this trap is explicitly stated nowhere in the existing docs or examples/nfr — it was the **biggest semantic
+gap in the skill alone**. → We documented the trap and the pattern in reference.md / LANGUAGE.md and made the
+subject's spec an official example as `examples/nfr/support_sla.fsl` (proved).
 
-## 反映した文書ギャップ(両被験の指摘)
+## Documentation Gaps Reflected (pointed out by both subjects)
 
-- time/deadline の配置規則(time は requirements 直下・deadline は requirement 内)、
-  age の意味論(tick で +1・while 偽で 0・ガードから読める)、urgent=時間凍結。
-- leadsTo は proved でも有界のまま → 非循環系なら最長実行超の `--depth` で全実行
-  被覆できる、という指針。`--depth K` はステップ K を含む。
-- 型上限の定数式(`0..ROOMS*SLOTS-1`)は valid(観察者が確認)— reference の
-  リテラル例を定数式に統一し2文書の不揃いを解消。
-- 未対応のまま記録: 条件付き公平(特定条件下のインスタンスのみ fair)の表現
-  手段が無い(②a。ガード付き別アクションへの切り出しが現状の回避)。
-  deadlock と leadsTo 停滞検査の関係の文書化も改善余地。
+- Placement rules for time/deadline (time directly under requirements, deadline inside a requirement), the
+  semantics of age (+1 on tick, 0 when the while is false, readable from a guard), urgent = time freeze.
+- leadsTo stays bounded even when proved → for an acyclic system, a `--depth` longer than the longest execution
+  covers all executions, a guideline. `--depth K` includes step K.
+- A constant-expression type upper bound (`0..ROOMS*SLOTS-1`) is valid (the observer confirmed) — unified the
+  literal examples in reference into constant expressions to resolve the inconsistency between the 2 docs.
+- Recorded as unaddressed: there is no means to express conditional fairness (only instances under a specific
+  condition are fair) (②a; the current workaround is to split into a separate guarded action). Documenting the
+  relationship between deadlock and leadsTo stagnation checking also has room for improvement.
 
-## 観察者側の学び
+## Observer-Side Learnings
 
-②a の非空虚監査で「fair を外せば飢餓 violated になるはず」というプローブは
-外れた(verified のまま)— 単調・非循環の系ではラッソが存在せず、全ての極大
-実行が全件解決で終わるため、**公平性なしでも leadsTo が構造的に成立する**。
-監査プローブ自体の設計にもドメイン構造の理解が要る、という教訓。
+In the ②a non-vacuity audit, the probe "removing fair should produce a starvation violated" missed (it stayed
+verified) — in a monotone, acyclic system there is no lasso, so every maximal execution ends with everything
+resolved, and thus **leadsTo holds structurally even without fairness**. A lesson that designing the audit probe
+itself also requires understanding the domain structure.
 
-## 更新後の総合評価(n=3)
+## Overall Assessment After Update (n=3)
 
-3ドメイン(予約・履歴/応答・SLA)すべてで、スキル2文書のみの盲検被験が
-proved に到達。詰まりは一貫して**構文ではなく意味論の文書化不足**で、3本とも
-fslc の診断(expected リスト・反例 trace・requirement 紐付け)が自力回復を
-支えた。G1 への確証は強まったが、依然 AI 被験のみ・人間 PM 未検証。
+In all 3 domains (booking, history/response, SLA), a blind subject with the 2 skill docs only reached proved.
+The snags were consistently **a lack of semantics documentation, not syntax**, and in all 3 the fslc diagnostics
+(the expected list, the counterexample trace, the requirement linkage) supported self-recovery. Confidence in G1
+strengthened, but it is still AI subjects only — human PM unverified.

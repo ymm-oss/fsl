@@ -1,4 +1,4 @@
-// topic: 信号機
+// topic: traffic light
 // scale: tiny
 // features: enum, if/else, invariant, reachable
 // expected-command: verify --depth 5 --engine induction --deadlock ignore

@@ -1,22 +1,22 @@
 // expected-command: check
 // expected-result: error
 // expected-kind: forbidden
-// `forbidden` 誤り例。cancel のガードが Shipped も許す(過小制約)ため、
-// 「出荷後のキャンセル」が受理され、forbidden が破れる。安全性 invariant では
-// 沈黙して verified になるところを、negative トレースが check 時に検出する。
+// `forbidden` error example. Because cancel's guard also allows Shipped (under-constraint),
+// "cancel after shipping" is accepted and forbidden is violated. Where a safety invariant
+// would stay silent and report verified, the negative trace detects it at check time.
 requirements ForbiddenOpAccepted {
   type OrderId = 0..1
   enum OSt { Cart, Paid, Shipped, Cancelled }
   state { order: Map<OrderId, OSt> }
   init { forall o: OrderId { order[o] = Cart } }
 
-  requirement REQ-1 "注文ライフサイクル(ガード弱化)" {
+  requirement REQ-1 "Order lifecycle (weakened guard)" {
     action pay(o: OrderId)    { requires order[o] == Cart  order[o] = Paid }
     action ship(o: OrderId)   { requires order[o] == Paid  order[o] = Shipped }
     action cancel(o: OrderId) { requires order[o] == Paid or order[o] == Shipped  order[o] = Cancelled }
   }
 
-  forbidden FB-1 "出荷後のキャンセルは拒否される" {
+  forbidden FB-1 "Cancellation after shipping is rejected" {
     pay(0)  ship(0)
     cancel(0)
     expect rejected

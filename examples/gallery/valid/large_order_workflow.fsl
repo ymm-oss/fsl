@@ -1,4 +1,4 @@
-// topic: 注文から返品までの複合ワークフロー
+// topic: composite workflow from order placement to return
 // scale: large
 // features: Map<_, struct>, Option field, ledger invariant, depth 8 reachable
 // expected-command: verify --depth 8 --deadlock ignore

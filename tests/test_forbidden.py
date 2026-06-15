@@ -21,7 +21,7 @@ GUARDED = r'''requirements OrderReq {
     action ship(o: OrderId)   { requires order[o] == Paid  order[o] = Shipped }
     action cancel(o: OrderId) { requires order[o] == Paid  order[o] = Cancelled }
   }
-  forbidden FB-1 "出荷後のキャンセルは拒否される" {
+  forbidden FB-1 "post-shipment cancellation is rejected" {
     pay(0)  ship(0)
     cancel(0)
     expect rejected
@@ -50,7 +50,7 @@ CASE_B = r'''requirements CapReq {
   requirement REQ-1 "cap" {
     action pay(o: OrderId) { requires order[o] == Cart  order[o] = Paid  paid_count = paid_count + 1 }
   }
-  forbidden FB-1 "上限超過の支払いは拒否される" {
+  forbidden FB-1 "payment exceeding the cap is rejected" {
     pay(0)
     pay(1)
     expect rejected
@@ -85,7 +85,7 @@ def test_guarded_forbidden_passes_check_and_emits_scenario(tmp_path):
     assert s["name"] == "forbidden_FB-1"
     assert s["forbidden_step"]["action"] == "cancel"
     assert s["rejected_by"] == "requires_failed"     # case (a): not enabled
-    assert s["requirement"] == {"id": "FB-1", "text": "出荷後のキャンセルは拒否される"}
+    assert s["requirement"] == {"id": "FB-1", "text": "post-shipment cancellation is rejected"}
 
 
 def test_guarded_forbidden_does_not_block_verify(tmp_path):

@@ -1,6 +1,6 @@
-"""examples/refinement_liveness — refine は安全性を伝播し活性を伝播しない。
+"""examples/refinement_liveness — refine propagates safety but not liveness.
 
-README に書いた各コマンドの結果が実際にその通りであることを固定する。
+Pins down that each command documented in the README actually behaves as stated.
 """
 from pathlib import Path
 
@@ -19,7 +19,7 @@ def test_policy_contract_is_sound():
 
 
 def test_liveness_not_propagated_by_refinement():
-    # 安全性は満たすので refine は通る…
+    # safety holds, so refine passes...
     refine = run_refine(
         str(E / "design_drops_liveness.fsl"),
         str(E / "policy.fsl"),
@@ -28,7 +28,7 @@ def test_liveness_not_propagated_by_refinement():
     )
     assert refine["result"] == "refines"
 
-    # …が、上位の活性 policy は設計層で壊れている(ラッソ)。
+    # ...but the upper-level liveness policy is broken at the design layer (lasso).
     verify = run_verify(str(E / "design_drops_liveness.fsl"), 8, "ignore")
     assert verify["result"] == "violated"
     assert verify["violation_kind"] == "leadsTo"

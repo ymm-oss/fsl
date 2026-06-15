@@ -1,4 +1,4 @@
-// 要件 ⊒ 業務。審査は業務層では見えない=stutter。
+// requirements ⊒ business. Review is invisible at the business layer = stutter.
 refinement ChainMidRefinesTop {
   impl ChainMid
   abs  ChainTop

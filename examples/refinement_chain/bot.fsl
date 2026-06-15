@@ -1,4 +1,4 @@
-// 最下位(設計)。監査ステップ Audit をさらに追加。
+// Bottom (design). Adds a further audit step, Audit.
 spec ChainBot {
   type Id = 0..1
   enum BSt { BOpen, BReview, BAudit, BDone }

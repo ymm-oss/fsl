@@ -1,0 +1,40 @@
+name: publish-pypi
+
+# Publish to PyPI when a GitHub Release is published.
+#
+# One-time setup (performed once by a repository admin):
+#   1. Register a "Trusted Publisher" for the fslc project on PyPI
+#      (owner: ymm-oss / repo: fsl / workflow: publish.yml / environment: pypi).
+#      This allows publishing via OIDC without storing an API token in GitHub Secrets.
+#   2. Create an environment named "pypi" in this repository (optionally configure approvers).
+# No token is required (trusted publishing via id-token: write).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: build + publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # PyPI trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

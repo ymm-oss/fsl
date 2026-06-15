@@ -1,4 +1,4 @@
-// topic: 1台エレベータ
+// topic: single-car elevator
 // scale: small
 // features: enum, bounded floor, guarded movement, reachable
 // expected-command: verify --depth 7 --engine induction --deadlock ignore

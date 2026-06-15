@@ -26,7 +26,7 @@ spec SlaSpike {
     age[r] = 0
   }
 
-  // urgent: tick は start/finish が enabled の間は進めない(下の tick の requires に反映)
+  // urgent: tick cannot advance while start/finish are enabled (reflected in tick's requires below)
   fair action start(r: Req) {
     requires pending[r]
     requires serving == none
@@ -43,7 +43,7 @@ spec SlaSpike {
   }
 
   action tick() {
-    // urgency: start も finish も enabled でないときだけ時間が進む
+    // urgency: time advances only when neither start nor finish is enabled
     requires (serving != none) or (forall r: Req { not pending[r] })
     requires not (serving != none and busy == 0)
     if busy > 0 { busy = busy - 1 }
@@ -79,7 +79,7 @@ spec SlaSpike {
       => (forall r: Req { age[r] == 0 })
   }
 
-  invariant SLA "NFR-1: 受理されたリクエストは4tick以内に完了する" {
+  invariant SLA "NFR-1: an accepted request is completed within 4 ticks" {
     forall r: Req { pending[r] => age[r] <= 4 }
   }
 

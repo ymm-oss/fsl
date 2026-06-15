@@ -614,7 +614,7 @@ class Ast(Transformer):
         return ("maps", target, _loc(meta))
 
     def req_mapped_action_target(self, meta, name, *exprs):
-        # 空括弧 foo() は maybe_placeholders で (None,) になる — 0引数として扱う
+        # empty parens foo() become (None,) under maybe_placeholders — treat as 0 args
         return ("action", name, [e for e in exprs if e is not None])
 
     def req_action_target(self, meta, child):
@@ -701,7 +701,7 @@ class Ast(Transformer):
         return ("stutter",)
 
     def mapped_action_target(self, meta, name, *exprs):
-        # 空括弧 foo() は maybe_placeholders で (None,) になる — 0引数として扱う
+        # empty parens foo() become (None,) under maybe_placeholders — treat as 0 args
         return ("action", name, [e for e in exprs if e is not None])
 
     def refinement_action(self, meta, name, *params_and_target):
@@ -794,7 +794,7 @@ class Ast(Transformer):
         return expr
 
     def acceptance_step(self, meta, name, *args):
-        # 空括弧 foo() は maybe_placeholders で (None,) になる — 0引数として扱う
+        # empty parens foo() become (None,) under maybe_placeholders — treat as 0 args
         return ("acceptance_step", name, [a for a in args if a is not None], _loc(meta))
 
     def acceptance_expect(self, meta, expr):
