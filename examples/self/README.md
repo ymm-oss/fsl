@@ -40,3 +40,21 @@ E=examples/self
 
 `fslc mutate` の kill-rate は、invariant が死んだ ghost に寄りかかっていないかを
 見る非自明性(anti-ghost)指標として使った。
+
+## 実装適合の錨
+
+`fslc_session.fsl` は fslc の CLI 結果分類と exit-code severity を FSL でモデル化した
+self-spec だが、モデル単体の `verify` / induction による内部整合の証明だけでは、
+**実装 (`src/fslc/cli.py`) がその契約を守っているか**は保証されない。
+
+`tests/test_self_conformance.py` がそのギャップを埋める。多様な outcome を出す spec 群に対し
+実 CLI で `check` → (ok なら) `verify` → (verified なら) `verify --engine induction` を走らせ、
+
+1. 各 subcommand の `result` とプロセス exit code が `exit_code()` の severity 表と一致すること
+2. `ProvedImpliesVerified` / `SuccessRequiresCheck` などの契約が実結果で成立すること
+3. 記録した `(subcommand, result)` 列を `fslc_session` の action 列へ写像し、`fslc replay` が
+   `conformant` を返すこと(実 CLI の遷移がモデル状態機械に適合)
+4. 契約違反の手書きトレースが `nonconformant` になること(負の対照)
+
+を検査する。これによりメタ循環ドッグフーディングは「モデル検証」から
+「実装適合検証」へ引き上げられる。
