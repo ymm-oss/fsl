@@ -1,0 +1,171 @@
+// Self-spec: algebra of bounded forward refinement.
+//
+// A four-layer pipeline models business >= requirements >= design >=
+// implementation. Each refine action preserves safety, while liveness may be
+// lost because the refinement relation permits stutter. A safety-breaking
+// change is modeled as an invalid refinement link: it advances one layer but
+// simultaneously clears both safety_ok and links_refine. Reflexivity is modeled
+// by a same-layer stutter refinement; transitivity is the three-link path from
+// Business to Implementation.
+//
+// probe: removing links_refine=false from refine_*_break_safety causes SafetyPropagates violation (verified 2026-06-15).
+spec RefinementAlgebra {
+  enum RefinementLayer { Business, Requirements, Design, Implementation }
+
+  state {
+    layer: RefinementLayer,
+    safety_ok: Bool,        // ghost: safety obligations still hold at this layer
+    liveness_ok: Bool,      // ghost: liveness obligations still hold at this layer
+    top_safety_ok: Bool,    // ghost: business-layer safety baseline
+    top_liveness_ok: Bool,  // ghost: business-layer liveness baseline
+    links_refine: Bool,     // ghost: every traversed layer link is a valid refinement
+    reached_requirements: Bool,
+    reached_design: Bool,
+    reached_implementation: Bool
+  }
+
+  init {
+    layer = Business
+    safety_ok = true
+    liveness_ok = true
+    top_safety_ok = true
+    top_liveness_ok = true
+    links_refine = true
+    reached_requirements = false
+    reached_design = false
+    reached_implementation = false
+  }
+
+  action refine_business_to_requirements_keep() {
+    requires layer == Business
+    requires links_refine
+    layer = Requirements
+    reached_requirements = true
+  }
+
+  action reflexive_refine() {}
+
+  action refine_business_to_requirements_drop_liveness() {
+    requires layer == Business
+    requires links_refine
+    layer = Requirements
+    liveness_ok = false
+    reached_requirements = true
+  }
+
+  action refine_business_to_requirements_break_safety() {
+    requires layer == Business
+    requires links_refine
+    layer = Requirements
+    safety_ok = false
+    links_refine = false
+    reached_requirements = true
+  }
+
+  action refine_requirements_to_design_keep() {
+    requires layer == Requirements
+    requires links_refine
+    layer = Design
+    reached_design = true
+  }
+
+  action refine_requirements_to_design_drop_liveness() {
+    requires layer == Requirements
+    requires links_refine
+    layer = Design
+    liveness_ok = false
+    reached_design = true
+  }
+
+  action refine_requirements_to_design_break_safety() {
+    requires layer == Requirements
+    requires links_refine
+    layer = Design
+    safety_ok = false
+    links_refine = false
+    reached_design = true
+  }
+
+  action refine_design_to_implementation_keep() {
+    requires layer == Design
+    requires links_refine
+    layer = Implementation
+    reached_implementation = true
+  }
+
+  action refine_design_to_implementation_drop_liveness() {
+    requires layer == Design
+    requires links_refine
+    layer = Implementation
+    liveness_ok = false
+    reached_implementation = true
+  }
+
+  action refine_design_to_implementation_break_safety() {
+    requires layer == Design
+    requires links_refine
+    layer = Implementation
+    safety_ok = false
+    links_refine = false
+    reached_implementation = true
+  }
+
+  invariant TopSafetyStable { top_safety_ok }
+  invariant LayerMatchesReachedRequirements {
+    reached_requirements => layer == Requirements or layer == Design or layer == Implementation
+  }
+  invariant LayerMatchesReachedDesign {
+    reached_design => layer == Design or layer == Implementation
+  }
+  invariant LayerMatchesReachedImplementation {
+    reached_implementation => layer == Implementation
+  }
+  invariant RequirementsLayerWasReached {
+    layer == Requirements or layer == Design or layer == Implementation => reached_requirements
+  }
+  invariant DesignLayerWasReached {
+    layer == Design or layer == Implementation => reached_design
+  }
+  invariant ImplementationLayerWasReached {
+    layer == Implementation => reached_implementation
+  }
+  invariant SafetyPropagates { top_safety_ok and links_refine and layer == Implementation => safety_ok }
+  invariant SafetyPreservedAtEveryLayer { top_safety_ok and links_refine => safety_ok }
+  invariant BrokenSafetyInvalidatesLink { not safety_ok => not links_refine }
+
+  reachable ReachRequirementsSafety {
+    layer == Requirements and safety_ok and links_refine
+  }
+
+  reachable ReachDesignSafety {
+    layer == Design and safety_ok and links_refine
+  }
+
+  reachable ReachImplementationSafety {
+    layer == Implementation and safety_ok and links_refine
+  }
+
+  reachable ReachRequirementsSafetyBroken {
+    layer == Requirements and not safety_ok and not links_refine
+  }
+
+  reachable ReachDesignSafetyBroken {
+    layer == Design and not safety_ok and not links_refine
+  }
+
+  reachable ReachImplementationSafetyBroken {
+    layer == Implementation and not safety_ok and not links_refine
+  }
+
+  reachable LivenessDroppedAtRequirements {
+    top_liveness_ok and links_refine and layer == Requirements and not liveness_ok
+  }
+
+  reachable LivenessDroppedAtDesign {
+    top_liveness_ok and links_refine and layer == Design and not liveness_ok
+  }
+
+  reachable LivenessDropped {
+    top_liveness_ok and links_refine and layer == Implementation and not liveness_ok
+  }
+}

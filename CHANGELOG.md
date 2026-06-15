@@ -18,6 +18,10 @@
   状態写像は Z3 レベルで合成し indexed map・Option・struct も既存 eval で扱う。
 - 例 `examples/refinement_liveness`(安全性は伝播・活性は伝播しない・fair で解決)、
   `examples/refinement_chain`(連鎖検査)とそれぞれの検査テスト。
+- **メタ循環ドッグフーディング用の self-spec 群** `examples/self/`: fslc 自身の設計契約を
+  FSL でモデル化した3本(`fslc_session` = CLI 結果分類と終了コード severity、
+  `fslc_monitor` = replay ランタイムの reject 粘着性、`refinement_algebra` = 安全性は
+  伝播・活性は伝播しない)。いずれも proved。結果固定テスト `tests/test_self_examples.py`。
 
 ### 修正
 - **`fslc refine` の健全性バグ**: impl の違反遷移が有界内で終端(deadlock)状態に
@@ -31,6 +35,11 @@
   refinement は安全性(invariant・統制ガード・振る舞いの包含)を伝播させるが活性
   (`leadsTo`/`responds`)は stutter のため伝播させないこと、活性は各層で再 verify
   + 進行アクションに `fair` が要ることを明記。
+- **`docs/DOGFOOD-11.md`**(メタ循環ドッグフーディング所見): `--vacuity`/単発 verify が
+  「一度も代入されない変数上の恒真 invariant(死んだゴースト)」を見逃し mutate kill-rate
+  でのみ露見する盲点(F22)、意図した終端状態を宣言する構文の不在(F23)、遷移禁止を
+  直接表明できない点(F24)、関係/代数的性質の表現力限界(F25)、deadlock warn の
+  メッセージが状態名を欠く点(F26)、単一 invariant 指定の不在(F27)を記録。
 
 ## [1.2.10] - 2026-06-15
 

@@ -1,0 +1,199 @@
+// Self-spec: fslc CLI result classification and repair discipline.
+//
+// Models src/fslc/cli.py exit_code():
+//   exit 0: ok / verified / proved / scenarios / conformant / generated /
+//           refines / typestate / mutated / explained
+//   exit 1: violated / reachable_failed / unknown_cti / nonconformant /
+//           refinement_failed
+//   exit 2: error with user-facing kind parse / semantics / io
+//   exit 3: error kind internal, or any unclassified result
+//
+// probe: SuccessRequiresCheck を `not checked` に壊すと violated@1
+spec FslcSession {
+  type Severity = 0..3
+  enum SessionStatus {
+    Draft,
+    CheckOk,
+    UserError,
+    Verified,
+    Violated,
+    ReachFailed,
+    UnknownCti,
+    ToolFault,
+    Proved,
+    OkResult,
+    Scenarios,
+    Conformant,
+    Generated,
+    Refines,
+    Typestate,
+    Mutated,
+    Explained,
+    Nonconformant,
+    RefinementFailed
+  }
+
+  state {
+    status: SessionStatus,
+    severity: Severity,     // ghost: CLI exit-code severity 0..3
+    checked: Bool,          // ghost: current pipeline has passed check
+    ever_verified: Bool,    // ghost: verify returned success at least once
+    ever_tool_fault: Bool   // ghost: internal/unclassified failures are terminal
+  }
+
+  init {
+    status = Draft
+    severity = 0
+    checked = false
+    ever_verified = false
+    ever_tool_fault = false
+  }
+
+  action check_ok() {
+    requires status == Draft
+    status = CheckOk
+    severity = 0
+    checked = true
+  }
+
+  action check_err() {
+    requires status == Draft
+    status = UserError
+    severity = 2
+  }
+
+  action verify_ok() {
+    requires status == CheckOk
+    status = Verified
+    severity = 0
+    ever_verified = true
+  }
+
+  action verify_violated() {
+    requires status == CheckOk
+    status = Violated
+    severity = 1
+  }
+
+  action verify_reachable_failed() {
+    requires status == CheckOk
+    status = ReachFailed
+    severity = 1
+  }
+
+  action replay_nonconformant() {
+    requires status == CheckOk
+    status = Nonconformant
+    severity = 1
+  }
+
+  action refine_failed() {
+    requires status == CheckOk
+    status = RefinementFailed
+    severity = 1
+  }
+
+  action induction_proved() {
+    requires status == Verified
+    status = Proved
+    severity = 0
+  }
+
+  action induction_cti() {
+    requires status == Verified
+    status = UnknownCti
+    severity = 1
+  }
+
+  action ok_result() {
+    requires status == CheckOk
+    status = OkResult
+    severity = 0
+  }
+
+  action scenarios_ok() {
+    requires status == CheckOk
+    status = Scenarios
+    severity = 0
+  }
+
+  action replay_conformant() {
+    requires status == CheckOk
+    status = Conformant
+    severity = 0
+  }
+
+  action generated_ok() {
+    requires status == CheckOk
+    status = Generated
+    severity = 0
+  }
+
+  action refines_ok() {
+    requires status == CheckOk
+    status = Refines
+    severity = 0
+  }
+
+  action typestate_ok() {
+    requires status == CheckOk
+    status = Typestate
+    severity = 0
+  }
+
+  action mutated_ok() {
+    requires status == CheckOk
+    status = Mutated
+    severity = 0
+  }
+
+  action explained_ok() {
+    requires status == CheckOk
+    status = Explained
+    severity = 0
+  }
+
+  action repair() {
+    requires status == UserError or status == Violated or status == ReachFailed
+          or status == UnknownCti or status == Nonconformant or status == RefinementFailed
+    status = Draft
+    severity = 0
+    checked = false
+  }
+
+  action tool_fault() {
+    requires not ever_tool_fault
+    status = ToolFault
+    severity = 3
+    ever_tool_fault = true
+  }
+
+  invariant SuccessRequiresCheck {
+    (status == CheckOk or status == Verified or status == Proved or status == OkResult
+      or status == Scenarios or status == Conformant or status == Generated
+      or status == Refines or status == Typestate or status == Mutated
+      or status == Explained) => checked
+  }
+
+  invariant ProvedImpliesVerified { status == Proved => ever_verified }
+  invariant VerifiedImpliesEver { status == Verified => ever_verified }
+  invariant ToolFaultNotRepairable { ever_tool_fault => status == ToolFault }
+
+  invariant SuccessExitZero {
+    (status == CheckOk or status == Verified or status == Proved or status == OkResult
+      or status == Scenarios or status == Conformant or status == Generated
+      or status == Refines or status == Typestate or status == Mutated
+      or status == Explained or status == Draft) => severity == 0
+  }
+
+  invariant VerificationFailureExitOne {
+    (status == Violated or status == ReachFailed or status == UnknownCti
+      or status == Nonconformant or status == RefinementFailed) => severity == 1
+  }
+
+  invariant UserErrorExitTwo { status == UserError => severity == 2 }
+  invariant ToolFaultExitThree { status == ToolFault => severity == 3 }
+
+  reachable ReachProved { status == Proved }
+  reachable ReachToolFault { status == ToolFault }
+}

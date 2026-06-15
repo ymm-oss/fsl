@@ -1,0 +1,46 @@
+# DOGFOOD-11: メタ循環ドッグフーディング — fslc 自身の設計契約を FSL で検証し、検出器の盲点を炙り出す (2026-06-15)
+
+DOGFOOD 1-10 は banking、reservation、SLA など外部ドメインを対象にしてきた。
+今回は初めて fslc 自身の振る舞い契約をモデル化したメタ循環ドッグフーディングである。
+成果物は `examples/self/` の3仕様。
+
+## 結果
+
+- `fslc_session` は CLI exit-code severity classification を形式的に証明した。success requires check pass、proved⊒verified、internal errors non-repairable。
+- `fslc_monitor` は replay reject-stickiness を証明した。once nonconformant is irreversible、conformant only when all steps ok。
+- 修正後の `refinement_algebra` は "safety propagates, liveness does not" を非自明に検査する。
+
+## 知見
+
+- **F22 (最重要・検出器の盲点):** --vacuity も単発 verify も「一度も代入されない state 変数上の恒真 invariant(死んだゴースト)」を検出しない。refinement_algebra 初稿は verified・vacuity警告0なのに mutate kill-rate 6.4%(73/78 survived)。他2本は 71%/67%。mutate の生存率が骨抜きの唯一の指標だった(DOGFOOD-10 F21「invariant弱化は mutate でしか見えない」の延長線)。改善候補: vacuity 検査が「どのアクションからも代入されない変数だけを参照する invariant/後件」を静的に警告できると安価に閉じる。
+
+- **F23 (設計/言語ギャップ):** 意図した終端状態(proved/conformant/tool_fault 等)を宣言する構文が無く、--deadlock ignore を全体にかけるしかない → 意図せぬ deadlock も同時に隠れる。repair_loop.fsl も同理由で --deadlock ignore 必須。per-state/per-action の terminal/final 注釈があれば意図した停止とバグを区別できる。
+
+- **F24 (言語ギャップ):** 「この状態からこのアクションは起動不可/この遷移は禁止」を直接表明する性質構文が無く、ghost+guard で間接表現するしかない。3本すべてで発生(RejectIsSticky / NoStepAfterReject / ToolFaultNotRepairable)。
+
+- **F25 (表現力):** refinement の反射性・推移性のような関係/代数的性質を公理として書けず、状態機械として「過程を模擬」するしかない。これが F22 の死んだゴースト罠を招きやすい(refinement_algebra が実証)。
+
+- **F26 (軽微):** --deadlock=warn の警告メッセージ文字列が deadlock 状態名を欠く("deadlock reachable at step N" のみ)。JSON の deadlock.trace には最終状態まで入っている(bmc.py:2851 が文字列に載せていないだけ)。
+
+- **F27 (テスト容易性):** 単一 invariant だけを狙って検査する手段(--property/--invariant 相当)が無い。verify は全 invariant を一括検査し「最初に見つかった違反」を報告するため、非空虚プローブで特定の invariant(例: SafetyPropagates)の violation を確認したくても、より汎用の invariant(SafetyPreservedAtEveryLayer)が先に報告されてしまい、狙った invariant が報告対象になるよう条件を絞る手間が要る。probe の精度向上のため単一性質指定オプションが候補。
+
+## 再現
+
+```bash
+E=examples/self
+
+./.venv/bin/python -m fslc check  $E/fslc_session.fsl
+./.venv/bin/python -m fslc verify $E/fslc_session.fsl --deadlock ignore
+./.venv/bin/python -m fslc verify $E/fslc_session.fsl --engine induction --deadlock ignore
+./.venv/bin/python -m fslc mutate $E/fslc_session.fsl
+
+./.venv/bin/python -m fslc check  $E/fslc_monitor.fsl
+./.venv/bin/python -m fslc verify $E/fslc_monitor.fsl --deadlock ignore
+./.venv/bin/python -m fslc verify $E/fslc_monitor.fsl --engine induction --deadlock ignore
+./.venv/bin/python -m fslc mutate $E/fslc_monitor.fsl
+
+./.venv/bin/python -m fslc check  $E/refinement_algebra.fsl
+./.venv/bin/python -m fslc verify $E/refinement_algebra.fsl
+./.venv/bin/python -m fslc verify $E/refinement_algebra.fsl --engine induction
+./.venv/bin/python -m fslc mutate $E/refinement_algebra.fsl
+```

@@ -1,0 +1,52 @@
+// Self-spec: replay Monitor runtime.
+//
+// Models src/fslc/cli.py run_replay(): events are sent to Monitor.step in
+// order; the first ok=false response returns nonconformant immediately, while
+// a log whose events all pass returns conformant. leadsTo is intentionally not
+// checked by replay.
+//
+// probe: ConformantImpliesAllOk を `status == Conformant => rejected` に壊すと violated@1
+spec FslcMonitor {
+  const MAX_EVENTS = 3
+  type Count = 0..MAX_EVENTS
+  enum MonitorStatus { Running, Conformant, Nonconformant }
+
+  state {
+    status: MonitorStatus,
+    processed: Count,       // ghost: accepted events before terminal result
+    rejected_at: Count,     // ghost: processed count at first rejected event
+    rejected: Bool
+  }
+
+  init {
+    status = Running
+    processed = 0
+    rejected_at = 0
+    rejected = false
+  }
+
+  action step_ok() {
+    requires status == Running
+    requires processed < MAX_EVENTS
+    processed = processed + 1
+  }
+
+  action step_reject() {
+    requires status == Running
+    status = Nonconformant
+    rejected = true
+    rejected_at = processed
+  }
+
+  action finish() {
+    requires status == Running
+    status = Conformant
+  }
+
+  invariant RejectIsSticky { rejected => status == Nonconformant }
+  invariant NoStepAfterReject { status == Nonconformant => processed == rejected_at }
+  invariant ConformantImpliesAllOk { status == Conformant => not rejected }
+
+  reachable ReachConformant { status == Conformant }
+  reachable ReachNonconformant { status == Nonconformant }
+}
