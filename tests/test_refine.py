@@ -222,3 +222,78 @@ def test_regression_existing_verify_still_works():
     spec = build_spec(parse((SPECS / "cart_v1.fsl").read_text(encoding="utf-8")))
     r = verify(spec, depth=4)
     assert r["result"] == "verified"
+
+
+# ── Regression: violation into a terminal/deadlock state ─────────────────
+# A guard-bypassing impl transition whose post-state is terminal (deadlocks
+# within the bound) must still be reported. The refine unrolling formerly
+# committed every step's transition into one solver, so a violating prefix that
+# could not extend to the full depth was filtered out of every model and the
+# violation was silently missed — detected at depth 1 (where the trace IS
+# full-length) but lost at depth>=2 (non-monotone). See specs/review/ and the
+# project memory `refine-deadlock-masks-violation`.
+
+_TERMINAL_ABS = """
+spec UpTerminal {
+  enum St { Submitted, Approved, Rejected, Paid }
+  state { s: St }
+  init { s = Submitted }
+  action approve() { requires s == Submitted   s = Approved }
+  action reject()  { requires s == Submitted   s = Rejected }
+  action pay()     { requires s == Approved     s = Paid }
+}
+"""
+
+# fast_pay bypasses approval and lands directly in the terminal Paid state.
+_TERMINAL_IMPL = """
+spec DownTerminal {
+  enum DSt { DSubmitted, DApproved, DRejected, DPaid }
+  state { d: DSt }
+  init { d = DSubmitted }
+  action approve()  { requires d == DSubmitted   d = DApproved }
+  action reject()   { requires d == DSubmitted   d = DRejected }
+  action pay()      { requires d == DApproved     d = DPaid }
+  action fast_pay() { requires d == DSubmitted    d = DPaid }
+}
+"""
+
+_TERMINAL_MAP = """
+refinement DownRefinesUp {
+  impl DownTerminal
+  abs  UpTerminal
+  map s = if d == DSubmitted then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+  action approve()  -> approve()
+  action reject()   -> reject()
+  action pay()      -> pay()
+  action fast_pay() -> pay()
+}
+"""
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3, 8])
+def test_violation_into_terminal_state_detected_at_all_depths(tmp_path, depth):
+    a = tmp_path / "up.fsl"; a.write_text(_TERMINAL_ABS, encoding="utf-8")
+    i = tmp_path / "down.fsl"; i.write_text(_TERMINAL_IMPL, encoding="utf-8")
+    mp = tmp_path / "map.fsl"; mp.write_text(_TERMINAL_MAP, encoding="utf-8")
+    r = run_refine(str(i), str(a), str(mp), depth=depth)
+    assert r["result"] == "refinement_failed", f"violation missed at depth {depth}"
+    assert r["kind"] == "abs_requires_failed"
+    assert r["impl_action"]["name"] == "fast_pay"
+    assert exit_code(r) == 1
+
+
+def test_terminal_violation_does_not_overflag_legitimate_refinement(tmp_path):
+    # Same shape, but fast_pay removed: the impl is a faithful refinement and
+    # must still report `refines` (the fix must not introduce false positives).
+    impl = _TERMINAL_IMPL.replace(
+        "  action fast_pay() { requires d == DSubmitted    d = DPaid }\n", "")
+    mp_src = _TERMINAL_MAP.replace("  action fast_pay() -> pay()\n", "")
+    a = tmp_path / "up.fsl"; a.write_text(_TERMINAL_ABS, encoding="utf-8")
+    i = tmp_path / "down.fsl"; i.write_text(impl, encoding="utf-8")
+    mp = tmp_path / "map.fsl"; mp.write_text(mp_src, encoding="utf-8")
+    r = run_refine(str(i), str(a), str(mp), depth=8)
+    assert r["result"] == "refines"
+    assert exit_code(r) == 0

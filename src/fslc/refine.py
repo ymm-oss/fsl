@@ -614,14 +614,17 @@ def refine(impl_spec, abs_spec, mapping, depth):
     expr_cache = {}
     states = [make_state(impl_spec, 0)]
     choices = []
+    with _eval_cache_scope(expr_cache, id(states[0])):
+        init_cons_impl = list(init_constraints(impl_spec, states[0]))
     s = z3.Solver()
     s.set(unsat_core=True)
-    with _eval_cache_scope(expr_cache, id(states[0])):
-        s.add(*init_constraints(impl_spec, states[0]))
+    s.add(*init_cons_impl)
 
     # 到達可能なプレフィックスだけを展開する。impl が depth より手前で
     # デッドロックすると「深さちょうど depth」の完全展開は充足不能になり、
     # 全ての違反検査が unsat=見逃しとなって空虚に refines を返してしまう。
+    # step_cons[k] = 遷移制約 states[k] -> states[k+1](プレフィックス検査用に保存)。
+    step_cons = []
     for step in range(depth):
         if s.check() != z3.sat:
             break
@@ -637,26 +640,38 @@ def refine(impl_spec, abs_spec, mapping, depth):
         if not reachable:
             break  # この遷移は到達不能(デッドロック)— ここで打ち切る
         s.add(*cons)
+        step_cons.append(cons)
         states.append(nxt)
         choices.append(ch)
     ctx = {"states": states, "choices": choices, "instances": instances}
 
+    # 各プレフィックスは「step t までの制約だけ」を持つ専用ソルバ sp で検査する。
+    # 全遷移を積んだ s で検査すると、後続を持てない違反遷移(有界内で deadlock/
+    # 終端状態に至るもの)が全モデルから除外され、違反を取りこぼす(深さを上げると
+    # 検出が減る非単調バグ)。sp は t の増加に合わせて遷移を逐次追加するだけで、
+    # 未来の遷移を一切要求しない。
+    sp = z3.Solver()
+    sp.set(unsat_core=True)
+    sp.add(*init_cons_impl)
+
     for t in range(len(states)):
+        if t > 0:
+            sp.add(*step_cons[t - 1])
         alpha_t = build_alpha(states[t], mapping, impl_spec, abs_spec)
 
         if t == 0:
             failure = _check_map_out_of_bounds(
-                s, alpha_t, abs_spec, impl_spec, mapping, ctx, step=0, at="init")
+                sp, alpha_t, abs_spec, impl_spec, mapping, ctx, step=0, at="init")
             if failure is not None:
                 return failure
 
             init_cons = _abs_init_constraints(abs_spec, alpha_t)
             if init_cons:
-                s.push()
-                s.add(z3.Not(z3.And(*init_cons)))
-                if s.check() == z3.sat:
-                    m = s.model()
-                    s.pop()
+                sp.push()
+                sp.add(z3.Not(z3.And(*init_cons)))
+                if sp.check() == z3.sat:
+                    m = sp.model()
+                    sp.pop()
                     return _failure(
                         impl_spec, abs_spec, mapping, ctx, m, at="init",
                         kind="abs_state_mismatch",
@@ -667,7 +682,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
                         alpha_after_actual=_alpha_logical_values(m, alpha_t, abs_spec),
                         mismatch=["init"],
                     )
-                s.pop()
+                sp.pop()
             continue
 
         prev = states[t - 1]
@@ -677,18 +692,18 @@ def refine(impl_spec, abs_spec, mapping, depth):
         for idx, inst in enumerate(instances):
             act_name = inst["action"]
             amap = mapping["actions"][act_name]
-            s.push()
-            s.add(choices[t - 1] == idx)
+            sp.push()
+            sp.add(choices[t - 1] == idx)
             guards, binds = _eval_requires(
                 inst["requires"], inst["lets"], prev, inst["binds"], impl_spec)
             if guards:
-                s.add(z3.And(*guards))
+                sp.add(z3.And(*guards))
 
             if amap["kind"] == "stutter":
-                s.add(z3.Not(_logical_eq_alpha(abs_spec, alpha_prev, alpha_cur)))
-                if s.check() == z3.sat:
-                    m = s.model()
-                    s.pop()
+                sp.add(z3.Not(_logical_eq_alpha(abs_spec, alpha_prev, alpha_cur)))
+                if sp.check() == z3.sat:
+                    m = sp.model()
+                    sp.pop()
                     ab = _alpha_logical_values(m, alpha_prev, abs_spec)
                     aa = _alpha_logical_values(m, alpha_cur, abs_spec)
                     return _failure(
@@ -701,7 +716,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
                         alpha_after_actual=aa,
                         mismatch=_mismatch_paths(m, abs_spec, ab, aa),
                     )
-                s.pop()
+                sp.pop()
                 continue
 
             abs_act = _find_abs_action(abs_spec, amap["abs_action"])
@@ -720,10 +735,10 @@ def refine(impl_spec, abs_spec, mapping, depth):
                 z3.Not(requires_ok),
                 z3.Not(_logical_eq_alpha(abs_spec, alpha_expected, alpha_cur)),
             )
-            s.add(violation)
-            if s.check() == z3.sat:
-                m = s.model()
-                s.pop()
+            sp.add(violation)
+            if sp.check() == z3.sat:
+                m = sp.model()
+                sp.pop()
                 ab = _alpha_logical_values(m, alpha_prev, abs_spec)
                 ae = _alpha_logical_values(m, alpha_expected, abs_spec)
                 aa = _alpha_logical_values(m, alpha_cur, abs_spec)
@@ -741,10 +756,10 @@ def refine(impl_spec, abs_spec, mapping, depth):
                     alpha_after_actual=aa,
                     mismatch=_mismatch_paths(m, abs_spec, ae, aa),
                 )
-            s.pop()
+            sp.pop()
 
         failure = _check_map_out_of_bounds(
-            s, alpha_t, abs_spec, impl_spec, mapping, ctx, step=t, at="step")
+            sp, alpha_t, abs_spec, impl_spec, mapping, ctx, step=t, at="step")
         if failure is not None:
             return failure
 
