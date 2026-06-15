@@ -6,6 +6,23 @@
 
 ## [Unreleased]
 
+## [1.2.10] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — 設計判断2件の決着(文書整合)**。コードは現状維持が
+妥当と分析し、DESIGN 文書を実態・意図に整合させた。
+
+### ドキュメント
+- **DESIGN-refinement §2 の検査順序**を実態に整合。t>0(ステップ間)は遷移対応を型境界
+  検査より先に、t=0(初期状態)は型境界検査(`map_out_of_bounds`)を init 対応より先に
+  行うことを明記。t=0 で範囲逸脱はほぼ init 不一致を伴うため、写像式バグを直接指摘
+  できる `map_out_of_bounds` を優先する設計意図(§2 の目的)を反映(従来の順序記述の
+  自己矛盾を解消)。
+- **DESIGN-seq §5** に、無ガードの部分 Seq 演算(`head`/`pop`/`at`)を含む invariant の
+  エンジン間差異を明記。`verify`/`prove`(BMC)は don't care を記号的に読み、runtime の
+  `Monitor` は具象的に `partial_op` を返す。don't care は記号的 vs 具象で本質的に一致
+  保証がないため、サイズガード付きイディオムを強く推奨(ガード版は両エンジン一致を検証
+  済み)。
+
 ## [1.2.9] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — 設計判断項目の決着(Batch E-c 続き)**。
@@ -377,7 +394,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.9...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.10...HEAD
+[1.2.10]: https://github.com/yumemi/fsl/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/yumemi/fsl/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/yumemi/fsl/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/yumemi/fsl/compare/v1.2.6...v1.2.7
