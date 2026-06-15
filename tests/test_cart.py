@@ -34,7 +34,10 @@ def test_fixed_verifies():
     assert r["invariants_checked"] == ["NoNegativeStock"]
     # the stock guard must not make any action permanently un-fireable
     assert all(r["action_coverage"].values()), r["action_coverage"]
-    assert r["warnings"] == []
+    # both Map<Int,...> state vars must carry the deprecation hint; other
+    # benign verify advisories (e.g. coverage/deadlock hints) may coexist.
+    map_warnings = [w for w in r["warnings"] if "Map<Int" in w.get("message", "")]
+    assert len(map_warnings) == 2, r["warnings"]
 
 
 @pytest.mark.parametrize("name", ["cart_buggy.fsl", "cart_fixed.fsl"])

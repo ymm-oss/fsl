@@ -306,7 +306,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         k = z3.Int(f"__bounds_{name}_elem")
         return z3.ForAll([k], z3.Implies(z3.Select(state[name], k), z3.And(k >= lo, k <= hi)))
     if tag == "map_value_bounds":
-        _, phys_name, value_ty = e
+        _, phys_name, value_ty = e[:3]
+        key_ty = e[3] if len(e) > 3 else ("int",)
 
         def scalar_bounds(vty, select_expr):
             if vty[0] in ("domain", "enum"):
@@ -333,10 +334,9 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
                 return z3.And(*parts)
             return None
 
-        mx = max(spec["consts"].values()) if spec["consts"] else 1
         parts = []
-        for i in range(0, mx + 1):
-            k = z3.IntVal(i)
+        for i in _map_domain(key_ty, spec):
+            k = _z3_domain_value(key_ty, i)
             body = value_bounds_for(value_ty, phys_name)
             if body is not None:
                 parts.append(body)
@@ -788,9 +788,10 @@ def _eval_set_method(m, elem_ty, method, args, state, binds, spec, old_state, in
     if method == "size":
         if args:
             _err("size expects no arguments")
-        lo, hi = domain_range(elem_ty, spec["types"])
-        terms = [z3.If(z3.Select(m, z3.IntVal(i)), z3.IntVal(1), z3.IntVal(0))
-                 for i in range(lo, hi + 1)]
+        terms = [
+            z3.If(z3.Select(m, _z3_domain_value(elem_ty, i)), z3.IntVal(1), z3.IntVal(0))
+            for i in _map_domain(elem_ty, spec)
+        ]
         acc = z3.IntVal(0)
         for t in terms:
             acc = acc + t
@@ -1377,11 +1378,27 @@ def _py_val(model, expr):
 
 
 def _map_domain(kty, spec):
+    if kty[0] == "bool":
+        return [False, True]
     if kty[0] == "int":
         mx = max(spec["consts"].values()) if spec["consts"] else 1
         return range(0, mx + 1)
     lo, hi = domain_range(kty, spec["types"])
     return range(lo, hi + 1)
+
+
+def _z3_domain_value(kty, value):
+    if kty[0] == "bool":
+        return z3.BoolVal(bool(value))
+    return z3.IntVal(value)
+
+
+def _display_map_key(kty, value, spec):
+    if kty[0] == "bool":
+        return "true" if value else "false"
+    if kty[0] == "enum":
+        return str(_display_value(kty, value, spec))
+    return str(value)
 
 
 def _display_state_keys(logical, spec):
@@ -1414,7 +1431,7 @@ def _logical_val(model, state, name, ty, spec):
         m = state[name]
         elems = []
         for i in _map_domain(elem_ty, spec):
-            if _py_val(model, z3.Select(m, z3.IntVal(i))):
+            if _py_val(model, z3.Select(m, _z3_domain_value(elem_ty, i))):
                 elems.append(_display_value(elem_ty, i, spec))
         return sorted(elems, key=str)
     if ty[0] == "seq":
@@ -1441,23 +1458,24 @@ def _logical_val(model, state, name, ty, spec):
         kty, vty = ty[1], ty[2]
         mout = {}
         for i in _map_domain(kty, spec):
-            key = str(_display_value(kty, i, spec) if kty[0] == "enum" else i)
+            key = _display_map_key(kty, i, spec)
+            zkey = _z3_domain_value(kty, i)
             if vty[0] == "option":
                 mout[key] = _display_option_value(
-                    model, state, name, vty[1], spec, z3.IntVal(i))
+                    model, state, name, vty[1], spec, zkey)
             elif vty[0] == "struct":
                 sname = vty[1]
                 obj = {}
                 for fn, fty in spec["types"][sname]["fields"].items():
                     if fty[0] == "option":
                         obj[fn] = _display_option_value(
-                            model, state, f"{name}__{fn}", fty[1], spec, z3.IntVal(i))
+                            model, state, f"{name}__{fn}", fty[1], spec, zkey)
                     else:
-                        raw = _py_val(model, z3.Select(state[f"{name}__{fn}"], z3.IntVal(i)))
+                        raw = _py_val(model, z3.Select(state[f"{name}__{fn}"], zkey))
                         obj[fn] = _display_value(fty, raw, spec)
                 mout[key] = obj
             else:
-                raw = _py_val(model, z3.Select(state[name], z3.IntVal(i)))
+                raw = _py_val(model, z3.Select(state[name], zkey))
                 mout[key] = _display_value(vty, raw, spec)
         return mout
     return None
@@ -1782,13 +1800,14 @@ def _logical_eq_var(spec, s1, s2, name, ty):
         m1, m2 = s1[name], s2[name]
         parts = []
         for i in _map_domain(elem_ty, spec):
-            parts.append(z3.Select(m1, z3.IntVal(i)) == z3.Select(m2, z3.IntVal(i)))
+            key = _z3_domain_value(elem_ty, i)
+            parts.append(z3.Select(m1, key) == z3.Select(m2, key))
         return z3.And(*parts) if parts else z3.BoolVal(True)
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
         parts = []
         for i in _map_domain(kty, spec):
-            key = z3.IntVal(i)
+            key = _z3_domain_value(kty, i)
             parts.append(_logical_eq_map_value(spec, s1, s2, name, vty, key))
         return z3.And(*parts) if parts else z3.BoolVal(True)
     if ty[0] == "struct":

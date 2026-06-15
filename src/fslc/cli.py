@@ -114,7 +114,7 @@ def run_check(file, strict_tags=False, requirements=None):
     try:
         src = open(file, encoding="utf-8").read()
         ast, display_names = _parse_file(file, src)
-        spec = build_spec(ast, display_names)
+        spec = build_spec(ast, display_names, semantic_check=False)
         acc = _acceptance_error(spec)
         if acc:
             return _envelope(acc)

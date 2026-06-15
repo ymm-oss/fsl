@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fslc import Monitor, build_spec, parse, verify
-from fslc.cli import exit_code, run_check, run_scenarios, run_testgen
+from fslc.cli import exit_code, run_check, run_scenarios, run_testgen, run_verify
 from fslc.parser import parse_src
 from fslc.explain import explain_file
 from fslc.model import eval_const
@@ -31,6 +31,141 @@ def _only_entity_action(report, action_name):
     ]
     assert len(actions) == 1, report
     return actions[0]
+
+
+def test_stage_helper_is_rejected_outside_business_dialect(tmp_path):
+    src = """
+spec StageOutsideBusiness {
+  type Case = 0..1
+  state { c: Case }
+  init { c = 0 }
+  action noop() { }
+  invariant Bad { stage(c) == 0 }
+}
+"""
+    path = tmp_path / "stage_outside_business.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_check(str(path))
+
+    assert result["result"] == "error", result
+    assert result["kind"] == "type"
+    assert result["message"] == "stage(...) は business 方言でのみ使用可"
+
+
+def test_stage_helper_remains_allowed_in_business_dialect(tmp_path):
+    src = """
+business StageBusinessOk {
+  actor Manager
+  case Return = 0..1
+  process Return {
+    stages Requested, Approved
+    initial Requested
+    transition approve Requested -> Approved by Manager
+  }
+  policy P-1 "stage helper is business-only" invariant {
+    forall c: Return { stage(c) == Requested or stage(c) == Approved }
+  }
+}
+"""
+    path = tmp_path / "stage_business_ok.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_check(str(path))
+
+    assert result["result"] == "ok", result
+
+
+def test_check_allows_actionless_spec_but_verify_reports_semantics(tmp_path):
+    src = """
+spec NoActions {
+  state { x: Int }
+  init { x = 0 }
+  invariant Tautology { true }
+}
+"""
+    path = tmp_path / "no_actions.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    checked = run_check(str(path))
+    verified = run_verify(str(path), depth=1, deadlock_mode="warn")
+
+    assert checked["result"] == "ok", checked
+    assert verified["result"] == "error", verified
+    assert verified["kind"] == "semantics"
+    assert verified["message"] == "spec has no actions"
+
+
+def test_bool_set_and_map_keys_verify_and_display(tmp_path):
+    src = """
+spec BoolContainers {
+  type Qty = 0..2
+  state { seen: Set<Bool>, counts: Map<Bool, Qty> }
+  init {
+    seen = Set { true }
+    counts[false] = 0
+    counts[true] = 1
+  }
+  action mark_false() {
+    seen = seen.add(false)
+    counts[false] = 2
+  }
+  invariant BoolKeys { seen.contains(true) and counts[true] <= 2 and seen.size() <= 2 }
+  reachable HasFalse { seen.contains(false) and counts[false] == 2 }
+}
+"""
+    result = _verify_fixture(tmp_path, "bool_containers.fsl", src, depth=1)
+
+    assert result["result"] == "verified", result
+    assert result["reachables"]["HasFalse"]["witness"][-1]["state"]["counts"] == {
+        "false": 2,
+        "true": 1,
+    }
+
+    monitor_src = """
+spec BoolContainersMonitor {
+  type Qty = 0..2
+  state { seen: Set<Bool>, counts: Map<Bool, Qty> }
+  init {
+    seen = Set { true }
+    counts[true] = 1
+  }
+  action mark_false() {
+    seen = seen.add(false)
+    counts[false] = 2
+  }
+  invariant BoolKeys { true }
+}
+"""
+    monitor = Monitor(build_spec(parse(monitor_src)))
+    assert monitor.state == {
+        "seen": [True],
+        "counts": {"false": 0, "true": 1},
+    }
+    step = monitor.step("mark_false", {})
+    assert step["ok"] is True, step
+    assert monitor.state == {
+        "seen": [False, True],
+        "counts": {"false": 2, "true": 1},
+    }
+
+
+def test_map_int_warning_without_domain_types(tmp_path):
+    src = """
+spec MapIntWarningStandalone {
+  state { m: Map<Int, Int> }
+  init { m[0] = 0 }
+  action noop() { }
+  invariant Tautology { true }
+}
+"""
+    path = tmp_path / "map_int_warning_standalone.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_check(str(path))
+
+    assert result["result"] == "ok", result
+    assert any("Map<Int" in warning.get("message", "") for warning in result["warnings"])
 
 
 def test_typestate_conjunctive_guard_extracts_from_state():

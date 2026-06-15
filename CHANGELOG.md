@@ -6,6 +6,29 @@
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — model/grammar 整合バッチ(Batch E-b)**。
+LANGUAGE.md / DESIGN-v1 とコードの drift 4件を修正。
+
+### 修正
+- **`Set<Bool>` / `Map<Bool, ·>` が型エラーで拒否**されていた問題を修正。LANGUAGE.md §2 は
+  有界スカラに Bool を含む。`is_bounded_scalar_type` に Bool を追加し、Z3 エンコード・
+  `domain_range`・暗黙境界 invariant・runtime 具体評価・refinement の写像・display を
+  Bool キー/要素に対応(`_z3_domain_value`/`_map_domain`/`_display_map_key`)。
+- **`fslc check` が action ゼロの spec を意味エラーで拒否**していた問題を修正。LANGUAGE.md
+  §7.1 で check は構文・名前・型のみ。`build_spec(semantic_check=...)` を導入し、action
+  ゼロの拒否は verify/prove/scenarios 側のみで行う(check は ok、verify は従来どおり)。
+- **business 方言専用の `stage(...)` が通常 spec で check を通過し verify で評価不能になる**
+  問題を修正。`check_stage_usage` を build_spec の意味検査に追加し、kernel spec 中の
+  `stage(...)` を type エラーで拒否(business 展開後の spec には残らないため business は
+  従来どおり)。
+- **`Map<Int, ·>` の非推奨警告が domain 型を持つ spec でしか出ない**問題を修正。条件を外し、
+  Int キー Map を使うすべての spec で非推奨警告(書き換えヒント付き)を出す。
+- (テスト) `test_cart::test_fixed_verifies` の警告アサーションを堅牢化。Map<Int> 警告が
+  常時出るようになったため「全警告が Map<Int」という空真前提が脆くなっていた。期待する
+  2件の Map<Int 非推奨警告の存在を確認する形に変更(verify の advisory 警告と共存可)。
+
 ## [1.2.6] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — explain/testgen バッチ(Batch E-a)**。
@@ -300,7 +323,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.6...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.7...HEAD
+[1.2.7]: https://github.com/yumemi/fsl/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/yumemi/fsl/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/yumemi/fsl/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/yumemi/fsl/compare/v1.2.3...v1.2.4

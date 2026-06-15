@@ -51,8 +51,8 @@ def eval_const(e, consts, binds=None):
 _STATE_TYPE_HINT = (
     "v1 state variables may use: scalar (Int, Bool, domain, enum), "
     "Option<scalar>, struct (scalar or Option<scalar> fields only), "
-    "Map<bounded-scalar, scalar | Option<scalar> | struct>, "
-    "Set<bounded-scalar>, or Seq<scalar, N>"
+    "Map<bounded-scalar (Bool/domain/enum), scalar | Option<scalar> | struct>, "
+    "Set<bounded-scalar (Bool/domain/enum)>, or Seq<scalar, N>"
 )
 
 
@@ -61,7 +61,7 @@ def is_scalar_type(ty):
 
 
 def is_bounded_scalar_type(ty):
-    return ty[0] in ("domain", "enum")
+    return ty[0] in ("bool", "domain", "enum")
 
 
 def is_option_scalar_type(ty):
@@ -116,6 +116,8 @@ def is_bounded(ty, types_meta):
 
 
 def domain_range(ty, types_meta):
+    if ty[0] == "bool":
+        return 0, 1
     if ty[0] == "domain":
         return ty[1], ty[2]
     if ty[0] == "enum":
@@ -404,9 +406,7 @@ def normalize_action_items(items):
 
 
 def check_map_key_warnings(state, types_meta):
-    """Emit Map<Int,·> deprecation hints for v1-style specs (those with domain types)."""
-    if not any(info["kind"] == "domain" for info in types_meta.values()):
-        return []
+    """Emit Map<Int,·> deprecation hints with a bounded-domain rewrite hint."""
     warnings = []
     for n, ty in state.items():
         if ty[0] == "map" and ty[1][0] == "int":
@@ -429,6 +429,8 @@ def bounds_invariant_expr(var_name, ty, types_meta):
                 ("bin", "<=", ("var", var_name), ("num", hi)))
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
+        if kty[0] == "bool":
+            return ("map_value_bounds", var_name, vty, kty)
         k_lo, k_hi = domain_range(kty, types_meta)
         v_body = bounds_invariant_expr("__v", vty, types_meta)
         v_body = _subst_var(v_body, "__v", ("index", var_name, ("var", "__k")))
@@ -482,8 +484,8 @@ def bounds_invariant_expr(var_name, ty, types_meta):
 
 
 def bounds_invariant_expr_map_field(phys_name, map_key_ty, value_ty, types_meta):
-    if map_key_ty[0] == "int":
-        return ("map_value_bounds", phys_name, value_ty)
+    if map_key_ty[0] in ("int", "bool"):
+        return ("map_value_bounds", phys_name, value_ty, map_key_ty)
 
     k_lo, k_hi = domain_range(map_key_ty, types_meta)
 
@@ -547,6 +549,77 @@ def _subst_var(expr, old, new):
     if tag in ("forall", "exists"):
         return (tag, expr[1], _subst_var(expr[2], old, new))
     return expr
+
+
+def _check_no_stage_expr(expr):
+    if not isinstance(expr, tuple):
+        return
+    if expr and expr[0] == "stage":
+        loc = expr[2] if len(expr) > 2 else None
+        _err("stage(...) は business 方言でのみ使用可", kind="type", loc=loc)
+    for part in expr[1:]:
+        if isinstance(part, tuple):
+            _check_no_stage_expr(part)
+        elif isinstance(part, list):
+            for item in part:
+                _check_no_stage_expr(item)
+        elif isinstance(part, dict):
+            for item in part.values():
+                _check_no_stage_expr(item)
+
+
+def _check_no_stage_stmts(stmts):
+    for st in stmts:
+        if not isinstance(st, tuple):
+            continue
+        tag = st[0]
+        if tag == "assign":
+            _check_no_stage_expr(st[2])
+        elif tag == "if":
+            _check_no_stage_expr(st[1])
+            _check_no_stage_stmts(st[2])
+            _check_no_stage_stmts(st[3])
+        elif tag == "forall_stmt":
+            binder = st[1]
+            if len(binder) > 3 and binder[3] is not None:
+                _check_no_stage_expr(binder[3])
+            _check_no_stage_stmts(st[2])
+
+
+def check_stage_usage(items):
+    """Reject business-dialect stage(...) helper nodes left in kernel specs."""
+    for it in items:
+        tag = it[0]
+        if tag == "init":
+            _check_no_stage_stmts(it[1])
+        elif tag == "action":
+            for body_item in it[3]:
+                btag = body_item[0]
+                if btag in ("requires", "let", "ensures"):
+                    _check_no_stage_expr(body_item[1] if btag != "let" else body_item[2])
+                elif btag in ("assign", "if", "forall_stmt"):
+                    _check_no_stage_stmts([body_item])
+        elif tag == "invariant":
+            _check_no_stage_expr(it[2])
+        elif tag == "reachable":
+            _check_no_stage_expr(it[2])
+        elif tag == "leadsto":
+            for binder in it[2]:
+                if len(binder) > 3 and binder[3] is not None:
+                    _check_no_stage_expr(binder[3])
+            _check_no_stage_expr(it[3])
+            _check_no_stage_expr(it[4])
+        elif tag == "__acceptance":
+            for ac in it[1]:
+                for step in ac.get("steps", []):
+                    for arg in step[2]:
+                        _check_no_stage_expr(arg)
+                _check_no_stage_expr(ac.get("expect"))
+        elif tag == "__forbidden":
+            for fb in it[1]:
+                for step in fb.get("steps", []):
+                    for arg in step[2]:
+                        _check_no_stage_expr(arg)
 
 
 def _validate_map_value_type(vty, types_meta, path):
@@ -651,7 +724,7 @@ def validate_state_var_type(ty, types_meta, path):
             return
         if not is_bounded_scalar_type(kty):
             _err(
-                f"{path}: Map key must be a bounded scalar (domain or enum)",
+                f"{path}: Map key must be a bounded scalar (Bool, domain, or enum)",
                 kind="type",
                 hint=_STATE_TYPE_HINT,
             )
@@ -660,7 +733,7 @@ def validate_state_var_type(ty, types_meta, path):
     if ty[0] == "set":
         if not is_bounded_scalar_type(ty[1]):
             _err(
-                f"{path}: Set element must be a bounded scalar (domain or enum)",
+                f"{path}: Set element must be a bounded scalar (Bool, domain, or enum)",
                 kind="type",
                 hint=_STATE_TYPE_HINT,
             )
@@ -806,7 +879,7 @@ def _with_meta(entry, meta):
     return entry
 
 
-def build_spec(tree, display_names=None):
+def build_spec(tree, display_names=None, semantic_check=True):
     _, name, items = tree
     dialect_display_names = {}
     dialect_implements = None
@@ -830,6 +903,8 @@ def build_spec(tree, display_names=None):
             dialect_generated_names.extend(it[1])
         elif it[0] == "__requirement_ids":
             dialect_requirement_ids.extend(it[1])
+
+    check_stage_usage(items)
 
     consts = {}
     for it in items:
@@ -917,7 +992,7 @@ def build_spec(tree, display_names=None):
             "message": "spec declares no user invariants (only implicit type bounds are checked)",
         })
 
-    if not actions:
+    if semantic_check and not actions:
         _err("spec has no actions", kind="semantics")
 
     check_seq_literal_sizes(state, init, actions, types_meta)
@@ -950,7 +1025,7 @@ def build_spec(tree, display_names=None):
 
 def check_spec(tree, display_names=None):
     """Syntax/name/type check only; returns result dict for fslc check."""
-    spec = build_spec(tree, display_names)
+    spec = build_spec(tree, display_names, semantic_check=False)
     return {
         "result": "ok",
         "spec": spec["name"],

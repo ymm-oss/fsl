@@ -26,6 +26,7 @@ from .bmc import (
     z3_sort,
     _eval_cache_scope,
     _map_domain,
+    _z3_domain_value,
 )
 from .model import FslError, bounds_invariant_expr, domain_range as model_domain_range
 
@@ -95,6 +96,8 @@ def _subst_binder(expr, binder_var, key_val):
     def walk(e):
         tag = e[0]
         if tag == "var" and e[1] == binder_var:
+            if isinstance(key_val, bool):
+                return ("bool", key_val)
             return ("num", key_val)
         if tag == "num" or tag == "bool" or tag == "none":
             return e
@@ -140,15 +143,14 @@ def _build_map_array(elem_expr_template, binder, key_ty, value_ty, impl_state, i
     """Build K(ArraySort)+Store chain for per-key map abstraction."""
     merged_types = _merge_types_meta(impl_spec, abs_spec)
     types_meta = merged_types
-    lo, hi = domain_range(key_ty, types_meta)
     elem_sort = z3_sort(value_ty, types_meta)
     arr = z3.K(z3_sort(key_ty, types_meta), _default_array_value(value_ty, types_meta))
-    for k in range(lo, hi + 1):
+    for k in _map_domain(key_ty, {"types": types_meta, "consts": {}}):
         expr_k = _subst_binder(elem_expr_template, binder[1], k)
         val = _eval_map_expr(expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
         if isinstance(val, tuple) and val[0] == "option_val":
             _err("per-key map mapping must produce scalar values, not Option", kind="type")
-        arr = z3.Store(arr, z3.IntVal(k), val)
+        arr = z3.Store(arr, _z3_domain_value(key_ty, k), val)
     return arr
 
 
@@ -203,17 +205,17 @@ def _expand_alpha_scalar(logical, ty, z3_val, out, types_meta):
 def _expand_alpha_map_option(logical, kty, vty, impl_state, elem_expr, binder,
                              impl_spec, abs_spec, out):
     merged_types = _merge_types_meta(impl_spec, abs_spec)
-    lo, hi = domain_range(kty, merged_types)
     pres_arr = z3.K(z3_sort(kty, merged_types), z3.BoolVal(False))
     val_arr = z3.K(z3_sort(kty, merged_types), _default_array_value(vty[1], merged_types))
-    for k in range(lo, hi + 1):
+    for k in _map_domain(kty, {"types": merged_types, "consts": {}}):
         expr_k = _subst_binder(elem_expr, binder[1], k)
         val = _eval_map_expr(expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
+        zkey = _z3_domain_value(kty, k)
         if isinstance(val, tuple) and val[0] == "option_val":
-            pres_arr = z3.Store(pres_arr, z3.IntVal(k), val[1])
-            val_arr = z3.Store(val_arr, z3.IntVal(k), val[2])
+            pres_arr = z3.Store(pres_arr, zkey, val[1])
+            val_arr = z3.Store(val_arr, zkey, val[2])
         elif val == ("none",):
-            pres_arr = z3.Store(pres_arr, z3.IntVal(k), z3.BoolVal(False))
+            pres_arr = z3.Store(pres_arr, zkey, z3.BoolVal(False))
         else:
             _err(f"map for Option map '{logical}' must produce none or some(...)", kind="type")
     out[f"{logical}__present"] = pres_arr
@@ -255,7 +257,7 @@ def build_alpha(impl_state, mapping, impl_spec, abs_spec):
                     )
                 elif vty[0] == "struct":
                     sname = vty[1]
-                    lo, hi = domain_range(ty[1], merged_types)
+                    key_values = _map_domain(ty[1], {"types": merged_types, "consts": {}})
                     for fn, fty in merged_types[sname]["fields"].items():
                         if fty[0] == "option":
                             pres_arr = z3.K(z3_sort(ty[1], merged_types), z3.BoolVal(False))
@@ -263,18 +265,19 @@ def build_alpha(impl_state, mapping, impl_spec, abs_spec):
                                 z3_sort(ty[1], merged_types),
                                 _default_array_value(fty[1], merged_types),
                             )
-                            for k in range(lo, hi + 1):
+                            for k in key_values:
                                 expr_k = _subst_binder(m["expr"], binder[1], k)
                                 sval = _eval_map_expr(
                                     expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
                                 if not isinstance(sval, tuple) or sval[0] != "struct_val":
                                     _err(f"map for struct map '{logical}' must produce struct values", kind="type")
                                 fv = sval[2][fn]
+                                zkey = _z3_domain_value(ty[1], k)
                                 if isinstance(fv, tuple) and fv[0] == "option_val":
-                                    pres_arr = z3.Store(pres_arr, z3.IntVal(k), fv[1])
-                                    val_arr = z3.Store(val_arr, z3.IntVal(k), fv[2])
+                                    pres_arr = z3.Store(pres_arr, zkey, fv[1])
+                                    val_arr = z3.Store(val_arr, zkey, fv[2])
                                 elif fv == ("none",):
-                                    pres_arr = z3.Store(pres_arr, z3.IntVal(k), z3.BoolVal(False))
+                                    pres_arr = z3.Store(pres_arr, zkey, z3.BoolVal(False))
                                 else:
                                     _err(
                                         f"map for Option field '{logical}[].{fn}' must produce none or some(...)",
@@ -287,13 +290,13 @@ def build_alpha(impl_state, mapping, impl_spec, abs_spec):
                                 z3_sort(ty[1], merged_types),
                                 _default_array_value(fty, merged_types),
                             )
-                            for k in range(lo, hi + 1):
+                            for k in key_values:
                                 expr_k = _subst_binder(m["expr"], binder[1], k)
                                 sval = _eval_map_expr(
                                     expr_k, impl_state, impl_spec, abs_spec, {binder[1]: k})
                                 if not isinstance(sval, tuple) or sval[0] != "struct_val":
                                     _err(f"map for struct map '{logical}' must produce struct values", kind="type")
-                                arr = z3.Store(arr, z3.IntVal(k), sval[2][fn])
+                                arr = z3.Store(arr, _z3_domain_value(ty[1], k), sval[2][fn])
                             alpha[f"{logical}__{fn}"] = arr
                 else:
                     alpha[logical] = _build_map_array(

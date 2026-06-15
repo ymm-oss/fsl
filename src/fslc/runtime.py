@@ -101,11 +101,21 @@ def _display_option_value(state, base, inner_ty, spec, key=None):
 
 
 def _map_domain(kty, spec):
+    if kty[0] == "bool":
+        return [False, True]
     if kty[0] == "int":
         mx = max(spec["consts"].values()) if spec["consts"] else 1
         return range(0, mx + 1)
     lo, hi = domain_range(kty, spec["types"])
     return range(lo, hi + 1)
+
+
+def _display_map_key(kty, value, spec):
+    if kty[0] == "bool":
+        return "true" if value else "false"
+    if kty[0] == "enum":
+        return str(_display_value(kty, value, spec))
+    return str(value)
 
 
 def _logical_var_from_lv(lv):
@@ -358,7 +368,7 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         lo, hi = domain_range(elem_ty, spec["types"])
         return all(lo <= key <= hi for key, present in state[name].items() if present)
     if tag == "map_value_bounds":
-        _, phys_name, value_ty = e
+        _, phys_name, value_ty = e[:3]
 
         def scalar_ok(vty, value):
             if vty[0] in ("domain", "enum"):
@@ -1148,7 +1158,7 @@ def _logical_val(state, name, ty, spec):
         kty, vty = ty[1], ty[2]
         mout = {}
         for i in _map_domain(kty, spec):
-            key = str(_display_value(kty, i, spec) if kty[0] == "enum" else i)
+            key = _display_map_key(kty, i, spec)
             if vty[0] == "option":
                 mout[key] = _display_option_value(state, name, vty[1], spec, i)
             elif vty[0] == "struct":
