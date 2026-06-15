@@ -124,6 +124,7 @@ fslc が保証するのは「書かれた仕様の内部整合」であって「
 | warning / `vacuous_implication` | 含意 invariant の前件が depth 内で一度も到達しない | 前件を成立させる action / reachable 正例が欠けていないか、前件式が意図と逆・強すぎでないかを確認。単に後件を弱めない |
 | warning / `vacuous_leadsto` | leadsTo のトリガが depth 内で到達しない | トリガ状態に入る action / ガード / 初期条件を確認。応答先(Q)ではなく、まず P が実際に起きる仕様かを見る |
 | warning / `always_true_requires` | 先行 requires の文脈下で、その requires 句が制約として効いていない | 句が冗長なのか、その句が効く状態へ到達する経路が欠けているのかを判断。自動的に削除しない |
+| warning / `tautology_over_frozen` | どのアクションも代入しない frozen 変数だけに依存し、動的に恒真になっている invariant(死んだゴースト=骨抜き) | その変数を `const` 化するか、変更すべきアクションの欠落を疑う。invariant が「契約を検査しているつもりで何も検査していない」サイン |
 | `error` / `parse` | 構文エラー | `loc` と `expected`(候補トークン)に従う |
 | `error` / `type` | 型エラー | `hint` に従う(例: `x == some(e)` → `x is some(v)` で束縛して比較) |
 | `error` / `semantics` | 二重代入など | 同一パスで同じ変数に2回代入しない(if の then/else は別パスなので可) |
@@ -193,6 +194,7 @@ spec Cart {
   invariant QueueStaysEmpty { q.size() == 0 }   // q を触る action が無いので不変
   reachable SoldOut { stock[0] == 0 }           // witness が返る
   leadsTo Served { cart is some(j) ~> cart == none }   // ~> は leadsTo 専用
+  terminal { stock[0] == 0 }                    // 意図した終端状態(deadlock 検査から除外)
 }
 ```
 
@@ -211,6 +213,9 @@ spec Cart {
   平坦化(`type Cell = 0..ROOMS*SLOTS-1`)し、軸は `c / SLOTS`・`c % SLOTS` で復元。
 - 「X の後に Y が起きた」という**履歴**は状態で書けない → ゴースト変数
   (`ever_locked` 等)を足すか、応答性質なら `leadsTo`。
+- **意図した終端状態**(処理完了など、そこで止まるのが正しい状態)は deadlock 警告に
+  なる → `terminal { <述語> }` で宣言する(`--deadlock ignore` を全体にかけると意図せぬ
+  deadlock まで隠れる)。terminal に含めない停止は引き続き検出される。
 
 ## 推奨プラクティス(任意 — リスクに応じて。小さな仕様では省いてよい)
 
