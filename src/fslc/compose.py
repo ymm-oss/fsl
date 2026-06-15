@@ -383,11 +383,11 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
         _, _, cparams, cbody, _, _fair, _meta = comp
         if len(cparams) != len(arg_exprs):
             _compose_err(f"sync arity mismatch for '{alias}.{act_name}'", loc=loc)
+        # Compose checks arity here; argument type mismatches are caught by
+        # build_spec's type checker after sync expansion.
         param_map = {}
         for i, p in enumerate(cparams):
             pname = p[1]
-            # sync 引数式に alias.x 参照が含まれると展開後 AST に残るため、
-            # compose の alias アクセスを物理名へ書き換えてから代入する
             param_map[pname] = _rewrite_expr(arg_exprs[i], aliases, set(), set(), set())
         for bit in cbody:
             bt = bit[0]

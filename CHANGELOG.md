@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-06-15
+
+テーマ: **監査トリアージ(issue #12) — explain/testgen バッチ(Batch E-a)**。
+
+### 修正
+- **`fslc explain` が init ブロックの弱化を反実仮想探索から一律除外**していた問題を
+  修正(`explain.py`)。init で確立される user invariant(例 audit_log.fsl の
+  BalanceNonNegative)が「反実仮想なし」と誤報告されていた。init 弱化も探索対象に含め、
+  診断に `origin: "init"` / `label: "init weakening"` を付す。
+- **`fslc explain` の acceptance/forbidden witness の `requirement` が None**になる
+  問題を修正。reqs に acceptance/forbidden の id/text を登録し、scenario の
+  `acceptance`/`forbidden` フィールドも requirement 解決に含める。
+- **`fslc testgen` が forbidden シナリオの拒否検査を生成しない**問題を修正
+  (`testgen.py`)。setup steps 再生に加え、最終ステップを実行して拒否される
+  (`ok==False`、必要なら `rejected_by` kind 一致)ことを assert する pytest を生成する。
+- compose 展開(Batch D)の回帰テストを追加(type/binder_range/param_range の const
+  プレフィクスと sync 引数の alias アクセス書き換えを検証)。
+
 ## [1.2.5] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — compose 展開バッチ(Batch D)**。コンポーネントの
@@ -282,7 +300,8 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/yumemi/fsl/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/yumemi/fsl/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/yumemi/fsl/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/yumemi/fsl/compare/v1.2.2...v1.2.3

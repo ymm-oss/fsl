@@ -187,6 +187,91 @@ compose Missing {
         path.unlink(missing_ok=True)
 
 
+def test_rewrite_component_range_bounds_use_prefixed_const():
+    """Regression: type, binder_range, and param_range bounds rewrite component consts."""
+    comp_path = SPECS / "_compose_rewrite_ranges_comp.fsl"
+    comp = """
+spec RewriteRanges {
+  const MAX = 2
+  type T = 0..MAX
+  state { v: T }
+  init { v = 0 }
+  action set(n in 0..MAX) { v = n }
+  invariant Bound { forall i in 0..MAX { v <= MAX } }
+}
+"""
+    body = """
+compose RewriteRangesSystem {
+  use RewriteRanges as r from "_compose_rewrite_ranges_comp.fsl"
+}
+"""
+    comp_path.write_text(comp, encoding="utf-8")
+    path = _write_compose(body, "_compose_rewrite_ranges.fsl")
+    try:
+        ast, dn = parse_src(path.read_text(encoding="utf-8"), str(SPECS))
+        items = ast[2]
+        prefixed_max = ("var", "r__MAX")
+
+        assert ("type", "r__T", ("num", 0), prefixed_max) in items
+
+        action = next(it for it in items if it[0] == "action" and it[1] == "r__set")
+        assert action[2] == [("param_range", "n", ("num", 0), prefixed_max)]
+
+        invariant = next(it for it in items if it[0] == "invariant" and it[1] == "r__Bound")
+        assert invariant[2][1] == ("binder_range", "i", ("num", 0), prefixed_max)
+
+        spec = build_spec(ast, dn)
+        assert spec["types"]["r__T"]["lo"] == 0
+        assert spec["types"]["r__T"]["hi"] == 2
+    finally:
+        path.unlink(missing_ok=True)
+        comp_path.unlink(missing_ok=True)
+
+
+def test_rewrite_sync_action_field_argument_in_param_map():
+    """Regression: sync argument substitution rewrites alias.field references."""
+    source_path = SPECS / "_compose_sync_source.fsl"
+    sink_path = SPECS / "_compose_sync_sink.fsl"
+    source = """
+spec SyncSource {
+  type Qty = 0..3
+  state { x: Qty }
+  init { x = 1 }
+  action noop() { }
+}
+"""
+    sink = """
+spec SyncSink {
+  type Qty = 0..3
+  state { seen: Qty }
+  init { seen = 0 }
+  action consume(q: Qty) { seen = q }
+}
+"""
+    body = """
+compose SyncFieldArg {
+  use SyncSource as src from "_compose_sync_source.fsl"
+  use SyncSink as sink from "_compose_sync_sink.fsl"
+  action mirror() = sink.consume(src.x) { }
+}
+"""
+    source_path.write_text(source, encoding="utf-8")
+    sink_path.write_text(sink, encoding="utf-8")
+    path = _write_compose(body, "_compose_sync_field_arg.fsl")
+    try:
+        ast, _ = parse_src(path.read_text(encoding="utf-8"), str(SPECS))
+        action = next(it for it in ast[2] if it[0] == "action" and it[1] == "mirror")
+        assign = action[3][0]
+
+        assert assign[0] == "assign"
+        assert assign[1] == ("var", "sink__seen")
+        assert assign[2] == ("var", "src__x")
+    finally:
+        path.unlink(missing_ok=True)
+        source_path.unlink(missing_ok=True)
+        sink_path.unlink(missing_ok=True)
+
+
 def test_order_system_scenarios_cover_all_non_internal_actions():
     """Regression: compose cover_* scenarios use display names for all covered actions."""
     sc = _scenarios_order()

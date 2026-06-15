@@ -202,7 +202,59 @@ spec ExplainMaxMutants {
     small = next(item for item in result["counterfactuals"] if item["invariant"] == "Small")
 
     assert small["weakening"] is not None, result
-    assert small["weakening"]["op"] == "requires-removal"
+    assert small["weakening"]["op"] == "assignment-removal"
+    assert small["weakening"]["origin"] == "init"
+
+
+def test_init_weakening_counterfactual():
+    result = explain_file(str(ROOT / "specs" / "audit_log.fsl"), depth=4)
+    balance = next(
+        item for item in result["counterfactuals"]
+        if item["invariant"] == "BalanceNonNegative"
+    )
+
+    assert balance["weakening"] is not None, result
+    assert balance["weakening"]["op"] == "assignment-removal"
+    assert balance["weakening"]["origin"] == "init"
+    assert balance["weakening"]["label"] == "init weakening"
+    assert balance["weakening"]["source_text"] == "balance = 0"
+
+
+def test_acceptance_forbidden_requirement_not_none(tmp_path):
+    src = """
+requirements ExplainScenarioRequirements {
+  type Count = 0..1
+  state { x: Count }
+  init { x = 0 }
+  action inc() {
+    requires x == 0
+    x = 1
+  }
+  acceptance AC-1 "one increment works" {
+    inc()
+    expect x == 1
+  }
+  forbidden FB-1 "second increment rejected" {
+    inc()
+    inc()
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "scenario_requirements.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = explain_file(str(path), depth=2)
+    witnesses = {w["name"]: w for w in result["witnesses"]}
+
+    assert witnesses["acceptance_AC-1"]["requirement"] == {
+        "id": "AC-1",
+        "text": "one increment works",
+    }
+    assert witnesses["forbidden_FB-1"]["requirement"] == {
+        "id": "FB-1",
+        "text": "second increment rejected",
+    }
 
 
 def test_step_partial_op_in_invariant_returns_result_dict():
@@ -241,6 +293,36 @@ spec TestgenDefaultName {
 
     assert result["result"] == "generated", result
     assert result["output"] == "test_testgenDefaultName.py"
+
+
+def test_forbidden_testgen_rejection_assertion(tmp_path):
+    src = """
+requirements ForbiddenTestgen {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid, Shipped, Cancelled }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  action pay(o: OrderId) { requires order[o] == Cart order[o] = Paid }
+  action ship(o: OrderId) { requires order[o] == Paid order[o] = Shipped }
+  action cancel(o: OrderId) { requires order[o] == Paid order[o] = Cancelled }
+  forbidden FB-1 "shipped order cannot be cancelled" {
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "forbidden_testgen.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_testgen(str(path), depth=4, output=None, write_file=False)
+    content = result["content"]
+
+    assert result["result"] == "generated", result
+    assert "_assert_rejected(result, 'requires_failed')" in content
+    assert "result = adapter.step('cancel', {'o': 0})" in content
+    compile(content, str(tmp_path / "test_forbidden_testgen.py"), "exec")
 
 
 def test_acceptance_action_argument_resolves_const(tmp_path):

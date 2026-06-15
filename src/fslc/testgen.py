@@ -100,6 +100,13 @@ def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=Non
         "        else:",
         "            assert observed[key] == val",
         "",
+        "",
+        "def _assert_rejected(result, expected_kind):",
+        "    assert isinstance(result, dict), 'forbidden adapter.step must return a result dict'",
+        "    assert result.get('ok') is False",
+        "    if expected_kind is not None:",
+        "        assert result.get('kind') == expected_kind",
+        "",
     ]
 
     scenario_function_names = {}
@@ -120,6 +127,13 @@ def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=Non
             lines.append(f"    adapter.step({_py_literal(step['action'])}, {_py_literal(step['params'])})")
             exp = expected_states[i] if i < len(expected_states) else {}
             lines.append(f"    _assert_partial_expected(adapter.observe(), {_py_literal(exp)})")
+        if scen.get("kind") == "forbidden" and scen.get("forbidden_step"):
+            forbidden_step = scen["forbidden_step"]
+            lines.append(
+                f"    result = adapter.step({_py_literal(forbidden_step['action'])}, "
+                f"{_py_literal(forbidden_step['params'])})"
+            )
+            lines.append(f"    _assert_rejected(result, {_py_literal(scen.get('rejected_by'))})")
 
     lines.extend([
         "",

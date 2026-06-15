@@ -221,12 +221,16 @@ def _trace_len(result):
 
 
 def _weakening(mutant, source_lines):
-    return {
+    out = {
         "op": WEAKENING_OPS.get(mutant.op, mutant.op.replace("_", "-")),
         "loc": mutant.loc,
         "target": mutant.target.replace("__", ".") if isinstance(mutant.target, str) else mutant.target,
         "source_text": _source_line(source_lines, mutant.loc),
     }
+    if mutant.action == "init":
+        out["origin"] = "init"
+        out["label"] = "init weakening"
+    return out
 
 
 def _counterfactuals(ast, display_names, spec, source_lines, depth, max_mutants):
@@ -241,8 +245,6 @@ def _counterfactuals(ast, display_names, spec, source_lines, depth, max_mutants)
     processed = 0
     for mutant in enumerate_mutants(ast, display_names):
         if mutant.op not in WEAKENING_OPS:
-            continue
-        if mutant.action == "init":
             continue
         if max_mutants is not None and processed >= max_mutants:
             break
@@ -319,14 +321,26 @@ def _witnesses(spec, source_lines, depth):
         reqs[_public_name(item["name"], spec)] = _requirement(item)
     for action in spec.get("actions", []):
         reqs[_public_name(action["name"], spec)] = _requirement(action)
+    for item in spec.get("acceptance", []) + spec.get("forbidden", []):
+        reqs[item["id"]] = {"id": item["id"], "text": item.get("text")}
     witnesses = []
     for scenario in result.get("scenarios", []):
-        key = scenario.get("property") or scenario.get("action") or scenario.get("final_check")
+        keys = [
+            scenario.get("property"),
+            scenario.get("action"),
+            scenario.get("final_check"),
+            scenario.get("acceptance"),
+            scenario.get("forbidden"),
+        ]
+        key = next((k for k in keys if k), None)
+        requirement = scenario.get("requirement")
+        if requirement is None:
+            requirement = next((reqs[k] for k in keys if k in reqs), None)
         witnesses.append({
             "name": scenario.get("name"),
             "kind": scenario.get("kind"),
             "target": key,
-            "requirement": reqs.get(key),
+            "requirement": requirement,
             "steps": scenario.get("steps", []),
             "narration": _narrate_steps(scenario.get("steps", [])),
             "initial_state": scenario.get("initial_state"),
