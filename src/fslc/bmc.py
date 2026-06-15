@@ -72,6 +72,9 @@ _ALWAYS_TRUE_REQUIRES_HINT = (
     "this requires clause is not acting as a constraint within this depth; decide "
     "whether the model is missing a path to states where it matters, or the clause is redundant"
 )
+_TAUTOLOGY_OVER_FROZEN_HINT = (
+    "make such variables 'const', or add the action that should modify them"
+)
 
 
 def _requirement(source):
@@ -2304,8 +2307,126 @@ def _leadsto_trigger_candidate(leadsto):
     }
 
 
+def _lvalue_base_name(lv):
+    tag = lv[0]
+    if tag in ("var", "index"):
+        return lv[1]
+    if tag == "field_lv":
+        base = lv[1]
+        if base[0] in ("var", "index"):
+            return base[1]
+    return None
+
+
+def _assigned_state_roots(stmts):
+    assigned = set()
+
+    def walk(stmt_list):
+        for st in stmt_list:
+            tag = st[0]
+            if tag == "assign":
+                name = _lvalue_base_name(st[1])
+                if name is not None:
+                    assigned.add(name)
+            elif tag == "if":
+                walk(st[2])
+                walk(st[3])
+            elif tag == "forall_stmt":
+                walk(st[2])
+
+    walk(stmts)
+    return assigned
+
+
+def _frozen_state_vars(spec):
+    assigned = set()
+    for act in spec.get("actions", []):
+        assigned.update(_assigned_state_roots(act.get("stmts", [])))
+    return set(spec.get("state", {})) - assigned
+
+
+def _referenced_state_vars(expr, spec):
+    refs = set()
+    state_names = set(spec.get("state", {}))
+
+    def walk(node):
+        if isinstance(node, tuple):
+            if node and node[0] == "var" and node[1] in state_names:
+                refs.add(node[1])
+            for part in node[1:]:
+                walk(part)
+        elif isinstance(node, list):
+            for part in node:
+                walk(part)
+        elif isinstance(node, dict):
+            for part in node.values():
+                walk(part)
+
+    walk(expr)
+    return refs
+
+
+def _init_model_for_frozen_check(spec):
+    s0 = make_state(spec, "frozen_init")
+    solver = z3.Solver()
+    solver.add(*init_constraints(spec, s0))
+    if solver.check() != z3.sat:
+        return None, None
+    return solver.model(), s0
+
+
+def _phys_vars_for_logicals(spec, logicals):
+    return [p for p in spec["phys_vars"] if p["logical"] in logicals]
+
+
+def _is_tautology_over_frozen(spec, inv, frozen_refs, init_model, init_state):
+    state = make_state(spec, f"frozen_taut_{inv['name']}")
+    solver = z3.Solver()
+    for p in _phys_vars_for_logicals(spec, frozen_refs):
+        phys = p["phys"]
+        solver.add(state[phys] == init_model.eval(init_state[phys], model_completion=True))
+    expr_cache = {}
+    for implicit in spec["invariants"]:
+        if implicit.get("implicit"):
+            solver.add(_inv_constraint(implicit, state, spec, expr_cache))
+    with _eval_cache_scope(expr_cache, id(state)):
+        solver.add(z3.Not(eval_expr(inv["expr"], state, {}, spec)))
+    return solver.check() == z3.unsat
+
+
+def _frozen_tautology_candidates(spec):
+    frozen = _frozen_state_vars(spec)
+    if not frozen:
+        return []
+    init_model, init_state = _init_model_for_frozen_check(spec)
+    if init_model is None:
+        return []
+
+    pending = []
+    for inv in spec.get("user_invariants", []):
+        if inv.get("implicit"):
+            continue
+        refs = _referenced_state_vars(inv["expr"], spec)
+        if not refs:
+            continue
+        frozen_refs = refs & frozen
+        if not frozen_refs:
+            continue
+        if not _is_tautology_over_frozen(spec, inv, frozen_refs, init_model, init_state):
+            continue
+        pending.append({
+            "kind": "tautology_over_frozen",
+            "name": inv["name"],
+            "source": inv,
+            "loc": inv.get("loc"),
+            "frozen_vars": tuple(sorted(frozen_refs)),
+        })
+    return pending
+
+
 def _vacuity_candidates(spec):
     pending = []
+    pending.extend(_frozen_tautology_candidates(spec))
     for inv in spec.get("user_invariants", []):
         cand = _implication_antecedent_candidate(inv)
         if cand is not None:
@@ -2408,6 +2529,21 @@ def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, covera
                     f"that is unreachable within depth {depth}"
                 ),
                 _VACUOUS_LEADSTO_HINT,
+                item.get("source"),
+                spec,
+            ))
+        elif item["kind"] == "tautology_over_frozen":
+            frozen_vars = ", ".join(item.get("frozen_vars", ()))
+            findings.append(_vacuity_warning(
+                "tautology_over_frozen",
+                item["name"],
+                item.get("loc"),
+                (
+                    f"invariant '{display_label(item['name'], spec)}' is a tautology "
+                    f"over frozen state ({frozen_vars}): it holds for all dynamics "
+                    "because every state variable it depends on is never modified by any action"
+                ),
+                _TAUTOLOGY_OVER_FROZEN_HINT,
                 item.get("source"),
                 spec,
             ))
@@ -2832,6 +2968,9 @@ def _bmc_explore(
         if pending_vacuity:
             still_pending = []
             for item in pending_vacuity:
+                if item["kind"] == "tautology_over_frozen":
+                    still_pending.append(item)
+                    continue
                 with _eval_cache_scope(expr_cache, id(states[t])):
                     prop = eval_expr(item["expr"], states[t], {}, spec)
                 s.push()

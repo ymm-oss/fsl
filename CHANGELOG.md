@@ -28,6 +28,11 @@
   引き続き検出される。`examples/self/fslc_session`・`fslc_monitor` が利用(LANGUAGE §1/§6)。
 - **`fslc verify --property <Name>`(DOGFOOD-11 F27 対応)**: 単一 invariant だけを検査する。
   非空虚プローブで狙った invariant の違反を確認しやすくなる(存在しない名前は usage エラー=exit 2)。
+- **死んだゴースト恒真の vacuity 検出(DOGFOOD-11 F22 対応・最重要)**: `--vacuity` が
+  「どのアクションも代入しない frozen な state 変数を init 値に固定したとき、動的変数の値に
+  よらず恒真になる invariant」を Z3 で静的検出する(kind `tautology_over_frozen`)。従来 verify も
+  vacuity も見逃し mutate の生存率でしか露見しなかった骨抜き(恒真)invariant を、検証時に警告する。
+  frozen 変数を参照しない/state を参照しない invariant は対象外。既存コーパス全体で偽陽性ゼロを確認。
 
 ### 修正
 - **デッドロック警告に状態を含める(DOGFOOD-11 F26 対応)**: `--deadlock warn` の警告

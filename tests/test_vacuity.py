@@ -96,6 +96,57 @@ def test_conditioned_redundant_requires_warning():
     assert warnings[0]["requirement"]["id"] == "REQ-A"
 
 
+def test_frozen_ghost_tautology_warning():
+    src = """
+    spec FrozenGhostTautology {
+      state { ghost: Bool, x: Bool }
+      init {
+        ghost = true
+        x = false
+      }
+      action flip() { x = not x }
+      invariant FrozenGhost { ghost }
+    }
+    """
+    out = verify(_spec(src), 1, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    warning = next(w for w in out["warnings"] if w.get("kind") == "tautology_over_frozen")
+    assert warning["name"] == "FrozenGhost"
+    assert "ghost" in warning["message"]
+    assert warning["hint"] == "make such variables 'const', or add the action that should modify them"
+
+
+def test_frozen_plus_dynamic_nontrivial_invariant_not_flagged():
+    src = """
+    spec FrozenPlusDynamic {
+      state { ghost: Bool, x: Bool }
+      init {
+        ghost = true
+        x = false
+      }
+      action keep_x_dynamic() { x = false }
+      invariant DependsOnDynamic { ghost => not x }
+    }
+    """
+    out = verify(_spec(src), 1, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    assert "tautology_over_frozen" not in _kinds(out)
+
+
+def test_literal_true_invariant_not_frozen_tautology():
+    src = """
+    spec LiteralTrueInvariant {
+      state { x: Bool }
+      init { x = false }
+      action flip() { x = not x }
+      invariant Inv { true }
+    }
+    """
+    out = verify(_spec(src), 1, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    assert "tautology_over_frozen" not in _kinds(out)
+
+
 def test_coverage_false_actions_suppress_always_true_requires():
     src = """
     spec CoverageFalseSuppressesRequires {
@@ -249,6 +300,7 @@ def test_verified_sample_corpus_has_no_vacuity_false_positives():
             "vacuous_implication",
             "vacuous_leadsto",
             "always_true_requires",
+            "tautology_over_frozen",
         }]
         assert vacuity == [], (path, vacuity)
     assert checked > 0

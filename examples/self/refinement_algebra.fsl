@@ -16,8 +16,6 @@ spec RefinementAlgebra {
     layer: RefinementLayer,
     safety_ok: Bool,        // ghost: safety obligations still hold at this layer
     liveness_ok: Bool,      // ghost: liveness obligations still hold at this layer
-    top_safety_ok: Bool,    // ghost: business-layer safety baseline
-    top_liveness_ok: Bool,  // ghost: business-layer liveness baseline
     links_refine: Bool,     // ghost: every traversed layer link is a valid refinement
     reached_requirements: Bool,
     reached_design: Bool,
@@ -28,8 +26,6 @@ spec RefinementAlgebra {
     layer = Business
     safety_ok = true
     liveness_ok = true
-    top_safety_ok = true
-    top_liveness_ok = true
     links_refine = true
     reached_requirements = false
     reached_design = false
@@ -110,7 +106,6 @@ spec RefinementAlgebra {
     reached_implementation = true
   }
 
-  invariant TopSafetyStable { top_safety_ok }
   invariant LayerMatchesReachedRequirements {
     reached_requirements => layer == Requirements or layer == Design or layer == Implementation
   }
@@ -129,8 +124,8 @@ spec RefinementAlgebra {
   invariant ImplementationLayerWasReached {
     layer == Implementation => reached_implementation
   }
-  invariant SafetyPropagates { top_safety_ok and links_refine and layer == Implementation => safety_ok }
-  invariant SafetyPreservedAtEveryLayer { top_safety_ok and links_refine => safety_ok }
+  invariant SafetyPropagates { links_refine and layer == Implementation => safety_ok }
+  invariant SafetyPreservedAtEveryLayer { links_refine => safety_ok }
   invariant BrokenSafetyInvalidatesLink { not safety_ok => not links_refine }
 
   reachable ReachRequirementsSafety {
@@ -158,14 +153,14 @@ spec RefinementAlgebra {
   }
 
   reachable LivenessDroppedAtRequirements {
-    top_liveness_ok and links_refine and layer == Requirements and not liveness_ok
+    links_refine and layer == Requirements and not liveness_ok
   }
 
   reachable LivenessDroppedAtDesign {
-    top_liveness_ok and links_refine and layer == Design and not liveness_ok
+    links_refine and layer == Design and not liveness_ok
   }
 
   reachable LivenessDropped {
-    top_liveness_ok and links_refine and layer == Implementation and not liveness_ok
+    links_refine and layer == Implementation and not liveness_ok
   }
 }
