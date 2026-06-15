@@ -25,7 +25,7 @@ FSL の基本的な使い方は、**人が FSL 構文を覚えて手書きする
    bash install.sh
 
    # GitHub CLI を使う場合
-   gh repo clone yumemi/fsl ~/.fsl
+   gh repo clone ymm-oss/fsl ~/.fsl
    bash ~/.fsl/install.sh
    ```
 
@@ -140,9 +140,9 @@ chmod +x fslc-macos-arm64
 
 プログラミングの知識は不要です。次の3ステップだけ:
 
-1. **ダウンロード** — ブラウザで GitHub の yumemi/fsl を開き、緑の
-   **「Code」▾ → 「Download ZIP」** をクリック（社内 GitHub にログイン済みの
-   ブラウザならそのまま落とせます)。ダウンロードした zip をダブルクリックで解凍。
+1. **ダウンロード** — ブラウザで GitHub の ymm-oss/fsl を開き、緑の
+   **「Code」▾ → 「Download ZIP」** をクリック(公開リポジトリなのでログイン不要)。
+   ダウンロードした zip をダブルクリックで解凍。
 2. **ターミナルを開く**（Mac なら「ターミナル.app」、アプリ検索で "terminal")。
 3. 解凍してできたフォルダで**インストールコマンドを実行**:
 
@@ -156,7 +156,7 @@ Claude Code 用スキルが `~/.claude/skills/fsl` に配置されます
 (配置後はダウンロードしたフォルダを削除して構いません)。
 
 > GitHub CLI を使う方・エンジニアの方は、`gh auth login` 済みなら次の1行でも:
-> `gh repo clone yumemi/fsl ~/.fsl && bash ~/.fsl/install.sh`
+> `gh repo clone ymm-oss/fsl ~/.fsl && bash ~/.fsl/install.sh`
 
 インストールされるもの:
 
@@ -177,7 +177,7 @@ rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl
 まずリポジトリを取得します:
 
 ```bash
-git clone https://github.com/yumemi/fsl && cd fsl
+git clone https://github.com/ymm-oss/fsl && cd fsl
 ```
 
 依存は `lark`（純Python）と `z3-solver`（ネイティブ libz3 を同梱した
@@ -270,3 +270,10 @@ spec   = build_spec(parse(open("specs/cart_v1.fsl").read()))
 result = verify(spec, depth=8)              # BMC。dict（CLI と同じ構造）
 result = prove(spec, k_ind=1, base_depth=8) # k帰納法（proved / unknown_cti）
 ```
+
+## ライセンス
+
+[Apache License 2.0](LICENSE) の下で配布します。Copyright 2026 Ryoichi Izumita。
+
+依存する `lark` と `z3-solver` はいずれも MIT License です(Apache-2.0 と互換)。
+詳細は [`NOTICE`](NOTICE) を参照してください。

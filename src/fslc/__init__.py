@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """fslc — FSL (AI-Native Formal Spec Language) bounded model checker."""
 from .parser import parse
 from .model import build_spec, check_spec, FslError

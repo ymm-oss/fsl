@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Typestate derivation — judge where a design spec's state machine is soundly
 expressible as host-language phantom types, and emit a TypeScript skeleton.
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Bounded model checker for FSL v1."""
 from __future__ import annotations
 

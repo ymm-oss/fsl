@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Parsing entry point: source text -> FSL AST.
 
 Raises ``lark.exceptions.UnexpectedInput`` on syntax errors and

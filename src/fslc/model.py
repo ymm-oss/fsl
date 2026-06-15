@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Spec model: AST -> validated spec dict, plus shared helpers."""
 from __future__ import annotations
 

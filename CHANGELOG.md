@@ -58,6 +58,16 @@
   直接表明できない点(F24)、関係/代数的性質の表現力限界(F25)、deadlock warn の
   メッセージが状態名を欠く点(F26)、単一 invariant 指定の不在(F27)を記録。
 
+### ライセンス / 配布(OSS 公開準備)
+- **ライセンスを Apache License 2.0 に確定**(権利者: Copyright 2026 Ryoichi Izumita)。
+  `LICENSE`(全文)・`NOTICE` を追加。pyproject の license を SPDX 式 `Apache-2.0` に更新
+  (従来は `MIT` 表記のみで LICENSE ファイル無し)、authors・urls・classifiers・keywords を整備。
+  全 Python ソースに `SPDX-License-Identifier: Apache-2.0` ヘッダを付与。依存(lark / z3-solver)は
+  いずれも MIT で Apache-2.0 と互換。
+- 公開リポジトリ URL を `github.com/ymm-oss/fsl` に更新(README / install.sh / CHANGELOG 内のリンク、
+  非公開前提の文言を公開向けに修正)。生成物の検索インデックス `docs/index.bleve/` を追跡対象から外し
+  `.gitignore` 化、Claude Code のローカル設定も無視対象に追加。
+
 ## [1.2.10] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — 設計判断2件の決着(文書整合)**。コードは現状維持が
@@ -446,20 +456,20 @@ from-state 抽出漏れ 2件を修正。どちらも健全な遷移を `relation
   example、素の Python 実装への適合テスト例。
 - ワンライナーインストーラ(ZIP ダウンロード対応)、AI エージェント向け Agent Skill。
 
-[Unreleased]: https://github.com/yumemi/fsl/compare/v1.2.10...HEAD
-[1.2.10]: https://github.com/yumemi/fsl/compare/v1.2.9...v1.2.10
-[1.2.9]: https://github.com/yumemi/fsl/compare/v1.2.8...v1.2.9
-[1.2.8]: https://github.com/yumemi/fsl/compare/v1.2.7...v1.2.8
-[1.2.7]: https://github.com/yumemi/fsl/compare/v1.2.6...v1.2.7
-[1.2.6]: https://github.com/yumemi/fsl/compare/v1.2.5...v1.2.6
-[1.2.5]: https://github.com/yumemi/fsl/compare/v1.2.4...v1.2.5
-[1.2.4]: https://github.com/yumemi/fsl/compare/v1.2.3...v1.2.4
-[1.2.3]: https://github.com/yumemi/fsl/compare/v1.2.2...v1.2.3
-[1.2.2]: https://github.com/yumemi/fsl/compare/v1.2.1...v1.2.2
-[1.2.1]: https://github.com/yumemi/fsl/compare/v1.2.0...v1.2.1
-[1.2.0]: https://github.com/yumemi/fsl/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/yumemi/fsl/compare/v1.0.3...v1.1.0
-[1.0.3]: https://github.com/yumemi/fsl/compare/v1.0.2...v1.0.3
-[1.0.2]: https://github.com/yumemi/fsl/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/yumemi/fsl/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/yumemi/fsl/releases/tag/v1.0.0
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v1.2.10...HEAD
+[1.2.10]: https://github.com/ymm-oss/fsl/compare/v1.2.9...v1.2.10
+[1.2.9]: https://github.com/ymm-oss/fsl/compare/v1.2.8...v1.2.9
+[1.2.8]: https://github.com/ymm-oss/fsl/compare/v1.2.7...v1.2.8
+[1.2.7]: https://github.com/ymm-oss/fsl/compare/v1.2.6...v1.2.7
+[1.2.6]: https://github.com/ymm-oss/fsl/compare/v1.2.5...v1.2.6
+[1.2.5]: https://github.com/ymm-oss/fsl/compare/v1.2.4...v1.2.5
+[1.2.4]: https://github.com/ymm-oss/fsl/compare/v1.2.3...v1.2.4
+[1.2.3]: https://github.com/ymm-oss/fsl/compare/v1.2.2...v1.2.3
+[1.2.2]: https://github.com/ymm-oss/fsl/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/ymm-oss/fsl/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/ymm-oss/fsl/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/ymm-oss/fsl/compare/v1.0.3...v1.1.0
+[1.0.3]: https://github.com/ymm-oss/fsl/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/ymm-oss/fsl/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/ymm-oss/fsl/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/ymm-oss/fsl/releases/tag/v1.0.0

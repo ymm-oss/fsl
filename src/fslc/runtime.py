@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Concrete runtime monitor for FSL specs (no Z3)."""
 from __future__ import annotations
 

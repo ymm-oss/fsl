@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Dialect AST expansion for requirement-oriented FSL frontends."""
 from __future__ import annotations
 

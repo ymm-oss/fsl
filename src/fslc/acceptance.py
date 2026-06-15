@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Acceptance scenario replay for the requirements dialect."""
 from __future__ import annotations
 

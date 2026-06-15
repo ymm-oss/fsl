@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Compose spec expansion: merge component specs into a single spec AST."""
 from __future__ import annotations
 

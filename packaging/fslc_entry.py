@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """PyInstaller entry point for the standalone ``fslc`` binary.
 
 PyInstaller freezes this module (not ``-m fslc``) so the resulting one-file

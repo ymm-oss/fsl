@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Generate pytest conformance test stubs from FSL specs."""
 from __future__ import annotations
 

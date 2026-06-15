@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """Refinement checking: impl spec refines abs spec via a mapping file."""
 from __future__ import annotations
 

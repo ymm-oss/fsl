@@ -1,0 +1,14 @@
+FSL — AI-Native Formal Specification Language (fslc)
+Copyright 2026 Ryoichi Izumita
+
+This product includes software developed by Ryoichi Izumita.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file
+for the full license text.
+
+This software depends on the following third-party packages at runtime,
+which are distributed under their own licenses (not included in this
+distribution):
+
+  - lark (MIT License)        https://github.com/lark-parser/lark
+  - z3-solver (MIT License)   https://github.com/Z3Prover/z3

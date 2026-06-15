@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+
 """FSL grammar: Lark grammar string + AST transformer + parser instance."""
 from lark import Lark, Transformer, v_args
 

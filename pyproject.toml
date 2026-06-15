@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,33 @@ version = "1.2.10"
 description = "FSL — AI-Native Formal Specification Language: a bounded model checker (Lark + Z3) designed for LLM write/verify/repair loops."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    { name = "Ryoichi Izumita", email = "ryoichi.a.izumita@accenture.com" },
+]
+keywords = [
+    "formal-methods",
+    "formal-specification",
+    "model-checking",
+    "bounded-model-checking",
+    "refinement",
+    "z3",
+    "verification",
+    "llm",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Scientific/Engineering",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "lark>=1.1",
     "z3-solver>=4.12",
@@ -16,6 +42,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/ymm-oss/fsl"
+Repository = "https://github.com/ymm-oss/fsl"
+Changelog = "https://github.com/ymm-oss/fsl/blob/main/CHANGELOG.md"
+Issues = "https://github.com/ymm-oss/fsl/issues"
 
 [project.scripts]
 fslc = "fslc.cli:main"
