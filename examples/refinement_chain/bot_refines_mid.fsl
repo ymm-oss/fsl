@@ -1,0 +1,12 @@
+// 設計 ⊒ 要件。audit は要件層では見えない内部ステップ=stutter。
+refinement ChainBotRefinesMid {
+  impl ChainBot
+  abs  ChainMid
+  map st[c: Id] = if st[c] == BOpen then MOpen
+                  else if st[c] == BReview then MReview
+                  else if st[c] == BAudit then MReview
+                  else MDone
+  action start_review(c) -> start_review(c)
+  action audit(c)        -> stutter
+  action finish(c)       -> finish(c)
+}

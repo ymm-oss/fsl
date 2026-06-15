@@ -588,8 +588,16 @@ def _check_map_out_of_bounds(
     )
 
 
-def refine(impl_spec, abs_spec, mapping, depth):
-    """Check that impl refines abs under the mapping to bounded depth."""
+def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
+    """Check that impl refines abs under the mapping to bounded depth.
+
+    `alpha_fn(impl_state) -> abs physical-state dict` defaults to the single-layer
+    mapping. `refine_chain` passes a *composed* alpha to check an end-to-end chain
+    (bounded refinement is transitive at equal depth, so composing the per-layer
+    maps and checking directly is sound — see DESIGN-refinement §7)."""
+    if alpha_fn is None:
+        def alpha_fn(st):
+            return build_alpha(st, mapping, impl_spec, abs_spec)
     explored = _bmc_explore(impl_spec, depth, deadlock_mode="ignore")
     if explored["result"] != "explored":
         # The impl spec is not internally consistent within the bound (e.g. it
@@ -657,7 +665,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
     for t in range(len(states)):
         if t > 0:
             sp.add(*step_cons[t - 1])
-        alpha_t = build_alpha(states[t], mapping, impl_spec, abs_spec)
+        alpha_t = alpha_fn(states[t])
 
         if t == 0:
             failure = _check_map_out_of_bounds(
@@ -686,7 +694,7 @@ def refine(impl_spec, abs_spec, mapping, depth):
             continue
 
         prev = states[t - 1]
-        alpha_prev = build_alpha(prev, mapping, impl_spec, abs_spec)
+        alpha_prev = alpha_fn(prev)
         alpha_cur = alpha_t
 
         for idx, inst in enumerate(instances):
@@ -780,6 +788,160 @@ def refine(impl_spec, abs_spec, mapping, depth):
     }
     if note:
         result["note"] = note
+    return result
+
+
+def _vars_in(expr):
+    """Set of variable names referenced in a mapping-expression AST."""
+    out = set()
+
+    def walk(e):
+        if not isinstance(e, tuple):
+            return
+        if e[0] == "var":
+            out.add(e[1])
+            return
+        for x in e[1:]:
+            if isinstance(x, tuple):
+                walk(x)
+            elif isinstance(x, dict):
+                for v in x.values():
+                    walk(v)
+            elif isinstance(x, list):
+                for v in x:
+                    walk(v)
+
+    walk(expr)
+    return out
+
+
+def _subst_param_exprs(expr, name_to_expr):
+    """Replace ("var", name) nodes with a replacement expression AST."""
+    def walk(e):
+        if not isinstance(e, tuple):
+            return e
+        tag = e[0]
+        if tag == "var" and e[1] in name_to_expr:
+            return name_to_expr[e[1]]
+        if tag in ("num", "bool", "none", "var"):
+            return e
+        if tag == "index":
+            base = e[1] if isinstance(e[1], str) else walk(e[1])
+            return ("index", base, walk(e[2]))
+        if tag == "field":
+            return ("field", walk(e[1]), e[2])
+        if tag == "struct_lit":
+            return ("struct_lit", e[1], {k: walk(v) for k, v in e[2].items()})
+        if tag == "bin":
+            return ("bin", e[1], walk(e[2]), walk(e[3]))
+        if tag == "ite":
+            return ("ite", walk(e[1]), walk(e[2]), walk(e[3]))
+        if tag == "neg":
+            return ("neg", walk(e[1]))
+        if tag == "not":
+            return ("not", walk(e[1]))
+        if tag == "some":
+            return ("some", walk(e[1]))
+        if tag in ("forall", "exists"):
+            return (tag, e[1], walk(e[2]))
+        if tag == "method":
+            return ("method", walk(e[1]), e[2], [walk(a) for a in e[3]])
+        return e
+
+    return walk(expr)
+
+
+def _compose_action_maps(am_low, am_high, mid_spec):
+    """Compose impl→mid (am_low) with mid→high (am_high) into impl→high.
+
+    stutter composes to stutter; a→b→c composes the argument expressions by
+    binding b's parameters to a's mapped argument expressions (over impl state)."""
+    mid_state = set(mid_spec["state"].keys())
+    composed = {}
+    for aname, m1 in am_low.items():
+        loc = m1.get("loc")
+        if m1["kind"] == "stutter":
+            composed[aname] = {"kind": "stutter", "loc": loc}
+            continue
+        b = m1["abs_action"]
+        m2 = am_high.get(b)
+        if m2 is None:
+            _err(f"chain: mid action '{b}' (image of '{aname}') has no correspondence "
+                 f"to the next layer", kind="type")
+        if m2["kind"] == "stutter":
+            composed[aname] = {"kind": "stutter", "loc": loc}
+            continue
+        b_act = _find_abs_action(mid_spec, b)
+        b_params = [p[0] for p in b_act["params"]]
+        name_to_expr = dict(zip(b_params, m1["arg_exprs"]))
+        new_args = []
+        for e in m2["arg_exprs"]:
+            for v in _vars_in(e):
+                if v in mid_state and v not in name_to_expr:
+                    _err(
+                        "chain composition does not support action arguments that read "
+                        f"intermediate-layer state ('{v}' in correspondence of '{b}')",
+                        kind="type",
+                    )
+            new_args.append(_subst_param_exprs(e, name_to_expr))
+        composed[aname] = {
+            "kind": "map", "abs_action": m2["abs_action"],
+            "arg_exprs": new_args, "loc": loc,
+        }
+    return composed
+
+
+def refine_chain(specs, mappings, depth):
+    """Check specs[0] ⊒ specs[-1] end-to-end by composing adjacent mappings.
+
+    specs:    [low, mid, ..., top]            (N specs, N >= 2)
+    mappings: [m_{0→1}, ..., m_{N-2→N-1}]      (m_i maps specs[i] as impl to specs[i+1] as abs)
+
+    Bounded refinement is transitive at equal depth (per-step local checking),
+    so composing the per-layer maps and checking low ⊒ top directly is sound and
+    equivalent to all adjacent links holding (DESIGN-refinement §7)."""
+    if len(specs) < 2 or len(mappings) != len(specs) - 1:
+        _err("chain: need N specs and N-1 mappings (impl abs map [abs map]...)", kind="type")
+    for i, mp in enumerate(mappings):
+        if mp["impl"] != specs[i]["name"]:
+            _err(f"chain: mapping {i} impl '{mp['impl']}' != spec '{specs[i]['name']}'", kind="type")
+        if mp["abs"] != specs[i + 1]["name"]:
+            _err(f"chain: mapping {i} abs '{mp['abs']}' != spec '{specs[i + 1]['name']}'", kind="type")
+    low, top = specs[0], specs[-1]
+
+    # Composed alpha: fold build_alpha across layers (Z3-level composition).
+    def alpha_fn(low_state):
+        st = low_state
+        for i, mp in enumerate(mappings):
+            st = build_alpha(st, mp, specs[i], specs[i + 1])
+        return st
+
+    # Composed action correspondence: fold adjacent maps.
+    composed_actions = mappings[0]["actions"]
+    for i in range(1, len(mappings)):
+        composed_actions = _compose_action_maps(
+            composed_actions, mappings[i]["actions"], specs[i])
+
+    composed_mapping = {
+        "name": f"{low['name']}RefinesChain",
+        "impl": low["name"], "abs": top["name"],
+        "maps": {},  # unused: alpha_fn supplies the (composed) state mapping
+        "actions": composed_actions,
+    }
+    result = refine(low, top, composed_mapping, depth, alpha_fn=alpha_fn)
+    result["chain"] = [s["name"] for s in specs]
+
+    # On failure, pinpoint the first broken adjacent link (more actionable than
+    # the composed end-to-end trace alone).
+    if result.get("result") == "refinement_failed":
+        for i, mp in enumerate(mappings):
+            link = refine(specs[i], specs[i + 1], mp, depth)
+            if link.get("result") != "refines":
+                result["failed_link"] = {
+                    "from": specs[i]["name"], "to": specs[i + 1]["name"],
+                    "kind": link.get("kind"),
+                }
+                break
     return result
 
 

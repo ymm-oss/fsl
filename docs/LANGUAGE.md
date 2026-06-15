@@ -366,6 +366,23 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 `map_out_of_bounds`)、`impl_trace`、写像後の `abs_before` / `abs_after_*`。
 静的エラー(map 漏れ・未知アクション等)は `kind: "type"`(exit 2)。
 
+### 連鎖検査(写像合成)
+
+層連鎖(業務 ⊒ 要件 ⊒ 設計 …)の end-to-end 忠実性は、`(spec 写像)` を続けて
+並べると**合成して直接**検査できる:
+
+```bash
+fslc refine bot.fsl  mid.fsl bot_refines_mid.fsl  top.fsl mid_refines_top.fsl --depth 6
+#            ^impl    ^abs1   ^map(impl→abs1)      ^abs2   ^map(abs1→abs2)
+```
+
+隣接写像を合成(状態 α_AC = α_BC ∘ α_AB、アクション a→b→c / stutter)して
+最下位 ⊒ 最上位を検査する。成功時は合成済み `action_map` と層の並び `chain` を、
+失敗時は最初に壊れたリンク `failed_link: {from, to, kind}` を返す。有界 refinement
+は同一深さで推移的なので、合成検査は全隣接リンクが成り立つことと等価
+(`docs/DESIGN-refinement.md` §7、例 `examples/refinement_chain`)。引数式が中間層の
+状態を読む場合のみ未対応。
+
 推奨ワークフロー: **abs を人間/LLM がレビュー → impl を LLM が詳細化 →
 `refine` が忠実性を担保**。abs の `ensures` / invariant は refine では再検査せず、
 abs 側で別途検証済みであることを前提とする。

@@ -1,0 +1,10 @@
+// 要件 ⊒ 業務。審査は業務層では見えない=stutter。
+refinement ChainMidRefinesTop {
+  impl ChainMid
+  abs  ChainTop
+  map st[c: Id] = if st[c] == MOpen then TOpen
+                  else if st[c] == MReview then TOpen
+                  else TDone
+  action start_review(c) -> stutter
+  action finish(c)       -> finish(c)
+}

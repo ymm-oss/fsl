@@ -1,0 +1,10 @@
+// 最下位(設計)。監査ステップ Audit をさらに追加。
+spec ChainBot {
+  type Id = 0..1
+  enum BSt { BOpen, BReview, BAudit, BDone }
+  state { st: Map<Id, BSt> }
+  init { forall c: Id { st[c] = BOpen } }
+  action start_review(c: Id) { requires st[c] == BOpen     st[c] = BReview }
+  action audit(c: Id)        { requires st[c] == BReview   st[c] = BAudit }
+  fair action finish(c: Id)  { requires st[c] == BAudit    st[c] = BDone }
+}

@@ -10,7 +10,7 @@ from pathlib import Path
 from .parser import parse, parse_src, parse_refinement
 from .model import build_spec, check_spec, FslError, strict_tag_warnings
 from .bmc import verify, prove, scenarios
-from .refine import build_refinement, refine
+from .refine import build_refinement, refine, refine_chain
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import generate_test_file, default_output_name
@@ -354,14 +354,34 @@ def run_replay(file, trace_path):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_refine(impl_file, abs_file, mapping_file, depth=8):
+def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
     try:
         impl_spec, _ = _read_spec(impl_file)
         abs_spec, _ = _read_spec(abs_file)
         mapping_src = open(mapping_file, encoding="utf-8").read()
-        mapping_ast = parse_refinement(mapping_src)
-        mapping = build_refinement(mapping_ast, impl_spec, abs_spec)
-        return _envelope(refine(impl_spec, abs_spec, mapping, depth))
+        mapping = build_refinement(parse_refinement(mapping_src), impl_spec, abs_spec)
+        if not rest:
+            return _envelope(refine(impl_spec, abs_spec, mapping, depth))
+        # 連鎖: rest = [abs2, map2, abs3, map3, ...] を (abs, map) ペアで畳む
+        if len(rest) % 2 != 0:
+            return _envelope({
+                "result": "error", "kind": "io",
+                "message": "refine 連鎖は最初の mapping の後に (abs map) ペアを並べる",
+            })
+        specs = [impl_spec, abs_spec]
+        mappings = [mapping]
+        prev = abs_spec
+        i = 0
+        while i < len(rest):
+            nxt_spec, _ = _read_spec(rest[i])
+            nxt_map = build_refinement(
+                parse_refinement(open(rest[i + 1], encoding="utf-8").read()),
+                prev, nxt_spec)
+            specs.append(nxt_spec)
+            mappings.append(nxt_map)
+            prev = nxt_spec
+            i += 2
+        return _envelope(refine_chain(specs, mappings, depth))
     except UnexpectedInput as e:
         return _envelope({
             "result": "error",
@@ -570,6 +590,8 @@ def main(argv=None):
     rf.add_argument("impl")
     rf.add_argument("abs")
     rf.add_argument("mapping")
+    rf.add_argument("rest", nargs="*",
+                    help="連鎖検査: さらに (abs map) を並べると end-to-end で合成検査する")
     rf.add_argument("--depth", type=int, default=8)
 
     ts = sub.add_parser("typestate",
@@ -601,7 +623,7 @@ def main(argv=None):
         result = run_replay(args.file, args.trace)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "refine":
-        result = run_refine(args.impl, args.abs, args.mapping, args.depth)
+        result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "testgen":
         result = run_testgen(args.file, args.depth, args.output, args.deadlock,

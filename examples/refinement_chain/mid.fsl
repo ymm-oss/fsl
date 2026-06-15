@@ -1,0 +1,9 @@
+// 中間層(要件)。審査ステップ Review を追加。
+spec ChainMid {
+  type Id = 0..1
+  enum MSt { MOpen, MReview, MDone }
+  state { st: Map<Id, MSt> }
+  init { forall c: Id { st[c] = MOpen } }
+  action start_review(c: Id) { requires st[c] == MOpen     st[c] = MReview }
+  fair action finish(c: Id)  { requires st[c] == MReview   st[c] = MDone }
+}

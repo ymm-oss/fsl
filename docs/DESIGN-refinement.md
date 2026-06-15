@@ -196,3 +196,45 @@ reserve 済みを消費)+ `specs/cart_refines.fsl`(マッピング)。
 
 - LANGUAGE.md に「refinement」節(マッピング構文・検査内容・ワークフロー)。
 - DESIGN-v1.md §10 に注記。README にコマンド追記。
+
+## 7. 連鎖検査(写像合成 / v2.x)
+
+層連鎖 業務 ⊒ 要件 ⊒ 設計 … の end-to-end 忠実性を、隣接写像を合成して
+**最下位 ⊒ 最上位を直接**検査する。従来は隣接ペアを個別に `refine` するだけで、
+末端が最上位の契約を保つことは推移律を暗黙に信頼するか、合成写像を手書きする
+しかなかった。
+
+CLI:
+
+```
+fslc refine <low> <mid> <map_lm> <top> <map_mt> [<next> <map> ...] [--depth K]
+```
+
+最初の `(impl abs map)` の後に `(abs map)` を続けるたびに層が1つ伸びる。
+`mappings[i]` は `specs[i]` を impl、`specs[i+1]` を abs とする。
+
+**健全性**: fslc の refine はステップ局所検査(各 impl 遷移を同ステップの abs
+遷移/stutter に対応づける)なので、有界 refinement は同一深さ K で推移的。
+低→中 と 中→高 がともに深さ K で refine するなら、stutter はステップ番号を
+増やさないため 低→高 も深さ K で refine する。よって合成検査は
+「全隣接リンクが深さ K で成り立つ」ことと**等価**(実証 `examples/refinement_chain`、
+スパイクで mid/bot/top の3層 + indexed map + parameterized action を確認)。
+
+**実装** (`refine_chain`):
+
+- 状態写像は **Z3 レベルで合成**する: α_AC(s) =
+  `build_alpha(build_alpha(s, map_AB, A, B), map_BC, B, C)`。`build_alpha` の出力
+  (B の物理状態を A 上の Z3 式で表した dict)をそのまま次の `build_alpha` の
+  入力状態に渡す。AST 置換を避けるので indexed map・Option・struct・Seq も
+  既存 `eval_expr` のままで合成される。
+- アクション対応は畳み込みで合成する: `a -> stutter` は stutter、`a -> b -> c` は
+  b の仮引数を a の写像引数式で束縛して合成。引数式が**中間層の状態**を読む
+  場合のみ未対応(`kind: type` エラー。実用上、引数はパラメータ参照が大半)。
+- 検査本体は既存 `refine()` を合成 α(`alpha_fn`)と合成アクション対応で実行する
+  (検査ループは無改変)。
+- 失敗時は隣接リンクを順に再検査し、最初に壊れたリンクを `failed_link:
+  {from, to, kind}` で返す(合成 end-to-end トレースより原因が特定しやすい)。
+
+**伝播の前提(活性は別)**: 連鎖が `refines` でも、伝播するのは安全性のみ。
+最上位の活性(`leadsTo`/`responds`)は各層で再 verify する(`DESIGN-layers.md`
+§6 の注、`examples/refinement_liveness`)。

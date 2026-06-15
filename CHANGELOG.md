@@ -6,6 +6,32 @@
 
 ## [Unreleased]
 
+テーマ: **層連鎖の伝播レビュー(fsl-design-review)** — refinement が安全性は
+伝播させるが活性は伝播させないことの確定と、end-to-end 連鎖検査の追加。
+
+### 追加
+- **`fslc refine` 連鎖モード(写像合成)**: `(spec 写像)` を続けて並べると、
+  隣接写像を合成(状態 α_AC = α_BC ∘ α_AB、アクション a→b→c / stutter)して
+  **最下位 ⊒ 最上位を直接**検査する。成功時は合成 `action_map` と `chain`、失敗時は
+  最初に壊れたリンク `failed_link` を返す。有界 refinement は同一深さで推移的なので
+  合成検査は全隣接リンク成立と等価(`DESIGN-refinement` §7、例 `examples/refinement_chain`)。
+  状態写像は Z3 レベルで合成し indexed map・Option・struct も既存 eval で扱う。
+- 例 `examples/refinement_liveness`(安全性は伝播・活性は伝播しない・fair で解決)、
+  `examples/refinement_chain`(連鎖検査)とそれぞれの検査テスト。
+
+### 修正
+- **`fslc refine` の健全性バグ**: impl の違反遷移が有界内で終端(deadlock)状態に
+  至る場合、フル長トレース強制により違反が全モデルから除外され見逃されていた
+  (深さを上げると検出が減る非単調挙動)。各プレフィックスを step t までの制約だけで
+  検査する専用ソルバに変更して解消。回帰テストを追加(`docs/DOGFOOD-6.md` の
+  「空虚 refines」バグ類の残存ケース)。
+
+### ドキュメント
+- **層連鎖の伝播主張を安全性に再スコープ**: `DESIGN-layers` §1/§6 と `LANGUAGE` §10 に、
+  refinement は安全性(invariant・統制ガード・振る舞いの包含)を伝播させるが活性
+  (`leadsTo`/`responds`)は stutter のため伝播させないこと、活性は各層で再 verify
+  + 進行アクションに `fair` が要ることを明記。
+
 ## [1.2.10] - 2026-06-15
 
 テーマ: **監査トリアージ(issue #12) — 設計判断2件の決着(文書整合)**。コードは現状維持が
