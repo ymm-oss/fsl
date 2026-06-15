@@ -370,6 +370,13 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 `refine` が忠実性を担保**。abs の `ensures` / invariant は refine では再検査せず、
 abs 側で別途検証済みであることを前提とする。
 
+`refine` が保証するのは**安全性の包含**(abs のガード・invariant を impl が
+破らない)まで。**活性(`leadsTo`)は伝播しない** — refine は stutter を許すので、
+abs が `fair` で担保していた進行を impl が落としても `refines` になりうる
+(写像は fair 注釈を要求しない)。abs の `leadsTo` を保ちたいなら、impl 側でも
+`leadsTo` を宣言して個別に `verify` し、進行を担うアクションに `fair` を付ける。
+これは前方シミュレーション一般の性質(safety は保存し liveness は保存しない)。
+
 ## 11. 合成 (compose)
 
 複数の検証済みコンポーネント spec を **名前空間付きでマージ**し、1 つの
