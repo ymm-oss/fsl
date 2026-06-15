@@ -58,3 +58,31 @@ self-spec だが、モデル単体の `verify` / induction による内部整合
 
 を検査する。これによりメタ循環ドッグフーディングは「モデル検証」から
 「実装適合検証」へ引き上げられる。
+
+### fslc_monitor 錨 (replay runtime)
+
+`fslc_monitor.fsl` は `src/fslc/runtime.py` の `Monitor` / `run_replay` が守るべき
+契約(最初の reject で停止・全 ok でのみ conformant・reject 後は処理が進まない)を
+モデル化する。`tests/test_self_conformance.py` の monitor 節が、ガード付き spec
+(`specs/cart_v1.fsl`) に対する実 `fslc replay` の観測結果を `step_ok` / `step_reject` /
+`finish` 列へ写像し、`fslc_monitor` への replay が `conformant` になることを検査する。
+契約違反トレース(reject 後の step_ok 等)は `nonconformant` になる負の対照も含む。
+
+### subcommand 被覆の拡張
+
+従来の錨は `check` → `verify` → `induction` パイプラインのみ。以下を追加した。
+
+| 実 subcommand | 写像 action | 備考 |
+|---|---|---|
+| `verify` (semantics error) | `verify_user_error` | `no_actions.fsl` 等、check ok だが verify が semantics エラー |
+| `scenarios` | `scenarios_ok` | |
+| `explain` | `explained_ok` | |
+| `mutate` | `mutated_ok` | |
+| `typestate` | `typestate_ok` | |
+| `refine` (成功) | `refines_ok` | |
+| `refine` (失敗) | `refine_failed` | |
+| `replay` (conformant) | `replay_conformant` | |
+| `replay` (nonconformant) | `replay_nonconformant` | |
+
+`tool_fault` (exit 3, internal error) はモデルには在るが、内部エラーを意図的に
+誘発できないため**実装錨は未整備**。

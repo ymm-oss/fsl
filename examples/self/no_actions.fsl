@@ -1,0 +1,7 @@
+// Self-spec anchor fixture: check passes (semantic_check=False) but verify fails
+// with kind=semantics (spec has no actions).
+spec NoActions {
+  state { x: Int }
+  init { x = 0 }
+  invariant Tautology { true }
+}

@@ -60,6 +60,12 @@ spec FslcSession {
     severity = 2
   }
 
+  action verify_user_error() {
+    requires status == CheckOk
+    status = UserError
+    severity = 2
+  }
+
   action verify_ok() {
     requires status == CheckOk
     status = Verified
