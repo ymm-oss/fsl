@@ -30,16 +30,23 @@ proposals / adding a variant or extension / reviewing a change to an existing de
   (invariants, guards, externally observable state)
 
 Lens — OCP: decide the "range you close" here. DIP: what abstraction should the
-design proposals all depend on in common. It is recommended to align with the user
-on the candidate contracts as a bullet list before proceeding (do not create a
-deliverable file; chat is fine).
+design proposals all depend on in common. Align with the user on the candidate
+contracts as a bullet list before proceeding (do not create a deliverable file;
+chat is fine).
+
+Do not infer the open/closed boundary, extension points, substitutability contract,
+variant roster, or action correspondence from general design taste. If the source
+material does not say what must remain stable or how a detail action maps to an
+abstract action, ask. A refinement proof is only meaningful for the contract the
+human agreed to freeze.
 
 ### Step 2 — Freeze the contract as an abstract spec
 
-Write the contract as an abstract `spec` and push it through the fsl skill's
-standard workflow up to `check` → `verify` → `--engine induction` (proved
-recommended). If the contract itself is contradictory, the design exploration cannot
-even begin — a `violated` here is a defect in the contract, not in a design proposal.
+After the contract boundary is confirmed, write the contract as an abstract `spec`
+and push it through the fsl skill's standard workflow up to `check` → `verify` →
+`--engine induction` (proved recommended). If the contract itself is contradictory,
+the design exploration cannot even begin — a `violated` here is a defect in the
+contract, not in a design proposal.
 
 Lens — DbC: `requires`/`ensures`/`invariant` are the contract directly. Leave
 defense of boundaries and partial operations to the automatic checks
@@ -56,10 +63,12 @@ later)**:
 ### Step 3 — Write each design proposal as a refinement
 
 Describe each design proposal / variant as a "detail `spec` + mapping file". Do not
-edit the abstract spec's file. Correspond actions that exist only in the detail layer
-to `stutter`. A module-addition-style extension is `compose`, not refinement
-(synchronize/compose without editing the existing files, and write the cross-cutting
-invariant in the composite layer).
+edit the abstract spec's file. Correspond actions that exist only in the detail
+layer to `stutter` only when they are confirmed not to affect observable abstract
+state. When a correspondence is unclear, ask before writing the mapping. A
+module-addition-style extension is `compose`, not refinement (synchronize/compose
+without editing the existing files, and write the cross-cutting invariant in the
+composite layer).
 
 Lens — LSP: the content of the refine check (do not strengthen preconditions, do not
 weaken postconditions, preserve invariants) is the definition of LSP itself.
@@ -72,7 +81,9 @@ but **they are not checked** (fslc says nothing even if you violate them).
 The mechanical repair steps for the result follow the fsl skill's repair protocol
 table, but in design exploration you must always decide, before fixing, "**is the
 design proposal bad, or is the contract excessive?**" — either conclusion is a
-legitimate outcome of a design review.
+legitimate outcome of a design review. If the answer is not explicit in the source
+or prior confirmation, present the counterexample and ask; do not silently change
+the abstract contract, mapping, or detail guards to obtain a green result.
 
 | Check result | Design meaning | Report in principle vocabulary |
 |---|---|---|

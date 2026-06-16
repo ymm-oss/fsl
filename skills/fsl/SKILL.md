@@ -32,7 +32,25 @@ Output is always a single JSON document on stdout. exit: 0=success
 (violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
 (parse/type/semantics/io), 3=internal error.
 
-## Before writing a spec: the formalization memo (post it in chat; do not make a separate file)
+## Before writing a spec: source fidelity and the formalization memo
+
+FSL is a specification language, not a requirements generator. Encode only facts
+that are present in the source material or assumptions the human has explicitly
+confirmed. **Do not fill missing requirements, business rules, error handling,
+timing, priorities, actors, lifecycle states, design boundaries, or refinement
+mappings just to make a complete or verified `.fsl`.** If a missing choice affects
+the state schema, an action's enabledness, a transition target, an invariant,
+`leadsTo`, a deadline, or a refinement mapping, stop at the memo and ask a
+question before writing or changing the spec.
+
+It is acceptable to make representation-only assumptions that do not change
+behavior (for example, choosing small finite domain sizes for model checking), but
+label them as modeling assumptions and keep them separate from business/design
+assumptions. If the user asks for a draft despite open questions, write only the
+confirmed fragment and mark the rest as questions; do not invent guards or
+invariants to close the gap.
+
+### Formalization memo (post it in chat; do not make a separate file)
 
 When deriving FSL from natural-language requirements, business rules, or code,
 **do not jump straight to writing `.fsl`**. First post a **formalization memo** in
@@ -49,21 +67,25 @@ for it (keep the loop lightweight; the only deliverable is the `.fsl` itself):
   constraint / exception / **boundary implications** (at-least vs. greater-than,
   before vs. after, inclusive vs. exclusive). This is where misreadings most
   frequently occur
-- **Assumption ledger**: places where the source was ambiguous, the interpretation
-  taken, and the reason (carried over into the spec as described below)
+- **Assumption ledger**: confirmed assumptions and representation-only modeling
+  choices. Do not use this ledger to silently decide missing product, business, or
+  design policy
 - **Questions for the human**: judgments that cannot be decided during
-  formalization (priority of business rules, precedence of exceptions, etc.)
+  formalization (priority of business rules, precedence of exceptions, lifecycle
+  states, retry/error behavior, timing/deadline semantics, ownership of actions,
+  abstraction boundaries, refinement correspondences, etc.)
 
 The human only needs to read this memo and the verifier's counterexamples —
 **do not make them review logical formulas directly**. Write the `.fsl` only after
-the memo has received human confirmation or correction.
+the memo has received human confirmation or correction for any choice that changes
+behavior.
 
-### Keep only the assumptions in the spec (fold them into the .fsl, not a separate memo file)
+### Keep only confirmed assumptions in the spec (fold them into the .fsl, not a separate memo file)
 
-Most of the memo can disappear into chat, but **if the assumption ledger is
-discarded, you later cannot trace "why this interpretation was chosen," which is a
-problem**. A separate file would drift out of sync with the spec, so **keep it in
-the `.fsl` itself as comments / tags**:
+Most of the memo can disappear into chat, but **if the confirmed assumption ledger
+is discarded, you later cannot trace "why this interpretation was chosen," which
+is a problem**. A separate file would drift out of sync with the spec, so **keep
+confirmed assumptions in the `.fsl` itself as comments / tags**:
 
 - Global assumptions → a ledger block at the top of the spec:
   `// ASSUME-1: stock is reserved by only one user at a time`
@@ -164,10 +186,12 @@ requires is blocking it" on a per-clause basis. Do not silently ignore it.
 
 When a counterexample makes you **change an interpretation** (added a guard,
 loosened an invariant, decided how to handle an exception), record that judgment in
-the assumption ledger (the `// ASSUME-n:` comments / tags in the `.fsl`). The
-shortest path to verified is often "weakening the spec," so without a record of
-what was weakened and why, you later cannot distinguish a hollowing-out repair from
-a legitimate fix.
+the assumption ledger (the `// ASSUME-n:` comments / tags in the `.fsl`) only after
+the source material or the human confirms it. If the counterexample exposes a
+missing requirement or design decision, ask instead of choosing the repair on the
+user's behalf. The shortest path to verified is often "weakening the spec," so
+without confirmation and a record of what was weakened and why, you later cannot
+distinguish a hollowing-out repair from a legitimate fix.
 
 ## Minimal syntax (details and the full catalog are in reference.md)
 
