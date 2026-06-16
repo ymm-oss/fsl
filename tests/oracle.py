@@ -9,6 +9,7 @@ with Monitor's concrete single-step semantics.  Bugs shared by the BMC and
 Monitor step semantics are not detectable by this oracle.
 """
 from __future__ import annotations
+import sys
 
 import copy
 import json
@@ -24,7 +25,7 @@ from fslc.runtime import Monitor, _as_bool, eval_concrete
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / ".venv" / "bin" / "python"
+PYTHON = sys.executable
 
 
 @dataclass(frozen=True)

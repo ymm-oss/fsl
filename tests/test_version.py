@@ -6,7 +6,7 @@ from pathlib import Path
 import fslc
 
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 
 def _run(*args):

@@ -1,4 +1,5 @@
 """FSL v1.1: scenarios generation and coverage diagnosis."""
+import sys
 import copy
 import json
 import subprocess
@@ -10,7 +11,7 @@ from fslc import parse, build_spec, verify, scenarios
 
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 
 def run_scenarios(name, depth=8, **kwargs):

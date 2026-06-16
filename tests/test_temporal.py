@@ -1,4 +1,5 @@
 """FSL v2.0-lite temporal: leadsTo and fair (DESIGN-temporal.md §6)."""
+import sys
 import ast
 import subprocess
 import tempfile
@@ -9,7 +10,7 @@ from fslc.cli import run_testgen
 
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 
 def run_inline(src, depth=8, **kwargs):

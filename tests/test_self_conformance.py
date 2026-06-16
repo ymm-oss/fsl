@@ -1,5 +1,6 @@
 """Implementation-conformance anchors: check that the fslc_session / fslc_monitor models match the real CLI behavior."""
 from __future__ import annotations
+import sys
 
 import json
 import os
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SESSION_SPEC = ROOT / "examples/self/fslc_session.fsl"
 MONITOR_SPEC = ROOT / "examples/self/fslc_monitor.fsl"
 CART_SPEC = ROOT / "specs/cart_v1.fsl"
-PY = ROOT / ".venv/bin/python"
+PY = sys.executable
 
 USER_ERROR_KINDS = frozenset({"parse", "semantics", "io", "usage", "type"})
 

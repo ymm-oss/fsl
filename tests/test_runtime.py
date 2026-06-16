@@ -1,4 +1,5 @@
 """FSL v2.0 runtime monitor, replay, and testgen tests (DESIGN-bridge §6)."""
+import sys
 import ast
 import copy
 import json
@@ -14,7 +15,7 @@ from fslc.testgen import generate_test_file
 
 ROOT = Path(__file__).resolve().parent.parent
 SPECS = ROOT / "specs"
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 SAMPLE_SPECS = [
     "cart_v1.fsl",

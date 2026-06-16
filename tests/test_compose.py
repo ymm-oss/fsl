@@ -1,4 +1,5 @@
 """FSL v2.0 spec compose tests (DESIGN-compose.md §5)."""
+import sys
 import json
 import subprocess
 from pathlib import Path
@@ -11,7 +12,7 @@ from fslc.parser import parse_src
 
 ROOT = Path(__file__).resolve().parent.parent
 SPECS = ROOT / "specs"
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 
 def _load_order_system():

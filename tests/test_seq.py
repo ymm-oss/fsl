@@ -1,4 +1,5 @@
 """FSL v1.1 Seq<T, N> tests (DESIGN-seq.md §8)."""
+import sys
 import json
 import subprocess
 from pathlib import Path
@@ -9,7 +10,7 @@ from fslc import parse, build_spec, verify, prove, scenarios, FslError
 from fslc.cli import run_check
 
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 SPECS = ROOT / "specs"
 
 

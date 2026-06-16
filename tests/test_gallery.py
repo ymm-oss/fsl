@@ -1,4 +1,5 @@
 from __future__ import annotations
+import sys
 
 import json
 import shlex
@@ -94,12 +95,12 @@ def _argv(case: GalleryCase) -> list[str]:
     path = GALLERY / case.path
     parts = shlex.split(case.command)
     if parts[0] == "check":
-        return [str(ROOT / ".venv" / "bin" / "python"), "-m", "fslc", "check", str(path), *parts[1:]]
+        return [sys.executable, "-m", "fslc", "check", str(path), *parts[1:]]
     if parts[0] == "verify":
-        return [str(ROOT / ".venv" / "bin" / "python"), "-m", "fslc", "verify", str(path), *parts[1:]]
+        return [sys.executable, "-m", "fslc", "verify", str(path), *parts[1:]]
     if parts[0] == "refine":
         return [
-            str(ROOT / ".venv" / "bin" / "python"),
+            sys.executable,
             "-m",
             "fslc",
             "refine",

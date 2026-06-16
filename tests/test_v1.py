@@ -11,7 +11,7 @@ from fslc.cli import run_check, run_verify, exit_code
 
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 
 def run(name, depth=8, **kwargs):

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import sys
 
 import json
 import subprocess
@@ -10,7 +11,7 @@ from fslc.cli import run_verify
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 
 def _spec(src: str):
