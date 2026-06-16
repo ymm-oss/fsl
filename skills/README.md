@@ -16,10 +16,12 @@ artifacts by accident:
 | [`fsl-requirements/`](fsl-requirements/) | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `requirements` spec |
 | [`fsl-design/`](fsl-design/) | engineering design, internal state/actions, refinement mapping, testgen/replay handoff | kernel `spec` + mapping |
 | [`fsl-design-review/`](fsl-design-review/) | design review, variants, SOLID/LSP/OCP/substitutability judgment | contract-conformance report |
+| [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or
-repairing verifier output.
+repairing verifier output. Use `fsl-delivery/` when the task spans multiple
+layers and needs lifecycle coordination.
 
 ## Files
 
@@ -35,6 +37,9 @@ repairing verifier output.
   refinement guardrails
 - [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — review procedure and
   design-principle interpretation
+- [`fsl-delivery/SKILL.md`](fsl-delivery/SKILL.md) — lifecycle orchestration
+  across business, requirements, design, verification, and implementation
+  conformance
 
 ## Installation
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "FSL Delivery"
+  short_description: "Drive FSL from planning to implementation"
+  default_prompt: "Use $fsl-delivery to drive this feature from planning through requirements, design, verification, and implementation conformance."

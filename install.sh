@@ -214,7 +214,7 @@ case ":$PATH:" in
 esac
 
 if [ "$INSTALL_SKILL" -eq 1 ]; then
-  SKILL_NAMES="fsl fsl-business fsl-requirements fsl-design fsl-design-review"
+  SKILL_NAMES="fsl fsl-business fsl-requirements fsl-design fsl-design-review fsl-delivery"
   mkdir -p "$HOME/.claude/skills"
   for SKILL_NAME in $SKILL_NAMES; do
     SKILL_SRC="$REPO_DIR/skills/$SKILL_NAME"

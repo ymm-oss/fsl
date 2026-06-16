@@ -170,7 +170,7 @@ Windows users should use WSL or refer to the developer instructions (PowerShell)
 Uninstall:
 
 ```bash
-rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review
+rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
 ```
 
 ## Developer setup
@@ -248,6 +248,7 @@ the canonical copies live under [`skills/`](skills/) at the repository root:
 - [`skills/fsl-requirements/SKILL.md`](skills/fsl-requirements/SKILL.md) — PM requirements, acceptance criteria, forbidden flows, and NFRs
 - [`skills/fsl-design/SKILL.md`](skills/fsl-design/SKILL.md) — engineering design specs and refinement to requirements
 - [`skills/fsl-design-review/SKILL.md`](skills/fsl-design-review/SKILL.md) — design review, variant checks, and substitutability judgment
+- [`skills/fsl-delivery/SKILL.md`](skills/fsl-delivery/SKILL.md) — end-to-end workflow orchestration across planning, requirements, design, and implementation conformance
 
 Claude Code working in this repository recognizes them automatically via `.claude/skills/`
 (symbolic links to `skills/*`). To use them in another project,
