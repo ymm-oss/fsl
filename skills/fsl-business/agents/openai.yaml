@@ -1,0 +1,4 @@
+interface:
+  display_name: "FSL Business"
+  short_description: "Verify business flows with FSL."
+  default_prompt: "Use $fsl-business to model and verify this business flow."

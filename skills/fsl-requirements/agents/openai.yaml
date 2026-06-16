@@ -1,0 +1,4 @@
+interface:
+  display_name: "FSL Requirements"
+  short_description: "Verify PM requirements with FSL."
+  default_prompt: "Use $fsl-requirements to formalize and verify these requirements."

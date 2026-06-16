@@ -214,18 +214,21 @@ case ":$PATH:" in
 esac
 
 if [ "$INSTALL_SKILL" -eq 1 ]; then
-  SKILL_SRC="$REPO_DIR/skills/fsl"
-  SKILL_DST="$HOME/.claude/skills/fsl"
-  [ -d "$SKILL_SRC" ] || fail "$SKILL_SRC not found. Check that the repository was fetched correctly and re-run."
-  if [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
-    echo "The Claude Code skill already exists: $SKILL_DST — to update it, run rm -rf \"$SKILL_DST\" and re-run."
-  else
-    mkdir -p "$(dirname "$SKILL_DST")"
-    cp -R "$SKILL_SRC" "$SKILL_DST"
-    echo "Copied the Claude Code skill: $SKILL_DST"
-  fi
+  SKILL_NAMES="fsl fsl-business fsl-requirements fsl-design fsl-design-review"
+  mkdir -p "$HOME/.claude/skills"
+  for SKILL_NAME in $SKILL_NAMES; do
+    SKILL_SRC="$REPO_DIR/skills/$SKILL_NAME"
+    SKILL_DST="$HOME/.claude/skills/$SKILL_NAME"
+    [ -d "$SKILL_SRC" ] || fail "$SKILL_SRC not found. Check that the repository was fetched correctly and re-run."
+    if [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
+      echo "The Claude Code skill already exists: $SKILL_DST — to update this skill, run rm -rf \"$SKILL_DST\" and re-run."
+    else
+      cp -R "$SKILL_SRC" "$SKILL_DST"
+      echo "Copied Claude Code skill: $SKILL_DST"
+    fi
+  done
 else
-  echo "Skipped copying the Claude Code skill."
+  echo "Skipped copying the Claude Code skills."
 fi
 
 echo "Running a smoke test."
@@ -239,4 +242,4 @@ case "$CHECK_OUTPUT" in
     ;;
 esac
 
-echo "Done. Open Claude Code and try saying something like \"verify this business flow with FSL.\" Examples: $REPO_DIR/examples/pm/ (for PMs), $REPO_DIR/examples/consulting/ (for consultants)"
+echo "Done. Open Claude Code and try saying: \"Use \$fsl-requirements to formalize and verify these cancellation requirements.\" Examples: $REPO_DIR/examples/pm/ (PMs), $REPO_DIR/examples/consulting/ (consultants)"

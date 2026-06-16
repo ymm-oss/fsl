@@ -50,4 +50,5 @@ Findings, bugs, and discoveries from putting each feature into real use. These f
 
 Worked examples are in [`../specs/`](../specs/) (standalone specs) and [`../examples/`](../examples/)
 (bank: implementation conformance / layers: three-layer chain / nfr: SLA).
-The skill for AI agents is at [`../skills/fsl/`](../skills/fsl/).
+The AI-agent skills are under [`../skills/`](../skills/), split into shared FSL
+syntax plus business, requirements, design, and design-review entry points.

@@ -30,19 +30,20 @@ reading the verification results as it repairs it.
    bash ~/.fsl/install.sh
    ```
 
-   A standard install gives you the verifier `fslc` and the Claude Code skill
-   `~/.claude/skills/fsl`. If you want AI to write FSL in another project too,
-   load this skill there.
+   A standard install gives you the verifier `fslc` and the Claude Code skills
+   under `~/.claude/skills/`. If you want AI to write FSL in another project too,
+   load these skills there.
 
-2. **Ask an AI agent to build it using the FSL skill**
+2. **Ask an AI agent to build it using the requirements skill**
 
    ```text
-   Using the FSL skill, write a requirements spec for a cancellation request flow.
+   Use $fsl-requirements to write a requirements spec for a cancellation request flow.
    Only approved orders can be canceled; cancellation after shipping is not allowed; refunds must not run twice.
    Verify it, fix any problems, and keep iterating until there are none.
    ```
 
-   For PM/consulting use, you can hand over natural-language business rules or acceptance criteria as-is.
+   For PM use, start with `$fsl-requirements`; for consulting/business-flow work,
+   start with `$fsl-business`.
    The AI follows the language reference and repair protocol in the skill,
    creates the `.fsl` file, and verifies it with `fslc`.
 
@@ -152,7 +153,7 @@ No programming knowledge is required. Just these three steps:
    ```
 
 This places FSL itself in `~/.fsl`, the `fslc` command in `~/.local/bin/fslc`, and
-the Claude Code skill in `~/.claude/skills/fsl`
+the Claude Code skills in `~/.claude/skills/`
 (once placed, you can delete the folder you downloaded).
 
 > For those who use the GitHub CLI, or engineers: if you have run `gh auth login`, this one line also works:
@@ -161,7 +162,7 @@ the Claude Code skill in `~/.claude/skills/fsl`
 What gets installed:
 
 - the `fslc` command (used from `~/.local/bin/fslc`)
-- the Claude Code skill (`~/.claude/skills/fsl`)
+- the Claude Code skills (`~/.claude/skills/fsl*`)
 - samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
 
 Windows users should use WSL or refer to the developer instructions (PowerShell).
@@ -169,7 +170,7 @@ Windows users should use WSL or refer to the developer instructions (PowerShell)
 Uninstall:
 
 ```bash
-rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl
+rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review
 ```
 
 ## Developer setup
@@ -234,18 +235,23 @@ refinement_failed / reachable_failed / unknown_cti / nonconformant;
 2 = spec error (`error`, including vacuity under `--vacuity error`); 3 = internal error.
 `cart_v1_buggy.fsl` returns the shortest counterexample trace for the automatic bounds check (`type_bound`).
 
-## Skill for AI agents
+## Skills for AI agents
 
 Because FSL is a language not present in training data, when an AI agent (such as Claude Code)
-writes a spec, the **Agent Skill** supplies the language specification and repair protocol into context.
-For easy distribution and discovery, the canonical copy lives at [`skills/fsl/`](skills/fsl/) at the repository root:
+writes a spec, the **Agent Skills** supply the language specification, role-specific
+workflow, and repair protocol into context. For easy distribution and discovery,
+the canonical copies live under [`skills/`](skills/) at the repository root:
 
-- [`skills/fsl/SKILL.md`](skills/fsl/SKILL.md) — workflow / repair protocol / minimal syntax
+- [`skills/fsl/SKILL.md`](skills/fsl/SKILL.md) — shared verifier workflow / repair protocol / minimal syntax
 - [`skills/fsl/reference.md`](skills/fsl/reference.md) — condensed, complete language-reference card
+- [`skills/fsl-business/SKILL.md`](skills/fsl-business/SKILL.md) — business process, controls, KPIs, and goals
+- [`skills/fsl-requirements/SKILL.md`](skills/fsl-requirements/SKILL.md) — PM requirements, acceptance criteria, forbidden flows, and NFRs
+- [`skills/fsl-design/SKILL.md`](skills/fsl-design/SKILL.md) — engineering design specs and refinement to requirements
+- [`skills/fsl-design-review/SKILL.md`](skills/fsl-design-review/SKILL.md) — design review, variant checks, and substitutability judgment
 
-Claude Code working in this repository recognizes it automatically via `.claude/skills/fsl`
-(a symbolic link to `skills/fsl`). To use it in another project,
-copy `skills/fsl/` into that project's `.claude/skills/` or into `~/.claude/skills/`,
+Claude Code working in this repository recognizes them automatically via `.claude/skills/`
+(symbolic links to `skills/*`). To use them in another project,
+copy the relevant `skills/fsl*` directories into that project's `.claude/skills/` or into `~/.claude/skills/`,
 or point the `gh` skill extension at `skills/` as the distribution source.
 See [`skills/README.md`](skills/README.md) for details.
 

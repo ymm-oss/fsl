@@ -717,8 +717,9 @@ DESIGN-*.md).
   formulas to adjudicating concrete examples. → [`DESIGN-explain.md`](DESIGN-explain.md)
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
-lookup, recommended practices) is in the skill for AI agents
-(`skills/fsl/SKILL.md`), and the real-run record is in [`DOGFOOD-9.md`](DOGFOOD-9.md).
+lookup, recommended practices) is in the AI-agent skills under `skills/`, with
+the shared language reference in `skills/fsl/SKILL.md`; the real-run record is in
+[`DOGFOOD-9.md`](DOGFOOD-9.md).
 
 ## 16. Promotion judgment to ghost types (typestate)
 

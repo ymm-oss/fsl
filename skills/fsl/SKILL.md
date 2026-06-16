@@ -1,9 +1,9 @@
 ---
 name: fsl
-description: Write, verify, and repair FSL specs and run fslc check/verify/explain/mutate/typestate/scenarios/replay/testgen/refine. Covers business-flow consistency, As-Is/To-Be controls, requirements formalization, acceptance criteria, SLAs, NFRs, refinement, implementation conformance, and FSL syntax.
+description: Shared FSL language and verifier reference for writing, checking, verifying, repairing, explaining, mutating, refining, replaying, generating scenarios/test scaffolds, and interpreting fslc JSON results. Use directly for FSL syntax, kernel specs, verifier errors, repair loops, and command usage. For role-specific authoring, prefer fsl-business for business flows, fsl-requirements for PM requirements/acceptance/NFR specs, and fsl-design for engineering design/refinement work.
 ---
 
-# FSL — How to Write Specs and the write→verify→repair Loop
+# FSL Core — Language, Verifier, and Repair Loop
 
 FSL is a language not present in training data. **Do not write from memory;
 follow this guide and reference.md.** Read `reference.md` in the same directory
@@ -11,6 +11,23 @@ for syntax details, the full expression catalog, and the idiom collection (alway
 read it before writing a spec). Within the repository, `docs/LANGUAGE.md` is the
 complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
 form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
+
+## Choose the right role skill first
+
+This skill is the shared language/verifier reference. For authoring from natural
+language, use the narrow role skill first and return here for syntax and repair:
+
+| User intent | Primary skill | Deliverable boundary |
+|---|---|---|
+| Business process, As-Is/To-Be, controls, KPIs, goals | `fsl-business` | `business` spec and business evidence |
+| PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `fsl-requirements` | `requirements` spec and scenarios |
+| Engineering design, internal state/actions, mapping to requirements | `fsl-design` | kernel `spec`, mapping, refine/testgen handoff |
+| Design review, variants, SOLID/LSP/OCP/substitutability | `fsl-design-review` | contract-conformance judgment |
+
+If a PM asks for a requirements specification, do not continue into design
+artifacts unless explicitly asked. If a consultant asks for business controls, do
+not infer system requirements. If an engineer asks for design, do not weaken the
+upper business/requirements contract to make refinement pass.
 
 ## Prerequisite: the fslc verifier
 
@@ -304,13 +321,17 @@ important constraints and high-risk specs.
   `scenarios` against the other's spec to expose discrepancies. Costly, so use it
   selectively.
 
-## Entry points by role (read the examples first)
+## Role-specific authoring entry points
 
-| Role | Examples to read | Constructs mainly written |
+When the task starts from role language rather than raw FSL syntax, use the role
+skill first. This prevents business, requirements, and design decisions from being
+mixed in one spec.
+
+| Role / intent | Use skill | Examples to read | Constructs mainly written |
 |---|---|---|
-| Consultant (business flows, regulations, As-Is/To-Be) | `examples/consulting/`, `examples/pm/cancel_flow.fsl` | `business` (reference.md §10) |
-| PM / PdM (requirement definition, acceptance criteria) | `examples/pm/`, `examples/e2e/2_requirements.fsl` | `requirements` (same, §10) + NFR (same, §11) |
-| Engineer (design, implementation connection) | `examples/e2e/` (the whole three-role chain), `examples/bank/` | `spec` (this guide) + refine mapping + Adapter (same, §9) |
+| Consultant (business flows, regulations, As-Is/To-Be) | `fsl-business` | `examples/consulting/`, `examples/pm/cancel_flow.fsl` | `business` (reference.md §10) |
+| PM / PdM (requirement definition, acceptance criteria) | `fsl-requirements` | `examples/pm/`, `examples/e2e/2_requirements.fsl` | `requirements` (reference.md §10) + NFR (reference.md §11) |
+| Engineer (design, implementation connection) | `fsl-design` | `examples/e2e/`, `examples/bank/` | kernel `spec` + refine mapping + Adapter (reference.md §9) |
 
 The flagship example threading all three roles through one domain is
 `examples/e2e/` (expense reimbursement).
@@ -320,6 +341,9 @@ The flagship example threading all three roles through one domain is
 A spec can be written in three layers. Chain **business ⊒ requirements ⊒ design ⊒
 implementation** via refinement (syntax in reference.md §10). Every layer expands
 to the kernel, so verify/induction/scenarios/Monitor are used identically:
+
+Treat the layer boundary as part of the contract. Do not move to the lower layer
+unless the user asks for it or the relevant role skill directs it.
 
 - `business Name { process/policy/kpi/goal }` — the consulting layer. For
   PM/consulting-facing files, prefer the readable stage syntax for common rules:

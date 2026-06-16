@@ -1,45 +1,50 @@
 # skills/
 
 A place for distributable Agent Skills. They are placed at the repository root so
-they are easy to find on GitHub and can be distributed via the `gh` skill extension
-or by manual copy.
+they are easy to find on GitHub and can be distributed via the `gh` skill
+extension or by manual copy.
 
-## fsl
+## Skill set
 
-[`fsl/`](fsl/) — a skill that teaches FSL (this repository's formal specification
-language) to AI agents. FSL is a language that does not exist in training data, so
-for an agent to write specs, this skill must supply the language specification and
-the repair protocol into context.
+FSL work is split by layer so an agent does not turn PM requirements into design
+artifacts by accident:
 
-- [`fsl/SKILL.md`](fsl/SKILL.md) — workflow, the result→next-move repair protocol
-  table, minimal syntax, and the rules to follow structurally (the main body read
-  when the skill is invoked)
-- [`fsl/reference.md`](fsl/reference.md) — a condensed full language reference card
-  (compose / refinement / a catalog of all expressions / a collection of idioms)
+| Skill | Use for | Main deliverable |
+|---|---|---|
+| [`fsl/`](fsl/) | shared language syntax, verifier commands, repair protocol, JSON result interpretation | core FSL reference |
+| [`fsl-business/`](fsl-business/) | business flows, As-Is/To-Be controls, policies, KPIs, goals | `business` spec |
+| [`fsl-requirements/`](fsl-requirements/) | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `requirements` spec |
+| [`fsl-design/`](fsl-design/) | engineering design, internal state/actions, refinement mapping, testgen/replay handoff | kernel `spec` + mapping |
+| [`fsl-design-review/`](fsl-design-review/) | design review, variants, SOLID/LSP/OCP/substitutability judgment | contract-conformance report |
 
-## fsl-design-review
+The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
+narrowest role skill for authoring, then load `fsl/` when writing syntax or
+repairing verifier output.
 
-[`fsl-design-review/`](fsl-design-review/) — a procedure skill for design study and
-design review using FSL. It describes a design proposal, variant, extension, or
-change as a "refinement to a frozen contract (abstract spec)" and reports the result
-of `fslc refine` in the vocabulary of design principles (SOLID's LSP/OCP, design by
-contract, etc.). The procedure is the spine, and the principles appear as judgment
-lenses at each step. FSL syntax is delegated to the fsl skill (intended to be used
-together).
+## Files
 
-- [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — the 5-step procedure,
-  the check-result→design-judgment translation table, the principle↔mechanism
-  correspondence table, and the discipline of the abstract layer
+- [`fsl/SKILL.md`](fsl/SKILL.md) — shared workflow, result→next-move repair
+  protocol, minimal syntax, and structural rules
+- [`fsl/reference.md`](fsl/reference.md) — condensed full language reference card
+  for kernel FSL, compose, refinement, business/requirements dialects, and NFR
+- [`fsl-business/SKILL.md`](fsl-business/SKILL.md) — business-layer procedure and
+  guardrails
+- [`fsl-requirements/SKILL.md`](fsl-requirements/SKILL.md) — requirements-layer
+  procedure and PM guardrails
+- [`fsl-design/SKILL.md`](fsl-design/SKILL.md) — design-layer procedure and
+  refinement guardrails
+- [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — review procedure and
+  design-principle interpretation
 
-### Installation
+## Installation
 
-**Claude Code (inside this repository)**: no extra work is needed, because there are
+**Claude Code inside this repository**: no extra work is needed, because there are
 symbolic links to each skill under `.claude/skills/`.
 
-**Using it in another project**: copy `skills/fsl/` (and, if needed,
-`skills/fsl-design-review/`) into the target project's `.claude/skills/`, or into
-the user-wide `~/.claude/skills/`. If you use the `gh` skill extension, specify this
-directory (`skills/`) as the distribution source.
+**Using it in another project**: copy the relevant `skills/fsl*` directories into
+the target project's `.claude/skills/`, or into the user-wide
+`~/.claude/skills/`. If you use the `gh` skill extension, specify this directory
+(`skills/`) as the distribution source.
 
 The verifier `fslc` itself is required separately (`pip install -e .` at the
 repository root; the only dependencies are lark and z3-solver).
