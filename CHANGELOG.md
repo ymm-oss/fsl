@@ -5,6 +5,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- **Readable fsl-biz stage syntax for PM/consulting-facing policies and goals**:
+  `policy ... every Case in Stage must eventually be Target [or Target ...]`,
+  `goal ... some Case can reach Stage`, and
+  `goal ... all Case can be Stage [or Stage ...]`. These are AST sugar for the
+  existing `responds` / `reachable` forms, so kernel semantics and JSON output
+  remain unchanged while common business-flow rules no longer require reading
+  `stage(c) == ... ~> ...` formulas.
+
 ## [1.3.0] - 2026-06-16
 
 Theme: **propagation review for layer chains (fsl-design-review)** — establishing that

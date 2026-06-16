@@ -45,24 +45,18 @@ business CancelFlow {
 
   // "Do not leave requests unattended" — under any order of progression,
   // a cancellation request eventually proceeds to showing an offer (an SLA-style response rule)
-  policy POL-1 "A cancellation request must always be met with a retention offer" responds {
-    forall c: Sub { stage(c) == CancelRequested ~> stage(c) == OfferShown }
-  }
+  policy POL-1 "A cancellation request must always be met with a retention offer"
+    every Sub in CancelRequested must eventually be OfferShown
 
   // "Do not leave a shown offer unattended" — once shown, it must always be resolved
-  policy POL-2 "A shown offer must always be resolved by acceptance or decline" responds {
-    forall c: Sub {
-      stage(c) == OfferShown ~> (stage(c) == Retained or stage(c) == Churned)
-    }
-  }
+  policy POL-2 "A shown offer must always be resolved by acceptance or decline"
+    every Sub in OfferShown must eventually be Retained or Churned
 
   // ── Goals (states that should be reachable) ─────────────────────────
   // Machine-confirm "can this process even reach retention in the first place?".
   // If a rule change makes the goal unreachable, it is detected as reachable_failed.
-  goal CanRetain "There exists a case that reaches retention via a retention offer" {
-    exists c: Sub { stage(c) == Retained }
-  }
-  goal CanChurn "There also exists a case that declines and reaches cancellation" {
-    exists c: Sub { stage(c) == Churned }
-  }
+  goal CanRetain "There exists a case that reaches retention via a retention offer"
+    some Sub can reach Retained
+  goal CanChurn "There also exists a case that declines and reaches cancellation"
+    some Sub can reach Churned
 }

@@ -236,10 +236,16 @@ process_initial: "initial" NAME
 process_transition: "transition" NAME NAME "->" NAME "by" NAME
 kpi_def: "kpi" NAME "counts" NAME "in" NAME
 policy_def: "policy" REQ_ID STRING policy_body
-?policy_body: policy_invariant | policy_responds
+?policy_body: policy_invariant | policy_responds | policy_eventually
 policy_invariant: "invariant" "{" expr "}"
 policy_responds: "responds" "{" lt_body "}"
-goal_def: "goal" REQ_ID STRING "{" expr "}"
+policy_eventually: "every" NAME "in" NAME "must" "eventually" "be" stage_disjunction
+goal_def: "goal" REQ_ID STRING goal_body
+?goal_body: goal_expr | goal_some_stage | goal_all_stage
+goal_expr: "{" expr "}"
+goal_some_stage: "some" NAME "can" "reach" NAME
+goal_all_stage: "all" NAME "can" "be" stage_disjunction
+stage_disjunction: NAME (_OR NAME)*
 
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 REQ_ID: /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/
@@ -858,11 +864,26 @@ class Ast(Transformer):
         binders, p, q = _flatten_leadsto(body)
         return ("biz_policy_responds", binders, p, q)
 
+    def stage_disjunction(self, meta, *names):
+        return list(names)
+
+    def policy_eventually(self, meta, case_name, source_stage, target_stages):
+        return ("biz_policy_eventually", case_name, source_stage, target_stages)
+
     def policy_def(self, meta, policy_id, text, body):
         return ("biz_policy", str(policy_id), text, body, _loc(meta))
 
-    def goal_def(self, meta, goal_id, text, expr):
-        return ("biz_goal", str(goal_id), text, expr, _loc(meta))
+    def goal_expr(self, meta, expr):
+        return ("biz_goal_expr", expr)
+
+    def goal_some_stage(self, meta, case_name, stage):
+        return ("biz_goal_some_stage", case_name, stage)
+
+    def goal_all_stage(self, meta, case_name, stages):
+        return ("biz_goal_all_stage", case_name, stages)
+
+    def goal_def(self, meta, goal_id, text, body):
+        return ("biz_goal", str(goal_id), text, body, _loc(meta))
 
     def business_def(self, meta, name, *items):
         return ("business", name, [i for i in items if i])

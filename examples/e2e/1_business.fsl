@@ -59,23 +59,16 @@ business ExpenseToBe {
   // counterexample carries this ID and original text, so the auditor, the
   // PM, and the engineer all see the same failure.
 
-  policy CTRL-1 "A submitted claim must always be adjudicated" responds {
-    forall c: Claim {
-      stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
-    }
-  }
+  policy CTRL-1 "A submitted claim must always be adjudicated"
+    every Claim in Submitted must eventually be Approved or Rejected
 
-  policy CTRL-2 "An approved claim must always be paid" responds {
-    forall c: Claim {
-      stage(c) == Approved ~> stage(c) == Paid
-    }
-  }
+  policy CTRL-2 "An approved claim must always be paid"
+    every Claim in Approved must eventually be Paid
 
   // ── Goal ─────────────────────────────────────────────────────────
   // Confirm "whether it is even possible to reach Paid from Draft".
   // A transformation proposal where this becomes reachable_failed is
   // stuck as a business process before controls even come into play.
-  goal CanPay "There exists a case that reaches completed payment via approval from a claim" {
-    exists c: Claim { stage(c) == Paid }
-  }
+  goal CanPay "There exists a case that reaches completed payment via approval from a claim"
+    some Claim can reach Paid
 }

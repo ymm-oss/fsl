@@ -1,17 +1,6 @@
 ---
 name: fsl
-description: >-
-  Write, verify, and repair specifications in FSL (AI-Native Formal
-  Specification Language). Use this when creating/editing/checking .fsl files,
-  running fslc commands (check/verify/explain/mutate/typestate/scenarios/replay/
-  testgen/refine), or doing formal specification, model checking, invariant
-  proofs, spec-driven test generation, refinement checking, or implementation
-  conformance checking. Also covers consistency checking of business flows and
-  business processes, As-Is/To-Be control checks, formalizing requirements and
-  requirement definitions, turning acceptance criteria into tests, and checking
-  SLAs and non-functional requirements. Triggers include "write a spec",
-  "formally verify", "verify this business flow", "define requirements", and
-  "FSL".
+description: Write, verify, and repair FSL specs and run fslc check/verify/explain/mutate/typestate/scenarios/replay/testgen/refine. Covers business-flow consistency, As-Is/To-Be controls, requirements formalization, acceptance criteria, SLAs, NFRs, refinement, implementation conformance, and FSL syntax.
 ---
 
 # FSL — How to Write Specs and the write→verify→repair Loop
@@ -100,6 +89,8 @@ the formalization memo.**
 | "prohibit/constrain a change from one state to the next" (two-state safety) | `trans` (use `old()` to reference the pre-transition state) |
 | "can only do X when Y" (precondition) | an action's `requires` |
 | "once X happens, Y must eventually happen" (response, progress) | `leadsTo` + `fair` on the action that drives progress |
+| business-flow stage response for consultants/PMs | `policy POL-1 "..." every Case in Source must eventually be Target [or Target ...]` |
+| business-flow reachability / completion goal | `goal G "..." some Case can reach Target` or `goal G "..." all Case can be Target [or Target ...]` |
 | "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
 | "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
 | "within K times / K ticks" (deadline) | requirements `time` + `deadline` (reference §11) |
@@ -306,9 +297,15 @@ A spec can be written in three layers. Chain **business ⊒ requirements ⊒ des
 implementation** via refinement (syntax in reference.md §10). Every layer expands
 to the kernel, so verify/induction/scenarios/Monitor are used identically:
 
-- `business Name { process/policy/kpi/goal }` — the consulting layer. Regulation
-  contradiction = invariant violation, dead business step = coverage diagnostic,
-  unreachable business goal = reachable_failed
+- `business Name { process/policy/kpi/goal }` — the consulting layer. For
+  PM/consulting-facing files, prefer the readable stage syntax for common rules:
+  `policy ... every Case in Source must eventually be Target [or Target ...]`,
+  `goal ... some Case can reach Target`, and
+  `goal ... all Case can be Target [or Target ...]`. Use explicit
+  `responds { forall ... stage(c) ... ~> ... }` / `{ expr }` only when the rule is
+  not simple stage progression. Regulation contradiction = invariant violation,
+  dead business step = coverage diagnostic, unreachable business goal =
+  reachable_failed
 - `requirements Name { requirement REQ-1 "source" {...} / acceptance / branches /
   implements Abs from "file" {map ...} }` — the requirements layer. With
   `implements`, verify simultaneously runs the refine to the upper layer (the

@@ -35,6 +35,29 @@ BIZ_SRC = r'''business ReturnHandling {
 '''
 
 
+NATURAL_BIZ_SRC = r'''business NaturalReturnHandling {
+  actor Customer, Manager
+  case Return = 0..2
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition reject Requested -> Rejected by Manager
+    transition refund Approved -> Refunded by Manager
+  }
+
+  kpi refunded counts Return in Refunded
+
+  policy PAY-2 "requests are eventually decided"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+
+  goal HasRefund "a return can be refunded" some Return can reach Refunded
+  goal AllSettled "all returns can settle" all Return can be Refunded or Rejected
+}
+'''
+
+
 def _write_biz(tmp_path, src=BIZ_SRC, name="return_biz.fsl"):
     path = tmp_path / name
     path.write_text(src, encoding="utf-8")
@@ -56,6 +79,32 @@ def test_biz_dialect_check_verify_and_induction(tmp_path):
     proved = run_verify(str(biz), 8, "ignore", engine="induction")
     assert proved["result"] == "proved"
     assert "_kpi_refunded" in proved["invariants_checked"]
+
+
+def test_biz_natural_policy_and_goal_syntax(tmp_path):
+    biz = _write_biz(tmp_path, NATURAL_BIZ_SRC)
+
+    checked = run_check(str(biz))
+    assert checked["result"] == "ok"
+
+    verified = run_verify(str(biz), 8, "warn")
+    assert verified["result"] == "verified"
+    assert "PAY-2" in verified["leads_to"]
+    assert set(verified["reachables"]) == {"AllSettled", "HasRefund"}
+
+
+def test_biz_natural_syntax_rejects_unknown_stage(tmp_path):
+    bad = NATURAL_BIZ_SRC.replace(
+        "must eventually be Approved",
+        "must eventually be Missing",
+    )
+    biz = _write_biz(tmp_path, bad)
+
+    result = run_check(str(biz))
+
+    assert result["result"] == "error"
+    assert result["kind"] == "type"
+    assert "stage 'Missing' is not declared" in result["message"]
 
 
 def test_biz_policy_violation_carries_policy_requirement_meta(tmp_path):
