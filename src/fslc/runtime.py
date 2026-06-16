@@ -13,6 +13,27 @@ from .model import FslError, binder_range, display_label, domain_range, eval_con
 from .parser import parse_src
 from .model import build_spec
 from .bmc import build_instances, compute_changes, _collect_partial_op_sites
+from .values import (
+    _display_state_keys,
+    _enum_name,
+    _is_enum_member,
+    _lvalue_key,
+    _seq_val_parts,
+    _struct_field_ty,
+    _struct_info,
+    eval_count,
+    eval_field,
+    eval_index,
+    eval_is,
+    eval_quant,
+    eval_sum,
+    logical_map_access,
+    option_logical_eq,
+    option_none_cmp,
+    reject_option_binop,
+    seq_compare,
+    struct_compare,
+)
 
 _INIT_HINT = "runtime monitor requires a deterministic init"
 _PARTIAL_OP_HINT = "guard the action with requires q.size() > 0 (or bound the index)"
@@ -65,20 +86,6 @@ class _EvalError(Exception):
 def _err(message, kind="semantics", loc=None, hint=None):
     raise FslError(message, kind=kind, loc=loc, hint=hint)
 
-
-def _is_enum_member(name, spec):
-    for info in spec["types"].values():
-        if info["kind"] == "enum" and name in info["members"]:
-            return info["members"].index(name)
-    return None
-
-
-def _enum_name(spec, ename, val):
-    members = spec["types"][ename]["members"]
-    i = int(val)
-    if 0 <= i < len(members):
-        return members[i]
-    return str(val)
 
 
 def _display_value(ty, val, spec):
@@ -550,68 +557,16 @@ def _read_logical(name, ty, state, spec):
 
 
 def _logical_map_access(logical, idx, state, spec):
-    ty = spec["state"][logical]
-    if ty[0] != "map":
-        _err(f"'{logical}' is not a map")
-    vty = ty[2]
-    if vty[0] == "struct":
-        sname = vty[1]
-        return ("struct_map_val", logical, idx, {
-            fn: (
-                ("option_val",
-                 state[f"{logical}__{fn}__present"][idx],
-                 state[f"{logical}__{fn}__value"][idx])
-                if fty[0] == "option"
-                else state[f"{logical}__{fn}"][idx]
-            )
-            for fn, fty in spec["types"][sname]["fields"].items()
-        })
-    if vty[0] == "option":
-        return (
-            "option_val",
-            state[f"{logical}__present"][idx],
-            state[f"{logical}__value"][idx],
-        )
-    return state[logical][idx]
+    return logical_map_access(logical, idx, state, spec, _CONC)
 
 
 def _eval_index(base_e, idx, state, spec):
-    if isinstance(base_e, str):
-        name = base_e
-    elif base_e[0] == "var":
-        name = base_e[1]
-    else:
-        _err("complex index base not supported")
-    if name in spec["state"]:
-        return _logical_map_access(name, idx, state, spec)
-    if name in state:
-        val = state[name]
-        if isinstance(val, dict):
-            return val[idx]
-        if isinstance(val, list):
-            return val[idx]
-        _err(f"cannot index '{name}'")
-    _err(f"unknown map '{name}'")
+    return eval_index(base_e, idx, state, spec, _CONC)
 
 
 def _eval_field(base, field, spec):
-    if isinstance(base, tuple) and base[0] == "struct_map_val":
-        fields = base[3]
-        if field not in fields:
-            _err(f"unknown field '{field}'")
-        return fields[field]
-    if isinstance(base, tuple) and base[0] == "struct_val":
-        _, sname, vals = base
-        if field not in vals:
-            _err(f"unknown field '{field}' in struct {sname}")
-        return vals[field]
-    _err(f"cannot access field '{field}' on this value")
+    return eval_field(base, field)
 
-
-def _seq_val_parts(base):
-    if isinstance(base, tuple) and base[0] == "seq_val":
-        return base[1], base[2], base[3], base[4]
-    return None
 
 
 def _set_elem_ty(base):
@@ -698,175 +653,88 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures, 
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
-    val = eval_concrete(inner, state, binds, spec, old_state, in_ensures)
-    if pat[0] == "pat_none":
-        if isinstance(val, tuple) and val[0] == "option_val":
-            return not val[1]
-        if isinstance(val, tuple) and val[0] == "none":
+    return eval_is(inner, pat, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
+
+
+class _ConcDomain:
+    def int_lit(self, n):
+        return n
+
+    def select_int(self, cond, body_thunk):
+        return body_thunk() if _as_bool(cond) else 0
+
+    def quantify(self, qop, terms):
+        if qop == "forall":
+            for w, body_thunk in terms:
+                if w is not None and not _as_bool(w):
+                    continue
+                if not _as_bool(body_thunk()):
+                    return False
             return True
-        _err("is none applied to non-Option value", kind="type")
-    if pat[0] == "pat_some":
-        vname = pat[1]
-        if isinstance(val, tuple) and val[0] == "option_val":
-            present, value = val[1], val[2]
-            binds[vname] = value
-            return present
-        _err("is some applied to non-Option value", kind="type")
-    _err("invalid pattern")
+        for w, body_thunk in terms:
+            if w is not None and not _as_bool(w):
+                continue
+            if _as_bool(body_thunk()):
+                return True
+        return False
+
+    def not_(self, x):
+        return not x
+
+    def and_(self, x, y):
+        return x and y
+
+    def implies(self, x, y):
+        return (not x) or y
+
+    def true_(self):
+        return True
+
+    def seq_eq(self, data1, len1, data2, len2, cap):
+        return len1 == len2 and all(data1[i] == data2[i] for i in range(len1))
+
+    def and_all(self, parts):
+        return all(parts)
+
+    def select(self, container, idx):
+        return container[idx]
+
+
+_CONC = _ConcDomain()
 
 
 def _eval_quant(e, state, binds, spec, old_state, in_ensures):
-    qop, binder, body = e[0], e[1], e[2]
-    v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
-    if qop == "forall":
-        for i in range(lo, hi + 1):
-            b2 = dict(binds)
-            b2[v] = i
-            if where is not None:
-                w = eval_concrete(where, state, b2, spec, old_state, in_ensures)
-                if not _as_bool(w):
-                    continue
-            if not _as_bool(eval_concrete(body, state, b2, spec, old_state, in_ensures)):
-                return False
-        return True
-    for i in range(lo, hi + 1):
-        b2 = dict(binds)
-        b2[v] = i
-        if where is not None:
-            w = eval_concrete(where, state, b2, spec, old_state, in_ensures)
-            if not _as_bool(w):
-                continue
-        if _as_bool(eval_concrete(body, state, b2, spec, old_state, in_ensures)):
-            return True
-    return False
+    return eval_quant(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
 
 
 def _eval_count(e, state, binds, spec, old_state, in_ensures):
-    _, v, ty_name, cond = e
-    ty = spec["types"][ty_name]["ty"]
-    lo, hi = domain_range(ty, spec["types"])
-    total = 0
-    for i in range(lo, hi + 1):
-        b2 = {**binds, v: i}
-        if _as_bool(eval_concrete(cond, state, b2, spec, old_state, in_ensures)):
-            total += 1
-    return total
+    return eval_count(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
 
 
 def _eval_sum(e, state, binds, spec, old_state, in_ensures):
-    _, v, ty_name, body, cond = e
-    ty = spec["types"][ty_name]["ty"]
-    lo, hi = domain_range(ty, spec["types"])
-    total = 0
-    for i in range(lo, hi + 1):
-        b2 = {**binds, v: i}
-        if cond is not None:
-            if not _as_bool(eval_concrete(cond, state, b2, spec, old_state, in_ensures)):
-                continue
-        total += eval_concrete(body, state, b2, spec, old_state, in_ensures)
-    return total
+    return eval_sum(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
 
-
-def _struct_info(val, spec):
-    if not isinstance(val, tuple):
-        return None, None
-    if val[0] == "struct_val":
-        return val[1], val[2]
-    if val[0] == "struct_map_val":
-        logical = val[1]
-        ty = spec["state"].get(logical)
-        if ty and ty[0] == "map" and ty[2][0] == "struct":
-            return ty[2][1], val[3]
-    return None, None
 
 
 def _seq_compare(a, b, op, spec):
-    if not (isinstance(a, tuple) and a[0] == "seq_val" and isinstance(b, tuple) and b[0] == "seq_val"):
-        return None
-    _, data1, len1, _, cap1 = a
-    _, data2, len2, _, cap2 = b
-    if cap1 != cap2:
-        _err("Seq comparison between different capacities", kind="type")
-    eq = len1 == len2 and all(data1[i] == data2[i] for i in range(len1))
-    return (not eq) if op == "!=" else eq
+    return seq_compare(a, b, op, spec, _CONC)
 
 
 def _struct_compare(a, b, op, spec):
-    sa, fa = _struct_info(a, spec)
-    sb, fb = _struct_info(b, spec)
-    if sa is None and sb is None:
-        return None
-    if sa is None or sb is None:
-        _err("struct comparison requires two struct values", kind="type")
-    if sa != sb:
-        _err(f"struct comparison between '{sa}' and '{sb}'", kind="type")
-    fields = spec["types"][sa]["fields"]
-    eq = True
-    for k in set(fa) | set(fb):
-        if fields[k][0] == "option":
-            eq = eq and _option_logical_eq(fa.get(k), fb.get(k))
-        else:
-            eq = eq and fa.get(k) == fb.get(k)
-    return (not eq) if op == "!=" else eq
+    return struct_compare(a, b, op, spec, _CONC)
 
 
 def _option_logical_eq(a, b):
-    if isinstance(a, tuple) and a[0] == "option_val":
-        if isinstance(b, tuple) and b[0] == "option_val":
-            return a[1] == b[1] and (not a[1] or a[2] == b[2])
-        if isinstance(b, tuple) and b[0] == "none":
-            return not a[1]
-    if isinstance(b, tuple) and b[0] == "option_val":
-        if isinstance(a, tuple) and a[0] == "none":
-            return not b[1]
-    if isinstance(a, tuple) and a[0] == "none" and isinstance(b, tuple) and b[0] == "none":
-        return True
-    _err("struct Option field comparison requires Option values", kind="type")
+    return option_logical_eq(a, b, _CONC)
 
 
 def _option_none_cmp(a, b, op):
-    if isinstance(a, tuple) and a[0] == "option_val" and isinstance(b, tuple) and b[0] == "none":
-        present = a[1]
-        return (not present) if op == "==" else present
-    if isinstance(b, tuple) and b[0] == "option_val" and isinstance(a, tuple) and a[0] == "none":
-        present = b[1]
-        return (not present) if op == "==" else present
-    return None
+    return option_none_cmp(a, b, op, _CONC)
 
 
 def _reject_option_binop(a, b, op):
-    def tag(v):
-        if isinstance(v, tuple) and v[0] in ("option_val", "none"):
-            return v[0]
-        return None
-    ta, tb = tag(a), tag(b)
-    if ta is None and tb is None:
-        return
-    if op in ("==", "!=") and ta == "none" and tb == "none":
-        return
-    if op in ("==", "!="):
-        _err("Option == and != are only defined against none", kind="type")
-    _err(f"Option values cannot be used with '{op}'", kind="type")
+    return reject_option_binop(a, b, op)
 
-
-def _lvalue_key(lv):
-    if lv[0] == "var":
-        return ("scalar", lv[1])
-    if lv[0] == "index":
-        return ("map", lv[1], lv[2])
-    if lv[0] == "field_lv":
-        base, field = lv[1], lv[2]
-        if base[0] == "index":
-            return ("map_field", base[1], base[2], field)
-        return ("field", base[1], field)
-    _err(f"invalid lvalue {lv}")
-
-
-def _struct_field_ty(spec, sname, field):
-    try:
-        return spec["types"][sname]["fields"][field]
-    except KeyError:
-        _err(f"unknown field '{field}' in struct {sname}")
 
 
 def _assign_option_to_phys(pend, state, present_phys, value_phys, val):
@@ -1114,12 +982,6 @@ def _exec_init(spec):
         run(st, binds)
     return state
 
-
-def _display_state_keys(logical, spec):
-    dn = spec.get("display_names") or {}
-    if not dn:
-        return logical
-    return {dn.get(k, k): v for k, v in logical.items()}
 
 
 def phys_to_logical(state, spec):

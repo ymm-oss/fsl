@@ -20,6 +20,74 @@ from .model import (
     resolve_action_name,
     z3_sort,
 )
+from .values import (
+    _display_state_keys,
+    _enum_name,
+    _is_enum_member,
+    _lvalue_key,
+    _seq_val_parts,
+    _struct_field_ty,
+    _struct_info,
+    eval_count,
+    eval_field,
+    eval_index,
+    eval_is,
+    eval_quant,
+    eval_sum,
+    logical_map_access,
+    option_logical_eq,
+    option_none_cmp,
+    reject_option_binop,
+    seq_compare,
+    struct_compare,
+)
+
+
+class _SymDomain:
+    def int_lit(self, n):
+        return z3.IntVal(n)
+
+    def select_int(self, cond, body_thunk):
+        return z3.If(cond, body_thunk(), z3.IntVal(0))
+
+    def quantify(self, qop, terms):
+        insts = []
+        for w, body_thunk in terms:
+            bi = body_thunk()
+            if w is not None:
+                insts.append(z3.Implies(w, bi) if qop == "forall" else z3.And(w, bi))
+            else:
+                insts.append(bi)
+        if not insts:
+            return z3.BoolVal(qop == "forall")
+        return z3.And(*insts) if qop == "forall" else z3.Or(*insts)
+
+    def not_(self, x):
+        return z3.Not(x)
+
+    def and_(self, x, y):
+        return z3.And(x, y)
+
+    def implies(self, x, y):
+        return z3.Implies(x, y)
+
+    def true_(self):
+        return z3.BoolVal(True)
+
+    def seq_eq(self, data1, len1, data2, len2, cap):
+        parts = [len1 == len2]
+        for i in range(cap):
+            parts.append(z3.Implies(i < len1, z3.Select(data1, i) == z3.Select(data2, i)))
+        return z3.And(*parts)
+
+    def and_all(self, parts):
+        return z3.And(*parts) if parts else z3.BoolVal(True)
+
+    def select(self, container, idx):
+        return z3.Select(container, idx)
+
+
+_SYM = _SymDomain()
 
 
 def _err(msg, kind="semantics", loc=None, expected=None, hint=None):
@@ -290,12 +358,6 @@ def _enum_phys_constraints(spec, state):
         cons.append(state[phys] <= hi)
     return cons
 
-
-def _is_enum_member(name, spec):
-    for info in spec["types"].values():
-        if info["kind"] == "enum" and name in info["members"]:
-            return info["members"].index(name)
-    return None
 
 
 def _type_of_expr(e, spec, ctx_ty=None):
@@ -573,107 +635,25 @@ def _ite_value(c, a, b, spec):
     _err("if arms must have the same type", kind="type")
 
 
-def _struct_info(val, spec):
-    if not isinstance(val, tuple):
-        return None, None
-    if val[0] == "struct_val":
-        return val[1], val[2]
-    if val[0] == "struct_map_val":
-        logical = val[1]
-        ty = spec["state"].get(logical)
-        if ty and ty[0] == "map" and ty[2][0] == "struct":
-            return ty[2][1], val[3]
-    return None, None
-
 
 def _seq_compare(a, b, op, spec):
-    if not (isinstance(a, tuple) and a[0] == "seq_val"
-            and isinstance(b, tuple) and b[0] == "seq_val"):
-        if isinstance(a, tuple) and a[0] == "seq_val":
-            _err("Seq comparison requires two Seq values", kind="type")
-        if isinstance(b, tuple) and b[0] == "seq_val":
-            _err("Seq comparison requires two Seq values", kind="type")
-        return None
-    data1, len1, _, cap1 = a[1], a[2], a[3], a[4]
-    data2, len2, _, cap2 = b[1], b[2], b[3], b[4]
-    if cap1 != cap2:
-        _err("Seq comparison between different capacities", kind="type")
-    parts = [len1 == len2]
-    for i in range(cap1):
-        parts.append(z3.Implies(i < len1, z3.Select(data1, i) == z3.Select(data2, i)))
-    res = z3.And(*parts)
-    return z3.Not(res) if op == "!=" else res
+    return seq_compare(a, b, op, spec, _SYM)
 
 
 def _struct_compare(a, b, op, spec):
-    sa, fa = _struct_info(a, spec)
-    sb, fb = _struct_info(b, spec)
-    if sa is None and sb is None:
-        return None
-    if sa is None or sb is None:
-        _err("struct comparison requires two struct values", kind="type")
-    if sa != sb:
-        _err(f"struct comparison between '{sa}' and '{sb}'", kind="type")
-    if set(fa) != set(fb):
-        _err(f"struct field mismatch in comparison of '{sa}'", kind="type")
-    fields = spec["types"][sa]["fields"]
-    parts = []
-    for k in fa:
-        fty = fields[k]
-        if fty[0] == "option":
-            parts.append(_option_logical_eq(fa[k], fb[k]))
-        else:
-            parts.append(fa[k] == fb[k])
-    res = z3.And(*parts) if parts else z3.BoolVal(True)
-    return z3.Not(res) if op == "!=" else res
+    return struct_compare(a, b, op, spec, _SYM)
 
 
 def _option_logical_eq(a, b):
-    if isinstance(a, tuple) and a[0] == "option_val":
-        if isinstance(b, tuple) and b[0] == "option_val":
-            return z3.And(a[1] == b[1], z3.Implies(a[1], a[2] == b[2]))
-        if isinstance(b, tuple) and b[0] == "none":
-            return z3.Not(a[1])
-    if isinstance(b, tuple) and b[0] == "option_val":
-        if isinstance(a, tuple) and a[0] == "none":
-            return z3.Not(b[1])
-    if isinstance(a, tuple) and a[0] == "none" and isinstance(b, tuple) and b[0] == "none":
-        return z3.BoolVal(True)
-    _err("struct Option field comparison requires Option values", kind="type")
+    return option_logical_eq(a, b, _SYM)
 
 
 def _option_none_cmp(a, b, op):
-    if isinstance(a, tuple) and a[0] == "option_val" and isinstance(b, tuple) and b[0] == "none":
-        present = a[1]
-        return z3.Not(present) if op == "==" else present
-    if isinstance(b, tuple) and b[0] == "option_val" and isinstance(a, tuple) and a[0] == "none":
-        present = b[1]
-        return z3.Not(present) if op == "==" else present
-    return None
-
-
-_OPTION_EQ_HINT = "use `x is some(v)` to compare the contained value"
-
-
-def _option_tag(v):
-    if isinstance(v, tuple) and v[0] in ("option_val", "none"):
-        return v[0]
-    return None
+    return option_none_cmp(a, b, op, _SYM)
 
 
 def _reject_option_binop(a, b, op):
-    ta, tb = _option_tag(a), _option_tag(b)
-    if ta is None and tb is None:
-        return
-    if op in ("==", "!="):
-        if ta == "none" and tb == "none":
-            return
-        _err(
-            "Option == and != are only defined against none",
-            kind="type",
-            hint=_OPTION_EQ_HINT,
-        )
-    _err(f"Option values cannot be used with '{op}'", kind="type")
+    return reject_option_binop(a, b, op)
 
 
 def _z3_div(a, b):
@@ -695,63 +675,16 @@ def _unify_option_cmp(a, b):
 
 
 def _logical_map_access(logical, idx, state, spec):
-    ty = spec["state"][logical]
-    if ty[0] != "map":
-        _err(f"'{logical}' is not a map")
-    kty, vty = ty[1], ty[2]
-    if vty[0] == "struct":
-        sname = vty[1]
-        fields = spec["types"][sname]["fields"]
-        return ("struct_map_val", logical, idx, {
-            fn: (
-                ("option_val",
-                 z3.Select(state[f"{logical}__{fn}__present"], idx),
-                 z3.Select(state[f"{logical}__{fn}__value"], idx))
-                if fty[0] == "option"
-                else z3.Select(state[f"{logical}__{fn}"], idx)
-            )
-            for fn, fty in fields.items()
-        })
-    if vty[0] == "option":
-        return ("option_val",
-                z3.Select(state[f"{logical}__present"], idx),
-                z3.Select(state[f"{logical}__value"], idx))
-    return z3.Select(state[logical], idx)
+    return logical_map_access(logical, idx, state, spec, _SYM)
 
 
 def _eval_index(base_e, idx, state, binds, spec, old_state, in_ensures):
-    if isinstance(base_e, str):
-        name = base_e
-    elif base_e[0] == "var":
-        name = base_e[1]
-    else:
-        _err("complex index base not supported")
-    if name in spec["state"]:
-        return _logical_map_access(name, idx, state, spec)
-    if name in state:
-        return z3.Select(state[name], idx)
-    _err(f"unknown map '{name}'")
+    return eval_index(base_e, idx, state, spec, _SYM)
 
 
 def _eval_field(base, field, state, binds, spec):
-    if isinstance(base, tuple) and base[0] == "struct_map_val":
-        logical, idx, fields = base[1], base[2], base[3]
-        if field not in fields:
-            _err(f"unknown field '{field}'")
-        return fields[field]
-    if isinstance(base, tuple) and base[0] == "struct_val":
-        _, sname, vals = base
-        if field not in vals:
-            _err(f"unknown field '{field}' in struct {sname}")
-        return vals[field]
-    _err(f"cannot access field '{field}' on this value")
+    return eval_field(base, field)
 
-
-def _struct_field_ty(spec, sname, field):
-    try:
-        return spec["types"][sname]["fields"][field]
-    except KeyError:
-        _err(f"unknown field '{field}' in struct {sname}")
 
 
 def _assign_option_to_phys(pend, state, present_phys, value_phys, val, none_ok=True):
@@ -804,11 +737,6 @@ def _set_elem_ty(base, state, spec):
                 return base, ty[1]
     return None
 
-
-def _seq_val_parts(base):
-    if isinstance(base, tuple) and base[0] == "seq_val":
-        return base[1], base[2], base[3], base[4]
-    return None
 
 
 def _eval_set_method(m, elem_ty, method, args, state, binds, spec, old_state, in_ensures):
@@ -906,92 +834,20 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
-    val = eval_expr(inner, state, binds, spec, old_state, in_ensures)
-    if pat[0] == "pat_none":
-        if isinstance(val, tuple) and val[0] == "option_val":
-            return z3.Not(val[1])
-        _err("is none applied to non-Option value", kind="type")
-    if pat[0] == "pat_some":
-        vname = pat[1]
-        if isinstance(val, tuple) and val[0] == "option_val":
-            present, value = val[1], val[2]
-            binds[vname] = value
-            return present
-        _err("is some applied to non-Option value", kind="type")
-    _err("invalid pattern")
+    return eval_is(inner, pat, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
 
 
 def _eval_quant(e, state, binds, spec, old_state, in_ensures):
-    qop, binder, body = e[0], e[1], e[2]
-    v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
-    insts = []
-    for i in range(lo, hi + 1):
-        b2 = dict(binds)
-        b2[v] = i
-        if where is not None:
-            w = eval_expr(where, state, b2, spec, old_state, in_ensures)
-            if qop == "forall":
-                body_inst = eval_expr(body, state, b2, spec, old_state, in_ensures)
-                insts.append(z3.Implies(w, body_inst))
-            else:
-                body_inst = eval_expr(body, state, b2, spec, old_state, in_ensures)
-                insts.append(z3.And(w, body_inst))
-        else:
-            insts.append(eval_expr(body, state, b2, spec, old_state, in_ensures))
-    if not insts:
-        return z3.BoolVal(qop == "forall")
-    return z3.And(*insts) if qop == "forall" else z3.Or(*insts)
+    return eval_quant(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
 
 
 def _eval_count(e, state, binds, spec, old_state, in_ensures):
-    _, v, ty_name, cond = e
-    if ty_name not in spec["types"]:
-        _err(f"unknown type '{ty_name}' in count")
-    ty = spec["types"][ty_name]["ty"]
-    lo, hi = domain_range(ty, spec["types"])
-    terms = []
-    for i in range(lo, hi + 1):
-        b2 = {**binds, v: i}
-        c = eval_expr(cond, state, b2, spec, old_state, in_ensures)
-        terms.append(z3.If(c, z3.IntVal(1), z3.IntVal(0)))
-    acc = z3.IntVal(0)
-    for t in terms:
-        acc = acc + t
-    return acc
+    return eval_count(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
 
 
 def _eval_sum(e, state, binds, spec, old_state, in_ensures):
-    _, v, ty_name, body, cond = e
-    if ty_name not in spec["types"]:
-        _err(f"unknown type '{ty_name}' in sum")
-    ty = spec["types"][ty_name]["ty"]
-    lo, hi = domain_range(ty, spec["types"])
-    terms = []
-    for i in range(lo, hi + 1):
-        b2 = {**binds, v: i}
-        if cond is not None:
-            c = eval_expr(cond, state, b2, spec, old_state, in_ensures)
-            val = eval_expr(body, state, b2, spec, old_state, in_ensures)
-            terms.append(z3.If(c, val, z3.IntVal(0)))
-        else:
-            terms.append(eval_expr(body, state, b2, spec, old_state, in_ensures))
-    acc = z3.IntVal(0)
-    for t in terms:
-        acc = acc + t
-    return acc
+    return eval_sum(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
 
-
-def _lvalue_key(lv):
-    if lv[0] == "var":
-        return ("scalar", lv[1])
-    if lv[0] == "index":
-        return ("map", lv[1], lv[2])
-    if lv[0] == "field_lv":
-        base, field = lv[1], lv[2]
-        if base[0] == "index":
-            return ("map_field", base[1], base[2], field)
-        return ("field", base[1], field)
-    _err(f"invalid lvalue {lv}")
 
 
 def _apply_assign(lv, rhs, pend, state, binds, spec):
@@ -1375,13 +1231,6 @@ def transition(spec, instances, cur, nxt, choice, expr_cache=None):
     return z3.And(*clauses)
 
 
-def _enum_name(spec, ename, val):
-    members = spec["types"][ename]["members"]
-    i = int(val)
-    if 0 <= i < len(members):
-        return members[i]
-    return str(val)
-
 
 def _display_value(ty, val, spec):
     if ty[0] == "bool":
@@ -1442,12 +1291,6 @@ def _display_map_key(kty, value, spec):
         return str(_display_value(kty, value, spec))
     return str(value)
 
-
-def _display_state_keys(logical, spec):
-    dn = spec.get("display_names") or {}
-    if not dn:
-        return logical
-    return {dn.get(k, k): v for k, v in logical.items()}
 
 
 def logical_state_values(model, state, spec):
