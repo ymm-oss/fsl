@@ -1,0 +1,1518 @@
+{
+  "examples/consulting/asis_expense.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/consulting/tobe_expense.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/consulting/tobe_refines_asis.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/e2e/1_business.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/e2e/2_requirements.fsl": {
+    "check": {
+      "implements": "refines",
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/e2e/3_design.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/e2e/3_refines_2.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/gallery/adversarial/clever_double_assignment_placement.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/gallery/adversarial/deep_nested_if_invariant.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "last_action": "twist",
+      "name": "XNeverOne",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "invariant"
+    }
+  },
+  "examples/gallery/adversarial/option_struct_set_seq_combo.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "complete": true,
+        "enqueue": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_jobs",
+        "_bounds_active",
+        "_bounds_q",
+        "QueuedInActive",
+        "QueueRowsQueued",
+        "NoDuplicateQueue"
+      ],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/adversarial/quantifier_boundary_break.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "last_action": "clear_edge",
+      "name": "AllSeen",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "invariant"
+    }
+  },
+  "examples/gallery/adversarial/refine_mapping_boundary_abs.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/adversarial/refine_mapping_boundary_impl.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/gallery/adversarial/seq_empty_head_boundary.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "read_empty",
+      "name": "_partial_read_empty",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "partial_op"
+    }
+  },
+  "examples/gallery/adversarial/seq_full_push_boundary.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "push_full",
+      "name": "_bounds_q",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "type_bound"
+    }
+  },
+  "examples/gallery/adversarial/simultaneous_leads_to_satisfaction.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "action_coverage": {
+        "reset": true,
+        "start_and_finish": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/errors/error_acceptance_false_expect.fsl": {
+    "check": {
+      "kind": "acceptance",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/forbidden_op_accepted.fsl": {
+    "check": {
+      "kind": "forbidden",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/parse_missing_expression.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/refinement_failed_abs.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/errors/refinement_failed_impl.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/errors/refinement_failed_map.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/semantics_duplicate_assignment.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/type_option_some_equality.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "kind": "type",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/type_struct_set_field.fsl": {
+    "check": {
+      "kind": "type",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/type_undeclared_type.fsl": {
+    "check": {
+      "kind": "type",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/vacuous_contradictory_init.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "kind": "vacuous",
+      "result": "error"
+    }
+  },
+  "examples/gallery/errors/vacuous_implication_warning.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "noop": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "NeverOne"
+      ],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "vacuous_implication"
+      ]
+    }
+  },
+  "examples/gallery/errors/violated_deadlock_terminal.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "stop",
+      "name": "deadlock",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "deadlock"
+    }
+  },
+  "examples/gallery/errors/violated_ensures_wrong_postcondition.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "inc",
+      "name": "inc",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "ensures"
+    }
+  },
+  "examples/gallery/errors/violated_invariant_counter.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "last_action": "inc",
+      "name": "StaysZero",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "invariant"
+    }
+  },
+  "examples/gallery/errors/violated_leads_to_starvation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": null,
+      "name": "EventuallyFinished",
+      "result": "violated",
+      "violated_at_step": null,
+      "violation_kind": "leadsTo"
+    }
+  },
+  "examples/gallery/errors/violated_partial_op_unchecked_pop.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "pop_empty",
+      "name": "_partial_pop_empty",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "partial_op"
+    }
+  },
+  "examples/gallery/errors/violated_type_bound_missing_guard.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "sell_without_stock",
+      "name": "_bounds_stock",
+      "result": "violated",
+      "violated_at_step": 1,
+      "violation_kind": "type_bound"
+    }
+  },
+  "examples/gallery/injected/bank__boundary_flip.fsl": {
+    "check": {
+      "kind": "acceptance",
+      "result": "error"
+    }
+  },
+  "examples/gallery/injected/bank__fabricated_constraint.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/bank__guard_weakening.fsl": {
+    "check": {
+      "kind": "forbidden",
+      "result": "error"
+    }
+  },
+  "examples/gallery/injected/bank__invariant_weakening.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/bank__omission.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/bank__over_strengthened_guard.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/bank__unreachable_antecedent.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/order_workflow__boundary_flip.fsl": {
+    "check": {
+      "kind": "acceptance",
+      "result": "error"
+    }
+  },
+  "examples/gallery/injected/order_workflow__fabricated_constraint.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/order_workflow__guard_weakening.fsl": {
+    "check": {
+      "kind": "forbidden",
+      "result": "error"
+    }
+  },
+  "examples/gallery/injected/order_workflow__invariant_weakening.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/order_workflow__omission.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/order_workflow__over_strengthened_guard.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/order_workflow__unreachable_antecedent.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/return_system__boundary_flip.fsl": {
+    "check": {
+      "kind": "acceptance",
+      "result": "error"
+    }
+  },
+  "examples/gallery/injected/return_system__fabricated_constraint.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/return_system__guard_weakening.fsl": {
+    "check": {
+      "kind": "forbidden",
+      "result": "error"
+    }
+  },
+  "examples/gallery/injected/return_system__invariant_weakening.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/return_system__omission.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/injected/return_system__over_strengthened_guard.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/injected/return_system__unreachable_antecedent.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/large_order_workflow.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "approve": true,
+        "deliver": true,
+        "pack": true,
+        "pay": true,
+        "place": true,
+        "refund": true,
+        "request_return": true,
+        "ship": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_orders",
+        "_bounds_stock",
+        "PaidLedger",
+        "RefundLedger",
+        "BuyerKnownAfterPlace"
+      ],
+      "reachables": {
+        "RefundedOne": 8
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/medium_dining_philosophers_deadlock_demo.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "become_hungry": true,
+        "eat_and_release": true,
+        "take_left": true
+      },
+      "deadlock_found": true,
+      "invariants_checked": [
+        "_bounds_fork_owner",
+        "LeftFlagMatchesOwner"
+      ],
+      "reachables": {
+        "BothHoldLeft": 4
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/valid/medium_two_phase_commit.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "abort": true,
+        "apply": true,
+        "begin": true,
+        "commit": true,
+        "vote_no": true,
+        "vote_yes": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_phase",
+        "_bounds_vote",
+        "CommitRequiresYes",
+        "AppliedOnlyCommitted"
+      ],
+      "reachables": {
+        "AllApplied": 6
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/small_elevator.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "call": true,
+        "move_down": true,
+        "move_up": true,
+        "open": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_floor",
+        "_bounds_target",
+        "_bounds_door",
+        "OpenAtTarget"
+      ],
+      "reachables": {
+        "OpenAtTop": 4
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/small_forbidden_guarded_cancel.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "action_coverage": {
+        "cancel": true,
+        "pay": true,
+        "ship": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_order"
+      ],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/gallery/valid/small_tcp_handshake.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "close": true,
+        "recv_syn_ack": true,
+        "send_syn": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_client",
+        "_bounds_server",
+        "ClientServerAgree"
+      ],
+      "reachables": {
+        "ConnectedOnce": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/small_vending_machine.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "insert_coin": true,
+        "refund": true,
+        "select": true,
+        "vend": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_stock",
+        "_bounds_credit",
+        "_bounds_selected",
+        "SelectionHasStock"
+      ],
+      "reachables": {
+        "SoldItemZero": 3
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/tiny_bounded_counter.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "dec": true,
+        "inc": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_n",
+        "NeverAboveCap"
+      ],
+      "reachables": {
+        "HitCap": 3
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/tiny_traffic_light.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "tick": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_light",
+        "AlwaysAColor"
+      ],
+      "reachables": {
+        "SeenYellow": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/tiny_turnstile.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "coin": true,
+        "push": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_entries",
+        "LockedOrOpen"
+      ],
+      "reachables": {
+        "OneEntry": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/layers/return_impl.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/layers/return_impl_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/layers/return_policy.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/layers/return_system.fsl": {
+    "check": {
+      "implements": "refines",
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/nfr/sla_worker.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/nfr/sla_worker_kernel.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/nfr/support_sla.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/pm/cancel_flow.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/pm/cancel_system.fsl": {
+    "check": {
+      "implements": "refines",
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/refinement_chain/bot.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/refinement_chain/bot_refines_mid.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/refinement_chain/mid.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/refinement_chain/mid_refines_top.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/refinement_chain/top.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/refinement_liveness/design_bypasses_control.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/refinement_liveness/design_bypasses_control_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/refinement_liveness/design_drops_liveness.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/refinement_liveness/design_drops_liveness_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/refinement_liveness/design_keeps_liveness.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/refinement_liveness/design_keeps_liveness_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/refinement_liveness/policy.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/self/fslc_monitor.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/self/fslc_session.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/self/no_actions.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/self/refinement_algebra.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/ui_spike/navstack.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/ui_spike/return_req_min.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/ui_spike/return_ui.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/ui_spike/ui_refines_req.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/validation/order_refund.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/validation/order_refund_instant.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/validation/order_refund_instant_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/validation/order_refund_windowed.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/validation/order_refund_windowed_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "specs/audit_log.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "deposit": true
+      },
+      "deadlock_found": true,
+      "invariants_checked": [
+        "_bounds_log",
+        "BalanceNonNegative",
+        "EntriesPositive",
+        "BalanceMatchesLog"
+      ],
+      "reachables": {
+        "LogFull": 4
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "specs/auth_lockout.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "admin_unlock": true,
+        "login_fail": true,
+        "login_ok": true,
+        "logout": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_accounts",
+        "LockedMeansMaxAttempts",
+        "NoSessionWhileLocked",
+        "MaxAttemptsMeansLocked"
+      ],
+      "reachables": {
+        "LockedOut": 3,
+        "RecoveredAfterLock": 5
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/bank.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "deposit": true,
+        "withdraw": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "NonNegative"
+      ],
+      "reachables": {
+        "Funded": 1
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/bank_impl.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "settle": true,
+        "submit_deposit": true,
+        "withdraw_cleared": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "ClearedNonNegative",
+        "PendingNonNegative"
+      ],
+      "reachables": {
+        "Settled": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/bank_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "specs/bank_system.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "bank.settle": true,
+        "deposit_audited": true,
+        "withdraw_audited": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_audit.log",
+        "bank.ClearedNonNegative",
+        "bank.PendingNonNegative",
+        "audit.BalanceNonNegative",
+        "audit.EntriesPositive",
+        "audit.BalanceMatchesLog",
+        "AuditAccountsForEverything",
+        "WithdrawnNonNegative"
+      ],
+      "reachables": {
+        "FullCycle": 4,
+        "audit.LogFull": 4,
+        "bank.Settled": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/cart_buggy.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none",
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "checkout",
+      "name": "NoNegativeStock",
+      "result": "violated",
+      "violated_at_step": 4,
+      "violation_kind": "invariant"
+    }
+  },
+  "specs/cart_fixed.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none",
+        "none"
+      ]
+    },
+    "verify": {
+      "action_coverage": {
+        "add_to_cart": true,
+        "checkout": true,
+        "remove_from_cart": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "NoNegativeStock"
+      ],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none",
+        "none"
+      ]
+    }
+  },
+  "specs/cart_impl.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "action_coverage": {
+        "add_to_cart": true,
+        "impl_checkout": true,
+        "remove_from_cart": true,
+        "reserve": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_impl_stock",
+        "_bounds_reserved",
+        "_bounds_impl_cart"
+      ],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "specs/cart_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "specs/cart_v1.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "action_coverage": {
+        "add_to_cart": true,
+        "checkout": true,
+        "remove_from_cart": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_stock",
+        "_bounds_cart"
+      ],
+      "reachables": {
+        "SoldOut": 4
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "specs/cart_v1_buggy.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    },
+    "verify": {
+      "last_action": "checkout",
+      "name": "_bounds_stock",
+      "result": "violated",
+      "violated_at_step": 4,
+      "violation_kind": "type_bound"
+    }
+  },
+  "specs/inventory_reservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "confirm": true,
+        "hold": true,
+        "release": true
+      },
+      "deadlock_found": true,
+      "invariants_checked": [
+        "_bounds_available",
+        "_bounds_res",
+        "FreeIsZero",
+        "FreeHasNoItem",
+        "HeldHasItem",
+        "Conservation"
+      ],
+      "reachables": {
+        "AllHeld": 3
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "specs/job_pipeline.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "finish_fail": true,
+        "finish_ok": true,
+        "finish_retry": true,
+        "start": true,
+        "submit": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_jobs",
+        "_bounds_queue",
+        "_bounds_running",
+        "QueuedAreQueued",
+        "RunningMatches",
+        "NoDupQueue"
+      ],
+      "reachables": {
+        "RetriedThenFailed": 5,
+        "SomeDone": 3
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/mutex_queue.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "acquire_free": true,
+        "enqueue": true,
+        "release_handoff": true,
+        "release_idle": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_holder",
+        "_bounds_waiters",
+        "HolderNotWaiting",
+        "WaitersImplyHolder",
+        "NoDuplicateWaiters"
+      ],
+      "reachables": {
+        "FullQueue": 3,
+        "HandoffHappened": 1
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/order_system.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "result": "reachable_failed",
+      "unreachable": []
+    }
+  },
+  "specs/order_workflow.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "cancel": true,
+        "pay": true,
+        "place": true,
+        "ship": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_orders",
+        "_bounds_shipped",
+        "ShippedWasPaid",
+        "RevenueConsistent",
+        "NonNegativeRevenue"
+      ],
+      "reachables": {
+        "FullLifecycle": 3
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/payment.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "authorize": true,
+        "capture": true,
+        "refund": true,
+        "void": true
+      },
+      "deadlock_found": true,
+      "invariants_checked": [
+        "_bounds_payments",
+        "RefundWithinAmount",
+        "LedgerMatches",
+        "LedgerNonNegative",
+        "RefundedOnlyWhenCaptured"
+      ],
+      "reachables": {
+        "FullyRefunded": 3
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "specs/rate_limiter.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "request_ok": true,
+        "request_rejected": true,
+        "tick": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_tokens",
+        "Counters"
+      ],
+      "reachables": {
+        "Exhausted": 4
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/repair_loop.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "check_fail": true,
+        "check_pass": true,
+        "induction_cti": true,
+        "induction_proved": true,
+        "repair": true,
+        "verify_ok": true,
+        "verify_reachfail": true,
+        "verify_violated": true
+      },
+      "deadlock_found": true,
+      "invariants_checked": [
+        "_bounds_status",
+        "_bounds_edits",
+        "ProvedWasVerified",
+        "VerifiedImpliesEver"
+      ],
+      "reachables": {
+        "ReachProved": 3,
+        "RepairedThenProved": 5
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "specs/seat_booking.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "book": true,
+        "cancel": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_seats",
+        "PerUserCap"
+      ],
+      "reachables": {
+        "TwoSoldToOne": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/seat_booking_impl.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "cancel_sold": true,
+        "confirm": true,
+        "hold": true,
+        "release": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_slots",
+        "OpenHasNoHolder",
+        "NonOpenHasHolder",
+        "SoldPerUserCap"
+      ],
+      "reachables": {
+        "Sold": 2
+      },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "specs/seat_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  }
+}
