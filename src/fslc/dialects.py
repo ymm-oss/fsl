@@ -721,9 +721,7 @@ def _collect_process(item, actors, cases):
     }
 
 
-def expand_business(ast):
-    """Expand business AST to a kernel spec AST."""
-    _, name, items = ast
+def _collect_business_entities(items):
     actors = set()
     cases = {}
     process_items = []
@@ -765,6 +763,10 @@ def expand_business(ast):
     for proc in processes:
         process_by_case.setdefault(proc["name"], []).append(proc)
 
+    return actors, cases, processes, kpis, policies, goals, process_by_case, process_by_name
+
+
+def _build_kpi_metadata(kpis, process_by_name):
     kpi_infos = []
     kpi_names = set()
     for item in kpis:
@@ -791,7 +793,10 @@ def expand_business(ast):
             "process": proc,
             "loc": loc,
         })
+    return kpi_infos
 
+
+def _generate_business_items(cases, processes, kpi_infos, policies, goals, process_by_case):
     out = []
     generated_names = []
     for case_name, data in cases.items():
@@ -880,4 +885,17 @@ def expand_business(ast):
 
     if generated_names:
         out.append(("__generated", generated_names))
+    return out
+
+
+def expand_business(ast):
+    """Expand business AST to a kernel spec AST."""
+    _, name, items = ast
+    _, cases, processes, kpis, policies, goals, process_by_case, process_by_name = (
+        _collect_business_entities(items)
+    )
+    kpi_infos = _build_kpi_metadata(kpis, process_by_name)
+    out = _generate_business_items(
+        cases, processes, kpi_infos, policies, goals, process_by_case,
+    )
     return ("spec", name, out)

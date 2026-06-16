@@ -541,7 +541,7 @@ def exit_code(result):
     return 3
 
 
-def main(argv=None):
+def _build_arg_parser():
     from . import __version__
     ap = argparse.ArgumentParser(prog="fslc")
     ap.add_argument("-V", "--version", action="version",
@@ -606,8 +606,11 @@ def main(argv=None):
     ts.add_argument("--ts", action="store_true",
                     help="emit only the derivable entities' TypeScript to stdout instead of JSON")
 
-    args = ap.parse_args(argv)
+    return ap
 
+
+def _dispatch(args):
+    from . import __version__
     if args.cmd == "version":
         print(f"fslc {__version__}")
         return 0
@@ -661,6 +664,12 @@ def main(argv=None):
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))
+
+
+def main(argv=None):
+    ap = _build_arg_parser()
+    args = ap.parse_args(argv)
+    return _dispatch(args)
 
 
 if __name__ == "__main__":

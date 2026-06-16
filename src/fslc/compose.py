@@ -431,18 +431,7 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
     return ("action", name, _rewrite_params(params, aliases), merged, loc, fair, sync_meta, True)
 
 
-def expand_compose(ast, base_dir):
-    """Expand compose AST to a single spec AST. Returns (spec_ast, display_names)."""
-    _, compose_name, items = ast
-    uses, internals, compose_rest = [], [], []
-    for it in items:
-        if it[0] == "use":
-            uses.append(it)
-        elif it[0] == "internal":
-            internals.append(it)
-        else:
-            compose_rest.append(it)
-
+def _resolve_components(uses, base_dir, display_names):
     aliases = {}
     for use in uses:
         _, spec_name, alias, path, loc = use
@@ -451,7 +440,6 @@ def expand_compose(ast, base_dir):
         aliases[alias] = (spec_name, path, loc)
 
     merged = []
-    display_names = {}
     all_actions = []
 
     for use in uses:
@@ -468,6 +456,10 @@ def expand_compose(ast, base_dir):
         merged.extend(prefixed)
         all_actions.extend([a for a in prefixed if a[0] == "action"])
 
+    return aliases, merged, all_actions
+
+
+def _merge_internal_actions(internals, aliases, all_actions):
     action_by_name = _action_lookup(all_actions)
     internal_phys = set()
     for internal in internals:
@@ -478,8 +470,10 @@ def expand_compose(ast, base_dir):
         if key not in action_by_name:
             _compose_err(f"unknown action '{alias}.{act_name}'", loc=loc)
         internal_phys.add(key)
+    return action_by_name, internal_phys
 
-    compose_aliases = set(aliases.keys())
+
+def _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged, all_actions):
     empty_comp = set()
 
     for it in compose_rest:
@@ -522,6 +516,8 @@ def expand_compose(ast, base_dir):
                            _rewrite_expr(it[4], compose_aliases, empty_comp, set(), set()),
                            it[5], it[6] if len(it) > 6 else None))
 
+
+def _finalize_compose_merged(merged, internal_phys):
     final_actions = [a for a in merged if a[0] == "action" and a[1] not in internal_phys]
     non_actions = [a for a in merged if a[0] not in ("action", "init")]
     init_stmts = []
@@ -532,5 +528,26 @@ def expand_compose(ast, base_dir):
     if init_stmts:
         merged.append(("init", init_stmts))
     merged.extend(final_actions)
+    return merged
+
+
+def expand_compose(ast, base_dir):
+    """Expand compose AST to a single spec AST. Returns (spec_ast, display_names)."""
+    _, compose_name, items = ast
+    uses, internals, compose_rest = [], [], []
+    for it in items:
+        if it[0] == "use":
+            uses.append(it)
+        elif it[0] == "internal":
+            internals.append(it)
+        else:
+            compose_rest.append(it)
+
+    display_names = {}
+    aliases, merged, all_actions = _resolve_components(uses, base_dir, display_names)
+    action_by_name, internal_phys = _merge_internal_actions(internals, aliases, all_actions)
+    compose_aliases = set(aliases.keys())
+    _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged, all_actions)
+    merged = _finalize_compose_merged(merged, internal_phys)
 
     return ("spec", compose_name, merged), display_names
