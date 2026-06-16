@@ -1,4 +1,5 @@
 """k-induction engine tests (DESIGN-induction.md §6)."""
+import sys
 import json
 import subprocess
 from pathlib import Path
@@ -9,7 +10,7 @@ from fslc import parse, build_spec, prove, verify
 
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 CTI_HINT = (
     "this state sequence satisfies all invariants but leads to a violation; "
     "the start state may be unreachable — add an auxiliary invariant that excludes it, "

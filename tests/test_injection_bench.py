@@ -11,7 +11,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 INJECTED = ROOT / "examples" / "gallery" / "injected"
 MATRIX_PATH = INJECTED / "MATRIX.json"
-PY = ROOT / ".venv" / "bin" / "python"
+PY = sys.executable
 
 DEPTH = "4"
 MUTATE_DEPTH = "2"
