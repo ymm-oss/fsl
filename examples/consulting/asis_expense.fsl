@@ -42,18 +42,13 @@ business AsIsExpense {
   //   two below are "do not leave unattended" controls that the structure
   //   alone cannot express.
 
-  policy CTRL-1 "A submitted claim must always be adjudicated for approval or rejection" responds {
-    forall c: Claim {
-      stage(c) == Submitted ~> (stage(c) == Approved or stage(c) == Rejected)
-    }
-  }
+  policy CTRL-1 "A submitted claim must always be adjudicated for approval or rejection"
+    every Claim in Submitted must eventually be Approved or Rejected
 
-  policy CTRL-2 "An approved claim must always be paid" responds {
-    forall c: Claim { stage(c) == Approved ~> stage(c) == Paid }
-  }
+  policy CTRL-2 "An approved claim must always be paid"
+    every Claim in Approved must eventually be Paid
 
   // ── Goal (confirming the current process can complete the business) ────
-  goal CanComplete "The process can complete from claim to payment" {
-    exists c: Claim { stage(c) == Paid }
-  }
+  goal CanComplete "The process can complete from claim to payment"
+    some Claim can reach Paid
 }

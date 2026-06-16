@@ -12,10 +12,8 @@ business ReturnHandling {
 
   kpi refunded counts Return in Refunded
 
-  policy PAY-2 "Every request is eventually decided" responds {
-    forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
-  }
-  goal AllSettled "All cases can be completed" {
-    forall c: Return { stage(c) == Refunded or stage(c) == Rejected }
-  }
+  policy PAY-2 "Every request is eventually decided"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+  goal AllSettled "All cases can be completed"
+    all Return can be Refunded or Rejected
 }

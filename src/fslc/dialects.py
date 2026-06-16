@@ -796,6 +796,37 @@ def _build_kpi_metadata(kpis, process_by_name):
     return kpi_infos
 
 
+def _process_for_case(case_name, process_by_case, loc):
+    processes = process_by_case.get(case_name, [])
+    if not processes:
+        _err(f"case '{case_name}' has no process", loc=loc)
+    if len(processes) > 1:
+        _err(
+            f"case '{case_name}' has multiple processes; natural stage syntax is ambiguous",
+            loc=loc,
+        )
+    return processes[0]
+
+
+def _stage_is(case_name, var_name, stage, process_by_case, loc):
+    proc = _process_for_case(case_name, process_by_case, loc)
+    if stage not in proc["stages"]:
+        _err(f"stage '{stage}' is not declared for process '{case_name}'", loc=loc)
+    return (
+        "bin",
+        "==",
+        ("index", ("var", proc["state_var"]), ("var", var_name)),
+        ("var", stage),
+    )
+
+
+def _any_stage(case_name, var_name, stages, process_by_case, loc):
+    return _or_all([
+        _stage_is(case_name, var_name, stage, process_by_case, loc)
+        for stage in stages
+    ])
+
+
 def _generate_business_items(cases, processes, kpi_infos, policies, goals, process_by_case):
     out = []
     generated_names = []
@@ -878,10 +909,34 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
         elif body[0] == "biz_policy_responds":
             binders, p, q = _rewrite_stage_binders(body[1], body[2], body[3], process_by_case)
             out.append(("leadsto", policy_id, binders, p, q, loc, meta))
+        elif body[0] == "biz_policy_eventually":
+            _, case_name, source_stage, target_stages = body
+            binder = ("binder_typed", "c", case_name, None)
+            p = _stage_is(case_name, "c", source_stage, process_by_case, loc)
+            q = _any_stage(case_name, "c", target_stages, process_by_case, loc)
+            out.append(("leadsto", policy_id, [binder], p, q, loc, meta))
 
     for item in goals:
-        _, goal_id, text, expr, loc = item
-        out.append(("reachable", goal_id, _rewrite_stage_expr(expr, {}, process_by_case), loc, _meta(goal_id, text)))
+        _, goal_id, text, body, loc = item
+        if body[0] == "biz_goal_expr":
+            expr = _rewrite_stage_expr(body[1], {}, process_by_case)
+        elif body[0] == "biz_goal_some_stage":
+            _, case_name, stage = body
+            expr = (
+                "exists",
+                ("binder_typed", "c", case_name, None),
+                _stage_is(case_name, "c", stage, process_by_case, loc),
+            )
+        elif body[0] == "biz_goal_all_stage":
+            _, case_name, stages = body
+            expr = (
+                "forall",
+                ("binder_typed", "c", case_name, None),
+                _any_stage(case_name, "c", stages, process_by_case, loc),
+            )
+        else:
+            _err(f"unknown business goal body '{body[0]}'", loc=loc)
+        out.append(("reachable", goal_id, expr, loc, _meta(goal_id, text)))
 
     if generated_names:
         out.append(("__generated", generated_names))

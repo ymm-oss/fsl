@@ -276,15 +276,18 @@ business ReturnHandling {
     transition refund  Approved  -> Refunded by Manager
   }
   kpi refunded counts Return in Refunded      // -> ghost + auto-consistency invariant (+1 on an inflow transition; an outflow transition is a type error)
-  policy PAY-2 "every request is adjudicated" responds {
-    forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
-  }                                           // the invariant { expr } form is also allowed
-  goal AllSettled "all cases can be settled" { forall c: Return { ... } }   // -> reachable
+  policy PAY-2 "every request is adjudicated"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+  goal AllSettled "all cases can be settled"
+    all Return can be Refunded or Rejected
 }
 ```
 
 `stage(c)` expands from the type of the bound c into the process's state Map
 (`return_stage[c]`).
+The natural business forms above are aliases for `responds { forall ... ~> ... }`
+and `goal { forall/exists ... }`; the explicit expression forms remain available
+for policies that cannot be written as a simple stage progression.
 
 ### requirements (the requirements layer)
 

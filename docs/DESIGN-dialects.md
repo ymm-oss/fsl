@@ -179,12 +179,10 @@ business ReturnHandling {
     // stage(c) is available in expressions (c is a case-type bound variable)
     forall c: Return { stage(c) == Refunded => true }   // example
   }
-  policy PAY-2 "every request is eventually adjudicated" responds {
-    forall c: Return { stage(c) == Requested ~> not (stage(c) == Requested) }
-  }
-  goal AllSettled "all cases can complete" {
-    forall c: Return { stage(c) == Refunded or stage(c) == Rejected }
-  }
+  policy PAY-2 "every request is eventually adjudicated"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+  goal AllSettled "all cases can complete"
+    all Return can be Refunded or Rejected
 }
 ```
 
@@ -209,7 +207,13 @@ business ReturnHandling {
    `invariant _kpi_k { k == count(c: X where x_stage(c) == S) }` (automatic).
 4. `policy <ID> "<text>" invariant { expr }` → invariant (with meta).
    `policy ... responds { P ~> Q }` → leadsTo (with meta).
+   `policy ... every <Case> in <Stage> must eventually be <Stage> [or <Stage> ...]`
+   is a readable alias for the common stage-response rule and expands to
+   `forall c: Case { stage(c) == Source ~> stage(c) == Target1 or ... }`.
    `goal <ID> "<text>" { expr }` → reachable (with meta).
+   `goal ... some <Case> can reach <Stage>` and
+   `goal ... all <Case> can be <Stage> [or <Stage> ...]` are readable aliases
+   for the common existential/all-cases reachability checks.
    `stage(c)` in an expression is rewritten to `x_stage[c]` for the case-type
    bound variable c in question (the process is identified from the type of the
    binding; ambiguity is a type error).

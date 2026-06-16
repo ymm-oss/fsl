@@ -591,6 +591,32 @@ an invariant violation, a dead process step = a coverage diagnosis, an
 unreachable business goal = reachable_failed, and a case left unattended = a
 leadsTo counterexample — all can be detected mechanically.
 
+For PM/consulting-facing files, use the readable stage syntax for common
+response policies and goals:
+
+```fsl
+business ReturnHandling {
+  actor Customer, Manager
+  case Return = 0..2
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition reject Requested -> Rejected by Manager
+    transition refund Approved -> Refunded by Manager
+  }
+
+  policy PAY-2 "every request is eventually decided"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+  goal AllSettled "all cases can be completed"
+    all Return can be Refunded or Rejected
+}
+```
+
+The explicit forms remain available when the rule is not just stage progression:
+`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` and
+`goal ... { exists c: Return { stage(c) == Refunded } }`.
+
 ### 13.4 How to write non-functional requirements (NFRs)
 
 The majority of NFRs can be written with the same machinery as functional
