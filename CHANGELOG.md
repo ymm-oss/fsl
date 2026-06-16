@@ -5,8 +5,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-16
+
 Theme: **propagation review for layer chains (fsl-design-review)** — establishing that
 refinement propagates safety but not liveness, and adding end-to-end chain checking.
+Also unifies the two FSL expression evaluators behind a shared, domain-parameterized core.
+
+### Changed
+- **Unified the symbolic (`bmc.py`, Z3) and concrete (`runtime.py`, Monitor) FSL evaluators**
+  behind a single shared core (`src/fslc/values.py`) parameterized by a per-evaluator domain
+  object (`_SymDomain` / `_ConcDomain`). The two evaluators previously re-implemented the same
+  expression semantics, a drift hazard where the verifier and the replay Monitor could disagree.
+  Unified: count, sum, quant, the Option/Seq/struct comparisons, `is`-patterns, field/index access,
+  and map access. Behavior-preserving — the verdict-level output is byte-identical across the whole
+  spec corpus, guarded by two new safety-net tests (`tests/test_corpus_snapshot.py`,
+  `tests/test_evaluator_agreement.py`). Genuinely divergent pieces (Seq/Set method evaluators,
+  `compute_updates`, `_eval_requires`, display) are intentionally left per-evaluator. Internal
+  refactor only — no change to the CLI, JSON output, exit codes, or grammar.
+- Split the over-long `cli.main`, `dialects.expand_business`, and `compose.expand_compose` into
+  named private stages (no behavior change).
 
 ### Added
 - **`fslc refine` chain mode (mapping composition)**: when you line up successive `(spec mapping)`,
@@ -37,6 +54,9 @@ refinement propagates safety but not liveness, and adding end-to-end chain check
   successful output includes `transitions_checked`, and a violation returns `violation_kind:"trans"`.
 
 ### Fixed
+- **Test suite runs without a `.venv` (CI portability)**: the subprocess-based tests invoked the
+  CLI through a hardcoded `ROOT/.venv/bin/python` and a macOS-only `/private/tmp` scratch path,
+  which failed on the CI runners. Now use `sys.executable` and `tempfile.gettempdir()`.
 - **Include the state in the deadlock warning (addressing DOGFOOD-11 F26)**: the `--deadlock warn` warning
   message now shows which state it halted in (e.g. `deadlock reachable at step 1
   (state: status=ToolFault, ...)`). The state was previously only in the JSON `deadlock.trace`.
