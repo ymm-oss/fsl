@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from fslc.cli import run_refine, run_scenarios, run_verify
@@ -118,8 +119,9 @@ def test_e2e_readme_commands_and_break_demo_are_current():
     ]
     assert "10 passed" in command_results[-1].stdout
 
-    broken_design = Path("/private/tmp/3_design_shortcut_test.fsl")
-    broken_mapping = Path("/private/tmp/3_refines_shortcut_test.fsl")
+    _tmp = Path(tempfile.gettempdir())
+    broken_design = _tmp / "3_design_shortcut_test.fsl"
+    broken_mapping = _tmp / "3_refines_shortcut_test.fsl"
     broken_design.write_text((E2E / "3_design.fsl").read_text(encoding="utf-8"), encoding="utf-8")
     broken_mapping.write_text((E2E / "3_refines_2.fsl").read_text(encoding="utf-8"), encoding="utf-8")
     design_src = broken_design.read_text(encoding="utf-8")
