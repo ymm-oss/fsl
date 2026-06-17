@@ -30,9 +30,10 @@ compose_param: NAME ":" qname -> param_typed
 qname: NAME ("." NAME)?
 
 refinement_def: "refinement" NAME "{" refinement_item* "}"
-?refinement_item: refinement_impl | refinement_abs | map_def | refinement_action
+?refinement_item: refinement_impl | refinement_abs | maps_auto_def | map_def | refinement_action
 refinement_impl: "impl" NAME
 refinement_abs: "abs" NAME
+maps_auto_def: "maps" "auto"
 map_def: "map" NAME ["[" binder "]"] "=" ref_expr
 refinement_action: "action" NAME "(" [refinement_param ("," refinement_param)*] ")" "->" action_target
 refinement_param: NAME [":" type]
@@ -691,6 +692,9 @@ class Ast(Transformer):
 
     def refinement_abs(self, meta, name):
         return ("abs", name)
+
+    def maps_auto_def(self, meta):
+        return ("maps_auto", _loc(meta))
 
     def map_def(self, meta, name, binder=None, expr=None):
         if binder is not None:

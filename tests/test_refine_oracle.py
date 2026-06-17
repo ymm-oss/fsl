@@ -45,10 +45,11 @@ class RefineOracleFailure(Exception):
         super().__init__(kind)
 
 
-def _mapping(path: Path) -> dict[str, Any]:
+def _mapping(path: Path, impl_spec=None, abs_spec=None) -> dict[str, Any]:
     _, _, items = parse_refinement(path.read_text(encoding="utf-8"))
     maps = {}
     actions = {}
+    maps_auto = False
     for item in items:
         if item[0] == "map":
             _, logical, binder, expr, _ = item
@@ -56,6 +57,22 @@ def _mapping(path: Path) -> dict[str, Any]:
         elif item[0] == "action_map":
             _, impl_action, params, target, _ = item
             actions[impl_action] = {"params": list(params), "target": target}
+        elif item[0] == "maps_auto":
+            maps_auto = True
+    if maps_auto and impl_spec is not None and abs_spec is not None:
+        for logical, ty in abs_spec["state"].items():
+            if logical not in maps and impl_spec["state"].get(logical) == ty:
+                maps[logical] = {"binder": None, "expr": ("var", logical)}
+        abs_actions = {act["name"]: act for act in abs_spec["actions"]}
+        for impl_act in impl_spec["actions"]:
+            aname = impl_act["name"]
+            if aname not in actions and aname in abs_actions:
+                abs_act = abs_actions[aname]
+                if len(impl_act["params"]) == len(abs_act["params"]):
+                    actions[aname] = {
+                        "params": [p[0] for p in impl_act["params"]],
+                        "target": ("action", aname, [("var", p[0]) for p in impl_act["params"]]),
+                    }
     return {"maps": maps, "actions": actions}
 
 
@@ -195,7 +212,7 @@ def refine_oracle(
     impl0 = Monitor(impl_path)
     impl0.reset()
     abs_spec = Monitor(abs_path).spec
-    mapping = _mapping(map_path)
+    mapping = _mapping(map_path, impl0.spec, abs_spec)
 
     alpha0 = _alpha_phys(impl0, abs_spec, mapping)
     _check_abs_bounds(abs_spec, alpha0, 0)
@@ -344,6 +361,47 @@ DEADLOCK_BUG_FIXTURES = {
         "stutter_changed_abs",
     ),
 }
+
+
+def test_refine_oracle_accepts_maps_auto_identity_defaults(tmp_path):
+    abs_src = """
+    spec AutoAbsOracle {
+      type K = 0..1
+      state { same: K, logical: K }
+      init { same = 0  logical = 0 }
+      action bump_same(k: K) { requires same == 0  same = k }
+      action bump_logical(k: K) { requires logical == 0  logical = k }
+    }
+    """
+    impl_src = """
+    spec AutoImplOracle {
+      type K = 0..1
+      state { same: K, detail: K }
+      init { same = 0  detail = 0 }
+      action bump_same(k: K) { requires same == 0  same = k }
+      action bump_logical(k: K) { requires detail == 0  detail = k }
+    }
+    """
+    map_src = """
+    refinement AutoImplOracleRefinesAbs {
+      impl AutoImplOracle
+      abs AutoAbsOracle
+      maps auto
+      map logical = detail
+    }
+    """
+    abs_path = tmp_path / "auto_abs.fsl"
+    impl_path = tmp_path / "auto_impl.fsl"
+    map_path = tmp_path / "auto_map.fsl"
+    abs_path.write_text(textwrap.dedent(abs_src), encoding="utf-8")
+    impl_path.write_text(textwrap.dedent(impl_src), encoding="utf-8")
+    map_path.write_text(textwrap.dedent(map_src), encoding="utf-8")
+
+    cli_result = run_refine(str(impl_path), str(abs_path), str(map_path), depth=3)
+    oracle_result = refine_oracle(impl_path, abs_path, map_path, depth=3)
+
+    assert cli_result["result"] == "refines", cli_result
+    assert oracle_result["result"] == "refines"
 
 
 @pytest.mark.parametrize("name", sorted(DEADLOCK_BUG_FIXTURES))

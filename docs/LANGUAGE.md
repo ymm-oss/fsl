@@ -438,6 +438,7 @@ refinement CartImplRefinesCart {
   impl CartImpl
   abs  ShoppingCart
 
+  maps auto
   map stock[i: ItemId] = impl_stock[i] - reserved[i]
   map cart[u: UserId]  = impl_cart[u]
 
@@ -449,6 +450,11 @@ refinement CartImplRefinesCart {
 
 - `map <abs var> = <impl expr>` — a scalar abstract variable.
 - `map <abs var>[<binder>] = <expr>` — element-wise mapping of a Map (enumerate the key type, which is bounded).
+- `maps auto` — optional identity defaults. For same-named compatible state
+  variables with no explicit `map`, it synthesizes `map x = x`; for same-named
+  compatible actions with no explicit correspondence, it synthesizes
+  `action f(params...) -> f(params...)`. Explicit entries override the defaults.
+  Incompatible same-name candidates are reported as `kind: "type"` errors.
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.

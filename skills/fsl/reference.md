@@ -69,11 +69,13 @@ refinement mapping (the third file; `fslc refine impl.fsl abs.fsl this.fsl`):
 refinement <Name> {
   impl <ImplSpecName>
   abs  <AbsSpecName>
+  maps auto                                      // optional identity defaults for same-named compatible state/actions
   map <abs_var> = <expr over impl state>          // scalar abstract variable
   map <abs_var>[<x>: <KeyType>] = <expr>          // per-element mapping of a Map
   // conditional expressions allowed only inside mapping/argument expressions: if <c> then <a> else <b> (else required)
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
   // formal params may be bare names or name: Type annotations matching the impl action
+  // explicit map/action entries override maps auto; incompatible same-name candidates are type errors
 }
 ```
 
