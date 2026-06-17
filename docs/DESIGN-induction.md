@@ -133,6 +133,9 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
   "result": "proved",
   "spec": "...",
   "engine": "induction",
+  "completeness": "unbounded",
+  "checked_to_depth": 8,
+  "cost": {"elapsed_s": 0.01},
   "k_used": { "ShippedWasPaid": 1, "RevenueConsistent": 2, "_bounds_orders": 1 },
   "base_depth": 8,
   "invariants_checked": [...],
@@ -145,6 +148,9 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
 - The exit code of `proved` is 0.
 - If a reachable is not found, `reachable_failed` (exit 1) takes **precedence**
   over proved as before (0 only when all properties hold).
+- `proved` is the only induction result with `completeness:"unbounded"`.
+  `unknown_cti` and base-case failures remain `completeness:"bounded"` and carry
+  `checked_to_depth` for the base BMC depth.
 - Consistency with the existing schema: the `violated` shape is completely
   identical to BMC (it is so automatically because the base case returns it).
 
@@ -153,7 +159,8 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
 New function `prove(spec, k_ind, base_depth, deadlock_mode)`:
 
 1. Call `verify(spec, base_depth, ...)` (= base case + reachables + coverage).
-   - If `violated` / `reachable_failed` / `error`, return as-is.
+   - If `violated` / `reachable_failed` / `error`, return that base-case verdict
+     with the induction call's top-level cost metadata.
 2. For the step case, build the state sequence σ_0..σ_k with `make_state(spec, t)`
    (a suffix such as `@ind{t}` to avoid name collisions), and push Inv(σ_0..σ_{k-1})
    and T onto a shared solver.

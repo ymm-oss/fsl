@@ -10,6 +10,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   skips named invariants, `trans`, `leadsTo`, and `reachable` properties in both
   BMC and induction runs. It composes with `--property`; exclusion wins when both
   name the same invariant.
+- (Verifier JSON) `verify` / induction results now expose boundedness metadata:
+  `completeness`, `checked_to_depth`, and `cost.elapsed_s`. BMC `verified` is
+  explicitly `completeness:"bounded"`, induction `proved` is
+  `completeness:"unbounded"`, and bounded `verified` adds a saturation hint when
+  normal exploration first witnesses a reachable/vacuity/coverage fact at depth K.
+- (Reachability diagnostics) `reachable_failed.unreached[]` now classifies each
+  target as `insufficient_depth` or `over_constrained`; over-constrained targets
+  include a `blocking_requires` unsat-core-style list naming the blocking type
+  bounds/invariants. The same classification is emitted by `fslc scenarios`.
 
 ### Changed
 - (Parser/UX) Invalid identifier characters such as `foo$bar` now produce a

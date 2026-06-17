@@ -225,14 +225,20 @@ mutated / explained / typestate,
 
 | result | Meaning | Next move |
 |---|---|---|
-| `verified` | No violation up to depth K (+ all reachable satisfied) | To raise confidence, use `--engine induction` |
-| `proved` | **The invariant holds in all executions** (unbounded depth) | Done |
+| `verified` | No violation up to depth K (+ all reachable satisfied); `completeness:"bounded"` | To raise confidence, use `--engine induction` |
+| `proved` | **The invariant holds in all executions** (unbounded depth); `completeness:"unbounded"` | Done |
 | `violated` | A counterexample exists. Comes with `violation_kind` and the shortest trace | Read the trace and fix the spec |
-| `reachable_failed` | reachable not reached within depth K | Look at the `action_coverage` diagnosis / raise `--depth` |
+| `reachable_failed` | reachable not reached within depth K | Read each `unreached[].classification`: raise `--depth` for `insufficient_depth`, or fix the blocking constraint for `over_constrained` |
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8) |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.
+
+`verify` / `verify --engine induction` results include `checked_to_depth` and
+`cost: {"elapsed_s": ...}`. BMC `verified` is explicitly bounded; when the final
+depth first witnesses a reachable/vacuity/coverage fact during normal
+exploration, `verified` also includes a `hint` that the state space is not
+obviously saturated at that depth and suggests a larger `--depth` or induction.
 
 When a leadsTo is declared and the result is `verified` / `proved`,
 `leads_to: { "<Name>": { "checked_to_depth": K } }` is attached
@@ -254,6 +260,27 @@ When a leadsTo is declared and the result is `verified` / `proved`,
 
 The blocking requires clause is identified by the unsat core. The next move is
 one of: weaken it / add an action that establishes it / raise the depth.
+
+For `reachable_failed`, each `unreached` entry carries:
+
+```json
+{
+  "name": "SoldOut",
+  "classification": "insufficient_depth",
+  "hint": "not witnessed within depth 3; try a larger --depth"
+}
+```
+
+or, when the target predicate is unsatisfiable under type bounds/invariants:
+
+```json
+{
+  "name": "TooHigh",
+  "classification": "over_constrained",
+  "blocking_requires": [{"kind": "type_bound", "name": "_bounds_x"}],
+  "hint": "target predicate is unsatisfiable under type bounds/invariants (_bounds_x); ..."
+}
+```
 
 ## 8. Recommended workflow: make proved the standard
 

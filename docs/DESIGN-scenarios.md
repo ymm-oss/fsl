@@ -89,6 +89,11 @@ fslc scenarios <file.fsl> [--depth K]
      terminal-state test in the implementation)
 - If the spec is violated, return the same violated JSON as verify and exit 1 (do not make
   scenarios from a broken spec).
+- If any `reachable` is not witnessed, return `reachable_failed` like verify. Each
+  `unreached[]` entry carries a `classification`: `insufficient_depth` when the
+  target is satisfiable as a state predicate but was not witnessed by depth K, or
+  `over_constrained` when the target is unsatisfiable under type bounds/invariants
+  (with `blocking_requires` naming the blocking unsat core).
 
 ### 2.3 Output JSON
 
