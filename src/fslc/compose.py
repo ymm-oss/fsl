@@ -355,10 +355,14 @@ def _prefix_component_items(items, alias, display_names):
             binders = [_rewrite_binder(b, {alias}, types, consts) for b in it[2]]
             pn = _prefix(it[1], alias)
             display_names[pn] = _display_logical(alias, it[1])
+            measure = (
+                _rewrite_expr(it[7], {alias}, state, types, consts)
+                if len(it) > 7 and it[7] is not None else None
+            )
             out.append(("leadsto", pn, binders,
                         _rewrite_expr(it[3], {alias}, state, types, consts),
                         _rewrite_expr(it[4], {alias}, state, types, consts),
-                        it[5], it[6] if len(it) > 6 else None))
+                        it[5], it[6] if len(it) > 6 else None, measure))
     return out
 
 
@@ -525,10 +529,14 @@ def _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged
             merged.append(("reachable", it[1], _rewrite_expr(it[2], compose_aliases, empty_comp, set(), set()), it[3], it[4] if len(it) > 4 else None))
         elif tag == "leadsto":
             binders = [_rewrite_binder(b, compose_aliases) for b in it[2]]
+            measure = (
+                _rewrite_expr(it[7], compose_aliases, empty_comp, set(), set())
+                if len(it) > 7 and it[7] is not None else None
+            )
             merged.append(("leadsto", it[1], binders,
                            _rewrite_expr(it[3], compose_aliases, empty_comp, set(), set()),
                            _rewrite_expr(it[4], compose_aliases, empty_comp, set(), set()),
-                           it[5], it[6] if len(it) > 6 else None))
+                           it[5], it[6] if len(it) > 6 else None, measure))
 
 
 def _finalize_compose_merged(merged, internal_phys):

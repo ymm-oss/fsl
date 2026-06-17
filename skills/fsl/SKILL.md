@@ -147,10 +147,10 @@ the formalization memo.**
    become warnings.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
 3. Once verified, run `fslc verify file.fsl --engine induction` → done at `proved`
-   (note: `--depth K` **includes** step K. Only invariants become infinite-depth
-   under `proved`; **leadsTo remains a bounded check up to depth K** — for an
-   acyclic spec whose state advances monotonically, re-verifying with a `--depth`
-   larger than the longest execution length covers all executions)
+   (note: `--depth K` **includes** step K. Invariants become infinite-depth under
+   `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,
+   in which case induction can prove that response with an unbounded ranking
+   argument)
 4. As needed: `fslc explain file.fsl --depth 8`
    (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
    checks, a "what if this rule were absent" counterfactual for each user

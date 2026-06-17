@@ -95,7 +95,8 @@ trans_def: "trans" NAME meta_tag? "{" expr "}"
 reachable_def: "reachable" NAME meta_tag? "{" expr "}"
 terminal_def: "terminal" "{" expr "}"
 
-leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body "}"
+leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body leadsto_decreases? "}"
+leadsto_decreases: "decreases" expr
 meta_tag: STRING
 ?lt_body: lt_forall | lt_implies
 lt_forall: "forall" binder [":"] "{" lt_body "}"
@@ -671,15 +672,20 @@ class Ast(Transformer):
     def lt_forall(self, meta, binder, body):
         return ("lt_forall", binder, body)
 
+    def leadsto_decreases(self, meta, measure):
+        return ("decreases", measure)
+
     def leadsto_def(self, meta, name, *rest):
-        req_meta, body = None, None
+        req_meta, body, measure = None, None, None
         for r in rest:
             if isinstance(r, dict):
                 req_meta = r
+            elif isinstance(r, tuple) and r[0] == "decreases":
+                measure = r[1]
             else:
                 body = r
         binders, p, q = _flatten_leadsto(body)
-        return ("leadsto", name, binders, p, q, _loc(meta), req_meta)
+        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure)
 
     def start(self, meta, child):
         return child

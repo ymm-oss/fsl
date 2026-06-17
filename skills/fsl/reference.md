@@ -25,7 +25,7 @@ spec <Name> {
   invariant <Name> { <expr> }
   trans     <Name> { <expr> }            // two-state safety. old(expr) for the old state
   reachable <Name> { <expr> }
-  leadsTo   <Name> { <expr> ~> <expr> }    // may be nested under an outer forall x: T { … }
+  leadsTo   <Name> { <expr> ~> <expr> [decreases <int expr>] } // outer forall x: T { … } may wrap the response
   terminal  { <expr> }                     // intended terminal state (excluded from the deadlock check)
 }
 ```
@@ -115,8 +115,9 @@ check as a type error.
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`
 - Seq: `Seq {}` `Seq { 1, 2 }` (element count ≤ N), `.push(e) .pop() .head() .at(i)
   .contains(e) .size()`, `==` (length + all elements)
-- ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q` / mapping-expression
-  only: `if c then a else b`
+- ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q` plus optional
+  `decreases <int expr>` for induction ranking / mapping-expression only:
+  `if c then a else b`
 
 ## 4. Statements (init / action body)
 
@@ -153,6 +154,11 @@ check as a type error.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
    counterexamples.
+7. `leadsTo ... decreases M` under `verify --engine induction` proves an
+   unbounded response when, under the proved invariants and while P holds and Q is
+   false, M is non-negative, some action is enabled, and every enabled action
+   either makes Q true or keeps P true while strictly decreasing M. Without
+   `decreases`, leadsTo remains bounded to `--depth`.
 
 ## 6. Automatic checks (checked even if not written)
 
@@ -252,7 +258,8 @@ first failed layer and later layers are marked `skipped`.
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),
   `cost`, and `k_used` (the k used per invariant); reachables/coverage come from
-  the base case.
+  the base case. Ranked leadsTo entries add
+  `{proved: true, completeness: "unbounded", proof: "ranking", decreases: ...}`.
 - `reachable_failed`: each `unreached[]` has `classification`:
   `insufficient_depth` (target satisfiable as a state predicate, no witness by K)
   or `over_constrained` (target unsat under type bounds/invariants, with
@@ -263,6 +270,9 @@ first failed layer and later layers are marked `skipped`.
 - coverage diagnostic:
   `{covered: false, name, display_name?, blocking_requires: [{loc, text}], hint}`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
+- leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
+  `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
+  `pending_not_preserved`).
 
 ## 8. Idioms (reuse them as-is)
 

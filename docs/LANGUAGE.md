@@ -40,7 +40,7 @@ spec <Name> {
   invariant <Name> { <expr> }           // holds in all reachable states (safety)
   trans <Name> { <expr> }               // holds across all reachable transitions (two-state safety)
   reachable <Name> { <expr> }           // is reachable (returns a witness)
-  leadsTo <Name> { <response property> }// bounded response property (see §1)
+  leadsTo <Name> { <response property> }// bounded response, or ranked induction with decreases (see §1)
   terminal { <expr> }                   // intended terminal states (excluded from deadlock checking)
 }
 ```
@@ -50,7 +50,9 @@ continuously enabled, the assumption is that it will eventually be executed.
 
 The hierarchy of properties: `invariant` is one-state safety, `trans` is
 two-state safety (the pre-transition state can be referenced with `old()`), and
-`leadsTo` is bounded liveness.
+`leadsTo` is response liveness. Without a ranking function, `leadsTo` is checked
+boundedly. With `--engine induction` and `decreases <int expr>`, a `leadsTo` can
+be proved unbounded by a well-founded ranking argument.
 
 Response properties inside a `leadsTo` block:
 
@@ -58,10 +60,18 @@ Response properties inside a `leadsTo` block:
 leadsTo <Name> {
   <expr> ~> <expr>                      // once P holds (including the same instant), Q eventually holds
   forall x: T { <expr> ~> <expr> }      // checked independently per binding (only an outer forall may nest)
+  decreases <int expr>                  // optional; induction-only ranking measure
 }
 ```
 
 `~>` is **exclusive to leadsTo blocks** — it cannot be used in general expressions.
+`decreases` is optional and must be an integer-valued expression. Under
+`fslc verify --engine induction`, the verifier proves the ranked response by
+checking, under the proved invariants, that whenever `P` is pending and `Q` is
+false: the measure is non-negative; some action is enabled; and every enabled
+action either makes `Q` true or keeps `P` true while strictly decreasing the
+measure. Ranked proof success is independent of `--depth`; `--depth` is still
+used for the base BMC check and reachable/coverage evidence.
 
 ## 2. Types
 
@@ -107,7 +117,8 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 - Seq: `Seq {}` / `Seq { 1, 2 }`, `.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`, `==` is equality of length and all elements
 - Inside ensures / trans only: read the pre-transition state with `old(expr)`
-- Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions)
+- Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
+  optional `decreases <int expr>` after the response body for induction ranking
 
 ## 4. Statements (init / action bodies)
 
@@ -251,7 +262,9 @@ obviously saturated at that depth and suggests a larger `--depth` or induction.
 When a leadsTo is declared and the result is `verified` / `proved`,
 `leads_to: { "<Name>": { "checked_to_depth": K } }` is attached
 (no counterexample is a bounded guarantee up to depth K, the same standing as a
-`verified` invariant). When a `trans` is declared, the success output carries
+`verified` invariant). If induction discharges a ranked `leadsTo`, that entry is
+upgraded with `proved: true`, `completeness: "unbounded"`, `proof: "ranking"`,
+and `decreases`. When a `trans` is declared, the success output carries
 `transitions_checked: ["Name", ...]`.
 
 ### Coverage diagnosis (actions that never become enabled)

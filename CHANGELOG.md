@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Induction) `leadsTo` declarations can now include `decreases <int expr>`.
+  Under `fslc verify --engine induction`, fslc proves the response unboundedly
+  with a ranking argument: the measure is non-negative while `P` is pending and
+  `Q` is false, pending states cannot deadlock, and every enabled action either
+  establishes `Q` or keeps `P` pending while strictly decreasing the measure.
 - (Refinement) Mapping files now support `maps auto`, which synthesizes identity
   mappings for same-named compatible state variables and same-named compatible
   actions unless an explicit `map` or `action ... ->` entry overrides it.

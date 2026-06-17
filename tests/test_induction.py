@@ -175,3 +175,66 @@ spec SyncK {
     r = prove_inline(src, k_ind=4)
     assert r["result"] == "unknown_cti"
     assert r["k"] == 4
+
+
+RANKED_LEADSTO = """
+spec RankedLeadsto {
+  state { x: Int }
+  init { x = 0 }
+  action inc() {
+    requires x < 5
+    x = x + 1
+  }
+  invariant XRange { x >= 0 and x <= 5 }
+  leadsTo ReachFive {
+    x < 5 ~> x == 5
+    decreases 5 - x
+  }
+}
+"""
+
+
+def test_ranked_leadsto_induction_proves_unbounded_at_small_depth():
+    spec = build_spec(parse(RANKED_LEADSTO))
+    bounded = verify(spec, 1)
+    assert bounded["result"] == "verified"
+    assert bounded["completeness"] == "bounded"
+    assert bounded["leads_to"]["ReachFive"]["checked_to_depth"] == 1
+    assert "proved" not in bounded["leads_to"]["ReachFive"]
+
+    r = prove(spec, 1, 1)
+    assert r["result"] == "proved"
+    assert r["completeness"] == "unbounded"
+    entry = r["leads_to"]["ReachFive"]
+    assert entry["checked_to_depth"] == 1
+    assert entry["proved"] is True
+    assert entry["completeness"] == "unbounded"
+    assert entry["proof"] == "ranking"
+    assert entry["decreases"] == "(5 - x)"
+    assert r["note"] == "invariants and ranked leadsTo proved for all depths"
+
+
+def test_ranked_leadsto_bad_measure_reports_non_decreasing_action():
+    src = RANKED_LEADSTO.replace("decreases 5 - x", "decreases x")
+    r = prove_inline(src, depth=1)
+    assert r["result"] == "unknown_cti"
+    assert r["violation_kind"] == "leadsTo_rank"
+    assert r["rank_failure"] == "non_decreasing_action"
+    assert r["invariant"] == "ReachFive"
+    assert r["measure"] == "x"
+    assert r["last_action"]["name"] == "inc"
+    assert r["measure_after"] >= r["measure_before"]
+    assert "strictly decreasing" in r["message"]
+    assert r["cti"]["states"][1]["action"]["name"] == "inc"
+
+
+def test_ranked_leadsto_negative_measure_reports_lower_bound_failure():
+    src = RANKED_LEADSTO.replace("decreases 5 - x", "decreases -x")
+    r = prove_inline(src, depth=1)
+    assert r["result"] == "unknown_cti"
+    assert r["violation_kind"] == "leadsTo_rank"
+    assert r["rank_failure"] == "unbounded_below"
+    assert r["measure"] == "-x"
+    assert r["measure_value"] < 0
+    assert "negative" in r["message"]
+    assert r["cti"]["states"][0]["state"]["x"] > 0

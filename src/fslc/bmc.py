@@ -1894,6 +1894,45 @@ def _display_leadsto_bindings(model, binds, spec, binding_types):
     return _public_model_bindings(model, binds, spec, binding_types)
 
 
+def _leadsto_measure_label(expr):
+    if expr is None:
+        return None
+    tag = expr[0]
+    if tag == "var":
+        return expr[1]
+    if tag == "num":
+        return str(expr[1])
+    if tag == "neg":
+        inner = _leadsto_measure_label(expr[1])
+        return f"-{inner}" if inner is not None else "decreases expression"
+    if tag == "bin" and expr[1] in {"+", "-", "*", "/", "%"}:
+        left = _leadsto_measure_label(expr[2])
+        right = _leadsto_measure_label(expr[3])
+        if left is not None and right is not None:
+            return f"({left} {expr[1]} {right})"
+    return "decreases expression"
+
+
+def _eval_int_measure(leadsto, state, binds, spec, expr_cache):
+    measure = leadsto.get("decreases")
+    with _eval_cache_scope(expr_cache, id(state)):
+        value = eval_expr(measure, state, dict(binds), spec)
+    if not isinstance(value, z3.ExprRef) or value.sort().kind() != z3.Z3_INT_SORT:
+        _err(
+            f"leadsTo '{leadsto['name']}' decreases expression must be Int-valued",
+            kind="type",
+            loc=leadsto.get("loc"),
+        )
+    return value
+
+
+def _model_int(model, value):
+    concrete = model.eval(value, model_completion=True)
+    if z3.is_int_value(concrete):
+        return concrete.as_long()
+    return None
+
+
 def _eval_at_state(expr, state, binds, spec, expr_cache):
     with _eval_cache_scope(expr_cache, id(state)):
         return eval_expr(expr, state, dict(binds), spec)
@@ -2058,6 +2097,175 @@ def _check_leadstos(explored, spec):
             return violation, None
     leads_to = {lt["name"]: {"checked_to_depth": depth} for lt in leadstos}
     return None, leads_to
+
+
+_LEADSTO_RANK_LOWER_HINT = (
+    "the decreases measure must be non-negative whenever the leadsTo trigger is "
+    "pending (P holds and Q is false); add an invariant or use a bounded domain "
+    "that proves the measure is >= 0"
+)
+_LEADSTO_RANK_DEADLOCK_HINT = (
+    "a pending leadsTo obligation must not reach a state with no enabled action "
+    "before Q holds"
+)
+_LEADSTO_RANK_PROGRESS_HINT = (
+    "from every state where P holds and Q is false, each enabled action must "
+    "either make Q true, or keep P true and strictly decrease the measure"
+)
+
+
+def _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, detail):
+    out = {
+        "result": "unknown_cti",
+        "spec": spec["name"],
+        "violation_kind": "leadsTo_rank",
+        "invariant": leadsto["name"],
+        "loc": leadsto.get("loc"),
+        "bindings": _display_leadsto_bindings(model, extra_binds, spec, binding_types),
+        "measure": _leadsto_measure_label(leadsto.get("decreases")),
+        "cti": {
+            "states": _build_trace(model, [state], [], [], spec, 0),
+            "violated_at": 0,
+        },
+    }
+    out.update(detail)
+    return _attach_requirement(out, leadsto)
+
+
+def _prove_leadsto_rank_lower_bound(spec, leadsto, extra_binds, binding_types, invariants):
+    expr_cache = {}
+    state = make_ind_state(spec, f"rank_{leadsto['name']}_lower")
+    solver = z3.Solver()
+    solver.add(*_enum_phys_constraints(spec, state))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, state, spec, expr_cache))
+    p = _eval_at_state(leadsto["P"], state, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], state, extra_binds, spec, expr_cache)
+    measure = _eval_int_measure(leadsto, state, extra_binds, spec, expr_cache)
+    solver.add(p, z3.Not(q), measure < 0)
+    if solver.check() != z3.sat:
+        return None
+    model = solver.model()
+    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, {
+        "rank_failure": "unbounded_below",
+        "measure_value": _model_int(model, measure),
+        "message": (
+            f"leadsTo '{display_label(leadsto['name'], spec)}' decreases measure "
+            "can be negative while P holds and Q is false"
+        ),
+        "hint": _LEADSTO_RANK_LOWER_HINT,
+    })
+
+
+def _prove_leadsto_rank_no_deadlock(spec, leadsto, extra_binds, binding_types, invariants, instances):
+    expr_cache = {}
+    state = make_ind_state(spec, f"rank_{leadsto['name']}_deadlock")
+    solver = z3.Solver()
+    solver.add(*_enum_phys_constraints(spec, state))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, state, spec, expr_cache))
+    p = _eval_at_state(leadsto["P"], state, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], state, extra_binds, spec, expr_cache)
+    enabled = _action_enabled_exprs(state, instances, spec, expr_cache)
+    solver.add(p, z3.Not(q), _deadlock_from_enabled(enabled))
+    if solver.check() != z3.sat:
+        return None
+    model = solver.model()
+    measure = _eval_int_measure(leadsto, state, extra_binds, spec, expr_cache)
+    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, {
+        "rank_failure": "deadlock",
+        "measure_value": _model_int(model, measure),
+        "message": (
+            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
+            "in a state with no enabled action"
+        ),
+        "hint": _LEADSTO_RANK_DEADLOCK_HINT,
+    })
+
+
+def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, invariants, instances):
+    expr_cache = {}
+    cur = make_ind_state(spec, f"rank_{leadsto['name']}_cur")
+    nxt = make_ind_state(spec, f"rank_{leadsto['name']}_next")
+    choice = z3.Int(f"__rank_choice_{leadsto['name']}")
+    solver = z3.Solver()
+    solver.add(choice >= 0, choice < len(instances))
+    solver.add(*_enum_phys_constraints(spec, cur))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, cur, spec, expr_cache))
+    with _eval_cache_scope(expr_cache, id(cur)):
+        solver.add(transition(spec, instances, cur, nxt, choice, expr_cache))
+
+    p = _eval_at_state(leadsto["P"], cur, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], cur, extra_binds, spec, expr_cache)
+    p_next = _eval_at_state(leadsto["P"], nxt, extra_binds, spec, expr_cache)
+    q_next = _eval_at_state(leadsto["Q"], nxt, extra_binds, spec, expr_cache)
+    measure = _eval_int_measure(leadsto, cur, extra_binds, spec, expr_cache)
+    measure_next = _eval_int_measure(leadsto, nxt, extra_binds, spec, expr_cache)
+    progress = z3.Or(q_next, z3.And(p_next, measure_next < measure))
+    solver.add(p, z3.Not(q), z3.Not(progress))
+    if solver.check() != z3.sat:
+        return None
+
+    model = solver.model()
+    trace = _build_trace(model, [cur, nxt], [choice], instances, spec, 1)
+    q_next_holds = z3.is_true(model.eval(q_next, model_completion=True))
+    p_next_holds = z3.is_true(model.eval(p_next, model_completion=True))
+    decreases = z3.is_true(model.eval(measure_next < measure, model_completion=True))
+    rank_failure = "non_decreasing_action"
+    if not q_next_holds and not p_next_holds:
+        rank_failure = "pending_not_preserved"
+    return _attach_requirement({
+        "result": "unknown_cti",
+        "spec": spec["name"],
+        "violation_kind": "leadsTo_rank",
+        "invariant": leadsto["name"],
+        "loc": leadsto.get("loc"),
+        "bindings": _display_leadsto_bindings(model, extra_binds, spec, binding_types),
+        "measure": _leadsto_measure_label(leadsto.get("decreases")),
+        "rank_failure": rank_failure,
+        "measure_before": _model_int(model, measure),
+        "measure_after": _model_int(model, measure_next),
+        "last_action": _last_action(model, [choice], instances, 1, spec),
+        "cti": {
+            "states": trace,
+            "violated_at": 1,
+        },
+        "message": (
+            f"enabled action '{trace[1]['action']['name']}' can leave "
+            f"leadsTo '{display_label(leadsto['name'], spec)}' pending without "
+            "strictly decreasing the measure"
+        ),
+        "hint": _LEADSTO_RANK_PROGRESS_HINT,
+    }, leadsto)
+
+
+def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
+    proved = {}
+    for leadsto in leadstos:
+        if leadsto.get("decreases") is None:
+            continue
+        binding_types = _leadsto_binding_types(leadsto, spec)
+        for extra_binds in expand_leadsto_bindings(leadsto, spec):
+            failure = _prove_leadsto_rank_lower_bound(
+                spec, leadsto, extra_binds, binding_types, invariants)
+            if failure is not None:
+                return failure, None
+            failure = _prove_leadsto_rank_no_deadlock(
+                spec, leadsto, extra_binds, binding_types, invariants, instances)
+            if failure is not None:
+                return failure, None
+            failure = _prove_leadsto_rank_progress(
+                spec, leadsto, extra_binds, binding_types, invariants, instances)
+            if failure is not None:
+                return failure, None
+        proved[leadsto["name"]] = {
+            "proved": True,
+            "completeness": "unbounded",
+            "proof": "ranking",
+            "decreases": _leadsto_measure_label(leadsto.get("decreases")),
+        }
+    return None, proved
 
 
 def _build_leadsto_response_scenarios(explored, spec):
@@ -3713,6 +3921,7 @@ def prove(
         return _finish_result(property_error, spec, base_depth, started)
     invariants = properties["invariants"]
     transitions = properties["transitions"]
+    leadstos = properties["leadstos"]
 
     base = verify(
         spec,
@@ -3824,10 +4033,24 @@ def prove(
             "hint": _CTI_HINT,
         }, inv), spec, base_depth, started, completeness="bounded")
 
+    rank_failure, ranked_leadstos = _prove_ranked_leadstos(
+        spec, leadstos, invariants, instances)
+    if rank_failure is not None:
+        rank_failure.setdefault("checked_to_depth", base_depth)
+        rank_failure.setdefault("completeness", "bounded")
+        return _finish_result(rank_failure, spec, base_depth, started, completeness="bounded")
+
     warnings = [
         w for w in base.get("warnings", [])
         if not (isinstance(w, dict) and "deadlock" in w.get("message", ""))
     ]
+
+    leads_to = None
+    if base.get("leads_to") is not None:
+        leads_to = {name: dict(entry) for name, entry in base["leads_to"].items()}
+        for name, proof in ranked_leadstos.items():
+            entry = leads_to.setdefault(name, {"checked_to_depth": base_depth})
+            entry.update(proof)
 
     result = {
         "result": "proved",
@@ -3843,9 +4066,21 @@ def prove(
         "reachables": base["reachables"],
         "warnings": warnings,
     }
-    if base.get("leads_to") is not None:
-        result["leads_to"] = base["leads_to"]
-        result["note"] = (
-            f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
-        )
+    if leads_to is not None:
+        result["leads_to"] = leads_to
+        bounded_leadstos = [
+            lt for lt in leadstos
+            if lt["name"] not in ranked_leadstos
+        ]
+        if ranked_leadstos and bounded_leadstos:
+            result["note"] = (
+                "invariants and ranked leadsTo proved for all depths; "
+                f"unranked leadsTo checked to depth {base_depth} only"
+            )
+        elif ranked_leadstos:
+            result["note"] = "invariants and ranked leadsTo proved for all depths"
+        else:
+            result["note"] = (
+                f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
+            )
     return _finish_result(result, spec, base_depth, started, completeness="unbounded")
