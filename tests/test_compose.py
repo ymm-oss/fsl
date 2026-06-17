@@ -188,6 +188,89 @@ compose Missing {
         path.unlink(missing_ok=True)
 
 
+def test_sync_action_warns_when_fair_constituent_is_not_inherited():
+    comp_path = SPECS / "_compose_fair_warning_core.fsl"
+    other_path = SPECS / "_compose_fair_warning_note.fsl"
+    comp = """
+spec FairWarningCore {
+  type Id = 0..0
+  state { done: Bool }
+  init { done = false }
+  fair action decay_fresh(i: Id) { done = true }
+  action plain_decay(i: Id) { done = done }
+  invariant CoreOk { true }
+}
+"""
+    other = """
+spec FairWarningNote {
+  type Id = 0..0
+  state { raised: Bool }
+  init { raised = false }
+  action raise(i: Id) { raised = true }
+  invariant NoteOk { true }
+}
+"""
+
+    def check(body, name):
+        path = _write_compose(body, name)
+        try:
+            return run_check(str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+    comp_path.write_text(comp, encoding="utf-8")
+    other_path.write_text(other, encoding="utf-8")
+    try:
+        warned = check("""
+compose FairLoss {
+  use FairWarningCore as core from "_compose_fair_warning_core.fsl"
+  use FairWarningNote as ntf from "_compose_fair_warning_note.fsl"
+
+  action decay_fresh(i: core.Id) = core.decay_fresh(i) || ntf.raise(i) { }
+}
+""", "_compose_fair_loss.fsl")
+        assert warned["result"] == "ok"
+        fair_warnings = [
+            w for w in warned["warnings"]
+            if w.get("kind") == "fair_not_inherited"
+        ]
+        assert len(fair_warnings) == 1
+        assert "decay_fresh" in fair_warnings[0]["message"]
+        assert "core.decay_fresh" in fair_warnings[0]["message"]
+        assert fair_warnings[0]["loc"]["line"] == 6
+
+        inherited_explicitly = check("""
+compose FairKept {
+  use FairWarningCore as core from "_compose_fair_warning_core.fsl"
+  use FairWarningNote as ntf from "_compose_fair_warning_note.fsl"
+
+  fair action decay_fresh(i: core.Id) = core.decay_fresh(i) || ntf.raise(i) { }
+}
+""", "_compose_fair_kept.fsl")
+        assert inherited_explicitly["result"] == "ok"
+        assert not [
+            w for w in inherited_explicitly["warnings"]
+            if w.get("kind") == "fair_not_inherited"
+        ]
+
+        no_fair_constituent = check("""
+compose NoFairLoss {
+  use FairWarningCore as core from "_compose_fair_warning_core.fsl"
+  use FairWarningNote as ntf from "_compose_fair_warning_note.fsl"
+
+  action plain_sync(i: core.Id) = core.plain_decay(i) || ntf.raise(i) { }
+}
+""", "_compose_no_fair_loss.fsl")
+        assert no_fair_constituent["result"] == "ok"
+        assert not [
+            w for w in no_fair_constituent["warnings"]
+            if w.get("kind") == "fair_not_inherited"
+        ]
+    finally:
+        comp_path.unlink(missing_ok=True)
+        other_path.unlink(missing_ok=True)
+
+
 def test_rewrite_component_range_bounds_use_prefixed_const():
     """Regression: type, binder_range, and param_range bounds rewrite component consts."""
     comp_path = SPECS / "_compose_rewrite_ranges_comp.fsl"

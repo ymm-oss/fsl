@@ -370,11 +370,12 @@ def _action_lookup(actions):
     return {a[1]: a for a in actions if a[0] == "action"}
 
 
-def _expand_sync_action(sync, action_by_name, aliases, loc):
+def _expand_sync_action(sync, action_by_name, aliases, loc, warnings):
     _, name, params, sync_refs, body_items, _, fair, sync_meta = sync
     if len({r[1] for r in sync_refs}) != len(sync_refs):
         _compose_err("sync action cannot reference two actions from the same component", loc=loc)
     merged = []
+    fair_constituents = []
     for ref in sync_refs:
         _, alias, act_name, arg_exprs = ref
         if alias not in aliases:
@@ -384,6 +385,8 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
         if comp is None:
             _compose_err(f"unknown action '{alias}.{act_name}'", loc=loc)
         _, _, cparams, cbody, _, _fair, _meta = comp
+        if _fair:
+            fair_constituents.append(f"{alias}.{act_name}")
         if len(cparams) != len(arg_exprs):
             _compose_err(f"sync arity mismatch for '{alias}.{act_name}'", loc=loc)
         # Compose checks arity here; argument type mismatches are caught by
@@ -426,6 +429,17 @@ def _expand_sync_action(sync, action_by_name, aliases, loc):
             ))
         else:
             merged.append(_rewrite_stmt(bit, aliases, empty_comp, set(), set()))
+    if not fair and fair_constituents:
+        refs = ", ".join(fair_constituents)
+        warnings.append({
+            "kind": "fair_not_inherited",
+            "message": (
+                f"synchronized action '{name}' is not fair; fair constituent "
+                f"action(s) {refs} will not contribute fairness unless the "
+                "composite action is declared fair"
+            ),
+            "loc": loc,
+        })
     # 8th element marks this as a sync action (inherits clauses from multiple
     # components) — used to scope per-action diagnostics like always_true_requires.
     return ("action", name, _rewrite_params(params, aliases), merged, loc, fair, sync_meta, True)
@@ -473,13 +487,13 @@ def _merge_internal_actions(internals, aliases, all_actions):
     return action_by_name, internal_phys
 
 
-def _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged, all_actions):
+def _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged, all_actions, warnings):
     empty_comp = set()
 
     for it in compose_rest:
         tag = it[0]
         if tag == "sync_action":
-            expanded = _expand_sync_action(it, action_by_name, compose_aliases, it[5])
+            expanded = _expand_sync_action(it, action_by_name, compose_aliases, it[5], warnings)
             merged.append(expanded)
             all_actions.append(expanded)
         elif tag == "action":
@@ -547,7 +561,10 @@ def expand_compose(ast, base_dir):
     aliases, merged, all_actions = _resolve_components(uses, base_dir, display_names)
     action_by_name, internal_phys = _merge_internal_actions(internals, aliases, all_actions)
     compose_aliases = set(aliases.keys())
-    _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged, all_actions)
+    warnings = []
+    _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged, all_actions, warnings)
     merged = _finalize_compose_merged(merged, internal_phys)
+    if warnings:
+        merged.append(("__warnings", warnings))
 
     return ("spec", compose_name, merged), display_names

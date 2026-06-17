@@ -18,6 +18,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   fields of the same `Map<K, Struct>` element may be updated independently in
   one action.
 
+### Fixed
+- (Compose) Non-fair synchronized actions that reference fair component actions
+  now emit a `fair_not_inherited` warning instead of silently hiding the dropped
+  composite-level liveness assumption.
+
 ## [1.3.1] - 2026-06-17
 
 Theme: **FSL delivery orchestration skill** — making the business → requirements →

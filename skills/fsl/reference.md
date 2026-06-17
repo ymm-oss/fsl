@@ -45,6 +45,12 @@ compose <Name> {
 }
 ```
 
+Compose synchronization does **not** inherit `fair` from component actions. If a
+fair constituent action is synchronized into a non-fair composite action, the
+result JSON `warnings` includes `kind: "fair_not_inherited"` naming the
+composite action and fair constituent(s). Use `fair action <name>(...) = ...`
+when the synchronized action itself must be fair.
+
 Compose synchronized arguments are **structural by bounded value range**, not
 nominal by type name. Passing `core.TaskId` to an action parameter declared
 `NoteId` is intended when both domains cover the same values: a repro with
