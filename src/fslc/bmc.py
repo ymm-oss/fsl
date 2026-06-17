@@ -3325,10 +3325,7 @@ def _display_output(result, spec):
         out["leads_to"] = display_keyed(out["leads_to"], spec)
     if "invariant" in out:
         invariant = out["invariant"]
-        displayed = display_label(invariant, spec)
-        out["invariant"] = displayed
-        if displayed != invariant:
-            out.setdefault("internal_invariant", invariant)
+        out["invariant"] = display_label(invariant, spec)
     if "trans" in out:
         out["trans"] = display_label(out["trans"], spec)
     if "unreached" in out:
