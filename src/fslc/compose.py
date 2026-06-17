@@ -304,10 +304,10 @@ def _prefix_component_items(items, alias, display_names):
             pn = _prefix(it[1], alias)
             lo = _rewrite_expr(it[2], {alias}, state, types, consts)
             hi = _rewrite_expr(it[3], {alias}, state, types, consts)
-            out.append(("type", pn, lo, hi))
+            out.append(("type", pn, lo, hi, *it[4:]))
         elif tag == "enum":
             pn = _prefix(it[1], alias)
-            out.append(("enum", pn, it[2]))
+            out.append(("enum", pn, it[2], *it[3:]))
         elif tag == "struct":
             pn = _prefix(it[1], alias)
             fields = {

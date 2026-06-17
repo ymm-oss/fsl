@@ -116,6 +116,33 @@ spec SeqTailLoop {
 }
 """
 
+SYMMETRIC_TASKS = """
+spec SymmetricTasks {
+  symmetric type TaskId = 0..2
+  enum Status { Pending, Done }
+  state { status: Map<TaskId, Status> }
+  init {
+    forall t: TaskId { status[t] = Pending }
+  }
+  fair action finish(t: TaskId) {
+    requires status[t] == Pending
+    status[t] = Done
+  }
+  action noop() { }
+  invariant StatusValid { true }
+  leadsTo EveryTaskFinishes {
+    forall t: TaskId {
+      status[t] == Pending ~> status[t] == Done
+    }
+  }
+}
+"""
+
+PLAIN_TASKS = SYMMETRIC_TASKS.replace("symmetric type TaskId", "type TaskId")
+
+SYMMETRIC_TASKS_UNFAIR = SYMMETRIC_TASKS.replace("fair action finish", "action finish")
+PLAIN_TASKS_UNFAIR = PLAIN_TASKS.replace("fair action finish", "action finish")
+
 
 def test_stutter_violation():
     r = run_inline(STUTTER_SPEC)
@@ -236,6 +263,48 @@ def test_logical_equiv_seq_tail_loop_detected():
     assert "loop_start" in r
     trace = r["trace"]
     assert _trace_states_equivalent(trace, r["loop_start"], len(trace) - 1)
+
+
+def test_symmetric_type_metadata_and_verified_agrees_with_plain_type():
+    plain = run_inline(PLAIN_TASKS, depth=6)
+    symmetric_spec = build_spec(parse(SYMMETRIC_TASKS))
+    symmetric = verify(symmetric_spec, 6)
+
+    assert symmetric_spec["types"]["TaskId"]["symmetric"] is True
+    assert symmetric_spec["symmetry"]["TaskId"]["lo"] == 0
+    assert symmetric_spec["symmetry"]["TaskId"]["hi"] == 2
+    assert plain["result"] == symmetric["result"] == "verified"
+    assert plain["leads_to"] == symmetric["leads_to"]
+
+
+def test_symmetric_enum_metadata():
+    src = """
+spec SymmetricEnum {
+  symmetric enum Worker { A, B, C }
+  state { busy: Set<Worker> }
+  init { busy = Set {} }
+  action mark(w: Worker) { busy = busy.add(w) }
+  invariant T { true }
+}
+"""
+    spec = build_spec(parse(src))
+    assert spec["types"]["Worker"]["symmetric"] is True
+    assert spec["symmetry"]["Worker"]["members"] == ["A", "B", "C"]
+
+
+def test_symmetric_type_violation_agrees_with_plain_type():
+    plain = run_inline(PLAIN_TASKS_UNFAIR, depth=5)
+    symmetric = run_inline(SYMMETRIC_TASKS_UNFAIR, depth=5)
+
+    assert plain["result"] == symmetric["result"] == "violated"
+    assert plain["violation_kind"] == symmetric["violation_kind"] == "leadsTo"
+    assert plain["invariant"] == symmetric["invariant"] == "EveryTaskFinishes"
+
+
+def test_symmetric_three_entity_leadsto_completes():
+    r = run_inline(SYMMETRIC_TASKS, depth=8)
+    assert r["result"] == "verified"
+    assert r["leads_to"]["EveryTaskFinishes"]["checked_to_depth"] == 8
 
 
 def test_specs_without_leadsto_output_unchanged():

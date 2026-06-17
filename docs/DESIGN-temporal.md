@@ -124,6 +124,39 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 checked **independently for each binding** (if even one has a counterexample it
 is violated; the counterexample JSON includes `bindings`).
 
+### 2.5.1 Symmetry Reduction
+
+A finite domain or enum may be declared symmetric:
+
+```fsl
+symmetric type TaskId = 0..2
+symmetric enum Worker { A, B, C }
+```
+
+The declaration means values of that type are interchangeable entity identities.
+For `leadsTo` lasso and deadlock-stall queries, fslc adds a symmetry-breaking
+constraint to the representative state:
+
+- lasso: the loop-head state `states[i]` must be canonical
+- stall: the deadlocked/stalled state `states[t]` must be canonical
+
+Canonicalization is intentionally partial and conservative. For each symmetric
+type, fslc builds per-entity rows from state variables shaped as
+`Map<SymmetricType, V>` and `Set<SymmetricType>`, as long as `V` does not itself
+mention any symmetric type. Rows are ordered lexicographically by source order of
+the contributing state variables/fields. This covers the common
+`Map<TaskId, Status>` / `Map<TaskId, Bool>` liveness model without trying to
+canonicalize references such as `holder: Option<TaskId>` or `Seq<TaskId, N>`.
+
+Soundness argument: the transition relation and properties of a valid
+`symmetric` model are equivariant under a single global renaming of that type's
+values. Given any lasso or stall counterexample, choose the global permutation
+that sorts the representative state's row vector. The renamed trace is still a
+valid counterexample; `leadsTo` bindings are still enumerated after renaming.
+fslc therefore constrains only the loop head or stalled state, not every
+intermediate state, avoiding the unsound "canonical state after every step"
+shortcut.
+
 ### 2.6 Ranked Induction with `decreases`
 
 For `leadsTo L { P ~> Q decreases M }`, induction first runs the ordinary
@@ -218,9 +251,12 @@ failure is a transition-progress failure.
   AST: `("leadsto", name, binders, P, Q, loc, meta, decreases)` (binders is the
   list of the outer forall), `fair: bool` on the action.
 - **model.py**: propagate `leadstos` into the spec dict, and `fair` into the
-  action/instance. The whitelist validation is unchanged. Make the grammar such
-  that `~>` appearing in a general expression is a parse error (do not put it in
-  the expression hierarchy).
+  action/instance. `symmetric type` / `symmetric enum` are carried in
+  `spec["types"][name]["symmetric"]`, `spec["symmetry"]`, and
+  `spec["state_type_refs"]` so the verifier can distinguish nominally different
+  domain types with the same numeric range. The whitelist validation is
+  unchanged. Make the grammar such that `~>` appearing in a general expression is
+  a parse error (do not put it in the expression hierarchy).
 - **bmc.py**:
   - `_logical_eq(spec, s1, s2)` — a helper that returns the logical equality of
     §2.3 (built using the phys_vars metadata — Option's present/value, Seq's
@@ -234,6 +270,10 @@ failure is a transition-progress failure.
     (expr_cache works).
   - The deadlock stall (§2.4) reuses the enabled expression of the existing
     deadlock check.
+  - Symmetry reduction (§2.5.1) adds canonical row-order constraints only inside
+    the lasso/stall push/pop queries. It is not asserted on the shared path
+    solver, so safety/reachability behavior and finite transition construction
+    remain unchanged.
   - Ranked induction (§2.6) is checked after invariant induction succeeds:
     lower-bound, no-deadlock, and per-action progress queries are issued per
     `leadsTo` binding. Failure is `unknown_cti` because it is a failed proof

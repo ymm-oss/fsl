@@ -46,8 +46,12 @@ mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
      | invariant_def | trans_def | reachable_def | leadsto_def | terminal_def
 
 const_def: "const" NAME "=" expr
-type_def: "type" NAME "=" expr ".." expr
-enum_def: "enum" NAME "{" enum_member ("," enum_member)* ","? "}"
+type_def: plain_type_def | symmetric_type_def
+plain_type_def: "type" NAME "=" expr ".." expr
+symmetric_type_def: "symmetric" "type" NAME "=" expr ".." expr
+enum_def: plain_enum_def | symmetric_enum_def
+plain_enum_def: "enum" NAME "{" enum_member ("," enum_member)* ","? "}"
+symmetric_enum_def: "symmetric" "enum" NAME "{" enum_member ("," enum_member)* ","? "}"
 enum_member: NAME -> enum_member
 struct_def: "struct" NAME "{" field ("," field)* ","? "}"
 field: NAME ":" type
@@ -549,11 +553,23 @@ class Ast(Transformer):
     def const_def(self, meta, n, e):
         return ("const", n, e)
 
-    def type_def(self, meta, n, lo, hi):
+    def plain_type_def(self, meta, n, lo, hi):
         return ("type", n, lo, hi)
 
-    def enum_def(self, meta, n, *members):
+    def symmetric_type_def(self, meta, n, lo, hi):
+        return ("type", n, lo, hi, {"symmetric": True})
+
+    def type_def(self, meta, node):
+        return node
+
+    def plain_enum_def(self, meta, n, *members):
         return ("enum", n, [m for m in members if m])
+
+    def symmetric_enum_def(self, meta, n, *members):
+        return ("enum", n, [m for m in members if m], {"symmetric": True})
+
+    def enum_def(self, meta, node):
+        return node
 
     def struct_def(self, meta, n, *fields):
         return ("struct", n, dict(fields))
