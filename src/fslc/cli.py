@@ -5,6 +5,7 @@
 import sys
 import json
 import argparse
+import re
 
 from lark.exceptions import UnexpectedInput, VisitError
 
@@ -55,6 +56,53 @@ def _parse_expected(e):
         if exp:
             return "one of: " + ", ".join(sorted(str(x) for x in exp))
     return "valid FSL syntax"
+
+
+_IDENTIFIER_CHARS = re.compile(r"[A-Za-z0-9_]")
+
+
+def _invalid_identifier_near(e):
+    src = getattr(e, "source", None)
+    pos = getattr(e, "pos_in_stream", None)
+    if src is None or pos is None or pos < 0 or pos >= len(src):
+        return None
+
+    bad = src[pos]
+    if bad.isspace() or _IDENTIFIER_CHARS.fullmatch(bad):
+        return None
+
+    start = pos
+    while start > 0 and _IDENTIFIER_CHARS.fullmatch(src[start - 1]):
+        start -= 1
+    end = pos + 1
+    while end < len(src) and _IDENTIFIER_CHARS.fullmatch(src[end]):
+        end += 1
+    if start == pos and end == pos + 1:
+        return None
+
+    return src[start:end]
+
+
+def _parse_error_result(e):
+    loc = {"line": e.line, "column": e.column}
+    near = _invalid_identifier_near(e)
+    if near:
+        return _envelope({
+            "result": "error",
+            "kind": "parse",
+            "loc": loc,
+            "message": (
+                f"invalid identifier near '{near}': identifiers may contain "
+                "letters, digits and '_', and must start with a letter or '_'"
+            ),
+        })
+    return _envelope({
+        "result": "error",
+        "kind": "parse",
+        "loc": loc,
+        "message": str(e).split("\n")[0],
+        "expected": _parse_expected(e),
+    })
 
 
 def _parse_file(file, src):
@@ -135,13 +183,7 @@ def run_check(file, strict_tags=False, requirements=None):
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
         return _envelope(out)
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -166,13 +208,7 @@ def run_typestate(file):
         spec = build_spec(ast, display_names)
         return _envelope(analyze_typestate(spec))
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -230,13 +266,7 @@ def run_verify(
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
         return _envelope(out)
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -261,13 +291,7 @@ def run_scenarios(file, depth, deadlock_mode="warn"):
         spec, source_lines = _read_spec(file)
         return _envelope(scenarios(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines))
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -334,13 +358,7 @@ def run_replay(file, trace_path):
     except json.JSONDecodeError as e:
         return _envelope({"result": "error", "kind": "io", "message": f"invalid JSON: {e}"})
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -388,13 +406,7 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
             i += 2
         return _envelope(refine_chain(specs, mappings, depth))
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -433,13 +445,7 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
             "content": content,
         })
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -468,13 +474,7 @@ def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTA
             max_mutants=max_mutants,
         ))
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(
@@ -498,13 +498,7 @@ def run_explain(file, depth=8):
     try:
         return _envelope(explain_file(file, depth=depth))
     except UnexpectedInput as e:
-        return _envelope({
-            "result": "error",
-            "kind": "parse",
-            "loc": {"line": e.line, "column": e.column},
-            "message": str(e).split("\n")[0],
-            "expected": _parse_expected(e),
-        })
+        return _parse_error_result(e)
     except VisitError as e:
         orig = e.orig_exc
         return _error_envelope(

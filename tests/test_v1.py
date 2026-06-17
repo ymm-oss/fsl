@@ -366,6 +366,19 @@ def test_parse_error_unexpected_characters_expected():
         broken.unlink(missing_ok=True)
 
 
+def test_parse_error_invalid_identifier_message():
+    out = check_inline("spec X { state { foo$bar: Int } init {} }")
+    assert out["result"] == "error"
+    assert out["kind"] == "parse"
+    assert out["loc"] == {"line": 1, "column": 21}
+    assert out["message"] == (
+        "invalid identifier near 'foo$bar': identifiers may contain "
+        "letters, digits and '_', and must start with a letter or '_'"
+    )
+    assert "expected" not in out
+    assert "STRING" not in out["message"]
+
+
 def test_parse_error_includes_expected_tokens():
     broken = ROOT / "specs" / "_parse_break.fsl"
     broken.write_text("spec X { state {", encoding="utf-8")

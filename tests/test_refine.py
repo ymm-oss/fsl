@@ -36,6 +36,58 @@ def test_cart_impl_refines_shopping_cart():
     assert exit_code(r) == 0
 
 
+def test_refinement_action_params_accept_matching_type_annotations(tmp_path):
+    mapping_src = (SPECS / "cart_refines.fsl").read_text(encoding="utf-8")
+    mapping_src = mapping_src.replace(
+        "action add_to_cart(u, i)     -> add_to_cart(u, i)",
+        "action add_to_cart(u: UserId, i: ItemId)     -> add_to_cart(u, i)",
+    ).replace(
+        "action remove_from_cart(u)   -> remove_from_cart(u)",
+        "action remove_from_cart(u: UserId)   -> remove_from_cart(u)",
+    ).replace(
+        "action impl_checkout(u)      -> checkout(u)",
+        "action impl_checkout(u: UserId)      -> checkout(u)",
+    ).replace(
+        "action reserve(i)            -> stutter",
+        "action reserve(i: ItemId)            -> stutter",
+    )
+    map_file = tmp_path / "cart_refines_annotated.fsl"
+    map_file.write_text(mapping_src, encoding="utf-8")
+
+    r = run_refine(
+        str(SPECS / "cart_impl.fsl"),
+        str(SPECS / "cart_v1.fsl"),
+        str(map_file),
+        depth=6,
+    )
+
+    assert r["result"] == "refines"
+    assert r["action_map"]["reserve"] == "stutter"
+    assert exit_code(r) == 0
+
+
+def test_refinement_action_param_type_annotation_mismatch_is_type_error(tmp_path):
+    mapping_src = (SPECS / "cart_refines.fsl").read_text(encoding="utf-8")
+    mapping_src = mapping_src.replace(
+        "action add_to_cart(u, i)     -> add_to_cart(u, i)",
+        "action add_to_cart(u: ItemId, i: ItemId)     -> add_to_cart(u, i)",
+    )
+    map_file = tmp_path / "cart_refines_bad_annotation.fsl"
+    map_file.write_text(mapping_src, encoding="utf-8")
+
+    r = run_refine(
+        str(SPECS / "cart_impl.fsl"),
+        str(SPECS / "cart_v1.fsl"),
+        str(map_file),
+        depth=2,
+    )
+
+    assert r["result"] == "error"
+    assert r["kind"] == "type"
+    assert "type annotation mismatch" in r["message"]
+    assert exit_code(r) == 2
+
+
 def test_seat_conditional_map_refines_booking():
     r = run_refine(
         str(SPECS / "seat_booking_impl.fsl"),

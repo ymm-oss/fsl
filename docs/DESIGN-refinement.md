@@ -26,8 +26,8 @@ refinement CartImplRefinesCart {
   map revenue          = ledger
 
   // Correspondence of impl action → abs action (all impl actions required)
-  action impl_checkout(u) -> checkout(u)     // parameters may be expressions
-  action rebalance(i)     -> stutter          // internal action (nothing happens in abs)
+  action impl_checkout(u: UserId) -> checkout(u)     // params may include matching impl types
+  action rebalance(i: ItemId)     -> stutter          // internal action (nothing happens in abs)
 }
 ```
 
@@ -40,7 +40,9 @@ refinement CartImplRefinesCart {
   expression)).
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
-  order). The abs-side arguments are expressions using them and the impl state.
+  order). They may be written bare (`u`) or with a type annotation matching the
+  impl action declaration (`u: UserId`). The abs-side arguments are expressions
+  using them and the impl state.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
