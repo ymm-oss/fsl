@@ -5,7 +5,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-17
+
+Theme: **FSL delivery orchestration skill** — making the business → requirements →
+design → implementation-conformance workflow directly invokable as a lifecycle
+skill, while also adding readable business-stage syntax.
+
 ### Added
+- **`fsl-delivery` Agent Skill**: a lifecycle coordinator that routes multi-layer
+  work across `fsl-business`, `fsl-requirements`, `fsl-design`, and
+  `fsl-design-review`, keeps layer boundaries explicit, and reports business,
+  requirements, design/refinement, and implementation-conformance proof states
+  separately. The install script and skill documentation now include it.
 - **Readable fsl-biz stage syntax for PM/consulting-facing policies and goals**:
   `policy ... every Case in Stage must eventually be Target [or Target ...]`,
   `goal ... some Case can reach Stage`, and
@@ -472,7 +483,9 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v1.2.10...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/ymm-oss/fsl/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/ymm-oss/fsl/compare/v1.2.10...v1.3.0
 [1.2.10]: https://github.com/ymm-oss/fsl/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/ymm-oss/fsl/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/ymm-oss/fsl/compare/v1.2.7...v1.2.8
