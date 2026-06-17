@@ -234,7 +234,8 @@ def _read_spec(file):
 
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
-        strict_tags=False, requirements=None, property_name=None):
+        strict_tags=False, requirements=None, property_name=None,
+        exclude_property_names=None):
     try:
         spec, source_lines = _read_spec(file)
         acc = _acceptance_error(spec)
@@ -249,6 +250,7 @@ def run_verify(
                 deadlock_mode=deadlock_mode,
                 vacuity_mode=vacuity_mode,
                 property_name=property_name,
+                exclude_property_names=exclude_property_names,
             )
         else:
             out = verify(
@@ -258,6 +260,7 @@ def run_verify(
                 source_lines=source_lines,
                 vacuity_mode=vacuity_mode,
                 property_name=property_name,
+                exclude_property_names=exclude_property_names,
             )
         impl = _implements_result(spec, depth)
         if impl:
@@ -558,6 +561,8 @@ def _build_arg_parser():
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
     v.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
     v.add_argument("--property", dest="property_name", default=None)
+    v.add_argument("--exclude-property", dest="exclude_property_names",
+                   action="append", default=None)
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
 
@@ -654,7 +659,8 @@ def _dispatch(args):
                             vacuity_mode=args.vacuity,
                             strict_tags=args.strict_tags,
                             requirements=args.requirements,
-                            property_name=args.property_name)
+                            property_name=args.property_name,
+                            exclude_property_names=args.exclude_property_names)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

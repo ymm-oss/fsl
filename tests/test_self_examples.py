@@ -85,3 +85,80 @@ def test_verify_property_missing_invariant_is_usage_error():
     assert out["result"] == "error"
     assert out["kind"] == "usage"
     assert out["message"].startswith("no such invariant: NoSuchInv")
+
+
+def test_verify_exclude_property_omits_reachable_only():
+    proc = _run_fslc_verify(
+        str(ROOT / "specs" / "mutex_queue.fsl"),
+        "--depth",
+        "8",
+        "--exclude-property",
+        "FullQueue",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert set(out["invariants_checked"]) == {
+        "HolderNotWaiting",
+        "WaitersImplyHolder",
+        "NoDuplicateWaiters",
+        "_bounds_holder",
+        "_bounds_waiters",
+    }
+    assert out["transitions_checked"] == []
+    assert set(out["reachables"]) == {"HandoffHappened"}
+    assert set(out["leads_to"]) == {"WaiterGetsLock"}
+
+
+def test_verify_exclude_property_missing_name_is_usage_error():
+    proc = _run_fslc_verify(
+        str(ROOT / "specs" / "mutex_queue.fsl"),
+        "--depth",
+        "8",
+        "--exclude-property",
+        "NoSuchProperty",
+    )
+    assert proc.returncode == 2
+    out = json.loads(proc.stdout)
+    assert out["result"] == "error"
+    assert out["kind"] == "usage"
+    assert out["message"].startswith("no such property: NoSuchProperty")
+    assert "HolderNotWaiting" in out["message"]
+    assert "FullQueue" in out["message"]
+    assert "WaiterGetsLock" in out["message"]
+
+
+def test_verify_exclude_property_repeated_omits_multiple_kinds():
+    proc = _run_fslc_verify(
+        str(ROOT / "specs" / "mutex_queue.fsl"),
+        "--depth",
+        "8",
+        "--exclude-property",
+        "HolderNotWaiting",
+        "--exclude-property",
+        "FullQueue",
+        "--exclude-property",
+        "WaiterGetsLock",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert "HolderNotWaiting" not in out["invariants_checked"]
+    assert set(out["reachables"]) == {"HandoffHappened"}
+    assert "leads_to" not in out
+
+
+def test_verify_property_and_exclude_property_exclude_wins():
+    proc = _run_fslc_verify(
+        str(ROOT / "specs" / "mutex_queue.fsl"),
+        "--depth",
+        "8",
+        "--property",
+        "HolderNotWaiting",
+        "--exclude-property",
+        "HolderNotWaiting",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert out["invariants_checked"] == []

@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- (Verifier CLI) `fslc verify --exclude-property <Name>` is repeatable and
+  skips named invariants, `trans`, `leadsTo`, and `reachable` properties in both
+  BMC and induction runs. It composes with `--property`; exclusion wins when both
+  name the same invariant.
+
 ### Changed
 - (Parser/UX) Invalid identifier characters such as `foo$bar` now produce a
   focused parse diagnostic that states the identifier rule instead of leaking raw
