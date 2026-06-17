@@ -67,6 +67,7 @@ refinement <Name> {
   map <abs_var>[<x>: <KeyType>] = <expr>          // per-element mapping of a Map
   // conditional expressions allowed only inside mapping/argument expressions: if <c> then <a> else <b> (else required)
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
+  // formal params may be bare names or name: Type annotations matching the impl action
 }
 ```
 

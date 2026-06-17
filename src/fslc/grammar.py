@@ -35,7 +35,7 @@ refinement_impl: "impl" NAME
 refinement_abs: "abs" NAME
 map_def: "map" NAME ["[" binder "]"] "=" ref_expr
 refinement_action: "action" NAME "(" [refinement_param ("," refinement_param)*] ")" "->" action_target
-refinement_param: NAME
+refinement_param: NAME [":" type]
 action_target: stutter_target | mapped_action_target
 stutter_target: "stutter"
 mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
@@ -697,8 +697,8 @@ class Ast(Transformer):
             return ("map", name, binder, expr, _loc(meta))
         return ("map", name, None, expr, _loc(meta))
 
-    def refinement_param(self, meta, name):
-        return name
+    def refinement_param(self, meta, name, ty=None):
+        return ("refinement_param", name, ty)
 
     def action_target(self, meta, child):
         return child
@@ -714,7 +714,7 @@ class Ast(Transformer):
         params = []
         target = None
         for p in params_and_target:
-            if isinstance(p, str):
+            if isinstance(p, tuple) and p[0] == "refinement_param":
                 params.append(p)
             else:
                 target = p

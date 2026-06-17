@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- (Parser/UX) Invalid identifier characters such as `foo$bar` now produce a
+  focused parse diagnostic that states the identifier rule instead of leaking raw
+  Lark terminal expectations.
+- (Refinement) Mapping-file action formals now accept `name: Type` annotations,
+  validated against the implementation action's declared parameter types.
 - (Documentation) Clarified compose synchronized-argument compatibility as structural
   over bounded value ranges rather than nominal type names, including same-range
   and narrower-target repro results. Also documented action-level

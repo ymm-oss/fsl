@@ -395,15 +395,16 @@ refinement CartImplRefinesCart {
   map stock[i: ItemId] = impl_stock[i] - reserved[i]
   map cart[u: UserId]  = impl_cart[u]
 
-  action add_to_cart(u, i)   -> add_to_cart(u, i)
-  action impl_checkout(u)    -> checkout(u)
-  action reserve(i)          -> stutter
+  action add_to_cart(u: UserId, i: ItemId) -> add_to_cart(u, i)
+  action impl_checkout(u: UserId)          -> checkout(u)
+  action reserve(i: ItemId)                -> stutter
 }
 ```
 
 - `map <abs var> = <impl expr>` — a scalar abstract variable.
 - `map <abs var>[<binder>] = <expr>` — element-wise mapping of a Map (enumerate the key type, which is bounded).
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
+  Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
 
 Only in the expressions of a refinement mapping file may you use

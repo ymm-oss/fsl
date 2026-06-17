@@ -31,7 +31,7 @@ from .bmc import (
     _map_domain,
     _z3_domain_value,
 )
-from .model import FslError, bounds_invariant_expr, domain_range as model_domain_range
+from .model import FslError, bounds_invariant_expr, domain_range as model_domain_range, resolve_type
 
 
 _REFINE_HINT = (
@@ -389,6 +389,28 @@ def _find_abs_action(abs_spec, name):
     return None
 
 
+def _param_type(p, types_meta):
+    tyname = p[3] if len(p) > 3 else None
+    if tyname and tyname in types_meta:
+        return types_meta[tyname]["ty"]
+    if tyname == "Int":
+        return ("int",)
+    if tyname == "Bool":
+        return ("bool",)
+    if len(p) >= 3 and isinstance(p[1], int) and isinstance(p[2], int):
+        return ("domain", p[1], p[2])
+    return None
+
+
+def _annotation_matches_param(annotation, impl_param, types_meta, consts):
+    impl_tyname = impl_param[3] if len(impl_param) > 3 else None
+    if annotation[0] == "name" and impl_tyname:
+        return annotation[1] == impl_tyname
+    annotated = resolve_type(annotation, types_meta, consts)
+    expected = _param_type(impl_param, types_meta)
+    return expected is None or _types_compatible(expected, annotated)
+
+
 def _abs_action_instance(act, param_exprs, impl_state, impl_binds, impl_spec, abs_spec):
     binds = dict(impl_binds)
     for i, p in enumerate(act["params"]):
@@ -436,14 +458,28 @@ def build_refinement(tree, impl_spec, abs_spec):
             impl_act = _find_abs_action(impl_spec, aname)
             if impl_act is None:
                 _err(f"unknown impl action '{aname}'", kind="type", loc=loc)
+            param_names = [p[1] for p in params]
             impl_param_names = [p[0] for p in impl_act["params"]]
-            if list(params) != impl_param_names:
+            if param_names != impl_param_names:
                 _err(
                     f"action '{aname}' parameter names/order must match impl "
                     f"({impl_param_names})",
                     kind="type",
                     loc=loc,
                 )
+            merged_types = _merge_types_meta(impl_spec, abs_spec)
+            for param, impl_param in zip(params, impl_act["params"]):
+                _, pname, annotation = param
+                if annotation is None:
+                    continue
+                if not _annotation_matches_param(
+                        annotation, impl_param, merged_types, impl_spec.get("consts", {})):
+                    _err(
+                        f"action '{aname}' parameter '{pname}' type annotation "
+                        f"mismatch: expected {impl_param[3]}, got {annotation}",
+                        kind="type",
+                        loc=loc,
+                    )
             if target[0] == "stutter":
                 actions[aname] = {"kind": "stutter", "loc": loc}
             else:
@@ -523,18 +559,6 @@ def build_refinement(tree, impl_spec, abs_spec):
 
     # static type check action-map argument expressions (DESIGN-refinement §3).
     # Defensive: only flag when both expected and inferred types are determinable.
-    def _param_type(p):
-        tyname = p[3] if len(p) > 3 else None
-        if tyname and tyname in merged_types:
-            return merged_types[tyname]["ty"]
-        if tyname == "Int":
-            return ("int",)
-        if tyname == "Bool":
-            return ("bool",)
-        if len(p) >= 3 and isinstance(p[1], int) and isinstance(p[2], int):
-            return ("domain", p[1], p[2])
-        return None
-
     for aname, amap in actions.items():
         if amap.get("kind") != "map":
             continue
@@ -544,11 +568,11 @@ def build_refinement(tree, impl_spec, abs_spec):
             continue
         env = {}
         for p in impl_act["params"]:
-            pt = _param_type(p)
+            pt = _param_type(p, merged_types)
             if pt:
                 env[p[0]] = pt
         for arg_expr, abs_p in zip(amap["arg_exprs"], abs_act["params"]):
-            expected = _param_type(abs_p)
+            expected = _param_type(abs_p, merged_types)
             got = _expr_static_type(arg_expr, merged_impl, env)
             if expected and got and not _types_compatible(expected, got):
                 _err(
