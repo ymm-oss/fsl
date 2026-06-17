@@ -3554,7 +3554,16 @@ def verify(
     return _finish_result(result, spec, depth, started, completeness="bounded")
 
 
-def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
+def _unreached_scenario_warning(unreached, depth):
+    name = unreached["name"]
+    if unreached.get("classification") == "insufficient_depth":
+        hint = f"try --depth >= {depth + 1}"
+    else:
+        hint = unreached.get("hint") or "increase --depth"
+    return _warn(f"reachable {name} not witnessed at depth {depth}; {hint}", hint)
+
+
+def scenarios(spec, depth, deadlock_mode="warn", source_lines=None, allow_unreached=False):
     explored = _bmc_explore(
         spec, depth, deadlock_mode=deadlock_mode, track_cover=True, vacuity_mode="ignore")
     if explored["result"] != "explored":
@@ -3578,17 +3587,22 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
         source_lines=source_lines,
     )
 
+    warnings = []
     if pending_reachables:
-        return _display_output({
-            "result": "reachable_failed",
-            "spec": explored["spec"],
-            "unreached": _diagnose_unreached_reachables(
-                pending_reachables, spec, depth, source_lines=source_lines),
-            "depth": depth,
-            "checked_to_depth": depth,
-            "action_coverage": coverage_diag,
-            "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
-        }, spec)
+        unreached = _diagnose_unreached_reachables(
+            pending_reachables, spec, depth, source_lines=source_lines)
+        if allow_unreached:
+            warnings.extend(_unreached_scenario_warning(u, depth) for u in unreached)
+        else:
+            return _display_output({
+                "result": "reachable_failed",
+                "spec": explored["spec"],
+                "unreached": unreached,
+                "depth": depth,
+                "checked_to_depth": depth,
+                "action_coverage": coverage_diag,
+                "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
+            }, spec)
 
     if deadlock_violation is not None:
         return _display_output(deadlock_violation, spec)
@@ -3610,7 +3624,6 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
         }, reachable_by_name.get(rname))
         scenario_list.append(scenario)
 
-    warnings = []
     leadsto_scenarios, leadsto_warnings = _build_leadsto_response_scenarios(explored, spec)
     scenario_list.extend(leadsto_scenarios)
     warnings.extend(leadsto_warnings)

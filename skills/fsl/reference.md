@@ -189,7 +189,7 @@ fslc explain <f> [--depth K=8]                 # skeleton + counterfactual + wit
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
-fslc testgen <f> [--depth K] [-o out.py]        # Adapter skeleton + conformance pytest
+fslc testgen <f> [--depth K] [--strict] [-o out.py]  # Adapter skeleton + conformance pytest
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 ```
@@ -297,6 +297,11 @@ The random-walk test uses the Monitor (the spec's concrete interpreter) as the
 oracle, stepping through the implementation one step at a time. A failure = a
 divergence between implementation and spec (read the trace to decide which one is
 correct).
+
+If a `reachable` target is not witnessed at the requested depth, `testgen` still
+generates tests for the scenarios it did witness and returns `warnings[]` with a
+message such as `reachable SoldOut not witnessed at depth 3; try --depth >= 4`.
+Use `--strict` to restore all-or-nothing `reachable_failed`.
 
 ## 10. Three-layer dialects (consulting / requirements / design)
 

@@ -454,6 +454,58 @@ spec TestgenDefaultName {
     assert result["output"] == "test_testgenDefaultName.py"
 
 
+def test_testgen_partial_reachable_generation_warns_with_depth_hint(tmp_path):
+    src = """
+spec PartialReachableTestgen {
+  type Small = 0..2
+  state { x: Small }
+  init { x = 0 }
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  reachable One { x == 1 }
+  reachable Two { x == 2 }
+}
+"""
+    path = tmp_path / "partial_reachable_testgen.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_testgen(str(path), depth=1, output=None, write_file=False)
+
+    assert result["result"] == "generated", result
+    assert "Scenario: reach_One" in result["content"]
+    assert "Scenario: reach_Two" not in result["content"]
+    assert result["warnings"] == [{
+        "message": "reachable Two not witnessed at depth 1; try --depth >= 2",
+        "hint": "try --depth >= 2",
+    }]
+
+
+def test_testgen_strict_reachable_failed_aborts(tmp_path):
+    src = """
+spec StrictReachableTestgen {
+  type Small = 0..2
+  state { x: Small }
+  init { x = 0 }
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  reachable One { x == 1 }
+  reachable Two { x == 2 }
+}
+"""
+    path = tmp_path / "strict_reachable_testgen.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_testgen(str(path), depth=1, output=None, write_file=False, strict=True)
+
+    assert result["result"] == "reachable_failed"
+    assert exit_code(result) == 1
+    assert [u["name"] for u in result["unreached"]] == ["Two"]
+
+
 def test_forbidden_testgen_rejection_assertion(tmp_path):
     src = """
 requirements ForbiddenTestgen {

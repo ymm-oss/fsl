@@ -6,6 +6,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Testgen) `fslc testgen` now generates partial pytest scaffolds when some
+  `reachable` targets are not witnessed at the requested depth. Witnessed
+  scenarios are still emitted, unwitnessed targets appear in `warnings[]` with a
+  depth hint, and `--strict` restores the previous `reachable_failed` abort.
 - (Vacuity) `fslc verify --vacuity` now emits `kind:"urgency_freeze"` for the
   requirements time/deadline trap where Z3 proves the generated urgent condition
   holds initially and is preserved by every action, so generated `tick` is dead

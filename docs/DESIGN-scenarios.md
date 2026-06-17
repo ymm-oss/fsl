@@ -98,6 +98,11 @@ fslc scenarios <file.fsl> [--depth K]
   target is satisfiable as a state predicate but was not witnessed by depth K, or
   `over_constrained` when the target is unsatisfiable under type bounds/invariants
   (with `blocking_requires` naming the blocking unsat core).
+- `fslc testgen` consumes the same scenario machinery in partial mode: witnessed
+  `reachable` targets still become pytest scenarios, while unwitnessed targets are
+  returned as warnings such as
+  `reachable SoldOut not witnessed at depth 3; try --depth >= 4`. `testgen
+  --strict` disables partial mode and preserves the `reachable_failed` abort.
 
 ### 2.3 Output JSON
 
