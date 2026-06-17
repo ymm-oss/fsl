@@ -182,6 +182,7 @@ fslc check <f>                                  # syntax / names / types only
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check a single invariant only (for probing)
+               [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]
 fslc explain <f> [--depth K=8]                 # skeleton + counterfactual + witness narration
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
@@ -201,6 +202,10 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
   the baseline result is returned. `--by-requirement` aggregates by the requirement
   tag of the "killed property" and warns on zero kills as `empty_formalization`
   (a lower bound observed for this mutant set and depth).
+- `verify --property Name` selects one invariant only. `--exclude-property Name`
+  is repeatable and removes named invariants, `trans`, `leadsTo`, and
+  `reachable` checks from the run and from checked-property outputs. If both
+  options name the same invariant, exclusion wins.
 - `explain` is deterministic formatting with no LLM. It enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest

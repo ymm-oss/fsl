@@ -406,6 +406,8 @@ fslc verify <file.fsl> [--depth K]              # BMC (default K=8)
                        [--engine bmc|induction] # induction: §9
                        [--k N]                  # max induction depth (default 1, induction only)
                        [--deadlock warn|error|ignore]
+                       [--property Name]         # select one invariant
+                       [--exclude-property Name] # repeatable; skip invariant/trans/leadsTo/reachable
 ```
 
 - Output is always a **single JSON object to stdout** (same as v0).
@@ -415,6 +417,11 @@ fslc verify <file.fsl> [--depth K]              # BMC (default K=8)
 - Because BMC checks in order from depth 0, the returned counterexample is the
   **shortest** (stated explicitly as a guarantee: the shorter the trace handed
   to the LLM, the higher the repair accuracy).
+- `--property` is an invariant-only selector. `--exclude-property` resolves
+  names across invariants, transition properties, `leadsTo`, and `reachable`;
+  excluded properties are omitted from checking and from `*_checked`,
+  `leads_to`, and `reachables` outputs. If both flags name the same invariant,
+  exclusion wins.
 
 ### 7.2 Output JSON Schema v1
 

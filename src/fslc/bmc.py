@@ -131,6 +131,64 @@ def _select_invariants(spec, property_name=None):
     }
 
 
+def _property_collections(spec):
+    return {
+        "invariants": spec.get("invariants", []),
+        "transitions": spec.get("transitions", []),
+        "leadstos": spec.get("leadstos", []),
+        "reachables": spec.get("reachables", []),
+    }
+
+
+def _resolve_excluded_properties(spec, exclude_property_names=None):
+    excluded = set(exclude_property_names or [])
+    if not excluded:
+        return excluded, None
+
+    collections = _property_collections(spec)
+    available = []
+    available_set = set()
+    for items in collections.values():
+        for item in items:
+            name = item["name"]
+            available.append(name)
+            available_set.add(name)
+
+    missing = sorted(name for name in excluded if name not in available_set)
+    if missing:
+        return excluded, {
+            "result": "error",
+            "kind": "usage",
+            "message": (
+                f"no such property: {', '.join(missing)} "
+                f"(available: {', '.join(available)})"
+            ),
+        }
+    return excluded, None
+
+
+def _select_properties(spec, property_name=None, exclude_property_names=None):
+    invariants, property_error = _select_invariants(spec, property_name)
+    if property_error is not None:
+        return None, property_error
+
+    excluded, exclude_error = _resolve_excluded_properties(spec, exclude_property_names)
+    if exclude_error is not None:
+        return None, exclude_error
+
+    collections = _property_collections(spec)
+    return {
+        "invariants": [inv for inv in invariants if inv["name"] not in excluded],
+        "transitions": [
+            tr for tr in collections["transitions"] if tr["name"] not in excluded
+        ],
+        "leadstos": [lt for lt in collections["leadstos"] if lt["name"] not in excluded],
+        "reachables": [
+            reach for reach in collections["reachables"] if reach["name"] not in excluded
+        ],
+    }, None
+
+
 _VACUOUS_IMPLICATION_HINT = (
     "the antecedent is not reachable within this depth; check whether an action "
     "that should establish it is missing, or whether the antecedent expression is wrong"
@@ -1979,17 +2037,18 @@ def _check_single_leadsto(explored, spec, leadsto):
 
 
 def _check_leadstos(explored, spec):
-    if not spec.get("leadstos"):
+    leadstos = explored.get("leadstos", spec.get("leadstos", []))
+    if not leadstos:
         return None, None
     stutter_violation = explored.get("leadsto_stutter_violation")
     if stutter_violation is not None:
         return stutter_violation, None
     depth = explored["depth"]
-    for lt in spec["leadstos"]:
+    for lt in leadstos:
         violation = _check_single_leadsto(explored, spec, lt)
         if violation is not None:
             return violation, None
-    leads_to = {lt["name"]: {"checked_to_depth": depth} for lt in spec["leadstos"]}
+    leads_to = {lt["name"]: {"checked_to_depth": depth} for lt in leadstos}
     return None, leads_to
 
 
@@ -2246,7 +2305,7 @@ def _is_tautology_over_frozen(spec, inv, frozen_refs, init_model, init_state):
     return solver.check() == z3.unsat
 
 
-def _frozen_tautology_candidates(spec):
+def _frozen_tautology_candidates(spec, invariants=None):
     frozen = _frozen_state_vars(spec)
     if not frozen:
         return []
@@ -2255,7 +2314,12 @@ def _frozen_tautology_candidates(spec):
         return []
 
     pending = []
+    if invariants is None:
+        invariants = spec.get("invariants", [])
+    selected_invariants = {inv["name"] for inv in invariants}
     for inv in spec.get("user_invariants", []):
+        if inv["name"] not in selected_invariants:
+            continue
         if inv.get("implicit"):
             continue
         refs = _referenced_state_vars(inv["expr"], spec)
@@ -2276,14 +2340,21 @@ def _frozen_tautology_candidates(spec):
     return pending
 
 
-def _vacuity_candidates(spec):
+def _vacuity_candidates(spec, invariants=None, leadstos=None):
     pending = []
-    pending.extend(_frozen_tautology_candidates(spec))
+    if invariants is None:
+        invariants = spec.get("invariants", [])
+    pending.extend(_frozen_tautology_candidates(spec, invariants))
+    selected_invariants = {inv["name"] for inv in invariants}
     for inv in spec.get("user_invariants", []):
+        if inv["name"] not in selected_invariants:
+            continue
         cand = _implication_antecedent_candidate(inv)
         if cand is not None:
             pending.append(cand)
-    for leadsto in spec.get("leadstos", []):
+    if leadstos is None:
+        leadstos = spec.get("leadstos", [])
+    for leadsto in leadstos:
         pending.append(_leadsto_trigger_candidate(leadsto))
     return pending
 
@@ -2661,11 +2732,15 @@ def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cach
 
 def _bmc_explore(
         spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn",
-        property_name=None):
-    invariants, property_error = _select_invariants(spec, property_name)
+        property_name=None, exclude_property_names=None):
+    properties, property_error = _select_properties(
+        spec, property_name, exclude_property_names)
     if property_error is not None:
         return property_error
-    transitions = spec.get("transitions", [])
+    invariants = properties["invariants"]
+    transitions = properties["transitions"]
+    leadstos = properties["leadstos"]
+    reachables = properties["reachables"]
 
     instances = build_instances(spec)
     expr_cache = {}
@@ -2687,8 +2762,11 @@ def _bmc_explore(
         }
 
     reachables_result = {}
-    pending_reachables = list(spec["reachables"])
-    pending_vacuity = _vacuity_candidates(spec) if vacuity_mode != "ignore" else []
+    pending_reachables = list(reachables)
+    pending_vacuity = (
+        _vacuity_candidates(spec, invariants, leadstos)
+        if vacuity_mode != "ignore" else []
+    )
 
     by_action = {}
     for idx, inst in enumerate(instances):
@@ -2706,7 +2784,7 @@ def _bmc_explore(
     leadsto_stutter_violation = None
     leadsto_stutter_found = set()
     leadsto_binding_types = {
-        lt["name"]: _leadsto_binding_types(lt, spec) for lt in spec.get("leadstos", [])
+        lt["name"]: _leadsto_binding_types(lt, spec) for lt in leadstos
     }
 
     for t in range(depth + 1):
@@ -2869,8 +2947,8 @@ def _bmc_explore(
 
         enabled = _action_enabled_exprs(states[t], instances, spec, expr_cache)
 
-        if spec.get("leadstos") and leadsto_stutter_violation is None:
-            for lt in spec["leadstos"]:
+        if leadstos and leadsto_stutter_violation is None:
+            for lt in leadstos:
                 binding_types = leadsto_binding_types[lt["name"]]
                 for extra_binds in expand_leadsto_bindings(lt, spec):
                     key = _leadsto_binding_key(lt["name"], extra_binds)
@@ -2993,6 +3071,7 @@ def _bmc_explore(
         "dl_warn": dl_warn,
         "cover_info": cover_info,
         "leadsto_stutter_violation": leadsto_stutter_violation,
+        "leadstos": leadstos,
         "invariants_checked": [i["name"] for i in invariants],
         "transitions_checked": [tr["name"] for tr in transitions],
     }
@@ -3000,13 +3079,14 @@ def _bmc_explore(
 
 def verify(
         spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
-        property_name=None):
+        property_name=None, exclude_property_names=None):
     explored = _bmc_explore(
         spec,
         depth,
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
         property_name=property_name,
+        exclude_property_names=exclude_property_names,
     )
     if explored["result"] != "explored":
         return _display_output(explored, spec)
@@ -3225,12 +3305,14 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
 
 def prove(
         spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn",
-        property_name=None):
+        property_name=None, exclude_property_names=None):
     """k-induction: base BMC then step-case invariant proof."""
-    invariants, property_error = _select_invariants(spec, property_name)
+    properties, property_error = _select_properties(
+        spec, property_name, exclude_property_names)
     if property_error is not None:
         return _display_output(property_error, spec)
-    transitions = spec.get("transitions", [])
+    invariants = properties["invariants"]
+    transitions = properties["transitions"]
 
     base = verify(
         spec,
@@ -3238,6 +3320,7 @@ def prove(
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
         property_name=property_name,
+        exclude_property_names=exclude_property_names,
     )
     if base["result"] in ("violated", "reachable_failed", "error"):
         return base

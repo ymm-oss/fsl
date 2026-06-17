@@ -190,6 +190,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
                [--property <Name>]               # check only a single invariant (for probing)
+               [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
@@ -206,6 +207,13 @@ In addition to `reachable` and action coverage, `scenarios` outputs, for each
 `initial_state`, and `expected_states`, representing the shortest trace from P
 holding to Q holding within depth K. Bindings for which P never holds are not
 turned into scenarios and appear in `warnings`.
+
+`verify --property Name` selects a single invariant. `--exclude-property Name`
+is repeatable and removes named invariants, `trans`, `leadsTo`, and `reachable`
+properties from the run and from checked-property outputs
+(`invariants_checked`, `transitions_checked`, `leads_to`, and `reachables`).
+When `--property` and `--exclude-property` name the same invariant, exclusion
+wins.
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / typestate,
