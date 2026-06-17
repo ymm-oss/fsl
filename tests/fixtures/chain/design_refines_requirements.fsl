@@ -1,0 +1,9 @@
+refinement ChainDesignRefinesRequirements {
+  impl ChainDesign
+  abs  ChainRequirements
+
+  map req[i: Item] = if design[i] == DDone then RDone else RDraft
+
+  action prepare(i) -> stutter
+  action finish(i)  -> finish(i)
+}

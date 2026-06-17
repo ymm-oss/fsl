@@ -38,6 +38,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   and add `display_name` such as `submit[a <= AUTO_LIMIT]`. Coverage
   `blocking_requires` hints now summarize the blocking factors after a cheap
   core-minimization pass.
+- (Chain CLI) `fslc chain [fsl-project.toml]` runs a manifest-defined
+  business -> requirements -> design -> implementation pipeline, reusing the
+  existing `check`, `verify`, `refine`, and shell implementation commands. It
+  writes a consolidated status table to stderr, JSON to stdout, supports
+  `--keep-going`, and exits non-zero when any layer fails.
 
 ### Changed
 - (Parser/UX) Invalid identifier characters such as `foo$bar` now produce a

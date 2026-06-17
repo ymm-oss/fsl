@@ -196,6 +196,7 @@ fslc scenarios <file.fsl> [--depth K]            # generate integration-test sca
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [-o out.py]  # implementation-conformance pytest scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
+fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K]            # skeleton enumeration + counterfactuals (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)

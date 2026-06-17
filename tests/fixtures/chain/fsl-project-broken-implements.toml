@@ -1,0 +1,15 @@
+[business]
+file = "business.fsl"
+depth = 1
+
+[requirements]
+file = "requirements_broken_implements.fsl"
+
+[design]
+file = "design.fsl"
+depth = 2
+refine_against = "requirements"
+mapping = "design_refines_requirements.fsl"
+
+[impl]
+command = "python -c \"print('impl ok')\""

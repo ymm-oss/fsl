@@ -193,8 +193,17 @@ fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* 
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [--strict] [-o out.py]  # Adapter skeleton + conformance pytest
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 ```
+
+`chain` reads `fsl-project.toml` by default. Each `[business]`,
+`[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`
+runs `verify`, while omitting `depth` runs `check`. A layer with
+`refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
+runs its shell `command` from the manifest directory. JSON is stdout; the
+consolidated table is stderr. Without `--keep-going`, execution stops after the
+first failed layer and later layers are marked `skipped`.
 
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
