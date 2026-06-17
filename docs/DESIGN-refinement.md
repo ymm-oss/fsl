@@ -45,6 +45,45 @@ refinement CartImplRefinesCart {
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
 
+### 1.1 Requirements-layer action-level `maps stutter`
+
+The requirements dialect can embed the action correspondence that would
+otherwise be written in the separate refinement mapping file. For an unbranched
+requirements action, `maps` may appear directly on the action declaration:
+
+```fsl
+spec AbsTick {
+  type K = 0..1
+  state { x: K }
+  init { x = 0 }
+  action tick() { x = 1 }
+}
+
+requirements ImplTick {
+  implements AbsTick from "refine_abs.fsl" {
+    map x = y
+  }
+  type K = 0..1
+  state { y: K }
+  init { y = 0 }
+  requirement REQ-TICK "tick is internal" {
+    fair action tick() maps stutter {
+      y = y
+    }
+  }
+}
+```
+
+This expands to a kernel action plus an inline action correspondence equivalent
+to `action tick() -> stutter` in a refinement file. The `stutter` rule is the
+same as §2: the abstract state after mapping must be unchanged by the impl
+step.
+
+Observed result: `fslc check refine_impl.fsl` returned `result:"ok"` with
+`implements:{abs:"AbsTick", result:"refines"}`, and
+`fslc verify refine_impl.fsl --depth 1` returned `result:"verified"` with the
+same implements result.
+
 ## 2. Checking Semantics (Bounded Forward Simulation)
 
 α(s) := the mapping that defines the impl state → abs state mapping.

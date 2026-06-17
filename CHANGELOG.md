@@ -5,6 +5,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- (Documentation) Clarified compose synchronized-argument compatibility as structural
+  over bounded value ranges rather than nominal type names, including same-range
+  and narrower-target repro results. Also documented action-level
+  `maps stutter` in requirements/refinement docs and clarified that distinct
+  fields of the same `Map<K, Struct>` element may be updated independently in
+  one action.
+
 ## [1.3.1] - 2026-06-17
 
 Theme: **FSL delivery orchestration skill** — making the business → requirements →

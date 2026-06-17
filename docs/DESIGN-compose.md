@@ -50,7 +50,8 @@ compose OrderSystem {
     statements can only write composition-side state, there is no conflict —
     synchronizing two actions of the same component is not allowed)
   - ensures are also inherited from each action
-  - argument expressions may use composition-side parameters and consts
+  - argument expressions may use composition-side parameters, consts, and state
+    expressions
 - `internal <alias>.<action>`: excludes that component action from standalone
   interleaving (it is executed only via a synchronized action).
 - An ordinary `action` (without `=`) may also be written (a glue action; reads and writes
@@ -68,8 +69,9 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    members, member resolution is done in type context, so it is a check error only when
    ambiguous).
 2. Rewrite `alias.x` references in the compose body to `alias__x`.
-3. Expand synchronized actions into a flat action by the rules of §1 (the parameter →
-   argument-expression substitution is injected as a let binding).
+3. Expand synchronized actions into a flat action by the rules of §1 (the
+   component action's formal parameters are replaced by the synchronized
+   argument expressions).
 4. Remove `internal`-designated actions from the spec's action list, and use them by
    **copying** the body when expanding synchronized actions.
 5. The components' invariants / automatic _bounds_ / reachable / leadsTo / fair survive
@@ -82,8 +84,77 @@ Static checks (check stage, `kind: "type"`):
 - missing use file / spec-name mismatch / duplicate alias
 - failure to resolve `alias.x` (unknown alias / variable / action)
 - referencing multiple actions of the same component in a synchronized action
-- type mismatch of synchronized arguments / nonexistent internal target
+- nonexistent internal target
 - a compose inside a compose
+
+### 2.1 Cross-spec parameter compatibility
+
+Synchronized action arguments are matched **structurally**, not nominally. During
+compose expansion, component declarations are prefixed (`core__TaskId`,
+`note__NoteId`), then each synchronized action body is copied with its formal
+parameter substituted by the argument expression. There is no check that the
+argument's declared type name equals the callee's parameter type name; both are
+encoded as bounded integer values, and the callee state's implicit `_bounds_*`
+invariant enforces the target range during verification.
+
+For example, this composition is accepted and verifies because both domains are
+`0..2`:
+
+```fsl
+spec Core {
+  type TaskId = 0..2
+  state { selected: TaskId }
+  init { selected = 0 }
+  action choose(t: TaskId) { selected = t }
+}
+
+spec Notes {
+  type NoteId = 0..2
+  state { last: NoteId }
+  init { last = 0 }
+  action attach(n: NoteId) { last = n }
+}
+
+compose CrossSpecSameRange {
+  use Core as core from "core.fsl"
+  use Notes as note from "notes.fsl"
+  action sync(t: core.TaskId) = core.choose(t) || note.attach(t) { }
+}
+```
+
+Observed result: `fslc check compose_same_range.fsl` returned
+`result:"ok"`, and `fslc verify compose_same_range.fsl --depth 1` returned
+`result:"verified"` with action coverage for `sync`.
+
+If the target domain is narrower, `check` still succeeds but verification can
+fail on the target component's implicit bounds:
+
+```fsl
+spec NotesNarrow {
+  type NoteId = 0..1
+  state { last: NoteId }
+  init { last = 0 }
+  action attach(n: NoteId) { last = n }
+}
+
+compose CrossSpecNarrow {
+  use Core as core from "core.fsl"
+  use NotesNarrow as note from "notes_narrow.fsl"
+  action sync(t: core.TaskId) = core.choose(t) || note.attach(t) { }
+}
+```
+
+Observed result: `fslc check compose_narrow_verify.fsl` returned
+`result:"ok"`, while `fslc verify compose_narrow_verify.fsl --depth 1`
+returned `result:"violated"`, `violation_kind:"type_bound"`, invariant
+`"_bounds_note.last"`, with `sync(t: 2)` as the counterexample.
+
+Recommended idiom: if two components intentionally share an identifier domain,
+declare same-range component-local domain types and name the synchronized
+parameter after one side (`t: core.TaskId` is fine). If the ranges differ, add a
+`requires` guard on the synchronized action, or model an explicit conversion /
+translation in one of the component specs before passing the value to the
+narrower component.
 
 ## 3. CLI
 
@@ -124,8 +195,11 @@ synchronization of checkout and capture, cross-cutting reachable).
 4. **Cross-cutting invariant violation**: a deliberately broken composition (a glue action
    making orders_linked negative) → violated, with trace state keys in the `cart.stock`
    form.
-5. **Static checks**: duplicate alias / unknown alias / spec-name mismatch / two-action
-   synchronization of the same component → kind: type. Missing file → kind: io.
+5. **Static checks**: duplicate alias / unknown alias / spec-name mismatch /
+   nonexistent internal target / two-action synchronization of the same
+   component → kind: type. Missing file → kind: io. Synchronized argument
+   range mismatches are observed through normal verification, not as compose
+   static checks (§2.1).
 6. **Display**: across all JSON output (witness / scenarios / Monitor.state) the
    `cart.stock` display and no `__` leakage.
 7. **runtime**: the Monitor runs as-is on a compose file (including replay).

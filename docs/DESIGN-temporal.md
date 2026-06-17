@@ -23,6 +23,21 @@ leadsTo WaiterGetsLock {
 - `fair` is a prefix modifier on an action definition. Its meaning is **weak
   fairness** (if that instance stays continuously enabled, it is eventually
   executed).
+- In the requirements dialect, the same fairness prefix can be combined with an
+  action-level refinement correspondence:
+
+  ```fsl
+  fair action tick() maps stutter {
+    y = y
+  }
+  ```
+
+  Here `fair` still has the weak-fairness meaning described in this document.
+  `maps stutter` belongs to the requirements/refinement layer: the action is an
+  internal upper-layer step whose mapped abstract state must not change. A CLI
+  repro with `map x = y` observed `fslc check` returning `result:"ok"` and
+  `implements.result:"refines"`, and `fslc verify --depth 1` returning
+  `result:"verified"` with the same implements result.
 
 ## 2. Semantics
 
