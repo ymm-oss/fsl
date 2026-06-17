@@ -499,6 +499,10 @@ compose OrderSystem {
   merges the requires / body / ensures of each component action, and the
   additional statements may only assign to the composition-side state
   (synchronizing two actions of the same component is not allowed).
+- Fairness is not inherited through synchronization. If a fair component action
+  is referenced by a non-fair synchronized action, `check` / `verify` emits a
+  `fair_not_inherited` warning in JSON `warnings`; write
+  `fair action <name>(...) = ...` when the synchronized action must be fair.
 - Synchronized action arguments are structurally compatible by bounded integer
   domain, not by declared type name. Passing a `core.TaskId` value to an action
   parameter declared as `NoteId` is valid when the underlying value range fits

@@ -52,6 +52,11 @@ compose OrderSystem {
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state
     expressions
+  - fairness is **not** inherited: if a fair component action is synchronized
+    into a non-fair synchronized action, `check` / `verify` emits a
+    `fair_not_inherited` warning in the JSON `warnings` array; declare
+    `fair action <name>(...) = ...` on the synchronized action to make the
+    composite action fair
 - `internal <alias>.<action>`: excludes that component action from standalone
   interleaving (it is executed only via a synchronized action).
 - An ordinary `action` (without `=`) may also be written (a glue action; reads and writes
@@ -75,7 +80,10 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
 4. Remove `internal`-designated actions from the spec's action list, and use them by
    **copying** the body when expanding synchronized actions.
 5. The components' invariants / automatic _bounds_ / reachable / leadsTo / fair survive
-   as-is under prefixed names (all are checked).
+   as-is under prefixed names (all are checked). A synchronized action keeps
+   only its own `fair` marker; constituent fairness is not propagated, and a
+   non-fair synchronized action that references fair constituents records a
+   `fair_not_inherited` warning.
 6. Display metadata: a physical variable `alias__x` is displayed in JSON as `alias.x`
    (a display-name map in logical_state_values. Traces, witnesses, CTIs, scenarios, and
    the Monitor state all follow).
