@@ -168,7 +168,8 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check only a single invariant (for probing)
+               [--property <Name>]               # check one named property in isolation —
+                                                 #   invariant / trans / leadsTo / reachable (for probing)
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)

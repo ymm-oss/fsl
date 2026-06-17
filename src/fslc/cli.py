@@ -563,7 +563,9 @@ def _build_arg_parser():
                    help="max induction depth (induction engine only)")
     v.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
     v.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
-    v.add_argument("--property", dest="property_name", default=None)
+    v.add_argument("--property", dest="property_name", default=None,
+                   help="check a single named property in isolation; resolves "
+                        "across invariant/trans/leadsTo/reachable declarations")
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
 
