@@ -20,6 +20,8 @@ refinement CartImplRefinesCart {
   impl CartImpl                       // spec name of the detailed spec (file passed on the CLI)
   abs  ShoppingCart                   // spec name of the abstract spec
 
+  maps auto                           // optional identity defaults for same-named state/actions
+
   // For each abstract state variable, give the mapping expression from the impl state (all variables required)
   map stock[i: ItemId] = impl_stock[i] - reserved[i]
   map cart[u: UserId]  = impl_cart[u]
@@ -38,6 +40,13 @@ refinement CartImplRefinesCart {
   whole-mapping form `map q = <impl Seq expr>` only — in v2.0, Seq is limited to
   an isomorphic mapping (there is a Seq on the impl side too, passed as an
   expression)).
+- `maps auto` — optional shorthand for representation-only refinements. It
+  synthesizes `map x = x` for same-named compatible state variables and
+  `action f(params...) -> f(params...)` for same-named compatible actions that
+  do not already have explicit entries. Explicit `map` and `action ... ->`
+  entries always win. When a same-name candidate exists but its state type,
+  action arity, or action parameter types are incompatible, `build_refinement`
+  raises a `kind: "type"` error instead of guessing.
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
   order). They may be written bare (`u`) or with a type annotation matching the

@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Refinement) Mapping files now support `maps auto`, which synthesizes identity
+  mappings for same-named compatible state variables and same-named compatible
+  actions unless an explicit `map` or `action ... ->` entry overrides it.
 - (Testgen) `fslc testgen` now generates partial pytest scaffolds when some
   `reachable` targets are not witnessed at the requested depth. Witnessed
   scenarios are still emitted, unwitnessed targets appear in `warnings[]` with a

@@ -1,4 +1,5 @@
 """Refinement checking (fslc refine) — DESIGN-refinement §5."""
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,50 @@ from fslc.refine import build_refinement, refine
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 
 
+_AUTO_ABS = """
+spec AutoAbs {
+  type K = 0..1
+  state { same: K, logical: K }
+  init { same = 0  logical = 0 }
+  action bump_same(k: K) { requires same == 0  same = k }
+  action bump_logical(k: K) { requires logical == 0  logical = k }
+}
+"""
+
+
+_AUTO_IMPL = """
+spec AutoImpl {
+  type K = 0..1
+  state { same: K, detail: K }
+  init { same = 0  detail = 0 }
+  action bump_same(k: K) { requires same == 0  same = k }
+  action bump_logical(k: K) { requires detail == 0  detail = k }
+}
+"""
+
+
+_AUTO_FULL_MAP = """
+refinement AutoImplRefinesAbs {
+  impl AutoImpl
+  abs AutoAbs
+  map same = same
+  map logical = detail
+  action bump_same(k) -> bump_same(k)
+  action bump_logical(k) -> bump_logical(k)
+}
+"""
+
+
+_AUTO_SHORTHAND_MAP = """
+refinement AutoImplRefinesAbs {
+  impl AutoImpl
+  abs AutoAbs
+  maps auto
+  map logical = detail
+}
+"""
+
+
 def _load_cart():
     impl = build_spec(parse((SPECS / "cart_impl.fsl").read_text(encoding="utf-8")))
     abs_spec = build_spec(parse((SPECS / "cart_v1.fsl").read_text(encoding="utf-8")))
@@ -20,6 +65,25 @@ def _load_cart():
         impl, abs_spec,
     )
     return impl, abs_spec, mapping
+
+
+def test_maps_auto_synthesizes_identity_state_and_actions(tmp_path):
+    abs_path = tmp_path / "auto_abs.fsl"
+    impl_path = tmp_path / "auto_impl.fsl"
+    full_path = tmp_path / "full.fsl"
+    auto_path = tmp_path / "auto.fsl"
+    abs_path.write_text(textwrap.dedent(_AUTO_ABS), encoding="utf-8")
+    impl_path.write_text(textwrap.dedent(_AUTO_IMPL), encoding="utf-8")
+    full_path.write_text(textwrap.dedent(_AUTO_FULL_MAP), encoding="utf-8")
+    auto_path.write_text(textwrap.dedent(_AUTO_SHORTHAND_MAP), encoding="utf-8")
+
+    full = run_refine(str(impl_path), str(abs_path), str(full_path), depth=3)
+    auto = run_refine(str(impl_path), str(abs_path), str(auto_path), depth=3)
+
+    assert full["result"] == "refines"
+    assert auto["result"] == full["result"]
+    assert auto["action_map"] == full["action_map"]
+    assert exit_code(auto) == 0
 
 
 def test_cart_impl_refines_shopping_cart():

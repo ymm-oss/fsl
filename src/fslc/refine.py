@@ -434,11 +434,84 @@ def _abs_action_instance(act, param_exprs, impl_state, impl_binds, impl_spec, ab
     return binds
 
 
+def _type_name_for(ty, types_meta):
+    for name, info in types_meta.items():
+        if info["ty"] == ty:
+            return name
+    return None
+
+
+def _auto_map_entry(logical, abs_ty, impl_ty, merged_types):
+    if not _types_compatible(abs_ty, impl_ty):
+        _err(
+            f"maps auto cannot synthesize map for '{logical}': "
+            f"incompatible state types {impl_ty} -> {abs_ty}",
+            kind="type",
+        )
+    if abs_ty[0] == "map" and abs_ty[2][0] in ("option", "struct"):
+        key_name = _type_name_for(abs_ty[1], merged_types)
+        if key_name is None:
+            _err(
+                f"maps auto cannot synthesize map for '{logical}': "
+                "Map keys need a named bounded type for per-key identity mapping",
+                kind="type",
+            )
+        binder = ("binder_typed", "_k", key_name, None)
+        return {
+            "kind": "indexed",
+            "binder": binder,
+            "expr": ("index", ("var", logical), ("var", "_k")),
+            "loc": None,
+        }
+    return {"kind": "scalar", "expr": ("var", logical), "loc": None}
+
+
+def _action_params_compatible(impl_act, abs_act, merged_types):
+    if len(impl_act["params"]) != len(abs_act["params"]):
+        return False
+    for impl_param, abs_param in zip(impl_act["params"], abs_act["params"]):
+        impl_ty = _param_type(impl_param, merged_types)
+        abs_ty = _param_type(abs_param, merged_types)
+        if impl_ty and abs_ty and not _types_compatible(abs_ty, impl_ty):
+            return False
+    return True
+
+
+def _apply_auto_mappings(maps, actions, impl_spec, abs_spec):
+    merged_types = _merge_types_meta(impl_spec, abs_spec)
+    for logical, abs_ty in abs_spec["state"].items():
+        if logical in maps or logical not in impl_spec["state"]:
+            continue
+        maps[logical] = _auto_map_entry(
+            logical, abs_ty, impl_spec["state"][logical], merged_types)
+
+    abs_actions = {act["name"]: act for act in abs_spec["actions"]}
+    for impl_act in impl_spec["actions"]:
+        aname = impl_act["name"]
+        if aname in actions or aname not in abs_actions:
+            continue
+        abs_act = abs_actions[aname]
+        if not _action_params_compatible(impl_act, abs_act, merged_types):
+            _err(
+                f"maps auto cannot synthesize action correspondence for '{aname}': "
+                "parameter arity or types are incompatible",
+                kind="type",
+                loc=impl_act.get("loc"),
+            )
+        actions[aname] = {
+            "kind": "map",
+            "abs_action": aname,
+            "arg_exprs": [("var", p[0]) for p in impl_act["params"]],
+            "loc": None,
+        }
+
+
 def build_refinement(tree, impl_spec, abs_spec):
     """Validate and normalize a refinement mapping AST."""
     _, name, items = tree
     impl_name = None
     abs_name = None
+    maps_auto = False
     maps = {}
     actions = {}
 
@@ -448,6 +521,8 @@ def build_refinement(tree, impl_spec, abs_spec):
             impl_name = it[1]
         elif tag == "abs":
             abs_name = it[1]
+        elif tag == "maps_auto":
+            maps_auto = True
         elif tag == "map":
             _, logical, binder, expr, loc = it
             if logical in maps:
@@ -524,6 +599,9 @@ def build_refinement(tree, impl_spec, abs_spec):
             f"abs name '{abs_name}' does not match abs spec '{abs_spec['name']}'",
             kind="type",
         )
+
+    if maps_auto:
+        _apply_auto_mappings(maps, actions, impl_spec, abs_spec)
 
     for logical in abs_spec["state"]:
         if logical not in maps:
