@@ -45,6 +45,18 @@ compose <Name> {
 }
 ```
 
+Compose synchronized arguments are **structural by bounded value range**, not
+nominal by type name. Passing `core.TaskId` to an action parameter declared
+`NoteId` is intended when both domains cover the same values: a repro with
+`TaskId = 0..2`, `NoteId = 0..2`, and
+`action sync(t: core.TaskId) = core.choose(t) || note.attach(t) { }` returned
+`ok` from `fslc check` and `verified` from `fslc verify --depth 1`. If the target
+is narrower (`NoteId = 0..1`), `check` still returns `ok`, but verification can
+fail with `violated/type_bound` on the target component's `_bounds_...`
+invariant (`sync(t: 2)` in the repro). Idiom: use same-range component-local
+domain types for shared IDs; add a sync-action `requires` guard when passing to
+a narrower domain.
+
 refinement mapping (the third file; `fslc refine impl.fsl abs.fsl this.fsl`):
 
 ```fsl
@@ -113,6 +125,17 @@ check as a type error.
    variable/field on the same path. then/else are separate paths (assigning in both
    is allowed). Assigning to the same variable **after an if** as inside a branch is
    also an error.
+   For `Map<K, Struct>` values, the path includes the field: `m[k].f1 = ...`
+   and `m[k].f2 = ...` in one action are allowed independent field writes
+   (`check` and `verify --depth 1` succeed in the repro). Repeating the same
+   field, e.g. `m[k].f1 = 1; m[k].f1 = 2`, fails during verification with
+   `kind:"semantics"` and `double assignment to 'm' field 'f1' on the same path`.
+
+   ```fsl
+   struct Pair { f1: V, f2: V }
+   state { m: Map<K, Pair> }
+   action update(k: K) { m[k].f1 = 1  m[k].f2 = 2 }
+   ```
 4. enabled when all requires hold. ensures is checked after the transition.
 5. For Seq `pop/head/at` and a nonzero divisor of `/` `%`, **well-definedness is
    checked automatically** in action context (partial_op). A requires guard or an if
@@ -310,6 +333,7 @@ requirements ReturnSystemReq {
   }
   requirement REQ-3 "payment only after approval" {
     fair action pay(c: CaseId) maps refund(c) { ... }     // maps = correspondence to an upper-layer action
+    fair action tick() maps stutter { ... }               // action-level internal/stutter correspondence
     invariant PaidLedger { ... }
   }
   acceptance AC-1 "small amounts get paid" { submit(0, 1)  pay(0)  expect sys[0].st == Paid }
@@ -319,6 +343,12 @@ requirements ReturnSystemReq {
 
 - When `implements` is present, `fslc verify` simultaneously runs the upper-layer
   refine → `implements: {abs, result}` in the result JSON.
+- `maps` may be on each branch or directly on an unbranched action. The
+  declaration-level form `fair action tick() maps stutter { ... }` parses and
+  refines as an internal upper-layer step; a repro with `map x = y` and
+  `tick { y = y }` returned `result:"ok"` / `implements.result:"refines"` from
+  `fslc check`, and `result:"verified"` with the same implements result from
+  `fslc verify --depth 1`.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It is output to scenarios as `acceptance_<ID>` and flows to
   testgen.

@@ -123,11 +123,32 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 - **Simultaneous assignment**: all right-hand sides in an action body read the
   **old state**. Variables that are not assigned do not change (the frame
   condition is automatic).
-- **Double assignment is a static error**: assigning to the same variable (or
+- **Double assignment is a semantics error**: assigning to the same variable (or
   field) twice on the same execution path is a semantics error. The then/else
   of an if are separate paths, so you may assign in both. Assigning to the same
   variable **after** an if is also an error (to prevent the writes inside the
   branches from being lost).
+- For `Map<K, Struct>` values, field writes are tracked per field. Updating two
+  different fields of the same element in one action, such as `m[k].f1 = 1`
+  followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same
+  path is a semantics error.
+
+  ```fsl
+  type K = 0..1
+  type V = 0..3
+  struct Pair { f1: V, f2: V }
+  state { m: Map<K, Pair> }
+  action update(k: K) {
+    m[k].f1 = 1
+    m[k].f2 = 2
+  }
+  ```
+
+  Observed result: `fslc check struct_fields_ok.fsl` returned `result:"ok"`,
+  and `fslc verify struct_fields_ok.fsl --depth 1` returned
+  `result:"verified"`. Changing the action to assign `m[k].f1` twice returned
+  `result:"error"`, `kind:"semantics"` from `fslc verify`, with message
+  `double assignment to 'm' field 'f1' on the same path`.
 - **requires**: enabled only when all hold.
 - **ensures**: checked in the post-transition state. A violation is
   `violation_kind: "ensures"`.
@@ -477,6 +498,20 @@ compose OrderSystem {
   merges the requires / body / ensures of each component action, and the
   additional statements may only assign to the composition-side state
   (synchronizing two actions of the same component is not allowed).
+- Synchronized action arguments are structurally compatible by bounded integer
+  domain, not by declared type name. Passing a `core.TaskId` value to an action
+  parameter declared as `NoteId` is valid when the underlying value range fits
+  the target type. This is the intended compose behavior, not an incidental
+  naming accident. Repro: with `TaskId = 0..2` and `NoteId = 0..2`,
+  `action sync(t: core.TaskId) = core.choose(t) || note.attach(t) { }`
+  produced `result:"ok"` from `fslc check` and `result:"verified"` from
+  `fslc verify --depth 1`. With `NoteId = 0..1`, the same compose still passed
+  `check` but `verify --depth 1` returned `result:"violated"`,
+  `violation_kind:"type_bound"`, invariant `"_bounds_note.last"`, for
+  `sync(t: 2)`. Recommended idiom: use same-range component-local domain types
+  for intentionally shared IDs; if a target domain is narrower, add an explicit
+  `requires` guard on the synchronized action or model a conversion in one
+  component.
 - `internal <alias>.<action>` — excludes that action from interleaving.
 - An ordinary `action` (without `=`) can also be written (a glue action).
 - JSON display: the physical name `alias__x` is output as `alias.x` (state keys,
@@ -561,6 +596,7 @@ requirements ReturnSystemReq {
   }
   requirement REQ-3 "payment is only after approval" {
     fair action pay(c: CaseId) maps refund(c) { ... }
+    fair action audit_tick() maps stutter { ... }
     invariant PaidLedger { ... }
   }
   acceptance AC-1 "a small amount is auto-approved and paid" {
@@ -575,6 +611,15 @@ requirements ReturnSystemReq {
   same plumbing as 13.1).
 - `branches` automatically splits an action by each when condition (displayed as
   `submit[a <= AUTO_LIMIT]`). The `maps` clause provides the action correspondence to the upper layer.
+  It may appear on each branch (`maps approve(c)` / `maps stutter`) or directly
+  on an unbranched action declaration (`fair action audit_tick() maps stutter {
+  ... }`). In the action-level `maps stutter` form the implementation action is
+  internal to the upper layer, and refinement requires the mapped abstract state
+  to remain unchanged. Repro: a requirements spec with
+  `fair action tick() maps stutter { y = y }` and `map x = y` returned
+  `result:"ok"` with `implements:{abs:"AbsTick", result:"refines"}` from
+  `fslc check`, and `result:"verified"` with the same implements result from
+  `fslc verify --depth 1`.
 - With `implements`, `fslc verify` **also runs the refine to the upper layer
   simultaneously**, and the result carries `implements: {abs, result}`.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
