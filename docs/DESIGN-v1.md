@@ -499,7 +499,9 @@ Differences from v0:
   "unreached": [ { "name": "FullLifecycle", "loc": { "line": 40, "column": 3 } } ],
   "depth": 8,
   "action_coverage": { "place": true, "pay": false, "ship": false, "cancel": true },
-  "hint": "within depth 8 no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth"
+  "hint": "within depth 8 no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth",
+  "faithfulness_class": "intent_unexercised",
+  "recommended_action": "add a single-shot reachable for the action / raise --depth"
 }
 ```
 
@@ -546,6 +548,12 @@ documentation and as system-prompt material.
 | `reachable_failed` | `action_coverage`, `hint` | Suspect the `requires` and `init` of the action whose coverage is false. Next, increase `--depth` |
 | `verified` but `action_coverage` has false | `warnings` | Vacuity. Fix the contradiction between requires and init |
 | `unknown_cti` (v1.1, §9) | `cti` | Add an auxiliary invariant that excludes the CTI state and re-run |
+
+Machine consumers can route the same table through `faithfulness_class`:
+`partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`, or
+`liveness_not_refined`, each paired with `recommended_action`. These fields are
+derived from existing `result` / `kind` / `violation_kind` diagnostics and do
+not replace them.
 
 Design implication: that **this table is closed** (every output has a next move)
 is a design requirement of the v1 output schema. When adding a new diagnostic,

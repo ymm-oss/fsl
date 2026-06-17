@@ -139,6 +139,17 @@ def test_req_dialect_branch_display_names_in_coverage(tmp_path):
     assert "submit[a > AUTO_LIMIT]" in proved["action_coverage"]
 
 
+def test_req_dialect_split_action_diagnostic_carries_display_name(tmp_path):
+    req = _write_req(tmp_path, REQ_SRC.replace("type Amount = 0..3", "type Amount = 0..1"))
+    out = run_verify(str(req), 8, "warn")
+
+    cov = out["action_coverage"]["submit[a > AUTO_LIMIT]"]
+    assert cov["covered"] is False
+    assert cov["name"] == "submit__b2"
+    assert cov["display_name"] == "submit[a > AUTO_LIMIT]"
+    assert cov["faithfulness_class"] == "intent_unexercised"
+
+
 def test_req_dialect_violation_carries_requirement_meta(tmp_path):
     bad = REQ_SRC.replace(
         "invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }",

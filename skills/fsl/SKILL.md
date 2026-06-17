@@ -173,6 +173,16 @@ the formalization memo.**
 
 ## Repair protocol (result → next move)
 
+Machine-readable `faithfulness_class` tags are a quick routing layer over the
+existing result/kind fields:
+
+| faithfulness_class | Recommended action |
+|---|---|
+| `partial_op_unguarded` | Add the missing guard / run bounded Monitor (replay) |
+| `frozen_only_invariant` | Run mutate to check kill-rate |
+| `intent_unexercised` | Add a single-shot reachable for the action / raise `--depth` |
+| `liveness_not_refined` | Re-prove liveness at each layer |
+
 | result / violation_kind | Meaning | Next move |
 |---|---|---|
 | `violated` / `invariant` | Counterexample found (trace is shortest) | Read the trace's `changes` and `violating_bindings`; add a guard or fix the invariant |
@@ -199,7 +209,16 @@ the formalization memo.**
 | `error` / `forbidden_setup` | A precondition (non-final) step of the forbidden is not enabled (invalid trace) | Review the setup procedure. The non-final steps are there to reach that point and are not treated as success |
 
 For an action whose coverage is `false`, `blocking_requires` pinpoints "which
-requires is blocking it" on a per-clause basis. Do not silently ignore it.
+requires is blocking it" on a per-clause basis, and `hint` summarizes the
+blocking factors. Do not silently ignore it. For branches-split actions,
+diagnostics keep the internal name (`submit__b1`) and add a human
+`display_name` such as `submit[a <= AUTO_LIMIT]`.
+
+Liveness is still checked separately from refinement: safety refinement can
+return `refines` while a lower-layer `leadsTo` fails. Treat
+`liveness_not_refined` as the routing tag for leadsTo-refinement diagnostics; the
+current clean signal is usually the separate `violated` / `leadsTo` verification
+result at that layer.
 
 When a counterexample makes you **change an interpretation** (added a guard,
 loosened an invariant, decided how to handle an exception), record that judgment in

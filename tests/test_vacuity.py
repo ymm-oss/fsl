@@ -115,6 +115,8 @@ def test_frozen_ghost_tautology_warning():
     assert warning["name"] == "FrozenGhost"
     assert "ghost" in warning["message"]
     assert warning["hint"] == "make such variables 'const', or add the action that should modify them"
+    assert warning["faithfulness_class"] == "frozen_only_invariant"
+    assert warning["recommended_action"] == "run mutate to check kill-rate"
 
 
 def test_frozen_plus_dynamic_nontrivial_invariant_not_flagged():

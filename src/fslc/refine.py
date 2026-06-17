@@ -8,6 +8,7 @@ import itertools
 
 import z3
 
+from .diagnostics import with_faithfulness
 from .bmc import (
     _bmc_explore,
     _build_trace,
@@ -31,7 +32,13 @@ from .bmc import (
     _map_domain,
     _z3_domain_value,
 )
-from .model import FslError, bounds_invariant_expr, domain_range as model_domain_range, resolve_type
+from .model import (
+    FslError,
+    annotate_display_name,
+    bounds_invariant_expr,
+    domain_range as model_domain_range,
+    resolve_type,
+)
 
 
 _REFINE_HINT = (
@@ -458,7 +465,7 @@ def build_refinement(tree, impl_spec, abs_spec):
             impl_act = _find_abs_action(impl_spec, aname)
             if impl_act is None:
                 _err(f"unknown impl action '{aname}'", kind="type", loc=loc)
-            param_names = [p[1] for p in params]
+            param_names = [p[1] if isinstance(p, tuple) else p for p in params]
             impl_param_names = [p[0] for p in impl_act["params"]]
             if param_names != impl_param_names:
                 _err(
@@ -469,6 +476,8 @@ def build_refinement(tree, impl_spec, abs_spec):
                 )
             merged_types = _merge_types_meta(impl_spec, abs_spec)
             for param, impl_param in zip(params, impl_act["params"]):
+                if not isinstance(param, tuple):
+                    continue
                 _, pname, annotation = param
                 if annotation is None:
                     continue
@@ -637,7 +646,7 @@ def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
             "input), not a refinement failure; verify the impl spec independently "
             "before checking refinement"
         )
-        return explored
+        return with_faithfulness(explored)
 
     instances = explored["instances"]
 
@@ -977,12 +986,12 @@ def refine_chain(specs, mappings, depth):
 
 def _inst_action(model, inst, spec):
     act = inst["action_def"]
-    la = {
+    la = annotate_display_name({
         "name": inst["action"],
         "params": {
             pk: _display_param(pk, pv, act, spec) for pk, pv in inst["binds"].items()
         },
-    }
+    }, inst["action"], spec)
     if act.get("loc"):
         la["loc"] = act["loc"]
     meta = act.get("meta")
@@ -998,7 +1007,7 @@ def _failure(
         model, explored["states"], explored["choices"],
         explored["instances"], impl_spec, step,
     )
-    return {
+    return with_faithfulness({
         "result": "refinement_failed",
         "impl": impl_spec["name"],
         "abs": abs_spec["name"],
@@ -1012,4 +1021,4 @@ def _failure(
         "abs_after_actual": alpha_after_actual,
         "mismatch": mismatch,
         "hint": _REFINE_HINT,
-    }
+    })

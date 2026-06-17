@@ -19,6 +19,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   target as `insufficient_depth` or `over_constrained`; over-constrained targets
   include a `blocking_requires` unsat-core-style list naming the blocking type
   bounds/invariants. The same classification is emitted by `fslc scenarios`.
+- (Diagnostic routing) Diagnostics can now carry additive `faithfulness_class`
+  and `recommended_action` fields for `partial_op_unguarded`,
+  `frozen_only_invariant`, `intent_unexercised`, and the reserved
+  `liveness_not_refined` route.
+- (Diagnostics UX) Branch-split action diagnostics keep the internal action name
+  and add `display_name` such as `submit[a <= AUTO_LIMIT]`. Coverage
+  `blocking_requires` hints now summarize the blocking factors after a cheap
+  core-minimization pass.
 
 ### Changed
 - (Parser/UX) Invalid identifier characters such as `foo$bar` now produce a

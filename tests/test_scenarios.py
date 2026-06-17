@@ -88,7 +88,9 @@ spec Blocked {
     cov = r["action_coverage"]["bad"]
     assert isinstance(cov, dict)
     assert cov["covered"] is False
+    assert cov["faithfulness_class"] == "intent_unexercised"
     assert cov["blocking_requires"]
+    assert "blocking requires:" in cov["hint"]
     locs = [e["loc"]["line"] for e in cov["blocking_requires"] if e.get("loc")]
     assert any(line for line in locs)
 

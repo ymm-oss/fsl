@@ -41,11 +41,13 @@ action stays `true` as before, and only a false action becomes an object.
   "add_to_cart": true,
   "checkout": {
     "covered": false,
+    "name": "checkout",
     "blocking_requires": [
       { "loc": {"line": 27, "column": 3}, "text": "stock[i] > 0" }
     ],
     "bindings": {"u": 0, "i": 1},      // only when the core is binding-dependent
-    "hint": "these requires clauses are unsatisfiable at every step up to depth K; weaken one of them, add an action that establishes them, or increase --depth"
+    "hint": "never enabled within depth K; blocking requires: stock[i] > 0; weaken a guard, add a setup action, or increase --depth",
+    "faithfulness_class": "intent_unexercised"
   }
 }
 ```
@@ -62,6 +64,8 @@ action stays `true` as before, and only a false action becomes an object.
 - In the `_action_coverage` loop, for each uncovered action conjoin its requires-clause
   list via the implication `z3.Bool(f"__cov_{action}_{i}_{j}")`, and use `check(assumptions)`.
   Unlike ordinary `s.add`, this needs no push/pop and lets the core be obtained.
+- The core is minimized with a cheap deletion pass before rendering `blocking_requires`
+  and the human `hint`; the raw entries remain per requires clause.
 - The requires AST and loc are already in the instance dict (`inst["requires"]`). Per
   clause (per requires statement) is sufficient; do not decompose the conjunction more
   finely.

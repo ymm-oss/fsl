@@ -316,4 +316,7 @@ at depth K" (demonstrated by `examples/refinement_chain`; a spike confirmed
 **Propagation premise (liveness is separate)**: even if the chain is `refines`,
 only safety propagates. The top-level liveness (`leadsTo`/`responds`) is re-
 verified at each layer (see the note in `DESIGN-layers.md` §6,
-`examples/refinement_liveness`).
+`examples/refinement_liveness`). The diagnostic routing table reserves
+`faithfulness_class: "liveness_not_refined"` for leadsTo-refinement failures, but
+today the cleanly derivable signal is still the separate lower-layer
+`violated` / `leadsTo` verification result.

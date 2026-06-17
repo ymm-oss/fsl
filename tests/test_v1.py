@@ -83,11 +83,14 @@ spec ReachDepth {
         source_lines=src.splitlines(),
     )
     assert shallow["result"] == "reachable_failed"
+    assert shallow["faithfulness_class"] == "intent_unexercised"
+    assert shallow["recommended_action"] == "add a single-shot reachable for the action / raise --depth"
     assert shallow["checked_to_depth"] == 2
     assert shallow["completeness"] == "bounded"
     [unreached] = shallow["unreached"]
     assert unreached["name"] == "Three"
     assert unreached["classification"] == "insufficient_depth"
+    assert unreached["faithfulness_class"] == "intent_unexercised"
     assert "not witnessed within depth 2" in unreached["hint"]
 
     deep = verify(build_spec(parse(src)), 3, deadlock_mode="ignore")
