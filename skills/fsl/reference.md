@@ -151,7 +151,8 @@ action that should change it). `--vacuity error` gives `result:"error"`;
 fslc check <f>                                  # syntax / names / types only
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
-               [--property <Name>]                  # check a single invariant only (for probing)
+               [--property <Name>]                  # check one named property in isolation
+                                                    #   (invariant / trans / leadsTo / reachable)
                [--strict-tags] [--requirements ids.txt]
 fslc explain <f> [--depth K=8]                 # skeleton + counterfactual + witness narration
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
@@ -203,6 +204,24 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
   base case.
 - coverage diagnostic: `{covered: false, blocking_requires: [{loc, text}], hint}`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
+
+### ⚠ Liveness scales differently from safety — verify it on a reduced model
+
+`leadsTo` is a lasso search: the cost grows roughly **exponentially in the number
+of concurrent entities** (the textbook BMC-liveness state explosion), because each
+added entity multiplies the interleavings the loop search must consider. Safety
+(`invariant` / `trans` / `reachable`) does **not** behave this way — it stays cheap
+even at large depth. Observed shape: a single entity verifies in seconds even at
+depth 16, but three concurrent entities with `leadsTo` can blow past minutes by
+depth ~12. This is a known limit, not a pathological encoding.
+
+Practical strategy:
+- Verify **liveness on the smallest model that still exhibits the interleaving** —
+  shrink the entity-count range (e.g. `0..1` instead of `0..3`) and use a shallow
+  `--depth`. One entity is often enough to find a real `leadsTo` bug.
+- Verify **safety separately on the full-size model** at the depth you need.
+- Use `--property <leadsToName>` to run a single liveness property in isolation
+  while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.
 
 ## 8. Idioms (reuse them as-is)
 

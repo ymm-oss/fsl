@@ -131,6 +131,44 @@ def _select_invariants(spec, property_name=None):
     }
 
 
+# Property declarations that `verify --property` can target, in the order they
+# appear in `available:` diagnostics. Each names a spec collection whose items
+# carry a "name" field.
+_PROPERTY_KINDS = ("invariants", "transitions", "leadstos", "reachables")
+
+
+def _select_property(spec, property_name=None):
+    """Resolve `--property` across invariant/trans/leadsTo/reachable declarations.
+
+    Returns (filtered_spec, error). When property_name is None the spec is
+    returned unchanged. Otherwise a shallow-copied spec is returned in which
+    every property collection keeps only items whose name matches, so the BMC
+    explorer checks the named property in isolation while still stepping the
+    full action model. The error is a usage dict when the name resolves to no
+    declaration.
+    """
+    if property_name is None:
+        return spec, None
+    available = []
+    matched = False
+    filtered = dict(spec)
+    for key in _PROPERTY_KINDS:
+        items = spec.get(key, []) or []
+        available.extend(item["name"] for item in items)
+        kept = [item for item in items if item["name"] == property_name]
+        if kept:
+            matched = True
+        filtered[key] = kept
+    if not matched:
+        avail = ", ".join(sorted(dict.fromkeys(available)))
+        return None, {
+            "result": "error",
+            "kind": "usage",
+            "message": f"no such property: {property_name} (available: {avail})",
+        }
+    return filtered, None
+
+
 _VACUOUS_IMPLICATION_HINT = (
     "the antecedent is not reachable within this depth; check whether an action "
     "that should establish it is missing, or whether the antecedent expression is wrong"
@@ -3001,12 +3039,15 @@ def _bmc_explore(
 def verify(
         spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
         property_name=None):
+    filtered, property_error = _select_property(spec, property_name)
+    if property_error is not None:
+        return _display_output(property_error, spec)
+    spec = filtered
     explored = _bmc_explore(
         spec,
         depth,
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
-        property_name=property_name,
     )
     if explored["result"] != "explored":
         return _display_output(explored, spec)
@@ -3229,6 +3270,24 @@ def prove(
     """k-induction: base BMC then step-case invariant proof."""
     invariants, property_error = _select_invariants(spec, property_name)
     if property_error is not None:
+        # k-induction proves safety invariants only. If the name resolves to a
+        # trans/leadsTo/reachable, say so instead of "no such invariant".
+        other = next(
+            (kind for kind in ("transitions", "leadstos", "reachables")
+             for item in spec.get(kind, []) or [] if item["name"] == property_name),
+            None,
+        )
+        if other is not None:
+            label = {"transitions": "trans", "leadstos": "leadsTo",
+                     "reachables": "reachable"}[other]
+            property_error = {
+                "result": "error",
+                "kind": "usage",
+                "message": (
+                    f"--property {property_name} is a {label}, which the induction "
+                    f"engine cannot prove; check it with the default bmc engine"
+                ),
+            }
         return _display_output(property_error, spec)
     transitions = spec.get("transitions", [])
 

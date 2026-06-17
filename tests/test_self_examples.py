@@ -84,4 +84,44 @@ def test_verify_property_missing_invariant_is_usage_error():
     out = json.loads(proc.stdout)
     assert out["result"] == "error"
     assert out["kind"] == "usage"
-    assert out["message"].startswith("no such invariant: NoSuchInv")
+    assert out["message"].startswith("no such property: NoSuchInv")
+
+
+def test_verify_property_targets_a_trans():
+    """--property resolves a `trans` declaration, not just invariants."""
+    proc = _run_fslc_verify(
+        str(E / "fslc_monitor.fsl"), "--depth", "8", "--property", "RejectIsSticky",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert out["transitions_checked"] == ["RejectIsSticky"]
+    # the other property kinds are not checked when one trans is selected
+    assert out["invariants_checked"] == []
+
+
+def test_induction_property_on_non_invariant_explains_engine_limit():
+    """`--engine induction --property <trans>` gives a clear engine-scope error."""
+    proc = _run_fslc_verify(
+        str(E / "fslc_monitor.fsl"), "--engine", "induction",
+        "--property", "RejectIsSticky",
+    )
+    assert proc.returncode == 2
+    out = json.loads(proc.stdout)
+    assert out["result"] == "error"
+    assert out["kind"] == "usage"
+    assert "is a trans" in out["message"]
+    assert "induction engine cannot prove" in out["message"]
+
+
+def test_verify_property_targets_a_reachable():
+    """--property resolves a `reachable` declaration in isolation."""
+    proc = _run_fslc_verify(
+        str(E / "fslc_monitor.fsl"), "--depth", "8", "--property", "ReachConformant",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert list(out["reachables"]) == ["ReachConformant"]
+    assert out["invariants_checked"] == []
+    assert out["transitions_checked"] == []
