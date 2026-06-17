@@ -67,6 +67,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   one action.
 
 ### Fixed
+- (Explain JSON) Counterfactual violation diagnostics no longer emit redundant
+  raw `internal_invariant` compose names when the public `invariant` field already
+  carries the dotted display name.
 - (Compose) Non-fair synchronized actions that reference fair component actions
   now emit a `fair_not_inherited` warning instead of silently hiding the dropped
   composite-level liveness assumption.

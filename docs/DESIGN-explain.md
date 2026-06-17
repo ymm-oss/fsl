@@ -64,7 +64,9 @@ verification logic is written. Key points:
 ## 5. Ripple / tests
 
 New `src/fslc/explain.py` (~120 lines, reusing mutate/verify) + a cli subcommand. Display
-names only (no internal-name leakage), JSON-serializable. tests/test_explain.py: cart_v1
+names only (no internal-name leakage), including nested counterfactual violation payloads
+where `invariant` carries the public dotted name and no raw `internal_invariant` duplicate is
+emitted. JSON-serializable. tests/test_explain.py: cart_v1
 skeleton / the `ShippedWasPaid` counterfactual appears via **assignment removal** /
 NonNegativeRevenue yields "no counterfactual" / the dialect cancel_flow carries the original
 requirement text / compose does not crash / exit 0. Roadmap #1.

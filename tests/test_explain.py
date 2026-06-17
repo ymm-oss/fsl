@@ -124,6 +124,19 @@ def test_explain_json_has_no_internal_double_underscore_names():
     out = explain_file(str(SPECS / "bank_system.fsl"), depth=2)
     blob = json.dumps(out, ensure_ascii=False)
     assert "__" not in blob
+    violations = [
+        item["violation"] for item in out["counterfactuals"]
+        if item.get("violation") is not None
+    ]
+    assert violations
+    assert all("internal_invariant" not in violation for violation in violations)
+    assert any(
+        violation.get("invariant") in {
+            "bank.ClearedNonNegative",
+            "audit.BalanceNonNegative",
+        }
+        for violation in violations
+    )
 
 
 def test_explain_output_is_json_serializable():
