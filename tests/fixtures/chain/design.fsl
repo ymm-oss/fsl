@@ -1,0 +1,21 @@
+spec ChainDesign {
+  type Item = 0..0
+  enum DSt { DOpen, DPrepared, DDone }
+
+  state {
+    design: Map<Item, DSt>
+  }
+  init {
+    forall i: Item { design[i] = DOpen }
+  }
+
+  action prepare(i: Item) {
+    requires design[i] == DOpen
+    design[i] = DPrepared
+  }
+
+  action finish(i: Item) {
+    requires design[i] == DPrepared
+    design[i] = DDone
+  }
+}

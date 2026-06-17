@@ -215,6 +215,7 @@ fslc replay specs/cart_v1.fsl --trace events.json  # conformance check of an eve
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py  # generate a pytest conformance-test scaffold
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
                                                   # check whether the detailed spec refines the abstract spec
+fslc chain fsl-project.toml --keep-going          # run business -> requirements -> design -> impl from a manifest
 fslc verify specs/order_system.fsl --depth 8    # compose: synchronized composition of cart + payment
 
 # Validation suite (closes the gap between spec ≠ intent; see docs/DESIGN-{forbidden,vacuity,...})
@@ -229,7 +230,8 @@ fslc typestate specs/order_workflow.fsl --ts    # state machine → applicabilit
 python -m fslc verify specs/cart_v1_buggy.fsl
 ```
 
-The output is always JSON (stdout). Exit codes: 0 = verified / proved / refines /
+The output is JSON on stdout (`fslc chain` also writes its human status table to
+stderr). Exit codes: 0 = verified / proved / refines /
 conformant / generated / mutated / explained / typestate; 1 = violated /
 refinement_failed / reachable_failed / unknown_cti / nonconformant;
 2 = spec error (`error`, including vacuity under `--vacuity error`); 3 = internal error.

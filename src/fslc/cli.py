@@ -608,6 +608,10 @@ def _build_arg_parser():
                     help="chain check: appending more (abs map) pairs runs an end-to-end composed check")
     rf.add_argument("--depth", type=int, default=8)
 
+    ch = sub.add_parser("chain", help="run a project manifest across business, requirements, design, and impl")
+    ch.add_argument("path", nargs="?", default="fsl-project.toml")
+    ch.add_argument("--keep-going", action="store_true")
+
     ts = sub.add_parser("typestate",
                         help="decide whether typestate (ghost types) applies to a design spec and emit a TS template")
     ts.add_argument("file")
@@ -641,6 +645,12 @@ def _dispatch(args):
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "refine":
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "chain":
+        from .chain import format_chain_table, run_chain
+
+        result = run_chain(args.path, keep_going=args.keep_going)
+        print(format_chain_table(result), file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "testgen":
         result = run_testgen(args.file, args.depth, args.output, args.deadlock,

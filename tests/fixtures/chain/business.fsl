@@ -1,0 +1,18 @@
+spec ChainBusiness {
+  type Item = 0..0
+  enum BSt { BOpen, BDone }
+
+  state {
+    st: Map<Item, BSt>
+  }
+  init {
+    forall i: Item { st[i] = BOpen }
+  }
+
+  action finish(i: Item) {
+    requires st[i] == BOpen
+    st[i] = BDone
+  }
+
+  reachable Done { exists i: Item { st[i] == BDone } }
+}

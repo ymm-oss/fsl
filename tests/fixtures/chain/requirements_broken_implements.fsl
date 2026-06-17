@@ -1,0 +1,22 @@
+requirements ChainRequirementsBrokenImplements {
+  implements ChainBusiness from "business.fsl" {
+    map st[i: Item] = if req[i] == RDone then BOpen else BOpen
+  }
+
+  type Item = 0..0
+  enum RSt { RDraft, RDone }
+
+  state {
+    req: Map<Item, RSt>
+  }
+  init {
+    forall i: Item { req[i] = RDraft }
+  }
+
+  requirement REQ-1 "an item can finish" {
+    action finish(i: Item) maps finish(i) {
+      requires req[i] == RDraft
+      req[i] = RDone
+    }
+  }
+}

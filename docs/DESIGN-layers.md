@@ -206,7 +206,44 @@ connect to the implementation via testgen/replay/Monitor (all implemented).
    upward display of counterexamples (annotating a design-layer CTI with the
    requirement ID).
 
-## 7. Phased plan
+## 7. Manifest-driven chain command
+
+`fslc chain [fsl-project.toml]` runs the project layer pipeline in order and
+returns one consolidated report. The human status table is written to stderr;
+the machine-readable JSON envelope is written to stdout and contains one
+`layers[]` entry per executed or skipped layer. The top-level result is
+`verified` when every layer passes, `violated` when a behavioral/refinement/impl
+layer fails, and `error` when any layer returns a spec/IO/internal error. The
+process exit code follows the existing `cli.exit_code` convention.
+
+```toml
+[business]
+file = "specs/business.fsl"
+depth = 8
+
+[requirements]
+file = "specs/requirements.fsl"
+
+[design]
+file = "specs/design.fsl"
+depth = 12
+refine_against = "requirements"
+mapping = "specs/design_refines_requirements.fsl"
+
+[impl]
+command = "pytest -q"
+```
+
+For `[business]`, `[requirements]`, and `[design]`, adding `depth = K` runs the
+existing `verify` path at that depth; omitting `depth` runs the existing `check`
+path. `refine_against` names another manifest layer and requires an explicit
+`mapping` file because `fslc refine` needs the state/action correspondence. The
+implementation command runs with the manifest directory as its working
+directory. By default the chain short-circuits on the first failed layer and
+marks the remaining planned layers as `skipped`; `--keep-going` records the
+failure and continues through the rest of the manifest.
+
+## 8. Phased plan
 
 | Stage | Content | Scale |
 |---|---|---|
