@@ -5,6 +5,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-18
+
+Theme: **honest verification bounds, AI-legible diagnostics, and tractable liveness** —
+verify/induction results now declare their `completeness`, `checked_to_depth`, and `cost`;
+diagnostics gain a `faithfulness_class` routing tag, split-action `display_name`s, sharper
+`insufficient_depth`/`over_constrained` reachable classification, and a new `urgency_freeze`
+vacuity lane; liveness gains ranking-function (`decreases`) proofs and `symmetric type`/`enum`
+reduction; and the workflow adds `fslc chain`, partial `testgen`, `--exclude-property`, and
+`maps auto`, plus a compose `fair`-not-inherited warning and friendlier identifier parse errors.
+
 ### Added
 - (Temporal) FSL now supports `symmetric type` and `symmetric enum` declarations
   for interchangeable entity identities. `leadsTo` lasso and stall checks use a
