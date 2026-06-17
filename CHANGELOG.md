@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-17
+
+Theme: **probing single properties and friendlier IDs** — `verify --property`
+becomes a general property probe across all declaration kinds, requirement-style
+IDs accept underscores, and the liveness/safety scaling trade-off is documented.
+
 ### Added
 - **`verify --property <Name>` now targets any property kind**, not just
   invariants. The name is resolved across `invariant`, `trans`, `leadsTo`, and
