@@ -28,8 +28,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   and deadline invariants are vacuous.
 - (Verifier CLI) `fslc verify --exclude-property <Name>` is repeatable and
   skips named invariants, `trans`, `leadsTo`, and `reachable` properties in both
-  BMC and induction runs. It composes with `--property`; exclusion wins when both
-  name the same invariant.
+  BMC and induction runs. It mirrors the 1.4.0 cross-kind `--property` resolver;
+  exclusion wins when both options name the same property.
 - (Verifier JSON) `verify` / induction results now expose boundedness metadata:
   `completeness`, `checked_to_depth`, and `cost.elapsed_s`. BMC `verified` is
   explicitly `completeness:"bounded"`, induction `proved` is
@@ -73,6 +73,37 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - (Compose) Non-fair synchronized actions that reference fair component actions
   now emit a `fair_not_inherited` warning instead of silently hiding the dropped
   composite-level liveness assumption.
+
+## [1.4.0] - 2026-06-17
+
+Theme: **probing single properties and friendlier IDs** — `verify --property`
+becomes a general property probe across all declaration kinds, requirement-style
+IDs accept underscores, and the liveness/safety scaling trade-off is documented.
+
+### Added
+- **`verify --property <Name>` now targets any property kind**, not just
+  invariants. The name is resolved across `invariant`, `trans`, `leadsTo`, and
+  `reachable` declarations and checked in isolation while the full action model
+  still steps, so a single property can be probed on its own (e.g. iterating on a
+  slow `leadsTo` without gating the safety checks).
+- **Underscores are accepted in requirement-style IDs** (`REQ_ID`): `acceptance`,
+  `forbidden`, `requirement`, `policy`, and `goal` IDs now allow `AC_DONE` in
+  addition to `AC-DONE`, matching the underscore already permitted in
+  action/invariant/trans names. Purely widens the accepted set — existing
+  hyphenated IDs are unchanged.
+
+### Changed
+- **`--property` not-found diagnostics** now read `no such property: X
+  (available: …)` and list every property kind. Under `--engine induction`
+  (k-induction proves safety invariants only), naming a `trans`/`leadsTo`/
+  `reachable` now reports that the induction engine cannot prove it and to use the
+  default `bmc` engine, instead of a misleading "no such invariant".
+- **Documented the liveness/safety scaling difference** (`skills/fsl/reference.md`
+  §7): `leadsTo` cost grows roughly exponentially in the number of concurrent
+  entities (the textbook BMC-liveness state explosion), while safety stays cheap.
+  Added the practical strategy — verify liveness on a reduced model and safety
+  separately at full size, and use `--property` to isolate one liveness property
+  while iterating.
 
 ## [1.3.1] - 2026-06-17
 

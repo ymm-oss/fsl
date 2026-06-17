@@ -254,7 +254,7 @@ goal_all_stage: "all" NAME "can" "be" stage_disjunction
 stage_disjunction: NAME (_OR NAME)*
 
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
-REQ_ID: /[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/
+REQ_ID: /[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*/
 _AND: /and\b/
 _OR: /or\b/
 _NOT: /not\b/

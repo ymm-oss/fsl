@@ -134,32 +134,64 @@ def _select_invariants(spec, property_name=None):
     }
 
 
-def _property_collections(spec):
-    return {
-        "invariants": spec.get("invariants", []),
-        "transitions": spec.get("transitions", []),
-        "leadstos": spec.get("leadstos", []),
-        "reachables": spec.get("reachables", []),
-    }
+# Property declarations that `verify --property` can target, in the order they
+# appear in `available:` diagnostics. Each names a spec collection whose items
+# carry a "name" field.
+_PROPERTY_KINDS = ("invariants", "transitions", "leadstos", "reachables")
 
 
-def _resolve_excluded_properties(spec, exclude_property_names=None):
+def _select_property(spec, property_name=None):
+    """Resolve `--property` across invariant/trans/leadsTo/reachable declarations.
+
+    Returns (filtered_spec, error). When property_name is None the spec is
+    returned unchanged. Otherwise a shallow-copied spec is returned in which
+    every property collection keeps only items whose name matches, so the BMC
+    explorer checks the named property in isolation while still stepping the
+    full action model. The error is a usage dict when the name resolves to no
+    declaration.
+    """
+    if property_name is None:
+        return spec, None
+    available = []
+    matched = False
+    filtered = dict(spec)
+    for key in _PROPERTY_KINDS:
+        items = spec.get(key, []) or []
+        available.extend(item["name"] for item in items)
+        kept = [item for item in items if item["name"] == property_name]
+        if kept:
+            matched = True
+        filtered[key] = kept
+    if not matched:
+        avail = ", ".join(sorted(dict.fromkeys(available)))
+        return None, {
+            "result": "error",
+            "kind": "usage",
+            "message": f"no such property: {property_name} (available: {avail})",
+        }
+    return filtered, None
+
+
+def _select_properties(spec, property_name=None, exclude_property_names=None):
+    filtered, property_error = _select_property(spec, property_name)
+    if property_error is not None:
+        return None, property_error
+
     excluded = set(exclude_property_names or [])
     if not excluded:
-        return excluded, None
+        return filtered, None
 
-    collections = _property_collections(spec)
     available = []
     available_set = set()
-    for items in collections.values():
-        for item in items:
+    for key in _PROPERTY_KINDS:
+        for item in filtered.get(key, []) or []:
             name = item["name"]
             available.append(name)
             available_set.add(name)
 
     missing = sorted(name for name in excluded if name not in available_set)
     if missing:
-        return excluded, {
+        return None, {
             "result": "error",
             "kind": "usage",
             "message": (
@@ -167,29 +199,14 @@ def _resolve_excluded_properties(spec, exclude_property_names=None):
                 f"(available: {', '.join(available)})"
             ),
         }
-    return excluded, None
 
-
-def _select_properties(spec, property_name=None, exclude_property_names=None):
-    invariants, property_error = _select_invariants(spec, property_name)
-    if property_error is not None:
-        return None, property_error
-
-    excluded, exclude_error = _resolve_excluded_properties(spec, exclude_property_names)
-    if exclude_error is not None:
-        return None, exclude_error
-
-    collections = _property_collections(spec)
-    return {
-        "invariants": [inv for inv in invariants if inv["name"] not in excluded],
-        "transitions": [
-            tr for tr in collections["transitions"] if tr["name"] not in excluded
-        ],
-        "leadstos": [lt for lt in collections["leadstos"] if lt["name"] not in excluded],
-        "reachables": [
-            reach for reach in collections["reachables"] if reach["name"] not in excluded
-        ],
-    }, None
+    selected = dict(filtered)
+    for key in _PROPERTY_KINDS:
+        selected[key] = [
+            item for item in filtered.get(key, []) or []
+            if item["name"] not in excluded
+        ]
+    return selected, None
 
 
 _VACUOUS_IMPLICATION_HINT = (
@@ -3454,16 +3471,11 @@ def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cach
 
 
 def _bmc_explore(
-        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn",
-        property_name=None, exclude_property_names=None):
-    properties, property_error = _select_properties(
-        spec, property_name, exclude_property_names)
-    if property_error is not None:
-        return property_error
-    invariants = properties["invariants"]
-    transitions = properties["transitions"]
-    leadstos = properties["leadstos"]
-    reachables = properties["reachables"]
+        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn"):
+    invariants = spec.get("invariants", [])
+    transitions = spec.get("transitions", [])
+    leadstos = spec.get("leadstos", [])
+    reachables = spec.get("reachables", [])
 
     instances = build_instances(spec)
     expr_cache = {}
@@ -3812,13 +3824,16 @@ def verify(
         spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
         property_name=None, exclude_property_names=None):
     started = time.perf_counter()
+    filtered, property_error = _select_properties(
+        spec, property_name, exclude_property_names)
+    if property_error is not None:
+        return _finish_result(property_error, spec, depth, started, completeness="bounded")
+    spec = filtered
     explored = _bmc_explore(
         spec,
         depth,
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
-        property_name=property_name,
-        exclude_property_names=exclude_property_names,
     )
     if explored["result"] != "explored":
         return _finish_result(explored, spec, depth, started, completeness="bounded")
@@ -4061,21 +4076,39 @@ def prove(
         property_name=None, exclude_property_names=None):
     """k-induction: base BMC then step-case invariant proof."""
     started = time.perf_counter()
-    properties, property_error = _select_properties(
+    filtered, property_error = _select_properties(
         spec, property_name, exclude_property_names)
     if property_error is not None:
         return _finish_result(property_error, spec, base_depth, started)
-    invariants = properties["invariants"]
-    transitions = properties["transitions"]
-    leadstos = properties["leadstos"]
+
+    if property_name is not None and not filtered.get("invariants"):
+        other = next(
+            (kind for kind in ("transitions", "leadstos", "reachables")
+             for item in filtered.get(kind, []) or [] if item["name"] == property_name),
+            None,
+        )
+        if other is not None:
+            label = {"transitions": "trans", "leadstos": "leadsTo",
+                     "reachables": "reachable"}[other]
+            return _finish_result({
+                "result": "error",
+                "kind": "usage",
+                "message": (
+                    f"--property {property_name} is a {label}, which the induction "
+                    f"engine cannot prove; check it with the default bmc engine"
+                ),
+            }, spec, base_depth, started)
+
+    spec = filtered
+    invariants = spec.get("invariants", [])
+    transitions = spec.get("transitions", [])
+    leadstos = spec.get("leadstos", [])
 
     base = verify(
         spec,
         base_depth,
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
-        property_name=property_name,
-        exclude_property_names=exclude_property_names,
     )
     if base["result"] in ("violated", "reachable_failed", "error"):
         return _add_result_metadata(

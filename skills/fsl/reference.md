@@ -199,7 +199,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 fslc check <f>                                  # syntax / names / types only
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
-               [--property <Name>]                  # check a single invariant only (for probing)
+               [--property <Name>]                  # check one named property in isolation
+                                                    #   (invariant / trans / leadsTo / reachable)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]
 fslc explain <f> [--depth K=8]                 # skeleton + counterfactual + witness narration
@@ -229,10 +230,12 @@ first failed layer and later layers are marked `skipped`.
   the baseline result is returned. `--by-requirement` aggregates by the requirement
   tag of the "killed property" and warns on zero kills as `empty_formalization`
   (a lower bound observed for this mutant set and depth).
-- `verify --property Name` selects one invariant only. `--exclude-property Name`
-  is repeatable and removes named invariants, `trans`, `leadsTo`, and
-  `reachable` checks from the run and from checked-property outputs. If both
-  options name the same invariant, exclusion wins.
+- `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
+  `reachable` declarations and checks only the named property kind in isolation.
+  `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
+  it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
+  the run and from checked-property outputs. If both options name the same
+  property, exclusion wins.
 - `explain` is deterministic formatting with no LLM. It enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -282,6 +285,24 @@ first failed layer and later layers are marked `skipped`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`).
+
+### ⚠ Liveness scales differently from safety — verify it on a reduced model
+
+`leadsTo` is a lasso search: the cost grows roughly **exponentially in the number
+of concurrent entities** (the textbook BMC-liveness state explosion), because each
+added entity multiplies the interleavings the loop search must consider. Safety
+(`invariant` / `trans` / `reachable`) does **not** behave this way — it stays cheap
+even at large depth. Observed shape: a single entity verifies in seconds even at
+depth 16, but three concurrent entities with `leadsTo` can blow past minutes by
+depth ~12. This is a known limit, not a pathological encoding.
+
+Practical strategy:
+- Verify **liveness on the smallest model that still exhibits the interleaving** —
+  shrink the entity-count range (e.g. `0..1` instead of `0..3`) and use a shallow
+  `--depth`. One entity is often enough to find a real `leadsTo` bug.
+- Verify **safety separately on the full-size model** at the depth you need.
+- Use `--property <leadsToName>` to run a single liveness property in isolation
+  while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.
 
 ## 8. Idioms (reuse them as-is)
 

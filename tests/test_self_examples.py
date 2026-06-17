@@ -12,6 +12,7 @@ from fslc.cli import run_check, run_verify
 
 ROOT = Path(__file__).resolve().parents[1]
 E = ROOT / "examples/self"
+SPECS = ROOT / "specs"
 
 
 # All three verify cleanly under --deadlock warn: intended terminal states are
@@ -84,12 +85,12 @@ def test_verify_property_missing_invariant_is_usage_error():
     out = json.loads(proc.stdout)
     assert out["result"] == "error"
     assert out["kind"] == "usage"
-    assert out["message"].startswith("no such invariant: NoSuchInv")
+    assert out["message"].startswith("no such property: NoSuchInv")
 
 
 def test_verify_exclude_property_omits_reachable_only():
     proc = _run_fslc_verify(
-        str(ROOT / "specs" / "mutex_queue.fsl"),
+        str(SPECS / "mutex_queue.fsl"),
         "--depth",
         "8",
         "--exclude-property",
@@ -110,9 +111,36 @@ def test_verify_exclude_property_omits_reachable_only():
     assert set(out["leads_to"]) == {"WaiterGetsLock"}
 
 
+def test_verify_property_targets_a_trans():
+    """--property resolves a `trans` declaration, not just invariants."""
+    proc = _run_fslc_verify(
+        str(E / "fslc_monitor.fsl"), "--depth", "8", "--property", "RejectIsSticky",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert out["transitions_checked"] == ["RejectIsSticky"]
+    # the other property kinds are not checked when one trans is selected
+    assert out["invariants_checked"] == []
+
+
+def test_induction_property_on_non_invariant_explains_engine_limit():
+    """`--engine induction --property <trans>` gives a clear engine-scope error."""
+    proc = _run_fslc_verify(
+        str(E / "fslc_monitor.fsl"), "--engine", "induction",
+        "--property", "RejectIsSticky",
+    )
+    assert proc.returncode == 2
+    out = json.loads(proc.stdout)
+    assert out["result"] == "error"
+    assert out["kind"] == "usage"
+    assert "is a trans" in out["message"]
+    assert "induction engine cannot prove" in out["message"]
+
+
 def test_verify_exclude_property_missing_name_is_usage_error():
     proc = _run_fslc_verify(
-        str(ROOT / "specs" / "mutex_queue.fsl"),
+        str(SPECS / "mutex_queue.fsl"),
         "--depth",
         "8",
         "--exclude-property",
@@ -130,7 +158,7 @@ def test_verify_exclude_property_missing_name_is_usage_error():
 
 def test_verify_exclude_property_repeated_omits_multiple_kinds():
     proc = _run_fslc_verify(
-        str(ROOT / "specs" / "mutex_queue.fsl"),
+        str(SPECS / "mutex_queue.fsl"),
         "--depth",
         "8",
         "--exclude-property",
@@ -150,7 +178,7 @@ def test_verify_exclude_property_repeated_omits_multiple_kinds():
 
 def test_verify_property_and_exclude_property_exclude_wins():
     proc = _run_fslc_verify(
-        str(ROOT / "specs" / "mutex_queue.fsl"),
+        str(SPECS / "mutex_queue.fsl"),
         "--depth",
         "8",
         "--property",
@@ -162,3 +190,16 @@ def test_verify_property_and_exclude_property_exclude_wins():
     out = json.loads(proc.stdout)
     assert out["result"] == "verified"
     assert out["invariants_checked"] == []
+
+
+def test_verify_property_targets_a_reachable():
+    """--property resolves a `reachable` declaration in isolation."""
+    proc = _run_fslc_verify(
+        str(E / "fslc_monitor.fsl"), "--depth", "8", "--property", "ReachConformant",
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["result"] == "verified"
+    assert list(out["reachables"]) == ["ReachConformant"]
+    assert out["invariants_checked"] == []
+    assert out["transitions_checked"] == []
