@@ -99,6 +99,32 @@ spec Blocked {
     assert any("bad" in w["message"] for w in sc["warnings"])
 
 
+def test_scenarios_reachable_failed_includes_over_constrained_diagnostic():
+    src = """
+spec ScenarioImpossibleReachable {
+  type Small = 0..2
+  state { x: Small }
+  init { x = 0 }
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  reachable TooHigh { x == 3 }
+}
+"""
+    out = scenarios(
+        build_spec(parse(src)),
+        3,
+        deadlock_mode="ignore",
+        source_lines=src.splitlines(),
+    )
+    assert out["result"] == "reachable_failed"
+    assert out["checked_to_depth"] == 3
+    [unreached] = out["unreached"]
+    assert unreached["classification"] == "over_constrained"
+    assert any(b.get("name") == "_bounds_x" for b in unreached["blocking_requires"])
+
+
 def test_coverage_true_remains_bool():
     r = verify(build_spec(parse((SPECS / "cart_v1.fsl").read_text())), 8)
     for name, cov in r["action_coverage"].items():

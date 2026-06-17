@@ -63,6 +63,90 @@ def test_order_workflow_verified():
     assert r["reachables"]["FullLifecycle"]["witnessed_at_step"] == 3
 
 
+def test_reachable_failed_marks_insufficient_depth_then_witnesses_later():
+    src = """
+spec ReachDepth {
+  type Step = 0..3
+  state { x: Step }
+  init { x = 0 }
+  action inc() {
+    requires x < 3
+    x = x + 1
+  }
+  reachable Three { x == 3 }
+}
+"""
+    shallow = verify(
+        build_spec(parse(src)),
+        2,
+        deadlock_mode="ignore",
+        source_lines=src.splitlines(),
+    )
+    assert shallow["result"] == "reachable_failed"
+    assert shallow["checked_to_depth"] == 2
+    assert shallow["completeness"] == "bounded"
+    [unreached] = shallow["unreached"]
+    assert unreached["name"] == "Three"
+    assert unreached["classification"] == "insufficient_depth"
+    assert "not witnessed within depth 2" in unreached["hint"]
+
+    deep = verify(build_spec(parse(src)), 3, deadlock_mode="ignore")
+    assert deep["result"] == "verified"
+    assert deep["reachables"]["Three"]["witnessed_at_step"] == 3
+
+
+def test_reachable_failed_marks_over_constrained_with_blocking_info():
+    src = """
+spec ImpossibleReachable {
+  type Small = 0..2
+  state { x: Small }
+  init { x = 0 }
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  reachable TooHigh { x == 3 }
+}
+"""
+    out = verify(
+        build_spec(parse(src)),
+        3,
+        deadlock_mode="ignore",
+        source_lines=src.splitlines(),
+    )
+    assert out["result"] == "reachable_failed"
+    [unreached] = out["unreached"]
+    assert unreached["classification"] == "over_constrained"
+    assert unreached["blocking_requires"]
+    assert any(b.get("name") == "_bounds_x" for b in unreached["blocking_requires"])
+    assert "_bounds_x" in unreached["hint"]
+
+
+def test_verified_result_metadata_and_unsaturated_hint():
+    src = """
+spec Frontier {
+  type Step = 0..3
+  state { x: Step }
+  init { x = 0 }
+  action inc() {
+    requires x < 3
+    x = x + 1
+  }
+  invariant Upper { x <= 3 }
+  reachable One { x == 1 }
+}
+"""
+    out = verify(build_spec(parse(src)), 1, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    assert out["reachables"]["One"]["witnessed_at_step"] == 1
+    assert out["completeness"] == "bounded"
+    assert out["checked_to_depth"] == 1
+    assert out["depth"] == 1
+    assert set(out["cost"]) == {"elapsed_s"}
+    assert isinstance(out["cost"]["elapsed_s"], float)
+    assert "state space not saturated at depth 1" in out["hint"]
+
+
 def test_trace_changes_format():
     r = run("cart_v1.fsl")
     steps_with_changes = [e for e in r["reachables"]["SoldOut"]["witness"] if "changes" in e]

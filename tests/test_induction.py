@@ -64,6 +64,9 @@ spec CounterLatch {
 """
     r = prove_inline(src)
     assert r["result"] == "proved"
+    assert r["completeness"] == "unbounded"
+    assert r["checked_to_depth"] == 8
+    assert set(r["cost"]) == {"elapsed_s"}
     assert r["k_used"]["XRange"] == 1
 
 
@@ -82,6 +85,8 @@ spec Sync {
 """
     r = prove_inline(base)
     assert r["result"] == "unknown_cti"
+    assert r["completeness"] == "bounded"
+    assert r["checked_to_depth"] == 8
     assert r["invariant"] == "Sync"
     assert r["hint"] == CTI_HINT
     assert r["k"] == 1

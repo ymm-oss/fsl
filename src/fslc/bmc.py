@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import itertools
+import time
 from contextlib import contextmanager
 
 import z3
@@ -2163,6 +2164,20 @@ _SCENARIOS_CONVENTION = (
     "assert only the fields mentioned in expected_states[i]"
 )
 
+_REACHABLE_INSUFFICIENT_HINT = (
+    "not witnessed within depth {depth}; try a larger --depth"
+)
+
+_REACHABLE_OVER_CONSTRAINED_HINT = (
+    "target predicate is unsatisfiable under type bounds/invariants ({blocking}); "
+    "loosen the blocking constraint or revise the reachable target"
+)
+
+_BOUNDED_UNSATURATED_HINT = (
+    "state space not saturated at depth {depth}; a violation could exist beyond "
+    "depth {depth}; consider a larger --depth or the induction engine"
+)
+
 
 def _requires_loc_key(req):
     loc = req.get("loc") or {}
@@ -2180,6 +2195,90 @@ def _requires_blocking_entry(req, source_lines=None):
                 if text:
                     entry["text"] = text
     return entry
+
+
+def _source_line_text(loc, source_lines=None):
+    if not loc or not source_lines:
+        return None
+    line = loc.get("line")
+    if line and 1 <= line <= len(source_lines):
+        text = source_lines[line - 1].strip()
+        if text:
+            return text
+    return None
+
+
+def _reachable_blocking_entry(kind, source, spec, source_lines=None):
+    entry = {"kind": kind}
+    name = source.get("name")
+    if name:
+        entry["name"] = display_label(name, spec)
+    loc = source.get("loc")
+    if loc:
+        entry["loc"] = loc
+    text = _source_line_text(loc, source_lines)
+    if text:
+        entry["text"] = text
+    elif source.get("implicit") and name:
+        entry["text"] = f"{display_label(name, spec)} (implicit type bounds)"
+    return _attach_requirement(entry, source)
+
+
+def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
+    entry = _attach_requirement({
+        "name": reach["name"],
+        "loc": reach.get("loc"),
+    }, reach)
+
+    state = make_state(spec, f"reach_diag_{id(reach)}")
+    expr_cache = {}
+    s = z3.Solver()
+    s.set(unsat_core=True)
+
+    lit_map = {}
+    for idx, inv in enumerate(spec.get("invariants", [])):
+        lit = z3.Bool(f"__reach_diag_inv_{idx}")
+        s.assert_and_track(_inv_constraint(inv, state, spec, expr_cache), lit)
+        lit_map[lit] = inv
+
+    target_lit = z3.Bool("__reach_diag_target")
+    with _eval_cache_scope(expr_cache, id(state)):
+        target = eval_expr(reach["expr"], state, {}, spec)
+    s.assert_and_track(target, target_lit)
+
+    status = s.check()
+    if status != z3.unsat:
+        entry["classification"] = "insufficient_depth"
+        entry["hint"] = _REACHABLE_INSUFFICIENT_HINT.format(depth=depth)
+        return entry
+
+    blocking = []
+    for core_lit in s.unsat_core():
+        inv = lit_map.get(core_lit)
+        if inv is None:
+            continue
+        kind = "type_bound" if inv.get("implicit") else "invariant"
+        blocking.append(_reachable_blocking_entry(kind, inv, spec, source_lines))
+    if not blocking:
+        blocking.append(_reachable_blocking_entry("reachable", reach, spec, source_lines))
+
+    names = [
+        b.get("name") or b.get("text") or b.get("kind", "constraint")
+        for b in blocking
+    ]
+    entry["classification"] = "over_constrained"
+    entry["blocking_requires"] = blocking
+    entry["hint"] = _REACHABLE_OVER_CONSTRAINED_HINT.format(
+        blocking=", ".join(names)
+    )
+    return entry
+
+
+def _diagnose_unreached_reachables(reachables, spec, depth, source_lines=None):
+    return [
+        _diagnose_unreached_reachable(reach, spec, depth, source_lines=source_lines)
+        for reach in reachables
+    ]
 
 
 def _exists_wrap(binders, expr):
@@ -2648,6 +2747,40 @@ def _display_output(result, spec):
     return out
 
 
+def _result_cost(started):
+    return {"elapsed_s": round(max(0.0, time.perf_counter() - started), 6)}
+
+
+def _checked_to_depth(result, fallback_depth):
+    if "violated_at_step" in result:
+        return result["violated_at_step"]
+    return fallback_depth
+
+
+def _add_result_metadata(result, depth, started, completeness=None):
+    out = dict(result)
+    out.setdefault("checked_to_depth", _checked_to_depth(out, depth))
+    out["cost"] = _result_cost(started)
+    if completeness is not None and out.get("result") != "error":
+        out.setdefault("completeness", completeness)
+    return out
+
+
+def _finish_result(result, spec, depth, started, completeness=None):
+    return _display_output(
+        _add_result_metadata(result, depth, started, completeness=completeness),
+        spec,
+    )
+
+
+def _state_space_unsaturated_at_depth(explored, spec):
+    # Cheap heuristic: do not issue an extra solver query. If the normal
+    # exploration first witnesses a reachable/vacuity/coverage fact at exactly
+    # depth K, the frontier is still producing new observable behavior, so the
+    # bounded success should advertise that it has not obviously saturated.
+    return bool(explored.get("frontier_progress"))
+
+
 def _and_path_ast(path_ast, extra):
     if path_ast is None:
         return extra
@@ -2763,6 +2896,7 @@ def _bmc_explore(
 
     reachables_result = {}
     pending_reachables = list(reachables)
+    frontier_progress = False
     pending_vacuity = (
         _vacuity_candidates(spec, invariants, leadstos)
         if vacuity_mode != "ignore" else []
@@ -2924,6 +3058,8 @@ def _bmc_explore(
                         "witnessed_at_step": t,
                         "witness": witness_trace,
                     }
+                    if t == depth and depth > 0:
+                        frontier_progress = True
                 else:
                     still_pending.append(reach)
                 s.pop()
@@ -2943,6 +3079,8 @@ def _bmc_explore(
                 s.pop()
                 if not reachable:
                     still_pending.append(item)
+                elif t == depth and depth > 0:
+                    frontier_progress = True
             pending_vacuity = still_pending
 
         enabled = _action_enabled_exprs(states[t], instances, spec, expr_cache)
@@ -3014,6 +3152,8 @@ def _bmc_explore(
                     s.pop()
                     if enabled:
                         coverage[aname] = True
+                        if t == depth and depth > 0:
+                            frontier_progress = True
                         if track_cover and aname not in cover_info:
                             cover_info[aname] = {"step": t, "idx": idx}
                         done.append(aname)
@@ -3066,6 +3206,7 @@ def _bmc_explore(
         "pending_reachables": pending_reachables,
         "pending_vacuity": pending_vacuity,
         "pending_requires_vacuity": pending_requires_vacuity,
+        "frontier_progress": frontier_progress,
         "deadlock_info": deadlock_info,
         "deadlock_violation": deadlock_violation,
         "dl_warn": dl_warn,
@@ -3080,6 +3221,7 @@ def _bmc_explore(
 def verify(
         spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
         property_name=None, exclude_property_names=None):
+    started = time.perf_counter()
     explored = _bmc_explore(
         spec,
         depth,
@@ -3089,7 +3231,7 @@ def verify(
         exclude_property_names=exclude_property_names,
     )
     if explored["result"] != "explored":
-        return _display_output(explored, spec)
+        return _finish_result(explored, spec, depth, started, completeness="bounded")
 
     depth = explored["depth"]
     coverage = explored["coverage"]
@@ -3104,26 +3246,28 @@ def verify(
         explored["states"], depth, spec, explored["expr_cache"], source_lines=source_lines,
     )
 
-    unreached = [{"name": reach["name"], "loc": reach.get("loc")} for reach in pending_reachables]
+    unreached = _diagnose_unreached_reachables(
+        pending_reachables, spec, depth, source_lines=source_lines)
 
     if unreached:
-        return _display_output({
+        return _finish_result({
             "result": "reachable_failed",
             "spec": explored["spec"],
             "unreached": unreached,
             "depth": depth,
+            "checked_to_depth": depth,
             "invariants_checked": explored["invariants_checked"],
             "transitions_checked": explored["transitions_checked"],
             "action_coverage": coverage,
             "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
-        }, spec)
+        }, spec, depth, started, completeness="bounded")
 
     if deadlock_violation is not None:
-        return _display_output(deadlock_violation, spec)
+        return _finish_result(deadlock_violation, spec, depth, started, completeness="bounded")
 
     lt_violation, leads_to = _check_leadstos(explored, spec)
     if lt_violation is not None:
-        return _display_output(lt_violation, spec)
+        return _finish_result(lt_violation, spec, depth, started, completeness="bounded")
 
     vacuity_findings = _finalize_vacuity_findings(
         explored.get("pending_vacuity", []),
@@ -3133,12 +3277,12 @@ def verify(
         spec,
     ) if vacuity_mode != "ignore" else []
     if vacuity_mode == "error" and vacuity_findings:
-        return _display_output({
+        return _finish_result({
             "result": "error",
             "spec": explored["spec"],
             "kind": vacuity_findings[0]["kind"],
             "findings": vacuity_findings,
-        }, spec)
+        }, spec, depth, started)
 
     warnings = [_warn(w["message"], w.get("hint")) if isinstance(w, dict) and "message" in w
                 else _warn(str(w)) for w in spec.get("warnings", [])]
@@ -3157,6 +3301,8 @@ def verify(
         "result": "verified",
         "spec": explored["spec"],
         "depth": depth,
+        "checked_to_depth": depth,
+        "completeness": "bounded",
         "invariants_checked": explored["invariants_checked"],
         "transitions_checked": explored["transitions_checked"],
         "reachables": reachables_result,
@@ -3167,7 +3313,9 @@ def verify(
     }
     if leads_to is not None:
         result["leads_to"] = leads_to
-    return _display_output(result, spec)
+    if _state_space_unsaturated_at_depth(explored, spec):
+        result["hint"] = _BOUNDED_UNSATURATED_HINT.format(depth=depth)
+    return _finish_result(result, spec, depth, started, completeness="bounded")
 
 
 def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
@@ -3198,8 +3346,10 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None):
         return _display_output({
             "result": "reachable_failed",
             "spec": explored["spec"],
-            "unreached": [{"name": r["name"], "loc": r.get("loc")} for r in pending_reachables],
+            "unreached": _diagnose_unreached_reachables(
+                pending_reachables, spec, depth, source_lines=source_lines),
             "depth": depth,
+            "checked_to_depth": depth,
             "action_coverage": coverage_diag,
             "hint": "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth".format(depth),
         }, spec)
@@ -3307,10 +3457,11 @@ def prove(
         spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn",
         property_name=None, exclude_property_names=None):
     """k-induction: base BMC then step-case invariant proof."""
+    started = time.perf_counter()
     properties, property_error = _select_properties(
         spec, property_name, exclude_property_names)
     if property_error is not None:
-        return _display_output(property_error, spec)
+        return _finish_result(property_error, spec, base_depth, started)
     invariants = properties["invariants"]
     transitions = properties["transitions"]
 
@@ -3323,7 +3474,12 @@ def prove(
         exclude_property_names=exclude_property_names,
     )
     if base["result"] in ("violated", "reachable_failed", "error"):
-        return base
+        return _add_result_metadata(
+            base,
+            base.get("checked_to_depth", base_depth),
+            started,
+            completeness=base.get("completeness"),
+        )
 
     instances = build_instances(spec)
     expr_cache = {}
@@ -3380,12 +3536,14 @@ def prove(
                     model = s.model()
                     trace = _build_trace(model, states, choices, instances, spec, 1)
                     s.pop()
-                    return _display_output(_attach_requirement({
+                    return _finish_result(_attach_requirement({
                         "result": "unknown_cti",
                         "spec": spec["name"],
                         "trans": trans["name"],
                         "invariant": trans["name"],
                         "k": 1,
+                        "checked_to_depth": base_depth,
+                        "completeness": "bounded",
                         "cti": {
                             "states": trace,
                             "violated_at": 1,
@@ -3393,7 +3551,7 @@ def prove(
                         "invariants_checked": [i["name"] for i in invariants],
                         "transitions_checked": [tr["name"] for tr in transitions],
                         "hint": _CTI_HINT,
-                    }, trans), spec)
+                    }, trans), spec, base_depth, started, completeness="bounded")
                 s.pop()
 
         remaining = still_remaining
@@ -3403,17 +3561,19 @@ def prove(
     if remaining:
         inv, k, model = last_cti
         trace = _build_trace(model, states, choices, instances, spec, k)
-        return _display_output(_attach_requirement({
+        return _finish_result(_attach_requirement({
             "result": "unknown_cti",
             "spec": spec["name"],
             "invariant": inv["name"],
             "k": k,
+            "checked_to_depth": base_depth,
+            "completeness": "bounded",
             "cti": {
                 "states": trace,
                 "violated_at": k,
             },
             "hint": _CTI_HINT,
-        }, inv), spec)
+        }, inv), spec, base_depth, started, completeness="bounded")
 
     warnings = [
         w for w in base.get("warnings", [])
@@ -3424,6 +3584,8 @@ def prove(
         "result": "proved",
         "spec": spec["name"],
         "engine": "induction",
+        "completeness": "unbounded",
+        "checked_to_depth": base_depth,
         "k_used": k_used,
         "base_depth": base_depth,
         "invariants_checked": [i["name"] for i in invariants],
@@ -3437,4 +3599,4 @@ def prove(
         result["note"] = (
             f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
         )
-    return _display_output(result, spec)
+    return _finish_result(result, spec, base_depth, started, completeness="unbounded")

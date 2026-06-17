@@ -52,6 +52,11 @@ so there is zero detection loss.
 - Output: `{kind, name(display name), loc, requirement, message, hint}` in warnings. prove()
   passes warnings through transparently from the base verify. scenarios uses
   `vacuity_mode="ignore"`.
+- Successful BMC output remains explicitly bounded via `completeness:"bounded"`
+  and `checked_to_depth`. When normal exploration first witnesses a
+  reachable/vacuity/coverage fact at the final depth K, `verified` includes a
+  saturation hint; this is separate from vacuity findings and only says the bound
+  has not obviously reached a fixpoint.
 - The hint avoids misdirecting the repair: a tautological requires says not "delete the clause"
   but "judge whether the model is lacking or redundant" (it may take effect at greater depth or
   under induction).

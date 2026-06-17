@@ -234,8 +234,17 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
   (`__`) do not appear.
 - `unknown_cti`: `cti.states` (k+1 states) + `violated_at`. The starting state is an
   unreachable phantom — add an auxiliary invariant to exclude it.
-- `proved`: `k_used` (the k used per invariant); reachables/coverage come from the
-  base case.
+- `verified` / `reachable_failed` / `violated` from BMC are bounded and include
+  `completeness:"bounded"`, `checked_to_depth`, and `cost: {"elapsed_s": ...}`.
+  Bounded `verified` may include a saturation `hint` when the depth-K frontier
+  first witnesses a reachable/vacuity/coverage fact during normal exploration.
+- `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),
+  `cost`, and `k_used` (the k used per invariant); reachables/coverage come from
+  the base case.
+- `reachable_failed`: each `unreached[]` has `classification`:
+  `insufficient_depth` (target satisfiable as a state predicate, no witness by K)
+  or `over_constrained` (target unsat under type bounds/invariants, with
+  `blocking_requires` naming the blocking core).
 - coverage diagnostic: `{covered: false, blocking_requires: [{loc, text}], hint}`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
 
