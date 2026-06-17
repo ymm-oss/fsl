@@ -247,7 +247,8 @@ def test_specs_without_leadsto_output_unchanged():
     assert "leads_to" not in r
     keys = {
         "result", "spec", "depth", "invariants_checked", "transitions_checked", "reachables",
-        "action_coverage", "deadlock", "warnings", "note",
+        "action_coverage", "deadlock", "warnings", "note", "checked_to_depth",
+        "completeness", "cost",
     }
     assert keys.issubset(set(r.keys()))
     extra = set(r.keys()) - keys

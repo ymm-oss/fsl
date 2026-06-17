@@ -752,7 +752,10 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   green). The correct form is **to make urgent only the guarded action that
   becomes enabled at deadline arrival (the respond_due form with
   `requires age >= K`)**. To confirm non-vacuity, lower it to `K-1` and check
-  that it becomes violated.
+  that it becomes violated. `fslc verify --vacuity` emits
+  `kind:"urgency_freeze"` for the provable form of this trap (the urgent
+  condition is initial and inductive); absence of the warning is not a proof of
+  non-vacuity.
 - The BMC check works immediately. An inductive proof often needs a time-budget
   auxiliary invariant (the `age + remaining work <= K` form) (derived from the
   CTI; real examples in `examples/nfr/`).
@@ -795,9 +798,12 @@ DESIGN-*.md).
   about). The dual of `acceptance` (must-allow). → [`DESIGN-forbidden.md`](DESIGN-forbidden.md)
 - **Vacuity check (`--vacuity`)** — on the verified/proved path, warns about
   `vacuous_implication` (the antecedent of an implication is unreachable),
-  `vacuous_leadsto` (the trigger is unreachable), and `always_true_requires`
-  (a guard that is always true under the context of preceding clauses). `error`
-  exits 2. → [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
+  `vacuous_leadsto` (the trigger is unreachable), `always_true_requires`
+  (a guard that is always true under the context of preceding clauses),
+  `tautology_over_frozen` (a dynamically tautological invariant over state no
+  action changes), and `urgency_freeze` (a generated deadline `tick` proven dead
+  because urgency freezes time). `error` exits 2. →
+  [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
 - **`--strict-tags`** — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

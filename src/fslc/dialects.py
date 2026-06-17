@@ -425,7 +425,17 @@ def _expand_time(out, time_block, deadlines, action_aliases, action_maps, implem
     if urgent_enabled:
         tick_body.append(("requires", ("not", _or_all(urgent_enabled)), time_block[2]))
     tick_body.extend(_build_age_tick_stmt(age) for age in ages)
-    out.append(("action", "tick", [], tick_body, time_block[2], False, None))
+    out.append((
+        "action",
+        "tick",
+        [],
+        tick_body,
+        time_block[2],
+        False,
+        None,
+        False,
+        {"kind": "time_tick", "urgent_actions": tuple(urgent_names)},
+    ))
     action_aliases.setdefault("tick", []).append("tick")
     generated_names = ["tick"]
     if implements is not None:

@@ -2,10 +2,11 @@
 
 Motivation: issue #4 (category 5 of roadmap #1). Each of the following specs becomes verified
 yet checks nothing: an implication invariant whose antecedent is unreachable (`P => Q` where P
-never happens), a leadsTo whose trigger is unreachable (`P ~> Q` where P never happens), and a
-requires clause that is always true in reachable states (a dead ornament). Vacuous verified, on
-par with under-constraint, is the biggest source of missed bugs. Conventionally `kind:"vacuous"`
-referred only to init unsatisfiability.
+never happens), a leadsTo whose trigger is unreachable (`P ~> Q` where P never happens), a
+requires clause that is always true in reachable states (a dead ornament), a frozen ghost
+invariant, and a requirements `deadline` whose generated `tick` action is dead because urgency
+freezes time. Vacuous verified, on par with under-constraint, is the biggest source of missed
+bugs. Conventionally `kind:"vacuous"` referred only to init unsatisfiability.
 
 ## 1. CLI
 
@@ -16,7 +17,7 @@ referred only to init unsatisfiability.
   `vacuous`)
 - `ignore`: skip the check
 
-## 2. Three checks (only on the verified / proved path)
+## 2. Vacuity lanes (only on the verified / proved path)
 
 1. **`vacuous_implication`**: the antecedent of a **user invariant** with a single `=>`
    directly under `forall*` does not become sat within depth K. The existential closure of the
@@ -31,6 +32,16 @@ referred only to init unsatisfiability.
    (c) spurious sat from the whole-domain Z3 encoding of a let-internal partial op works only in
    the "do not emit a warning" direction and is safe. **Coverage-false actions** (already warned
    never-enabled) and **compose-synchronized actions** are out of scope.
+4. **`tautology_over_frozen`**: a user invariant that depends only on state variables no action
+   ever assigns to, and is dynamically always true over those frozen values, is a hollow
+   invariant. This is a static pre-filter plus Z3 check; it remains pending until final warning
+   emission.
+5. **`urgency_freeze`**: for requirements `time`/`deadline`, warn only when the generated
+   deadline invariants exist, the generated `tick` action has the structural guard
+   `requires not(urgent_enabled)`, the deadline age variables are not assigned by non-`tick`
+   actions, and Z3 proves `urgent_enabled` holds in every initial state and is preserved by
+   every action. This is depth-independent and intentionally incomplete: if the initial or
+   inductive proof fails, no warning is emitted.
 
 ### Reason for excluding compose-synchronized actions (important)
 
@@ -43,12 +54,13 @@ so there is zero detection loss.
 
 ## 3. Ripple (the verification engine core is unmodified; only a piggyback onto `_bmc_explore`)
 
-- bmc.py: `pending_vacuity` (implication antecedents + leadsTo triggers), isomorphic to the
-  `pending_reachables` loop, piggybacks on a single expansion. requires tautology adds the sat
-  of "preceding clauses ∧ ¬clause" to the coverage loop. Context-bearing candidates are
-  pre-filtered to only "clauses logically implied by the preceding clauses over the type space"
-  (`_requires_clause_locally_implied`), excluding bounded false positives from capacity-guard
-  families.
+- bmc.py: `pending_vacuity` contains dynamic candidates (implication antecedents + leadsTo
+  triggers), isomorphic to the `pending_reachables` loop, plus static candidates
+  (`tautology_over_frozen`, `urgency_freeze`) that are proven before exploration and carried to
+  finalization. requires tautology adds the sat of "preceding clauses ∧ ¬clause" to the coverage
+  loop. Context-bearing candidates are pre-filtered to only "clauses logically implied by the
+  preceding clauses over the type space" (`_requires_clause_locally_implied`), excluding bounded
+  false positives from capacity-guard families.
 - Output: `{kind, name(display name), loc, requirement, message, hint}` in warnings. prove()
   passes warnings through transparently from the base verify. scenarios uses
   `vacuity_mode="ignore"`.
@@ -63,8 +75,9 @@ so there is zero detection loss.
 
 ## 4. Tests (tests/test_vacuity.py)
 
-The three warning kinds (display name, loc, requirement) / forall wrapping / context-bearing
-redundant clause / two suppressions (coverage false, sync) / not shown on the violated path /
+The warning kinds (display name, loc, requirement) / forall wrapping / context-bearing
+redundant clause / two suppressions (coverage false, sync) / frozen-ghost tautology /
+urgency-freeze positive and deadline-urgency-pattern negative / not shown on the violated path /
 induction pass-through / error (exit 2) and ignore / **corpus zero-false-positive gatekeeper**
 (specs/ + examples/ + gallery/valid in one batch). Gallery
 `vacuous_implication_warning.fsl` (`--vacuity error`).
@@ -72,5 +85,5 @@ induction pass-through / error (exit 2) and ignore / **corpus zero-false-positiv
 ## 5. Related
 
 Complementary to #3 forbidden and #6 mutate in detecting under-constraint and empty
-formalization. Because it is a bounded check, the warning wording makes "within depth K"
-explicit. Roadmap #1.
+formalization. The reachability-based lanes make "within depth K" explicit; `urgency_freeze`
+is reported only after an initial + inductive proof of the generated urgent condition. Roadmap #1.
