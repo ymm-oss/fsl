@@ -72,9 +72,9 @@ state is unreachable under this regulation").
 ```fsl-biz
 business ReturnHandling {
   actor Customer, Manager
-  case Return = 0..2                       // business case (→ domain type)
+  entity Return                            // business entity (verification size below)
 
-  process Return {                         // → enum Stage + Map<Case, Stage>
+  process Return {                         // → enum Stage + Map<Entity, Stage>
     stage Requested -> Approved  by Manager : approve
     stage Requested -> Rejected  by Manager : reject
     stage Approved  -> Refunded  by System  : refund
@@ -86,6 +86,10 @@ business ReturnHandling {
   policy EveryRequestDecided responds {              // → leadsTo + fair
     Return in Requested ~> Return in Approved or Rejected
   }
+}
+
+verify {
+  instances Return = 3
 }
 ```
 

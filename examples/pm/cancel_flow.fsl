@@ -15,9 +15,10 @@ business CancelFlow {
   // Participants (used to verify "who performs" each transition)
   actor Customer, System
 
-  // Size of the world to verify: 3 subscriptions. A small count is enough
-  // (a rule of thumb in formal verification: bugs reproduce even in tiny worlds).
-  case Sub = 0..2
+  // Subscription is the business entity in this process. The verify block below
+  // sets the world to 3 subscriptions; a small count is enough (a rule of thumb
+  // in formal verification: bugs reproduce even in tiny worlds).
+  entity Sub
 
   // ── Process diagram (state transitions) ─────────────────────
   // One-to-one with the paper flow chart. Each transition is an "arrow".
@@ -59,4 +60,8 @@ business CancelFlow {
     some Sub can reach Retained
   goal CanChurn "There also exists a case that declines and reaches cancellation"
     some Sub can reach Churned
+}
+
+verify {
+  instances Sub = 3
 }

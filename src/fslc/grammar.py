@@ -7,7 +7,12 @@ from lark import Lark, Transformer, v_args
 # ---------------------------------------------------------------- grammar
 
 GRAMMAR = r"""
-start: spec_def | refinement_def | compose_def | requirements_def | business_def
+start: top_def verify_def?
+top_def: spec_def | refinement_def | compose_def | requirements_def | business_def
+
+verify_def: "verify" "{" verify_item* "}"
+verify_item: "instances" NAME "=" INT ";"? -> verify_instances
+           | "values" NAME "=" expr ".." expr ";"? -> verify_values
 
 spec_def: "spec" NAME "{" item* "}"
 
@@ -55,6 +60,8 @@ symmetric_enum_def: "symmetric" "enum" NAME "{" enum_member ("," enum_member)* "
 enum_member: NAME -> enum_member
 struct_def: "struct" NAME "{" field ("," field)* ","? "}"
 field: NAME ":" type
+entity_def: "entity" NAME
+number_def: "number" NAME
 
 state_def: "state" "{" var_decl ("," var_decl)* ","? "}"
 var_decl: NAME ":" type
@@ -204,7 +211,7 @@ ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def
-                  | const_def | type_def | enum_def | struct_def
+                  | const_def | type_def | enum_def | struct_def | entity_def | number_def
                   | state_def | init_def | req_action_def | time_def
                   | invariant_def | trans_def | reachable_def | leadsto_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
@@ -232,9 +239,8 @@ age_def: "age" NAME ["[" binder "]"] "while" expr
 deadline_def: "deadline" NAME "<=" expr
 
 business_def: "business" NAME "{" business_item* "}"
-?business_item: actor_def | case_def | process_def | kpi_def | policy_def | goal_def
+?business_item: actor_def | entity_def | process_def | kpi_def | policy_def | goal_def
 actor_def: "actor" NAME ("," NAME)* ","?
-case_def: "case" NAME "=" expr ".." expr
 process_def: "process" NAME "{" process_item* "}"
 ?process_item: process_stages | process_initial | process_transition
 process_stages: "stages" NAME ("," NAME)* ","?
@@ -541,6 +547,12 @@ class Ast(Transformer):
     def var_decl(self, meta, n, ty):
         return ("decl", n, ty)
 
+    def entity_def(self, meta, name):
+        return ("entity", name, _loc(meta))
+
+    def number_def(self, meta, name):
+        return ("number", name, _loc(meta))
+
     def enum_member(self, meta, name):
         return name
 
@@ -703,7 +715,22 @@ class Ast(Transformer):
         binders, p, q = _flatten_leadsto(body)
         return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure)
 
-    def start(self, meta, child):
+    def top_def(self, meta, child):
+        return child
+
+    def verify_instances(self, meta, name, n):
+        return ("verify_instances", name, int(n), _loc(meta))
+
+    def verify_values(self, meta, name, lo, hi):
+        return ("verify_values", name, lo, hi, _loc(meta))
+
+    def verify_def(self, meta, *items):
+        return ("verify_bounds", [i for i in items if i], _loc(meta))
+
+    def start(self, meta, child, verify=None):
+        if verify is not None and child[0] in ("spec", "business", "requirements"):
+            tag, name, items = child
+            return (tag, name, items + [verify])
         return child
 
     def spec_def(self, meta, name, *items):
@@ -864,9 +891,6 @@ class Ast(Transformer):
 
     def actor_def(self, meta, *names):
         return ("biz_actor", list(names), _loc(meta))
-
-    def case_def(self, meta, name, lo, hi):
-        return ("biz_case", name, lo, hi, _loc(meta))
 
     def process_stages(self, meta, *names):
         return ("biz_stages", list(names), _loc(meta))

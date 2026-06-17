@@ -72,6 +72,35 @@ def _meta(req_id, text):
     return {"id": req_id, "text": text}
 
 
+def _collect_verify_bounds(items):
+    instances = {}
+    values = {}
+    locs = {"instances": {}, "values": {}, "block": None}
+    seen = False
+    for item in items:
+        if item[0] != "verify_bounds":
+            continue
+        if seen:
+            _err("verify block may appear at most once", loc=item[2])
+        seen = True
+        locs["block"] = item[2]
+        for bound in item[1]:
+            tag = bound[0]
+            if tag == "verify_instances":
+                _, name, n, loc = bound
+                if name in instances:
+                    _err(f"duplicate instances bound for '{name}'", loc=loc)
+                instances[name] = n
+                locs["instances"][name] = loc
+            elif tag == "verify_values":
+                _, name, lo, hi, loc = bound
+                if name in values:
+                    _err(f"duplicate values bound for '{name}'", loc=loc)
+                values[name] = (lo, hi)
+                locs["values"][name] = loc
+    return instances, values, locs
+
+
 def _with_meta(item, meta):
     tag = item[0]
     if tag == "req_action":
@@ -469,9 +498,56 @@ def _expand_requirements_with_display(ast, base_dir):
     requirement_ids = []
     generated_names = []
     consts = _collect_consts(items)
+    instances, values, bound_locs = _collect_verify_bounds(items)
+    entity_locs = {}
+    number_locs = {}
 
     for item in items:
         tag = item[0]
+        if tag == "entity":
+            _, entity_name, loc = item
+            if entity_name in entity_locs:
+                _err(f"duplicate entity '{entity_name}'", loc=loc)
+            if entity_name in number_locs:
+                _err(f"'{entity_name}' cannot be both entity and number", loc=loc)
+            entity_locs[entity_name] = loc
+        elif tag == "number":
+            _, number_name, loc = item
+            if number_name in number_locs:
+                _err(f"duplicate number '{number_name}'", loc=loc)
+            if number_name in entity_locs:
+                _err(f"'{number_name}' cannot be both entity and number", loc=loc)
+            number_locs[number_name] = loc
+
+    for entity_name, loc in entity_locs.items():
+        if entity_name not in instances:
+            _err(f"entity '{entity_name}' has no 'instances' bound in verify block", loc=loc)
+        n = instances[entity_name]
+        if n < 1:
+            _err(f"entity '{entity_name}' instances bound must be >= 1", loc=bound_locs["instances"][entity_name])
+        out.append(("type", entity_name, ("num", 0), ("num", n - 1)))
+    for number_name, loc in number_locs.items():
+        if number_name not in values:
+            _err(f"number '{number_name}' has no 'values' bound in verify block", loc=loc)
+        lo, hi = values[number_name]
+        out.append(("type", number_name, lo, hi))
+    for entity_name in instances:
+        if entity_name not in entity_locs:
+            _err(
+                f"verify instances for undeclared entity '{entity_name}'",
+                loc=bound_locs["instances"][entity_name],
+            )
+    for number_name in values:
+        if number_name not in number_locs:
+            _err(
+                f"verify values for undeclared number '{number_name}'",
+                loc=bound_locs["values"][number_name],
+            )
+
+    for item in items:
+        tag = item[0]
+        if tag in ("entity", "number", "verify_bounds"):
+            continue
         if tag == "implements":
             if implements is not None:
                 _err("requirements may declare implements only once", loc=item[4])
@@ -583,11 +659,11 @@ def _rewrite_stage_expr(expr, env, process_by_case):
     if tag == "stage":
         arg = expr[1]
         if not (isinstance(arg, tuple) and arg[0] == "var"):
-            _err("stage(...) expects a bound case variable", loc=expr[2] if len(expr) > 2 else None)
+            _err("stage(...) expects a bound entity variable", loc=expr[2] if len(expr) > 2 else None)
         var_name = arg[1]
         case_ty = env.get(var_name)
         if case_ty is None:
-            _err(f"stage({var_name}) cannot be resolved; '{var_name}' is not a typed case binder",
+            _err(f"stage({var_name}) cannot be resolved; '{var_name}' is not a typed entity binder",
                  loc=expr[2] if len(expr) > 2 else None)
         processes = process_by_case.get(case_ty, [])
         if not processes:
@@ -685,7 +761,7 @@ def _process_stage_enum(name):
 def _collect_process(item, actors, cases):
     _, name, parts, loc = item
     if name not in cases:
-        _err(f"process '{name}' has no matching case declaration", loc=loc)
+        _err(f"process '{name}' has no matching entity declaration", loc=loc)
     stages = None
     initial = None
     transitions = []
@@ -733,22 +809,24 @@ def _collect_process(item, actors, cases):
 
 def _collect_business_entities(items):
     actors = set()
+    entities = {}
     cases = {}
     process_items = []
     kpis = []
     policies = []
     goals = []
+    instances, values, bound_locs = _collect_verify_bounds(items)
 
     for item in items:
         tag = item[0]
         if tag == "biz_actor":
             for actor in item[1]:
                 actors.add(actor)
-        elif tag == "biz_case":
-            _, case_name, lo, hi, loc = item
-            if case_name in cases:
-                _err(f"duplicate case '{case_name}'", loc=loc)
-            cases[case_name] = {"lo": lo, "hi": hi, "loc": loc}
+        elif tag == "entity":
+            _, entity_name, loc = item
+            if entity_name in entities:
+                _err(f"duplicate entity '{entity_name}'", loc=loc)
+            entities[entity_name] = loc
         elif tag == "biz_process":
             process_items.append(item)
         elif tag == "biz_kpi":
@@ -757,6 +835,29 @@ def _collect_business_entities(items):
             policies.append(item)
         elif tag == "biz_goal":
             goals.append(item)
+
+    for entity_name, loc in entities.items():
+        if entity_name not in instances:
+            _err(f"entity '{entity_name}' has no 'instances' bound in verify block", loc=loc)
+        n = instances[entity_name]
+        if n < 1:
+            _err(f"entity '{entity_name}' instances bound must be >= 1", loc=bound_locs["instances"][entity_name])
+        cases[entity_name] = {
+            "lo": ("num", 0),
+            "hi": ("num", n - 1),
+            "loc": loc,
+        }
+    for entity_name in instances:
+        if entity_name not in entities:
+            _err(
+                f"verify instances for undeclared entity '{entity_name}'",
+                loc=bound_locs["instances"][entity_name],
+            )
+    for number_name in values:
+        _err(
+            f"verify values for undeclared number '{number_name}'",
+            loc=bound_locs["values"][number_name],
+        )
 
     processes = []
     transition_names = set()
@@ -809,10 +910,10 @@ def _build_kpi_metadata(kpis, process_by_name):
 def _process_for_case(case_name, process_by_case, loc):
     processes = process_by_case.get(case_name, [])
     if not processes:
-        _err(f"case '{case_name}' has no process", loc=loc)
+        _err(f"entity '{case_name}' has no process", loc=loc)
     if len(processes) > 1:
         _err(
-            f"case '{case_name}' has multiple processes; natural stage syntax is ambiguous",
+            f"entity '{case_name}' has multiple processes; natural stage syntax is ambiguous",
             loc=loc,
         )
     return processes[0]

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 BIZ_SRC = r'''business ReturnHandling {
   actor Customer, Manager
-  case Return = 0..2
+  entity Return
 
   process Return {
     stages Requested, Approved, Rejected, Refunded
@@ -32,12 +32,15 @@ BIZ_SRC = r'''business ReturnHandling {
     forall c: Return { stage(c) == Refunded or stage(c) == Rejected }
   }
 }
+verify {
+  instances Return = 3
+}
 '''
 
 
 NATURAL_BIZ_SRC = r'''business NaturalReturnHandling {
   actor Customer, Manager
-  case Return = 0..2
+  entity Return
 
   process Return {
     stages Requested, Approved, Rejected, Refunded
@@ -54,6 +57,9 @@ NATURAL_BIZ_SRC = r'''business NaturalReturnHandling {
 
   goal HasRefund "a return can be refunded" some Return can reach Refunded
   goal AllSettled "all returns can settle" all Return can be Refunded or Rejected
+}
+verify {
+  instances Return = 3
 }
 '''
 
@@ -93,6 +99,58 @@ def test_biz_natural_policy_and_goal_syntax(tmp_path):
     assert set(verified["reachables"]) == {"AllSettled", "HasRefund"}
 
 
+def test_biz_entity_verify_instances_sets_world_size(tmp_path):
+    src = BIZ_SRC.replace("instances Return = 3", "instances Return = 2")
+    biz = _write_biz(tmp_path, src)
+
+    result = run_verify(str(biz), 8, "warn")
+
+    witness = result["reachables"]["AllSettled"]["witness"]
+    assert witness[-1]["state"]["return_stage"] == {
+        "0": "Rejected",
+        "1": "Rejected",
+    }
+
+
+def test_biz_entity_requires_instances_bound(tmp_path):
+    src = BIZ_SRC.replace("verify {\n  instances Return = 3\n}\n", "")
+    biz = _write_biz(tmp_path, src)
+
+    result = run_check(str(biz))
+
+    assert result["result"] == "error"
+    assert result["kind"] == "type"
+    assert "entity 'Return' has no 'instances' bound in verify block" in result["message"]
+
+
+def test_requirements_entity_and_number_verify_bounds_lower_to_types(tmp_path):
+    src = r'''requirements ReqBounds {
+  const MIN_AMOUNT = 1
+  entity Claim
+  number Amount
+  state { claim: Claim, amount: Amount }
+  init {
+    claim = 0
+    amount = MIN_AMOUNT
+  }
+  action mark() {
+    amount = 3
+  }
+  invariant AmountFloor { amount >= MIN_AMOUNT }
+}
+verify {
+  instances Claim = 2
+  values Amount = MIN_AMOUNT..3
+}
+'''
+    path = tmp_path / "req_bounds.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    result = run_check(str(path))
+
+    assert result["result"] == "ok", result
+
+
 def test_biz_natural_syntax_rejects_unknown_stage(tmp_path):
     bad = NATURAL_BIZ_SRC.replace(
         "must eventually be Approved",
@@ -128,13 +186,16 @@ def test_biz_policy_violation_carries_policy_requirement_meta(tmp_path):
 def test_biz_kpi_auto_invariant_can_be_violated(tmp_path):
     src = r'''business BadKpi {
   actor Manager
-  case Return = 0..1
+  entity Return
   process Return {
     stages Refunded
     initial Refunded
     transition noop Refunded -> Refunded by Manager
   }
   kpi refunded counts Return in Refunded
+}
+verify {
+  instances Return = 2
 }
 '''
     biz = _write_biz(tmp_path, src)
@@ -185,7 +246,7 @@ def test_biz_kpi_decrement_is_type_error(tmp_path):
 def test_biz_stage_call_ambiguous_is_type_error(tmp_path):
     src = r'''business AmbiguousStage {
   actor Manager
-  case Return = 0..1
+  entity Return
   process Return {
     stages Requested, Approved
     initial Requested
@@ -199,6 +260,9 @@ def test_biz_stage_call_ambiguous_is_type_error(tmp_path):
   policy P-1 "ambiguous stage helper" invariant {
     forall c: Return { stage(c) == Requested }
   }
+}
+verify {
+  instances Return = 2
 }
 '''
     biz = _write_biz(tmp_path, src)

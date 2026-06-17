@@ -23,11 +23,10 @@ business ExpenseToBe {
 
   actor Employee, Manager, Finance, System
 
-  // The verification target is 3 claims. It looks small, but the
-  // combinations of states are plenty, and control gaps such as
-  // "skipping approval" or "payment count increasing on its own" are
-  // reproduced here.
-  case Claim = 0..2
+  // Claim is the business entity flowing through the process. The verification
+  // world size (3 claims) lives in the top-level verify block below, not in a
+  // domain-looking range declaration.
+  entity Claim
 
   // ── Business process (one-to-one with the paper flow diagram) ─────
   process Claim {
@@ -71,4 +70,8 @@ business ExpenseToBe {
   // stuck as a business process before controls even come into play.
   goal CanPay "There exists a case that reaches completed payment via approval from a claim"
     some Claim can reach Paid
+}
+
+verify {
+  instances Claim = 3
 }

@@ -16,8 +16,9 @@ business AsIsExpense {
   // Departments / roles involved (the "who does it" of transitions)
   actor Employee, Manager, Finance
 
-  // The world to verify: 3 claims flowing concurrently (a small world is enough)
-  case Claim = 0..2
+  // The business entity flowing through the process. The verify block below
+  // sets the world to 3 claims flowing concurrently (a small world is enough).
+  entity Claim
 
   // ── Current process (one-to-one with the flow diagram from interviews) ──
   process Claim {
@@ -51,4 +52,8 @@ business AsIsExpense {
   // ── Goal (confirming the current process can complete the business) ────
   goal CanComplete "The process can complete from claim to payment"
     some Claim can reach Paid
+}
+
+verify {
+  instances Claim = 3
 }

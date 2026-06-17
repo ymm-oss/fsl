@@ -57,7 +57,7 @@ def test_stage_helper_remains_allowed_in_business_dialect(tmp_path):
     src = """
 business StageBusinessOk {
   actor Manager
-  case Return = 0..1
+  entity Return
   process Return {
     stages Requested, Approved
     initial Requested
@@ -66,6 +66,9 @@ business StageBusinessOk {
   policy P-1 "stage helper is business-only" invariant {
     forall c: Return { stage(c) == Requested or stage(c) == Approved }
   }
+}
+verify {
+  instances Return = 2
 }
 """
     path = tmp_path / "stage_business_ok.fsl"

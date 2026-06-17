@@ -723,7 +723,7 @@ response policies and goals:
 ```fsl
 business ReturnHandling {
   actor Customer, Manager
-  case Return = 0..2
+  entity Return
   process Return {
     stages Requested, Approved, Rejected, Refunded
     initial Requested
@@ -736,6 +736,10 @@ business ReturnHandling {
     every Return in Requested must eventually be Approved or Rejected or Refunded
   goal AllSettled "all cases can be completed"
     all Return can be Refunded or Rejected
+}
+
+verify {
+  instances Return = 3
 }
 ```
 

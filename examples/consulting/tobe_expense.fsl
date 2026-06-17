@@ -15,7 +15,7 @@ business ToBeExpense {
 
   actor Employee, Manager, Finance, System
 
-  case Claim = 0..2
+  entity Claim
 
   process Claim {
     stages Draft, Submitted, Approved, Rejected, Paid
@@ -42,4 +42,8 @@ business ToBeExpense {
 
   goal CanComplete "The process can complete from claim to payment"
     some Claim can reach Paid
+}
+
+verify {
+  instances Claim = 3
 }

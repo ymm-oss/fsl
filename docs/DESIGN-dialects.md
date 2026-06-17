@@ -163,9 +163,9 @@ Add `business <Name> { ... }` at top level. The expander
 ```fsl
 business ReturnHandling {
   actor Customer, Manager                  // → enum Actor { Customer, Manager } (an informational annotation, omittable if not referenced)
-  case Return = 0..2                       // → type Return = 0..2
+  entity Return                            // → entity sort; verification size lives in verify
 
-  process Return {                         // one process per case type
+  process Return {                         // one process per entity type
     stages Requested, Approved, Rejected, Refunded   // → enum ReturnStage
     initial Requested
     transition approve  Requested -> Approved by Manager
@@ -177,7 +177,7 @@ business ReturnHandling {
                                            //   +1 on the refund transition + a consistency invariant
 
   policy PAY-1 "refunds only for approved cases" invariant {
-    // stage(c) is available in expressions (c is a case-type bound variable)
+    // stage(c) is available in expressions (c is an entity-typed bound variable)
     forall c: Return { stage(c) == Refunded => true }   // example
   }
   policy PAY-2 "every request is eventually adjudicated"
@@ -185,11 +185,15 @@ business ReturnHandling {
   goal AllSettled "all cases can complete"
     all Return can be Refunded or Rejected
 }
+
+verify {
+  instances Return = 3
+}
 ```
 
 ### 3.2 Expansion rules
 
-1. `case X = lo..hi` → `type X = lo..hi`.
+1. `entity X` plus `verify { instances X = N }` → `type X = 0..N-1`.
 2. `process X { stages S1..Sn  initial Si  transition t A -> B by Actor }` →
    - `enum XStage { S1, ..., Sn }`
    - `state { x_stage: Map<X, XStage> }` (the variable name is the lowercased
@@ -208,14 +212,14 @@ business ReturnHandling {
    `invariant _kpi_k { k == count(c: X where x_stage(c) == S) }` (automatic).
 4. `policy <ID> "<text>" invariant { expr }` → invariant (with meta).
    `policy ... responds { P ~> Q }` → leadsTo (with meta).
-   `policy ... every <Case> in <Stage> must eventually be <Stage> [or <Stage> ...]`
+   `policy ... every <Entity> in <Stage> must eventually be <Stage> [or <Stage> ...]`
    is a readable alias for the common stage-response rule and expands to
-   `forall c: Case { stage(c) == Source ~> stage(c) == Target1 or ... }`.
+   `forall c: Entity { stage(c) == Source ~> stage(c) == Target1 or ... }`.
    `goal <ID> "<text>" { expr }` → reachable (with meta).
-   `goal ... some <Case> can reach <Stage>` and
-   `goal ... all <Case> can be <Stage> [or <Stage> ...]` are readable aliases
+   `goal ... some <Entity> can reach <Stage>` and
+   `goal ... all <Entity> can be <Stage> [or <Stage> ...]` are readable aliases
    for the common existential/all-cases reachability checks.
-   `stage(c)` in an expression is rewritten to `x_stage[c]` for the case-type
+   `stage(c)` in an expression is rewritten to `x_stage[c]` for the entity-typed
    bound variable c in question (the process is identified from the type of the
    binding; ambiguity is a type error).
 5. The `actor` declaration is a roster (used to validate the `by` of a
