@@ -1,4 +1,4 @@
-# FSL v2.0-lite — Bounded `leadsTo` and Fairness Annotations Implementation Design
+# FSL v2.0-lite — `leadsTo`, Fairness, and Ranked Induction Implementation Design
 
 The first two items of DESIGN-v1.md §10 v2.0. The motivation is DOGFOOD-1 F1 /
 DOGFOOD-2 F7: "eventually Y after X" (a response property) cannot be written with
@@ -14,12 +14,20 @@ leadsTo WaiterGetsLock {
     waiters.contains(p) ~> (holder is some(h) and h == p)
   }
 }
+
+leadsTo LeavesDecayZone {
+  inZone ~> !inZone
+  decreases waterBudgetLeft
+}
 ```
 
 - Add `leadsTo <Name> { <lt> }` as a top-level item.
   `lt := <expr> "~>" <expr> | "forall" binder "{" lt "}"` (forall only on the
   outside, nesting allowed. `~>` is an operator exclusive to the leadsTo block
   and cannot be used in general expressions).
+- A `leadsTo` block may end with `decreases <expr>`. The expression must be
+  integer-valued. It is ignored by the bounded BMC check and used only by
+  `--engine induction` to prove the response unboundedly.
 - `fair` is a prefix modifier on an action definition. Its meaning is **weak
   fairness** (if that instance stays continuously enabled, it is eventually
   executed).
@@ -116,6 +124,25 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 checked **independently for each binding** (if even one has a counterexample it
 is violated; the counterexample JSON includes `bindings`).
 
+### 2.6 Ranked Induction with `decreases`
+
+For `leadsTo L { P ~> Q decreases M }`, induction first runs the ordinary
+bounded base check. After all invariants are proved inductive, it discharges the
+response over the invariant abstraction with these obligations, per outer
+`forall` binding:
+
+```
+Inv(s) ∧ P(s) ∧ ¬Q(s)              ⇒ M(s) >= 0
+Inv(s) ∧ P(s) ∧ ¬Q(s)              ⇒ some action is enabled
+Inv(s) ∧ P(s) ∧ ¬Q(s) ∧ T_a(s,s') ⇒ Q(s') ∨ (P(s') ∧ M(s') < M(s))
+```
+
+The final `P(s')` conjunct is intentionally stronger than a bare decrease check:
+it keeps the response obligation in the ranked region until `Q` holds. Without
+that persistence condition, a trigger could disappear before `Q` and the rank
+would no longer justify the original response property. Fairness annotations are
+not used by the ranking proof; every enabled action must make ranked progress.
+
 ## 3. Positioning and Result of the Check
 
 - **violated (counterexample found) is a definite violation** (the lasso is a
@@ -124,11 +151,10 @@ is violated; the counterexample JSON includes `bindings`).
   depth K"** (a lasso with a prefix exceeding K is not seen). It has the same
   positioning as `verified` for invariants, and puts `checked_to_depth` in the
   `leads_to` field.
-- With `--engine induction` too, leadsTo performs **the same check on the base
-  case (BMC) side**, and `proved` remains a claim about invariants (the
-  unbounded-depth proof of leadsTo is out of scope for the v2.0 body). The
-  `leads_to` of the `proved` output also carries `checked_to_depth`, and the note
-  distinguishes them.
+- With `--engine induction`, unranked `leadsTo` performs **the same check on the
+  base case (BMC) side** and remains bounded. A ranked `leadsTo` whose
+  obligations in §2.6 are unsat is reported as an unbounded ranking proof in its
+  `leads_to` entry.
 
 ## 4. JSON
 
@@ -165,11 +191,32 @@ is violated; the counterexample JSON includes `bindings`).
 }
 ```
 
+For a ranked response proved by induction:
+
+```json
+"leads_to": {
+  "LeavesDecayZone": {
+    "checked_to_depth": 1,
+    "proved": true,
+    "completeness": "unbounded",
+    "proof": "ranking",
+    "decreases": "waterBudgetLeft"
+  }
+}
+```
+
+If a ranking obligation fails, induction returns `unknown_cti` with
+`violation_kind: "leadsTo_rank"`, `rank_failure` (`unbounded_below`,
+`deadlock`, `non_decreasing_action`, or `pending_not_preserved`), the relevant
+binding, a logical-state CTI, and the selected action/measure values when the
+failure is a transition-progress failure.
+
 ## 5. Implementation Notes
 
-- **grammar.py**: `leadsTo_def`, `~>` (`LEADSTO_OP`), the `fair` modifier.
-  AST: `("leadsto", name, binders, P, Q, loc)` (binders is the list of the outer
-  forall), `fair: bool` on the action.
+- **grammar.py**: `leadsTo_def`, `~>` (`LEADSTO_OP`), optional
+  `decreases <expr>`, and the `fair` modifier.
+  AST: `("leadsto", name, binders, P, Q, loc, meta, decreases)` (binders is the
+  list of the outer forall), `fair: bool` on the action.
 - **model.py**: propagate `leadstos` into the spec dict, and `fair` into the
   action/instance. The whitelist validation is unchanged. Make the grammar such
   that `~>` appearing in a general expression is a parse error (do not put it in
@@ -187,6 +234,11 @@ is violated; the counterexample JSON includes `bindings`).
     (expr_cache works).
   - The deadlock stall (§2.4) reuses the enabled expression of the existing
     deadlock check.
+  - Ranked induction (§2.6) is checked after invariant induction succeeds:
+    lower-bound, no-deadlock, and per-action progress queries are issued per
+    `leadsTo` binding. Failure is `unknown_cti` because it is a failed proof
+    obligation over the invariant abstraction, not necessarily a reachable
+    bounded violation.
   - Performance: one query per leadsTo binding. The expression size is
     O(K² · (|P|+|Q|+|Fair|·K)). For K=8 and a number of bindings on the order of
     the capacity, there is no problem (it runs on top of PERF1's shared
@@ -214,8 +266,13 @@ is violated; the counterexample JSON includes `bindings`).
    comparison would miss and make it a regression test).
 7. **existing compatibility**: the verify/proved output of a spec without
    leadsTo is completely unchanged.
-8. **combined with induction**: `--engine induction` of a spec with leadsTo
-   returns proved + leads_to.checked_to_depth.
+8. **combined with induction (unranked)**: `--engine induction` of a spec with
+   unranked leadsTo returns proved + leads_to.checked_to_depth.
+9. **ranked induction**: a response with `decreases` returns
+   leads_to.<name>.proved + completeness:"unbounded" at a depth too small to
+   represent full completion.
+10. **bad ranking diagnostics**: non-decreasing and negative measures return
+   `unknown_cti` / `leadsTo_rank` with action/measure or lower-bound detail.
 
 ## 7. Scenario-ization of leadsTo (Implemented in v2.1)
 

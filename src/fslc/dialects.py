@@ -81,7 +81,7 @@ def _with_meta(item, meta):
     if tag in ("invariant", "reachable"):
         return item[:4] + (meta,)
     if tag == "leadsto":
-        return item[:6] + (meta,)
+        return item[:6] + (meta,) + item[7:]
     return item
 
 

@@ -8,11 +8,16 @@ edge cases.
 ## 1. Goals and non-goals
 
 - **Goal**: **unbounded-depth proof** of invariants (user-defined + automatic
-  `_bounds_*`). On success, `result: "proved"`. It promotes BMC's "no violation
-  up to depth K" to "holds in every reachable state."
+  `_bounds_*`) and, when a `leadsTo` declares `decreases <expr>`, an unbounded
+  ranking proof of that response property. On success, `result: "proved"`.
+  Invariants promote BMC's "no violation up to depth K" to "holds in every
+  reachable state"; ranked `leadsTo` promotes the bounded response check to a
+  well-founded progress proof.
 - **Non-goals (not handled in v1.1)**:
   - Proof of `reachable` (`reachable` may remain a bounded witness search;
     induction also searches for a witness the same way as BMC — depth reuses `--depth`)
+  - Unbounded proof of unranked `leadsTo` (it remains a bounded lasso/stutter
+    check attached as `leads_to.<name>.checked_to_depth`)
   - Inductive proof of `ensures` (ensures is a single-transition property, so
     induction is unnecessary — see §5)
   - IC3/PDR (no automatic strengthening from CTIs. Returning the CTI to the LLM
@@ -63,7 +68,23 @@ Important: the premise Inv(σ_t) of the per-invariant decision may assume the
 **conjunction of all invariants** (mutual induction; standard and sound — each is
 proven under a stronger premise than simultaneous induction of all).
 
-### 2.3 Soundness notes (for implementers)
+### 2.3 Ranked leadsTo step case
+
+After the invariant step case succeeds, each `leadsTo L { P ~> Q decreases M }`
+is checked per outer binding against the invariant abstraction:
+
+```
+Inv(s) ∧ P(s) ∧ ¬Q(s)              ⇒ M(s) >= 0
+Inv(s) ∧ P(s) ∧ ¬Q(s)              ⇒ enabled(s)
+Inv(s) ∧ P(s) ∧ ¬Q(s) ∧ T_a(s,s') ⇒ Q(s') ∨ (P(s') ∧ M(s') < M(s))
+```
+
+`M` must be integer-valued. The `P(s')` part is required for soundness: a
+ranking argument only proves the response while the pending obligation remains
+inside the ranked region. Fairness is not consulted here; every enabled action
+must make progress or establish `Q`.
+
+### 2.4 Soundness notes (for implementers)
 
 - Do **not** put Init into the premise (doing so makes it the same as BMC and not a proof).
 - Include `_bounds_*` in Inv too. Since variables of bounded type become free
@@ -83,6 +104,10 @@ proven under a stronger premise than simultaneous induction of all).
   property). The `deadlock` field is not included in the output of
   `--engine induction`.
 - Action coverage also uses the base-case (BMC) result as-is.
+- Ranked `leadsTo` has its own no-deadlock obligation in the pending region
+  (`P ∧ ¬Q`). This is separate from ordinary deadlock reporting because it is a
+  proof obligation over invariant states, returned as `unknown_cti` /
+  `violation_kind:"leadsTo_rank"` if it fails.
 
 ## 3. Extracting the CTI (counterexample to induction)
 
@@ -145,12 +170,31 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
 }
 ```
 
+If a ranked `leadsTo` is proved, the ordinary `leads_to` entry is upgraded:
+
+```json
+"leads_to": {
+  "ReachDone": {
+    "checked_to_depth": 1,
+    "proved": true,
+    "completeness": "unbounded",
+    "proof": "ranking",
+    "decreases": "(5 - x)"
+  }
+}
+```
+
 - The exit code of `proved` is 0.
 - If a reachable is not found, `reachable_failed` (exit 1) takes **precedence**
   over proved as before (0 only when all properties hold).
 - `proved` is the only induction result with `completeness:"unbounded"`.
   `unknown_cti` and base-case failures remain `completeness:"bounded"` and carry
   `checked_to_depth` for the base BMC depth.
+- Failed ranked `leadsTo` obligations return `unknown_cti` with
+  `violation_kind:"leadsTo_rank"` and `rank_failure` naming the failed
+  obligation (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
+  `pending_not_preserved`). Transition-progress failures include `last_action`,
+  `measure_before`, `measure_after`, and a two-state CTI.
 - Consistency with the existing schema: the `violated` shape is completely
   identical to BMC (it is so automatically because the base case returns it).
 
@@ -165,9 +209,11 @@ New function `prove(spec, k_ind, base_depth, deadlock_mode)`:
    (a suffix such as `@ind{t}` to avoid name collisions), and push Inv(σ_0..σ_{k-1})
    and T onto a shared solver.
 3. Per invariant: push / ¬inv_i(σ_k) / check / pop.
-4. All unsat → reshape the verify result dict to `result: "proved"` and return.
+4. All invariant checks unsat → check ranked `leadsTo` obligations, if any.
+   Failed ranking obligations return `unknown_cti`.
+5. All unsat → reshape the verify result dict to `result: "proved"` and return.
    Any sat → extract the CTI and `unknown_cti`.
-5. When incrementing k, you can reuse by **only adding** σ_{k+1} and Inv(σ_k)·
+6. When incrementing k, you can reuse by **only adding** σ_{k+1} and Inv(σ_k)·
    T(σ_k, σ_{k+1}) (do not rebuild the solver). However, "adding Inv(σ_k) to the
    premise" must be done after the pop so as not to conflict with the ¬inv_i check at k.
 
@@ -206,6 +252,10 @@ Implementation notes:
    implementation (see the comment). If hard to construct, the k=2 case may be
    substituted by verifying "with Aux removed, Sync is tried at k=2..4 and all
    are sat" (= that the k iteration runs).
+7. **ranked leadsTo proof**: `leadsTo ReachFive { x < 5 ~> x == 5 decreases 5 - x }`
+   proves `leads_to.ReachFive.completeness == "unbounded"` at `--depth 1`.
+8. **ranking diagnostics**: `decreases x` reports `non_decreasing_action` with
+   action/measure before-after; `decreases -x` reports `unbounded_below`.
 
 ## 7. Reflecting back into DESIGN-v1.md
 

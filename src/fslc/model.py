@@ -614,6 +614,8 @@ def check_stage_usage(items):
                     _check_no_stage_expr(binder[3])
             _check_no_stage_expr(it[3])
             _check_no_stage_expr(it[4])
+            if len(it) > 7 and it[7] is not None:
+                _check_no_stage_expr(it[7])
         elif tag == "__acceptance":
             for ac in it[1]:
                 for step in ac.get("steps", []):
@@ -998,6 +1000,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "P": it[3],
                 "Q": it[4],
                 "loc": it[5],
+                "decreases": it[7] if len(it) > 7 else None,
             }, it[6] if len(it) > 6 else None))
         elif tag == "invariant":
             invariants.append(_with_meta({
