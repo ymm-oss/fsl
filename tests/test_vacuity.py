@@ -119,6 +119,54 @@ def test_frozen_ghost_tautology_warning():
     assert warning["recommended_action"] == "run mutate to check kill-rate"
 
 
+def test_urgency_freeze_warning_for_always_enabled_urgent_deadline():
+    src = """
+    requirements UrgencyFreezeTrap {
+      state { pending: Bool }
+      init { pending = true }
+      action spin() { pending = pending }
+      time {
+        urgent spin
+        age age while pending
+      }
+      requirement NFR-1 "deadline" { deadline age <= 0 }
+    }
+    """
+    out = verify(_spec(src), 3, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    warning = next(w for w in out["warnings"] if w.get("kind") == "urgency_freeze")
+    assert warning["name"] == "tick"
+    assert "'spin'" in warning["message"]
+    assert "generated action 'tick' is never enabled" in warning["message"]
+    assert "deadline invariant(s)" in warning["message"]
+    assert "deadline-urgency pattern" in warning["hint"]
+    assert warning["requirement"]["id"] == "NFR-1"
+
+
+def test_deadline_urgency_pattern_not_flagged_as_freeze():
+    src = """
+    requirements DeadlineUrgencyPattern {
+      const SLA = 1
+      state { pending: Bool }
+      init { pending = true }
+      action respond_due() {
+        requires pending
+        requires age >= SLA
+        pending = false
+      }
+      time {
+        urgent respond_due
+        age age while pending
+      }
+      requirement NFR-1 "deadline" { deadline age <= SLA }
+    }
+    """
+    out = verify(_spec(src), 4, deadlock_mode="ignore")
+    assert out["result"] == "verified"
+    assert out["action_coverage"]["tick"] is True
+    assert "urgency_freeze" not in _kinds(out)
+
+
 def test_frozen_plus_dynamic_nontrivial_invariant_not_flagged():
     src = """
     spec FrozenPlusDynamic {
@@ -306,6 +354,7 @@ def test_verified_sample_corpus_has_no_vacuity_false_positives():
             "vacuous_leadsto",
             "always_true_requires",
             "tautology_over_frozen",
+            "urgency_freeze",
         }]
         assert vacuity == [], (path, vacuity)
     assert checked > 0

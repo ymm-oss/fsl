@@ -207,6 +207,10 @@ _ALWAYS_TRUE_REQUIRES_HINT = (
 _TAUTOLOGY_OVER_FROZEN_HINT = (
     "make such variables 'const', or add the action that should modify them"
 )
+_URGENCY_FREEZE_HINT = (
+    "use the deadline-urgency pattern: make only the action guarded by deadline "
+    "arrival (for example, requires age >= K) urgent"
+)
 
 
 def _requirement(source):
@@ -2392,6 +2396,14 @@ def _phys_vars_for_logicals(spec, logicals):
     return [p for p in spec["phys_vars"] if p["logical"] in logicals]
 
 
+def _implicit_inv_constraints(spec, state, expr_cache):
+    return [
+        _inv_constraint(inv, state, spec, expr_cache)
+        for inv in spec["invariants"]
+        if inv.get("implicit")
+    ]
+
+
 def _is_tautology_over_frozen(spec, inv, frozen_refs, init_model, init_state):
     state = make_state(spec, f"frozen_taut_{inv['name']}")
     solver = z3.Solver()
@@ -2399,9 +2411,7 @@ def _is_tautology_over_frozen(spec, inv, frozen_refs, init_model, init_state):
         phys = p["phys"]
         solver.add(state[phys] == init_model.eval(init_state[phys], model_completion=True))
     expr_cache = {}
-    for implicit in spec["invariants"]:
-        if implicit.get("implicit"):
-            solver.add(_inv_constraint(implicit, state, spec, expr_cache))
+    solver.add(*_implicit_inv_constraints(spec, state, expr_cache))
     with _eval_cache_scope(expr_cache, id(state)):
         solver.add(z3.Not(eval_expr(inv["expr"], state, {}, spec)))
     return solver.check() == z3.unsat
@@ -2442,11 +2452,147 @@ def _frozen_tautology_candidates(spec, invariants=None):
     return pending
 
 
+def _deadline_invariants(spec, invariants):
+    selected_invariants = {inv["name"] for inv in invariants}
+    return [
+        inv for inv in spec.get("user_invariants", [])
+        if (
+            inv["name"] in selected_invariants
+            and isinstance(inv.get("name"), str)
+            and inv["name"].startswith("_deadline_")
+            and not inv.get("implicit")
+        )
+    ]
+
+
+def _generated_tick_action(spec):
+    if "tick" not in set(spec.get("generated_names") or []):
+        return None
+    ticks = [act for act in spec.get("actions", []) if act["name"] == "tick"]
+    if len(ticks) != 1:
+        return None
+    return ticks[0]
+
+
+def _tick_urgent_expr(tick):
+    requires = tick.get("requires") or []
+    if len(requires) != 1:
+        return None
+    expr = requires[0]["expr"]
+    if not (isinstance(expr, tuple) and expr[0] == "not"):
+        return None
+    return expr[1]
+
+
+def _state_root_expr(expr):
+    if not isinstance(expr, tuple):
+        return None
+    if expr[0] == "var":
+        return expr[1]
+    if expr[0] == "index":
+        base = expr[1]
+        if isinstance(base, str):
+            return base
+        if isinstance(base, tuple) and base[0] == "var":
+            return base[1]
+    return None
+
+
+def _deadline_age_refs(deadlines):
+    refs = set()
+    for inv in deadlines:
+        expr = inv["expr"]
+        while isinstance(expr, tuple) and expr[0] == "forall":
+            expr = expr[2]
+        if not (isinstance(expr, tuple) and expr[0] == "bin" and expr[1] == "<="):
+            return None
+        root = _state_root_expr(expr[2])
+        if root is None:
+            return None
+        refs.add(root)
+    return refs
+
+
+def _non_tick_assigns_any(spec, logicals):
+    for action in spec.get("actions", []):
+        if action["name"] == "tick":
+            continue
+        if _assigned_state_roots(action.get("stmts", [])) & logicals:
+            return True
+    return False
+
+
+def _urgency_expr_holds_initially(spec, urgent_expr):
+    state = make_ind_state(spec, "urgency_init")
+    expr_cache = {}
+    solver = z3.Solver()
+    solver.add(*init_constraints(spec, state))
+    solver.add(*_implicit_inv_constraints(spec, state, expr_cache))
+    with _eval_cache_scope(expr_cache, id(state)):
+        solver.add(z3.Not(eval_expr(urgent_expr, state, {}, spec)))
+    return solver.check() == z3.unsat
+
+
+def _urgency_expr_is_inductive(spec, urgent_expr):
+    instances = build_instances(spec)
+    if not instances:
+        return False
+    cur = make_ind_state(spec, "urgency_cur")
+    nxt = make_ind_state(spec, "urgency_next")
+    choice = z3.Int("__urgency_freeze_choice")
+    expr_cache = {}
+    solver = z3.Solver()
+    solver.add(choice >= 0, choice < len(instances))
+    solver.add(*_implicit_inv_constraints(spec, cur, expr_cache))
+    with _eval_cache_scope(expr_cache, id(cur)):
+        solver.add(eval_expr(urgent_expr, cur, {}, spec))
+    solver.add(transition(spec, instances, cur, nxt, choice, expr_cache))
+    with _eval_cache_scope(expr_cache, id(nxt)):
+        solver.add(z3.Not(eval_expr(urgent_expr, nxt, {}, spec)))
+    return solver.check() == z3.unsat
+
+
+def _urgency_freeze_candidate(spec, invariants):
+    deadlines = _deadline_invariants(spec, invariants)
+    if not deadlines:
+        return None
+    tick = _generated_tick_action(spec)
+    if tick is None:
+        return None
+    urgent_expr = _tick_urgent_expr(tick)
+    if urgent_expr is None:
+        return None
+    deadline_age_refs = _deadline_age_refs(deadlines)
+    if not deadline_age_refs:
+        return None
+    if _non_tick_assigns_any(spec, deadline_age_refs):
+        return None
+    if not _urgency_expr_holds_initially(spec, urgent_expr):
+        return None
+    if not _urgency_expr_is_inductive(spec, urgent_expr):
+        return None
+
+    generated = tick.get("generated") or {}
+    urgent_actions = tuple(generated.get("urgent_actions") or ())
+    return {
+        "kind": "urgency_freeze",
+        "name": "tick",
+        "source": deadlines[0],
+        "loc": (tick.get("requires") or [{}])[0].get("loc") or tick.get("loc"),
+        "urgent_actions": urgent_actions,
+        "deadlines": tuple(inv["name"] for inv in deadlines),
+        "deadline_age_refs": tuple(sorted(deadline_age_refs)),
+    }
+
+
 def _vacuity_candidates(spec, invariants=None, leadstos=None):
     pending = []
     if invariants is None:
         invariants = spec.get("invariants", [])
     pending.extend(_frozen_tautology_candidates(spec, invariants))
+    urgency_freeze = _urgency_freeze_candidate(spec, invariants)
+    if urgency_freeze is not None:
+        pending.append(urgency_freeze)
     selected_invariants = {inv["name"] for inv in invariants}
     for inv in spec.get("user_invariants", []):
         if inv["name"] not in selected_invariants:
@@ -2571,6 +2717,31 @@ def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, covera
                     "because every state variable it depends on is never modified by any action"
                 ),
                 _TAUTOLOGY_OVER_FROZEN_HINT,
+                item.get("source"),
+                spec,
+            ))
+        elif item["kind"] == "urgency_freeze":
+            urgent_actions = item.get("urgent_actions") or ()
+            if urgent_actions:
+                urgent_text = ", ".join(
+                    f"'{display_label(name, spec)}'" for name in urgent_actions
+                )
+            else:
+                urgent_text = "the generated urgent condition"
+            deadline_names = ", ".join(
+                f"'{display_label(name, spec)}'" for name in item.get("deadlines", ())
+            )
+            findings.append(_vacuity_warning(
+                "urgency_freeze",
+                item["name"],
+                item.get("loc"),
+                (
+                    f"urgent condition for action(s) {urgent_text} holds initially "
+                    "and is preserved by every action, so generated action 'tick' "
+                    "is never enabled; time is frozen and deadline invariant(s) "
+                    f"{deadline_names} are vacuously satisfied"
+                ),
+                _URGENCY_FREEZE_HINT,
                 item.get("source"),
                 spec,
             ))
@@ -3133,7 +3304,7 @@ def _bmc_explore(
         if pending_vacuity:
             still_pending = []
             for item in pending_vacuity:
-                if item["kind"] == "tautology_over_frozen":
+                if item["kind"] in {"tautology_over_frozen", "urgency_freeze"}:
                     still_pending.append(item)
                     continue
                 with _eval_cache_scope(expr_cache, id(states[t])):

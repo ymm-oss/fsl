@@ -172,8 +172,9 @@ action's clauses are inherited copies from its components and are checked by
 verifying the component spec on its own), and **an invariant that depends only on a
 frozen state variable no action ever assigns to and is dynamically always true**
 (`tautology_over_frozen` — a dead ghost; make it `const`, or suspect a missing
-action that should change it). `--vacuity error` gives `result:"error"`;
-`--vacuity ignore` disables it.
+action that should change it), and a generated deadline `tick` proven dead because
+urgency freezes time (`urgency_freeze`). `--vacuity error` gives
+`result:"error"`; `--vacuity ignore` disables it.
 
 ## 7. CLI and JSON essentials
 
@@ -425,8 +426,10 @@ in each layer's documents).
 
 If you make an action that can be enabled at all times (e.g. the response itself)
 `urgent`, **time never advances at all and the deadline is vacuously verified for
-any K** (even `deadline <= 0` is green). The correct form is to **make only a
-guarded action that becomes enabled only at the deadline `urgent`**:
+any K** (even `deadline <= 0` is green). `fslc verify --vacuity` emits
+`kind:"urgency_freeze"` when this freeze is proven by the generated `tick` guard
+being initial and inductive. The correct form is to **make only a guarded action
+that becomes enabled only at the deadline `urgent`**:
 
 ```fsl
 time {

@@ -6,6 +6,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Vacuity) `fslc verify --vacuity` now emits `kind:"urgency_freeze"` for the
+  requirements time/deadline trap where Z3 proves the generated urgent condition
+  holds initially and is preserved by every action, so generated `tick` is dead
+  and deadline invariants are vacuous.
 - (Verifier CLI) `fslc verify --exclude-property <Name>` is repeatable and
   skips named invariants, `trans`, `leadsTo`, and `reachable` properties in both
   BMC and induction runs. It composes with `--property`; exclusion wins when both

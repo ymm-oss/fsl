@@ -90,6 +90,11 @@ The `time` block (at most one inside `requirements`):
 - Urgency is a **modeling premise** ("the system does not defer work when idle"). If
   urgent is not specified, most deadlines fail with a starvation counterexample — that
   is the check correctly pointing out that "there is no scheduling premise".
+- The inverse pitfall is the vacuous-SLA trap: if the urgent-enabled condition is
+  provably true in all reachable states, `tick` is never enabled, time freezes, and
+  deadline invariants are hollow. `fslc verify --vacuity` reports
+  `kind:"urgency_freeze"` only for the sound case where Z3 proves that condition
+  initially and inductively.
 - The counterexample trace of a deadline violation lines up ticks (the waiting time is
   visible).
 - The inductive proof often needs time-budget auxiliary invariants (of the
