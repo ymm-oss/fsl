@@ -116,11 +116,12 @@ requirements ReturnSystemReq {
 2. `branches { when <cond> { stmts... } maps <abs-correspondence> ... }` →
    split the action per branch: `submit__b1`, `submit__b2` (the display names
    are of the form `submit[a <= AUTO_LIMIT]` — the display-name map reuses the
-   compose mechanism). Each split action = the original requires + the when
-   condition + the branch body. The when conditions are **not checked for
-   exhaustiveness or exclusivity** (left to the ordinary enabled semantics:
-   if they overlap, both are enabled; if there is a gap, it is disabled — the
-   coverage diagnostic detects it).
+   compose mechanism). Diagnostics for a split branch keep the internal name and
+   add `display_name` when the branch label is more useful to a human. Each split
+   action = the original requires + the when condition + the branch body. The
+   when conditions are **not checked for exhaustiveness or exclusivity** (left to
+   the ordinary enabled semantics: if they overlap, both are enabled; if there is
+   a gap, it is disabled — the coverage diagnostic detects it).
 3. `maps <abs_action>(<args>) | stutter` (action modifier / inside branches) →
    compose it with the map group in the `implements` block to **internally
    generate a refinement AST**.

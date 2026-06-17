@@ -234,6 +234,13 @@ mutated / explained / typestate,
 
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.
 
+Diagnostics that identify a faithfulness/intent gap may also carry
+`faithfulness_class` plus `recommended_action`. Current classes are:
+`partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`, and
+`liveness_not_refined`. The tag is derived from existing `result` / `kind` /
+`violation_kind` fields and is additive; consumers should keep reading the
+original classification fields for detail.
+
 `verify` / `verify --engine induction` results include `checked_to_depth` and
 `cost: {"elapsed_s": ...}`. BMC `verified` is explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
@@ -252,14 +259,18 @@ When a leadsTo is declared and the result is `verified` / `proved`,
 "action_coverage": {
   "checkout": {
     "covered": false,
+    "name": "checkout",
     "blocking_requires": [ {"loc": {"line": 27}, "text": "requires stock[i] > 0"} ],
-    "hint": "these requires clauses are unsatisfiable at every step up to depth 8; ..."
+    "hint": "never enabled within depth 8; blocking requires: requires stock[i] > 0; ...",
+    "faithfulness_class": "intent_unexercised",
+    "recommended_action": "add a single-shot reachable for the action / raise --depth"
   }
 }
 ```
 
-The blocking requires clause is identified by the unsat core. The next move is
-one of: weaken it / add an action that establishes it / raise the depth.
+The blocking requires clause is identified by a minimized unsat core when that is
+cheap. For requirements `branches`, a false coverage diagnostic keeps the
+internal split-action `name` and adds `display_name`.
 
 For `reachable_failed`, each `unreached` entry carries:
 

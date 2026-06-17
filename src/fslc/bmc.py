@@ -10,8 +10,10 @@ from contextlib import contextmanager
 
 import z3
 
+from .diagnostics import with_faithfulness
 from .model import (
     FslError,
+    annotate_display_name,
     binder_range,
     display_keyed,
     display_label,
@@ -1654,11 +1656,12 @@ def _build_trace(model, states, choices, instances, spec, upto):
             idx = model.eval(choices[k - 1], model_completion=True).as_long()
             inst = instances[idx]
             act = inst["action_def"]
-            entry["action"] = {
-                "name": display_label(inst["action"], spec),
+            action_label = display_label(inst["action"], spec)
+            entry["action"] = annotate_display_name({
+                "name": action_label,
                 "params": {pk: _display_param(pk, pv, act, spec)
                            for pk, pv in inst["binds"].items()},
-            }
+            }, inst["action"], spec)
             if act.get("loc"):
                 entry["action"]["loc"] = act["loc"]
             if prev_logical is not None:
@@ -1688,10 +1691,10 @@ def _last_action(model, choices, instances, step, spec):
     idx = model.eval(choices[step - 1], model_completion=True).as_long()
     inst = instances[idx]
     act = inst["action_def"]
-    la = {
+    la = annotate_display_name({
         "name": display_label(inst["action"], spec),
         "params": {pk: _display_param(pk, pv, act, spec) for pk, pv in inst["binds"].items()},
-    }
+    }, inst["action"], spec)
     if act.get("loc"):
         la["loc"] = act["loc"]
     return la
@@ -2596,6 +2599,59 @@ def _display_bindings(binds, inst, spec):
     return {pk: _display_param(pk, pv, act, spec) for pk, pv in binds.items()}
 
 
+def _requires_core_unsat(s, reqs, state, binds, spec, expr_cache):
+    s.push()
+    with _eval_cache_scope(expr_cache, id(state)):
+        for req in reqs:
+            b = dict(binds)
+            s.add(eval_expr(req["expr"], state, b, spec))
+    unsat = s.check() == z3.unsat
+    s.pop()
+    return unsat
+
+
+def _minimize_requires_core(s, core, state, binds, spec, expr_cache):
+    minimal = list(core)
+    changed = True
+    while changed and len(minimal) > 1:
+        changed = False
+        for idx in range(len(minimal)):
+            trial = minimal[:idx] + minimal[idx + 1:]
+            if trial and _requires_core_unsat(s, trial, state, binds, spec, expr_cache):
+                minimal = trial
+                changed = True
+                break
+    return minimal
+
+
+def _blocking_requires_hint(entries, depth):
+    if not entries:
+        return _COVERAGE_HINT.replace("K", str(depth))
+
+    factors = []
+    for entry in entries:
+        text = entry.get("text")
+        if text:
+            factors.append(text)
+            continue
+        loc = entry.get("loc") or {}
+        line = loc.get("line")
+        factors.append(f"line {line}" if line else "requires clause")
+
+    seen = set()
+    summary = []
+    for factor in factors:
+        if factor in seen:
+            continue
+        seen.add(factor)
+        summary.append(factor)
+
+    return (
+        f"never enabled within depth {depth}; blocking requires: "
+        f"{'; '.join(summary)}; weaken a guard, add a setup action, or increase --depth"
+    )
+
+
 def _diagnose_action_coverage(s, aname, instance_idxs, instances, states, depth, spec, expr_cache,
                               source_lines=None):
     """At depth K, find blocking requires for an uncovered action via unsat core."""
@@ -2630,6 +2686,8 @@ def _diagnose_action_coverage(s, aname, instance_idxs, instances, states, depth,
         s.pop()
 
         if blocking:
+            blocking = _minimize_requires_core(
+                s, blocking, states[t], binds, spec, expr_cache)
             instance_cores.append(blocking)
             instance_bindings.append((inst, binds))
 
@@ -2656,13 +2714,16 @@ def _diagnose_action_coverage(s, aname, instance_idxs, instances, states, depth,
         chosen_binds = instance_bindings[0][1]
         use_bindings = len(instance_cores) > 1
 
+    blocking_entries = [
+        _requires_blocking_entry(r, source_lines) for r in chosen_core
+    ]
     out = {
         "covered": False,
-        "blocking_requires": [
-            _requires_blocking_entry(r, source_lines) for r in chosen_core
-        ],
-        "hint": _COVERAGE_HINT.replace("K", str(depth)),
+        "name": aname,
+        "blocking_requires": blocking_entries,
+        "hint": _blocking_requires_hint(blocking_entries, depth),
     }
+    annotate_display_name(out, aname, spec)
     if use_bindings:
         out["bindings"] = _display_bindings(chosen_binds, chosen_inst, spec)
     return out
@@ -2719,9 +2780,9 @@ def _display_scenario(scenario, spec):
 
 
 def _display_output(result, spec):
+    out = with_faithfulness(result)
     if not spec.get("display_names"):
-        return result
-    out = dict(result)
+        return out
     if "invariants_checked" in out:
         out["invariants_checked"] = [display_label(n, spec) for n in out["invariants_checked"]]
     if "transitions_checked" in out:
@@ -2735,7 +2796,11 @@ def _display_output(result, spec):
     if "leads_to" in out:
         out["leads_to"] = display_keyed(out["leads_to"], spec)
     if "invariant" in out:
-        out["invariant"] = display_label(out["invariant"], spec)
+        invariant = out["invariant"]
+        displayed = display_label(invariant, spec)
+        out["invariant"] = displayed
+        if displayed != invariant:
+            out.setdefault("internal_invariant", invariant)
     if "trans" in out:
         out["trans"] = display_label(out["trans"], spec)
     if "unreached" in out:

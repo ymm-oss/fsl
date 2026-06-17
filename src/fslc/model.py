@@ -814,6 +814,33 @@ def display_label(name, spec):
     return name
 
 
+def display_name_for(name, spec):
+    """Return the human display label for an internal name, if it differs."""
+    label = display_label(name, spec)
+    return label if label != name else None
+
+
+def _is_split_action_display(name, display_name):
+    return (
+        isinstance(name, str)
+        and "__b" in name
+        and isinstance(display_name, str)
+        and "[" in display_name
+        and display_name.endswith("]")
+    )
+
+
+def annotate_display_name(entry, name, spec):
+    """Add split-action display/internal names without changing existing fields."""
+    display_name = display_name_for(name, spec)
+    if display_name is None or not _is_split_action_display(name, display_name):
+        return entry
+    entry.setdefault("display_name", display_name)
+    if entry.get("name") != name:
+        entry.setdefault("internal_name", name)
+    return entry
+
+
 def resolve_action_name(name, spec):
     """Resolve a display action label back to the physical action name."""
     dn = spec.get("display_names") or {}

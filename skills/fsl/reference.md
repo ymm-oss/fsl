@@ -245,7 +245,11 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
   `insufficient_depth` (target satisfiable as a state predicate, no witness by K)
   or `over_constrained` (target unsat under type bounds/invariants, with
   `blocking_requires` naming the blocking core).
-- coverage diagnostic: `{covered: false, blocking_requires: [{loc, text}], hint}`.
+- faithfulness diagnostics may add `faithfulness_class` and
+  `recommended_action`: `partial_op_unguarded`, `frozen_only_invariant`,
+  `intent_unexercised`, or `liveness_not_refined`.
+- coverage diagnostic:
+  `{covered: false, name, display_name?, blocking_requires: [{loc, text}], hint}`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
 
 ## 8. Idioms (reuse them as-is)
@@ -382,9 +386,10 @@ requirements ReturnSystemReq {
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — anything other than `requires_failed` means the spec itself is a
   verify violation).
-- The display of a branches split action is `submit[a <= AUTO_LIMIT]`, but **when
-  referenced from a downstream refinement mapping use the internal names
-  `submit__b1`/`submit__b2`** (a current limitation).
+- The display of a branches split action is `submit[a <= AUTO_LIMIT]`.
+  Diagnostics for split branches keep the internal name (`submit__b1`) and add
+  `display_name`; downstream refinement mappings still reference the internal
+  names `submit__b1`/`submit__b2`.
 - Elements inside a requirement automatically get {id, text} metadata.
 
 ### Drawing the layer boundary

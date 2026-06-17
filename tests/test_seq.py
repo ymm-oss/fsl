@@ -133,6 +133,8 @@ def test_empty_pop_head_partial_op_unguarded():
       "action bad_head() {\n    requires queue.head() == 0\n  }", ""), depth=2)
   assert r_pop["result"] == "violated"
   assert r_pop["violation_kind"] == "partial_op"
+  assert r_pop["faithfulness_class"] == "partial_op_unguarded"
+  assert r_pop["recommended_action"] == "add the missing guard / run bounded Monitor (replay)"
   assert r_pop["invariant"] == "_partial_bad_pop"
   assert r_pop["hint"] == "guard the action with requires q.size() > 0 (or bound the index)"
   assert r_pop.get("loc") is not None
