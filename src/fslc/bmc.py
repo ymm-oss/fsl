@@ -1349,6 +1349,150 @@ def _z3_domain_value(kty, value):
     return z3.IntVal(value)
 
 
+def _symmetric_type_names(spec):
+    symmetry = spec.get("symmetry") or {}
+    return [name for name in symmetry if spec["types"].get(name, {}).get("symmetric")]
+
+
+def _type_ref_is_named(ref, type_name):
+    return (
+        isinstance(ref, tuple)
+        and len(ref) >= 2
+        and ref[0] == "named"
+        and ref[1] == type_name
+    )
+
+
+def _type_ref_mentions(ref, type_name, spec):
+    if not isinstance(ref, tuple):
+        return False
+    tag = ref[0]
+    if tag == "named":
+        name = ref[1]
+        if name == type_name:
+            return True
+        info = spec["types"].get(name)
+        if info and info["kind"] == "struct":
+            return any(
+                _type_ref_mentions(field_ref, type_name, spec)
+                for field_ref in info.get("field_refs", {}).values()
+            )
+        return False
+    if tag in ("map", "seq"):
+        return (
+            _type_ref_mentions(ref[1], type_name, spec)
+            or _type_ref_mentions(ref[2], type_name, spec)
+        )
+    if tag in ("set", "option"):
+        return _type_ref_mentions(ref[1], type_name, spec)
+    return False
+
+
+def _type_ref_mentions_any_symmetric(ref, spec):
+    return any(_type_ref_mentions(ref, name, spec) for name in _symmetric_type_names(spec))
+
+
+def _symmetry_values(spec, type_name):
+    info = spec["types"][type_name]
+    if info["kind"] == "domain":
+        return range(info["lo"], info["hi"] + 1)
+    if info["kind"] == "enum":
+        return range(len(info["members"]))
+    return ()
+
+
+def _default_scalar_value(ty):
+    if ty[0] == "bool":
+        return z3.BoolVal(False)
+    return z3.IntVal(0)
+
+
+def _symmetry_option_terms(present, value, inner_ty):
+    visible_value = z3.If(present, value, _default_scalar_value(inner_ty))
+    return [present, visible_value]
+
+
+def _symmetry_map_value_terms(spec, state, name, vty, key):
+    if vty[0] in ("int", "bool", "domain", "enum"):
+        return [z3.Select(state[name], key)]
+    if vty[0] == "option":
+        present = z3.Select(state[f"{name}__present"], key)
+        value = z3.Select(state[f"{name}__value"], key)
+        return _symmetry_option_terms(present, value, vty[1])
+    if vty[0] == "struct":
+        out = []
+        sname = vty[1]
+        for fn, fty in spec["types"][sname]["fields"].items():
+            if fty[0] in ("int", "bool", "domain", "enum"):
+                out.append(z3.Select(state[f"{name}__{fn}"], key))
+            elif fty[0] == "option":
+                present = z3.Select(state[f"{name}__{fn}__present"], key)
+                value = z3.Select(state[f"{name}__{fn}__value"], key)
+                out.extend(_symmetry_option_terms(present, value, fty[1]))
+        return out
+    return []
+
+
+def _symmetry_term_as_int(term):
+    if isinstance(term, z3.ExprRef) and term.sort().kind() == z3.Z3_BOOL_SORT:
+        return z3.If(term, z3.IntVal(1), z3.IntVal(0))
+    return term
+
+
+def _symmetry_lex_le(left, right):
+    left = [_symmetry_term_as_int(t) for t in left]
+    right = [_symmetry_term_as_int(t) for t in right]
+    if not left:
+        return z3.BoolVal(True)
+    cases = []
+    equal_prefix = z3.BoolVal(True)
+    for a, b in zip(left, right):
+        cases.append(z3.And(equal_prefix, a < b))
+        equal_prefix = z3.And(equal_prefix, a == b)
+    cases.append(equal_prefix)
+    return z3.Or(*cases)
+
+
+def _symmetry_rows_for_type(spec, state, type_name):
+    values = list(_symmetry_values(spec, type_name))
+    rows = {value: [] for value in values}
+    if not rows:
+        return []
+
+    refs = spec.get("state_type_refs") or {}
+    for name, ty in spec["state"].items():
+        ref = refs.get(name)
+        if ty[0] == "map" and isinstance(ref, tuple) and ref[0] == "map":
+            key_ref, value_ref = ref[1], ref[2]
+            if not _type_ref_is_named(key_ref, type_name):
+                continue
+            if _type_ref_mentions_any_symmetric(value_ref, spec):
+                continue
+            kty, vty = ty[1], ty[2]
+            for value in values:
+                key = _z3_domain_value(kty, value)
+                rows[value].extend(_symmetry_map_value_terms(spec, state, name, vty, key))
+        elif ty[0] == "set" and isinstance(ref, tuple) and ref[0] == "set":
+            if not _type_ref_is_named(ref[1], type_name):
+                continue
+            elem_ty = ty[1]
+            for value in values:
+                rows[value].append(z3.Select(state[name], _z3_domain_value(elem_ty, value)))
+
+    return [rows[value] for value in values]
+
+
+def _symmetry_canonical_constraint(spec, state):
+    parts = []
+    for type_name in _symmetric_type_names(spec):
+        rows = _symmetry_rows_for_type(spec, state, type_name)
+        if not rows or not rows[0]:
+            continue
+        for left, right in zip(rows, rows[1:]):
+            parts.append(_symmetry_lex_le(left, right))
+    return z3.And(*parts) if parts else z3.BoolVal(True)
+
+
 def _display_map_key(kty, value, spec):
     if kty[0] == "bool":
         return "true" if value else "false"
@@ -1968,6 +2112,7 @@ def _check_leadsto_stutter_at_step(
         s, states, choices, instances, spec, leadsto, extra_binds, t, enabled, expr_cache,
         binding_types):
     dl = _deadlock_from_enabled(enabled)
+    canonical = _symmetry_canonical_constraint(spec, states[t])
     candidates = []
     for p in range(t + 1):
         not_q = [
@@ -1977,6 +2122,7 @@ def _check_leadsto_stutter_at_step(
         p_hold = _eval_at_state(leadsto["P"], states[p], extra_binds, spec, expr_cache)
         candidates.append(z3.And(
             dl,
+            canonical,
             p_hold,
             z3.And(*not_q) if not_q else z3.BoolVal(True),
         ))
@@ -1999,6 +2145,7 @@ def _check_leadsto_stutter_at_step(
         p_hold = _eval_at_state(leadsto["P"], states[p], extra_binds, spec, expr_cache)
         cond = z3.And(
             dl,
+            canonical,
             p_hold,
             z3.And(*not_q) if not_q else z3.BoolVal(True),
         )
@@ -2022,6 +2169,7 @@ def _check_single_leadsto(explored, spec, leadsto):
     K = depth
 
     binding_types = _leadsto_binding_types(leadsto, spec)
+    canonical = [_symmetry_canonical_constraint(spec, states[t]) for t in range(K + 1)]
 
     for extra_binds in expand_leadsto_bindings(leadsto, spec):
         candidates = []
@@ -2040,6 +2188,7 @@ def _check_single_leadsto(explored, spec, leadsto):
                         instances, states, choices, i, j, spec, extra_binds, expr_cache)
                     cond = z3.And(
                         loop,
+                        canonical[i],
                         p_hold,
                         z3.And(*not_q) if not_q else z3.BoolVal(True),
                         fair_ok,

@@ -135,13 +135,48 @@ def enum_member_index(types_meta, member_name):
     _err(f"unknown enum member '{member_name}'", kind="name")
 
 
+def _decl_symmetric(it, meta_index):
+    return (
+        len(it) > meta_index
+        and isinstance(it[meta_index], dict)
+        and bool(it[meta_index].get("symmetric"))
+    )
+
+
+def resolve_type_ref(ty, types, consts=None):
+    """Resolve a type AST while preserving named type identity for metadata."""
+    if ty[0] in ("int", "bool"):
+        return ty
+    if ty[0] == "name":
+        n = ty[1]
+        if n not in types:
+            _err(f"unknown type '{n}'", kind="type")
+        return ("named", n)
+    if ty[0] == "map":
+        return (
+            "map",
+            resolve_type_ref(ty[1], types, consts),
+            resolve_type_ref(ty[2], types, consts),
+        )
+    if ty[0] == "set":
+        return ("set", resolve_type_ref(ty[1], types, consts))
+    if ty[0] == "seq":
+        if consts is None:
+            _err("internal error: Seq capacity requires consts", kind="internal")
+        cap = resolve_seq_capacity(ty[2], consts)
+        return ("seq", resolve_type_ref(ty[1], types, consts), cap)
+    if ty[0] == "option":
+        return ("option", resolve_type_ref(ty[1], types, consts))
+    _err(f"unknown type form {ty}", kind="type")
+
+
 def collect_types(items, consts):
     types_meta = {}
     enum_members = {}
 
     for it in items:
         if it[0] == "type":
-            _, n, lo, hi = it
+            _, n, lo, hi = it[:4]
             lo_i, hi_i = eval_const(lo, consts, {}), eval_const(hi, consts, {})
             if lo_i > hi_i:
                 _err(f"type '{n}' has empty range {lo_i}..{hi_i}", kind="type")
@@ -150,9 +185,10 @@ def collect_types(items, consts):
                 "lo": lo_i,
                 "hi": hi_i,
                 "ty": ("domain", lo_i, hi_i),
+                "symmetric": _decl_symmetric(it, 4),
             }
         elif it[0] == "enum":
-            _, n, members = it
+            _, n, members = it[:3]
             if not members:
                 _err(f"enum '{n}' has no members", kind="type")
             for m in members:
@@ -166,6 +202,7 @@ def collect_types(items, consts):
                 "kind": "enum",
                 "members": list(members),
                 "ty": ("enum", n),
+                "symmetric": _decl_symmetric(it, 3),
             }
         elif it[0] == "struct":
             _, n, fields = it
@@ -174,8 +211,12 @@ def collect_types(items, consts):
 
     for n, info in types_meta.items():
         if info["kind"] == "struct":
+            raw_fields = dict(info["fields"])
             info["fields"] = {
-                fn: resolve_type(ft, types_meta, consts) for fn, ft in info["fields"].items()
+                fn: resolve_type(ft, types_meta, consts) for fn, ft in raw_fields.items()
+            }
+            info["field_refs"] = {
+                fn: resolve_type_ref(ft, types_meta, consts) for fn, ft in raw_fields.items()
             }
             for fn, fty in info["fields"].items():
                 if not is_struct_field_type(fty):
@@ -961,6 +1002,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     leadstos = []
     terminal = None
     terminal_loc = None
+    state_type_refs = {}
 
     for it in items:
         tag = it[0]
@@ -969,6 +1011,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 if n in state:
                     _err(f"duplicate state variable '{n}'", kind="name")
                 state[n] = resolve_type(ty_ast, types_meta, consts)
+                state_type_refs[n] = resolve_type_ref(ty_ast, types_meta, consts)
         elif tag == "init":
             init = it[1]
         elif tag == "action":
@@ -1058,12 +1101,23 @@ def build_spec(tree, display_names=None, semantic_check=True):
 
     all_display_names = dict(display_names or {})
     all_display_names.update(dialect_display_names)
+    symmetry = {
+        n: {
+            "kind": info["kind"],
+            "lo": info.get("lo"),
+            "hi": info.get("hi"),
+            "members": list(info.get("members", [])),
+        }
+        for n, info in types_meta.items()
+        if info.get("symmetric") and info["kind"] in ("domain", "enum")
+    }
 
     return {
         "name": name,
         "consts": consts,
         "types": types_meta,
         "state": state,
+        "state_type_refs": state_type_refs,
         "phys_vars": phys_vars,
         "init": init,
         "actions": actions,
@@ -1082,6 +1136,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "action_aliases": dialect_action_aliases,
         "generated_names": dialect_generated_names,
         "requirement_ids": dialect_requirement_ids,
+        "symmetry": symmetry,
     }
 
 

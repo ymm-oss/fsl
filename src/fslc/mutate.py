@@ -310,7 +310,7 @@ def _action_mutants(item, path, *, enums, display_names):
 
 
 def _type_mutants(item, path):
-    _, name, lo, hi = item
+    _, name, lo, hi = item[:4]
     for bound_idx, bound_name, expr in ((2, "lo", lo), (3, "hi", hi)):
         if not (isinstance(expr, tuple) and expr[0] == "num"):
             continue

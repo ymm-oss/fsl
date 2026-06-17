@@ -6,6 +6,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Temporal) FSL now supports `symmetric type` and `symmetric enum` declarations
+  for interchangeable entity identities. `leadsTo` lasso and stall checks use a
+  canonical representative for per-entity `Map<SymmetricType, ...>` / `Set`
+  rows, reducing symmetric liveness search without changing the JSON envelope.
 - (Induction) `leadsTo` declarations can now include `decreases <int expr>`.
   Under `fslc verify --engine induction`, fslc proves the response unboundedly
   with a ranking argument: the measure is non-negative while `P` is pending and

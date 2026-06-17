@@ -9,7 +9,9 @@ of rules as of v2.x.
 spec <Name> {
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
   type  <Name> = <lo>..<hi>               // domain type (bounded integer)
+  symmetric type <Name> = <lo>..<hi>      // interchangeable entity identities
   enum  <Name> { <Member>, ... }
+  symmetric enum <Name> { <Member>, ... }
   struct <Name> { <field>: <type>, ... }  // field: scalar | Option<scalar>
 
   state { <var>: <type>, ... }
@@ -85,7 +87,9 @@ refinement <Name> {
 |---|---|---|
 | Int / Bool | `n: Int` | Int is unbounded |
 | Domain type | `type Qty = 0..5` | **automatic bound check** (violated/type_bound) |
+| symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
 | enum | `enum St { A, B }` | members are referenced and displayed by bare name |
+| symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
 | struct | `struct S { f: Qty, o: Option<K> }` | field = scalar or Option<scalar> only |
 | Option<T> | `c: Option<ItemId>` | T is a scalar. `none` / `some(e)` |
 | Map<K, V> | `m: Map<ItemId, Qty>` | K is a bounded scalar (Int keys give a deprecation warning) |
@@ -159,6 +163,11 @@ check as a type error.
    false, M is non-negative, some action is enabled, and every enabled action
    either makes Q true or keeps P true while strictly decreasing M. Without
    `decreases`, leadsTo remains bounded to `--depth`.
+8. `symmetric type` / `symmetric enum` means those values are interchangeable
+   entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
+   representative state using canonical rows from `Map<SymmetricType, V>` and
+   `Set<SymmetricType>` state (`V` is used only when it contains no symmetric
+   identity type); use it only when no identity is semantically special.
 
 ## 6. Automatic checks (checked even if not written)
 

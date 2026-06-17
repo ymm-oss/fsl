@@ -24,7 +24,9 @@ the implementation design of each feature can be reached from
 spec <Name> {
   const <NAME> = <constant expr>
   type  <Name> = <lo>..<hi>            // domain type (bounded integer)
+  symmetric type <Name> = <lo>..<hi>   // domain whose values are interchangeable identities
   enum  <Name> { <Member>, ... }
+  symmetric enum <Name> { <Member>, ... }
   struct <Name> { <field>: <scalar type | Option<scalar type>>, ... }
 
   state { <var>: <type>, ... }
@@ -98,6 +100,12 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.
 - `Map<Int, V>` works but emits a deprecation warning. Use a domain-type key.
+- `symmetric type` and `symmetric enum` mark values as interchangeable entity
+  identities for liveness symmetry reduction. During `leadsTo` lasso/stall
+  search, fslc uses one canonical representative for per-entity rows built from
+  `Map<SymmetricType, V>` and `Set<SymmetricType>` state; `V` is used only when
+  it contains no symmetric identity type. This is intended for models such as
+  `Map<TaskId, Status>` where no task identity is special.
 
 ## 3. Expressions
 
