@@ -194,7 +194,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
-fslc testgen   <file.fsl> [-o out.py]            # generate implementation-conformance pytest scaffold (§12)
+fslc testgen   <file.fsl> [--depth K] [--strict] [-o out.py]  # implementation-conformance pytest scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K]            # skeleton enumeration + counterfactuals (§15)
@@ -599,7 +599,7 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 
 ```bash
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
-fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # all skipped if the Adapter is unimplemented
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # partial reachability warnings unless --strict
 ```
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated

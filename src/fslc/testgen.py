@@ -15,6 +15,12 @@ from .model import build_spec
 from .bmc import scenarios
 
 
+class TestgenScenarioError(RuntimeError):
+    def __init__(self, scenario_result):
+        self.scenario_result = scenario_result
+        super().__init__(f"cannot generate tests: scenarios returned {scenario_result.get('result')}")
+
+
 def _py_literal(obj):
     return repr(obj)
 
@@ -35,18 +41,25 @@ def _spec_path_line(spec_path, output_path=None):
     return f"SPEC_PATH = Path(__file__).resolve().parent / {str(relative)!r}"
 
 
-def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=None):
+def generate_test_bundle(spec_path, depth=8, deadlock_mode="warn", output_path=None, strict=False):
     path = Path(spec_path)
     src = path.read_text(encoding="utf-8")
     ast, display_names = parse_src(src, str(path.parent))
     spec = build_spec(ast, display_names)
-    sc = scenarios(spec, depth, deadlock_mode=deadlock_mode, source_lines=src.splitlines())
+    sc = scenarios(
+        spec,
+        depth,
+        deadlock_mode=deadlock_mode,
+        source_lines=src.splitlines(),
+        allow_unreached=not strict,
+    )
     if sc.get("result") != "scenarios":
-        raise RuntimeError(f"cannot generate tests: scenarios returned {sc.get('result')}")
+        raise TestgenScenarioError(sc)
 
     spec_name = spec["name"]
     module_name = spec_name[0].lower() + spec_name[1:] if spec_name else "spec"
     scenario_data = sc.get("scenarios", [])
+    warnings = sc.get("warnings", [])
 
     lines = [
         '"""Auto-generated conformance tests for FSL spec.',
@@ -165,7 +178,22 @@ def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=Non
         "",
     ])
 
-    return "\n".join(lines) + "\n"
+    return {
+        "content": "\n".join(lines) + "\n",
+        "spec": spec_name,
+        "module": module_name,
+        "warnings": warnings,
+    }
+
+
+def generate_test_file(spec_path, depth=8, deadlock_mode="warn", output_path=None, strict=False):
+    return generate_test_bundle(
+        spec_path,
+        depth=depth,
+        deadlock_mode=deadlock_mode,
+        output_path=output_path,
+        strict=strict,
+    )["content"]
 
 
 def default_output_name(spec_path):

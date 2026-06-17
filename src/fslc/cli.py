@@ -18,7 +18,7 @@ from .bmc import verify, prove, scenarios
 from .refine import build_refinement, refine, refine_chain
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
-from .testgen import generate_test_file, default_output_name
+from .testgen import TestgenScenarioError, generate_test_bundle, default_output_name
 from .typestate import analyze as analyze_typestate
 from .mutate import DEFAULT_MAX_MUTANTS, mutate_file
 from .explain import explain_file
@@ -431,23 +431,30 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
+def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=True, strict=False):
     try:
         out_path = output or default_output_name(file)
-        content = generate_test_file(
+        bundle = generate_test_bundle(
             file,
             depth=depth,
             deadlock_mode=deadlock_mode,
             output_path=output if output else None,
+            strict=strict,
         )
+        content = bundle["content"]
         if write_file and output:
             open(output, "w", encoding="utf-8").write(content)
-        return _envelope({
+        result = {
             "result": "generated",
-            "spec": _read_spec(file)[0]["name"],
+            "spec": bundle["spec"],
             "output": out_path,
             "content": content,
-        })
+        }
+        if bundle.get("warnings"):
+            result["warnings"] = bundle["warnings"]
+        return _envelope(result)
+    except TestgenScenarioError as e:
+        return _envelope(e.scenario_result)
     except UnexpectedInput as e:
         return _parse_error_result(e)
     except VisitError as e:
@@ -581,6 +588,7 @@ def _build_arg_parser():
     tg.add_argument("--depth", type=int, default=8)
     tg.add_argument("-o", "--output", default=None)
     tg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    tg.add_argument("--strict", action="store_true")
 
     mt = sub.add_parser("mutate")
     mt.add_argument("file")
@@ -636,7 +644,7 @@ def _dispatch(args):
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "testgen":
         result = run_testgen(args.file, args.depth, args.output, args.deadlock,
-                            write_file=bool(args.output))
+                            write_file=bool(args.output), strict=args.strict)
         if result.get("result") == "generated":
             content = result.pop("content")
             out = result.get("output")

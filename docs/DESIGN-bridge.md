@@ -124,7 +124,7 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [-o <out.py>]    # default: test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [-o <out.py>]    # default: test_<spec name lowercased>.py to stdout
 ```
 
 The output is a **self-contained pytest file** (the primary dependencies are
@@ -143,6 +143,10 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
 2. **Scenario replay test** (run the scenarios mechanism at testgen time and
    embed it): feed each scenario's steps to the Adapter, and assert that after
    each step `observe()` matches **only the fields mentioned** in `expected_states[i]`.
+   If some `reachable` targets are not witnessed at the requested depth, testgen
+   still embeds the witnessed scenarios and returns warning JSON naming each
+   missing target with a depth hint. `--strict` restores all-or-nothing
+   `reachable_failed`.
 3. **Random-walk conformance test**: with `Monitor` as the oracle, choose actions
    from `mon.enabled()` by pseudorandom (fixed seed, `random.Random(0)`) for
    N=100 steps, and on every step assert `adapter.step(...)` → `observe() == mon.state`.
