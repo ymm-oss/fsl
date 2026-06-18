@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-18
+
 ### Added
 - (Induction) Automatic synthesis of `leadsTo` ranking measures (follow-up to
   #11). When a `leadsTo` has no author-supplied `decreases`, `fslc verify
