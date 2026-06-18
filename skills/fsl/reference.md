@@ -32,6 +32,24 @@ spec <Name> {
 }
 ```
 
+Business/requirements dialects also have type-kinds whose finite bounds live in
+a sibling top-level `verify` block instead of inline ranges:
+
+```fsl
+business <Name> {
+  entity <Entity>                          // identity sort; size set by verify.instances
+}
+requirements <Name> {
+  entity <Entity>                          // optional explicit identity sort
+  number <Number>                          // numeric sort; range set by verify.values
+  process <Entity> with f: <Number> { ... } // process also declares the entity kind
+}
+verify {
+  instances <Entity> = <N>
+  values <Number> = <lo>..<hi>
+}
+```
+
 Composite spec (a separate top-level form):
 
 ```fsl
@@ -88,6 +106,8 @@ refinement <Name> {
 | Int / Bool | `n: Int` | Int is unbounded |
 | Domain type | `type Qty = 0..5` | **automatic bound check** (violated/type_bound) |
 | symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
+| entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements; bound by `verify { instances Claim = N }` |
+| number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements; bound by `verify { values Amount = lo..hi }` |
 | enum | `enum St { A, B }` | members are referenced and displayed by bare name |
 | symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
 | struct | `struct S { f: Qty, o: Option<K> }` | field = scalar or Option<scalar> only |
@@ -203,7 +223,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                                                     #   (invariant / trans / leadsTo / reachable)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]
-fslc explain <f> [--depth K=8]                 # skeleton + counterfactual + witness narration
+fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
@@ -236,10 +256,12 @@ first failed layer and later layers are marked `skipped`.
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same
   property, exclusion wins.
-- `explain` is deterministic formatting with no LLM. It enumerates
+- `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
   counterfactual trace that breaks it under requires/assignment/fair removal.
+  `--readable` emits a text view that surfaces verification bounds, fairness,
+  KPI projections, branch lowering, and synthesized refinement mappings.
   Invariants for which none is found are explicitly marked
   `no counterfactual within depth K`.
 - `--strict-tags` on `check` / `verify` adds traceability warnings only to
@@ -372,7 +394,7 @@ leadsTo / action:
 ```fsl
 business ReturnHandling {
   actor Customer, Manager            // roster (validates `by`)
-  case Return = 0..2                 // -> domain type
+  entity Return                      // identity sort; size set by verify below
   process Return {
     stages Requested, Approved, Rejected, Refunded
     initial Requested
@@ -386,6 +408,10 @@ business ReturnHandling {
   goal AllSettled "all cases can be settled"
     all Return can be Refunded or Rejected
 }
+
+verify {
+  instances Return = 3
+}
 ```
 
 `stage(c)` expands from the type of the bound c into the process's state Map
@@ -397,43 +423,56 @@ for policies that cannot be written as a simple stage progression.
 ### requirements (the requirements layer)
 
 ```fsl
-requirements ReturnSystemReq {
-  implements ReturnHandling from "return_policy.fsl" {   // mapping to the upper layer (optional)
-    map return_stage[c: CaseId] = if sys[c].st == New then Requested else ...
-    map refunded = paid_count
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" { }
+
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
   }
-  // types / state / init are kernel syntax as-is
-  requirement REQ-1 "amounts at or below the threshold are auto-approved" {
-    fair action submit(c: CaseId, a: Amount) {
-      requires sys[c].st == New
-      requires a > 0
-      branches {                                          // data-dependent branch correspondence, auto-split
-        when a <= AUTO_LIMIT { sys[c] = ... } maps approve(c)
-        when a > AUTO_LIMIT  { sys[c] = ... } maps stutter
-      }
-    }
+
+  kpi paid_claims = count Claim in Paid
+
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
   }
-  requirement REQ-3 "payment only after approval" {
-    fair action pay(c: CaseId) maps refund(c) { ... }     // maps = correspondence to an upper-layer action
-    fair action tick() maps stutter { ... }               // action-level internal/stutter correspondence
-    invariant PaidLedger { ... }
+  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+    submit(1, 2) reject(1)
+    expect Claim 1 in Rejected
   }
-  acceptance AC-1 "small amounts get paid" { submit(0, 1)  pay(0)  expect sys[0].st == Paid }
-  forbidden FB-1 "cancellation after shipping is rejected" { submit(0, 1)  ship(0)  cancel(0)  expect rejected }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
 }
 ```
 
-- When `implements` is present, `fslc verify` simultaneously runs the upper-layer
-  refine → `implements: {abs, result}` in the result JSON.
-- `maps` may be on each branch or directly on an unbranched action. The
-  declaration-level form `fair action tick() maps stutter { ... }` parses and
-  refines as an internal upper-layer step; a repro with `map x = y` and
-  `tick { y = y }` returned `result:"ok"` / `implements.result:"refines"` from
-  `fslc check`, and `result:"verified"` with the same implements result from
-  `fslc verify --depth 1`.
+- The process+data profile is the default requirements form for a single-entity
+  lifecycle. `process E with f: T { ... }` creates the entity stage map and
+  carried fields; transition clauses add input (`with a: T`), guards (`when`),
+  field updates (`set f = expr`), and traceability (`covers REQ-n "text"`).
+- `kpi NAME = count ENTITY in STAGE` is a declarative projection in both
+  business and requirements; it does not create a ghost counter or an automatic
+  `_kpi_*` invariant.
+- When `implements Abs from "file" { }` is present and process/action/stage names
+  match, fslc synthesizes the identity refinement mapping. `maps auto` is also
+  allowed inside an `implements` block for same-name kernel-wrapper state/actions,
+  and explicit `map` / action correspondences override it. Auto-mapped process
+  transitions are statically actor-checked; an actor mismatch is a check-time
+  type error.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
-  `kind: "acceptance"`). It is output to scenarios as `acceptance_<ID>` and flows to
-  testgen.
+  `kind: "acceptance"`). It supports the readable stage form
+  `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
+  scenarios as `acceptance_<ID>`, and flows to testgen.
 - `forbidden FB-1 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected** (not-enabled, or an
@@ -443,10 +482,13 @@ requirements ReturnSystemReq {
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — anything other than `requires_failed` means the spec itself is a
   verify violation).
-- The display of a branches split action is `submit[a <= AUTO_LIMIT]`.
-  Diagnostics for split branches keep the internal name (`submit__b1`) and add
-  `display_name`; downstream refinement mappings still reference the internal
-  names `submit__b1`/`submit__b2`.
+- The kernel-wrapper form remains for hard cases: multi-entity requirements,
+  conservation rules, SLA/time, history that is not expressible as a carried
+  field, or any behavior that needs explicit kernel state. In that form, use
+  kernel `struct` / `state` / `init`, `fair action`, `branches`, and explicit
+  `maps` where needed. The display of a branches split action is
+  `submit[a <= AUTO_LIMIT]`; diagnostics keep the internal name (`submit__b1`)
+  and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.
 
 ### Drawing the layer boundary

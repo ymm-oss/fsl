@@ -1,4 +1,4 @@
-# FSL — `fslc explain` (natural-language rendering and counterfactuals) implementation design
+# FSL — `fslc explain --readable` (human-readable rendering and counterfactuals) implementation design
 
 Motivation: issue #7 (category 6 of roadmap #1). Having PMs and consultants directly
 review the logical formulas written by an AI is not realistic, whereas humans are good at
@@ -8,9 +8,11 @@ formulas" to "adjudicating concrete examples."
 
 ## 1. CLI / output
 
-`fslc explain <f> [--depth K]` → `result:"explained"`, exit 0. **No LLM used** (deterministic
-formatting only; prose generation is left to the agent-side skill). The verification engine is
-unmodified; #6 mutate and verify are reused.
+`fslc explain <f> [--depth K]` → `result:"explained"`, exit 0, JSON output.
+`fslc explain <f> [--depth K] --readable` emits the deterministic text review
+view. **No LLM used** (deterministic formatting only; prose generation is left
+to the agent-side skill). The verification engine is unmodified; #6 mutate and
+verify are reused.
 
 ```json
 {"result":"explained",
@@ -22,9 +24,11 @@ unmodified; #6 mutate and verify are reused.
 
 ## 2. The three artifacts
 
-1. **Skeleton enumeration** — outputs the state schema, each action's "who / when (requires) /
-   what it changes," and each property's "what it forbids / guarantees," together with
-   requirement tags and implicit checks (type bounds, partial_op).
+1. **Skeleton enumeration** — outputs the state schema, verification bounds, KPI
+   projections, branch lowering, synthesized refinement mapping, each action's
+   "who / when (requires) / what it changes," and each property's "what it
+   forbids / guarantees," together with requirement tags and implicit checks
+   (type bounds, partial_op).
 2. **Counterfactual narratives** — for each user invariant, presents the shortest counterexample
    under the minimal model weakening that makes the invariant violated, as "without this rule,
    the following sequence breaks REQ-3." This automates the manual demo in `cart_v1_buggy.fsl`.

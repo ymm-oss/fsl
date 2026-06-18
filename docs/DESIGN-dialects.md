@@ -59,61 +59,60 @@ converts it into kernel AST (an ordinary spec). The same wiring point as compose
 ### 2.1 Syntax
 
 ```fsl
-requirements ReturnSystemReq {
-  implements ReturnPolicy from "return_policy.fsl" {   // optional
-    map cases[c: CaseId] = if sys[c].st == New then Requested else ...
-    map refunded = paid_count
-    // action correspondences are collected automatically from the maps clauses of branches and of ordinary actions
-  }
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" { }     // identity refinement is synthesized when names match
 
-  // types, states, init are kernel syntax as-is (no implicit state is created)
-  type CaseId = 0..2
-  type Amount = 0..3
+  number Amount
   const AUTO_LIMIT = 1
-  enum SSt { New, AutoApproved, MgrQueue, MgrApproved, MgrRejected, Paid }
-  struct RCase { st: SSt, amount: Amount }
-  state { sys: Map<CaseId, RCase>, paid_count: Int }
-  init { ... }
 
-  requirement REQ-1 "returns at or below the threshold are auto-approved" {
-    action submit(c: CaseId, a: Amount) {
-      requires sys[c].st == New
-      requires a > 0
-      branches {
-        when a <= AUTO_LIMIT {
-          sys[c] = RCase { st: AutoApproved, amount: a }
-        } maps approve(c)
-        when a > AUTO_LIMIT {
-          sys[c] = RCase { st: MgrQueue, amount: a }
-        } maps stutter
-      }
-    }
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
   }
 
-  requirement REQ-2 "payment only after approval" {
-    fair action pay(c: CaseId) maps refund(c) {
-      requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
-      sys[c].st = Paid
-      paid_count = paid_count + 1
-    }
-    invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }
-  }
+  kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "small amounts are auto-approved and paid" {
-    submit(0, 1)
-    pay(0)
-    expect sys[0].st == Paid
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
   }
+}
+
+verify {
+  instances Claim = 3
+  values Amount = 0..3
 }
 ```
 
+The kernel-wrapper form remains valid for hard cases (multi-entity behavior,
+conservation rules, SLA/time, or history not expressible as a carried field):
+types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
+`maps` still pass through as kernel syntax plus refinement metadata.
+
 ### 2.2 Expansion rules
 
-1. `requirement <ID> "<text>" { items }` → lift the contained action /
+1. `number X` plus `verify { values X = lo..hi }` → `type X = lo..hi`.
+   `process E ...` plus `verify { instances E = N }` → `type E = 0..N-1`
+   unless `entity E` already declared it explicitly.
+2. `process E with f: T { stages ... initial ... transition ... }` →
+   generate an `EStage` enum, an `e_stage: Map<E, EStage>` state map, carried
+   field maps such as `amount: Map<E, Amount>`, deterministic init, and one fair
+   action per transition. Transition `with a: T` becomes an action parameter,
+   `when` becomes a requires clause, `set f = expr` becomes a field-map
+   assignment for that entity, and `covers REQ-n "text"` attaches traceability.
+3. `kpi k = count E in S` → no kernel state/action/invariant. The declaration is
+   recorded as metadata for the projection
+   `count(c: E where e_stage[c] == S)`.
+4. `requirement <ID> "<text>" { items }` → lift the contained action /
    invariant / reachable / leadsTo to top level and attach
    `meta = {id: ID, text}` to each element (the Stage 1 mechanism). The ID is
    an identifier token of the form `REQ-1` (alphanumerics and hyphens).
-2. `branches { when <cond> { stmts... } maps <abs-correspondence> ... }` →
+5. `branches { when <cond> { stmts... } maps <abs-correspondence> ... }` →
    split the action per branch: `submit__b1`, `submit__b2` (the display names
    are of the form `submit[a <= AUTO_LIMIT]` — the display-name map reuses the
    compose mechanism). Diagnostics for a split branch keep the internal name and
@@ -122,16 +121,20 @@ requirements ReturnSystemReq {
    when conditions are **not checked for exhaustiveness or exclusivity** (left to
    the ordinary enabled semantics: if they overlap, both are enabled; if there is
    a gap, it is disabled — the coverage diagnostic detects it).
-3. `maps <abs_action>(<args>) | stutter` (action modifier / inside branches) →
+6. `maps <abs_action>(<args>) | stutter` (action modifier / inside branches) →
    compose it with the map group in the `implements` block to **internally
    generate a refinement AST**.
-4. When an `implements ... { map ... }` is present, at verify / check time
-   **also run a refine check against the upper layer**, and add
+7. When an `implements ... { ... }` is present, at verify / check time **also
+   run a refine check against the upper layer**, and add
    `"implements": {"abs": "ReturnPolicy", "result": "refines" | {...violation}}`
-   to the result JSON (even if refine fails, the verify result itself is
-   returned separately). The refine-violation JSON passes through the
+   to the result JSON (even if refine fails, the verify result itself is returned
+   separately). An empty body auto-generates identity maps when process/action/
+   stage names match. `maps auto` is allowed for same-name kernel-wrapper
+   state/actions, explicit maps override it, and auto-mapped process transitions
+   are statically actor-checked. The refine-violation JSON passes through the
    `requirement` of the impl action involved (extension of §1.2).
-5. `acceptance <ID> "<text>" { <action call>...  expect <expr> }` →
+8. `acceptance <ID> "<text>" { <action call>...  expect <expr> }` and
+   `expect <Entity> <id> in <Stage>` →
    (a) Schema: a fixed step sequence. At expansion time, **replay it with the
    concrete Monitor** and verify at check time that each step is ok and that
    expect is true at the end (failure is reported as a `kind: "acceptance"`
@@ -139,7 +142,7 @@ requirements ReturnSystemReq {
    (b) Embed it in the scenarios output as a `kind: "acceptance"` scenario
    (steps / expected_states are built from the replay result) → it flows
    naturally into testgen.
-6. The name of the expanded spec is the name of `requirements`. All other items
+9. The name of the expanded spec is the name of `requirements`. All other items
    (type/enum/struct/state/init/top-level actions, etc.) pass through unchanged.
 
 ### 2.3 Tests (tests/test_req_dialect.py)
@@ -227,8 +230,8 @@ verify {
 
 Use the return process of §3.1 as a fixture: check ok / verify verified /
 induction proved / a policy-violating variant carries the requirement
-(= policy ID+text) in the counterexample / automatic generation of the kpi
-consistency invariant / the goal is witnessed as reachable / type errors for
+(= policy ID+text) in the counterexample / KPI projection metadata is recorded
+without generating a counter invariant / the goal is witnessed as reachable / type errors for
 an undeclared actor and a decrementing KPI / all existing tests unchanged.
 Furthermore, `return_policy_biz.fsl`, which rewrites examples/layers'
 return_policy.fsl in this dialect, can **be refined from the requirements layer**

@@ -58,7 +58,9 @@ Inputs to the dialect design obtained from the spike:
 - **(L1) conditional action correspondence is required**: "depending on the
   amount, submit performs the business approve or nothing happens" was expressed
   in the current version by an **action split** into submit_small/submit_large.
-  The req dialect's expander automates this split (the `branches` of §4.2).
+  The process+data profile now covers the common single-entity lifecycle directly;
+  the kernel-wrapper form still automates this split with `branches` for hard
+  multi-outcome correspondences (§4.2).
 - **(L2) the business vocabulary maps straight onto the kernel**: process=enum+Map,
   policy=invariant/leadsTo, actor=domain type, KPI=count projection metadata. Not a single
   new semantic was needed.
@@ -75,17 +77,19 @@ business ReturnHandling {
   entity Return                            // business entity (verification size below)
 
   process Return {                         // → enum Stage + Map<Entity, Stage>
-    stage Requested -> Approved  by Manager : approve
-    stage Requested -> Rejected  by Manager : reject
-    stage Approved  -> Refunded  by System  : refund
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition reject  Requested -> Rejected by Manager
+    transition refund  Approved  -> Refunded by Manager
   }
 
   kpi refunded = count Return in Refunded  // → count projection metadata
 
-  policy NoRefundWithoutApproval invariant { ... }   // the expression is a kernel expression
-  policy EveryRequestDecided responds {              // → leadsTo + fair
-    Return in Requested ~> Return in Approved or Rejected
-  }
+  policy EveryRequestDecided "every request is eventually decided"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+  goal AllSettled "all cases can be completed"
+    all Return can be Refunded or Rejected
 }
 
 verify {
@@ -95,8 +99,10 @@ verify {
 
 Expansion rules: `process` → enum + `Map<CaseId, Stage>` + an action per
 transition (`by <actor>` is action metadata; a transition whose actor has a
-parameter becomes a parameter of the actor type). `kpi ... counts` → Int ghost +
-automatic invariant `kpi == count(...)`. `responds` → fair + leadsTo.
+parameter becomes a parameter of the actor type). `kpi name = count Entity in
+Stage` → declarative projection metadata only, not a ghost counter and not an
+automatic `_kpi_*` invariant. Readable `every ... must eventually ...` policies
+lower to leadsTo.
 
 **What this layer does not handle (stated explicitly)**: real time, SLA time
 values, probability, continuous quantities of money, org charts, and the prose
@@ -116,52 +122,68 @@ acceptance criteria.
 ### 4.1 Syntax
 
 ```fsl-req
-requirements ReturnSystemReq {
-  implements ReturnHandling from "return_policy.fslb"   // refinement declaration against the upper layer
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" { }
 
-  actor Customer, Manager
-  id Case = 0..2
-  value Amount = 0..3
+  number Amount
   const AUTO_LIMIT = 1
 
-  requirement REQ-1 "returns at or below the threshold are auto-approved" {
-    action submit(c: Case, a: Amount) by Customer {
-      requires state(c) == New
-      requires a > 0
-      branches {                                  // ← L1: automatic split for conditional branching
-        when a <= AUTO_LIMIT -> AutoApproved  maps approve(c)
-        when a >  AUTO_LIMIT -> MgrQueue      maps stutter
-      }
-    }
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
   }
 
-  requirement REQ-3 "every request is eventually adjudicated" responds { ... }
+  kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "small amounts are approved immediately" {
-    submit(0, 1)  expect state(0) == AutoApproved
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
   }
+}
+
+verify {
+  instances Claim = 3
+  values Amount = 0..3
 }
 ```
 
 ### 4.2 Expansion rules
 
+- `number X` + `verify { values X = lo..hi }` becomes the bounded kernel type
+  `type X = lo..hi`; lifecycle entity sizes come from
+  `verify { instances E = N }`.
+- `process E with f: T` is the default single-entity lifecycle form. It expands
+  to the stage enum, entity stage map, carried field maps, deterministic init,
+  and fair transition actions. Transition `with`/`when`/`set`/`covers` lower to
+  action params, requires, assignments, and metadata.
+- `kpi name = count E in S` records a declarative projection available to
+  explain/scenarios without adding a ghost counter.
 - `requirement` block → **attach `req_id` / `req_text` metadata** to the
   contained kernel elements (action/invariant/leadsTo). All JSON output
   (violated / unknown_cti / coverage diagnostics / scenarios) carries
   `requirement: {id, text}` — "which requirement broke" appears in the
   counterexample together with the original text (§6).
-- `branches` → automatic split into multiple actions with the when condition
-  added to requires (`submit__1`, `submit__2`; displayed as
-  `submit[a<=AUTO_LIMIT]`). The action correspondence of the refinement mapping
-  to the upper layer is **auto-generated** from the `maps` clauses.
+- `branches` remains in the kernel-wrapper fallback. It automatically splits an
+  action into multiple actions with the when condition added to requires
+  (`submit__1`, `submit__2`; displayed as `submit[a<=AUTO_LIMIT]`). The action
+  correspondence of the refinement mapping to the upper layer is generated from
+  the `maps` clauses.
 - `implements ... from` → synthesize a refinement-file equivalent from the state
-  mapping (the `maps` clauses and stage-correspondence declarations), and at
-  `fslc verify` time **also run the refine check against the upper layer**
-  (the check result JSON has `refines_upper: true/false`).
+  mapping. An empty body auto-generates identity refinement when names match;
+  `maps auto` is allowed for same-name kernel-wrapper state/actions; explicit
+  maps override either form. Auto-mapped process transitions are actor-checked.
+  At `fslc verify` time, fslc **also runs the refine check against the upper
+  layer** (the result JSON has `implements: {abs, result}`).
 - `acceptance` → a **fixed scenario** with known steps + expect. Checked via the
   replay mechanism, and it also enters the scenarios output as-is (= the
   acceptance test flows into downstream testgen and becomes a conformance test
-  for the implementation).
+  for the implementation). The readable stage assertion
+  `expect <Entity> <id> in <Stage>` is available alongside `expect <expr>`.
 
 **What this layer does not handle**: (description at the time of writing —
 since then DESIGN-nfr.md has added support for authorization, audit, capacity,
@@ -253,7 +275,7 @@ failure and continues through the rest of the manifest.
 |---|---|---|
 | 0 | Organize the spike (§2) as `examples/layers/` + this design document | done/small |
 | 1 | **Metadata plumbing**: pass req_id/text through from AST → all JSON output (delivers value ahead of dialects: usable even in current fsl via `// @req REQ-1` annotations) | small |
-| 2 | **fsl-req dialect**: requirement/acceptance/branches/implements. The expander is isomorphic to compose. The automatic split of `branches` and the automatic synthesis of refinement are the core | medium (about one compose round) |
+| 2 | **fsl-req dialect**: process+data, requirement/acceptance/branches/implements. The expander is isomorphic to compose. Process+data covers the common lifecycle; `branches` remains for hard kernel-wrapper cases; automatic synthesis of refinement is the core | medium (about one compose round) |
 | 3 | **fsl-biz dialect**: process/policy/kpi. The expander + display in business vocabulary | medium |
 | 4 | Three-layer dogfooding (run all three layers + implementation, starting from a consulting document) | medium |
 

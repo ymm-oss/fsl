@@ -47,6 +47,24 @@ spec <Name> {
 }
 ```
 
+Business and requirements dialects also have type-kinds whose finite domains are
+set by a sibling top-level `verify` block rather than by inline ranges:
+
+```fsl
+business <Name> {
+  entity <Entity>
+}
+requirements <Name> {
+  entity <Entity>          // optional explicit identity sort
+  number <Number>
+  process <Entity> with f: <Number> { ... }  // process also declares the entity kind
+}
+verify {
+  instances <Entity> = <N>
+  values <Number> = <lo>..<hi>
+}
+```
+
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 
@@ -81,6 +99,8 @@ used for the base BMC check and reachable/coverage evidence.
 |---|---|---|
 | `Int` / `Bool` | `count: Int` | Unbounded integer / boolean |
 | Domain type | `type Qty = 0..5` | Bounded integer. **The range is checked automatically** (§6) |
+| Entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements. Size is set by `verify { instances Claim = N }` |
+| Number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements. Range is set by `verify { values Amount = lo..hi }` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
 | struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | Fields are scalars or `Option<scalar>` |
 | `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`. Used instead of a sentinel value |
@@ -218,7 +238,7 @@ fslc testgen   <file.fsl> [--depth K] [--strict] [-o out.py]  # implementation-c
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
-fslc explain   <file.fsl> [--depth K]            # skeleton enumeration + counterfactuals (§15)
+fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 ```
 
@@ -658,54 +678,67 @@ action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
 ```fsl
-requirements ReturnSystemReq {
-  implements ReturnPolicy from "return_policy.fsl" {   // mapping to the upper layer (optional)
-    map cases[c: CaseId] = if sys[c].st == New then Requested else ...
-    map refunded = paid_count
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" { }
+
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
   }
 
-  // types, state, and init are kernel syntax as-is
-  requirement REQ-1 "returns at or below the threshold are auto-approved" {
-    fair action submit(c: CaseId, a: Amount) {
-      requires sys[c].st == New
-      requires a > 0
-      branches {                                       // data-dependent branch handling
-        when a <= AUTO_LIMIT { sys[c] = ... } maps approve(c)
-        when a > AUTO_LIMIT  { sys[c] = ... } maps stutter
-      }
-    }
+  kpi paid_claims = count Claim in Paid
+
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
   }
-  requirement REQ-3 "payment is only after approval" {
-    fair action pay(c: CaseId) maps refund(c) { ... }
-    fair action audit_tick() maps stutter { ... }
-    invariant PaidLedger { ... }
+  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+    submit(1, 2) reject(1)
+    expect Claim 1 in Rejected
   }
-  acceptance AC-1 "a small amount is auto-approved and paid" {
-    submit(0, 1)
-    pay(0)
-    expect sys[0].st == Paid
-  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
 }
 ```
 
-- Elements inside a `requirement` automatically get `{id, text}` metadata (the
-  same plumbing as 13.1).
-- `branches` automatically splits an action by each when condition (displayed as
-  `submit[a <= AUTO_LIMIT]`). The `maps` clause provides the action correspondence to the upper layer.
-  It may appear on each branch (`maps approve(c)` / `maps stutter`) or directly
-  on an unbranched action declaration (`fair action audit_tick() maps stutter {
-  ... }`). In the action-level `maps stutter` form the implementation action is
-  internal to the upper layer, and refinement requires the mapped abstract state
-  to remain unchanged. Repro: a requirements spec with
-  `fair action tick() maps stutter { y = y }` and `map x = y` returned
-  `result:"ok"` with `implements:{abs:"AbsTick", result:"refines"}` from
-  `fslc check`, and `result:"verified"` with the same implements result from
-  `fslc verify --depth 1`.
+- The process+data profile is the primary requirements form for a single-entity
+  lifecycle. `process E with f: T { ... }` creates the entity stage map and
+  carried fields; transitions can add an input (`with a: T`), guard (`when`),
+  field update (`set f = expr`), and traceability (`covers REQ-n "text"`).
+- `number Amount` declares a value kind; the finite verifier range lives in
+  `verify { values Amount = lo..hi }`. Entity sizes live in
+  `verify { instances Entity = N }`.
+- `kpi NAME = count ENTITY in STAGE` is a declarative projection in both
+  business and requirements. It does not create a ghost counter or an automatic
+  `_kpi_*` invariant.
 - With `implements`, `fslc verify` **also runs the refine to the upper layer
-  simultaneously**, and the result carries `implements: {abs, result}`.
+  simultaneously**, and the result carries `implements: {abs, result}`. An empty
+  body (`implements X from "..." { }`) auto-generates identity refinement when
+  process/action/stage names match. `maps auto` is allowed inside `implements`
+  for same-name kernel-wrapper state/actions, and explicit maps override it.
+  Auto-mapped process transitions are actor-checked; a transition whose actor
+  differs from the business action's actor is a check-time error.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
-  failure is `kind: "acceptance"`) and flows directly into scenarios / testgen
+  failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
+  <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen
   (= the acceptance criteria become conformance tests for the implementation).
+- Use the kernel-wrapper form only for hard cases: multi-entity requirements,
+  conservation rules, SLA/time, history not expressible as a carried field, or
+  behavior that needs explicit kernel state. That fallback still supports
+  `struct` / `state` / `init`, `fair action`, `branches`, and explicit `maps`.
+  `branches` automatically splits an action by each when condition (displayed as
+  `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
+  correspondence to the upper layer.
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
@@ -849,10 +882,13 @@ DESIGN-*.md).
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
   `empty_formalization` warning (the semantic-level extension of
   `--strict-tags`). → [`DESIGN-mutate.md`](DESIGN-mutate.md)
-- **`fslc explain`** — skeleton enumeration (state, action who/when/what-changes,
-  automatic checks, tags) + counterfactuals ("without this rule, this procedure
-  could break it") + witness narration. Moves human review from reading logical
-  formulas to adjudicating concrete examples. → [`DESIGN-explain.md`](DESIGN-explain.md)
+- **`fslc explain --readable`** — a text view over skeleton enumeration (state,
+  action who/when/what-changes, verification bounds, fairness, KPI projections,
+  branch lowering, synthesized refinement mappings, automatic checks, tags) +
+  counterfactuals ("without this rule, this procedure could break it") + witness
+  narration. Moves human review from reading logical formulas to adjudicating
+  concrete examples. JSON mode remains available without `--readable`. →
+  [`DESIGN-explain.md`](DESIGN-explain.md)
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under `skills/`, with

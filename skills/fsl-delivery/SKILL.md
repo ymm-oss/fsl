@@ -79,7 +79,7 @@ For high-risk contracts, add:
 - `fslc verify <file> --vacuity error`
 - `fslc verify <file> --strict-tags`
 - `fslc mutate <file> --by-requirement`
-- `fslc explain <file>`
+- `fslc explain <file> --readable`
 
 ## Claim Discipline
 

@@ -20,10 +20,11 @@ repository, read `examples/pm/`, `examples/layers/return_system.fsl`, and
 
 Produce requirements-layer artifacts only:
 
-- A `requirements` spec with `requirement REQ-n "source text" { ... }`
+- A `requirements` spec, preferably using the process+data profile:
+  `process Entity with field: Type { transition ... with/when/set/covers ... }`
 - `acceptance` and `forbidden` blocks for positive and negative flows
-- Optional `implements BusinessName from "business.fsl" { map ... }` when a
-  confirmed business layer exists
+- Optional `implements BusinessName from "business.fsl" { }`, `maps auto`, or
+  explicit maps when a confirmed business layer exists
 - Scenario/test skeleton output from `fslc scenarios` when requested
 
 Do not write internal design state, architecture, queues/outboxes, service modules,
@@ -41,21 +42,39 @@ design decision but does not state it, ask rather than choosing.
    - upper business contract, if any, and candidate `implements` mapping
    - assumptions and questions that affect behavior
 2. Preserve source fidelity. Requirement IDs and verbatim text belong in
-   `requirement REQ-n "..."` so diagnostics and scenarios trace back to the PM
-   document.
+   `covers REQ-n "..."` on process transitions, or in
+   `requirement REQ-n "..."` for kernel-wrapper declarations, so diagnostics and
+   scenarios trace back to the PM document.
 3. Encode only externally observable product behavior. State names should describe
    product/system states, not engineering mechanisms.
-4. Use `branches { when ... maps ... }` only when one user-visible operation has
-   multiple requirement outcomes and the upper business correspondence is confirmed.
-5. Put positive examples in `acceptance`; put must-reject procedures in
+4. Use the process+data profile first for a single-entity lifecycle:
+   `number Amount`, `process Claim with amount: Amount`, transition `with`
+   inputs, `when` guards, `set` field updates, and `covers` traceability. Put
+   finite bounds in a top-level `verify` block with `instances Claim = N` and
+   `values Amount = lo..hi`.
+5. Use the kernel-wrapper form (`struct` / `state` / `init`, `fair action`,
+   `branches`, explicit `maps`) only for hard cases: multi-entity behavior,
+   conservation rules, SLA/time, history not expressible as a carried field, or
+   a user-visible operation whose data-dependent outcomes need separate upper
+   correspondences.
+6. Put positive examples in `acceptance`; put must-reject procedures in
    `forbidden`. Use `forbidden` for missing-guard risk because a safety invariant
-   often stays silent when an invalid operation is accepted.
-6. For NFRs:
+   often stays silent when an invalid operation is accepted. Prefer
+   `expect Entity id in Stage` for process-stage checks; use `expect <expr>` for
+   other predicates.
+7. For `implements`:
+   - `implements BusinessName from "business.fsl" { }` auto-generates identity
+     refinement when process/action/stage names match
+   - `maps auto` is allowed inside `implements` for same-name kernel-wrapper
+     state/actions; explicit `map` and action correspondences override it
+   - auto-mapped process transitions are actor-checked; a requirements transition
+     whose actor differs from the business action's actor is a check-time error
+8. For NFRs:
    - permissions: role guard plus invariant when needed
    - audit/capacity/reliability: ordinary invariants and response properties
    - SLA/deadline: use requirements `time` and `deadline`; confirm non-vacuity by
      checking that a tighter deadline fails
-7. Run `fslc check`, `fslc verify`, and for stable requirements
+9. Run `fslc check`, `fslc verify`, and for stable requirements
    `fslc verify --engine induction`. Run `fslc scenarios` to hand development the
    acceptance/forbidden skeletons.
 

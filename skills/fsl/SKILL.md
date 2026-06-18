@@ -133,7 +133,7 @@ the formalization memo.**
 | "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
 | "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
 | "within K times / K ticks" (deadline) | requirements `time` + `deadline` (reference §11) |
-| upper/lower bound or non-negativity of a number | domain type `type T = lo..hi` (do not hand-write boundary invariants) |
+| upper/lower bound or non-negativity of a number | kernel: `type T = lo..hi`; business/requirements dialects: `number T` plus `verify { values T = lo..hi }` (do not hand-write boundary invariants) |
 | "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
 | "the total equals X" / "the count is X" (aggregate consistency) | an invariant over `sum(...)` / `count(...)` |
 
@@ -151,10 +151,12 @@ the formalization memo.**
    `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,
    in which case induction can prove that response with an unbounded ranking
    argument)
-4. As needed: `fslc explain file.fsl --depth 8`
+4. As needed: `fslc explain file.fsl --depth 8 --readable`
    (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
    checks, a "what if this rule were absent" counterfactual for each user
-   invariant, and reachable/scenarios witnesses. For PMs/consultants, ask them to
+   invariant, and reachable/scenarios witnesses; `--readable` emits a text view
+   that surfaces verification bounds, fairness, KPI projections, branch lowering,
+   and synthesized refinement mappings. For PMs/consultants, ask them to
    adjudicate concrete traces rather than logical formulas),
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
@@ -373,16 +375,26 @@ unless the user asks for it or the relevant role skill directs it.
   not simple stage progression. Regulation contradiction = invariant violation,
   dead business step = coverage diagnostic, unreachable business goal =
   reachable_failed
-- `requirements Name { requirement REQ-1 "source" {...} / acceptance / branches /
-  implements Abs from "file" {map ...} }` — the requirements layer. With
-  `implements`, verify simultaneously runs the refine to the upper layer (the
-  `implements` field in the result JSON). `acceptance` is replay-checked at check
-  time and flows scenarios → testgen. `forbidden` (must-forbid) conversely writes
-  an "operation sequence that should be rejected" and verifies at check time that
-  the last step is rejected (not-enabled or a violation) — if accepted,
-  `kind: "forbidden"`. An independent channel for catching under-constraint
-  (missing guards) that a safety invariant stays silent about (a receptacle for
-  cross-validation where a separate agent writes positive/negative traces from NL)
+- `requirements Name { process E with f: T {...} / kpi / acceptance /
+  forbidden / implements Abs from "file" { } }` — the requirements layer. Use
+  the process+data profile first for a single-entity lifecycle: transition
+  clauses carry inputs (`with`), guards (`when`), field updates (`set`), and
+  traceability (`covers`). Put verifier bounds in `verify { instances E = N
+  values T = lo..hi }`. With `implements`, verify simultaneously runs the refine
+  to the upper layer (the `implements` field in the result JSON); an empty body
+  auto-generates identity refinement when names match, `maps auto` is allowed for
+  same-name kernel-wrapper state/actions, and auto-mapped process transitions are
+  actor-checked. `acceptance` is replay-checked at check time and supports
+  `expect E id in Stage` as well as `expect <expr>`, then flows scenarios →
+  testgen. `forbidden` (must-forbid) conversely writes an "operation sequence
+  that should be rejected" and verifies at check time that the last step is
+  rejected (not-enabled or a violation) — if accepted, `kind: "forbidden"`. Use
+  kernel-wrapper `struct` / `state` / `init`, `fair action`, `branches`, and
+  explicit `maps` only for hard cases such as multi-entity behavior,
+  conservation rules, SLA/time, or history not expressible as a carried field.
+  An independent channel for catching under-constraint (missing guards) that a
+  safety invariant stays silent about (a receptacle for cross-validation where a
+  separate agent writes positive/negative traces from NL)
 - The design layer is an ordinary `spec` (the main subject of this guide). Connect
   it to the requirements layer with `fslc refine`
 - **Traceability**: a `"ID: source"` tag immediately before a declaration's `{`.

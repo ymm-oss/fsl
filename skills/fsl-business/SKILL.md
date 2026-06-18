@@ -19,8 +19,8 @@ repository, read `examples/consulting/` for As-Is/To-Be work,
 
 Produce business-layer artifacts only:
 
-- A `business` spec with `actor`, `case`, `process`, `transition`, `policy`,
-  `kpi`, and `goal`
+- A `business` spec with `actor`, `entity`, `process`, `transition`, `policy`,
+  `kpi`, and `goal`, plus a top-level `verify { instances Entity = N }` bound
 - Verification commands/results, usually `fslc verify ... --engine induction`
 - Optional As-Is/To-Be control preservation using `fslc refine` and a mapping file
 
@@ -33,14 +33,16 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
 
 1. Extract a business formalization memo in chat:
    - actors and external roles
-   - case/entity types and finite modeling sizes
+   - business entity names and finite `verify { instances ... }` modeling sizes
    - process stages and allowed business transitions
    - policies/controls with IDs and verbatim source text
-   - KPIs/goals and what counts as completion
+   - KPIs/goals and what counts as completion (`kpi name = count Entity in Stage`)
    - open questions about rule priority, exceptions, ownership, or timing
 2. Ask for confirmation before encoding any interpretation that changes behavior.
    Representation-only modeling choices may be labeled and carried as comments.
 3. Write the `business` spec. Prefer readable stage syntax:
+   - `entity Claim` with `verify { instances Claim = 3 }`
+   - `kpi paid_claims = count Claim in Paid`
    - `policy POL-1 "..." every Case in Source must eventually be Target`
    - `goal G "..." some Case can reach Target`
    - `goal G "..." all Case can be Target or OtherTarget`

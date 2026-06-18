@@ -5,6 +5,41 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+Theme: **human-readable business/requirements dialects** (issue #21) — verification
+bounds, KPIs, and refinement mappings stop masquerading as model facts, and the
+requirements layer gains a readable process+data profile close to the business surface.
+
+### Added
+- (Dialects) `entity <Name>` / `number <Name>` type-kinds and a top-level
+  `verify { instances E = N ; values X = lo..hi }` block that holds the bounded-model
+  sizes in one honest place. Kernel `type X = lo..hi` is unchanged.
+- (Requirements) A `process <Entity> with <field>: <T> { ... }` profile: business-style
+  `stages`/`initial`/`transition ... by`, extended with `with <input>`, `when <guard>`,
+  `set <field> = <expr>`, and `covers REQ-n "text"` traceability. It lowers to a kernel
+  state machine; an empty `implements X from "..." { }` body auto-generates the identity
+  refinement when names match. Acceptance gains a readable `expect <Entity> <id> in <Stage>`.
+- (Requirements) `maps auto` is now allowed inside an `implements { }` block.
+- (Safety) Auto-mapped process transitions are statically actor-checked against the
+  business layer (the verifier cannot — actors are not refinement state), so an actor
+  mismatch is a check-time error instead of a green-but-wrong refinement.
+- (Explain) `fslc explain --readable` renders a deterministic text view that surfaces
+  verification bounds, fairness, KPI projections, branch lowering, and the synthesized
+  refinement mapping (auto-mapped entries flagged for actor/intent review).
+
+### Changed
+- (Dialects) `kpi NAME = count ENTITY in STAGE` is now a declarative derived projection
+  (available in business and requirements) carried as metadata — no ghost counter, no
+  per-transition increment, no auto `_kpi_*` consistency invariant.
+- The "spec declares no user invariants" warning no longer fires when the spec has
+  leadsTo/reachable/trans properties, acceptances, forbidden flows, or an `implements`
+  refinement (those are checked too).
+
+### Removed
+- **BREAKING:** business `case X = lo..hi` (use `entity X` + `verify { instances X = N }`).
+- **BREAKING:** `kpi ... counts ... in ...` (use `kpi ... = count ... in ...`); the
+  KPI counter-consistency auto-invariant and the "decrement KPI unsupported" error are
+  gone (a projection is exact by construction).
+
 ## [1.5.0] - 2026-06-18
 
 Theme: **honest verification bounds, AI-legible diagnostics, and tractable liveness** —
