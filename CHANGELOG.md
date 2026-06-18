@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-06-18
+
 Theme: **human-readable business/requirements dialects** (issue #21) — verification
 bounds, KPIs, and refinement mappings stop masquerading as model facts, and the
 requirements layer gains a readable process+data profile close to the business surface.
