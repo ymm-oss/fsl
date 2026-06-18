@@ -11,30 +11,30 @@
 //   PM requirements has not grown.
 //
 // Note:
-//   Because submit in 2_requirements.fsl is split via branches, the
-//   correspondence targets use the internal names submit__b1 / submit__b2.
+//   The requirements process now has one submit transition. The design still
+//   separates low-amount and high-amount submission paths, and collapses
+//   auto-review / manager-review substages back to Submitted for the PM view.
 // ════════════════════════════════════════════════════════════════
 refinement DesignRefinesRequirements {
   impl ExpenseDesign
   abs  ExpenseRequirements
 
-  map req[c: Claim] = ReqClaim {
-    st: if design[c].st == DesignDraft then ReqDraft
-        else if design[c].st == DesignAutoReview then ReqAutoReview
-        else if design[c].st == DesignManagerReview then ReqManagerReview
-        else if design[c].st == DesignAutoApproved then ReqAutoApproved
-        else if design[c].st == DesignManagerApproved then ReqManagerApproved
-        else if design[c].st == DesignRejected then ReqRejected
-        else ReqPaid,
-    amount: design[c].amount
-  }
-  map paid_count = paid_count
+  map claim_stage[c: Claim] =
+    if design[c].st == DesignDraft then Draft
+    else if design[c].st == DesignAutoReview then Submitted
+    else if design[c].st == DesignManagerReview then Submitted
+    else if design[c].st == DesignAutoApproved then Approved
+    else if design[c].st == DesignManagerApproved then Approved
+    else if design[c].st == DesignRejected then Rejected
+    else if design[c].st == DesignPaymentSubmitted then Paid
+    else Paid
+  map claim_amount[c: Claim] = design[c].amount
 
-  action submit_small(c, a) -> submit__b1(c, a)
-  action submit_large(c, a) -> submit__b2(c, a)
+  action submit_small(c, a) -> submit(c, a)
+  action submit_large(c, a) -> submit(c, a)
   action auto_approve(c)    -> auto_approve(c)
   action mgr_approve(c)     -> mgr_approve(c)
-  action mgr_reject(c)      -> mgr_reject(c)
+  action mgr_reject(c)      -> reject(c)
   action pay_submit(c)      -> pay(c)
   action pay_confirm(c)     -> stutter
   action outbox_send()      -> stutter

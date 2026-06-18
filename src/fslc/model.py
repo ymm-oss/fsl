@@ -1091,7 +1091,16 @@ def build_spec(tree, display_names=None, semantic_check=True):
     all_invariants = bounds_invs + invariants
 
     warnings = check_map_key_warnings(state, types_meta)
-    if not invariants and not leadstos and not reachables and not transitions:
+    has_user_checks = (
+        invariants
+        or leadstos
+        or reachables
+        or transitions
+        or dialect_acceptance
+        or dialect_forbidden
+        or dialect_implements is not None
+    )
+    if not has_user_checks:
         warnings.append({
             "message": "spec declares no user invariants (only implicit type bounds are checked)",
         })

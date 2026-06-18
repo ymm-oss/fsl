@@ -695,6 +695,7 @@ def _expand_requirements_with_display(ast, base_dir):
     instances, values, bound_locs = _collect_verify_bounds(items)
     entity_locs = {}
     number_locs = {}
+    process_entity_locs = {}
 
     for item in items:
         tag = item[0]
@@ -712,6 +713,14 @@ def _expand_requirements_with_display(ast, base_dir):
             if number_name in entity_locs:
                 _err(f"'{number_name}' cannot be both entity and number", loc=loc)
             number_locs[number_name] = loc
+        elif tag == "biz_process":
+            _, entity_name, _fields, _parts, loc = item
+            process_entity_locs.setdefault(entity_name, loc)
+
+    for entity_name, loc in process_entity_locs.items():
+        if entity_name in number_locs:
+            _err(f"'{entity_name}' cannot be both process entity and number", loc=loc)
+        entity_locs.setdefault(entity_name, loc)
 
     for entity_name, loc in entity_locs.items():
         if entity_name not in instances:
@@ -740,10 +749,14 @@ def _expand_requirements_with_display(ast, base_dir):
 
     processes, process_by_name = _collect_requirements_processes(items, entity_locs, number_locs)
     process_by_ast_name = {proc["name"]: proc for proc in processes}
+    kpi_infos = _build_kpi_metadata(
+        [item for item in items if item[0] == "biz_kpi"],
+        process_by_name,
+    )
 
     for item in items:
         tag = item[0]
-        if tag in ("entity", "number", "verify_bounds"):
+        if tag in ("entity", "number", "verify_bounds", "biz_kpi"):
             continue
         if tag == "implements":
             if implements is not None:
@@ -841,6 +854,9 @@ def _expand_requirements_with_display(ast, base_dir):
         out.append(("__generated", generated_names))
     if requirement_ids:
         out.append(("__requirement_ids", requirement_ids))
+    kpi_metadata = _project_kpi_metadata(kpi_infos)
+    if kpi_metadata:
+        out.append(("__kpis", kpi_metadata))
     return ("spec", name, out), display_names
 
 
@@ -1125,6 +1141,25 @@ def _build_kpi_metadata(kpis, process_by_name):
     return kpi_infos
 
 
+def _project_kpi_metadata(kpi_infos):
+    kpi_metadata = []
+    for kpi in kpi_infos:
+        state_var = _process_state_var(kpi["case"])
+        cond = (
+            "bin",
+            "==",
+            ("index", ("var", state_var), ("var", "c")),
+            ("var", kpi["stage"]),
+        )
+        kpi_metadata.append({
+            "name": kpi["name"],
+            "entity": kpi["case"],
+            "stage": kpi["stage"],
+            "expr": ("count", "c", kpi["case"], cond),
+        })
+    return kpi_metadata
+
+
 def _process_for_case(case_name, process_by_case, loc):
     processes = process_by_case.get(case_name, [])
     if not processes:
@@ -1203,21 +1238,7 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
                 _meta(tr["name"], f"by {tr['actor']}"),
             ))
 
-    kpi_metadata = []
-    for kpi in kpi_infos:
-        state_var = _process_state_var(kpi["case"])
-        cond = (
-            "bin",
-            "==",
-            ("index", ("var", state_var), ("var", "c")),
-            ("var", kpi["stage"]),
-        )
-        kpi_metadata.append({
-            "name": kpi["name"],
-            "entity": kpi["case"],
-            "stage": kpi["stage"],
-            "expr": ("count", "c", kpi["case"], cond),
-        })
+    kpi_metadata = _project_kpi_metadata(kpi_infos)
     if kpi_metadata:
         out.append(("__kpis", kpi_metadata))
 

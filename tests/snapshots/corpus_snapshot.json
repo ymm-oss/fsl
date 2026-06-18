@@ -615,9 +615,7 @@
   "examples/gallery/valid/small_forbidden_guarded_cancel.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     },
     "verify": {
       "action_coverage": {
@@ -632,9 +630,7 @@
       "reachables": {},
       "result": "verified",
       "transitions_checked": [],
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "examples/gallery/valid/small_tcp_handshake.fsl": {

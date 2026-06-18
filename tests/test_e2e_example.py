@@ -47,7 +47,6 @@ def test_e2e_chain_verifies_refines_and_implementation_passes():
     )
     assert requirements_proved["result"] == "proved"
     assert requirements_proved["implements"]["result"] == "refines"
-    assert "CountsMatchPaid" in requirements_proved["invariants_checked"]
 
     scenarios = run_scenarios(str(E2E / "2_requirements.fsl"), 8)
     acceptance_names = {

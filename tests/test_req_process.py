@@ -1,3 +1,4 @@
+from fslc import build_spec, parse
 from fslc.cli import run_check, run_verify
 
 
@@ -39,6 +40,8 @@ REQ_SRC = r'''requirements ClaimReq {
     transition pay Approved -> Paid by Finance
   }
 
+  kpi paid_claims = count Claim in Paid
+
   acceptance AC-1 "low amount is auto-approved and paid" {
     submit(0, 1)
     auto_approve(0)
@@ -71,11 +74,27 @@ def test_requirements_process_data_profile_check_verify_and_refine(tmp_path):
 
     checked = run_check(str(req))
     assert checked["result"] == "ok", checked
+    assert checked["warnings"] == []
     assert checked["implements"] == {"abs": "ClaimBiz", "result": "refines"}
 
     verified = run_verify(str(req), 6, "ignore")
     assert verified["result"] == "verified", verified
     assert verified["implements"]["result"] == "refines"
+
+    spec = build_spec(parse(req.read_text(encoding="utf-8"), base_dir=tmp_path))
+    assert [kpi["name"] for kpi in spec["kpis"]] == ["paid_claims"]
+    assert spec["kpis"][0] == {
+        "name": "paid_claims",
+        "entity": "Claim",
+        "stage": "Paid",
+        "expr": (
+            "count",
+            "c",
+            "Claim",
+            ("bin", "==", ("index", ("var", "claim_stage"), ("var", "c")), ("var", "Paid")),
+        ),
+    }
+    assert not any(inv["name"].startswith("_kpi") for inv in spec["user_invariants"])
 
 
 def test_requirements_process_guard_bites_via_forbidden(tmp_path):

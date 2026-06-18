@@ -210,7 +210,7 @@ ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> st
 ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 
 requirements_def: "requirements" NAME "{" requirements_item* "}"
-?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def
+?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
                   | state_def | init_def | req_action_def | process_def | time_def
                   | invariant_def | trans_def | reachable_def | leadsto_def
