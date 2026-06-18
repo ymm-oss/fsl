@@ -1,0 +1,43 @@
+spec OrderWorkflow {
+  enum Status { Draft, Submitted, Approved, Shipped, Cancelled }
+
+  state {
+    status:   Status,
+    approved: Bool
+  }
+
+  init {
+    status = Draft
+    approved = false
+  }
+
+  action submit() {
+    requires status == Draft
+    status = Submitted
+  }
+
+  action approve() {
+    requires status == Submitted
+    status = Approved
+    approved = true
+  }
+
+  action ship() {
+    requires status == Approved
+    status = Shipped
+  }
+
+  action cancel() {
+    requires status != Shipped
+    status = Cancelled
+  }
+
+  // The rule we want to guarantee.
+  invariant ShipOnlyAfterApproval { status == Shipped => approved }
+
+  // Auxiliary invariant: needed to make the proof go through by k-induction.
+  // (Being in Approved already implies the approval flag is set.)
+  invariant ApprovedImpliesFlag { status == Approved => approved }
+
+  reachable CanShip { status == Shipped }
+}

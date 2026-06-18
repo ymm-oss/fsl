@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How FSL works & how to use it — brute force, proof, dialects, ops</title>
+<meta name="description" content="How FSL works (BMC and k-induction, counterexamples to induction) and how to use it: three dialects, refinement, the fslc commands, and the write→verify→repair loop." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<div class="progress"></div>
+
+<header class="topbar">
+  <span class="brand"><b>FSL</b> how it works</span>
+  <span class="spacer"></span>
+  <a href="concept.en.html">← Back to the concept</a>
+  <span class="lang">
+    <a href="guide.ja.html">日本語</a>
+    <a href="guide.en.html" class="active">EN</a>
+  </span>
+</header>
+
+<main>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">After the concept</p>
+    <h1 class="reveal">How it works,<br>and how to <span class="hl">use it</span>.</h1>
+    <p class="lead reveal">What actually happens behind "a machine checks by brute force"?<br>And how do you run it on your own project?</p>
+    <p class="reveal dim" style="margin-top:18px">Reading the <a href="concept.en.html">concept intro</a> first makes this smoother.</p>
+    <div class="scroll-hint reveal">▽ Scroll</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<!-- 1. Two stages -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Verification engines</p>
+    <h2 class="reveal">Two stages: brute force first, then proof</h2>
+    <p class="lead narrow reveal">The verifier <code>fslc</code> has two modes. Each is stronger than the last.</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>① BMC (bounded model checking)</h3>
+        <p class="dim"><code>fslc verify --depth N</code></p>
+        <p>Brute-forces every path within <b>N steps</b> from the initial state. A counterexample means a <b>definite bug</b>. Otherwise: "no counterexample up to depth N (verified)". Fast, and the counterexample is concrete.</p>
+      </div>
+      <div class="card">
+        <h3>② k-induction (infinite depth)</h3>
+        <p class="dim"><code>fslc verify --engine induction</code></p>
+        <p>Shows that from <b>any state</b> satisfying the rule, one step keeps the rule. Succeed and it's <b>proved at infinite depth</b>. Stricter than BMC.</p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">First, BMC:</p>
+      <pre><code>$ fslc verify order_fixed.fsl --depth 8
+<span class="s">{ "result": "verified", "spec": "OrderWorkflow" }</span>   <span class="c">// no counterexample up to depth 8</span></code></pre>
+      <p class="reveal" style="margin:18px 0 0">No counterexample to depth 8. <b>But can you claim it's safe at any depth?</b> That's where induction comes in.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2. CTI demo -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Run induction</p>
+    <h2 class="reveal">Induction asks: "what if we started from this state?"</h2>
+    <p class="lead narrow reveal">Induction starts from <b>every state that satisfies the rule</b>, reachable or not. So it sometimes raises a state that never actually occurs and says "from here, one step breaks it." That's a <b>counterexample to induction (CTI)</b>. Try it with the buttons below.</p>
+
+    <div class="panel reveal">
+      <div class="panel-head">
+        <span class="title">🔎 fslc verify --engine induction</span>
+        <span class="spacer" style="flex:1"></span>
+        <span id="verdict-cti"></span>
+      </div>
+      <div id="diagram-cti"></div>
+      <div class="readout" id="readout-cti"></div>
+      <div class="banner" id="banner-cti"></div>
+      <div id="aux-line" style="display:none;margin-top:14px">
+        <pre><code><span class="c">// add this one line and it becomes proved (auxiliary invariant)</span>
+<span class="k">invariant</span> ApprovedImpliesFlag { status == Approved <span class="k">=></span> approved }</code></pre>
+      </div>
+      <div class="btns">
+        <button class="btn primary" id="play-cti">▶ Verify by induction</button>
+        <button class="btn" id="fix-cti">+ Add the auxiliary invariant & re-verify</button>
+      </div>
+      <p class="dim" style="font-size:13px;margin:14px 0 0">Also based on real <code>fslc</code> output (<code>unknown_cti</code> → add auxiliary invariant → <code>proved</code>).</p>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <h3>Reading a CTI</h3>
+      <p style="margin:0">A CTI is not necessarily a real bug. It means one of two things:<br>
+      <b>(a) The invariant is too weak</b> — a state that never actually occurs isn't ruled out by the rule → teach it "Approved ⇒ approved" with an auxiliary invariant and it's proved.<br>
+      <b>(b) A real, reachable bug</b> — you can actually get to that state → fix the spec or the implementation.<br>
+      Telling the two apart is the human's job.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Dialects & refinement -->
+<section>
+  <div class="wrap narrow">
+    <p class="kicker reveal">The vertical thread</p>
+    <h2 class="reveal">Three dialects, joined by refinement</h2>
+    <p class="lead reveal">Write the same domain at different granularities and connect them with <b>refinement</b>. <code>fslc refine</code> mechanically checks that the upper layer's intent is preserved below, and <b>requirement IDs propagate into every layer's diagnostics</b>.</p>
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer"><h3>consulting (business)</h3><p>Rules, controls, KPIs, goals. Check business-level contradictions, forbidden states, goal reachability.</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>requirements</h3><p>Requirement IDs, acceptance criteria, forbidden flows, NFRs (permissions / audit / SLA…). Trace counterexamples back to the request.</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>design</h3><p>State machines, data, async, composition. invariant / reachable / leadsTo / mappings check the requirements are met.</p></div>
+      <div class="arrow-down">↓ scenarios / testgen / replay</div>
+      <div class="layer"><h3>Implementation / QA</h3><p>Generate scenarios and pytest scaffolds. Check that implementation logs conform.</p></div>
+    </div>
+    <p class="dim reveal" style="margin-top:18px;font-size:14px"><code>fslc refine impl.fsl abs.fsl mapping.fsl</code> checks one refinement step; <code>fslc chain fsl-project.toml</code> verifies the whole chain at once.</p>
+  </div>
+</section>
+
+<!-- 4. Cheat sheet -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">The toolbox</p>
+    <h2 class="reveal"><code>fslc</code> command cheat sheet</h2>
+    <p class="lead narrow reveal">All output is <b>machine-readable JSON</b> (for AI to read and fix). Exit codes: 0 = verified/proved/refines…, 1 = violated/counterexample, 2 = spec error.</p>
+    <div class="cards reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>Write & verify</h3>
+        <p><code>check</code> — syntax/types only (fast loop)<br>
+        <code>verify --depth N</code> — BMC, shortest counterexample<br>
+        <code>verify --engine induction</code> — prove at infinite depth</p>
+      </div>
+      <div class="card">
+        <h3>Measure spec quality</h3>
+        <p><code>--vacuity error</code> — detect vacuous properties<br>
+        <code>--strict-tags</code> — lint untagged/unreferenced<br>
+        <code>mutate</code> — measure constraint strength<br>
+        <code>explain</code> — bounds & counterfactuals</p>
+      </div>
+      <div class="card">
+        <h3>Connect to implementation</h3>
+        <p><code>scenarios</code> — integration-test scaffold JSON<br>
+        <code>testgen -o test.py</code> — pytest conformance scaffold<br>
+        <code>replay --trace log.json</code> — log conformance<br>
+        <code>typestate --ts</code> — state machine → types</p>
+      </div>
+      <div class="card">
+        <h3>Connect the layers</h3>
+        <p><code>refine impl abs map</code> — check refinement<br>
+        <code>chain project.toml</code> — business→impl in one go<br>
+        <code>verify</code> of a composed spec also works</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. loop -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Run it for real</p>
+    <h2 class="reveal">Run the write → verify → repair loop</h2>
+    <p class="lead narrow reveal">FSL doesn't assume humans memorize the grammar. <b>AI drafts, <code>fslc</code> returns counterexamples, AI fixes.</b> You own intent and the final call.</p>
+    <div class="loop reveal" style="margin-top:24px">
+      <div class="step"><div class="n">01</div><h3>Give intent</h3><p>State what must hold — "never ship unapproved" — in words.</p></div>
+      <div class="step"><div class="n">02</div><h3>AI drafts</h3><p>The skill supplies grammar and the repair protocol; it generates the <code>.fsl</code>.</p></div>
+      <div class="step"><div class="n">03</div><h3><code>fslc</code> counterexamples</h3><p>Contradictions, loopholes, unreachability as JSON.</p></div>
+      <div class="step"><div class="n">04</div><h3>AI repairs</h3><p>Reads the counterexample; repeats until nothing breaks.</p></div>
+    </div>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">What the AI reads is JSON like this (a counterexample trace):</p>
+      <pre><code>{
+  <span class="k">"result"</span>: <span class="r">"violated"</span>,
+  <span class="k">"invariant"</span>: <span class="s">"ShipOnlyAfterApproval"</span>,
+  <span class="k">"violated_at_step"</span>: 2,
+  <span class="k">"last_action"</span>: { <span class="k">"name"</span>: <span class="s">"ship"</span> },
+  <span class="k">"trace"</span>: [ <span class="c">/* Draft → submit → Submitted → ship → Shipped */</span> ]
+}</code></pre>
+    </div>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">Setup is three commands (details in the <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">README</a>):</p>
+      <pre><code><span class="c"># 1. Install (gives you fslc and the skills)</span>
+$ bash install.sh
+
+<span class="c"># 2. Ask the AI (via the skill)</span>
+"Use $fsl-requirements to write requirements for 'no shipping before approval;
+ refunds never run twice', verify it, and repair until no counterexamples remain."
+
+<span class="c"># 3. If needed, also generate test scaffolds and implementation hookup</span>
+$ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- 6. Where to start -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Adoption</p>
+    <h2 class="reveal">Where do you start?</h2>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>🎯 High-risk core</h3>
+        <p class="dim">Close to traditional formal methods.</p>
+        <p>Payments/refunds, applications/approvals, reservations/inventory allocation, permissions/audit, queues/async, SLA/timeouts. <b>Focus where mistakes hurt.</b></p>
+      </div>
+      <div class="card">
+        <h3>🧩 Small state management</h3>
+        <p class="dim">Worth it because AI drafts the spec.</p>
+        <p>Screen transitions, back/cancel, confirmation modals, unsaved/saving, wizards, double-submit prevention, retry/pending/failed, role-based availability. <b>For pre-implementation loophole checks.</b></p>
+      </div>
+    </div>
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0">The criterion isn't "how many states" but <b>"whether some order of operations or flag combination can enter an unintended state."</b> Even 3 states and 2 flags are worth FSL-ing if back/cancel/retry/permission branching is involved. Start with a small PoC you can finish in two weeks.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section>
+  <div class="wrap narrow center">
+    <div class="cta reveal">
+      <h2>Give it a try</h2>
+      <p>Have AI write one small spec and run <code>fslc verify</code> on it.<br>Getting a counterexample back is the best way to understand.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub / README</a>
+        <a class="btn ghost" href="concept.en.html">Back to the concept</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>FSL — AI-Native Formal Specification Language. Demos are based on real <code>fslc</code> output (verified / unknown_cti / proved).</p>
+  <p><a href="guide.ja.html">日本語</a> · <a href="concept.en.html">Concept intro</a> · <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
+</footer>
+
+<script type="application/json" id="diagram-config">
+{
+  "nodes": [
+    {"id":"Draft","label":"Draft","cx":90,"cy":80},
+    {"id":"Submitted","label":"Submitted","cx":285,"cy":80},
+    {"id":"Approved","label":"Approved","cx":480,"cy":80},
+    {"id":"Shipped","label":"Shipped","cx":675,"cy":80},
+    {"id":"Cancelled","label":"Cancelled","cx":285,"cy":200}
+  ],
+  "edges": [
+    {"id":"submit","action":"submit","from":"Draft","to":"Submitted","label":"submit"},
+    {"id":"approve","action":"approve","from":"Submitted","to":"Approved","label":"approve"},
+    {"id":"ship","action":"ship","from":"Approved","to":"Shipped","label":"ship"},
+    {"id":"cancel1","action":"cancel","from":"Submitted","to":"Cancelled","label":"cancel"}
+  ]
+}
+</script>
+
+<!-- real counterexample-to-induction from `fslc verify order_fixed.fsl --engine induction` -->
+<script type="application/json" id="trace-cti">
+{
+  "result": "unknown_cti",
+  "violated_at_step": 1,
+  "trace": [
+    { "step": 0, "state": { "status": "Approved", "approved": false } },
+    { "step": 1, "state": { "status": "Shipped", "approved": false },
+      "action": { "name": "ship" }, "changes": { "status": { "from": "Approved", "to": "Shipped" } } }
+  ]
+}
+</script>
+
+<!-- English UI strings for the shared engine -->
+<script type="application/json" id="i18n">
+{
+  "ctiBanner": "⚠ <b>Counterexample to induction (CTI)</b> — if a state existed where the order is Approved yet approved = false, a single ship would break the rule.<br>This state is never actually reached from init, but induction doesn't assume that.",
+  "ctiVerdict": "⚠ unknown_cti",
+  "provedBanner": "✅ <b>proved</b> — adding one auxiliary invariant (\"Approved ⇒ approved\") lets induction finish the proof at <b>infinite depth</b>.",
+  "provedVerdict": "✓ proved"
+}
+</script>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

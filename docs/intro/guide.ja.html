@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL の仕組みと使い方 — 総当たり・証明・方言・運用</title>
+<meta name="description" content="FSLの仕組み（BMCとk帰納法、反例候補CTI）と、3つの方言・refinement・fslcコマンド・write→verify→repairの実運用。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<div class="progress"></div>
+
+<header class="topbar">
+  <span class="brand"><b>FSL</b> 仕組みと使い方</span>
+  <span class="spacer"></span>
+  <a href="concept.ja.html">← 概念にもどる</a>
+  <span class="lang">
+    <a href="guide.ja.html" class="active">日本語</a>
+    <a href="guide.en.html">EN</a>
+  </span>
+</header>
+
+<main>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">概念のつぎへ</p>
+    <h1 class="reveal">仕組みと、<span class="hl">使い方</span>。</h1>
+    <p class="lead reveal">「機械が総当たりで確かめる」——その内側では何が起きているのか。<br>そして、自分のプロジェクトでどう回すのか。</p>
+    <p class="reveal dim" style="margin-top:18px"><a href="concept.ja.html">概念の入門ページ</a>を先に読むと、ここからがスムーズです。</p>
+    <div class="scroll-hint reveal">▽ スクロール</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<!-- 1. 2段構え -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">検証エンジン</p>
+    <h2 class="reveal">検証は2段構え：まず「総当たり」、次に「証明」</h2>
+    <p class="lead narrow reveal">FSL の検証器 <code>fslc</code> には2つのモードがあります。順に強くなります。</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>① BMC（有界モデル検査）</h3>
+        <p class="dim"><code>fslc verify --depth N</code></p>
+        <p>初期状態から <b>N 手以内</b>の全経路を総当たり。反例が出れば<b>確実にバグ</b>。出なければ「深さ N までは反例なし（verified）」。速くて、反例が具体的。</p>
+      </div>
+      <div class="card">
+        <h3>② k帰納法（無限の深さ）</h3>
+        <p class="dim"><code>fslc verify --engine induction</code></p>
+        <p>「ルールを満たす<b>どんな状態</b>から1手進めても、ルールは保たれる」ことを示す。成功すれば<b>深さ無限で proved</b>。BMC より厳密。</p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">まず BMC：</p>
+      <pre><code>$ fslc verify order_fixed.fsl --depth 8
+<span class="s">{ "result": "verified", "spec": "OrderWorkflow" }</span>   <span class="c">// 深さ8まで反例なし</span></code></pre>
+      <p class="reveal" style="margin:18px 0 0">深さ8まで反例なし。<b>でも「どんなに深くても安全」と言い切れる？</b> そこで帰納法の出番です。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2. CTI デモ -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">帰納法を動かす</p>
+    <h2 class="reveal">帰納法は「もし、この状態から始まったら？」を突く</h2>
+    <p class="lead narrow reveal">帰納法は、到達できるかに関係なく<b>ルールを満たすあらゆる状態</b>を出発点に試します。だから時に、実際には起きない状態を持ち出して「ここから1手で破れる」と指摘します。これが<b>反例候補（CTI）</b>です。下のボタンで実際に動かしてみてください。</p>
+
+    <div class="panel reveal">
+      <div class="panel-head">
+        <span class="title">🔎 fslc verify --engine induction</span>
+        <span class="spacer" style="flex:1"></span>
+        <span id="verdict-cti"></span>
+      </div>
+      <div id="diagram-cti"></div>
+      <div class="readout" id="readout-cti"></div>
+      <div class="banner" id="banner-cti"></div>
+      <div id="aux-line" style="display:none;margin-top:14px">
+        <pre><code><span class="c">// この1行を足すと proved になる（補助不変条件）</span>
+<span class="k">invariant</span> ApprovedImpliesFlag { status == Approved <span class="k">=></span> approved }</code></pre>
+      </div>
+      <div class="btns">
+        <button class="btn primary" id="play-cti">▶ 帰納法で検証</button>
+        <button class="btn" id="fix-cti">＋ 補助不変条件を足して再検証</button>
+      </div>
+      <p class="dim" style="font-size:13px;margin:14px 0 0">※ これも実際の <code>fslc</code> 出力に基づきます（<code>unknown_cti</code> → 補助不変条件を追加 → <code>proved</code>）。</p>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <h3>CTI（反例候補）の読み方</h3>
+      <p style="margin:0">CTI は「必ずバグ」ではありません。意味は2通り：<br>
+      <b>(a) 不変条件が弱い</b>＝実際には起きない状態を、ルールが排除できていない → 補助不変条件で「承認済 ⇒ approved」を教えると proved。<br>
+      <b>(b) 本物の到達可能なバグ</b>＝その状態に実際に行けてしまう → 仕様か実装を直す。<br>
+      どちらかを見極めるのが人の仕事です。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3. 方言と refinement -->
+<section>
+  <div class="wrap narrow">
+    <p class="kicker reveal">縦のつながり</p>
+    <h2 class="reveal">3つの方言を refinement でつなぐ</h2>
+    <p class="lead reveal">同じドメインを粒度ちがいで書き、<b>refinement（詳細化）</b>で接続します。上の層の意図が下の層で保たれているかを <code>fslc refine</code> が機械的に照合し、<b>要件IDが全層の診断に伝播</b>します。</p>
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer"><h3>consulting（業務）</h3><p>規則・統制・KPI・ゴール。業務としての矛盾、禁止状態への到達、ゴール到達可能性を確認。</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>requirements（要件）</h3><p>要件ID・受け入れ条件・禁止フロー・NFR（権限/監査/SLA等）。反例から元の要望へ遡れる。</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>design（設計）</h3><p>状態機械・データ・非同期・合成。invariant / reachable / leadsTo / 写像で要件充足を照合。</p></div>
+      <div class="arrow-down">↓ scenarios / testgen / replay</div>
+      <div class="layer"><h3>実装・QA</h3><p>シナリオ・pytest雛形を生成。実装ログの適合も確認。</p></div>
+    </div>
+    <p class="dim reveal" style="margin-top:18px;font-size:14px"><code>fslc refine impl.fsl abs.fsl mapping.fsl</code> で1段の詳細化を、<code>fslc chain fsl-project.toml</code> で全段を一括検証できます。</p>
+  </div>
+</section>
+
+<!-- 4. コマンド早見 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">道具箱</p>
+    <h2 class="reveal"><code>fslc</code> コマンド早見</h2>
+    <p class="lead narrow reveal">出力はすべて<b>機械可読なJSON</b>（AIが読んで直すため）。終了コードは 0＝verified/proved/refines…、1＝violated/反例、2＝仕様エラー。</p>
+    <div class="cards reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>書く・検証する</h3>
+        <p><code>check</code> — 構文・型のみ（高速ループ）<br>
+        <code>verify --depth N</code> — BMC・最短反例<br>
+        <code>verify --engine induction</code> — 無限の深さで証明</p>
+      </div>
+      <div class="card">
+        <h3>仕様の質を測る</h3>
+        <p><code>--vacuity error</code> — 空虚な性質を検出<br>
+        <code>--strict-tags</code> — 未タグ/未参照のlint<br>
+        <code>mutate</code> — 制約の強さを測る<br>
+        <code>explain</code> — 検証範囲・反実仮想</p>
+      </div>
+      <div class="card">
+        <h3>実装につなぐ</h3>
+        <p><code>scenarios</code> — 統合テスト雛形JSON<br>
+        <code>testgen -o test.py</code> — pytest適合雛形<br>
+        <code>replay --trace log.json</code> — ログ適合チェック<br>
+        <code>typestate --ts</code> — 状態機械→型</p>
+      </div>
+      <div class="card">
+        <h3>階層をつなぐ</h3>
+        <p><code>refine impl abs map</code> — 詳細化の照合<br>
+        <code>chain project.toml</code> — 業務→実装を一括<br>
+        合成（compose）した仕様の <code>verify</code> も可能</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. write -> verify -> repair -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">実際に回す</p>
+    <h2 class="reveal">write → verify → repair を回す</h2>
+    <p class="lead narrow reveal">FSL は「人が文法を覚えて書く」前提ではありません。<b>AIが下書きし、<code>fslc</code> が反例を返し、AIが直す</b>。あなたは意図と最終判断を担います。</p>
+    <div class="loop reveal" style="margin-top:24px">
+      <div class="step"><div class="n">01</div><h3>意図を渡す</h3><p>「未承認は出荷しない」など守りたいことを言葉で。</p></div>
+      <div class="step"><div class="n">02</div><h3>AIが下書き</h3><p>スキルが文法と修復手順を供給。<code>.fsl</code> を生成。</p></div>
+      <div class="step"><div class="n">03</div><h3><code>fslc</code> が反例</h3><p>矛盾・抜け穴・到達不能を JSON で返す。</p></div>
+      <div class="step"><div class="n">04</div><h3>AIが修復</h3><p>反例を読み、破れなくなるまで反復。</p></div>
+    </div>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">AIが読むのは、こういう JSON（反例トレース）：</p>
+      <pre><code>{
+  <span class="k">"result"</span>: <span class="r">"violated"</span>,
+  <span class="k">"invariant"</span>: <span class="s">"ShipOnlyAfterApproval"</span>,
+  <span class="k">"violated_at_step"</span>: 2,
+  <span class="k">"last_action"</span>: { <span class="k">"name"</span>: <span class="s">"ship"</span> },
+  <span class="k">"trace"</span>: [ <span class="c">/* Draft → submit → Submitted → ship → Shipped */</span> ]
+}</code></pre>
+    </div>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">導入は3コマンド（詳細は <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">README</a>）：</p>
+      <pre><code><span class="c"># 1. 入れる（fslc とスキルが入る）</span>
+$ bash install.sh
+
+<span class="c"># 2. AIに頼む（スキル経由）</span>
+「$fsl-requirements で『承認前は出荷不可・返金は二重に走らない』要件を書いて、
+ verify して、反例が出たら直して、無くなるまで回して」
+
+<span class="c"># 3. 必要ならテスト雛形と実装連携も生成させる</span>
+$ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- 6. どこから始める -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">適用</p>
+    <h2 class="reveal">どこから始める？</h2>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>🎯 リスクの高い基幹</h3>
+        <p class="dim">従来の形式手法に近い使い方。</p>
+        <p>決済・返金 / 申請・承認 / 予約・在庫引当 / 権限・監査 / キュー・非同期 / SLA・タイムアウト。<b>間違うと痛い</b>所に集中投下。</p>
+      </div>
+      <div class="card">
+        <h3>🧩 小さな状態管理</h3>
+        <p class="dim">AIが下書きするから割に合う使い方。</p>
+        <p>画面遷移・戻る/取消・確認モーダル / 未保存・保存中 / ウィザード / 二重送信防止 / retry・pending・failed / 権限による操作可否。<b>状態の抜け穴の事前点検</b>に。</p>
+      </div>
+    </div>
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0">判断基準は「状態の数」ではなく、<b>「操作順やフラグの組み合わせで、意図しない状態に入れてしまうか」</b>。3状態・2フラグでも、戻る/取消/retry/権限分岐があるなら FSL 化する価値があります。まずは2週間で終わる小さな PoC から。</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section>
+  <div class="wrap narrow center">
+    <div class="cta reveal">
+      <h2>触ってみる</h2>
+      <p>小さな仕様をひとつ、AIに書かせて <code>fslc verify</code> にかけてみてください。<br>反例が返ってくる体験が、いちばんの理解になります。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub / README</a>
+        <a class="btn ghost" href="concept.ja.html">概念をもう一度</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>FSL — AI-Native Formal Specification Language. デモは実際の <code>fslc</code> 出力（verified / unknown_cti / proved）に基づきます。</p>
+  <p><a href="guide.en.html">English</a> ・ <a href="concept.ja.html">概念の入門</a> ・ <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
+</footer>
+
+<script type="application/json" id="diagram-config">
+{
+  "nodes": [
+    {"id":"Draft","label":"下書き","cx":90,"cy":80},
+    {"id":"Submitted","label":"申請済","cx":285,"cy":80},
+    {"id":"Approved","label":"承認済","cx":480,"cy":80},
+    {"id":"Shipped","label":"出荷済","cx":675,"cy":80},
+    {"id":"Cancelled","label":"取消","cx":285,"cy":200}
+  ],
+  "edges": [
+    {"id":"submit","action":"submit","from":"Draft","to":"Submitted","label":"submit"},
+    {"id":"approve","action":"approve","from":"Submitted","to":"Approved","label":"approve"},
+    {"id":"ship","action":"ship","from":"Approved","to":"Shipped","label":"ship"},
+    {"id":"cancel1","action":"cancel","from":"Submitted","to":"Cancelled","label":"cancel"}
+  ]
+}
+</script>
+
+<!-- real counterexample-to-induction from `fslc verify order_fixed.fsl --engine induction` -->
+<script type="application/json" id="trace-cti">
+{
+  "result": "unknown_cti",
+  "violated_at_step": 1,
+  "trace": [
+    { "step": 0, "state": { "status": "Approved", "approved": false } },
+    { "step": 1, "state": { "status": "Shipped", "approved": false },
+      "action": { "name": "ship" }, "changes": { "status": { "from": "Approved", "to": "Shipped" } } }
+  ]
+}
+</script>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

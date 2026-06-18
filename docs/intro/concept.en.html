@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What is FSL? — A spec a machine can check</title>
+<meta name="description" content="An intro to FSL for people who don't know formal methods. From a spec you read to a spec a machine checks by brute force." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<div class="progress"></div>
+
+<header class="topbar">
+  <span class="brand"><b>FSL</b> intro</span>
+  <span class="spacer"></span>
+  <a href="guide.en.html">How it works →</a>
+  <span class="lang">
+    <a href="concept.ja.html">日本語</a>
+    <a href="concept.en.html" class="active">EN</a>
+  </span>
+</header>
+
+<main>
+
+<!-- 0. HERO -->
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">FSL for people who don't know formal methods</p>
+    <h1 class="reveal">You can <span class="hl">read</span> a spec.<br>Whether it's <span class="hl">correct</span>,<br>you can't check.</h1>
+    <p class="lead reveal">AI now writes specs, code, and tests at high speed.<br>So who guarantees they're actually correct?</p>
+    <p class="reveal" style="margin-top:24px">FSL is a language for letting <b>a machine check your spec by brute force</b>.<br>By the end of this page, you'll feel what that means. <span class="dim">(10 min, no jargon)</span></p>
+    <div class="scroll-hint reveal">▽ Scroll</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<!-- 1. Bugs you've hit -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">First, recall</p>
+    <h2 class="reveal">That bug? Probably a "state loophole"</h2>
+    <p class="lead narrow reveal">Ever had one of these? They share one shape: in some <b>order of operations</b>, you slip into a <b>state that must never happen</b>.</p>
+    <div class="cards reveal" style="margin-top:28px">
+      <div class="card"><div class="emoji">📦</div><h3>Shipped before approval</h3><p>"Ship" became clickable before "Approve", so it shipped while unapproved.</p></div>
+      <div class="card"><div class="emoji">↩️</div><h3>Lost on Back</h3><p>Hit Back mid-edit and landed in a limbo screen — neither saved nor cancelled.</p></div>
+      <div class="card"><div class="emoji">💳</div><h3>Double submit, double charge</h3><p>Mashed the submit button and the payment ran twice.</p></div>
+      <div class="card"><div class="emoji">🔓</div><h3>Permission slip-through</h3><p>A user without permission could change state via a certain order.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. Anatomy -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Break it down: just three</p>
+    <h2 class="reveal">Software is made of states, operations, and rules</h2>
+    <div class="triad reveal" style="margin-top:28px">
+      <div class="card"><span class="tag state">state</span><h3 style="margin-top:12px">What it looks like now</h3><p>Draft / Submitted / Approved / Shipped … the situations the app can be in.</p></div>
+      <div class="card"><span class="tag op">operation</span><h3 style="margin-top:12px">What you can do</h3><p>submit / approve / ship / cancel — actions that move the state.</p></div>
+      <div class="card"><span class="tag rule">rule</span><h3 style="margin-top:12px">What must hold</h3><p>"An unapproved order is never shipped." A promise that must never break.</p></div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">Most bugs are this <b>rule</b> breaking under some <b>order of operations</b>.<br>So how do you find that break?</p>
+  </div>
+</section>
+
+<!-- 3. Example -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Think with an example</p>
+    <h2 class="reveal">Let's draw "an order"</h2>
+    <p class="lead narrow reveal">Boxes are <b>states</b>, arrows are <b>operations</b>. One <b>rule</b> to keep:<br><b>"An order that hasn't passed Approved never becomes Shipped."</b></p>
+    <div class="panel reveal">
+      <div id="diagram-intro"></div>
+      <p class="dim" style="margin:14px 0 0;font-size:14px">Draft →(submit)→ Submitted →(approve)→ Approved →(ship)→ Shipped. You can cancel partway, too. Looks perfectly fine, doesn't it?</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Test vs all -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Here's the core</p>
+    <h2 class="reveal">A test is one path; the machine is every path</h2>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>🧪 Test</h3>
+        <p class="dim" style="margin-bottom:14px">Checks <b>one procedure</b> a person thought of.</p>
+        <div id="diagram-test"></div>
+        <p class="dim" style="font-size:14px;margin:12px 0 0">submit→approve→ship is OK. But you only checked <b>this one path you chose</b>.</p>
+      </div>
+      <div class="card">
+        <h3>🔎 Formal methods (FSL)</h3>
+        <p class="dim" style="margin-bottom:14px">The machine explores <b>every possible order</b>.</p>
+        <div id="diagram-all"></div>
+        <p class="dim" style="font-size:14px;margin:12px 0 0">Try all paths and… a <b style="color:var(--danger)">loophole that skips approval to ship</b> appears.</p>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">A test only sees the path you chose.<br>FSL has the machine brute-force whether the rule breaks under <b>any order</b>.</p>
+  </div>
+</section>
+
+<!-- 5. Counterexample -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">The magic moment</p>
+    <h2 class="reveal">If it can break, the machine shows you the exact steps</h2>
+    <p class="lead narrow reveal">Write a rule, hit verify, and FSL answers —<br>"It breaks. Here are the <b>shortest steps</b>."</p>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">The rule being checked (FSL excerpt):</p>
+      <pre><code><span class="c">// ship only after approval, supposedly…</span>
+<span class="k">action</span> ship() {
+  <span class="k">requires</span> status == <span class="r">Submitted</span>   <span class="c">// ← bug: should be Approved</span>
+  status = Shipped
+}
+<span class="k">invariant</span> ShipOnlyAfterApproval { status == Shipped <span class="k">=></span> approved }</code></pre>
+
+      <div class="panel-head" style="margin-top:22px">
+        <span class="title">🔎 Running fslc verify</span>
+        <span class="spacer" style="flex:1"></span>
+        <span id="verdict-hero"></span>
+      </div>
+      <div id="diagram-hero"></div>
+      <div class="readout" id="readout-hero"></div>
+      <div class="banner" id="banner-hero"></div>
+      <div class="btns">
+        <button class="btn primary" id="play-hero">▶ Replay the check</button>
+      </div>
+      <p class="dim" style="font-size:13px;margin:14px 0 0">This animation replays the actual counterexample trace (JSON) from <code>fslc verify</code>. No embellishment.</p>
+    </div>
+
+    <p class="narrow reveal" style="margin-top:28px">That means you get the bug's <b>reproduction steps before you implement</b>.<br>A tireless QA tries every order and hands you one path that breaks.</p>
+  </div>
+</section>
+
+<!-- 6. Try it -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Try it yourself</p>
+    <h2 class="reveal">Can you break the rule?</h2>
+    <p class="lead narrow reveal">Operate with the buttons — only allowed ones are enabled.<br>Reach "Shipped without approval" and you win.</p>
+    <div class="panel reveal">
+      <div class="panel-head">
+        <label class="switch"><input type="checkbox" id="board-mode" /> Make it the buggy version (remove the ship guard)</label>
+      </div>
+      <div id="diagram-board"></div>
+      <div class="readout" id="readout-board"></div>
+      <div class="banner" id="banner-board"></div>
+      <div class="btns">
+        <button class="op" id="op-submit">submit</button>
+        <button class="op" id="op-approve">approve</button>
+        <button class="op" id="op-ship">ship</button>
+        <button class="op" id="op-cancel">cancel</button>
+        <button class="btn" id="op-reset">↺ Reset</button>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">In the correct version you can't break it by hand, no matter what.<br>Flip to buggy and you can — but trying every path by hand is brutal.<br><b>The machine tries every path on this board in an instant.</b></p>
+  </div>
+</section>
+
+<!-- 7. Why AI -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Why this works now</p>
+    <h2 class="reveal">AI writes, the machine checks, AI fixes</h2>
+    <p class="lead narrow reveal">Old-school formal methods meant experts writing for weeks. FSL flips the order.</p>
+    <div class="loop reveal" style="margin-top:24px">
+      <div class="step"><div class="n">01</div><h3>A human gives intent</h3><p>State what must hold — like "never ship unapproved" — in words.</p></div>
+      <div class="step"><div class="n">02</div><h3>AI drafts the spec</h3><p>AI knows FSL's grammar. You don't memorize it.</p></div>
+      <div class="step"><div class="n">03</div><h3>The machine returns counterexamples</h3><p><code>fslc</code> returns contradictions, loopholes, counterexamples as JSON.</p></div>
+      <div class="step"><div class="n">04</div><h3>AI reads and fixes</h3><p>Reads the counterexample, fixes the spec. Repeat until nothing breaks.</p></div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">Humans only <b>decide intent</b> and make the <b>final business call</b>.<br>So today it's cheap enough even for a tiny thing like a confirmation modal.</p>
+  </div>
+</section>
+
+<!-- 8. Vertical -->
+<section style="background:var(--surface-2)">
+  <div class="wrap narrow">
+    <p class="kicker reveal">Another trait</p>
+    <h2 class="reveal">From business to implementation, on one line</h2>
+    <p class="lead reveal">Handle the same "order" at different granularities. The machine tracks that the upper intent is actually reflected below.</p>
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer"><h3>Business (rules)</h3><p>Returns within 30 days of shipment, etc. Check for business-level contradictions.</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>Requirements (PM / acceptance)</h3><p>Written with requirement IDs. Trace from a counterexample back to the original request.</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>Design (state machines / data)</h3><p>Implementation-near transitions. Check they satisfy the requirements.</p></div>
+      <div class="arrow-down">↓ scenarios / testgen / replay</div>
+      <div class="layer"><h3>Implementation / QA</h3><p>Generate test scaffolds and scenarios from the spec. Check that impl logs conform.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9. Limits -->
+<section>
+  <div class="wrap narrow">
+    <p class="kicker reveal">Honestly</p>
+    <h2 class="reveal">FSL is not omnipotent</h2>
+    <div class="callout warn reveal">
+      <p style="margin:0 0 10px"><b>It checks only the range of the rules you wrote.</b> If the rules themselves are wrong, the verdict rests on wrong rules.</p>
+      <p style="margin:0 0 10px"><b>It's not a replacement for tests.</b> Implementation, UI, and integrations are tests' job. The two complement each other.</p>
+      <p style="margin:0"><b>A human decides in the end.</b> Whether an AI-written spec truly captures the original rules is for a human to confirm. FSL is an external standard that aids that judgment.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10. Reveal + CTA -->
+<section>
+  <div class="wrap narrow center">
+    <p class="kicker reveal">The reveal</p>
+    <h2 class="reveal">What you just experienced is "formal methods"</h2>
+    <p class="lead reveal">Write states, operations, and rules; the machine checks every order; if it breaks, it returns a counterexample —<br>simpler than the scary name suggests.</p>
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>Go one step deeper</h2>
+      <p>"How does it prove things?" "How do I use it on my project?"<br>The next page answers that.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="guide.en.html">Read how it works →</a>
+        <a class="btn ghost" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>FSL — AI-Native Formal Specification Language. This page's animation is based on real <code>fslc verify</code> output.</p>
+  <p><a href="concept.ja.html">日本語版</a> · <a href="guide.en.html">How it works</a> · <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
+</footer>
+
+<!-- data: state-machine config (English labels) -->
+<script type="application/json" id="diagram-config">
+{
+  "nodes": [
+    {"id":"Draft","label":"Draft","cx":90,"cy":80},
+    {"id":"Submitted","label":"Submitted","cx":285,"cy":80},
+    {"id":"Approved","label":"Approved","cx":480,"cy":80},
+    {"id":"Shipped","label":"Shipped","cx":675,"cy":80},
+    {"id":"Cancelled","label":"Cancelled","cx":285,"cy":200}
+  ],
+  "edges": [
+    {"id":"submit","action":"submit","from":"Draft","to":"Submitted","label":"submit"},
+    {"id":"approve","action":"approve","from":"Submitted","to":"Approved","label":"approve"},
+    {"id":"ship","action":"ship","from":"Approved","to":"Shipped","label":"ship"},
+    {"id":"cancel1","action":"cancel","from":"Submitted","to":"Cancelled","label":"cancel"},
+    {"id":"shipbug","action":"ship","from":"Submitted","to":"Shipped","label":"ship (skips approval)","kind":"bug","curve":true}
+  ]
+}
+</script>
+
+<!-- data: real counterexample trace from `fslc verify order_buggy.fsl` -->
+<script type="application/json" id="trace-buggy">
+{
+  "result": "violated",
+  "invariant": "ShipOnlyAfterApproval",
+  "violated_at_step": 2,
+  "last_action": { "name": "ship" },
+  "trace": [
+    { "step": 0, "state": { "status": "Draft", "approved": false } },
+    { "step": 1, "state": { "status": "Submitted", "approved": false },
+      "action": { "name": "submit" }, "changes": { "status": { "from": "Draft", "to": "Submitted" } } },
+    { "step": 2, "state": { "status": "Shipped", "approved": false },
+      "action": { "name": "ship" }, "changes": { "status": { "from": "Submitted", "to": "Shipped" } } }
+  ]
+}
+</script>
+
+<!-- English UI strings for the shared engine -->
+<script type="application/json" id="i18n">
+{
+  "heroBanner": "❌ <b>violated</b> — the rule \"{inv}\" can be broken.<br>Shortest counterexample: <b>submit → {act}</b> ({step} steps). It reaches shipping by skipping approval.",
+  "heroVerdict": "❌ violated",
+  "boardViol": "❌ <b>Rule violated!</b> Shipped without approval (approved = false while Shipped). A loophole hard to find by hand — the machine finds it by brute force in one shot.",
+  "boardShip": "✅ Shipped after approval. The rule holds.",
+  "boardCancel": "Cancelled. Press \"Reset\" to try again."
+}
+</script>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

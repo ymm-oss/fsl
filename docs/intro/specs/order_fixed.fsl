@@ -1,0 +1,39 @@
+spec OrderWorkflow {
+  enum Status { Draft, Submitted, Approved, Shipped, Cancelled }
+
+  state {
+    status:   Status,
+    approved: Bool
+  }
+
+  init {
+    status = Draft
+    approved = false
+  }
+
+  action submit() {
+    requires status == Draft
+    status = Submitted
+  }
+
+  action approve() {
+    requires status == Submitted
+    status = Approved
+    approved = true
+  }
+
+  action ship() {
+    requires status == Approved   // FIX: ship only after approval
+    status = Shipped
+  }
+
+  action cancel() {
+    requires status != Shipped
+    status = Cancelled
+  }
+
+  // The rule we want to guarantee: an order is shipped only after approval.
+  invariant ShipOnlyAfterApproval { status == Shipped => approved }
+
+  reachable CanShip { status == Shipped }
+}

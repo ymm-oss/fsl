@@ -1,0 +1,111 @@
+{
+  "fsl": "1.0",
+  "result": "proved",
+  "spec": "OrderWorkflow",
+  "engine": "induction",
+  "completeness": "unbounded",
+  "checked_to_depth": 8,
+  "k_used": {
+    "_bounds_status": 1,
+    "ShipOnlyAfterApproval": 1,
+    "ApprovedImpliesFlag": 1
+  },
+  "base_depth": 8,
+  "invariants_checked": [
+    "_bounds_status",
+    "ShipOnlyAfterApproval",
+    "ApprovedImpliesFlag"
+  ],
+  "transitions_checked": [],
+  "action_coverage": {
+    "submit": true,
+    "approve": true,
+    "ship": true,
+    "cancel": true
+  },
+  "reachables": {
+    "CanShip": {
+      "witnessed_at_step": 3,
+      "witness": [
+        {
+          "step": 0,
+          "state": {
+            "status": "Draft",
+            "approved": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "status": "Submitted",
+            "approved": false
+          },
+          "action": {
+            "name": "submit",
+            "params": {},
+            "loc": {
+              "line": 14,
+              "column": 3
+            }
+          },
+          "changes": {
+            "status": {
+              "from": "Draft",
+              "to": "Submitted"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "status": "Approved",
+            "approved": true
+          },
+          "action": {
+            "name": "approve",
+            "params": {},
+            "loc": {
+              "line": 19,
+              "column": 3
+            }
+          },
+          "changes": {
+            "approved": {
+              "from": false,
+              "to": true
+            },
+            "status": {
+              "from": "Submitted",
+              "to": "Approved"
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "status": "Shipped",
+            "approved": true
+          },
+          "action": {
+            "name": "ship",
+            "params": {},
+            "loc": {
+              "line": 25,
+              "column": 3
+            }
+          },
+          "changes": {
+            "status": {
+              "from": "Approved",
+              "to": "Shipped"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "cost": {
+    "elapsed_s": 0.086708
+  }
+}

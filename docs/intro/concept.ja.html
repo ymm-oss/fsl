@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSLって、なに？ — 仕様を「機械が確かめる」言語の入門</title>
+<meta name="description" content="形式手法を知らない人のためのFSL入門。仕様書を『読むもの』から『機械が総当たりで確かめるもの』へ。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<div class="progress"></div>
+
+<header class="topbar">
+  <span class="brand"><b>FSL</b> 入門</span>
+  <span class="spacer"></span>
+  <a href="guide.ja.html">仕組みと使い方 →</a>
+  <span class="lang">
+    <a href="concept.ja.html" class="active">日本語</a>
+    <a href="concept.en.html">EN</a>
+  </span>
+</header>
+
+<main>
+
+<!-- 0. HERO -->
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">形式手法を知らない人のためのFSL</p>
+    <h1 class="reveal">仕様書は<span class="hl">“読める”</span>。<br>でも<span class="hl">“正しい”</span>かは、<br>確かめられない。</h1>
+    <p class="lead reveal">AIが、仕様もコードもテストも高速に書く時代。<br>では、それが「本当に正しい」保証は、誰がするのでしょう。</p>
+    <p class="reveal" style="margin-top:24px">FSL は、仕様を <b>機械が総当たりで確かめる</b> ための言語です。<br>このページを最後まで読むと、その意味が体でわかります。<span class="dim">（10分・専門用語なし）</span></p>
+    <div class="scroll-hint reveal">▽ スクロール</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<!-- 1. あるあるバグ -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">まず、思い出してください</p>
+    <h2 class="reveal">そのバグ、たぶん「状態の抜け穴」です</h2>
+    <p class="lead narrow reveal">こういう経験、ありませんか？ どれも「<b>ある操作の順番</b>で、<b>起きてはいけない状態</b>に入ってしまった」という同じ形をしています。</p>
+    <div class="cards reveal" style="margin-top:28px">
+      <div class="card"><div class="emoji">📦</div><h3>承認前なのに出荷</h3><p>「承認」を押す前に「出荷」が押せてしまい、未承認のまま発送された。</p></div>
+      <div class="card"><div class="emoji">↩️</div><h3>戻るボタンで迷子</h3><p>編集途中で戻ると、保存もキャンセルもしていない宙ぶらりんの画面に。</p></div>
+      <div class="card"><div class="emoji">💳</div><h3>二重送信で二重課金</h3><p>送信ボタンを連打したら、決済が2回走ってしまった。</p></div>
+      <div class="card"><div class="emoji">🔓</div><h3>権限のすり抜け</h3><p>権限のないユーザーが、特定の順で操作すると状態を変えられた。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. 正体 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">分解すると、たった3つ</p>
+    <h2 class="reveal">ソフトウェアは「状態・操作・ルール」でできている</h2>
+    <div class="triad reveal" style="margin-top:28px">
+      <div class="card"><span class="tag state">状態</span><h3 style="margin-top:12px">いまどうなっているか</h3><p>下書き / 申請済 / 承認済 / 出荷済 …。アプリが取りうる「状況」。</p></div>
+      <div class="card"><span class="tag op">操作</span><h3 style="margin-top:12px">何ができるか</h3><p>申請する / 承認する / 出荷する / 取り消す。状態を動かす「行動」。</p></div>
+      <div class="card"><span class="tag rule">ルール</span><h3 style="margin-top:12px">何を守るべきか</h3><p>「承認していない注文は、出荷されない」。絶対に破れてはいけない約束。</p></div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">バグの多くは、この<b>ルール</b>が、ある<b>操作</b>の順番で破れてしまうこと。<br>では、その「破れ方」をどうやって見つければいいでしょう？</p>
+  </div>
+</section>
+
+<!-- 3. 例：注文フロー -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">例で考える</p>
+    <h2 class="reveal">「注文」を図にしてみる</h2>
+    <p class="lead narrow reveal">箱が<b>状態</b>、矢印が<b>操作</b>。守りたい<b>ルール</b>はひとつ——<br><b>「承認済を経ていない注文は、出荷済にならない」</b>。</p>
+    <div class="panel reveal">
+      <div id="diagram-intro"></div>
+      <p class="dim" style="margin:14px 0 0;font-size:14px">下書き →(申請)→ 申請済 →(承認)→ 承認済 →(出荷)→ 出荷済。途中で取り消すこともできる。一見、何の問題もなさそうに見えます。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4. テスト vs 総当たり -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">ここが核心</p>
+    <h2 class="reveal">テストは「1本の道」、機械は「全部の道」</h2>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>🧪 テスト</h3>
+        <p class="dim" style="margin-bottom:14px">人が思いついた<b>1つの手順</b>を確かめる。</p>
+        <div id="diagram-test"></div>
+        <p class="dim" style="font-size:14px;margin:12px 0 0">「申請→承認→出荷」はOK。でも、確かめたのは<b>選んだこの1本</b>だけ。</p>
+      </div>
+      <div class="card">
+        <h3>🔎 形式手法（FSL）</h3>
+        <p class="dim" style="margin-bottom:14px">考えうる<b>すべての操作順</b>を機械が探索する。</p>
+        <div id="diagram-all"></div>
+        <p class="dim" style="font-size:14px;margin:12px 0 0">全部の道を試すと…<b style="color:var(--danger)">承認を飛ばして出荷に行ける抜け穴</b>が見つかった。</p>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">テストは「選んだ道」しか見ません。<br>FSL は、ルールが<b>どんな順番でも</b>破れないかを、機械に総当たりで調べさせます。</p>
+  </div>
+</section>
+
+<!-- 5. 反例（主役） -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">魔法の瞬間</p>
+    <h2 class="reveal">破れるなら、機械が「その手順」を見せてくれる</h2>
+    <p class="lead narrow reveal">ルールを書いて検証ボタンを押すと、FSL はこう答えます——<br>「破れます。これが、その<b>最短の手順</b>です」。</p>
+
+    <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">いま検証しているルール（FSLの抜粋）：</p>
+      <pre><code><span class="c">// 出荷は承認のあとだけ、のはず…</span>
+<span class="k">action</span> ship() {
+  <span class="k">requires</span> status == <span class="r">Submitted</span>   <span class="c">// ← バグ：本当は Approved であるべき</span>
+  status = Shipped
+}
+<span class="k">invariant</span> ShipOnlyAfterApproval { status == Shipped <span class="k">=></span> approved }</code></pre>
+
+      <div class="panel-head" style="margin-top:22px">
+        <span class="title">🔎 fslc verify の実行</span>
+        <span class="spacer" style="flex:1"></span>
+        <span id="verdict-hero"></span>
+      </div>
+      <div id="diagram-hero"></div>
+      <div class="readout" id="readout-hero"></div>
+      <div class="banner" id="banner-hero"></div>
+      <div class="btns">
+        <button class="btn primary" id="play-hero">▶ 検証を再生する</button>
+      </div>
+      <p class="dim" style="font-size:13px;margin:14px 0 0">※ このアニメは、実際の <code>fslc verify</code> が返した反例トレース（JSON）をそのまま再生しています。脚色なし。</p>
+    </div>
+
+    <p class="narrow reveal" style="margin-top:28px">これは <b>“バグの再現手順を、実装する前に”</b> 受け取れる、ということ。<br>疲れ知らずのQAが、ありとあらゆる順番を試して、破れる道を1本突きつけてくれます。</p>
+  </div>
+</section>
+
+<!-- 6. 自分で破ってみる -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">体験してみる</p>
+    <h2 class="reveal">あなたは、ルールを破れますか？</h2>
+    <p class="lead narrow reveal">ボタンで操作してみてください。押せるボタンだけが有効になります。<br>「承認なしで出荷済」に到達できたら、あなたの勝ち。</p>
+    <div class="panel reveal">
+      <div class="panel-head">
+        <label class="switch"><input type="checkbox" id="board-mode" /> バグ版にする（出荷のガードを外す）</label>
+      </div>
+      <div id="diagram-board"></div>
+      <div class="readout" id="readout-board"></div>
+      <div class="banner" id="banner-board"></div>
+      <div class="btns">
+        <button class="op" id="op-submit">submit（申請）</button>
+        <button class="op" id="op-approve">approve（承認）</button>
+        <button class="op" id="op-ship">ship（出荷）</button>
+        <button class="op" id="op-cancel">cancel（取消）</button>
+        <button class="btn" id="op-reset">↺ リセット</button>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">正しい版では、手でいくら試しても破れません。<br>バグ版に切り替えると破れます——でも、人が全パターンを試すのは大変。<br><b>機械なら、この盤面の全手順を一瞬で試し尽くします。</b></p>
+  </div>
+</section>
+
+<!-- 7. なぜ今・なぜAI -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">なぜ今、これが効くのか</p>
+    <h2 class="reveal">AIが書き、機械が確かめ、AIが直す</h2>
+    <p class="lead narrow reveal">昔の形式手法は「専門家が何週間もかけて書くもの」でした。FSL は順番を変えます。</p>
+    <div class="loop reveal" style="margin-top:24px">
+      <div class="step"><div class="n">01</div><h3>人が意図を渡す</h3><p>「未承認は出荷しない」など、守りたいことを言葉で伝える。</p></div>
+      <div class="step"><div class="n">02</div><h3>AIが仕様を下書き</h3><p>FSL の文法はAIが知っている。人は覚えなくていい。</p></div>
+      <div class="step"><div class="n">03</div><h3>機械が反例を返す</h3><p><code>fslc</code> が矛盾・抜け穴・反例を JSON で返す。</p></div>
+      <div class="step"><div class="n">04</div><h3>AIが読んで直す</h3><p>反例を読み、仕様を修正。これを破れなくなるまで繰り返す。</p></div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">人がやるのは<b>意図を決めること</b>と<b>業務上の最終判断</b>だけ。<br>だから今や、確認モーダルのような小さな状態管理にも気軽に使えます。</p>
+  </div>
+</section>
+
+<!-- 8. 縦に貫く -->
+<section style="background:var(--surface-2)">
+  <div class="wrap narrow">
+    <p class="kicker reveal">もうひとつの特徴</p>
+    <h2 class="reveal">業務から実装まで、1本の線でつながる</h2>
+    <p class="lead reveal">同じ「注文」を、粒度を変えて縦に貫けます。上の意図が下までちゃんと反映されているかを、機械が追跡します。</p>
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer"><h3>業務（ビジネスルール）</h3><p>返品は出荷後30日以内、など。業務としての矛盾がないかを確かめる。</p></div>
+      <div class="arrow-down">↓ refinement（詳細化）</div>
+      <div class="layer"><h3>要件（PM/受け入れ条件）</h3><p>要件IDつきで記述。検証結果や反例から、元の要望まで遡れる。</p></div>
+      <div class="arrow-down">↓ refinement</div>
+      <div class="layer"><h3>設計（状態機械・データ）</h3><p>実装に近い状態遷移。要件をちゃんと満たしているかを照合。</p></div>
+      <div class="arrow-down">↓ scenarios / testgen / replay</div>
+      <div class="layer"><h3>実装・QA</h3><p>仕様からテスト雛形やシナリオを生成。実装のログが仕様に従うかも確認。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9. 限界 -->
+<section>
+  <div class="wrap narrow">
+    <p class="kicker reveal">正直なところ</p>
+    <h2 class="reveal">FSL は万能ではありません</h2>
+    <div class="callout warn reveal">
+      <p style="margin:0 0 10px"><b>確かめるのは「書いたルールの範囲」だけ。</b> ルール自体が間違っていれば、検証結果も間違ったルールに基づきます。</p>
+      <p style="margin:0 0 10px"><b>テストの代わりにはなりません。</b> 実装・UI・外部連携の確認はテストの役割。両者は補い合う関係です。</p>
+      <p style="margin:0"><b>最後は人が判断する。</b> 「AIが書いた仕様が、本当に元の業務ルールを表しているか」は、人が確認します。FSL はその判断を助ける外部の基準です。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10. 種明かし + CTA -->
+<section>
+  <div class="wrap narrow center">
+    <p class="kicker reveal">種明かし</p>
+    <h2 class="reveal">いま体験したのが「形式手法」です</h2>
+    <p class="lead reveal">状態と操作とルールを書き、機械があらゆる順番を調べ、破れるなら反例を返す——<br>難しそうな名前のわりに、やっていることはシンプルでした。</p>
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>もう一歩、踏み込む</h2>
+      <p>「どういう仕組みで証明しているの？」「自分のプロジェクトでどう使うの？」<br>その答えは、次のページにあります。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="guide.ja.html">仕組みと使い方を読む →</a>
+        <a class="btn ghost" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub で見る</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>FSL — AI-Native Formal Specification Language. このページのアニメは実際の <code>fslc verify</code> 出力に基づきます。</p>
+  <p><a href="concept.en.html">English version</a> ・ <a href="guide.ja.html">仕組みと使い方</a> ・ <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
+</footer>
+
+<!-- data: state-machine config (shared by all diagrams on this page) -->
+<script type="application/json" id="diagram-config">
+{
+  "nodes": [
+    {"id":"Draft","label":"下書き","cx":90,"cy":80},
+    {"id":"Submitted","label":"申請済","cx":285,"cy":80},
+    {"id":"Approved","label":"承認済","cx":480,"cy":80},
+    {"id":"Shipped","label":"出荷済","cx":675,"cy":80},
+    {"id":"Cancelled","label":"取消","cx":285,"cy":200}
+  ],
+  "edges": [
+    {"id":"submit","action":"submit","from":"Draft","to":"Submitted","label":"submit"},
+    {"id":"approve","action":"approve","from":"Submitted","to":"Approved","label":"approve"},
+    {"id":"ship","action":"ship","from":"Approved","to":"Shipped","label":"ship"},
+    {"id":"cancel1","action":"cancel","from":"Submitted","to":"Cancelled","label":"cancel"},
+    {"id":"shipbug","action":"ship","from":"Submitted","to":"Shipped","label":"ship（承認を飛ばす）","kind":"bug","curve":true}
+  ]
+}
+</script>
+
+<!-- data: real counterexample trace from `fslc verify order_buggy.fsl` -->
+<script type="application/json" id="trace-buggy">
+{
+  "result": "violated",
+  "invariant": "ShipOnlyAfterApproval",
+  "violated_at_step": 2,
+  "last_action": { "name": "ship" },
+  "trace": [
+    { "step": 0, "state": { "status": "Draft", "approved": false } },
+    { "step": 1, "state": { "status": "Submitted", "approved": false },
+      "action": { "name": "submit" }, "changes": { "status": { "from": "Draft", "to": "Submitted" } } },
+    { "step": 2, "state": { "status": "Shipped", "approved": false },
+      "action": { "name": "ship" }, "changes": { "status": { "from": "Submitted", "to": "Shipped" } } }
+  ]
+}
+</script>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+{
+  "fsl": "1.0",
+  "result": "verified",
+  "spec": "OrderWorkflow",
+  "depth": 8,
+  "checked_to_depth": 8,
+  "completeness": "bounded",
+  "invariants_checked": [
+    "_bounds_status",
+    "ShipOnlyAfterApproval"
+  ],
+  "transitions_checked": [],
+  "reachables": {
+    "CanShip": {
+      "witnessed_at_step": 3,
+      "witness": [
+        {
+          "step": 0,
+          "state": {
+            "status": "Draft",
+            "approved": false
+          }
+        },
+        {
+          "step": 1,
+          "state": {
+            "status": "Submitted",
+            "approved": false
+          },
+          "action": {
+            "name": "submit",
+            "params": {},
+            "loc": {
+              "line": 14,
+              "column": 3
+            }
+          },
+          "changes": {
+            "status": {
+              "from": "Draft",
+              "to": "Submitted"
+            }
+          }
+        },
+        {
+          "step": 2,
+          "state": {
+            "status": "Approved",
+            "approved": true
+          },
+          "action": {
+            "name": "approve",
+            "params": {},
+            "loc": {
+              "line": 19,
+              "column": 3
+            }
+          },
+          "changes": {
+            "status": {
+              "from": "Submitted",
+              "to": "Approved"
+            },
+            "approved": {
+              "from": false,
+              "to": true
+            }
+          }
+        },
+        {
+          "step": 3,
+          "state": {
+            "status": "Shipped",
+            "approved": true
+          },
+          "action": {
+            "name": "ship",
+            "params": {},
+            "loc": {
+              "line": 25,
+              "column": 3
+            }
+          },
+          "changes": {
+            "status": {
+              "from": "Approved",
+              "to": "Shipped"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "action_coverage": {
+    "submit": true,
+    "approve": true,
+    "ship": true,
+    "cancel": true
+  },
+  "deadlock": {
+    "found": true,
+    "at_step": 3,
+    "trace": [
+      {
+        "step": 0,
+        "state": {
+          "status": "Draft",
+          "approved": false
+        }
+      },
+      {
+        "step": 1,
+        "state": {
+          "status": "Submitted",
+          "approved": false
+        },
+        "action": {
+          "name": "submit",
+          "params": {},
+          "loc": {
+            "line": 14,
+            "column": 3
+          }
+        },
+        "changes": {
+          "status": {
+            "from": "Draft",
+            "to": "Submitted"
+          }
+        }
+      },
+      {
+        "step": 2,
+        "state": {
+          "status": "Approved",
+          "approved": true
+        },
+        "action": {
+          "name": "approve",
+          "params": {},
+          "loc": {
+            "line": 19,
+            "column": 3
+          }
+        },
+        "changes": {
+          "status": {
+            "from": "Submitted",
+            "to": "Approved"
+          },
+          "approved": {
+            "from": false,
+            "to": true
+          }
+        }
+      },
+      {
+        "step": 3,
+        "state": {
+          "status": "Shipped",
+          "approved": true
+        },
+        "action": {
+          "name": "ship",
+          "params": {},
+          "loc": {
+            "line": 25,
+            "column": 3
+          }
+        },
+        "changes": {
+          "status": {
+            "from": "Approved",
+            "to": "Shipped"
+          }
+        }
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "message": "deadlock reachable at step 3 (state: status=Shipped, approved=true)",
+      "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional"
+    }
+  ],
+  "note": "bounded verification: no violation within depth 8",
+  "cost": {
+    "elapsed_s": 0.068092
+  }
+}

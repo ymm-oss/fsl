@@ -1,0 +1,79 @@
+{
+  "fsl": "1.0",
+  "result": "violated",
+  "spec": "OrderWorkflow",
+  "violation_kind": "invariant",
+  "invariant": "ShipOnlyAfterApproval",
+  "loc": {
+    "line": 36,
+    "column": 3
+  },
+  "violated_at_step": 2,
+  "violating_bindings": [
+    {}
+  ],
+  "last_action": {
+    "name": "ship",
+    "params": {},
+    "loc": {
+      "line": 25,
+      "column": 3
+    }
+  },
+  "trace": [
+    {
+      "step": 0,
+      "state": {
+        "status": "Draft",
+        "approved": false
+      }
+    },
+    {
+      "step": 1,
+      "state": {
+        "status": "Submitted",
+        "approved": false
+      },
+      "action": {
+        "name": "submit",
+        "params": {},
+        "loc": {
+          "line": 14,
+          "column": 3
+        }
+      },
+      "changes": {
+        "status": {
+          "from": "Draft",
+          "to": "Submitted"
+        }
+      }
+    },
+    {
+      "step": 2,
+      "state": {
+        "status": "Shipped",
+        "approved": false
+      },
+      "action": {
+        "name": "ship",
+        "params": {},
+        "loc": {
+          "line": 25,
+          "column": 3
+        }
+      },
+      "changes": {
+        "status": {
+          "from": "Submitted",
+          "to": "Shipped"
+        }
+      }
+    }
+  ],
+  "checked_to_depth": 2,
+  "cost": {
+    "elapsed_s": 0.02995
+  },
+  "completeness": "bounded"
+}
