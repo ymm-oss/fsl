@@ -97,6 +97,64 @@ def test_requirements_process_data_profile_check_verify_and_refine(tmp_path):
     assert not any(inv["name"].startswith("_kpi") for inv in spec["user_invariants"])
 
 
+def test_requirements_process_auto_map_actor_mismatch_is_type_error(tmp_path):
+    bad = REQ_SRC.replace(
+        "transition auto_approve Submitted -> Approved by System when amount <= AUTO_LIMIT",
+        "transition auto_approve Submitted -> Approved by Manager when amount <= AUTO_LIMIT",
+    )
+    req = _write_pair(tmp_path, bad)
+
+    result = run_check(str(req))
+
+    assert result["result"] == "error", result
+    assert result["kind"] == "type"
+    assert "transition 'auto_approve' is auto-mapped to business action 'auto_approve'" in result["message"]
+    assert "actor 'by Manager' does not match the business actor 'by System'" in result["message"]
+
+
+def test_requirements_implements_accepts_maps_auto(tmp_path):
+    req = _write_pair(
+        tmp_path,
+        r'''requirements ClaimReqAuto {
+  implements ClaimBiz from "biz.fsl" {
+    maps auto
+  }
+
+  type Claim = 0..2
+  enum ClaimStage { Draft, Submitted, Approved, Rejected, Paid }
+  state { claim_stage: Map<Claim, ClaimStage> }
+  init { forall c: Claim { claim_stage[c] = Draft } }
+
+  fair action submit(c: Claim) {
+    requires claim_stage[c] == Draft
+    claim_stage[c] = Submitted
+  }
+  fair action auto_approve(c: Claim) {
+    requires claim_stage[c] == Submitted
+    claim_stage[c] = Approved
+  }
+  fair action mgr_approve(c: Claim) {
+    requires claim_stage[c] == Submitted
+    claim_stage[c] = Approved
+  }
+  fair action reject(c: Claim) {
+    requires claim_stage[c] == Submitted
+    claim_stage[c] = Rejected
+  }
+  fair action pay(c: Claim) {
+    requires claim_stage[c] == Approved
+    claim_stage[c] = Paid
+  }
+}
+''',
+    )
+
+    result = run_check(str(req))
+
+    assert result["result"] == "ok", result
+    assert result["implements"] == {"abs": "ClaimBiz", "result": "refines"}
+
+
 def test_requirements_process_guard_bites_via_forbidden(tmp_path):
     bad = REQ_SRC.replace(
         "transition auto_approve Submitted -> Approved by System when amount <= AUTO_LIMIT",

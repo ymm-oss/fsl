@@ -536,6 +536,45 @@ def _expand_requirements_process(proc, values, consts):
     return out, state_maps, action_maps
 
 
+def _business_action_actor_map(abs_ast):
+    if abs_ast[0] != "spec":
+        return {}
+    actors = {}
+    for item in abs_ast[2]:
+        if item[0] != "action" or len(item) <= 6:
+            continue
+        meta = item[6]
+        if not isinstance(meta, dict):
+            continue
+        text = meta.get("text")
+        if not isinstance(text, str) or not text.startswith("by "):
+            continue
+        actor = text[3:].strip()
+        if actor:
+            actors[item[1]] = actor
+    return actors
+
+
+def _check_auto_mapped_process_actors(processes, abs_ast):
+    business_actors = _business_action_actor_map(abs_ast)
+    if not business_actors:
+        return
+    for proc in processes:
+        for tr in proc["transitions"]:
+            name = tr["name"]
+            biz_actor = business_actors.get(name)
+            if biz_actor is None:
+                continue
+            req_actor = tr["actor"]
+            if req_actor != biz_actor:
+                _err(
+                    f"transition '{name}' is auto-mapped to business action '{name}' "
+                    f"but its actor 'by {req_actor}' does not match the business actor "
+                    f"'by {biz_actor}'; rename the action or write an explicit map",
+                    loc=tr["loc"],
+                )
+
+
 def _lower_acceptance_expect(expect, process_by_name):
     if expect[0] == "acceptance_expect":
         return expect[1]
@@ -836,6 +875,7 @@ def _expand_requirements_with_display(ast, base_dir):
     )
 
     if implements is not None:
+        _check_auto_mapped_process_actors(processes, implements["abs_ast"])
         mapping_items = [("impl", name), ("abs", implements["abs"])]
         mapping_items.extend(implements["maps"])
         mapping_items.extend(auto_state_maps)
