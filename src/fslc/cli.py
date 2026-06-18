@@ -505,9 +505,9 @@ def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTA
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_explain(file, depth=8):
+def run_explain(file, depth=8, readable=False):
     try:
-        return _envelope(explain_file(file, depth=depth))
+        return _envelope(explain_file(file, depth=depth, readable=readable))
     except UnexpectedInput as e:
         return _parse_error_result(e)
     except VisitError as e:
@@ -603,6 +603,7 @@ def _build_arg_parser():
     ex = sub.add_parser("explain")
     ex.add_argument("file")
     ex.add_argument("--depth", type=int, default=8)
+    ex.add_argument("--readable", action="store_true")
 
     rf = sub.add_parser("refine")
     rf.add_argument("impl")
@@ -674,8 +675,11 @@ def _dispatch(args):
         print(json.dumps(result, indent=2, ensure_ascii=False))
         sys.exit(0)
     elif args.cmd == "explain":
-        result = run_explain(args.file, args.depth)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        result = run_explain(args.file, args.depth, readable=args.readable)
+        if args.readable and result.get("result") == "explained":
+            sys.stdout.write(result["readable"] + "\n")
+        else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
                             engine=args.engine, k_ind=args.k_ind,

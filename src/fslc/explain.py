@@ -4,6 +4,7 @@
 """Deterministic spec-to-human explanation helpers."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .bmc import _collect_partial_op_sites, _requirement, scenarios
@@ -19,6 +20,9 @@ WEAKENING_OPS = {
 }
 
 _SOURCE_UNAVAILABLE = "source unavailable; using name/structure (component-origin or generated element)"
+_TRANSITION_ACTOR_RE = re.compile(
+    r"\bby\s+(.+?)(?:\s+with\b|\s+when\b|\s+set\b|\s+covers\b|$)"
+)
 
 
 def _public_name(name, spec):
@@ -218,6 +222,398 @@ def _skeleton(spec, source_lines):
     }
 
 
+def _display_from(display_names, name):
+    label = (display_names or {}).get(name, name)
+    if isinstance(label, str) and "__" in label:
+        return label.replace("__", ".")
+    return label
+
+
+def _type_ref_to_text(ty):
+    if isinstance(ty, list):
+        ty = tuple(ty)
+    if not isinstance(ty, tuple) or not ty:
+        return str(ty)
+    tag = ty[0]
+    if tag == "named":
+        return ty[1].replace("__", ".")
+    if tag == "name":
+        return ty[1].replace("__", ".")
+    if tag == "int":
+        return "Int"
+    if tag == "bool":
+        return "Bool"
+    if tag == "domain":
+        return f"{ty[1]}..{ty[2]}"
+    if tag == "enum":
+        return ty[1].replace("__", ".")
+    if tag == "map":
+        return f"Map<{_type_ref_to_text(ty[1])}, {_type_ref_to_text(ty[2])}>"
+    if tag == "option":
+        return f"Option<{_type_ref_to_text(ty[1])}>"
+    if tag == "set":
+        return f"Set<{_type_ref_to_text(ty[1])}>"
+    if tag == "seq":
+        return f"Seq<{_type_ref_to_text(ty[1])}, {ty[2]}>"
+    if tag == "struct":
+        return ty[1].replace("__", ".")
+    return str(ty)
+
+
+def _state_type_text(name, ty, spec):
+    refs = spec.get("state_type_refs") or {}
+    if name in refs:
+        return _type_ref_to_text(refs[name])
+    return _type_ref_to_text(_public_type(ty))
+
+
+def _map_key_domain_names(ty):
+    if isinstance(ty, list):
+        ty = tuple(ty)
+    if not isinstance(ty, tuple) or not ty:
+        return set()
+    tag = ty[0]
+    if tag == "map":
+        out = set()
+        key = ty[1]
+        if isinstance(key, list):
+            key = tuple(key)
+        if isinstance(key, tuple) and key and key[0] in ("named", "name"):
+            out.add(key[1])
+        out.update(_map_key_domain_names(ty[2]))
+        return out
+    if tag in ("option", "set", "seq"):
+        return _map_key_domain_names(ty[1])
+    return set()
+
+
+def _entity_domain_names(spec):
+    out = set()
+    for ty in (spec.get("state_type_refs") or {}).values():
+        out.update(_map_key_domain_names(ty))
+    return out
+
+
+def _verification_world_lines(spec):
+    entities = _entity_domain_names(spec)
+    lines = []
+    for name, info in sorted((spec.get("types") or {}).items()):
+        if info.get("kind") != "domain":
+            continue
+        lo = info.get("lo")
+        hi = info.get("hi")
+        if lo is None or hi is None:
+            continue
+        count = hi - lo + 1
+        public = name.replace("__", ".")
+        if name in entities:
+            lines.append(f"{public}: {count} instances ({lo}..{hi})")
+        else:
+            lines.append(f"{public}: values {lo}..{hi} ({count} values)")
+    return lines
+
+
+def _params_text(params, include_types=True):
+    rendered = []
+    for param in params or []:
+        if isinstance(param, dict):
+            name = param.get("name")
+            ty = param.get("type")
+        elif isinstance(param, tuple) and param and param[0] == "refinement_param":
+            name = param[1]
+            ty = _type_ref_to_text(param[2]) if param[2] is not None else None
+        else:
+            name = str(param)
+            ty = None
+        if include_types and ty:
+            rendered.append(f"{name}: {ty}")
+        else:
+            rendered.append(str(name))
+    return ", ".join(rendered)
+
+
+def _requirement_text(req):
+    if not req:
+        return None
+    rid = req.get("id")
+    text = req.get("text")
+    if rid and text:
+        return f"{{{rid}: {text}}}"
+    if rid:
+        return f"{{{rid}}}"
+    if text:
+        return f"{{{text}}}"
+    return None
+
+
+def _dedupe(items):
+    out = []
+    seen = set()
+    for item in items or []:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _actor_from_action(action):
+    if action.get("actor"):
+        return action["actor"]
+    for text in action.get("requires_text") or []:
+        match = _TRANSITION_ACTOR_RE.search(text)
+        if match:
+            return " ".join(match.group(1).split())
+    return None
+
+
+def _expr_to_text(expr, display_names=None):
+    if not isinstance(expr, tuple):
+        return str(expr)
+    tag = expr[0]
+    if tag == "var":
+        return _display_from(display_names, expr[1])
+    if tag == "num":
+        return str(expr[1])
+    if tag == "bool":
+        return "true" if expr[1] else "false"
+    if tag == "none":
+        return "none"
+    if tag == "bin":
+        return f"{_expr_to_text(expr[2], display_names)} {expr[1]} {_expr_to_text(expr[3], display_names)}"
+    if tag == "not":
+        return f"not {_expr_to_text(expr[1], display_names)}"
+    if tag == "neg":
+        return f"-{_expr_to_text(expr[1], display_names)}"
+    if tag == "index":
+        return f"{_expr_to_text(expr[1], display_names)}[{_expr_to_text(expr[2], display_names)}]"
+    if tag == "field":
+        return f"{_expr_to_text(expr[1], display_names)}.{expr[2]}"
+    if tag == "method":
+        args = ", ".join(_expr_to_text(a, display_names) for a in expr[3])
+        return f"{_expr_to_text(expr[1], display_names)}.{expr[2]}({args})"
+    if tag == "some":
+        return f"some({_expr_to_text(expr[1], display_names)})"
+    if tag == "is":
+        pat = expr[2]
+        if pat[0] == "pat_none":
+            return f"{_expr_to_text(expr[1], display_names)} is none"
+        return f"{_expr_to_text(expr[1], display_names)} is some({pat[1]})"
+    if tag == "ite":
+        return (
+            f"if {_expr_to_text(expr[1], display_names)} then "
+            f"{_expr_to_text(expr[2], display_names)} else "
+            f"{_expr_to_text(expr[3], display_names)}"
+        )
+    if tag in ("set_lit", "seq_lit"):
+        head = "Set" if tag == "set_lit" else "Seq"
+        return f"{head} {{{', '.join(_expr_to_text(e, display_names) for e in expr[1])}}}"
+    if tag == "struct_lit":
+        fields = ", ".join(
+            f"{k}: {_expr_to_text(v, display_names)}"
+            for k, v in sorted(expr[2].items())
+        )
+        return f"{expr[1]} {{ {fields} }}"
+    if tag in ("old", "abs"):
+        return f"{tag}({_expr_to_text(expr[1], display_names)})"
+    if tag in ("min", "max"):
+        return (
+            f"{tag}({_expr_to_text(expr[1], display_names)}, "
+            f"{_expr_to_text(expr[2], display_names)})"
+        )
+    if tag == "count":
+        return f"count({expr[1]}: {expr[2]} where {_expr_to_text(expr[3], display_names)})"
+    if tag == "sum":
+        where = f" where {_expr_to_text(expr[4], display_names)}" if expr[4] is not None else ""
+        return (
+            f"sum({expr[1]}: {expr[2]} of "
+            f"{_expr_to_text(expr[3], display_names)}{where})"
+        )
+    if tag in ("forall", "exists"):
+        return f"{tag} {_binder_to_text(expr[1], display_names)}: {_expr_to_text(expr[2], display_names)}"
+    return tag
+
+
+def _binder_to_text(binder, display_names=None):
+    if not isinstance(binder, tuple) or len(binder) < 3:
+        return str(binder)
+    if binder[0] == "binder_typed":
+        text = f"{binder[1]}: {_type_ref_to_text(('name', binder[2]))}"
+        if len(binder) > 3 and binder[3] is not None:
+            text += f" where {_expr_to_text(binder[3], display_names)}"
+        return text
+    if binder[0] == "binder_range":
+        return (
+            f"{binder[1]} in {_expr_to_text(binder[2], display_names)}.."
+            f"{_expr_to_text(binder[3], display_names)}"
+        )
+    return str(binder)
+
+
+def _binder_name(binder):
+    if isinstance(binder, tuple) and len(binder) > 1:
+        return binder[1]
+    return "?"
+
+
+def _branch_lowering_lines(display_names):
+    groups = {}
+    for _physical, label in sorted((display_names or {}).items()):
+        if not isinstance(label, str) or "[" not in label or not label.endswith("]"):
+            continue
+        base = label.split("[", 1)[0]
+        groups.setdefault(base, []).append(label)
+    return [
+        f"{base} \u2192 {', '.join(labels)}"
+        for base, labels in sorted(groups.items())
+    ]
+
+
+def _mapping_state_line(item, impl_display_names, abs_display_names):
+    _, logical, binder, expr, _loc = item
+    lhs = _display_from(abs_display_names, logical)
+    if binder is not None:
+        lhs = f"{lhs}[{_binder_name(binder)}]"
+    return f"{lhs} \u21a6 {_expr_to_text(expr, impl_display_names)}"
+
+
+def _mapping_action_line(item, impl_display_names, abs_display_names):
+    _, aname, params, target, _loc = item
+    lhs = _display_from(impl_display_names, aname)
+    lhs = f"{lhs}({_params_text(params, include_types=False)})"
+    if target[0] == "stutter":
+        rhs = "stutter"
+    else:
+        _, abs_name, args = target
+        rhs = _display_from(abs_display_names, abs_name)
+        rhs = f"{rhs}({', '.join(_expr_to_text(arg, impl_display_names) for arg in args)})"
+    return f"{lhs} \u21a6 {rhs}"
+
+
+def _refinement_mapping_lines(spec, display_names):
+    impl = spec.get("implements")
+    if not impl or not impl.get("mapping_ast"):
+        return []
+    impl_display_names = spec.get("display_names") or display_names or {}
+    abs_display_names = impl.get("abs_display_names") or {}
+    lines = [
+        f"  - implements {spec['name']} \u21a6 {impl.get('abs')}",
+        "    includes explicit maps and generated-by-name correspondences; review actor/intent matches",
+    ]
+    state_lines = []
+    action_lines = []
+    for item in impl["mapping_ast"][2]:
+        if item[0] == "map":
+            state_lines.append(_mapping_state_line(item, impl_display_names, abs_display_names))
+        elif item[0] == "action_map":
+            action_lines.append(_mapping_action_line(item, impl_display_names, abs_display_names))
+    if state_lines:
+        lines.append("    state maps:")
+        lines.extend(f"      - {line}" for line in state_lines)
+    if action_lines:
+        lines.append("    action correspondences:")
+        lines.extend(f"      - {line}" for line in action_lines)
+    return lines
+
+
+def render_readable(explained: dict, spec: dict, display_names: dict) -> str:
+    """Render an explain result as deterministic human-readable text."""
+    skeleton = explained.get("skeleton") or {}
+    lines = [f"Spec: {spec['name']} (depth {explained.get('depth')})"]
+
+    def section(title, items):
+        if not items:
+            return
+        lines.append("")
+        lines.append(f"{title}:")
+        lines.extend(items)
+
+    section("Verification world", [f"  - {line}" for line in _verification_world_lines(spec)])
+
+    state_items = []
+    state_order = sorted(
+        spec.get("state", {}),
+        key=lambda internal: _public_name(internal, spec),
+    )
+    for internal in state_order:
+        name = _public_name(internal, spec)
+        state_items.append(f"  - {name}: {_state_type_text(internal, spec['state'][internal], spec)}")
+    section("State", state_items)
+
+    action_items = []
+    generated_by_name = {
+        _public_name(action["name"], spec): action.get("generated")
+        for action in spec.get("actions", [])
+    }
+    for action in skeleton.get("actions") or []:
+        params = _params_text(action.get("params"))
+        generated = generated_by_name.get(action["name"])
+        marker = []
+        if action.get("fair"):
+            marker.append("fair")
+        if generated and generated.get("kind") == "time_tick":
+            marker.append("generated by time block")
+        elif action["name"] == "tick" and generated is not None:
+            marker.append("generated")
+        suffix = f" [{' | '.join(marker)}]" if marker else ""
+        actor = _actor_from_action(action)
+        actor_text = f" actor: {actor}" if actor else ""
+        action_items.append(f"  - {action['name']}({params}){suffix}{actor_text}")
+        req = _requirement_text(action.get("requirement"))
+        if req:
+            action_items.append(f"    requirement: {req}")
+        requires = _dedupe(action.get("requires_text"))
+        if requires:
+            action_items.append("    requires:")
+            action_items.extend(f"      - {text}" for text in requires)
+        writes = action.get("writes") or []
+        if writes:
+            action_items.append(f"    writes: {', '.join(writes)}")
+    section("Actions", action_items)
+
+    kpi_items = [
+        (
+            f"  - {kpi['name']} = count of {kpi['entity']} in {kpi['stage']} "
+            "(derived projection - not stored state)"
+        )
+        for kpi in sorted(spec.get("kpis") or [], key=lambda item: item["name"])
+    ]
+    section("Derived metrics (KPIs)", kpi_items)
+
+    prop_items = []
+    for prop in skeleton.get("properties") or []:
+        req = _requirement_text(prop.get("requirement"))
+        req_text = f" {req}" if req else ""
+        prop_items.append(f"  - {prop['kind']} {prop['name']}{req_text}")
+        if prop.get("body_text"):
+            prop_items.append(f"    body: {prop['body_text']}")
+    section("Properties", prop_items)
+
+    check_items = []
+    for check in skeleton.get("auto_checks") or []:
+        if check.get("kind") == "type_bound":
+            check_items.append(
+                f"  - type_bound: {check.get('target')} (implicit bounded-domain check)"
+            )
+        elif check.get("kind") == "partial_op":
+            check_items.append(
+                f"  - partial_op: {check.get('action')} checks {check.get('text')}"
+            )
+        else:
+            check_items.append(f"  - {check.get('kind')}: {check.get('name')}")
+    section("Automatic checks", check_items)
+
+    branch_items = [f"  - {line}" for line in _branch_lowering_lines(spec.get("display_names") or display_names)]
+    section("Branch lowering", branch_items)
+
+    section("Refinement mapping (synthesized + explicit)", _refinement_mapping_lines(spec, display_names))
+
+    fair = [action["name"] for action in skeleton.get("actions") or [] if action.get("fair")]
+    section("Fairness assumptions", [f"  - fair: {', '.join(fair)}"] if fair else [])
+
+    return "\n".join(lines)
+
+
 def _trace_len(result):
     trace = result.get("trace") or []
     return len(trace)
@@ -352,24 +748,27 @@ def _witnesses(spec, source_lines, depth):
     return witnesses
 
 
-def explain_file(file, depth=8, max_mutants=None):
+def explain_file(file, depth=8, max_mutants=None, readable=False):
     src = Path(file).read_text(encoding="utf-8")
     ast, display_names = parse_src(src, str(Path(file).parent))
     if ast[0] != "spec":
         raise FslError("explain expects a spec-like FSL file", kind="semantics")
     source_lines = src.splitlines()
     spec = build_spec(ast, display_names)
-    counterfactuals, reachable_kills = _counterfactuals(
-        ast, display_names, spec, source_lines, depth, max_mutants
-    )
     out = {
         "result": "explained",
         "spec": spec["name"],
         "depth": depth,
         "skeleton": _skeleton(spec, source_lines),
-        "counterfactuals": counterfactuals,
-        "witnesses": _witnesses(spec, source_lines, depth),
     }
+    if readable:
+        out["readable"] = render_readable(out, spec, display_names)
+        return out
+    counterfactuals, reachable_kills = _counterfactuals(
+        ast, display_names, spec, source_lines, depth, max_mutants
+    )
+    out["counterfactuals"] = counterfactuals
+    out["witnesses"] = _witnesses(spec, source_lines, depth)
     if reachable_kills:
         out["reachable_counterfactuals"] = reachable_kills
     return out

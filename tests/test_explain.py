@@ -120,6 +120,83 @@ def test_explain_cli_exit_zero_for_valid_specs():
         assert exit_code(out) == 0
 
 
+def test_explain_readable_requirements_surfaces_generated_review_context():
+    out = run_explain(str(EXAMPLES / "e2e" / "2_requirements.fsl"), readable=True)
+
+    assert out["result"] == "explained"
+    assert exit_code(out) == 0
+    text = out["readable"]
+    assert "Spec: ExpenseRequirements (depth 8)" in text
+    assert "Claim: 3 instances (0..2)" in text
+    assert "Amount: values 0..3" in text
+    assert "paid_claims = count of Claim in Paid" in text
+    assert "submit(c: Claim, a: Amount) [fair] actor: Employee" in text
+    assert "claim_stage[c] ↦ claim_stage[c]" in text
+    assert "submit(c, a) ↦ submit(c)" in text
+
+
+def test_explain_readable_cli_prints_plain_text():
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fslc",
+            "explain",
+            str(SPECS / "cart_v1.fsl"),
+            "--depth",
+            "4",
+            "--readable",
+        ],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("Spec: ShoppingCart")
+    assert not proc.stdout.lstrip().startswith("{")
+
+
+def test_explain_readable_branch_lowering_lists_split_actions(tmp_path):
+    src = r'''requirements BranchReq {
+  type CaseId = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum S { New, Small, Big }
+  state { st: Map<CaseId, S> }
+  init { forall c: CaseId { st[c] = New } }
+
+  fair action submit(c: CaseId, a: Amount) {
+    requires st[c] == New
+    branches {
+      when a <= AUTO_LIMIT { st[c] = Small } maps stutter
+      when a > AUTO_LIMIT { st[c] = Big } maps stutter
+    }
+  }
+
+  reachable SmallReach { exists c: CaseId { st[c] == Small } }
+}
+'''
+    path = tmp_path / "branch_req.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    out = run_explain(str(path), depth=2, readable=True)
+
+    assert out["result"] == "explained"
+    assert "Branch lowering:" in out["readable"]
+    assert "submit → submit[a <= AUTO_LIMIT], submit[a > AUTO_LIMIT]" in out["readable"]
+
+
+def test_explain_default_json_shape_does_not_include_readable_text():
+    out = run_explain(str(SPECS / "cart_v1.fsl"), depth=4)
+
+    assert out["result"] == "explained"
+    assert "skeleton" in out
+    assert "counterfactuals" in out
+    assert "readable" not in out
+
+
 def test_explain_json_has_no_internal_double_underscore_names():
     out = explain_file(str(SPECS / "bank_system.fsl"), depth=2)
     blob = json.dumps(out, ensure_ascii=False)
