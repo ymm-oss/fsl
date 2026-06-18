@@ -29,7 +29,6 @@ requirements ExpenseRequirements {
       else if req[c].st == ReqManagerApproved then Approved
       else if req[c].st == ReqRejected then Rejected
       else Paid
-    map paid_claims = paid_count
   }
 
   type Claim = 0..2

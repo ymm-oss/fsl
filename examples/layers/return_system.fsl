@@ -7,7 +7,6 @@ requirements ReturnSystemReq {
       else if sys[c].st == MgrApproved then Approved
       else if sys[c].st == MgrRejected then Rejected
       else Refunded
-    map refunded = paid_count
   }
   type CaseId = 0..2
   type Amount = 0..3

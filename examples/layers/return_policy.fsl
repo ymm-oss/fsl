@@ -10,7 +10,7 @@ business ReturnHandling {
     transition refund  Approved  -> Refunded by Manager
   }
 
-  kpi refunded counts Return in Refunded
+  kpi refunded = count Return in Refunded
 
   policy PAY-2 "Every request is eventually decided"
     every Return in Requested must eventually be Approved or Rejected or Refunded

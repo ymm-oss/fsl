@@ -965,6 +965,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     dialect_action_aliases = {}
     dialect_generated_names = []
     dialect_requirement_ids = []
+    dialect_kpis = []
     dialect_warnings = []
     for it in items:
         if it[0] == "__display_names":
@@ -981,6 +982,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
             dialect_generated_names.extend(it[1])
         elif it[0] == "__requirement_ids":
             dialect_requirement_ids.extend(it[1])
+        elif it[0] == "__kpis":
+            dialect_kpis.extend(it[1])
         elif it[0] == "__warnings":
             dialect_warnings.extend(it[1])
 
@@ -1088,7 +1091,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     all_invariants = bounds_invs + invariants
 
     warnings = check_map_key_warnings(state, types_meta)
-    if not invariants:
+    if not invariants and not leadstos and not reachables and not transitions:
         warnings.append({
             "message": "spec declares no user invariants (only implicit type bounds are checked)",
         })
@@ -1136,6 +1139,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "action_aliases": dialect_action_aliases,
         "generated_names": dialect_generated_names,
         "requirement_ids": dialect_requirement_ids,
+        "kpis": dialect_kpis,
         "symmetry": symmetry,
     }
 

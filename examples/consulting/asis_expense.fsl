@@ -35,7 +35,7 @@ business AsIsExpense {
   }
 
   // ── KPI (undercounting / double-counting are checked automatically) ────
-  kpi paid_claims counts Claim in Paid
+  kpi paid_claims = count Claim in Paid
 
   // ── Internal regulations (controls) — written with ID and original text ──
   // Note: "payment only after approval" is guaranteed by the process

@@ -51,7 +51,7 @@ business ExpenseToBe {
   // Management metric: the number of completed payments. Because kpi
   // auto-generates a same-named counter-consistency invariant, undercounting
   // and double-counting of payments are also part of the verification target.
-  kpi paid_claims counts Claim in Paid
+  kpi paid_claims = count Claim in Paid
 
   // ── Control policies ─────────────────────────────────────────────
   // Write the ID and the original text verbatim. On violation, the JSON

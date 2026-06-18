@@ -32,7 +32,7 @@ business ToBeExpense {
     transition pay          Approved  -> Paid      by Finance
   }
 
-  kpi paid_claims counts Claim in Paid
+  kpi paid_claims = count Claim in Paid
 
   // The controls are kept identical to As-Is (not weakened)
   policy CTRL-1 "A submitted claim must always be adjudicated for approval or rejection"

@@ -380,7 +380,7 @@ business ReturnHandling {
     transition reject  Requested -> Rejected by Manager
     transition refund  Approved  -> Refunded by Manager
   }
-  kpi refunded counts Return in Refunded      // -> ghost + auto-consistency invariant (+1 on an inflow transition; an outflow transition is a type error)
+  kpi refunded = count Return in Refunded     // -> metadata projection count(c: Return where stage(c) == Refunded)
   policy PAY-2 "every request is adjudicated"
     every Return in Requested must eventually be Approved or Rejected or Refunded
   goal AllSettled "all cases can be settled"

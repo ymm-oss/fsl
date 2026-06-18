@@ -37,9 +37,9 @@ business CancelFlow {
   }
 
   // ── KPI ────────────────────────────────────────────────
-  // Counter consistency (no missed counts, no double counting) is checked automatically
-  kpi churned  counts Sub in Churned
-  kpi retained counts Sub in Retained
+  // Declarative count projections for reporting/explain metadata.
+  kpi churned  = count Sub in Churned
+  kpi retained = count Sub in Retained
 
   // ── Business rules (policies) ───────────────────────────────
   // Written with the ID and original text. When violated, this ID and text appear in the counterexample.

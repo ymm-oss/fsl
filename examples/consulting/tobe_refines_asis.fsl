@@ -16,7 +16,6 @@ refinement ToBeKeepsAsIsControls {
 
   // Business stages correspond by the same name (the transformation adds no stages)
   map claim_stage[c: Claim] = claim_stage[c]
-  map paid_claims = paid_claims
 
   // Transition mapping table: "which As-Is business does this To-Be business correspond to"
   action submit(c)       -> submit(c)

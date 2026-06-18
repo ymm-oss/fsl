@@ -712,7 +712,7 @@ requirements ReturnSystemReq {
 Write business processes, policies, and KPIs with zero implementation
 vocabulary (syntax details in `DESIGN-dialects.md` §3). A process expands into
 enum+Map+transition actions, a policy into invariant / leadsTo, and a kpi into a
-ghost counter + a consistency invariant. A contradiction in the regulations =
+declarative count projection recorded as metadata. A contradiction in the regulations =
 an invariant violation, a dead process step = a coverage diagnosis, an
 unreachable business goal = reachable_failed, and a case left unattended = a
 leadsTo counterexample — all can be detected mechanically.
@@ -731,6 +731,8 @@ business ReturnHandling {
     transition reject Requested -> Rejected by Manager
     transition refund Approved -> Refunded by Manager
   }
+
+  kpi refunded = count Return in Refunded
 
   policy PAY-2 "every request is eventually decided"
     every Return in Requested must eventually be Approved or Rejected or Refunded

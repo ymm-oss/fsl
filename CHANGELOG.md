@@ -474,7 +474,7 @@ The discipline before writing (formalization memo, recommended practices) goes i
 - Added the **`--strict-tags` lint** (issue #5) to `fslc check` / `fslc verify`.
   Only for ok/verified/proved successful results, it emits as warnings the untagged action/invariant/reachable/leadsTo and
   unreferenced requirement IDs (`--requirements ids.txt` and the requirements-dialect `requirement`
-  block). The dialect-generated `tick` / `_kpi_*` are excluded by an explicit marker, and the default (no flag)
+  block). The dialect-generated `tick` is excluded by an explicit marker, and the default (no flag)
   output is as before.
 - Added **vacuity checks** (issue #4) to `fslc verify`. On the verified/proved path it emits as warnings
   `vacuous_implication` (the unreachable antecedent of an implication invariant), `vacuous_leadsto`

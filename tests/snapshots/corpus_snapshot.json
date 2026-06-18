@@ -160,9 +160,7 @@
   "examples/gallery/adversarial/simultaneous_leads_to_satisfaction.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     },
     "verify": {
       "action_coverage": {
@@ -174,9 +172,7 @@
       "reachables": {},
       "result": "verified",
       "transitions_checked": [],
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "examples/gallery/errors/error_acceptance_false_expect.fsl": {
@@ -334,9 +330,7 @@
   "examples/gallery/errors/violated_leads_to_starvation.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     },
     "verify": {
       "last_action": null,
@@ -872,9 +866,7 @@
   "examples/refinement_liveness/design_drops_liveness.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "examples/refinement_liveness/design_drops_liveness_refines.fsl": {
@@ -886,9 +878,7 @@
   "examples/refinement_liveness/design_keeps_liveness.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "examples/refinement_liveness/design_keeps_liveness_refines.fsl": {
@@ -900,9 +890,7 @@
   "examples/refinement_liveness/policy.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "examples/self/fslc_monitor.fsl": {
@@ -932,9 +920,7 @@
   "examples/ui_spike/navstack.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "examples/ui_spike/return_req_min.fsl": {
@@ -1203,9 +1189,7 @@
   "specs/cart_v1.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     },
     "verify": {
       "action_coverage": {
@@ -1223,17 +1207,13 @@
       },
       "result": "verified",
       "transitions_checked": [],
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     }
   },
   "specs/cart_v1_buggy.fsl": {
     "check": {
       "result": "ok",
-      "warnings": [
-        "none"
-      ]
+      "warnings": []
     },
     "verify": {
       "last_action": "checkout",

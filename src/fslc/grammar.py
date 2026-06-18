@@ -246,7 +246,7 @@ process_def: "process" NAME "{" process_item* "}"
 process_stages: "stages" NAME ("," NAME)* ","?
 process_initial: "initial" NAME
 process_transition: "transition" NAME NAME "->" NAME "by" NAME
-kpi_def: "kpi" NAME "counts" NAME "in" NAME
+kpi_def: "kpi" NAME "=" "count" NAME "in" NAME
 policy_def: "policy" REQ_ID STRING policy_body
 ?policy_body: policy_invariant | policy_responds | policy_eventually
 policy_invariant: "invariant" "{" expr "}"

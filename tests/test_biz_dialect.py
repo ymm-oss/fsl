@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from fslc.cli import run_check, run_refine, run_verify
+from fslc.model import build_spec
+from fslc.parser import parse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,10 +20,10 @@ BIZ_SRC = r'''business ReturnHandling {
     transition refund Approved -> Refunded by Manager
   }
 
-  kpi refunded counts Return in Refunded
+  kpi refunded = count Return in Refunded
 
-  policy PAY-1 "refund count is consistent" invariant {
-    refunded == count(c: Return where stage(c) == Refunded)
+  policy PAY-1 "refund count is non-negative" invariant {
+    count(c: Return where stage(c) == Refunded) >= 0
   }
   policy PAY-2 "requests are eventually decided" responds {
     forall c: Return {
@@ -50,7 +52,7 @@ NATURAL_BIZ_SRC = r'''business NaturalReturnHandling {
     transition refund Approved -> Refunded by Manager
   }
 
-  kpi refunded counts Return in Refunded
+  kpi refunded = count Return in Refunded
 
   policy PAY-2 "requests are eventually decided"
     every Return in Requested must eventually be Approved or Rejected or Refunded
@@ -78,13 +80,11 @@ def test_biz_dialect_check_verify_and_induction(tmp_path):
 
     verified = run_verify(str(biz), 8, "warn")
     assert verified["result"] == "verified"
-    assert "_kpi_refunded" in verified["invariants_checked"]
     assert "AllSettled" in verified["reachables"]
     assert verified["reachables"]["AllSettled"]["witnessed_at_step"] >= 0
 
     proved = run_verify(str(biz), 8, "ignore", engine="induction")
     assert proved["result"] == "proved"
-    assert "_kpi_refunded" in proved["invariants_checked"]
 
 
 def test_biz_natural_policy_and_goal_syntax(tmp_path):
@@ -167,8 +167,8 @@ def test_biz_natural_syntax_rejects_unknown_stage(tmp_path):
 
 def test_biz_policy_violation_carries_policy_requirement_meta(tmp_path):
     bad = BIZ_SRC.replace(
-        "refunded == count(c: Return where stage(c) == Refunded)",
-        "refunded == 0",
+        "count(c: Return where stage(c) == Refunded) >= 0",
+        "count(c: Return where stage(c) == Refunded) == 0",
     )
     biz = _write_biz(tmp_path, bad)
 
@@ -179,33 +179,48 @@ def test_biz_policy_violation_carries_policy_requirement_meta(tmp_path):
     assert result["invariant"] == "PAY-1"
     assert result["requirement"] == {
         "id": "PAY-1",
-        "text": "refund count is consistent",
+        "text": "refund count is non-negative",
     }
 
 
-def test_biz_kpi_auto_invariant_can_be_violated(tmp_path):
-    src = r'''business BadKpi {
+def test_biz_kpi_is_metadata_only_and_allows_stage_outflow(tmp_path):
+    src = r'''business KpiProjection {
   actor Manager
-  entity Return
-  process Return {
-    stages Refunded
-    initial Refunded
-    transition noop Refunded -> Refunded by Manager
+  entity E
+  process E {
+    stages S, T
+    initial S
+    transition leave S -> T by Manager
   }
-  kpi refunded counts Return in Refunded
+  kpi k = count E in S
 }
 verify {
-  instances Return = 2
+  instances E = 2
 }
 '''
     biz = _write_biz(tmp_path, src)
 
-    result = run_verify(str(biz), 3, "warn")
+    checked = run_check(str(biz))
+    assert checked["result"] == "ok"
 
-    assert result["result"] == "violated"
-    assert result["violation_kind"] == "invariant"
-    assert result["invariant"] == "_kpi_refunded"
-    assert result["violated_at_step"] == 0
+    result = run_verify(str(biz), 3, "warn")
+    assert result["result"] == "verified"
+    assert not any(name.startswith("_kpi") for name in result["invariants_checked"])
+
+    spec = build_spec(parse(src))
+    assert not any(inv["name"].startswith("_kpi") for inv in spec["user_invariants"])
+    assert [kpi["name"] for kpi in spec["kpis"]] == ["k"]
+    assert spec["kpis"][0] == {
+        "name": "k",
+        "entity": "E",
+        "stage": "S",
+        "expr": (
+            "count",
+            "c",
+            "E",
+            ("bin", "==", ("index", ("var", "e_stage"), ("var", "c")), ("var", "S")),
+        ),
+    }
 
 
 def test_biz_goal_has_reachable_witness(tmp_path):
@@ -230,17 +245,6 @@ def test_biz_undeclared_actor_is_type_error(tmp_path):
     assert result["result"] == "error"
     assert result["kind"] == "type"
     assert "undeclared actor 'Manager'" in result["message"]
-
-
-def test_biz_kpi_decrement_is_type_error(tmp_path):
-    bad = BIZ_SRC.replace("kpi refunded counts Return in Refunded", "kpi requested counts Return in Requested")
-    biz = _write_biz(tmp_path, bad)
-
-    result = run_check(str(biz))
-
-    assert result["result"] == "error"
-    assert result["kind"] == "type"
-    assert "decrement KPI is not supported" in result["message"]
 
 
 def test_biz_stage_call_ambiguous_is_type_error(tmp_path):
@@ -290,7 +294,6 @@ def test_biz_policy_can_replace_handwritten_return_policy_for_refinement(tmp_pat
     else if sys[c].st == MgrApproved then Approved
     else if sys[c].st == MgrRejected then Rejected
     else Refunded
-  map refunded = paid_count
 
   action submit__b1(c, a) -> approve(c)
   action submit__b2(c, a) -> stutter

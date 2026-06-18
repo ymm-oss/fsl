@@ -60,7 +60,7 @@ Inputs to the dialect design obtained from the spike:
   in the current version by an **action split** into submit_small/submit_large.
   The req dialect's expander automates this split (the `branches` of §4.2).
 - **(L2) the business vocabulary maps straight onto the kernel**: process=enum+Map,
-  policy=invariant/leadsTo, actor=domain type, KPI=ghost counter. Not a single
+  policy=invariant/leadsTo, actor=domain type, KPI=count projection metadata. Not a single
   new semantic was needed.
 
 ## 3. Dialect 1: fsl-biz (consulting)
@@ -80,7 +80,7 @@ business ReturnHandling {
     stage Approved  -> Refunded  by System  : refund
   }
 
-  kpi refunded counts Return in Refunded   // → ghost counter + consistency invariant
+  kpi refunded = count Return in Refunded  // → count projection metadata
 
   policy NoRefundWithoutApproval invariant { ... }   // the expression is a kernel expression
   policy EveryRequestDecided responds {              // → leadsTo + fair

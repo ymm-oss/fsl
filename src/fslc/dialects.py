@@ -890,13 +890,6 @@ def _build_kpi_metadata(kpis, process_by_name):
             _err(f"kpi '{kname}' refers to unknown process '{case_name}'", loc=loc)
         if stage not in proc["stages"]:
             _err(f"kpi '{kname}' refers to unknown stage '{stage}'", loc=loc)
-        for tr in proc["transitions"]:
-            if tr["src"] == stage and tr["dst"] != stage:
-                _err(
-                    f"kpi '{kname}' counts stage '{stage}', but transition '{tr['name']}' leaves it; "
-                    "decrement KPI is not supported in fsl-biz v3",
-                    loc=tr["loc"],
-                )
         kpi_infos.append({
             "name": kname,
             "case": case_name,
@@ -940,7 +933,6 @@ def _any_stage(case_name, var_name, stages, process_by_case, loc):
 
 def _generate_business_items(cases, processes, kpi_infos, policies, goals, process_by_case):
     out = []
-    generated_names = []
     for case_name, data in cases.items():
         out.append(("type", case_name, data["lo"], data["hi"]))
     for proc in processes:
@@ -949,8 +941,6 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
     state_decls = []
     for proc in processes:
         state_decls.append(("decl", proc["state_var"], ("map", ("name", proc["name"]), ("name", proc["enum"]))))
-    for kpi in kpi_infos:
-        state_decls.append(("decl", kpi["name"], ("int",)))
     if state_decls:
         out.append(("state", state_decls))
 
@@ -962,16 +952,8 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
             [("assign", ("index", proc["state_var"], ("var", "c")), ("var", proc["initial"]), proc["loc"])],
             proc["loc"],
         ))
-    for kpi in kpi_infos:
-        init_stmts.append(("assign", ("var", kpi["name"]), ("num", 0), kpi["loc"]))
     if init_stmts:
         out.append(("init", init_stmts))
-
-    kpis_by_transition = {}
-    for kpi in kpi_infos:
-        for tr in kpi["process"]["transitions"]:
-            if tr["dst"] == kpi["stage"]:
-                kpis_by_transition.setdefault(tr["name"], []).append(kpi)
 
     for proc in processes:
         for tr in proc["transitions"]:
@@ -986,11 +968,6 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
                  ("var", tr["dst"]),
                  tr["loc"]),
             ]
-            for kpi in kpis_by_transition.get(tr["name"], []):
-                body.append(("assign",
-                             ("var", kpi["name"]),
-                             ("bin", "+", ("var", kpi["name"]), ("num", 1)),
-                             tr["loc"]))
             out.append((
                 "action",
                 tr["name"],
@@ -1001,15 +978,23 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
                 _meta(tr["name"], f"by {tr['actor']}"),
             ))
 
+    kpi_metadata = []
     for kpi in kpi_infos:
-        proc = kpi["process"]
-        cond = ("bin", "==",
-                ("index", ("var", proc["state_var"]), ("var", "c")),
-                ("var", kpi["stage"]))
-        expr = ("bin", "==", ("var", kpi["name"]), ("count", "c", kpi["case"], cond))
-        inv_name = f"_kpi_{kpi['name']}"
-        out.append(("invariant", inv_name, expr, kpi["loc"], None))
-        generated_names.append(inv_name)
+        state_var = _process_state_var(kpi["case"])
+        cond = (
+            "bin",
+            "==",
+            ("index", ("var", state_var), ("var", "c")),
+            ("var", kpi["stage"]),
+        )
+        kpi_metadata.append({
+            "name": kpi["name"],
+            "entity": kpi["case"],
+            "stage": kpi["stage"],
+            "expr": ("count", "c", kpi["case"], cond),
+        })
+    if kpi_metadata:
+        out.append(("__kpis", kpi_metadata))
 
     for item in policies:
         _, policy_id, text, body, loc = item
@@ -1049,8 +1034,6 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
             _err(f"unknown business goal body '{body[0]}'", loc=loc)
         out.append(("reachable", goal_id, expr, loc, _meta(goal_id, text)))
 
-    if generated_names:
-        out.append(("__generated", generated_names))
     return out
 
 

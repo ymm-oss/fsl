@@ -8,7 +8,7 @@ across four files — **business → requirements → design fsl → mapping** �
 
 | Stage | Result |
 |---|---|
-| business (3 process transitions + KPI + 2 policies + goal) | proved (the automatic `_kpi_refunded` consistency invariant enters the inductive hypothesis) |
+| business (3 process transitions + KPI + 2 policies + goal) | proved (KPI recorded as projection metadata; no generated `_kpi_*` invariant) |
 | requirements (branches, acceptance, implements) | verified + implements: **refines** (upper-layer check included in a single verify command) + proved |
 | design layer (two-stage payment + notification queue) | proved + **refines** to the requirements layer |
 | variant that breaks a requirement | the counterexample carries `requirement: {REQ-3, original text}` and `implements: violated` **simultaneously** |

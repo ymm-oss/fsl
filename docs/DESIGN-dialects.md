@@ -173,8 +173,8 @@ business ReturnHandling {
     transition refund   Approved  -> Refunded by Manager
   }
 
-  kpi refunded counts Return in Refunded   // → state refunded: Int +
-                                           //   +1 on the refund transition + a consistency invariant
+  kpi refunded = count Return in Refunded  // → metadata projection:
+                                           //   count(c: Return where stage(c) == Refunded)
 
   policy PAY-1 "refunds only for approved cases" invariant {
     // stage(c) is available in expressions (c is an entity-typed bound variable)
@@ -199,17 +199,15 @@ verify {
    - `state { x_stage: Map<X, XStage> }` (the variable name is the lowercased
      process name + `_stage`) + `init { forall c: X { x_stage[c] = Si } }`
    - per transition, `fair action <t>(c: X) "by <Actor>" {
-       requires x_stage[c] == A   x_stage[c] = B  [kpi update] }`
+       requires x_stage[c] == A   x_stage[c] = B }`
      (`by` goes into meta.text: `meta = {id: t, text: "by Manager"}`.
       Since it is not policy-derived, a separate field `"actor"` from
       requirement is also acceptable — for implementation simplicity it is fine
       to put "by Manager" into meta.text)
    - duplicate transition labels with the same name are a type error.
-3. `kpi k counts X in S` → `state { k: Int }` + init 0 +
-   `k = k + 1` on every transition that **enters** S (if there is a transition
-   leaving S it is a type error — it is stated explicitly that decrementing KPIs
-   are unsupported in v3) +
-   `invariant _kpi_k { k == count(c: X where x_stage(c) == S) }` (automatic).
+3. `kpi k = count X in S` → no kernel state/action/invariant. The declaration is
+   recorded as metadata for the projection
+   `count(c: X where x_stage[c] == S)`.
 4. `policy <ID> "<text>" invariant { expr }` → invariant (with meta).
    `policy ... responds { P ~> Q }` → leadsTo (with meta).
    `policy ... every <Entity> in <Stage> must eventually be <Stage> [or <Stage> ...]`
