@@ -2055,6 +2055,9 @@ def _display_leadsto_bindings(model, binds, spec, binding_types):
     return _public_model_bindings(model, binds, spec, binding_types)
 
 
+_LEADSTO_SYNTHESIS_MAX_CANDIDATES = 6
+
+
 def _leadsto_measure_label(expr):
     if expr is None:
         return None
@@ -2066,12 +2069,360 @@ def _leadsto_measure_label(expr):
     if tag == "neg":
         inner = _leadsto_measure_label(expr[1])
         return f"-{inner}" if inner is not None else "decreases expression"
-    if tag == "bin" and expr[1] in {"+", "-", "*", "/", "%"}:
+    if tag == "index":
+        base = expr[1]
+        base_label = base if isinstance(base, str) else _leadsto_measure_label(base)
+        key = _leadsto_measure_label(expr[2])
+        if base_label is not None and key is not None:
+            return f"{base_label}[{key}]"
+    if tag == "not":
+        inner = _leadsto_measure_label(expr[1])
+        return f"not {inner}" if inner is not None else "decreases expression"
+    if tag == "bin":
         left = _leadsto_measure_label(expr[2])
         right = _leadsto_measure_label(expr[3])
         if left is not None and right is not None:
             return f"({left} {expr[1]} {right})"
+    if tag == "ite":
+        cond = _leadsto_measure_label(expr[1])
+        yes = _leadsto_measure_label(expr[2])
+        no = _leadsto_measure_label(expr[3])
+        if cond is not None and yes is not None and no is not None:
+            return f"if {cond} then {yes} else {no}"
+    if tag == "sum":
+        _, v, ty, body, cond = expr
+        body_label = _leadsto_measure_label(body)
+        if body_label is not None:
+            if cond is None:
+                return f"sum({v}: {ty} of {body_label})"
+            cond_label = _leadsto_measure_label(cond)
+            if cond_label is not None:
+                return f"sum({v}: {ty} of {body_label} where {cond_label})"
+    if tag == "count":
+        _, v, ty, cond = expr
+        cond_label = _leadsto_measure_label(cond)
+        if cond_label is not None:
+            return f"count({v}: {ty} where {cond_label})"
     return "decreases expression"
+
+
+def _typed_leadsto_binders(leadsto):
+    return [
+        (binder[1], binder[2], binder[3] if len(binder) > 3 else None)
+        for binder in leadsto.get("binders", [])
+        if binder[0] == "binder_typed"
+    ]
+
+
+def _expr_index_parts(expr):
+    if not (isinstance(expr, tuple) and expr and expr[0] == "index"):
+        return None
+    base = expr[1]
+    if isinstance(base, str):
+        name = base
+    elif isinstance(base, tuple) and base[0] == "var":
+        name = base[1]
+    else:
+        return None
+    return name, expr[2]
+
+
+def _enum_member_for_expr(expr, enum_name, spec):
+    if not (isinstance(expr, tuple) and expr and expr[0] == "var"):
+        return None
+    value = expr[1]
+    info = spec["types"].get(enum_name)
+    if info is None or info.get("kind") != "enum":
+        return None
+    return value if value in info["members"] else None
+
+
+def _enum_index_equality(expr, spec):
+    if not (isinstance(expr, tuple) and len(expr) == 4 and expr[0] == "bin" and expr[1] == "=="):
+        return None
+    left, right = expr[2], expr[3]
+    for idx_expr, value_expr in ((left, right), (right, left)):
+        parts = _expr_index_parts(idx_expr)
+        if parts is None:
+            continue
+        map_name, key_expr = parts
+        map_ty = spec["state"].get(map_name)
+        if not (map_ty and map_ty[0] == "map" and map_ty[2][0] == "enum"):
+            continue
+        enum_name = map_ty[2][1]
+        value = _enum_member_for_expr(value_expr, enum_name, spec)
+        if value is not None:
+            return {
+                "map": map_name,
+                "key": key_expr,
+                "enum": enum_name,
+                "value": value,
+            }
+    return None
+
+
+def _collect_enum_index_equalities(expr, spec):
+    out = []
+
+    def walk(node):
+        found = _enum_index_equality(node, spec)
+        if found is not None:
+            out.append(found)
+        if not isinstance(node, tuple):
+            return
+        for child in node[1:]:
+            if isinstance(child, tuple):
+                walk(child)
+            elif isinstance(child, dict):
+                for value in child.values():
+                    if isinstance(value, tuple):
+                        walk(value)
+            elif isinstance(child, list):
+                for value in child:
+                    if isinstance(value, tuple):
+                        walk(value)
+
+    walk(expr)
+    return out
+
+
+def _same_expr(left, right):
+    return left == right
+
+
+def _stage_rank_context(spec, leadsto):
+    p_terms = _collect_enum_index_equalities(leadsto["P"], spec)
+    q_terms = _collect_enum_index_equalities(leadsto["Q"], spec)
+    binders = {name: ty for name, ty, _where in _typed_leadsto_binders(leadsto)}
+    for p_term in p_terms:
+        key = p_term["key"]
+        if not (isinstance(key, tuple) and key[0] == "var" and key[1] in binders):
+            continue
+        binder_var = key[1]
+        map_ty = spec["state"].get(p_term["map"])
+        if map_ty is None or map_ty[0] != "map":
+            continue
+        binder_ty_name = binders[binder_var]
+        binder_ty = spec["types"].get(binder_ty_name, {}).get("ty")
+        if binder_ty is not None and binder_ty != map_ty[1]:
+            continue
+        targets = [
+            q_term["value"]
+            for q_term in q_terms
+            if (
+                q_term["map"] == p_term["map"]
+                and q_term["enum"] == p_term["enum"]
+                and _same_expr(q_term["key"], key)
+            )
+        ]
+        if targets:
+            return {
+                "map": p_term["map"],
+                "key_var": binder_var,
+                "type_name": binder_ty_name,
+                "enum": p_term["enum"],
+                "targets": list(dict.fromkeys(targets)),
+            }
+    return None
+
+
+def _assigns_to_stage_map(stmts, map_name, enum_name, spec):
+    out = []
+
+    def walk(items):
+        for stmt in items:
+            tag = stmt[0]
+            if tag == "assign":
+                parts = _expr_index_parts(stmt[1])
+                if parts is None:
+                    continue
+                assigned_map, key_expr = parts
+                if assigned_map != map_name:
+                    continue
+                value = _enum_member_for_expr(stmt[2], enum_name, spec)
+                if value is not None:
+                    out.append((key_expr, value))
+            elif tag == "if":
+                walk(stmt[2])
+                walk(stmt[3])
+            elif tag == "forall_stmt":
+                walk(stmt[2])
+
+    walk(stmts)
+    return out
+
+
+def _action_stage_edges(spec, map_name, enum_name):
+    edges = []
+    for action in spec.get("actions", []):
+        assignments = _assigns_to_stage_map(action.get("stmts", []), map_name, enum_name, spec)
+        if not assignments:
+            continue
+        requires = []
+        for req in action.get("requires", []):
+            requires.extend(_collect_enum_index_equalities(req["expr"], spec))
+        for key_expr, dst in assignments:
+            for req in requires:
+                if (
+                    req["map"] == map_name
+                    and req["enum"] == enum_name
+                    and _same_expr(req["key"], key_expr)
+                ):
+                    edges.append((req["value"], dst))
+    return edges
+
+
+def _shortest_stage_ranks(members, targets, edges):
+    fallback = len(members)
+    ranks = {target: 0 for target in targets if target in members}
+    changed = True
+    while changed:
+        changed = False
+        for src, dst in edges:
+            if src not in members or dst not in ranks:
+                continue
+            candidate = ranks[dst] + 1
+            if src not in ranks or candidate < ranks[src]:
+                ranks[src] = candidate
+                changed = True
+    return {member: ranks.get(member, fallback) for member in members}
+
+
+def _stage_rank_candidate(spec, leadsto):
+    context = _stage_rank_context(spec, leadsto)
+    if context is None:
+        return None
+    enum_info = spec["types"].get(context["enum"])
+    if enum_info is None or enum_info.get("kind") != "enum":
+        return None
+    members = list(enum_info["members"])
+    if not members:
+        return None
+    edges = _action_stage_edges(spec, context["map"], context["enum"])
+    ranks = _shortest_stage_ranks(members, context["targets"], edges)
+    rank_expr = ("num", ranks[members[-1]])
+    index_expr = ("index", ("var", context["map"]), ("var", context["key_var"]))
+    for member in reversed(members[:-1]):
+        rank_expr = (
+            "ite",
+            ("bin", "==", index_expr, ("var", member)),
+            ("num", ranks[member]),
+            rank_expr,
+        )
+    return ("sum", context["key_var"], context["type_name"], rank_expr, None)
+
+
+def _const_int_value(expr, spec):
+    if not isinstance(expr, tuple):
+        return None
+    if expr[0] == "num":
+        return expr[1]
+    if expr[0] == "var" and expr[1] in spec["consts"]:
+        return spec["consts"][expr[1]]
+    if expr[0] == "neg":
+        inner = _const_int_value(expr[1], spec)
+        return -inner if inner is not None else None
+    return None
+
+
+def _scalar_int_distance_comparisons(expr, spec):
+    out = []
+
+    def add_if_match(node):
+        if not (isinstance(node, tuple) and len(node) == 4 and node[0] == "bin"):
+            return
+        op = node[1]
+        if op not in ("==", ">=", "<="):
+            return
+        left, right = node[2], node[3]
+        if isinstance(left, tuple) and left[0] == "var" and left[1] in spec["state"]:
+            k = _const_int_value(right, spec)
+            if k is not None:
+                out.append((left[1], op, k))
+        if isinstance(right, tuple) and right[0] == "var" and right[1] in spec["state"]:
+            k = _const_int_value(left, spec)
+            if k is None:
+                return
+            flipped = {"==": "==", ">=": "<=", "<=": ">="}[op]
+            out.append((right[1], flipped, k))
+
+    def walk(node):
+        add_if_match(node)
+        if not isinstance(node, tuple):
+            return
+        for child in node[1:]:
+            if isinstance(child, tuple):
+                walk(child)
+            elif isinstance(child, dict):
+                for value in child.values():
+                    if isinstance(value, tuple):
+                        walk(value)
+            elif isinstance(child, list):
+                for value in child:
+                    if isinstance(value, tuple):
+                        walk(value)
+
+    walk(expr)
+    return out
+
+
+def _int_distance_candidates(spec, leadsto):
+    out = []
+    seen = set()
+    for var_name, op, k in _scalar_int_distance_comparisons(leadsto["Q"], spec):
+        ty = spec["state"].get(var_name)
+        if ty is None or ty[0] not in ("int", "domain"):
+            continue
+        if op in ("==", ">="):
+            candidate = ("bin", "-", ("num", k), ("var", var_name))
+        else:
+            lo = ty[1] if ty[0] == "domain" else k
+            candidate = ("bin", "-", ("var", var_name), ("num", lo))
+        if candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+    return out
+
+
+def _and_expr(left, right):
+    return ("bin", "and", left, right)
+
+
+def _pending_count_candidate(leadsto):
+    binders = _typed_leadsto_binders(leadsto)
+    if len(binders) != 1:
+        return None
+    var_name, ty_name, where = binders[0]
+    cond = _and_expr(leadsto["P"], ("not", leadsto["Q"]))
+    if where is not None:
+        cond = _and_expr(where, cond)
+    return ("count", var_name, ty_name, cond)
+
+
+def _synthesize_leadsto_measures(spec, leadsto, binding_types):
+    del binding_types
+    candidates = []
+
+    stage_candidate = _stage_rank_candidate(spec, leadsto)
+    if stage_candidate is not None:
+        candidates.append(stage_candidate)
+
+    candidates.extend(_int_distance_candidates(spec, leadsto))
+
+    pending_candidate = _pending_count_candidate(leadsto)
+    if pending_candidate is not None:
+        candidates.append(pending_candidate)
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique.append(candidate)
+        if len(unique) >= _LEADSTO_SYNTHESIS_MAX_CANDIDATES:
+            break
+    return unique
 
 
 def _eval_int_measure(leadsto, state, binds, spec, expr_cache):
@@ -2409,28 +2760,66 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
 def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
     proved = {}
     for leadsto in leadstos:
-        if leadsto.get("decreases") is None:
-            continue
         binding_types = _leadsto_binding_types(leadsto, spec)
-        for extra_binds in expand_leadsto_bindings(leadsto, spec):
-            failure = _prove_leadsto_rank_lower_bound(
-                spec, leadsto, extra_binds, binding_types, invariants)
-            if failure is not None:
-                return failure, None
-            failure = _prove_leadsto_rank_no_deadlock(
-                spec, leadsto, extra_binds, binding_types, invariants, instances)
-            if failure is not None:
-                return failure, None
-            failure = _prove_leadsto_rank_progress(
-                spec, leadsto, extra_binds, binding_types, invariants, instances)
-            if failure is not None:
-                return failure, None
-        proved[leadsto["name"]] = {
-            "proved": True,
-            "completeness": "unbounded",
-            "proof": "ranking",
-            "decreases": _leadsto_measure_label(leadsto.get("decreases")),
-        }
+        if leadsto.get("decreases") is not None:
+            for extra_binds in expand_leadsto_bindings(leadsto, spec):
+                failure = _prove_leadsto_rank_lower_bound(
+                    spec, leadsto, extra_binds, binding_types, invariants)
+                if failure is not None:
+                    return failure, None
+                failure = _prove_leadsto_rank_no_deadlock(
+                    spec, leadsto, extra_binds, binding_types, invariants, instances)
+                if failure is not None:
+                    return failure, None
+                failure = _prove_leadsto_rank_progress(
+                    spec, leadsto, extra_binds, binding_types, invariants, instances)
+                if failure is not None:
+                    return failure, None
+            proved[leadsto["name"]] = {
+                "proved": True,
+                "completeness": "unbounded",
+                "proof": "ranking",
+                "decreases": _leadsto_measure_label(leadsto.get("decreases")),
+            }
+            continue
+
+        try:
+            candidates = _synthesize_leadsto_measures(spec, leadsto, binding_types)
+        except Exception:
+            candidates = []
+        for candidate in candidates:
+            candidate_leadsto = dict(leadsto)
+            candidate_leadsto["decreases"] = candidate
+            candidate_failed = False
+            try:
+                for extra_binds in expand_leadsto_bindings(candidate_leadsto, spec):
+                    failure = _prove_leadsto_rank_lower_bound(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+                    failure = _prove_leadsto_rank_no_deadlock(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+                    failure = _prove_leadsto_rank_progress(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+            except Exception:
+                candidate_failed = True
+            if candidate_failed:
+                continue
+            proved[leadsto["name"]] = {
+                "proved": True,
+                "completeness": "unbounded",
+                "proof": "ranking",
+                "decreases": _leadsto_measure_label(candidate),
+                "synthesized": True,
+            }
+            break
     return None, proved
 
 

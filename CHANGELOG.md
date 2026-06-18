@@ -5,6 +5,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- (Induction) Automatic synthesis of `leadsTo` ranking measures (follow-up to
+  #11). When a `leadsTo` has no author-supplied `decreases`, `fslc verify
+  --engine induction` tries a small set of candidate measures (stage-rank sum
+  derived from the action graph, integer distance-to-target, pending count) and,
+  if one satisfies the existing ranking obligations, proves the response
+  unboundedly and reports `"proof": "ranking", "synthesized": true`. Sound by
+  construction — candidates are validated by the unchanged proof obligations, so
+  a wrong candidate can only fail, never yield a false proof; if none works the
+  leadsTo keeps its bounded result. Branching multi-action flows with no global
+  ranking measure fall back to bounded checking as before.
+
 ## [2.0.0] - 2026-06-18
 
 Theme: **human-readable business/requirements dialects** (issue #21) — verification
