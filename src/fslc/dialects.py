@@ -360,6 +360,199 @@ def _deadline_expr(age, bound):
     return ("forall", age["binder"], expr)
 
 
+def _process_field_state_var(process_name, field_name):
+    return f"{process_name.lower()}_{field_name}"
+
+
+def _param_name(param):
+    return param[1]
+
+
+def _collect_requirements_processes(items, entity_locs, number_locs):
+    process_items = [item for item in items if item[0] == "biz_process"]
+    processes = []
+    process_by_name = {}
+    transition_names = set()
+    for item in process_items:
+        proc = _collect_process(
+            item,
+            set(),
+            entity_locs,
+            allow_data=True,
+            validate_actors=False,
+        )
+        if proc["name"] in process_by_name:
+            _err(f"duplicate process '{proc['name']}'", loc=proc["loc"])
+        field_names = set()
+        fields = []
+        for field in proc["fields"]:
+            _, fname, ty = field
+            if fname in field_names:
+                _err(f"duplicate carried process field '{fname}'", loc=proc["loc"])
+            field_names.add(fname)
+            if not isinstance(ty, str) or ty not in number_locs:
+                _err("carried process field must be a number type", loc=proc["loc"])
+            fields.append({
+                "name": fname,
+                "type": ty,
+                "state_var": _process_field_state_var(proc["name"], fname),
+            })
+        proc["fields"] = fields
+
+        for tr in proc["transitions"]:
+            if tr["name"] in transition_names:
+                _err(f"duplicate transition label '{tr['name']}'", loc=tr["loc"])
+            transition_names.add(tr["name"])
+            extras = tr.get("extras") or {}
+            inputs = list(extras.get("inputs", []))
+            input_names = set()
+            for param in inputs:
+                pname = _param_name(param)
+                if pname == "c":
+                    _err("transition input conflicts with generated entity binder 'c'", loc=tr["loc"])
+                if pname in field_names:
+                    _err(
+                        f"transition input '{pname}' conflicts with carried process field",
+                        loc=tr["loc"],
+                    )
+                if pname in input_names:
+                    _err(f"duplicate transition input '{pname}'", loc=tr["loc"])
+                input_names.add(pname)
+            sets = list(extras.get("sets", []))
+            for assign in sets:
+                if assign[1] not in field_names:
+                    _err(
+                        f"transition set references unknown carried process field '{assign[1]}'",
+                        loc=tr["loc"],
+                    )
+            tr["inputs"] = inputs
+            tr["guard"] = extras.get("guard")
+            tr["sets"] = sets
+            tr["covers"] = extras.get("covers")
+        processes.append(proc)
+        process_by_name[proc["name"]] = proc
+    return processes, process_by_name
+
+
+def _resolve_process_expr(expr, proc):
+    fields = {
+        field["name"]: ("index", ("var", field["state_var"]), ("var", "c"))
+        for field in proc["fields"]
+    }
+    return _subst_expr(expr, fields)
+
+
+def _expand_requirements_process(proc, values, consts):
+    out = []
+    action_maps = []
+    state_maps = []
+
+    out.append(("enum", proc["enum"], proc["stages"]))
+    state_decls = [
+        ("decl", proc["state_var"], ("map", ("name", proc["name"]), ("name", proc["enum"]))),
+    ]
+    for field in proc["fields"]:
+        state_decls.append((
+            "decl",
+            field["state_var"],
+            ("map", ("name", proc["name"]), ("name", field["type"])),
+        ))
+    out.append(("state", state_decls))
+
+    init_body = [
+        (
+            "assign",
+            ("index", proc["state_var"], ("var", "c")),
+            ("var", proc["initial"]),
+            proc["loc"],
+        )
+    ]
+    for field in proc["fields"]:
+        lo_expr, _hi_expr = values[field["type"]]
+        init_body.append((
+            "assign",
+            ("index", field["state_var"], ("var", "c")),
+            ("num", eval_const(lo_expr, consts, {})),
+            proc["loc"],
+        ))
+    _merge_init(out, [(
+        "forall_stmt",
+        ("binder_typed", "c", proc["name"], None),
+        init_body,
+        proc["loc"],
+    )])
+
+    state_maps.append((
+        "map",
+        proc["state_var"],
+        ("binder_typed", "c", proc["name"], None),
+        ("index", ("var", proc["state_var"]), ("var", "c")),
+        proc["loc"],
+    ))
+
+    for tr in proc["transitions"]:
+        loc = tr["loc"]
+        body = [
+            (
+                "requires",
+                (
+                    "bin",
+                    "==",
+                    ("index", ("var", proc["state_var"]), ("var", "c")),
+                    ("var", tr["src"]),
+                ),
+                loc,
+            )
+        ]
+        if tr["guard"] is not None:
+            body.append(("requires", _resolve_process_expr(tr["guard"], proc), loc))
+        body.append((
+            "assign",
+            ("index", proc["state_var"], ("var", "c")),
+            ("var", tr["dst"]),
+            loc,
+        ))
+        for assign in tr["sets"]:
+            _, fname, expr = assign
+            field = next(f for f in proc["fields"] if f["name"] == fname)
+            body.append((
+                "assign",
+                ("index", field["state_var"], ("var", "c")),
+                _resolve_process_expr(expr, proc),
+                loc,
+            ))
+
+        meta = _meta(*tr["covers"]) if tr["covers"] is not None else _meta(tr["name"], f"by {tr['actor']}")
+        params = [("param_typed", "c", proc["name"])] + deepcopy(tr["inputs"])
+        out.append(("action", tr["name"], params, body, loc, True, meta))
+        action_maps.append((
+            "action_map",
+            tr["name"],
+            ["c"] + [_param_name(p) for p in tr["inputs"]],
+            ("action", tr["name"], [("var", "c")]),
+            loc,
+        ))
+
+    return out, state_maps, action_maps
+
+
+def _lower_acceptance_expect(expect, process_by_name):
+    if expect[0] == "acceptance_expect":
+        return expect[1]
+    _, entity, n, stage, loc = expect
+    proc = process_by_name.get(entity)
+    if proc is None:
+        _err(f"expect references entity '{entity}' with no process", loc=loc)
+    if stage not in proc["stages"]:
+        _err(f"stage '{stage}' is not declared for process '{entity}'", loc=loc)
+    return (
+        "bin",
+        "==",
+        ("index", ("var", proc["state_var"]), ("num", n)),
+        ("var", stage),
+    )
+
+
 def _parse_time_block(time_block):
     age_decls = {}
     urgent = []
@@ -489,6 +682,7 @@ def _expand_requirements_with_display(ast, base_dir):
     out = []
     display_names = {}
     action_maps = []
+    auto_state_maps = []
     action_aliases = {}
     implements = None
     acceptances = []
@@ -544,6 +738,9 @@ def _expand_requirements_with_display(ast, base_dir):
                 loc=bound_locs["values"][number_name],
             )
 
+    processes, process_by_name = _collect_requirements_processes(items, entity_locs, number_locs)
+    process_by_ast_name = {proc["name"]: proc for proc in processes}
+
     for item in items:
         tag = item[0]
         if tag in ("entity", "number", "verify_bounds"):
@@ -586,6 +783,17 @@ def _expand_requirements_with_display(ast, base_dir):
                 expanded, maps = _expand_item(child, req_meta, display_names, action_aliases)
                 out.extend(expanded)
                 action_maps.extend(maps)
+        elif tag == "biz_process":
+            expanded, state_maps, maps = _expand_requirements_process(
+                process_by_ast_name[item[1]],
+                values,
+                consts,
+            )
+            out.extend(expanded)
+            auto_state_maps.extend(state_maps)
+            action_maps.extend(maps)
+            for action in maps:
+                action_aliases.setdefault(action[1], []).append(action[1])
         elif tag == "acceptance":
             _, ac_id, text, steps, expect, loc = item
             if expect is None:
@@ -594,7 +802,7 @@ def _expand_requirements_with_display(ast, base_dir):
                 "id": ac_id,
                 "text": text,
                 "steps": steps,
-                "expect": expect[1],
+                "expect": _lower_acceptance_expect(expect, process_by_name),
                 "loc": loc,
             })
         elif tag == "forbidden":
@@ -617,6 +825,7 @@ def _expand_requirements_with_display(ast, base_dir):
     if implements is not None:
         mapping_items = [("impl", name), ("abs", implements["abs"])]
         mapping_items.extend(implements["maps"])
+        mapping_items.extend(auto_state_maps)
         mapping_items.extend(action_maps)
         implements["mapping_ast"] = ("refinement", f"{name}Implements{implements['abs']}", mapping_items)
         out.append(("__implements", implements))
@@ -758,10 +967,18 @@ def _process_stage_enum(name):
     return f"{name}Stage"
 
 
-def _collect_process(item, actors, cases):
-    _, name, parts, loc = item
+def _collect_process(item, actors, cases, *, allow_data=False, validate_actors=True):
+    _, name, fields_node, parts, loc = item
     if name not in cases:
         _err(f"process '{name}' has no matching entity declaration", loc=loc)
+    fields = []
+    if fields_node is not None:
+        if not allow_data:
+            _err(
+                "data guards/fields are a requirements-layer feature; business processes are pure stage graphs",
+                loc=fields_node[2],
+            )
+        fields = fields_node[1]
     stages = None
     initial = None
     transitions = []
@@ -776,12 +993,19 @@ def _collect_process(item, actors, cases):
                 _err(f"process '{name}' declares initial more than once", loc=part[2])
             initial = part[1]
         elif tag == "biz_transition":
+            extras = part[5]
+            if extras and not allow_data:
+                _err(
+                    "data guards/fields are a requirements-layer feature; business processes are pure stage graphs",
+                    loc=part[6],
+                )
             transitions.append({
                 "name": part[1],
                 "src": part[2],
                 "dst": part[3],
                 "actor": part[4],
-                "loc": part[5],
+                "extras": extras,
+                "loc": part[6],
             })
     if not stages:
         _err(f"process '{name}' must declare stages", loc=loc)
@@ -794,10 +1018,11 @@ def _collect_process(item, actors, cases):
             _err(f"transition '{tr['name']}' uses unknown source stage '{tr['src']}'", loc=tr["loc"])
         if tr["dst"] not in stages:
             _err(f"transition '{tr['name']}' uses unknown target stage '{tr['dst']}'", loc=tr["loc"])
-        if tr["actor"] not in actors:
+        if validate_actors and tr["actor"] not in actors:
             _err(f"transition '{tr['name']}' uses undeclared actor '{tr['actor']}'", loc=tr["loc"])
     return {
         "name": name,
+        "fields": fields,
         "stages": stages,
         "initial": initial,
         "transitions": transitions,

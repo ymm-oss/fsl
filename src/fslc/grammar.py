@@ -212,7 +212,7 @@ ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
-                  | state_def | init_def | req_action_def | time_def
+                  | state_def | init_def | req_action_def | process_def | time_def
                   | invariant_def | trans_def | reachable_def | leadsto_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def
@@ -230,7 +230,8 @@ req_mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
 acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expect "}"
 acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
 acceptance_arg: ref_expr
-acceptance_expect: "expect" expr
+acceptance_expect: "expect" expr -> acceptance_expect
+                 | "expect" NAME INT "in" NAME -> acceptance_expect_stage
 forbidden_def: "forbidden" REQ_ID STRING "{" acceptance_step* "expect" "rejected" "}"
 time_def: "time" "{" time_item* "}"
 ?time_item: urgent_def | age_def
@@ -241,11 +242,18 @@ deadline_def: "deadline" NAME "<=" expr
 business_def: "business" NAME "{" business_item* "}"
 ?business_item: actor_def | entity_def | process_def | kpi_def | policy_def | goal_def
 actor_def: "actor" NAME ("," NAME)* ","?
-process_def: "process" NAME "{" process_item* "}"
+process_def: "process" NAME process_with? "{" process_item* "}"
+process_with: "with" proc_field ("," proc_field)*
+proc_field: NAME ":" qname
 ?process_item: process_stages | process_initial | process_transition
 process_stages: "stages" NAME ("," NAME)* ","?
 process_initial: "initial" NAME
-process_transition: "transition" NAME NAME "->" NAME "by" NAME
+process_transition: "transition" NAME NAME "->" NAME "by" NAME trans_input? trans_guard? trans_set? trans_covers?
+trans_input: "with" param ("," param)*
+trans_guard: "when" expr
+trans_set: "set" proc_assign ("," proc_assign)*
+proc_assign: NAME "=" expr
+trans_covers: "covers" REQ_ID STRING
 kpi_def: "kpi" NAME "=" "count" NAME "in" NAME
 policy_def: "policy" REQ_ID STRING policy_body
 ?policy_body: policy_invariant | policy_responds | policy_eventually
@@ -859,13 +867,16 @@ class Ast(Transformer):
     def acceptance_expect(self, meta, expr):
         return ("acceptance_expect", expr, _loc(meta))
 
+    def acceptance_expect_stage(self, meta, entity, n, stage):
+        return ("acceptance_expect_stage", entity, int(n), stage, _loc(meta))
+
     def acceptance_def(self, meta, ac_id, text, *parts):
         steps = []
         expect = None
         for p in parts:
             if isinstance(p, tuple) and p[0] == "acceptance_step":
                 steps.append(p)
-            elif isinstance(p, tuple) and p[0] == "acceptance_expect":
+            elif isinstance(p, tuple) and p[0] in ("acceptance_expect", "acceptance_expect_stage"):
                 expect = p
         return ("acceptance", str(ac_id), text, steps, expect, _loc(meta))
 
@@ -898,11 +909,51 @@ class Ast(Transformer):
     def process_initial(self, meta, name):
         return ("biz_initial", name, _loc(meta))
 
-    def process_transition(self, meta, name, src, dst, actor):
-        return ("biz_transition", name, src, dst, actor, _loc(meta))
+    def proc_field(self, meta, n, ty):
+        return ("proc_field", n, ty)
 
-    def process_def(self, meta, name, *items):
-        return ("biz_process", name, [i for i in items if i], _loc(meta))
+    def process_with(self, meta, *fields):
+        return ("proc_fields", list(fields), _loc(meta))
+
+    def trans_input(self, meta, *params):
+        return ("trans_input", list(params))
+
+    def trans_guard(self, meta, e):
+        return ("trans_guard", e)
+
+    def proc_assign(self, meta, n, e):
+        return ("proc_assign", n, e)
+
+    def trans_set(self, meta, *assigns):
+        return ("trans_set", list(assigns))
+
+    def trans_covers(self, meta, req_id, text):
+        return ("trans_covers", str(req_id), text)
+
+    def process_transition(self, meta, name, src, dst, actor, *extras):
+        extra = {"inputs": [], "guard": None, "sets": [], "covers": None}
+        for item in extras:
+            if item is None:
+                continue
+            if item[0] == "trans_input":
+                extra["inputs"] = item[1]
+            elif item[0] == "trans_guard":
+                extra["guard"] = item[1]
+            elif item[0] == "trans_set":
+                extra["sets"] = item[1]
+            elif item[0] == "trans_covers":
+                extra["covers"] = (item[1], item[2])
+        if not any(extra.values()):
+            extra = {}
+        return ("biz_transition", name, src, dst, actor, extra, _loc(meta))
+
+    def process_def(self, meta, name, *rest):
+        fields = None
+        items = list(rest)
+        if items and isinstance(items[0], tuple) and items[0][0] == "proc_fields":
+            fields = items[0]
+            items = items[1:]
+        return ("biz_process", name, fields, [i for i in items if i], _loc(meta))
 
     def kpi_def(self, meta, name, case_name, stage):
         return ("biz_kpi", name, case_name, stage, _loc(meta))
