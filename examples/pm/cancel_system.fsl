@@ -12,6 +12,14 @@
 // broken requirement verbatim. The acceptance criteria are automatically
 // replayed during verification and serve directly as the dev team's
 // integration-test template.
+//
+// NOTE: kernel-wrapper form (intentional). This spec keeps the kernel-wrapper
+// form (struct / state / explicit maps), NOT the `process ... with` profile,
+// because it hits decision-rule triggers the profile does not cover:
+//   - non-identity action correspondences (tap_cancel -> request_cancel, etc.);
+//   - a Bool history flag (`offered`) with the `OfferedFlagConsistent` invariant;
+//   - conservation counters (churn_count / retain_count + CountsMatchScreens).
+// Contrast examples/e2e/2_requirements.fsl (process+data profile).
 // ════════════════════════════════════════════════════════════════
 requirements CancelSystemReq {
 

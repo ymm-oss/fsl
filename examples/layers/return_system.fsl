@@ -1,3 +1,15 @@
+// ════════════════════════════════════════════════════════════════
+// Return handling (requirements layer) — kernel-wrapper form (intentional)
+//
+// This spec deliberately uses the kernel-wrapper form (struct / state /
+// branches / explicit maps), NOT the readable `process ... with` profile,
+// because it hits the decision-rule triggers the profile does not cover:
+//   - a BRANCHED refinement correspondence — `submit` maps to `approve` for
+//     low amounts but to `stutter` for high amounts (manager queue); and
+//   - a conservation counter — `paid_count` with the `PaidLedger` invariant.
+// Contrast examples/e2e/2_requirements.fsl, a clean single-entity lifecycle
+// that uses the process+data profile. (See skills/fsl-requirements.)
+// ════════════════════════════════════════════════════════════════
 requirements ReturnSystemReq {
   implements ReturnHandling from "return_policy.fsl" {
     map return_stage[c: CaseId] =
