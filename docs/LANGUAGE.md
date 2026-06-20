@@ -239,6 +239,7 @@ fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed 
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
+fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 ```
 
@@ -889,6 +890,12 @@ DESIGN-*.md).
   narration. Moves human review from reading logical formulas to adjudicating
   concrete examples. JSON mode remains available without `--readable`. →
   [`DESIGN-explain.md`](DESIGN-explain.md)
+- **`fslc html`** — a self-contained HTML report over the same explain/verify
+  evidence: status summary, state/action/property tables, an action-to-state
+  write graph, trace timelines, witness examples, counterfactuals, source, and
+  raw JSON. It is meant for PRs, design reviews, and non-specialist project
+  review without requiring the reader to run the CLI. →
+  [`DESIGN-html-report.md`](DESIGN-html-report.md)
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under `skills/`, with
