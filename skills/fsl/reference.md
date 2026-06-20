@@ -27,7 +27,9 @@ spec <Name> {
   invariant <Name> { <expr> }
   trans     <Name> { <expr> }            // two-state safety. old(expr) for the old state
   reachable <Name> { <expr> }
-  leadsTo   <Name> { <expr> ~> <expr> [decreases <int expr>] } // outer forall x: T { … } may wrap the response
+  leadsTo   <Name> { <expr> ~> [within K] <expr> [decreases <int expr>] } // outer forall x: T { … } may wrap the response
+  unless    <Name> { <expr> unless <expr> } // safety: preserve P until Q
+  until     <Name> { <expr> until <expr> }  // unless safety + progress P ~> Q
   terminal  { <expr> }                     // intended terminal state (excluded from the deadlock check)
 }
 ```
@@ -129,9 +131,13 @@ check as a type error.
   space: `a / b`)
 - Comparison: `== != < <= > >=` / logic: `and or not =>`
 - Quantification: `forall x: T { expr }`, `exists x: T { expr }` (`where expr`
-  allowed), and the v0 form `forall i in lo..hi: expr` (range is a constant
-  expression: `0..CAP-1` recommended)
+  allowed), `forall x in set_or_seq { expr }` / `exists x in set_or_seq { expr }`
+  for expression-only Set/Seq iteration, and the v0 form
+  `forall i in lo..hi: expr` (range is a constant expression: `0..CAP-1` recommended)
 - Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
+- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
+  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
+  matching binding; `exactlyOne` means exactly one.
 - Option: `x == none` `x != none` `x is some(v)` (v is usable afterward within that
   formula). **`x == some(e)` and arithmetic/ordering on Option are type errors**
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
@@ -139,8 +145,9 @@ check as a type error.
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`
 - Seq: `Seq {}` `Seq { 1, 2 }` (element count ≤ N), `.push(e) .pop() .head() .at(i)
   .contains(e) .size()`, `==` (length + all elements)
-- ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q` plus optional
-  `decreases <int expr>` for induction ranking / mapping-expression only:
+- ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q`,
+  `P ~> within K Q`, plus optional `decreases <int expr>` for induction ranking /
+  mapping-expression only:
   `if c then a else b`
 
 ## 4. Statements (init / action body)
