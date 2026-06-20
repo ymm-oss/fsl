@@ -94,11 +94,10 @@ a { color: inherit; }
   padding: 32px;
 }
 .hero {
-  min-height: 300px;
   display: grid;
   align-items: end;
-  gap: 24px;
-  padding: 40px;
+  gap: 18px;
+  padding: 26px 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background:
@@ -118,7 +117,7 @@ h1, h2, h3 {
 }
 h1 {
   max-width: 940px;
-  font-size: 58px;
+  font-size: 42px;
   overflow-wrap: anywhere;
 }
 h2 { font-size: 26px; }
@@ -189,6 +188,10 @@ h3 { font-size: 16px; }
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 18px;
 }
+.stack {
+  display: grid;
+  gap: 18px;
+}
 .panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -207,13 +210,14 @@ th, td {
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 th {
   color: var(--muted);
   background: #fafbf8;
   font: 700 12px/1.3 var(--mono);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 tr:last-child td { border-bottom: 0; }
 code, pre {
@@ -310,6 +314,19 @@ pre {
   color: var(--muted);
   font: 12px/1.45 var(--mono);
 }
+.callout {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.callout.bad { border-color: #f1b2ac; background: var(--red-2); color: #7f2620; }
+.callout.info { border-color: #afdcd7; background: var(--teal-2); color: #0a5d59; }
+.callout-sub { margin-top: 6px; font: 12px/1.45 var(--mono); }
+.step.bad .step-num { background: var(--red); }
+.step.bad .step-body { border-color: #f1b2ac; background: var(--red-2); }
 .cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -457,9 +474,14 @@ details > div { padding: 0 12px 12px; }
           </div>
           <div>
       <svg class="flow-svg" viewBox="0 0 720 320" role="img" aria-label="Action to state write graph">
-        <text class="small" x="48" y="34">STATE</text>
+        <defs>
+          <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#087f7a"/>
+          </marker>
+        </defs>
+        <text class="small" x="48" y="34">STATE &#8592; writes</text>
         <text class="small" x="457" y="34">ACTIONS</text>
-        <path d="M 455 72.0 C 360 72.0, 360 72.0, 265 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55"/><path d="M 455 175.0 C 360 175.0, 360 72.0, 265 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55"/><path d="M 455 278.0 C 360 278.0, 360 72.0, 265 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55"/><path d="M 455 278.0 C 360 278.0, 360 278.0, 265 278.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55"/>
+        <path d="M 455 72.0 C 360 72.0, 360 72.0, 268 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/><path d="M 455 175.0 C 360 175.0, 360 72.0, 268 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/><path d="M 455 278.0 C 360 278.0, 360 72.0, 268 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/><path d="M 455 278.0 C 360 278.0, 360 278.0, 268 278.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/>
         <rect x="46" y="55.0" width="220" height="34" rx="8" fill="#d8f0eb" stroke="#afdcd7"/><text x="62" y="77.0">cart</text><rect x="46" y="261.0" width="220" height="34" rx="8" fill="#d8f0eb" stroke="#afdcd7"/><text x="62" y="283.0">stock</text>
         <rect x="455" y="55.0" width="220" height="34" rx="8" fill="#fff2d2" stroke="#efd39a"/><text x="471" y="77.0">add_to_cart</text><rect x="455" y="158.0" width="220" height="34" rx="8" fill="#fff2d2" stroke="#efd39a"/><text x="471" y="180.0">remove_from_cart</text><rect x="455" y="261.0" width="220" height="34" rx="8" fill="#fff2d2" stroke="#efd39a"/><text x="471" y="283.0">checkout</text>
       </svg>
@@ -478,7 +500,7 @@ details > div { padding: 0 12px 12px; }
         <div class="panel table-wrap">
           <table>
             <thead><tr><th>Action</th><th>Params</th><th>Requires</th><th>Writes</th><th>Ensures</th><th>Requirement</th></tr></thead>
-            <tbody><tr><td><code>add_to_cart</code><br><span class="badge ok">covered</span></td><td>u: UserId, i: ItemId</td><td><div class="chips"><span class="chip require">requires cart[u] == none</span></div></td><td><div class="chips"><span class="chip write">cart</span></div></td><td><span class="chip">none</span></td><td><span class="chip">none</span></td></tr><tr><td><code>remove_from_cart</code><br><span class="badge ok">covered</span></td><td>u: UserId</td><td><div class="chips"><span class="chip require">requires cart[u] != none</span></div></td><td><div class="chips"><span class="chip write">cart</span></div></td><td><span class="chip">none</span></td><td><span class="chip">none</span></td></tr><tr><td><code>checkout</code><br><span class="badge ok">covered</span></td><td>u: UserId</td><td><div class="chips"><span class="chip require">requires cart[u] is some(i)</span><span class="chip require">requires stock[i] &gt; 0</span></div></td><td><div class="chips"><span class="chip write">cart</span><span class="chip write">stock</span></div></td><td><div class="chips"><span class="chip">ensures stock[i] == old(stock[i]) - 1</span></div></td><td><span class="chip">none</span></td></tr></tbody>
+            <tbody><tr><td><code>add_to_cart</code><br><span class="badge ok">covered</span></td><td>u: UserId, i: ItemId</td><td><div class="chips"><span class="chip require">cart[u] == none</span></div></td><td><div class="chips"><span class="chip write">cart</span></div></td><td><span class="chip">none</span></td><td><span class="chip">none</span></td></tr><tr><td><code>remove_from_cart</code><br><span class="badge ok">covered</span></td><td>u: UserId</td><td><div class="chips"><span class="chip require">cart[u] != none</span></div></td><td><div class="chips"><span class="chip write">cart</span></div></td><td><span class="chip">none</span></td><td><span class="chip">none</span></td></tr><tr><td><code>checkout</code><br><span class="badge ok">covered</span></td><td>u: UserId</td><td><div class="chips"><span class="chip require">cart[u] is some(i)</span><span class="chip require">stock[i] &gt; 0</span></div></td><td><div class="chips"><span class="chip write">cart</span><span class="chip write">stock</span></div></td><td><div class="chips"><span class="chip">stock[i] == old(stock[i]) - 1</span></div></td><td><span class="chip">none</span></td></tr></tbody>
           </table>
         </div>
       </section>
@@ -491,7 +513,7 @@ details > div { padding: 0 12px 12px; }
             <p>Human-authored properties plus checks inserted by the verifier.</p>
           </div>
         </div>
-        <div class="grid-2">
+        <div class="stack">
           <div class="panel table-wrap">
             <table>
               <thead><tr><th>Kind</th><th>Name</th><th>Deadline</th><th>Body</th><th>Requirement</th></tr></thead>
@@ -515,7 +537,8 @@ details > div { padding: 0 12px 12px; }
             <p>Shortest counterexample or representative reachable trace, step by step.</p>
           </div>
         </div>
-        <div class="timeline"><div class="step"><div class="step-num">0</div><div class="step-body"><strong>initial</strong> <div class="changes"><div class="change">initial state</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+        <div class="callout info"><strong>Representative reachable trace</strong> — no violation; a concrete path the model can take.</div>
+        <div class="timeline"><div class="step"><div class="step-num">0</div><div class="step-body"><strong>initial</strong>  <div class="changes"><div class="change">initial state</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
     &quot;0&quot;: null,
     &quot;1&quot;: null
@@ -524,16 +547,16 @@ details > div { padding: 0 12px 12px; }
     &quot;0&quot;: 1,
     &quot;1&quot;: 1
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">1</div><div class="step-body"><strong>add_to_cart</strong> <code>u=0, i=1</code><div class="changes"><div class="change">cart[0]: None -> 1</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">1</div><div class="step-body"><strong>add_to_cart</strong> <code>u=1, i=1</code> <div class="changes"><div class="change">cart[1]: None -> 1</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
-    &quot;0&quot;: 1,
-    &quot;1&quot;: null
+    &quot;0&quot;: null,
+    &quot;1&quot;: 1
   },
   &quot;stock&quot;: {
     &quot;0&quot;: 1,
     &quot;1&quot;: 1
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>checkout</strong> <code>u=0</code><div class="changes"><div class="change">cart[0]: 1 -> None</div><div class="change">stock[1]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>checkout</strong> <code>u=1</code> <div class="changes"><div class="change">cart[1]: 1 -> None</div><div class="change">stock[1]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
     &quot;0&quot;: null,
     &quot;1&quot;: null
@@ -542,7 +565,7 @@ details > div { padding: 0 12px 12px; }
     &quot;0&quot;: 1,
     &quot;1&quot;: 0
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">3</div><div class="step-body"><strong>add_to_cart</strong> <code>u=1, i=0</code><div class="changes"><div class="change">cart[1]: None -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">3</div><div class="step-body"><strong>add_to_cart</strong> <code>u=1, i=0</code> <div class="changes"><div class="change">cart[1]: None -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
     &quot;0&quot;: null,
     &quot;1&quot;: 0
@@ -551,7 +574,7 @@ details > div { padding: 0 12px 12px; }
     &quot;0&quot;: 1,
     &quot;1&quot;: 0
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>checkout</strong> <code>u=1</code><div class="changes"><div class="change">cart[1]: 0 -> None</div><div class="change">stock[0]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>checkout</strong> <code>u=1</code> <div class="changes"><div class="change">cart[1]: 0 -> None</div><div class="change">stock[0]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
     &quot;0&quot;: null,
     &quot;1&quot;: null
@@ -571,12 +594,12 @@ details > div { padding: 0 12px 12px; }
             <p>Concrete examples that exercise reachable targets and action coverage.</p>
           </div>
         </div>
-        <div class="cards"><article class="mini-card"><h3><span>reach_SoldOut</span><span class="badge info">reachable</span></h3><p><code>SoldOut</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=1, i=1)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. checkout(u=1)</strong></div></div><div class="step"><div class="step-num">3</div><div class="step-body"><strong>3. add_to_cart(u=1, i=0)</strong></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>4. checkout(u=1)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
+        <div class="cards"><article class="mini-card"><h3><span>reach_SoldOut</span><span class="badge info">reachable</span></h3><p><code>SoldOut</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=1, i=0)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. checkout(u=1)</strong></div></div><div class="step"><div class="step-num">3</div><div class="step-body"><strong>3. add_to_cart(u=0, i=1)</strong></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>4. checkout(u=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
   &quot;expected_states&quot;: [
     {
       &quot;cart&quot;: {
         &quot;0&quot;: null,
-        &quot;1&quot;: 1
+        &quot;1&quot;: 0
       },
       &quot;stock&quot;: {
         &quot;0&quot;: 1,
@@ -589,18 +612,18 @@ details > div { padding: 0 12px 12px; }
         &quot;1&quot;: null
       },
       &quot;stock&quot;: {
-        &quot;0&quot;: 1,
-        &quot;1&quot;: 0
+        &quot;0&quot;: 0,
+        &quot;1&quot;: 1
       }
     },
     {
       &quot;cart&quot;: {
-        &quot;0&quot;: null,
-        &quot;1&quot;: 0
+        &quot;0&quot;: 1,
+        &quot;1&quot;: null
       },
       &quot;stock&quot;: {
-        &quot;0&quot;: 1,
-        &quot;1&quot;: 0
+        &quot;0&quot;: 0,
+        &quot;1&quot;: 1
       }
     },
     {
@@ -680,11 +703,11 @@ details > div { padding: 0 12px 12px; }
       &quot;1&quot;: 1
     }
   }
-}</pre></div></div></details></article><article class="mini-card"><h3><span>cover_checkout</span><span class="badge info">action_coverage</span></h3><p><code>checkout</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=0, i=0)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. checkout(u=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></article><article class="mini-card"><h3><span>cover_checkout</span><span class="badge info">action_coverage</span></h3><p><code>checkout</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=0, i=1)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. checkout(u=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
   &quot;expected_states&quot;: [
     {
       &quot;cart&quot;: {
-        &quot;0&quot;: 0,
+        &quot;0&quot;: 1,
         &quot;1&quot;: null
       },
       &quot;stock&quot;: {
@@ -698,8 +721,8 @@ details > div { padding: 0 12px 12px; }
         &quot;1&quot;: null
       },
       &quot;stock&quot;: {
-        &quot;0&quot;: 0,
-        &quot;1&quot;: 1
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 0
       }
     }
   ],
@@ -901,7 +924,7 @@ details > div { padding: 0 12px 12px; }
         {
           &quot;cart&quot;: {
             &quot;0&quot;: null,
-            &quot;1&quot;: 1
+            &quot;1&quot;: 0
           },
           &quot;stock&quot;: {
             &quot;0&quot;: 1,
@@ -914,18 +937,18 @@ details > div { padding: 0 12px 12px; }
             &quot;1&quot;: null
           },
           &quot;stock&quot;: {
-            &quot;0&quot;: 1,
-            &quot;1&quot;: 0
+            &quot;0&quot;: 0,
+            &quot;1&quot;: 1
           }
         },
         {
           &quot;cart&quot;: {
-            &quot;0&quot;: null,
-            &quot;1&quot;: 0
+            &quot;0&quot;: 1,
+            &quot;1&quot;: null
           },
           &quot;stock&quot;: {
-            &quot;0&quot;: 1,
-            &quot;1&quot;: 0
+            &quot;0&quot;: 0,
+            &quot;1&quot;: 1
           }
         },
         {
@@ -952,26 +975,13 @@ details > div { padding: 0 12px 12px; }
       &quot;kind&quot;: &quot;reachable&quot;,
       &quot;name&quot;: &quot;reach_SoldOut&quot;,
       &quot;narration&quot;: [
-        &quot;1. add_to_cart(u=1, i=1)&quot;,
+        &quot;1. add_to_cart(u=1, i=0)&quot;,
         &quot;2. checkout(u=1)&quot;,
-        &quot;3. add_to_cart(u=1, i=0)&quot;,
-        &quot;4. checkout(u=1)&quot;
+        &quot;3. add_to_cart(u=0, i=1)&quot;,
+        &quot;4. checkout(u=0)&quot;
       ],
       &quot;requirement&quot;: null,
       &quot;steps&quot;: [
-        {
-          &quot;action&quot;: &quot;add_to_cart&quot;,
-          &quot;params&quot;: {
-            &quot;i&quot;: 1,
-            &quot;u&quot;: 1
-          }
-        },
-        {
-          &quot;action&quot;: &quot;checkout&quot;,
-          &quot;params&quot;: {
-            &quot;u&quot;: 1
-          }
-        },
         {
           &quot;action&quot;: &quot;add_to_cart&quot;,
           &quot;params&quot;: {
@@ -983,6 +993,19 @@ details > div { padding: 0 12px 12px; }
           &quot;action&quot;: &quot;checkout&quot;,
           &quot;params&quot;: {
             &quot;u&quot;: 1
+          }
+        },
+        {
+          &quot;action&quot;: &quot;add_to_cart&quot;,
+          &quot;params&quot;: {
+            &quot;i&quot;: 1,
+            &quot;u&quot;: 0
+          }
+        },
+        {
+          &quot;action&quot;: &quot;checkout&quot;,
+          &quot;params&quot;: {
+            &quot;u&quot;: 0
           }
         }
       ],
@@ -1089,7 +1112,7 @@ details > div { padding: 0 12px 12px; }
       &quot;expected_states&quot;: [
         {
           &quot;cart&quot;: {
-            &quot;0&quot;: 0,
+            &quot;0&quot;: 1,
             &quot;1&quot;: null
           },
           &quot;stock&quot;: {
@@ -1103,8 +1126,8 @@ details > div { padding: 0 12px 12px; }
             &quot;1&quot;: null
           },
           &quot;stock&quot;: {
-            &quot;0&quot;: 0,
-            &quot;1&quot;: 1
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 0
           }
         }
       ],
@@ -1121,7 +1144,7 @@ details > div { padding: 0 12px 12px; }
       &quot;kind&quot;: &quot;action_coverage&quot;,
       &quot;name&quot;: &quot;cover_checkout&quot;,
       &quot;narration&quot;: [
-        &quot;1. add_to_cart(u=0, i=0)&quot;,
+        &quot;1. add_to_cart(u=0, i=1)&quot;,
         &quot;2. checkout(u=0)&quot;
       ],
       &quot;requirement&quot;: null,
@@ -1129,7 +1152,7 @@ details > div { padding: 0 12px 12px; }
         {
           &quot;action&quot;: &quot;add_to_cart&quot;,
           &quot;params&quot;: {
-            &quot;i&quot;: 0,
+            &quot;i&quot;: 1,
             &quot;u&quot;: 0
           }
         },
@@ -1153,7 +1176,7 @@ details > div { padding: 0 12px 12px; }
   &quot;checked_to_depth&quot;: 4,
   &quot;completeness&quot;: &quot;bounded&quot;,
   &quot;cost&quot;: {
-    &quot;elapsed_s&quot;: 0.156529
+    &quot;elapsed_s&quot;: 0.160357
   },
   &quot;deadlock&quot;: {
     &quot;found&quot;: false
@@ -1191,19 +1214,19 @@ details > div { padding: 0 12px 12px; }
             &quot;name&quot;: &quot;add_to_cart&quot;,
             &quot;params&quot;: {
               &quot;i&quot;: 1,
-              &quot;u&quot;: 0
+              &quot;u&quot;: 1
             }
           },
           &quot;changes&quot;: {
-            &quot;cart[0]&quot;: {
+            &quot;cart[1]&quot;: {
               &quot;from&quot;: null,
               &quot;to&quot;: 1
             }
           },
           &quot;state&quot;: {
             &quot;cart&quot;: {
-              &quot;0&quot;: 1,
-              &quot;1&quot;: null
+              &quot;0&quot;: null,
+              &quot;1&quot;: 1
             },
             &quot;stock&quot;: {
               &quot;0&quot;: 1,
@@ -1220,11 +1243,11 @@ details > div { padding: 0 12px 12px; }
             },
             &quot;name&quot;: &quot;checkout&quot;,
             &quot;params&quot;: {
-              &quot;u&quot;: 0
+              &quot;u&quot;: 1
             }
           },
           &quot;changes&quot;: {
-            &quot;cart[0]&quot;: {
+            &quot;cart[1]&quot;: {
               &quot;from&quot;: 1,
               &quot;to&quot;: null
             },

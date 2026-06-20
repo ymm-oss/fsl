@@ -157,11 +157,10 @@ a { color: inherit; }
   padding: 32px;
 }
 .hero {
-  min-height: 300px;
   display: grid;
   align-items: end;
-  gap: 24px;
-  padding: 40px;
+  gap: 18px;
+  padding: 26px 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background:
@@ -181,7 +180,7 @@ h1, h2, h3 {
 }
 h1 {
   max-width: 940px;
-  font-size: 58px;
+  font-size: 42px;
   overflow-wrap: anywhere;
 }
 h2 { font-size: 26px; }
@@ -252,6 +251,10 @@ h3 { font-size: 16px; }
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 18px;
 }
+.stack {
+  display: grid;
+  gap: 18px;
+}
 .panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -270,13 +273,14 @@ th, td {
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 th {
   color: var(--muted);
   background: #fafbf8;
   font: 700 12px/1.3 var(--mono);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 tr:last-child td { border-bottom: 0; }
 code, pre {
@@ -373,6 +377,19 @@ pre {
   color: var(--muted);
   font: 12px/1.45 var(--mono);
 }
+.callout {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.callout.bad { border-color: #f1b2ac; background: var(--red-2); color: #7f2620; }
+.callout.info { border-color: #afdcd7; background: var(--teal-2); color: #0a5d59; }
+.callout-sub { margin-top: 6px; font: 12px/1.45 var(--mono); }
+.step.bad .step-num { background: var(--red); }
+.step.bad .step-body { border-color: #f1b2ac; background: var(--red-2); }
 .cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -505,8 +522,7 @@ def _status_section(verification: dict) -> str:
         rows.append(("Implements", _json_code(verification["implements"])))
     if verification.get("deadlock"):
         rows.append(("Deadlock", _json_code(verification["deadlock"])))
-    if verification.get("violation_kind"):
-        rows.append(("Violation", _violation_detail(verification)))
+    rows.extend(_violation_rows(verification))
     warning_html = _warnings(verification.get("warnings") or [])
     return f"""
       <section class="section" id="status">
@@ -546,16 +562,63 @@ def _warnings(warnings) -> str:
 """
 
 
-def _violation_detail(verification: dict) -> str:
+_VIOLATION_KIND_LABELS = {
+    "type_bound": "type bound",
+    "invariant": "invariant",
+    "leadsTo": "response (leadsTo)",
+    "leadsTo_rank": "response ranking (leadsTo)",
+    "ensures": "postcondition (ensures)",
+    "trans": "transition guard",
+    "partial_op": "partial-operation guard",
+    "deadlock": "deadlock",
+}
+
+_VIOLATION_FIELDS = [
+    ("violation_kind", "Violation kind"),
+    ("invariant", "Violated property"),
+    ("violated_at_step", "Violated at step"),
+    ("pending_since", "Pending since step"),
+    ("deadline", "Deadline"),
+    ("within", "Within"),
+]
+
+
+def _violated_name(verification: dict) -> str:
+    name = str(verification.get("invariant") or "")
+    if name.startswith("_bounds_"):
+        return name[len("_bounds_"):]
+    return name
+
+
+def _bindings_inline(binds) -> str:
+    if isinstance(binds, dict):
+        binds = [binds]
     parts = []
-    for key in ("violation_kind", "invariant", "pending_since", "deadline", "within"):
-        if verification.get(key) is not None:
-            parts.append(f"{key}={verification[key]}")
-    if not parts:
-        return ""
-    return '<div class="chips">' + "".join(
-        f'<span class="chip">{escape(str(part))}</span>' for part in parts
-    ) + "</div>"
+    for b in binds or []:
+        if isinstance(b, dict):
+            parts.append(", ".join(f"{k}={v}" for k, v in b.items()))
+        else:
+            parts.append(str(b))
+    return f"<code>{escape('; '.join(parts))}</code>"
+
+
+def _violation_rows(verification: dict) -> list:
+    if not verification.get("violation_kind"):
+        return []
+    rows = []
+    for key, label in _VIOLATION_FIELDS:
+        val = verification.get(key)
+        if val is None:
+            continue
+        if key == "violation_kind":
+            val = _VIOLATION_KIND_LABELS.get(val, val)
+        elif key == "invariant":
+            val = _violated_name(verification)
+        rows.append((label, f"<code>{escape(str(val))}</code>"))
+    binds = verification.get("violating_bindings") or verification.get("bindings")
+    if binds:
+        rows.append(("Violating binding", _bindings_inline(binds)))
+    return rows
 
 
 def _model_section(state: dict, actions: list) -> str:
@@ -591,9 +654,9 @@ def _actions_section(actions: list, coverage: dict) -> str:
         params = ", ".join(
             f"{p.get('name')}: {p.get('type')}" for p in action.get("params", [])
         )
-        requires = _chip_list(action.get("requires_text"), "require")
+        requires = _chip_list(_strip_lead(action.get("requires_text"), "requires "), "require")
         writes = _chip_list(action.get("writes"), "write")
-        ensures = _chip_list(action.get("ensures_text"))
+        ensures = _chip_list(_strip_lead(action.get("ensures_text"), "ensures "))
         markers = []
         if action.get("fair"):
             markers.append('<span class="chip fair">fair</span>')
@@ -658,7 +721,7 @@ def _properties_section(properties: list, auto_checks: list) -> str:
             <p>Human-authored properties plus checks inserted by the verifier.</p>
           </div>
         </div>
-        <div class="grid-2">
+        <div class="stack">
           <div class="panel table-wrap">
             <table>
               <thead><tr><th>Kind</th><th>Name</th><th>Deadline</th><th>Body</th><th>Requirement</th></tr></thead>
@@ -677,11 +740,14 @@ def _properties_section(properties: list, auto_checks: list) -> str:
 
 
 def _trace_section(verification: dict) -> str:
+    is_counterexample = bool(verification.get("trace"))
     trace = verification.get("trace") or _first_reachable_witness(verification)
+    banner = _trace_banner(verification, is_counterexample, trace)
     if not trace:
         content = '<p class="empty">No counterexample trace was emitted. Reachable witnesses may still appear below.</p>'
     else:
-        content = _trace_timeline(trace)
+        violated_step = verification.get("violated_at_step") if is_counterexample else None
+        content = _trace_timeline(trace, violated_step)
     return f"""
       <section class="section" id="traces">
         <div class="section-head">
@@ -690,9 +756,42 @@ def _trace_section(verification: dict) -> str:
             <p>Shortest counterexample or representative reachable trace, step by step.</p>
           </div>
         </div>
+        {banner}
         {content}
       </section>
 """
+
+
+def _trace_banner(verification: dict, is_counterexample: bool, trace) -> str:
+    if is_counterexample:
+        kind = _VIOLATION_KIND_LABELS.get(
+            verification.get("violation_kind"), verification.get("violation_kind") or "a property"
+        )
+        name = _violated_name(verification)
+        name_html = f" <code>{escape(name)}</code>" if name else ""
+        if verification.get("violated_at_step") is not None:
+            where = f" at step {escape(str(verification['violated_at_step']))}"
+        elif verification.get("pending_since") is not None:
+            where = f", pending since step {escape(str(verification['pending_since']))}"
+        else:
+            where = ""
+        binds = verification.get("violating_bindings") or verification.get("bindings")
+        bind_html = f'<div class="callout-sub">binding {_bindings_inline(binds)}</div>' if binds else ""
+        return (
+            '<div class="callout bad">'
+            f"<strong>Counterexample</strong> — violates {escape(kind)}{name_html}{where}. "
+            "The highlighted step below is where it first breaks."
+            f"{bind_html}"
+            "</div>"
+        )
+    if trace:
+        return (
+            '<div class="callout info">'
+            "<strong>Representative reachable trace</strong> — no violation; "
+            "a concrete path the model can take."
+            "</div>"
+        )
+    return ""
 
 
 def _witness_section(witnesses: list) -> str:
@@ -833,8 +932,9 @@ def _influence_svg(states: list, actions: list) -> str:
             y1 = action_y[ai]
             y2 = state_y[state_index[write]]
             edges.append(
-                f'<path d="M 455 {y1} C 360 {y1}, 360 {y2}, 265 {y2}" '
-                'fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55"/>'
+                f'<path d="M 455 {y1} C 360 {y1}, 360 {y2}, 268 {y2}" '
+                'fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" '
+                'marker-end="url(#flow-arrow)"/>'
             )
     state_nodes = []
     for name, y in zip(states, state_y):
@@ -851,7 +951,12 @@ def _influence_svg(states: list, actions: list) -> str:
         )
     return f"""
       <svg class="flow-svg" viewBox="0 0 {width} {height}" role="img" aria-label="Action to state write graph">
-        <text class="small" x="48" y="34">STATE</text>
+        <defs>
+          <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#087f7a"/>
+          </marker>
+        </defs>
+        <text class="small" x="48" y="34">STATE &#8592; writes</text>
         <text class="small" x="457" y="34">ACTIONS</text>
         {''.join(edges)}
         {''.join(state_nodes)}
@@ -871,7 +976,7 @@ def _node_positions(count: int, height: int) -> list:
     return [round(top + gap * i, 1) for i in range(count)]
 
 
-def _trace_timeline(trace: list) -> str:
+def _trace_timeline(trace: list, violated_step=None) -> str:
     steps = []
     for entry in trace:
         step_no = entry.get("step", len(steps))
@@ -885,11 +990,13 @@ def _trace_timeline(trace: list) -> str:
         )
         if not rendered_changes and step_no == 0:
             rendered_changes = '<div class="change">initial state</div>'
+        is_bad = violated_step is not None and step_no == violated_step
+        badge = '<span class="badge bad">violation</span>' if is_bad else ""
         steps.append(
-            '<div class="step">'
+            f'<div class="step{" bad" if is_bad else ""}">'
             f'<div class="step-num">{escape(str(step_no))}</div>'
             '<div class="step-body">'
-            f'<strong>{escape(str(action_name))}</strong> {_params(params)}'
+            f'<strong>{escape(str(action_name))}</strong> {_params(params)} {badge}'
             f'<div class="changes">{rendered_changes}</div>'
             f'{_details("State", _json_pre(entry.get("state")))}'
             '</div></div>'
@@ -924,6 +1031,14 @@ def _type_text(ty) -> str:
     if tag in ("enum", "struct", "named", "name"):
         return str(ty[1])
     return str(ty)
+
+
+def _strip_lead(items, prefix) -> list:
+    """Drop a redundant leading keyword (the column header already names it)."""
+    return [
+        item[len(prefix):] if isinstance(item, str) and item.startswith(prefix) else item
+        for item in (items or [])
+    ]
 
 
 def _chip_list(items, kind="") -> str:
