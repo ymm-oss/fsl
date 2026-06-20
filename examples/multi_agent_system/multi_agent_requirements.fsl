@@ -1,0 +1,461 @@
+// AIマルチエージェントシステム [requirements層PoC]。
+//
+// この層の目的:
+// - PM/レビューアが追える外部可視な制御状態として、
+//   受け付け、scope、plan、worker完了、統合、critic、修正、承認、納品、
+//   副作用tool承認を表す。
+// - agentの実装詳細やqueue名はdesign層へ寄せる。
+//
+// ASSUME-1:
+// - HumanReviewは処理済み終端である。
+// ASSUME-2:
+// - 高リスクworkは副作用toolを必要とし、人間承認後にだけ実行できる。
+// ASSUME-3:
+// - criticが要求できる修正は1回までで、2回目の不合格は拒否または人間レビューに進める。
+requirements MultiAgentRequirements {
+  type Work = 0..0
+  type Revision = 0..1
+
+  // Agent:
+  // - 0: supervisor
+  // - 1: worker A
+  // - 2: worker B
+  //
+  // Set<Agent>とSet上の量化を使い、worker assignmentを読みやすくする。
+  type Agent = 0..2
+
+  enum Stage {
+    New,
+    Received,
+    Scoped,
+    Planned,
+    Assigned,
+    Aggregated,
+    CriticReview,
+    RevisionNeeded,
+    Approved,
+    Delivered,
+    Rejected,
+    HumanReview,
+    ToolApproval,
+    ToolApproved,
+    ToolExecuted
+  }
+  enum Risk { Unknown, Low, High }
+  enum Approval { NoApproval, Requested, ApprovalGranted, Denied }
+
+  struct Job {
+    st: Stage,
+    risk: Risk,
+    worker_a_done: Bool,
+    worker_b_done: Bool,
+    critic_ok: Bool,
+    approval: Approval,
+    audit: Bool,
+    revision: Revision
+  }
+
+  state {
+    job: Map<Work, Job>,
+    active_agents: Set<Agent>
+  }
+
+  init {
+    forall w: Work {
+      job[w] = Job {
+        st: New,
+        risk: Unknown,
+        worker_a_done: false,
+        worker_b_done: false,
+        critic_ok: false,
+        approval: NoApproval,
+        audit: false,
+        revision: 0
+      }
+    }
+    active_agents = Set {}
+  }
+
+  requirement REQ-1 "workは監査境界を通って受け付けられる" {
+    // receiveは監査境界。ここを通らない終端はHandledWorkWasAuditedで拒否する。
+    fair action receive(w: Work) {
+      requires job[w].st == New
+      job[w].st = Received
+      job[w].audit = true
+    }
+  }
+
+  requirement REQ-2 "supervisorはworkのリスクと副作用要否をscopeする" {
+    // 低リスクworkは副作用toolを必要としない。
+    fair action scope_low(w: Work) {
+      requires job[w].st == Received
+      job[w].st = Scoped
+      job[w].risk = Low
+    }
+
+    // 高リスクworkは副作用toolを必要とする。
+    fair action scope_high(w: Work) {
+      requires job[w].st == Received
+      job[w].st = Scoped
+      job[w].risk = High
+    }
+  }
+
+  requirement REQ-3 "supervisorは複数workerへ委譲し、両workerの結果を集約する" {
+    // supervisorが作業計画を作る。design層ではplanner queueに分解してよい。
+    fair action plan_work(w: Work) {
+      requires job[w].st == Scoped
+      job[w].st = Planned
+    }
+
+    // worker A/Bへ委譲する。active_agentsは現在のassignmentを表す。
+    fair action assign_workers(w: Work) {
+      requires job[w].st == Planned
+      requires job[w].revision == 0
+      job[w].st = Assigned
+      job[w].worker_a_done = false
+      job[w].worker_b_done = false
+      active_agents = Set {1, 2}
+    }
+
+    // critic修正後の再委譲。business層からはレビュー内の修正処理として扱う。
+    fair action assign_revision_workers(w: Work) {
+      requires job[w].st == Planned
+      requires job[w].revision > 0
+      job[w].st = Assigned
+      job[w].worker_a_done = false
+      job[w].worker_b_done = false
+      active_agents = Set {1, 2}
+    }
+
+    // worker Aの成果物が返る。
+    fair action worker_a_finish(w: Work) {
+      requires job[w].st == Assigned
+      requires active_agents.contains(1)
+      requires not job[w].worker_a_done
+      job[w].worker_a_done = true
+    }
+
+    // worker Bの成果物が返る。
+    fair action worker_b_finish(w: Work) {
+      requires job[w].st == Assigned
+      requires active_agents.contains(2)
+      requires not job[w].worker_b_done
+      job[w].worker_b_done = true
+    }
+
+    // 両workerの成果物がそろった時だけ統合できる。
+    fair action aggregate_results(w: Work) {
+      requires job[w].st == Assigned
+      requires job[w].revision == 0
+      requires job[w].worker_a_done
+      requires job[w].worker_b_done
+      job[w].st = Aggregated
+      active_agents = Set {}
+    }
+
+    // 修正後の再統合。business層ではBReviewingの内側に留める。
+    fair action aggregate_revision_results(w: Work) {
+      requires job[w].st == Assigned
+      requires job[w].revision > 0
+      requires job[w].worker_a_done
+      requires job[w].worker_b_done
+      job[w].st = Aggregated
+      active_agents = Set {}
+    }
+  }
+
+  requirement REQ-4 "criticは成果物を承認、修正要求、拒否、人間レビューへ振り分ける" {
+    // criticレビューを開始する。design層ではcritic queueに分解してよい。
+    fair action start_critic(w: Work) {
+      requires job[w].st == Aggregated
+      job[w].st = CriticReview
+    }
+
+    // criticが承認する。
+    fair action critic_pass(w: Work) {
+      requires job[w].st == CriticReview
+      job[w].st = Approved
+      job[w].critic_ok = true
+    }
+
+    // 1回目の不合格は修正ループへ戻せる。
+    fair action critic_requests_revision(w: Work) {
+      requires job[w].st == CriticReview
+      requires job[w].revision < 1
+      job[w].st = RevisionNeeded
+      job[w].critic_ok = false
+    }
+
+    // 修正ループに戻すとき、revision budgetを1つ消費する。
+    fair action revise_plan(w: Work) {
+      requires job[w].st == RevisionNeeded
+      requires job[w].revision < 1
+      job[w].st = Planned
+      job[w].revision = job[w].revision + 1
+      job[w].worker_a_done = false
+      job[w].worker_b_done = false
+    }
+
+    // 修正後も通せない場合は拒否で閉じる。
+    fair action reject_after_revision(w: Work) {
+      requires job[w].st == CriticReview
+      requires job[w].revision == 1
+      job[w].st = Rejected
+    }
+
+    // 修正後もAIだけで判断できない場合は人間レビューへ送る。
+    fair action escalate_after_revision(w: Work) {
+      requires job[w].st == CriticReview
+      requires job[w].revision == 1
+      job[w].st = HumanReview
+    }
+  }
+
+  requirement REQ-5 "副作用toolはcritic承認後かつ人間承認後にだけ実行できる" {
+    // 低リスクworkはcritic承認後に納品できる。
+    fair action deliver_answer(w: Work) {
+      requires job[w].st == Approved
+      requires job[w].risk == Low
+      requires job[w].critic_ok
+      job[w].st = Delivered
+    }
+
+    // 高リスクworkは副作用tool承認待ちへ進む。
+    fair action request_tool_approval(w: Work) {
+      requires job[w].st == Approved
+      requires job[w].risk == High
+      requires job[w].critic_ok
+      job[w].st = ToolApproval
+      job[w].approval = Requested
+    }
+
+    // 人間が副作用toolを承認する。
+    fair action approve_tool(w: Work) {
+      requires job[w].st == ToolApproval
+      requires job[w].approval == Requested
+      job[w].st = ToolApproved
+      job[w].approval = ApprovalGranted
+    }
+
+    // 人間が副作用toolを拒否する。
+    fair action deny_tool(w: Work) {
+      requires job[w].st == ToolApproval
+      requires job[w].approval == Requested
+      job[w].st = Rejected
+      job[w].approval = Denied
+    }
+
+    // 承認済みの副作用toolだけを実行する。
+    fair action execute_tool(w: Work) {
+      requires job[w].st == ToolApproved
+      requires job[w].approval == ApprovalGranted
+      job[w].st = ToolExecuted
+    }
+  }
+
+  // Safety: 終端状態は監査境界を通っている。
+  invariant HandledWorkWasAudited "REQ-1: 終端workは監査済みでなければならない" {
+    forall w: Work {
+      (job[w].st == Delivered or job[w].st == Rejected or job[w].st == HumanReview or job[w].st == ToolExecuted) => job[w].audit
+    }
+  }
+
+  // Safety: worker成果物の統合は、両workerが完了してからである。
+  invariant AggregatedMeansBothWorkersDone "REQ-3: 統合済みworkは両workerの成果物を持つ" {
+    forall w: Work {
+      job[w].st == Aggregated => (job[w].worker_a_done and job[w].worker_b_done)
+    }
+  }
+
+  // Safety: active_agentsにはworker agentだけが入る。supervisor(0)は成果物workerではない。
+  invariant ActiveAgentsAreWorkers "REQ-3: active_agentsは成果物workerだけを含む" {
+    forall a in active_agents {
+      a == 1 or a == 2
+    }
+  }
+
+  // Safety: Assigned中はworker A/Bがそれぞれ1回ずつ割り当てられている。
+  // Setなので重複は表現できないが、exactlyOneで読み手に一意性を明示する。
+  invariant AssignedHasExactlyTwoWorkers "REQ-3: Assigned中はworker A/Bが一意に割り当てられている" {
+    forall w: Work {
+      job[w].st == Assigned => (
+        exactlyOne(a in active_agents where a == 1) and
+        exactlyOne(a in active_agents where a == 2)
+      )
+    }
+  }
+
+  // Safety: critic承認なしに納品・副作用実行へ進まない。
+  invariant OutputRequiresCriticApproval "REQ-4: 納品または副作用実行にはcritic承認が必要" {
+    forall w: Work {
+      (job[w].st == Delivered or job[w].st == ToolExecuted or job[w].st == ToolApproval or job[w].st == ToolApproved) => job[w].critic_ok
+    }
+  }
+
+  // Safety: 副作用tool実行には人間承認が必要である。
+  invariant ToolExecutionRequiresHumanApproval "REQ-5: 副作用tool実行には人間承認が必要" {
+    forall w: Work {
+      job[w].st == ToolExecuted => job[w].approval == ApprovalGranted
+    }
+  }
+
+  // Safety: ToolApprovalというstage名とapproval値を同期させる。
+  invariant ToolApprovalMeansRequested "REQ-5: ToolApprovalはRequested承認状態を表す" {
+    forall w: Work {
+      job[w].st == ToolApproval => job[w].approval == Requested
+    }
+  }
+
+  // Safety: ToolApprovedというstage名とapproval値を同期させる。
+  invariant ToolApprovedMeansApproved "REQ-5: ToolApprovedはApprovalGranted承認状態を表す" {
+    forall w: Work {
+      job[w].st == ToolApproved => job[w].approval == ApprovalGranted
+    }
+  }
+
+  // Transition safety: revise_planはrevision budgetを必ず1だけ消費する。
+  trans RevisionConsumesOneBudget "REQ-4: 修正ループに戻す時はrevision budgetを1つ消費する" {
+    forall w: Work {
+      (old(job[w].st) == RevisionNeeded and job[w].st == Planned) => (
+        job[w].revision == old(job[w].revision) + 1
+      )
+    }
+  }
+
+  // Liveness: 受け付け後のworkは、納品・拒否・人間レビュー・副作用実行のいずれかへ閉じる。
+  // retryではなくagent coordinationのため、worker完了・critic・承認を含めて18 step以内にした。
+  leadsTo WorkEventuallyHandled "REQ-6: 受け付けたworkは最終的に処理済み終端へ到達する" {
+    forall w: Work {
+      (
+        job[w].st == Received or job[w].st == Scoped or job[w].st == Planned or
+        job[w].st == Assigned or job[w].st == Aggregated or job[w].st == CriticReview or
+        job[w].st == RevisionNeeded or job[w].st == Approved or job[w].st == ToolApproval or
+        job[w].st == ToolApproved
+      )
+        ~> within 18
+      (
+        job[w].st == Delivered or job[w].st == Rejected or job[w].st == HumanReview or job[w].st == ToolExecuted
+      )
+    }
+  }
+
+  // Temporal sugar: 処理中workは終端まで処理中集合から外れない。
+  // 1 Work固定のPoCなので、job[0]で直接書いている。
+  until WorkOpenUntilHandled "REQ-6: 処理中workは終端まで処理中状態を保つ" {
+    (
+      job[0].st == Received or job[0].st == Scoped or job[0].st == Planned or
+      job[0].st == Assigned or job[0].st == Aggregated or job[0].st == CriticReview or
+      job[0].st == RevisionNeeded or job[0].st == Approved or job[0].st == ToolApproval or
+      job[0].st == ToolApproved
+    )
+      until
+    (
+      job[0].st == Delivered or job[0].st == Rejected or job[0].st == HumanReview or job[0].st == ToolExecuted
+    )
+  }
+
+  reachable CanDeliver {
+    exists w: Work { job[w].st == Delivered }
+  }
+
+  reachable CanReject {
+    exists w: Work { job[w].st == Rejected }
+  }
+
+  reachable CanReview {
+    exists w: Work { job[w].st == HumanReview }
+  }
+
+  reachable CanExecuteTool {
+    exists w: Work { job[w].st == ToolExecuted }
+  }
+
+  acceptance AC-LOW-DELIVER "低リスクworkはcritic承認後に納品される" {
+    receive(0)
+    scope_low(0)
+    plan_work(0)
+    assign_workers(0)
+    worker_a_finish(0)
+    worker_b_finish(0)
+    aggregate_results(0)
+    start_critic(0)
+    critic_pass(0)
+    deliver_answer(0)
+    expect job[0].st == Delivered
+  }
+
+  acceptance AC-HIGH-TOOL "高リスクworkは人間承認後に副作用toolを実行する" {
+    receive(0)
+    scope_high(0)
+    plan_work(0)
+    assign_workers(0)
+    worker_a_finish(0)
+    worker_b_finish(0)
+    aggregate_results(0)
+    start_critic(0)
+    critic_pass(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    execute_tool(0)
+    expect job[0].st == ToolExecuted
+  }
+
+  acceptance AC-REVISION-REVIEW "修正後も判断できないworkは人間レビューへ進む" {
+    receive(0)
+    scope_low(0)
+    plan_work(0)
+    assign_workers(0)
+    worker_a_finish(0)
+    worker_b_finish(0)
+    aggregate_results(0)
+    start_critic(0)
+    critic_requests_revision(0)
+    revise_plan(0)
+    assign_revision_workers(0)
+    worker_a_finish(0)
+    worker_b_finish(0)
+    aggregate_revision_results(0)
+    start_critic(0)
+    escalate_after_revision(0)
+    expect job[0].st == HumanReview
+  }
+
+  forbidden FB-AGGREGATE-EARLY "両worker完了前に統合してはならない" {
+    receive(0)
+    scope_low(0)
+    plan_work(0)
+    assign_workers(0)
+    worker_a_finish(0)
+    aggregate_results(0)
+    expect rejected
+  }
+
+  forbidden FB-DELIVER-BEFORE-CRITIC "critic承認前に納品してはならない" {
+    receive(0)
+    scope_low(0)
+    plan_work(0)
+    assign_workers(0)
+    worker_a_finish(0)
+    worker_b_finish(0)
+    aggregate_results(0)
+    deliver_answer(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-BEFORE-APPROVAL "人間承認前に副作用toolを実行してはならない" {
+    receive(0)
+    scope_high(0)
+    plan_work(0)
+    assign_workers(0)
+    worker_a_finish(0)
+    worker_b_finish(0)
+    aggregate_results(0)
+    start_critic(0)
+    critic_pass(0)
+    request_tool_approval(0)
+    execute_tool(0)
+    expect rejected
+  }
+
+}

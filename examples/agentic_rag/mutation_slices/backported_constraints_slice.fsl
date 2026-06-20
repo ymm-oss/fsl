@@ -1,0 +1,282 @@
+// Agentic RAG mutation slice: 本体requirementsへ戻した制約のkill寄与確認。
+//
+// 目的:
+// - `agentic_rag_requirements.fsl`へ追加した状態同期 invariant と trans が、
+//   実際にmutationを殺すかを短時間で観測する。
+// - requirements本体を直接`mutate`すると重いので、1リクエスト固定の小さな
+//   断面に、同じ契約だけを写している。
+//
+// 注意:
+// - このsliceは業務フロー全体を表さない。
+// - `prepare_*` actionは、各状態名の意味を個別に観測するための前状態生成である。
+// - 本体requirementsへ戻す判断は`SURVIVOR_REVIEW.md`に残し、このsliceでは
+//   その判断がmutation上も効いているかだけを見る。
+requirements AgenticRagBackportedConstraintsSlice {
+  // mutationを軽くするため、対象リクエストは1件に固定する。
+  type Req = 0..0
+  // 本体requirementsと同じretry budget境界を使う。
+  type Retry = 0..2
+
+  enum Stage {
+    New,
+    EvidenceReady,
+    Drafted,
+    EvidenceBad,
+    Retrieving,
+    GuardFailed,
+    ToolApproval,
+    ToolApproved,
+    ActionExecuted,
+    Refused,
+    HumanReview
+  }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  struct Case {
+    st: Stage,
+    evidence: Evidence,
+    guard: Guard,
+    approval: Approval,
+    role: Role,
+    retry: Retry,
+    citation_ok: Bool
+  }
+
+  state {
+    req: Map<Req, Case>
+  }
+
+  init {
+    forall r: Req {
+      req[r] = Case {
+        st: New,
+        evidence: Missing,
+        guard: Unchecked,
+        approval: NoApproval,
+        role: Public,
+        retry: 2,
+        citation_ok: false
+      }
+    }
+  }
+
+  requirement REQ-3 "証拠状態、引用、retry budgetの契約を保つ" {
+    // EvidenceReadyの意味を直接観測する準備action。
+    // evidence/citation assignmentを消す変異は、EvidenceReadyHasEvidenceAndCitationで殺す。
+    action prepare_evidence_ready(r: Req) {
+      requires req[r].st == New
+      req[r].st = EvidenceReady
+      req[r].evidence = Adequate
+      req[r].citation_ok = true
+    }
+
+    // Draftedの意味を直接観測する準備action。
+    // 本体ではdraft_answerがEvidenceReadyから来るが、このsliceでは
+    // DraftedHasEvidenceAndCitationのkill寄与を独立に見るため畳み込む。
+    action prepare_drafted(r: Req) {
+      requires req[r].st == New
+      req[r].st = Drafted
+      req[r].evidence = Adequate
+      req[r].citation_ok = true
+    }
+
+    // EvidenceBadの意味を直接観測する準備action。
+    // retry後にも再びEvidenceBadへ戻せるよう、Retrievingからも許可する。
+    action prepare_evidence_bad(r: Req) {
+      requires req[r].st == New or req[r].st == Retrieving
+      req[r].st = EvidenceBad
+      req[r].evidence = Inadequate
+      req[r].citation_ok = false
+    }
+
+    // retryするときはbudgetを1だけ消費する。
+    // retry assignmentを削除・反転する変異は、RetryConsumesOneBudgetで殺す。
+    action retry_retrieve(r: Req) {
+      requires req[r].st == EvidenceBad
+      requires req[r].retry > 0
+      req[r].st = Retrieving
+      req[r].retry = req[r].retry - 1
+    }
+
+    // budgetを使い切った後だけ拒否で閉じる。
+    action refuse_low_evidence(r: Req) {
+      requires req[r].st == EvidenceBad
+      requires req[r].retry == 0
+      req[r].st = Refused
+    }
+
+    // budgetを使い切った後だけ人間レビューで閉じる。
+    action review_low_evidence(r: Req) {
+      requires req[r].st == EvidenceBad
+      requires req[r].retry == 0
+      req[r].st = HumanReview
+    }
+
+    invariant EvidenceReadyHasEvidenceAndCitation "REQ-3: EvidenceReadyは十分な証拠と許可済み引用を表す" {
+      forall r: Req {
+        req[r].st == EvidenceReady => (
+          req[r].evidence == Adequate and req[r].citation_ok
+        )
+      }
+    }
+
+    invariant DraftedHasEvidenceAndCitation "REQ-3: Draftedは回答可能な証拠と引用を保持している" {
+      forall r: Req {
+        req[r].st == Drafted => (
+          req[r].evidence == Adequate and req[r].citation_ok
+        )
+      }
+    }
+
+    invariant EvidenceBadMeansNoCitation "REQ-3: EvidenceBadは不十分な証拠と引用不可を表す" {
+      forall r: Req {
+        req[r].st == EvidenceBad => (
+          req[r].evidence == Inadequate and not req[r].citation_ok
+        )
+      }
+    }
+
+    trans RetryConsumesOneBudget "REQ-3: retry時はbudgetを1だけ消費する" {
+      forall r: Req {
+        (old(req[r].st) == EvidenceBad and req[r].st == Retrieving) => (
+          req[r].retry == old(req[r].retry) - 1
+        )
+      }
+    }
+
+    reachable CanCloseLowEvidenceByRefusal {
+      exists r: Req { req[r].st == Refused }
+    }
+
+    reachable CanCloseLowEvidenceByReview {
+      exists r: Req { req[r].st == HumanReview }
+    }
+  }
+
+  requirement REQ-4 "guard失敗状態は失敗guard値と同期する" {
+    // GuardFailedの意味を直接観測する準備action。
+    action prepare_guard_failed(r: Req) {
+      requires req[r].st == New
+      req[r].st = GuardFailed
+      req[r].guard = Failed
+    }
+
+    invariant GuardFailedMeansFailedGuard "REQ-4: GuardFailedは出力ガードレール失敗を表す" {
+      forall r: Req {
+        req[r].st == GuardFailed => req[r].guard == Failed
+      }
+    }
+  }
+
+  requirement REQ-5 "副作用toolの承認stageと実行stageを保つ" {
+    // ToolApprovalの意味を直接観測する準備action。
+    action request_tool_approval(r: Req) {
+      requires req[r].st == New
+      req[r].st = ToolApproval
+      req[r].approval = Requested
+      req[r].role = Operator
+    }
+
+    // ToolApprovedの意味を直接観測する準備action。
+    action approve_tool(r: Req) {
+      requires req[r].st == ToolApproval
+      requires req[r].role == Operator
+      req[r].st = ToolApproved
+      req[r].approval = Approved
+    }
+
+    // ActionExecutedへの遷移元がToolApprovedであることをtransで見る。
+    action execute_tool(r: Req) {
+      requires req[r].st == ToolApproved
+      requires req[r].approval == Approved
+      requires req[r].role == Operator
+      req[r].st = ActionExecuted
+    }
+
+    invariant ToolApprovalMeansRequested "REQ-5: ToolApprovalはRequested承認状態を表す" {
+      forall r: Req {
+        req[r].st == ToolApproval => req[r].approval == Requested
+      }
+    }
+
+    invariant ToolApprovedMeansApproved "REQ-5: ToolApprovedはApproved承認状態を表す" {
+      forall r: Req {
+        req[r].st == ToolApproved => req[r].approval == Approved
+      }
+    }
+
+    trans ExecutionComesFromApprovedStage "REQ-5: ActionExecutedはToolApprovedからだけ入る" {
+      forall r: Req {
+        req[r].st == ActionExecuted => (
+          old(req[r].st) == ToolApproved or old(req[r].st) == ActionExecuted
+        )
+      }
+    }
+
+    reachable CanExecuteTool {
+      exists r: Req { req[r].st == ActionExecuted }
+    }
+  }
+
+  acceptance AC-EVIDENCE-READY "EvidenceReadyは証拠と引用を持つ" {
+    prepare_evidence_ready(0)
+    expect req[0].st == EvidenceReady
+  }
+
+  acceptance AC-DRAFTED "Draftedは証拠と引用を持つ" {
+    prepare_drafted(0)
+    expect req[0].st == Drafted
+  }
+
+  acceptance AC-EVIDENCE-BAD "EvidenceBadは証拠不足と引用不可を持つ" {
+    prepare_evidence_bad(0)
+    expect req[0].st == EvidenceBad
+  }
+
+  acceptance AC-RETRY-REFUSE "retryを使い切って拒否で閉じる" {
+    prepare_evidence_bad(0)
+    retry_retrieve(0)
+    prepare_evidence_bad(0)
+    retry_retrieve(0)
+    prepare_evidence_bad(0)
+    refuse_low_evidence(0)
+    expect req[0].st == Refused
+  }
+
+  acceptance AC-RETRY-REVIEW "retryを使い切ってレビューで閉じる" {
+    prepare_evidence_bad(0)
+    retry_retrieve(0)
+    prepare_evidence_bad(0)
+    retry_retrieve(0)
+    prepare_evidence_bad(0)
+    review_low_evidence(0)
+    expect req[0].st == HumanReview
+  }
+
+  acceptance AC-GUARD-FAILED "GuardFailedはFailed guardを持つ" {
+    prepare_guard_failed(0)
+    expect req[0].st == GuardFailed
+  }
+
+  acceptance AC-TOOL-EXECUTE "ToolApprovedから実行済みへ進む" {
+    request_tool_approval(0)
+    approve_tool(0)
+    execute_tool(0)
+    expect req[0].st == ActionExecuted
+  }
+
+  forbidden FB-EARLY-REFUSE "retryが残る間は拒否で閉じない" {
+    prepare_evidence_bad(0)
+    refuse_low_evidence(0)
+    expect rejected
+  }
+
+  forbidden FB-EARLY-REVIEW "retryが残る間はレビューで閉じない" {
+    prepare_evidence_bad(0)
+    review_low_evidence(0)
+    expect rejected
+  }
+}

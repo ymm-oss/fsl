@@ -1,0 +1,69 @@
+// Agentic RAG ネガティブプローブ用の縮約requirements。
+//
+// 目的:
+// - 本体requirementsのlivenessのうち、回答準備済み境界だけを切り出す。
+// - 「Drafted + guard Passed まで来たリクエストは、最終的にAnsweredになる」
+//   というprogress obligationを、単一リクエストreq[0]で短く観測する。
+//
+// 注意:
+// - これは本体仕様の代替ではない。
+// - liveness喪失を説明するための小さな抽象requirementsである。
+requirements AgenticRagLivenessRequirements {
+  symmetric type Req = 0..1
+  type Retry = 0..2
+
+  enum Stage { Drafted, Answered }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  struct Case {
+    st: Stage,
+    evidence: Evidence,
+    guard: Guard,
+    approval: Approval,
+    role: Role,
+    retry: Retry,
+    needs_tool: Bool,
+    citation_ok: Bool,
+    audit: Bool
+  }
+
+  state {
+    req: Map<Req, Case>
+  }
+
+  init {
+    forall r: Req {
+      req[r] = Case {
+        st: Drafted,
+        evidence: Adequate,
+        guard: Passed,
+        approval: NoApproval,
+        role: Public,
+        retry: 2,
+        needs_tool: false,
+        citation_ok: true,
+        audit: true
+      }
+    }
+  }
+
+  requirement REQ-L1 "回答準備済みリクエストは最終的に公開回答される" {
+    // 抽象requirementsではanswerをfairにしているので、enabledな回答公開を
+    // 永久に選ばない実行はleadsTo反例から除外される。
+    fair action answer(r: Req) {
+      requires req[r].st == Drafted
+      requires req[r].evidence == Adequate
+      requires req[r].citation_ok
+      requires req[r].guard == Passed
+      req[r].st = Answered
+    }
+
+    // req[0]に固定した短いprogress obligation。
+    leadsTo RequestEventuallyHandled {
+      req[0].st == Drafted ~> req[0].st == Answered
+    }
+  }
+}

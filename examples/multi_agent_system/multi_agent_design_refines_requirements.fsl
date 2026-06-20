@@ -1,0 +1,92 @@
+// AIマルチエージェント design層 → requirements層 refinement mapping。
+//
+// このファイルの役割:
+// - design層で追加したqueue、planner実行、critic queue、tool queueを
+//   requirements層の外部可視な状態へ畳み込む。
+// - 内部queue操作をstutterにする箇所と、要件上の状態遷移として見せる箇所を分ける。
+// - requirements層のlivenessをdesign層でも落とさないよう、進捗actionを明示する。
+refinement MultiAgentDesignRefinesRequirements {
+  impl MultiAgentDesign
+  abs  MultiAgentRequirements
+
+  map job[w: Work] = Job {
+    st:
+      if d[w].phase == DNew then New
+      else if d[w].phase == DAccepted then New
+      else if d[w].phase == DAudited then Received
+      else if d[w].phase == DScoped then Scoped
+      else if d[w].phase == DPlanQueued then Planned
+      else if d[w].phase == DPlanning then Planned
+      else if d[w].phase == DPlanned then Planned
+      else if d[w].phase == DAssignQueued then Planned
+      else if d[w].phase == DAssigned then Assigned
+      else if d[w].phase == DAggregated then Aggregated
+      else if d[w].phase == DCriticQueued then Aggregated
+      else if d[w].phase == DCriticRunning then CriticReview
+      else if d[w].phase == DRevisionNeeded then RevisionNeeded
+      else if d[w].phase == DApproved then Approved
+      else if d[w].phase == DDelivered then Delivered
+      else if d[w].phase == DRejected then Rejected
+      else if d[w].phase == DHumanReview then HumanReview
+      else if d[w].phase == DToolApproval then ToolApproval
+      else if d[w].phase == DToolApproved then ToolApproved
+      else if d[w].phase == DToolQueued then ToolApproved
+      else ToolExecuted,
+    risk: d[w].risk,
+    worker_a_done: d[w].worker_a_done,
+    worker_b_done: d[w].worker_b_done,
+    critic_ok: d[w].critic_ok,
+    approval: d[w].approval,
+    audit: d[w].audit,
+    revision: d[w].revision
+  }
+
+  map active_agents = active_agents
+
+  // 入口受け付けはまだ監査境界前なのでstutter。
+  action accept_work(w) -> stutter
+
+  // 監査ログを書いた時点をrequirements層のreceiveに対応させる。
+  action write_audit(w) -> receive(w)
+
+  // supervisorのscope結果。
+  action classify_low(w) -> scope_low(w)
+  action classify_high(w) -> scope_high(w)
+
+  // planner queue投入をrequirements層のplan_workに対応させる。
+  // その後のplanner内部処理はPlannedの内側なのでstutter。
+  action enqueue_plan(w) -> plan_work(w)
+  action start_planner(w) -> stutter
+  action finish_plan(w) -> stutter
+
+  // worker queue投入はPlannedの内側。実割当だけがassign_workers。
+  action enqueue_workers(w) -> stutter
+  action assign_workers(w) -> assign_workers(w)
+  action assign_revision_workers(w) -> assign_revision_workers(w)
+  action worker_a_finish(w) -> worker_a_finish(w)
+  action worker_b_finish(w) -> worker_b_finish(w)
+  action aggregate_results(w) -> aggregate_results(w)
+  action aggregate_revision_results(w) -> aggregate_revision_results(w)
+
+  // critic queue投入はAggregatedの内側。実レビュー開始だけがstart_critic。
+  action enqueue_critic(w) -> stutter
+  action start_critic(w) -> start_critic(w)
+  action critic_pass(w) -> critic_pass(w)
+  action critic_requests_revision(w) -> critic_requests_revision(w)
+  action requeue_plan(w) -> revise_plan(w)
+  action reject_after_revision(w) -> reject_after_revision(w)
+  action escalate_after_revision(w) -> escalate_after_revision(w)
+
+  // 納品と副作用tool承認フロー。
+  action publish_answer(w) -> deliver_answer(w)
+  action request_tool_approval(w) -> request_tool_approval(w)
+  action approve_tool(w) -> approve_tool(w)
+  action deny_tool(w) -> deny_tool(w)
+  action enqueue_tool(w) -> stutter
+  action execute_tool(w) -> execute_tool(w)
+
+  preserve progress {
+    respond WorkEventuallyHandled by publish_answer, reject_after_revision, escalate_after_revision, deny_tool, execute_tool
+    respond WorkOpenUntilHandled by publish_answer, reject_after_revision, escalate_after_revision, deny_tool, execute_tool
+  }
+}

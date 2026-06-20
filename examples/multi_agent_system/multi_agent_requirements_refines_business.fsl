@@ -1,0 +1,70 @@
+// AIマルチエージェント requirements層 → business層 refinement mapping。
+//
+// このファイルの役割:
+// - requirements層の細かい制御状態を、business層の荒い業務段階へ畳み込む。
+// - worker完了、critic修正、approval値などの詳細が、業務上の近道を作っていない
+//   ことを確認する。
+// - business層のliveness policyを、requirements層で進捗を担うactionへ対応付ける。
+refinement MultiAgentRequirementsRefinesBusiness {
+  impl MultiAgentRequirements
+  abs  MultiAgentBusiness
+
+  // requirements層のrevision中は、business層ではBReviewingに留める。
+  // これにより、critic修正ループが業務上の「レビュー中work」の内側に収まる。
+  map work_stage[w: Work] =
+    if job[w].st == New then BNew
+    else if job[w].st == Delivered then BDelivered
+    else if job[w].st == Rejected then BRejected
+    else if job[w].st == HumanReview then BHumanReview
+    else if job[w].st == ToolApproval then BWaitingApproval
+    else if job[w].st == ToolApproved then BEffectApproved
+    else if job[w].st == ToolExecuted then BEffectExecuted
+    else if job[w].st == Approved then BApproved
+    else if job[w].st == Aggregated then BReviewing
+    else if job[w].st == CriticReview then BReviewing
+    else if job[w].st == RevisionNeeded then BReviewing
+    else if job[w].revision > 0 then BReviewing
+    else if job[w].st == Assigned then BDelegated
+    else BScoped
+
+  // 監査境界を通った受け付けをbusiness層のsubmitに対応させる。
+  action receive(w) -> submit(w)
+
+  // scopeとplanは業務上まだBScopedの内側。
+  action scope_low(w) -> stutter
+  action scope_high(w) -> stutter
+  action plan_work(w) -> stutter
+
+  // worker委譲と成果物回収をbusiness層のdelegate/collectに対応させる。
+  action assign_workers(w) -> delegate(w)
+  action assign_revision_workers(w) -> stutter
+  action worker_a_finish(w) -> stutter
+  action worker_b_finish(w) -> stutter
+  action aggregate_results(w) -> collect(w)
+  action aggregate_revision_results(w) -> stutter
+
+  // critic開始はBReviewingの内側。結果だけをbusiness層に見せる。
+  action start_critic(w) -> stutter
+  action critic_pass(w) -> approve_result(w)
+  action critic_requests_revision(w) -> stutter
+  action revise_plan(w) -> stutter
+  action reject_after_revision(w) -> reject_result(w)
+  action escalate_after_revision(w) -> escalate_review(w)
+
+  // 納品と副作用tool承認フロー。
+  action deliver_answer(w) -> deliver(w)
+  action request_tool_approval(w) -> request_effect_approval(w)
+  action approve_tool(w) -> approve_effect(w)
+  action deny_tool(w) -> deny_effect(w)
+  action execute_tool(w) -> run_effect(w)
+
+  // business層のpolicyを、requirements層で進捗を担うactionへ引き戻す。
+  preserve progress {
+    respond BP1 by assign_workers, reject_after_revision, escalate_after_revision
+    respond BP2 by aggregate_results, escalate_after_revision
+    respond BP3 by critic_pass, reject_after_revision, escalate_after_revision
+    respond BP4 by deliver_answer, request_tool_approval
+    respond BP5 by approve_tool, deny_tool
+    respond BP6 by execute_tool
+  }
+}

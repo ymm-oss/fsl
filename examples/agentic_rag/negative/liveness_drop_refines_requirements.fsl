@@ -1,0 +1,32 @@
+// liveness喪失designを縮約requirements層へ写すmapping。
+//
+// 期待:
+// - action対応だけを見る安全性refineは破れていない。
+// - しかし `preserve progress` により、縮約requirements層の
+//   RequestEventuallyHandledをdesign実行へ引き戻すと、heartbeatのlassoが見つかる。
+// - `fslc refine ...` は refinement_failed / progress_lost / leadsTo になる。
+refinement AgenticRagLivenessDropRefinesRequirements {
+  impl AgenticRagLivenessDropDesign
+  abs  AgenticRagLivenessRequirements
+
+  map req[r: Req] = Case {
+    st: if d[r].phase == DDrafted then Drafted else Answered,
+    evidence: d[r].evidence,
+    guard: d[r].guard,
+    approval: d[r].approval,
+    role: d[r].role,
+    retry: d[r].retry,
+    needs_tool: d[r].needs_tool,
+    citation_ok: d[r].citation_ok,
+    audit: d[r].audit
+  }
+
+  action heartbeat(r) -> stutter
+  action publish_answer(r) -> answer(r)
+
+  // 縮約requirements層のlivenessをdesign層へ引き戻す。
+  // publish_answerがfairではないため、このprogress保存は失敗するはず。
+  preserve progress {
+    respond RequestEventuallyHandled by publish_answer
+  }
+}

@@ -1,0 +1,337 @@
+// Agentic RAGサポートフロー [design層PoC]。
+//
+// このファイルはrequirements層の契約を、実装寄りの内部処理へ分解する。
+// router、retriever、reranker/evaluator、drafter、output guard、approval、
+// tool executorを個別の内部段階として表現する。
+//
+// 重要な境界:
+// - このdesign層は検索品質そのものを証明しない。
+//   vector_search/rerank/evaluateは「外部コンポーネントの結果が状態に反映された」
+//   という制御イベントとして扱う。
+// - requirements層で見えるactionは、refinement mappingで明示する。
+// - 内部準備actionはstutterとして扱い、requirements層の抽象状態を変えない。
+spec AgenticRagDesign {
+  // Reqはrequirements層と同じリクエストID。IDそのものに意味差はない。
+  symmetric type Req = 0..1
+  // Retryは残りリトライ回数。requirements層と同じ範囲に揃える。
+  type Retry = 0..2
+
+  // DPhaseは実装寄りの内部段階。requirements層のStageより細かい。
+  enum DPhase {
+    DNew,
+    DAccepted,
+    DReceived,
+    DRouterQueued,
+    DClassified,
+    DVectorSearch,
+    DRerank,
+    DRetrying,
+    DVectorRetry,
+    DRerankRetry,
+    DReady,
+    DInadequate,
+    DDraftQueued,
+    DDrafted,
+    DGuardChecking,
+    DGuardPassed,
+    DGuardFailed,
+    DToolPlan,
+    DToolApproval,
+    DToolApproved,
+    DAnswered,
+    DRefused,
+    DHumanReview,
+    DActionExecuted
+  }
+
+  // Evidence/Guard/Approval/Roleはrequirements層と同じ意味で使う。
+  // refinementではこれらの値をそのまま抽象Caseへ写す。
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  // DCaseは実装がobserve()で投影できる論理状態。
+  // DB schemaや実APIの完全な表現ではなく、仕様検査に必要な情報だけを持つ。
+  struct DCase {
+    phase: DPhase,
+    evidence: Evidence,
+    guard: Guard,
+    approval: Approval,
+    role: Role,
+    retry: Retry,
+    needs_tool: Bool,
+    citation_ok: Bool,
+    audit: Bool
+  }
+
+  state {
+    d: Map<Req, DCase>
+  }
+
+  init {
+    forall r: Req {
+      d[r] = DCase {
+        phase: DNew,
+        evidence: Missing,
+        guard: Unchecked,
+        approval: NoApproval,
+        role: Public,
+        retry: 2,
+        needs_tool: false,
+        citation_ok: false,
+        audit: false
+      }
+    }
+  }
+
+  // 認証・認可層からoperator権限を反映する。requirements層のgrant_operatorに対応する。
+  fair action set_operator(r: Req) {
+    requires d[r].phase == DNew or d[r].phase == DAccepted
+    d[r].role = Operator
+  }
+
+  // リクエストを入口で受け取るが、まだrequirements層のreceiveとは見なさない。
+  // 監査ログを書き終えるまで抽象状態はNewのままにする。
+  fair action accept_request(r: Req) {
+    requires d[r].phase == DNew
+    d[r].phase = DAccepted
+  }
+
+  // 監査ログを書き、requirements層のreceiveに対応する可視遷移にする。
+  fair action write_audit(r: Req) {
+    requires d[r].phase == DAccepted
+    d[r].phase = DReceived
+    d[r].audit = true
+  }
+
+  // routerキューへ入れる内部処理。requirements層からはReceivedのまま。
+  fair action enqueue_router(r: Req) {
+    requires d[r].phase == DReceived
+    d[r].phase = DRouterQueued
+  }
+
+  // 通常回答パスへルーティングする。requirements層のclassify_answerに対応する。
+  fair action route_answer(r: Req) {
+    requires d[r].phase == DRouterQueued
+    d[r].phase = DClassified
+    d[r].needs_tool = false
+  }
+
+  // 副作用toolパスへルーティングする。requirements層のclassify_toolに対応する。
+  fair action route_tool(r: Req) {
+    requires d[r].phase == DRouterQueued
+    d[r].phase = DClassified
+    d[r].needs_tool = true
+  }
+
+  // 初回検索のvector search。まだ評価結果は出ていないので抽象状態はClassified。
+  fair action vector_search(r: Req) {
+    requires d[r].phase == DClassified
+    d[r].phase = DVectorSearch
+  }
+
+  // 初回検索結果のrerank。これもまだ抽象状態を変えない。
+  fair action rerank(r: Req) {
+    requires d[r].phase == DVectorSearch
+    d[r].phase = DRerank
+  }
+
+  // リトライ検索のvector search。requirements層からはRetrievingのまま。
+  fair action vector_search_retry(r: Req) {
+    requires d[r].phase == DRetrying
+    d[r].phase = DVectorRetry
+  }
+
+  // リトライ検索結果のrerank。まだ抽象状態を変えない。
+  fair action rerank_retry(r: Req) {
+    requires d[r].phase == DVectorRetry
+    d[r].phase = DRerankRetry
+  }
+
+  // evaluatorが「証拠十分、引用可能」と判定する。
+  // 初回検索ならClassifiedから、リトライならRetrievingから、requirements層の
+  // retrieve_successに対応する。
+  fair action evaluate_adequate(r: Req) {
+    requires d[r].phase == DRerank or d[r].phase == DRerankRetry
+    d[r].phase = DReady
+    d[r].evidence = Adequate
+    d[r].citation_ok = true
+  }
+
+  // evaluatorが「証拠不足または引用不可」と判定する。
+  // requirements層のretrieve_emptyに対応する。
+  fair action evaluate_inadequate(r: Req) {
+    requires d[r].phase == DRerank or d[r].phase == DRerankRetry
+    d[r].phase = DInadequate
+    d[r].evidence = Inadequate
+    d[r].citation_ok = false
+  }
+
+  // retry budgetを消費し、リトライ検索へ進む。requirements層のretry_retrieveに対応する。
+  fair action schedule_retry(r: Req) {
+    requires d[r].phase == DInadequate
+    requires d[r].retry > 0
+    d[r].phase = DRetrying
+    d[r].retry = d[r].retry - 1
+  }
+
+  // 証拠不足を拒否で閉じる。requirements層のrefuse_low_evidenceに対応する。
+  fair action refuse_low_evidence(r: Req) {
+    requires d[r].phase == DInadequate
+    requires d[r].retry == 0
+    d[r].phase = DRefused
+  }
+
+  // 証拠不足を人間レビューへ送る。requirements層のreview_low_evidenceに対応する。
+  fair action review_low_evidence(r: Req) {
+    requires d[r].phase == DInadequate
+    requires d[r].retry == 0
+    d[r].phase = DHumanReview
+  }
+
+  // drafterジョブへ投入する内部処理。requirements層からはEvidenceReadyのまま。
+  fair action enqueue_draft(r: Req) {
+    requires d[r].phase == DReady
+    requires not d[r].needs_tool
+    d[r].phase = DDraftQueued
+  }
+
+  // 回答下書きを生成する。requirements層のdraft_answerに対応する。
+  fair action draft_answer(r: Req) {
+    requires d[r].phase == DDraftQueued
+    d[r].phase = DDrafted
+    d[r].guard = Unchecked
+  }
+
+  // 出力ガードレール評価を開始する内部処理。抽象状態はDraftedのまま。
+  fair action start_output_guard(r: Req) {
+    requires d[r].phase == DDrafted
+    d[r].phase = DGuardChecking
+  }
+
+  // 出力ガードレール成功。requirements層のoutput_guard_passに対応する。
+  fair action output_guard_pass(r: Req) {
+    requires d[r].phase == DGuardChecking
+    d[r].phase = DGuardPassed
+    d[r].guard = Passed
+  }
+
+  // 出力ガードレール失敗。requirements層のoutput_guard_failに対応する。
+  fair action output_guard_fail(r: Req) {
+    requires d[r].phase == DGuardChecking
+    d[r].phase = DGuardFailed
+    d[r].guard = Failed
+  }
+
+  // 最終回答を公開する。requirements層のanswerに対応する。
+  fair action publish_answer(r: Req) {
+    requires d[r].phase == DGuardPassed
+    requires d[r].evidence == Adequate
+    requires d[r].citation_ok
+    requires d[r].guard == Passed
+    d[r].phase = DAnswered
+  }
+
+  // guard失敗を拒否で閉じる。requirements層のrefuse_guard_failureに対応する。
+  fair action refuse_guard_failure(r: Req) {
+    requires d[r].phase == DGuardFailed
+    d[r].phase = DRefused
+  }
+
+  // guard失敗を人間レビューへ送る。requirements層のreview_guard_failureに対応する。
+  fair action review_guard_failure(r: Req) {
+    requires d[r].phase == DGuardFailed
+    d[r].phase = DHumanReview
+  }
+
+  // tool executor用の計画を作る内部処理。requirements層からはEvidenceReadyのまま。
+  fair action plan_tool(r: Req) {
+    requires d[r].phase == DReady
+    requires d[r].needs_tool
+    d[r].phase = DToolPlan
+  }
+
+  // tool承認待ちへ進める。requirements層のrequest_tool_approvalに対応する。
+  fair action request_tool_approval(r: Req) {
+    requires d[r].phase == DToolPlan
+    d[r].phase = DToolApproval
+    d[r].approval = Requested
+  }
+
+  // operatorによるtool承認。requirements層のapprove_toolに対応する。
+  fair action approve_tool(r: Req) {
+    requires d[r].phase == DToolApproval
+    requires d[r].role == Operator
+    d[r].phase = DToolApproved
+    d[r].approval = Approved
+  }
+
+  // tool承認拒否。requirements層のdeny_toolに対応する。
+  fair action deny_tool(r: Req) {
+    requires d[r].phase == DToolApproval
+    d[r].phase = DRefused
+    d[r].approval = Denied
+  }
+
+  // 副作用tool実行。requirements層のexecute_toolに対応する。
+  fair action execute_tool(r: Req) {
+    requires d[r].phase == DToolApproved
+    requires d[r].approval == Approved
+    requires d[r].role == Operator
+    d[r].phase = DActionExecuted
+  }
+
+  // Design側でも、最終回答に必要な証拠・引用・guard通過を不変条件にする。
+  invariant AnswerHasEvidenceAndGuardD {
+    forall r: Req {
+      d[r].phase == DAnswered => (
+        d[r].evidence == Adequate and d[r].citation_ok and d[r].guard == Passed
+      )
+    }
+  }
+
+  // Design側でも、副作用tool実行にはoperator承認が必要である。
+  invariant ToolExecutionApprovedD {
+    forall r: Req {
+      d[r].phase == DActionExecuted => (
+        d[r].approval == Approved and d[r].role == Operator
+      )
+    }
+  }
+
+  // 終端処理は必ず監査済みである。
+  invariant HandledRequestsWereAuditedD {
+    forall r: Req {
+      (d[r].phase == DAnswered or d[r].phase == DRefused or d[r].phase == DHumanReview or d[r].phase == DActionExecuted) => d[r].audit
+    }
+  }
+
+  // 証拠不足状態ではcitation_okがfalseである。誤って引用可能扱いにしない。
+  invariant InadequateEvidenceCannotCite {
+    forall r: Req {
+      d[r].phase == DInadequate => (
+        d[r].evidence == Inadequate and not d[r].citation_ok
+      )
+    }
+  }
+
+  reachable CanAnswerD {
+    exists r: Req { d[r].phase == DAnswered }
+  }
+
+  reachable CanReviewD {
+    exists r: Req { d[r].phase == DHumanReview }
+  }
+
+  reachable CanExecuteToolD {
+    exists r: Req { d[r].phase == DActionExecuted }
+  }
+
+  // 全リクエストが終端状態なら停止してよい。
+  terminal {
+    forall r: Req {
+      d[r].phase == DAnswered or d[r].phase == DRefused or d[r].phase == DHumanReview or d[r].phase == DActionExecuted
+    }
+  }
+}

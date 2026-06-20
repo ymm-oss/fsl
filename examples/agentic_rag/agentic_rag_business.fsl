@@ -1,0 +1,94 @@
+// Agentic RAGサポートフロー [business層PoC]。
+//
+// この層の目的:
+// - 「業務として守りたい統制」を、実装・API・検索方式から切り離して書く。
+// - requirements層やdesign層が細かくなっても、業務側から見た意味が
+//   変わっていないかをrefinementで確認できるようにする。
+//
+// この層で扱うこと:
+// - 受け付けた依頼は放置せず、回答・拒否・人間レビュー・承認付き副作用実行へ進む。
+// - 顧客へ出す回答は、業務上「回答可能」と判断された後にだけ出る。
+// - 副作用toolは承認待ちを経て、承認後にだけ実行される。
+//
+// この層で扱わないこと:
+// - RAGの検索品質、rerank、引用ACL、出力guardの実装詳細。
+// - retry budget、worker queue、tool executorの内部段階。
+// - 実時間SLA。必要ならrequirements層でtime/deadlineとして追加する。
+business AgenticRagBusiness {
+
+  // Userは依頼者、Systemはエージェントシステム、Operatorは人間の承認者・レビュア。
+  actor User, System, Operator
+
+  // Reqは業務上の依頼。検証時の個数はverifyブロックで小さく固定する。
+  entity Req
+
+  // 業務フローは、要件や設計より荒い段階だけを表す。
+  // `B` prefixは、requirements層のStage enumと名前衝突しないための表記上の工夫。
+  // requirements層の EvidenceReady/Drafted/GuardPassed などは、
+  // refinement mappingでBInProgressまたはBReadyForCustomerへ畳み込む。
+  process Req {
+    stages BNew, BInProgress, BReadyForCustomer, BWaitingApproval, BActionApproved, BAnswered, BRefused, BHumanReview, BActionExecuted
+    initial BNew
+
+    // 依頼を業務処理に入れる。
+    transition receive BNew -> BInProgress by User
+
+    // 顧客へ回答してよい状態になった、という業務上の判定。
+    // requirements層では、証拠・引用・出力guard通過の組み合わせに対応する。
+    transition clear_response BInProgress -> BReadyForCustomer by System
+
+    // 顧客へ回答を返す。
+    transition answer BReadyForCustomer -> BAnswered by System
+
+    // 回答できない依頼は拒否で閉じる。
+    transition cannot_answer BInProgress -> BRefused by System
+
+    // 判断を人間へ移す。PoCではHumanReviewを処理済み終端として扱う。
+    transition escalate BInProgress -> BHumanReview by Operator
+
+    // 副作用toolが必要な依頼は、実行前に承認待ちへ進む。
+    transition request_approval BInProgress -> BWaitingApproval by System
+
+    // 承認はOperatorだけが行う。ここを通らずActionExecutedへ進む経路はない。
+    transition approve_tool BWaitingApproval -> BActionApproved by Operator
+
+    // 承認拒否は拒否終端として扱う。
+    transition deny_tool BWaitingApproval -> BRefused by Operator
+
+    // 承認済みの副作用だけを実行する。
+    transition execute_tool BActionApproved -> BActionExecuted by System
+  }
+
+  // 業務統制: 依頼が処理中に置き去りにされない。
+  policy BP1 "受け付けた依頼は放置されず、回答準備・拒否・人間レビュー・承認待ちのいずれかへ進む"
+    every Req in BInProgress must eventually be BReadyForCustomer or BRefused or BHumanReview or BWaitingApproval
+
+  // 業務統制: 回答可能と判断された依頼は顧客へ回答される。
+  policy BP2 "回答可能になった依頼は顧客へ回答される"
+    every Req in BReadyForCustomer must eventually be BAnswered
+
+  // 業務統制: 承認待ちの副作用依頼は承認または拒否で閉じる。
+  policy BP3 "副作用toolの承認待ちは承認または拒否で解決される"
+    every Req in BWaitingApproval must eventually be BActionApproved or BRefused
+
+  // 業務統制: 承認済み副作用は実行される。
+  policy BP4 "承認済みの副作用toolは実行される"
+    every Req in BActionApproved must eventually be BActionExecuted
+
+  // Positive goals: 業務として許容する主要な終端が到達可能であることを確認する。
+  goal CanAnswer "根拠と安全性を満たす依頼は回答まで進める"
+    some Req can reach BAnswered
+
+  goal CanRefuse "回答不能または承認拒否の依頼は拒否で閉じられる"
+    some Req can reach BRefused
+
+  goal CanReview "人間レビューへ送る業務経路が存在する"
+    some Req can reach BHumanReview
+
+  goal CanExecuteTool "承認済み副作用toolを実行する業務経路が存在する"
+    some Req can reach BActionExecuted
+}
+
+verify {
+  instances Req = 2
+}

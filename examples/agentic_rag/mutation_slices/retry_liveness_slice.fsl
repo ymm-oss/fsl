@@ -1,0 +1,145 @@
+// Agentic RAG mutation slice: retry budget と証拠不足liveness。
+//
+// 目的:
+// - 本体requirementsのREQ-3/REQ-6のうち、証拠不足時にretry budgetを消費し、
+//   budgetが尽きたらRefusedまたはHumanReviewで終端する契約を軽く検査する。
+// - retry decrementのassignment削除、retry==0 guard削除、fair削除を
+//   `fslc mutate`で短く観測する。
+//
+// 注意:
+// - このsliceでは通常回答pathやtool pathは扱わない。
+// - retrieve_emptyは外部retriever/evaluatorが「証拠不足」を返したイベントとして扱う。
+requirements AgenticRagRetryLivenessSlice {
+  type Req = 0..0
+  type Retry = 0..2
+
+  enum Stage { Classified, Retrieving, EvidenceBad, Refused, HumanReview }
+  enum Evidence { Missing, Adequate, Inadequate }
+
+  struct Case {
+    st: Stage,
+    evidence: Evidence,
+    retry: Retry,
+    citation_ok: Bool
+  }
+
+  state {
+    req: Map<Req, Case>
+  }
+
+  init {
+    forall r: Req {
+      req[r] = Case {
+        st: Classified,
+        evidence: Missing,
+        retry: 2,
+        citation_ok: false
+      }
+    }
+  }
+
+  requirement REQ-3 "証拠不足時はretry budgetを消費し、尽きたら終端する" {
+    // 検索失敗・証拠不足・引用不可の抽象イベント。
+    fair action retrieve_empty(r: Req) {
+      requires req[r].st == Classified or req[r].st == Retrieving
+      req[r].st = EvidenceBad
+      req[r].evidence = Inadequate
+      req[r].citation_ok = false
+    }
+
+    // 再検索へ進むときはretryを必ず1つ消費する。
+    fair action retry_retrieve(r: Req) {
+      requires req[r].st == EvidenceBad
+      requires req[r].retry > 0
+      req[r].st = Retrieving
+      req[r].retry = req[r].retry - 1
+    }
+
+    // retryが尽きたら拒否で閉じられる。
+    fair action refuse_low_evidence(r: Req) {
+      requires req[r].st == EvidenceBad
+      requires req[r].retry == 0
+      req[r].st = Refused
+    }
+
+    // retryが尽きたら人間レビューでも閉じられる。
+    fair action review_low_evidence(r: Req) {
+      requires req[r].st == EvidenceBad
+      requires req[r].retry == 0
+      req[r].st = HumanReview
+    }
+
+    // Safety: EvidenceBadは証拠不足・引用不可と同期している。
+    invariant EvidenceBadMeansNoCitation {
+      forall r: Req {
+        req[r].st == EvidenceBad => (
+          req[r].evidence == Inadequate and not req[r].citation_ok
+        )
+      }
+    }
+
+    // Safety: 証拠不足で終端する場合はretryを使い切っている。
+    invariant LowEvidenceTerminalAfterBudgetExhausted {
+      forall r: Req {
+        (req[r].st == Refused or req[r].st == HumanReview) => req[r].retry == 0
+      }
+    }
+
+    // Transition safety: retry_retrieveはbudgetを1だけ減らす。
+    // assignment削除や `retry + 1` 方向の変異を殺す。
+    trans RetryConsumesOneBudget {
+      forall r: Req {
+        (old(req[r].st) == EvidenceBad and req[r].st == Retrieving) => (
+          req[r].retry == old(req[r].retry) - 1
+        )
+      }
+    }
+
+    // Liveness: 処理中の証拠不足pathは、最終的に拒否または人間レビューへ到達する。
+    // remote mainで追加された `within` を使い、retry budget=2のこのsliceでは
+    // Classified/Retrieving/EvidenceBadから6 step以内に終端することも固定する。
+    leadsTo EvidenceEventuallyClosed {
+      forall r: Req {
+        (req[r].st == Classified or req[r].st == Retrieving or req[r].st == EvidenceBad)
+          ~> within 6
+        (req[r].st == Refused or req[r].st == HumanReview)
+      }
+    }
+
+    reachable CanReviewAfterRetries {
+      exists r: Req { req[r].st == HumanReview }
+    }
+  }
+
+  // Temporal sugar: 1リクエスト固定sliceなので、`until`で処理中状態が終端まで
+  // 保たれることを読みやすく表す。これは上のwithin付きleadsToと同じ進捗を、
+  // 「終端まで処理中集合から外れない」というsafety込みで補強する。
+  until EvidenceOpenUntilClosed "REQ-3: 証拠不足pathは終端まで処理中状態を保つ" {
+    (req[0].st == Classified or req[0].st == Retrieving or req[0].st == EvidenceBad)
+      until
+    (req[0].st == Refused or req[0].st == HumanReview)
+  }
+
+  acceptance AC-RETRY-REVIEW "retryを使い切って人間レビューへ進む" {
+    retrieve_empty(0)
+    retry_retrieve(0)
+    retrieve_empty(0)
+    retry_retrieve(0)
+    retrieve_empty(0)
+    review_low_evidence(0)
+    expect req[0].st == HumanReview
+  }
+
+  forbidden FB-REFUSE-BEFORE-BUDGET-EXHAUSTED "retryが残る間は拒否で閉じない" {
+    retrieve_empty(0)
+    refuse_low_evidence(0)
+    expect rejected
+  }
+
+  forbidden FB-REVIEW-BEFORE-BUDGET-EXHAUSTED "retryが残る間はレビューで閉じない" {
+    retrieve_empty(0)
+    review_low_evidence(0)
+    expect rejected
+  }
+
+}
