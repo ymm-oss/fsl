@@ -1290,7 +1290,7 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
             out.append(("invariant", policy_id, expr, loc, meta))
         elif body[0] == "biz_policy_responds":
             binders, p, q = _rewrite_stage_binders(body[1], body[2], body[3], process_by_case)
-            out.append(("leadsto", policy_id, binders, p, q, loc, meta))
+            out.append(("leadsto", policy_id, binders, p, q, loc, meta, None, body[4]))
         elif body[0] == "biz_policy_eventually":
             _, case_name, source_stage, target_stages = body
             binder = ("binder_typed", "c", case_name, None)

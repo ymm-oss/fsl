@@ -1012,8 +1012,8 @@ class Ast(Transformer):
         return ("biz_policy_invariant", expr)
 
     def policy_responds(self, meta, body):
-        binders, p, q = _flatten_leadsto(body)
-        return ("biz_policy_responds", binders, p, q)
+        binders, p, q, within = _flatten_leadsto(body)
+        return ("biz_policy_responds", binders, p, q, within)
 
     def stage_disjunction(self, meta, *names):
         return list(names)
