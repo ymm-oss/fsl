@@ -1,0 +1,151 @@
+// Agentic RAG mutation slice: 回答安全性。
+//
+// 目的:
+// - 本体requirementsのREQ-3/REQ-4のうち、最終回答に必要な
+//   evidence / citation_ok / output guard の契約だけを短く検査する。
+// - `fslc mutate`でanswerのrequires削除、guard結果の取り違え、
+//   assignment削除などを軽く殺せるようにする。
+//
+// 注意:
+// - これは本体requirementsの代替ではない。
+// - mutation観測用に、bad evidenceやbad citationを作る小さなfault actionを
+//   用意している。実運用の正規pathではなく、missing guardを露出させるための
+//   テスト用前状態である。
+requirements AgenticRagAnswerSafetySlice {
+  // mutationを軽くするため、対象リクエストは1件に固定する。
+  type Req = 0..0
+
+  enum Stage { New, Drafted, GuardFailed, Answered, Refused }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+
+  struct Case {
+    st: Stage,
+    evidence: Evidence,
+    guard: Guard,
+    citation_ok: Bool
+  }
+
+  state {
+    req: Map<Req, Case>
+  }
+
+  init {
+    forall r: Req {
+      req[r] = Case {
+        st: New,
+        evidence: Missing,
+        guard: Unchecked,
+        citation_ok: false
+      }
+    }
+  }
+
+  requirement REQ-3 "最終回答には十分な証拠と許可された引用が必要である" {
+    // 正常な下書き前状態を一気に作る。検索・rerank・ACL/filterは
+    // 本体requirementsではretrieve_successに相当するが、このsliceでは畳み込む。
+    action prepare_good_draft(r: Req) {
+      requires req[r].st == New
+      req[r].st = Drafted
+      req[r].evidence = Adequate
+      req[r].citation_ok = true
+      req[r].guard = Unchecked
+    }
+
+    // fault injection: 下書き後に証拠評価だけが悪い状態を作る。
+    // answerのevidence requiresを消す変異を殺すための前状態。
+    action corrupt_evidence(r: Req) {
+      requires req[r].st == Drafted
+      req[r].evidence = Inadequate
+    }
+
+    // fault injection: 引用不可の下書き状態を作る。
+    // answerのcitation_ok requiresを消す変異を殺すための前状態。
+    action corrupt_citation(r: Req) {
+      requires req[r].st == Drafted
+      req[r].citation_ok = false
+    }
+
+    // guard通過。状態はDraftedのまま、guardだけをPassedにする。
+    fair action output_guard_pass(r: Req) {
+      requires req[r].st == Drafted
+      requires req[r].guard == Unchecked
+      req[r].guard = Passed
+    }
+
+    // guard失敗。ここからanswerへ進めないことをforbiddenで見る。
+    fair action output_guard_fail(r: Req) {
+      requires req[r].st == Drafted
+      requires req[r].guard == Unchecked
+      req[r].st = GuardFailed
+      req[r].guard = Failed
+    }
+
+    // 回答公開の中心契約。mutationではこのrequires群が主な観測対象になる。
+    fair action answer(r: Req) {
+      requires req[r].st == Drafted
+      requires req[r].evidence == Adequate
+      requires req[r].citation_ok
+      requires req[r].guard == Passed
+      req[r].st = Answered
+    }
+
+    // guard失敗後は拒否で閉じる。HumanReviewは本体requirementsで扱うので、
+    // このsliceでは終端を1つに絞る。
+    fair action refuse_guard_failure(r: Req) {
+      requires req[r].st == GuardFailed
+      req[r].st = Refused
+    }
+
+    // Safety: Answeredに入ったら、証拠・引用・guardがすべて満たされる。
+    invariant AnswerHasEvidenceAndGuard {
+      forall r: Req {
+        req[r].st == Answered => (
+          req[r].evidence == Adequate and req[r].citation_ok and req[r].guard == Passed
+        )
+      }
+    }
+
+    // Positive: 正常回答pathが過剰に閉じられていないことを確認する。
+    reachable CanAnswer {
+      exists r: Req { req[r].st == Answered }
+    }
+  }
+
+  acceptance AC-ANSWER "証拠・引用・guardが揃えば回答できる" {
+    prepare_good_draft(0)
+    output_guard_pass(0)
+    answer(0)
+    expect req[0].st == Answered
+  }
+
+  forbidden FB-NO-GUARD "guard通過前の回答は拒否される" {
+    prepare_good_draft(0)
+    answer(0)
+    expect rejected
+  }
+
+  forbidden FB-BAD-EVIDENCE "証拠不足の回答は拒否される" {
+    prepare_good_draft(0)
+    corrupt_evidence(0)
+    output_guard_pass(0)
+    answer(0)
+    expect rejected
+  }
+
+  forbidden FB-BAD-CITATION "引用不可の回答は拒否される" {
+    prepare_good_draft(0)
+    corrupt_citation(0)
+    output_guard_pass(0)
+    answer(0)
+    expect rejected
+  }
+
+  forbidden FB-GUARD-FAILED "guard失敗後の回答は拒否される" {
+    prepare_good_draft(0)
+    output_guard_fail(0)
+    answer(0)
+    expect rejected
+  }
+
+}

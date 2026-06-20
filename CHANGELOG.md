@@ -13,6 +13,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   surface a verdict banner and highlight the violating trace step, with violation
   facts humanized in the status table; reachable runs are labelled as such. Without
   `-o`, the HTML is written to stdout.
+- (Refinement) Mapping files can opt into liveness-preserving refinement with
+  `preserve progress { respond <AbsLeadsTo> by <impl actions...> }`. The check
+  pulls the named abstract `leadsTo` through the state mapping and reports
+  `refinement_failed / progress_lost` when the lower layer can stall or spin
+  while the abstract response remains pending.
 
 ## [2.1.0] - 2026-06-18
 

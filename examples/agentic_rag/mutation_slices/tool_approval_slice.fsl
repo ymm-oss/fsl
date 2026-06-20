@@ -1,0 +1,180 @@
+// Agentic RAG mutation slice: 副作用tool承認。
+//
+// 目的:
+// - 本体requirementsのREQ-5のうち、operatorロール、明示承認、
+//   ToolApproved段階を経た実行、という副作用toolの安全契約を軽く検査する。
+// - `approve_tool` / `execute_tool` のrequires削除やassignment削除を
+//   `fslc mutate`で短時間に観測する。
+//
+// 注意:
+// - fault actionの`downgrade_approval`と`revoke_operator`は、実運用の正規pathではなく、
+//   execute_toolのrequiresが本当に効いているかを見るための前状態生成である。
+requirements AgenticRagToolApprovalSlice {
+  type Req = 0..0
+
+  enum Stage { New, EvidenceReady, ToolApproval, ToolApproved, ActionExecuted, Refused }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  struct Case {
+    st: Stage,
+    evidence: Evidence,
+    approval: Approval,
+    role: Role,
+    needs_tool: Bool
+  }
+
+  state {
+    req: Map<Req, Case>
+  }
+
+  init {
+    forall r: Req {
+      req[r] = Case {
+        st: New,
+        evidence: Missing,
+        approval: NoApproval,
+        role: Public,
+        needs_tool: false
+      }
+    }
+  }
+
+  requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
+    // operator権限を付与する。承認前に呼ぶ正規pathをacceptanceで使う。
+    action grant_operator(r: Req) {
+      requires req[r].st == New
+      req[r].role = Operator
+    }
+
+    // 検索証拠が十分でtoolが必要な状態を作る。検索品質そのものは対象外。
+    action prepare_tool_ready(r: Req) {
+      requires req[r].st == New
+      req[r].st = EvidenceReady
+      req[r].evidence = Adequate
+      req[r].needs_tool = true
+    }
+
+    // 承認待ちへ進める境界。Requestedだけではまだ実行できない。
+    fair action request_tool_approval(r: Req) {
+      requires req[r].st == EvidenceReady
+      requires req[r].needs_tool
+      req[r].st = ToolApproval
+      req[r].approval = Requested
+    }
+
+    // operatorだけが承認できる。
+    fair action approve_tool(r: Req) {
+      requires req[r].st == ToolApproval
+      requires req[r].role == Operator
+      req[r].st = ToolApproved
+      req[r].approval = Approved
+    }
+
+    // 承認拒否はRefusedで閉じる。
+    fair action deny_tool(r: Req) {
+      requires req[r].st == ToolApproval
+      req[r].st = Refused
+      req[r].approval = Denied
+    }
+
+    // fault injection: ToolApproved段階まで来た後でapprovalだけを戻す。
+    // execute_toolのapproval requiresを消す変異を殺すための前状態。
+    action downgrade_approval(r: Req) {
+      requires req[r].st == ToolApproved
+      req[r].approval = Requested
+    }
+
+    // fault injection: ToolApproved段階まで来た後でroleだけをPublicへ戻す。
+    // execute_toolのrole requiresを消す変異を殺すための前状態。
+    action revoke_operator(r: Req) {
+      requires req[r].st == ToolApproved
+      req[r].role = Public
+    }
+
+    // fault injection: stageだけが承認待ちで、approval/roleは実行条件を満たす状態。
+    // execute_toolのstage requiresを消す変異をtransで殺すための前状態。
+    action make_waiting_but_approved(r: Req) {
+      requires req[r].st == ToolApproval
+      requires req[r].role == Operator
+      req[r].approval = Approved
+    }
+
+    // 副作用tool実行。stage、approval、roleの3点をすべて要求する。
+    fair action execute_tool(r: Req) {
+      requires req[r].st == ToolApproved
+      requires req[r].approval == Approved
+      requires req[r].role == Operator
+      req[r].st = ActionExecuted
+    }
+
+    // Safety: 実行済みなら承認済みoperatorである。
+    invariant ToolExecutionApproved {
+      forall r: Req {
+        req[r].st == ActionExecuted => (
+          req[r].approval == Approved and req[r].role == Operator
+        )
+      }
+    }
+
+    // Transition safety: ActionExecutedへ入る直前のstageはToolApprovedでなければならない。
+    // execute_toolのstage requires削除は、状態不変条件だけでは見逃しやすいのでtransで固定する。
+    trans ExecutionComesFromApprovedStage {
+      forall r: Req {
+        req[r].st == ActionExecuted => (
+          old(req[r].st) == ToolApproved or old(req[r].st) == ActionExecuted
+        )
+      }
+    }
+
+    reachable CanExecuteTool {
+      exists r: Req { req[r].st == ActionExecuted }
+    }
+  }
+
+  acceptance AC-TOOL "operator承認後に副作用toolを実行できる" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    execute_tool(0)
+    expect req[0].st == ActionExecuted
+  }
+
+  forbidden FB-PUBLIC-APPROVE "非operatorは承認できない" {
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-BEFORE-APPROVAL "承認待ちから直接実行できない" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    execute_tool(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-WITH-DOWNGRADED-APPROVAL "承認状態を戻した後は実行できない" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    downgrade_approval(0)
+    execute_tool(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-WITH-PUBLIC-ROLE "operator権限を失った後は実行できない" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    revoke_operator(0)
+    execute_tool(0)
+    expect rejected
+  }
+
+}

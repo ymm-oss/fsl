@@ -34,6 +34,23 @@ def test_liveness_not_propagated_by_refinement():
     assert verify["violation_kind"] == "leadsTo"
 
 
+def test_preserve_progress_catches_liveness_drop():
+    refine = run_refine(
+        str(E / "design_drops_liveness.fsl"),
+        str(E / "policy.fsl"),
+        str(E / "design_drops_liveness_progress_refines.fsl"),
+        depth=8,
+    )
+    assert refine["result"] == "refinement_failed"
+    assert refine["kind"] == "progress_lost"
+    assert refine["violation_kind"] == "leadsTo"
+    assert refine["invariant"] == "EveryClaimDecided"
+    assert refine["progress"] == {
+        "leadsTo": "EveryClaimDecided",
+        "actions": ["approve", "reject"],
+    }
+
+
 def test_fair_restores_liveness_at_the_lower_layer():
     refine = run_refine(
         str(E / "design_keeps_liveness.fsl"),
@@ -43,6 +60,22 @@ def test_fair_restores_liveness_at_the_lower_layer():
     )
     assert refine["result"] == "refines"
     assert run_verify(str(E / "design_keeps_liveness.fsl"), 8, "ignore")["result"] == "verified"
+
+
+def test_preserve_progress_passes_when_lower_layer_keeps_liveness():
+    refine = run_refine(
+        str(E / "design_keeps_liveness.fsl"),
+        str(E / "policy.fsl"),
+        str(E / "design_keeps_liveness_progress_refines.fsl"),
+        depth=8,
+    )
+    assert refine["result"] == "refines"
+    assert refine["progress"] == {
+        "EveryClaimDecided": {
+            "checked_to_depth": 8,
+            "actions": ["approve", "reject"],
+        }
+    }
 
 
 def test_safety_violation_is_propagated_and_caught():

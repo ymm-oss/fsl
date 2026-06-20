@@ -1,0 +1,77 @@
+// Agentic RAG ネガティブプローブ: liveness喪失design。
+//
+// 目的:
+// - 下位designが安全性の対応は満たしていても、内部stutter loopで
+//   requirements層の「回答準備済みリクエストは最終的に回答される」を
+//   落とせることを確認する。
+// - `preserve progress` がその喪失を refinement_failed / progress_lost として
+//   検出することを示す。
+//
+// 重要:
+// - publish_answerは意図的にfairではない。
+// - heartbeatは抽象状態を変えない内部処理で、Drafted + guard Passedのまま
+//   永久に回れる。
+spec AgenticRagLivenessDropDesign {
+  symmetric type Req = 0..1
+  type Retry = 0..2
+  type Beat = 0..1
+
+  enum DPhase { DDrafted, DAnswered }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  struct DCase {
+    phase: DPhase,
+    evidence: Evidence,
+    guard: Guard,
+    approval: Approval,
+    role: Role,
+    retry: Retry,
+    needs_tool: Bool,
+    citation_ok: Bool,
+    audit: Bool,
+    // 抽象requirements層には写さない内部heartbeat用の状態。
+    beat: Beat
+  }
+
+  state {
+    d: Map<Req, DCase>
+  }
+
+  init {
+    forall r: Req {
+      d[r] = DCase {
+        phase: DDrafted,
+        evidence: Adequate,
+        guard: Passed,
+        approval: NoApproval,
+        role: Public,
+        retry: 2,
+        needs_tool: false,
+        citation_ok: true,
+        audit: true,
+        beat: 0
+      }
+    }
+  }
+
+  // 内部workerのheartbeat。requirements層から見るとDrafted + guard Passedの
+  // ままなのでstutterであり、処理済み状態には近づかない。
+  action heartbeat(r: Req) {
+    requires d[r].phase == DDrafted
+    requires d[r].guard == Passed
+    d[r].beat = 1 - d[r].beat
+  }
+
+  // 安全性としてはrequirements層のanswerに対応できる。
+  // ただしfairではないため、heartbeatだけが回る実行を排除できない。
+  action publish_answer(r: Req) {
+    requires d[r].phase == DDrafted
+    requires d[r].evidence == Adequate
+    requires d[r].citation_ok
+    requires d[r].guard == Passed
+    d[r].phase = DAnswered
+  }
+}

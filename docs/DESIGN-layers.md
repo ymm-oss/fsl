@@ -214,13 +214,16 @@ connect to the implementation via testgen/replay/Monitor (all implemented).
    leadsTo "every request is always adjudicated" of the §2 spike is **not
    inherited automatically** even when the design layer refines the business
    layer. Remedies: (a) `verify` liveness policies individually at each layer
-   (put `fair` on the lower action that bears the progress), or (b) require
-   fairness preservation by mapping convention. This is a general property of
-   forward simulation (safety is preserved, liveness is not), and is not an fslc
-   defect. Concrete example: a design that, after placing the submission on an
-   internal queue, keeps spinning a stutter loop instead of a non-fair
-   adjudication passes refine but breaks the business leadsTo (`verify` produces
-   a leadsTo counterexample = a lasso).
+   (put `fair` on the lower action that bears the progress), or (b) add
+   `preserve progress { respond <AbsLeadsTo> by <impl actions...> }` to the
+   refinement mapping. That opt-in pulls the upper `leadsTo` through the state
+   mapping and reports `refinement_failed / progress_lost` if the lower layer can
+   spin or stall while the upper response remains pending. This is a general
+   property of forward simulation (safety is preserved, liveness is not), and is
+   not an fslc defect. Concrete example: a design that, after placing the
+   submission on an internal queue, keeps spinning a stutter loop instead of a
+   non-fair adjudication passes ordinary refine but breaks the business leadsTo;
+   with `preserve progress`, the same mapping fails as a progress-lost refinement.
 2. **Traceability metadata** (new; plumbing only): put `req_id`/`policy_id` on
    nodes of the kernel AST and pass them through into all JSON output. From the
    design layer's counterexample, "violates REQ-1 (original text)" comes out

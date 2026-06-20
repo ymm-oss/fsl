@@ -35,7 +35,7 @@ compose_param: NAME ":" qname -> param_typed
 qname: NAME ("." NAME)?
 
 refinement_def: "refinement" NAME "{" refinement_item* "}"
-?refinement_item: refinement_impl | refinement_abs | maps_auto_def | map_def | refinement_action
+?refinement_item: refinement_impl | refinement_abs | maps_auto_def | map_def | refinement_action | preserve_progress_def
 refinement_impl: "impl" NAME
 refinement_abs: "abs" NAME
 maps_auto_def: "maps" "auto"
@@ -45,6 +45,9 @@ refinement_param: NAME [":" type]
 action_target: stutter_target | mapped_action_target
 stutter_target: "stutter"
 mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
+preserve_progress_def: "preserve" "progress" "{" progress_item* "}"
+?progress_item: progress_respond
+progress_respond: "respond" NAME "by" NAME ("," NAME)* ","?
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
@@ -224,7 +227,7 @@ requirements_def: "requirements" NAME "{" requirements_item* "}"
                   | state_def | init_def | req_action_def | process_def | time_def
                   | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
-?implements_item: map_def | maps_auto_def
+?implements_item: map_def | maps_auto_def | preserve_progress_def
 requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
 ?requirement_item: req_action_def | invariant_def | trans_def | reachable_def | leadsto_def | deadline_def
 req_action_def: req_fair_action | req_plain_action
@@ -832,6 +835,12 @@ class Ast(Transformer):
         if target is None:
             raise ValueError("refinement action missing target")
         return ("action_map", name, params, target, _loc(meta))
+
+    def progress_respond(self, meta, leadsto_name, *action_names):
+        return ("progress_respond", leadsto_name, list(action_names), _loc(meta))
+
+    def preserve_progress_def(self, meta, *items):
+        return ("preserve_progress", [i for i in items if i], _loc(meta))
 
     def refinement_def(self, meta, name, *items):
         return ("refinement", name, [i for i in items if i])

@@ -1,0 +1,395 @@
+// AIマルチエージェントシステム [design層PoC]。
+//
+// この層の目的:
+// - requirements層の制御契約を、実装寄りの内部工程へ分解する。
+// - supervisor queue、planner、worker assignment、critic queue、tool queueを
+//   明示しながら、requirements層から見える意味を変えないことをrefinementで確認する。
+//
+// ASSUME-1:
+// - 1 Work固定のPoC。複数workのqueue公平性やcapacity競合は別sliceで扱う。
+// ASSUME-2:
+// - planner_q / worker_q / critic_q / tool_q は実装の永続queueを抽象化したもの。
+// ASSUME-3:
+// - worker A/Bの成果物そのものの品質は扱わず、完了シグナルだけを扱う。
+spec MultiAgentDesign {
+  const QUEUE_CAP = 2
+  type Work = 0..0
+  type Revision = 0..1
+  type Agent = 0..2
+
+  enum DPhase {
+    DNew,
+    DAccepted,
+    DAudited,
+    DScoped,
+    DPlanQueued,
+    DPlanning,
+    DPlanned,
+    DAssignQueued,
+    DAssigned,
+    DAggregated,
+    DCriticQueued,
+    DCriticRunning,
+    DRevisionNeeded,
+    DApproved,
+    DDelivered,
+    DRejected,
+    DHumanReview,
+    DToolApproval,
+    DToolApproved,
+    DToolQueued,
+    DToolExecuted
+  }
+  enum Risk { Unknown, Low, High }
+  enum Approval { NoApproval, Requested, ApprovalGranted, Denied }
+
+  struct DJob {
+    phase: DPhase,
+    risk: Risk,
+    worker_a_done: Bool,
+    worker_b_done: Bool,
+    critic_ok: Bool,
+    approval: Approval,
+    audit: Bool,
+    revision: Revision
+  }
+
+  state {
+    d: Map<Work, DJob>,
+    active_agents: Set<Agent>,
+    planner_q: Seq<Work, QUEUE_CAP>,
+    worker_q: Seq<Work, QUEUE_CAP>,
+    critic_q: Seq<Work, QUEUE_CAP>,
+    tool_q: Seq<Work, QUEUE_CAP>
+  }
+
+  init {
+    forall w: Work {
+      d[w] = DJob {
+        phase: DNew,
+        risk: Unknown,
+        worker_a_done: false,
+        worker_b_done: false,
+        critic_ok: false,
+        approval: NoApproval,
+        audit: false,
+        revision: 0
+      }
+    }
+    active_agents = Set {}
+    planner_q = Seq {}
+    worker_q = Seq {}
+    critic_q = Seq {}
+    tool_q = Seq {}
+  }
+
+  // 入口ではまだ監査ログがないので、requirements層からはNewのまま。
+  fair action accept_work(w: Work) {
+    requires d[w].phase == DNew
+    d[w].phase = DAccepted
+  }
+
+  // 監査ログを書いた時点で、requirements層のreceiveに対応する。
+  fair action write_audit(w: Work) {
+    requires d[w].phase == DAccepted
+    d[w].phase = DAudited
+    d[w].audit = true
+  }
+
+  // supervisorが低リスクworkとしてscopeする。
+  fair action classify_low(w: Work) {
+    requires d[w].phase == DAudited
+    d[w].phase = DScoped
+    d[w].risk = Low
+  }
+
+  // supervisorが高リスクworkとしてscopeする。
+  fair action classify_high(w: Work) {
+    requires d[w].phase == DAudited
+    d[w].phase = DScoped
+    d[w].risk = High
+  }
+
+  // planner queueへ投入する。この境界をrequirements層のplan_workに対応させる。
+  fair action enqueue_plan(w: Work) {
+    requires d[w].phase == DScoped
+    requires planner_q.size() < QUEUE_CAP
+    requires not planner_q.contains(w)
+    d[w].phase = DPlanQueued
+    planner_q = planner_q.push(w)
+  }
+
+  // planner workerがqueueから取り出す。requirements層からはPlannedの内側。
+  fair action start_planner(w: Work) {
+    requires d[w].phase == DPlanQueued
+    requires planner_q.size() > 0
+    requires planner_q.head() == w
+    d[w].phase = DPlanning
+    planner_q = planner_q.pop()
+  }
+
+  // planning完了。requirements層からはPlannedの内側。
+  fair action finish_plan(w: Work) {
+    requires d[w].phase == DPlanning
+    d[w].phase = DPlanned
+  }
+
+  // worker assignment queueへ投入する。
+  fair action enqueue_workers(w: Work) {
+    requires d[w].phase == DPlanned
+    requires worker_q.size() < QUEUE_CAP
+    requires not worker_q.contains(w)
+    d[w].phase = DAssignQueued
+    worker_q = worker_q.push(w)
+  }
+
+  // worker A/Bへ実際に割り当てる。ここがrequirements層のassign_workers。
+  fair action assign_workers(w: Work) {
+    requires d[w].phase == DAssignQueued
+    requires d[w].revision == 0
+    requires worker_q.size() > 0
+    requires worker_q.head() == w
+    d[w].phase = DAssigned
+    d[w].worker_a_done = false
+    d[w].worker_b_done = false
+    active_agents = Set {1, 2}
+    worker_q = worker_q.pop()
+  }
+
+  // 修正後の再割当。requirements層のassign_revision_workersに対応する。
+  fair action assign_revision_workers(w: Work) {
+    requires d[w].phase == DAssignQueued
+    requires d[w].revision > 0
+    requires worker_q.size() > 0
+    requires worker_q.head() == w
+    d[w].phase = DAssigned
+    d[w].worker_a_done = false
+    d[w].worker_b_done = false
+    active_agents = Set {1, 2}
+    worker_q = worker_q.pop()
+  }
+
+  // worker Aの完了通知。
+  fair action worker_a_finish(w: Work) {
+    requires d[w].phase == DAssigned
+    requires active_agents.contains(1)
+    requires not d[w].worker_a_done
+    d[w].worker_a_done = true
+  }
+
+  // worker Bの完了通知。
+  fair action worker_b_finish(w: Work) {
+    requires d[w].phase == DAssigned
+    requires active_agents.contains(2)
+    requires not d[w].worker_b_done
+    d[w].worker_b_done = true
+  }
+
+  // 成果物を統合し、critic queueへ投入できる状態にする。
+  fair action aggregate_results(w: Work) {
+    requires d[w].phase == DAssigned
+    requires d[w].revision == 0
+    requires d[w].worker_a_done
+    requires d[w].worker_b_done
+    d[w].phase = DAggregated
+    active_agents = Set {}
+  }
+
+  // 修正後の再統合。requirements層のaggregate_revision_resultsに対応する。
+  fair action aggregate_revision_results(w: Work) {
+    requires d[w].phase == DAssigned
+    requires d[w].revision > 0
+    requires d[w].worker_a_done
+    requires d[w].worker_b_done
+    d[w].phase = DAggregated
+    active_agents = Set {}
+  }
+
+  // critic queueへ投入する。requirements層ではAggregatedのまま。
+  fair action enqueue_critic(w: Work) {
+    requires d[w].phase == DAggregated
+    requires critic_q.size() < QUEUE_CAP
+    requires not critic_q.contains(w)
+    d[w].phase = DCriticQueued
+    critic_q = critic_q.push(w)
+  }
+
+  // critic workerがレビューを開始する。requirements層のstart_criticに対応する。
+  fair action start_critic(w: Work) {
+    requires d[w].phase == DCriticQueued
+    requires critic_q.size() > 0
+    requires critic_q.head() == w
+    d[w].phase = DCriticRunning
+    critic_q = critic_q.pop()
+  }
+
+  // criticが承認する。
+  fair action critic_pass(w: Work) {
+    requires d[w].phase == DCriticRunning
+    d[w].phase = DApproved
+    d[w].critic_ok = true
+  }
+
+  // 1回目の不合格は修正ループへ戻す。
+  fair action critic_requests_revision(w: Work) {
+    requires d[w].phase == DCriticRunning
+    requires d[w].revision < 1
+    d[w].phase = DRevisionNeeded
+    d[w].critic_ok = false
+  }
+
+  // 修正作業をplanner queueへ戻す。requirements層のrevise_planに対応する。
+  fair action requeue_plan(w: Work) {
+    requires d[w].phase == DRevisionNeeded
+    requires d[w].revision < 1
+    requires planner_q.size() < QUEUE_CAP
+    requires not planner_q.contains(w)
+    d[w].phase = DPlanQueued
+    d[w].revision = d[w].revision + 1
+    d[w].worker_a_done = false
+    d[w].worker_b_done = false
+    planner_q = planner_q.push(w)
+  }
+
+  // 修正後も通せない場合は拒否で閉じる。
+  fair action reject_after_revision(w: Work) {
+    requires d[w].phase == DCriticRunning
+    requires d[w].revision == 1
+    d[w].phase = DRejected
+  }
+
+  // 修正後もAIだけで判断できない場合は人間レビューへ送る。
+  fair action escalate_after_revision(w: Work) {
+    requires d[w].phase == DCriticRunning
+    requires d[w].revision == 1
+    d[w].phase = DHumanReview
+  }
+
+  // 低リスクworkを納品する。
+  fair action publish_answer(w: Work) {
+    requires d[w].phase == DApproved
+    requires d[w].risk == Low
+    requires d[w].critic_ok
+    d[w].phase = DDelivered
+  }
+
+  // 高リスクworkを副作用tool承認待ちへ進める。
+  fair action request_tool_approval(w: Work) {
+    requires d[w].phase == DApproved
+    requires d[w].risk == High
+    requires d[w].critic_ok
+    d[w].phase = DToolApproval
+    d[w].approval = Requested
+  }
+
+  // 人間承認。
+  fair action approve_tool(w: Work) {
+    requires d[w].phase == DToolApproval
+    requires d[w].approval == Requested
+    d[w].phase = DToolApproved
+    d[w].approval = ApprovalGranted
+  }
+
+  // 人間拒否。
+  fair action deny_tool(w: Work) {
+    requires d[w].phase == DToolApproval
+    requires d[w].approval == Requested
+    d[w].phase = DRejected
+    d[w].approval = Denied
+  }
+
+  // tool executor queueへ投入する。requirements層ではToolApprovedのまま。
+  fair action enqueue_tool(w: Work) {
+    requires d[w].phase == DToolApproved
+    requires tool_q.size() < QUEUE_CAP
+    requires not tool_q.contains(w)
+    d[w].phase = DToolQueued
+    tool_q = tool_q.push(w)
+  }
+
+  // 承認済み副作用toolを実行する。
+  fair action execute_tool(w: Work) {
+    requires d[w].phase == DToolQueued
+    requires d[w].approval == ApprovalGranted
+    requires tool_q.size() > 0
+    requires tool_q.head() == w
+    d[w].phase = DToolExecuted
+    tool_q = tool_q.pop()
+  }
+
+  // Design側でも、queue内のworkが対応するphaseにいることを固定する。
+  // Seq上のforallを使い、queueの生存prefixだけを読む。
+  invariant PlannerQueueContainsPlanQueuedWork {
+    forall w in planner_q {
+      d[w].phase == DPlanQueued
+    }
+  }
+
+  invariant WorkerQueueContainsAssignQueuedWork {
+    forall w in worker_q {
+      d[w].phase == DAssignQueued
+    }
+  }
+
+  invariant CriticQueueContainsQueuedWork {
+    forall w in critic_q {
+      d[w].phase == DCriticQueued
+    }
+  }
+
+  invariant ToolQueueContainsApprovedWork {
+    forall w in tool_q {
+      d[w].phase == DToolQueued
+    }
+  }
+
+  // Design側でも、worker assignmentの意味を固定する。
+  invariant AssignedHasExactlyTwoWorkersD {
+    forall w: Work {
+      d[w].phase == DAssigned => (
+        exactlyOne(a in active_agents where a == 1) and
+        exactlyOne(a in active_agents where a == 2)
+      )
+    }
+  }
+
+  invariant OutputRequiresCriticApprovalD {
+    forall w: Work {
+      (d[w].phase == DDelivered or d[w].phase == DToolApproval or d[w].phase == DToolApproved or d[w].phase == DToolQueued or d[w].phase == DToolExecuted) => d[w].critic_ok
+    }
+  }
+
+  invariant ToolExecutionRequiresHumanApprovalD {
+    forall w: Work {
+      d[w].phase == DToolExecuted => d[w].approval == ApprovalGranted
+    }
+  }
+
+  invariant HandledWorkWasAuditedD {
+    forall w: Work {
+      (d[w].phase == DDelivered or d[w].phase == DRejected or d[w].phase == DHumanReview or d[w].phase == DToolExecuted) => d[w].audit
+    }
+  }
+
+  reachable CanDeliverD {
+    exists w: Work { d[w].phase == DDelivered }
+  }
+
+  reachable CanRejectD {
+    exists w: Work { d[w].phase == DRejected }
+  }
+
+  reachable CanReviewD {
+    exists w: Work { d[w].phase == DHumanReview }
+  }
+
+  reachable CanExecuteToolD {
+    exists w: Work { d[w].phase == DToolExecuted }
+  }
+
+  terminal {
+    forall w: Work {
+      d[w].phase == DDelivered or d[w].phase == DRejected or d[w].phase == DHumanReview or d[w].phase == DToolExecuted
+    }
+  }
+}

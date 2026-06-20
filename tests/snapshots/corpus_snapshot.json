@@ -865,6 +865,12 @@
       "warnings": []
     }
   },
+  "examples/refinement_liveness/design_drops_liveness_progress_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
   "examples/refinement_liveness/design_drops_liveness_refines.fsl": {
     "check": {
       "kind": "semantics",
@@ -875,6 +881,12 @@
     "check": {
       "result": "ok",
       "warnings": []
+    }
+  },
+  "examples/refinement_liveness/design_keeps_liveness_progress_refines.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
     }
   },
   "examples/refinement_liveness/design_keeps_liveness_refines.fsl": {

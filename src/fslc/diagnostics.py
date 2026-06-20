@@ -8,7 +8,7 @@ from __future__ import annotations
 FAITHFULNESS_ACTIONS = {
     "partial_op_unguarded": "add the missing guard / run bounded Monitor (replay)",
     "frozen_only_invariant": "run mutate to check kill-rate",
-    "liveness_not_refined": "re-prove liveness at each layer",
+    "liveness_not_refined": "re-prove liveness at each layer or add preserve progress to the refinement mapping",
     "intent_unexercised": "add a single-shot reachable for the action / raise --depth",
 }
 
@@ -39,6 +39,7 @@ def faithfulness_class_for(diagnostic):
             "leadsTo_refinement_failed",
             "leadsto_refinement_failed",
             "liveness_not_refined",
+            "progress_lost",
     }:
         return "liveness_not_refined"
 

@@ -1,0 +1,96 @@
+// Agentic RAG ネガティブプローブ: tool承認迂回design。
+//
+// 目的:
+// - 副作用toolを `Requested` のまま実行するdesignを作り、
+//   requirements層のexecute_tool requiresで拒否されることを確認する。
+//
+// 期待:
+// - このspec単体のcheckは通る。
+// - refinementではexecute_without_approval -> execute_toolの対応で、
+//   抽象execute_toolの `st == ToolApproved` と `approval == Approved` が
+//   満たせず、refinement_failed / abs_requires_failed になる。
+spec AgenticRagToolApprovalBypassDesign {
+  symmetric type Req = 0..1
+  type Retry = 0..2
+
+  // tool pathだけを最小化して表す。
+  enum DPhase { DNew, DReceived, DClassified, DReady, DToolApproval, DActionExecuted }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  struct DCase {
+    phase: DPhase,
+    evidence: Evidence,
+    guard: Guard,
+    approval: Approval,
+    role: Role,
+    retry: Retry,
+    needs_tool: Bool,
+    citation_ok: Bool,
+    audit: Bool
+  }
+
+  state {
+    d: Map<Req, DCase>
+  }
+
+  init {
+    forall r: Req {
+      d[r] = DCase {
+        phase: DNew,
+        evidence: Missing,
+        guard: Unchecked,
+        approval: NoApproval,
+        role: Public,
+        retry: 2,
+        needs_tool: false,
+        citation_ok: false,
+        audit: false
+      }
+    }
+  }
+
+  // operator権限は先に付与する。これにより失敗原因をrole不足ではなく
+  // approval不足へ寄せる。
+  fair action set_operator(r: Req) {
+    requires d[r].phase == DNew
+    d[r].role = Operator
+  }
+
+  fair action receive(r: Req) {
+    requires d[r].phase == DNew
+    d[r].phase = DReceived
+    d[r].audit = true
+  }
+
+  // 副作用toolが必要なリクエストとして分類する。
+  fair action classify_tool(r: Req) {
+    requires d[r].phase == DReceived
+    d[r].phase = DClassified
+    d[r].needs_tool = true
+  }
+
+  fair action retrieve_success(r: Req) {
+    requires d[r].phase == DClassified
+    d[r].phase = DReady
+    d[r].evidence = Adequate
+    d[r].citation_ok = true
+  }
+
+  // 承認依頼は出すが、まだapprovalはRequestedでありApprovedではない。
+  fair action request_tool_approval(r: Req) {
+    requires d[r].phase == DReady
+    requires d[r].needs_tool
+    d[r].phase = DToolApproval
+    d[r].approval = Requested
+  }
+
+  // 悪い近道: 承認済み状態にせず、副作用toolを実行済みにしてしまう。
+  action execute_without_approval(r: Req) {
+    requires d[r].phase == DToolApproval
+    requires d[r].role == Operator
+    d[r].phase = DActionExecuted
+  }
+}

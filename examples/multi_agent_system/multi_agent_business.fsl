@@ -1,0 +1,101 @@
+// AIマルチエージェントシステム [business層PoC]。
+//
+// この層の目的:
+// - supervisor、worker、critic、tool executorの内部実装から離れて、
+//   業務として守りたい統制だけを書く。
+// - 下位層がキュー、並列worker、レビュー、修正ループを追加しても、
+//   業務上の近道や放置が増えていないことをrefinementで確認する。
+//
+// ASSUME-1:
+// - このPoCではHumanReviewを処理済み終端として扱う。
+// ASSUME-2:
+// - 高リスクworkは副作用toolを伴うworkとして扱い、人間承認後にだけ実行する。
+// ASSUME-3:
+// - criticによる修正ループはrequirements層で1回までに制限する。
+business MultiAgentBusiness {
+
+  actor User, System, HumanReviewer
+
+  // Workはユーザーから依頼された1つの仕事。検証個数はverifyブロックで固定する。
+  entity Work
+
+  // 業務フローは、内部agentの数やqueue名を含めない荒い段階だけにする。
+  process Work {
+    stages BNew, BScoped, BDelegated, BReviewing, BApproved, BDelivered, BRejected, BHumanReview, BWaitingApproval, BEffectApproved, BEffectExecuted
+    initial BNew
+
+    // 依頼を受け付け、業務上の対象範囲が決まった状態へ入れる。
+    transition submit BNew -> BScoped by User
+
+    // supervisorが複数agentへ委譲した状態。内部ではworker queueやassignmentに分かれてよい。
+    transition delegate BScoped -> BDelegated by System
+
+    // worker成果物が集まり、criticや統合レビューの対象になる。
+    transition collect BDelegated -> BReviewing by System
+
+    // criticが業務上公開・実行してよい結果と判断した。
+    transition approve_result BReviewing -> BApproved by System
+
+    // criticまたは運用判断で仕事を拒否する。
+    transition reject_result BReviewing -> BRejected by System
+
+    // AIだけでは判断できない仕事を人間レビューへ送る。
+    transition escalate_review BReviewing -> BHumanReview by HumanReviewer
+
+    // 副作用のない承認済み成果物をユーザーへ納品する。
+    transition deliver BApproved -> BDelivered by System
+
+    // 副作用toolが必要な承認済み成果物は、人間承認待ちへ出す。
+    transition request_effect_approval BApproved -> BWaitingApproval by System
+
+    // 副作用toolの実行を人間が承認する。
+    transition approve_effect BWaitingApproval -> BEffectApproved by HumanReviewer
+
+    // 副作用toolの実行を人間が拒否する。
+    transition deny_effect BWaitingApproval -> BRejected by HumanReviewer
+
+    // 承認済みの副作用だけを実行する。
+    transition run_effect BEffectApproved -> BEffectExecuted by System
+  }
+
+  // 業務統制: scope済みの仕事は、委譲されるか、人間判断・拒否へ進む。
+  policy BP1 "scope済みworkは放置されず、複数agentへの委譲または終端判断へ進む"
+    every Work in BScoped must eventually be BDelegated or BRejected or BHumanReview
+
+  // 業務統制: 委譲された仕事は、成果物レビューへ戻ってくる。
+  policy BP2 "委譲されたworkはworker成果物を集めてレビューへ戻る"
+    every Work in BDelegated must eventually be BReviewing or BHumanReview
+
+  // 業務統制: レビュー中の仕事は、承認・拒否・人間レビューで解決される。
+  policy BP3 "レビュー中workは承認、拒否、または人間レビューで解決される"
+    every Work in BReviewing must eventually be BApproved or BRejected or BHumanReview
+
+  // 業務統制: 承認済み成果物は、納品または副作用承認待ちへ進む。
+  policy BP4 "承認済みworkは納品または副作用承認待ちへ進む"
+    every Work in BApproved must eventually be BDelivered or BWaitingApproval
+
+  // 業務統制: 副作用承認待ちは、承認または拒否で閉じる。
+  policy BP5 "副作用toolの承認待ちは承認または拒否で解決される"
+    every Work in BWaitingApproval must eventually be BEffectApproved or BRejected
+
+  // 業務統制: 承認済み副作用は実行される。
+  policy BP6 "承認済みの副作用toolは実行される"
+    every Work in BEffectApproved must eventually be BEffectExecuted
+
+  // Positive goals: 業務として許容する主要終端が到達可能であることを確認する。
+  goal CanDeliver "低リスクworkは納品まで進める"
+    some Work can reach BDelivered
+
+  goal CanReject "不適切なworkは拒否で閉じられる"
+    some Work can reach BRejected
+
+  goal CanReview "AIだけでは判断できないworkを人間レビューへ送れる"
+    some Work can reach BHumanReview
+
+  goal CanExecuteEffect "承認済み副作用toolを実行できる"
+    some Work can reach BEffectExecuted
+}
+
+verify {
+  instances Work = 1
+}

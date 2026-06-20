@@ -216,6 +216,7 @@ fslc replay specs/cart_v1.fsl --trace events.json  # conformance check of an eve
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py  # generate a pytest conformance-test scaffold
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
                                                   # check whether the detailed spec refines the abstract spec
+                                                  # mapping files can opt into preserve progress for upper leadsTo
 fslc chain fsl-project.toml --keep-going          # run business -> requirements -> design -> impl from a manifest
 fslc verify specs/order_system.fsl --depth 8    # compose: synchronized composition of cart + payment
 

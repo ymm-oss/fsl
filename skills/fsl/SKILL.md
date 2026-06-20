@@ -186,7 +186,7 @@ existing result/kind fields:
 | `partial_op_unguarded` | Add the missing guard / run bounded Monitor (replay) |
 | `frozen_only_invariant` | Run mutate to check kill-rate |
 | `intent_unexercised` | Add a single-shot reachable for the action / raise `--depth` |
-| `liveness_not_refined` | Re-prove liveness at each layer |
+| `liveness_not_refined` | Re-prove liveness at each layer or add `preserve progress` to the refinement mapping |
 
 | result / violation_kind | Meaning | Next move |
 |---|---|---|
@@ -208,6 +208,7 @@ existing result/kind fields:
 | `error` / `vacuous` | init is unsatisfiable (contradictory assignments, etc.) | Review init. Check that you are not giving one state variable contradictory values. A violation from an out-of-range value is different and becomes `violated`/`type_bound` |
 | `refinement_failed` / `abs_requires_failed` | A detailed-layer transition breaks an upper-layer guard (e.g. a shortcut skipping approval) | Read `impl_action` and `impl_trace`. Add a guard to the detailed layer, or review the interpretation of the correspondence (`maps` / mapping) |
 | `refinement_failed` / `abs_state_mismatch` / `stutter_changed_abs` / `map_out_of_bounds` | Mapping inconsistency (an update has no correspondence / a stutter nonetheless changes upper-layer state / a mapped value is out of the type's range) | Compare the `mismatch` path with `abs_before/after`. Fix the mapping expression or the action correspondence |
+| `refinement_failed` / `progress_lost` | A `preserve progress` mapping pulled an upper `leadsTo` into the lower layer and found a lasso/stall | Read `impl_trace`, `pending_since`, `loop_start`/`stutter`, and the `progress.actions`. Add/restore `fair` on the lower progress action, add a lower-layer ranked `leadsTo`, or revise the progress mapping |
 | `implements.result: violated` within verify | The requirements layer deviates from the upper (business) layer | The contents of `implements.violation` have the same shape as refinement_failed. Same procedure as above + check the `requirement` on the requirements side |
 | `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
 | `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
@@ -219,11 +220,20 @@ blocking factors. Do not silently ignore it. For branches-split actions,
 diagnostics keep the internal name (`submit__b1`) and add a human
 `display_name` such as `submit[a <= AUTO_LIMIT]`.
 
-Liveness is still checked separately from refinement: safety refinement can
-return `refines` while a lower-layer `leadsTo` fails. Treat
-`liveness_not_refined` as the routing tag for leadsTo-refinement diagnostics; the
-current clean signal is usually the separate `violated` / `leadsTo` verification
-result at that layer.
+Ordinary refinement still propagates safety, not liveness: safety refinement can
+return `refines` while a lower-layer `leadsTo` fails. If the upper response must
+be preserved at refine time, add to the mapping:
+
+```fsl
+preserve progress {
+  respond EveryRequestHandled by answer, refuse, escalate
+}
+```
+
+This checks the upper `leadsTo` after pulling it through the state mapping. A
+failure is `refinement_failed / progress_lost`. The `by` actions are validated
+impl action names and review metadata; the actual lasso exclusion still comes
+from lower-layer `fair action` declarations.
 
 When a counterexample makes you **change an interpretation** (added a guard,
 loosened an invariant, decided how to handle an exception), record that judgment in

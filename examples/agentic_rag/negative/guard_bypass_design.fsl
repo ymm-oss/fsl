@@ -1,0 +1,91 @@
+// Agentic RAG ネガティブプローブ: guard迂回design。
+//
+// 目的:
+// - 下位designが「出力guardを通さずに回答公開する近道」を追加した場合、
+//   requirements層のanswer requiresで拒否されることを確認する。
+//
+// 期待:
+// - このspec単体は「悪いdesign」を表すだけなので、checkは通る。
+// - refinementではpublish_without_guard -> answerの対応で、
+//   抽象answerの `guard == Passed` が満たせず、
+//   refinement_failed / abs_requires_failed になる。
+spec AgenticRagGuardBypassDesign {
+  // Reqは通常仕様と同じく、意味差のない小さな有限IDとして扱う。
+  symmetric type Req = 0..1
+  type Retry = 0..2
+
+  // 最小限の回答pathだけを持つ。あえてguard成功状態は用意しない。
+  enum DPhase { DNew, DReceived, DClassified, DReady, DDrafted, DAnswered }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Guard { Unchecked, Passed, Failed }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  struct DCase {
+    phase: DPhase,
+    evidence: Evidence,
+    guard: Guard,
+    approval: Approval,
+    role: Role,
+    retry: Retry,
+    needs_tool: Bool,
+    citation_ok: Bool,
+    audit: Bool
+  }
+
+  state {
+    d: Map<Req, DCase>
+  }
+
+  init {
+    forall r: Req {
+      d[r] = DCase {
+        phase: DNew,
+        evidence: Missing,
+        guard: Unchecked,
+        approval: NoApproval,
+        role: Public,
+        retry: 2,
+        needs_tool: false,
+        citation_ok: false,
+        audit: false
+      }
+    }
+  }
+
+  // 通常の受付境界。requirements層のreceiveに対応する。
+  fair action receive(r: Req) {
+    requires d[r].phase == DNew
+    d[r].phase = DReceived
+    d[r].audit = true
+  }
+
+  // 通常回答pathへ分類する。副作用toolは使わない。
+  fair action classify_answer(r: Req) {
+    requires d[r].phase == DReceived
+    d[r].phase = DClassified
+    d[r].needs_tool = false
+  }
+
+  // 外部retriever/evaluatorが十分な証拠と引用可能性を返した、という抽象イベント。
+  fair action retrieve_success(r: Req) {
+    requires d[r].phase == DClassified
+    d[r].phase = DReady
+    d[r].evidence = Adequate
+    d[r].citation_ok = true
+  }
+
+  // 下書きを作る。guardはまだUncheckedのまま。
+  fair action draft_answer(r: Req) {
+    requires d[r].phase == DReady
+    d[r].phase = DDrafted
+    d[r].guard = Unchecked
+  }
+
+  // 悪い近道: output_guard_passを経由せず回答公開する。
+  // design内部ではDAnsweredに進んでしまうが、requirements層のanswerには対応できない。
+  action publish_without_guard(r: Req) {
+    requires d[r].phase == DDrafted
+    d[r].phase = DAnswered
+  }
+}

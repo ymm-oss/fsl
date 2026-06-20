@@ -1,0 +1,136 @@
+// Agentic RAG design層 → requirements層 refinement mapping。
+//
+// このファイルの役割:
+// - design層で増えた内部工程を、requirements層の抽象状態へ畳み込む。
+// - 実装寄りの内部actionのうち、PM/要件レビューで見える意味を持つものだけを
+//   requirements層のactionへ対応付ける。
+// - キュー投入、vector search、rerank、guard開始などの準備処理はstutterにする。
+//
+// 読み方:
+// - `map req[r] = Case { ... }` が状態写像。
+// - `action lower -> upper` がaction写像。
+// - `preserve progress` は、requirements層のlivenessをdesign層でも守るため、
+//   どのdesign actionが進捗を担うかを明示している。
+refinement AgenticRagDesignRefinesRequirements {
+  impl AgenticRagDesign
+  abs  AgenticRagRequirements
+
+  // requirements層のreq[r]を、design層のd[r]から観測されるCaseとして再構成する。
+  //
+  // DNew/DAccepted:
+  //   監査ログがまだ書かれていないので、requirements層ではNewのまま。
+  //
+  // DReceived/DRouterQueued:
+  //   requirements層ではreceive後、classify前のReceivedとして見る。
+  //
+  // DClassified/DVectorSearch/DRerank:
+  //   検索準備中でも、requirements層では分類済みClassifiedとして見る。
+  //
+  // DRetrying/DVectorRetry/DRerankRetry:
+  //   リトライ検索の内部段階は、requirements層のRetrievingへ畳む。
+  //
+  // DReady/DDraftQueued/DToolPlan:
+  //   証拠が十分で、回答生成またはtool承認へ進めるEvidenceReadyとして見る。
+  //
+  // DGuardChecking/DGuardPassed:
+  //   output_guard_passはrequirements層ではStageを変えずguardだけをPassedにする。
+  //   そのため、どちらもDraftedに畳む。
+  //
+  // 終端状態:
+  //   DAnswered/DRefused/DHumanReview/DActionExecutedは同名の抽象終端へ写す。
+  map req[r: Req] = Case {
+    st:
+      if d[r].phase == DNew then New
+      else if d[r].phase == DAccepted then New
+      else if d[r].phase == DReceived then Received
+      else if d[r].phase == DRouterQueued then Received
+      else if d[r].phase == DClassified then Classified
+      else if d[r].phase == DVectorSearch then Classified
+      else if d[r].phase == DRerank then Classified
+      else if d[r].phase == DRetrying then Retrieving
+      else if d[r].phase == DVectorRetry then Retrieving
+      else if d[r].phase == DRerankRetry then Retrieving
+      else if d[r].phase == DReady then EvidenceReady
+      else if d[r].phase == DInadequate then EvidenceBad
+      else if d[r].phase == DDraftQueued then EvidenceReady
+      else if d[r].phase == DDrafted then Drafted
+      else if d[r].phase == DGuardChecking then Drafted
+      else if d[r].phase == DGuardPassed then Drafted
+      else if d[r].phase == DGuardFailed then GuardFailed
+      else if d[r].phase == DToolPlan then EvidenceReady
+      else if d[r].phase == DToolApproval then ToolApproval
+      else if d[r].phase == DToolApproved then ToolApproved
+      else if d[r].phase == DAnswered then Answered
+      else if d[r].phase == DRefused then Refused
+      else if d[r].phase == DHumanReview then HumanReview
+      else ActionExecuted,
+    evidence: d[r].evidence,
+    guard: d[r].guard,
+    approval: d[r].approval,
+    role: d[r].role,
+    retry: d[r].retry,
+    needs_tool: d[r].needs_tool,
+    citation_ok: d[r].citation_ok,
+    audit: d[r].audit
+  }
+
+  // operator権限の反映はrequirements層のgrant_operatorに対応する。
+  action set_operator(r) -> grant_operator(r)
+
+  // 入口で受け付けただけでは、まだ抽象的にはNewのまま。
+  action accept_request(r) -> stutter
+
+  // 監査ログが書かれた時点をrequirements層のreceive境界にする。
+  action write_audit(r) -> receive(r)
+
+  // router投入は内部準備なので、requirements層から見るとReceivedのまま。
+  action enqueue_router(r) -> stutter
+
+  // ルーティング結果はrequirements層の分類actionに対応する。
+  action route_answer(r) -> classify_answer(r)
+  action route_tool(r) -> classify_tool(r)
+
+  // 検索・rerankそのものは内部処理。評価結果が出るまでは抽象状態を変えない。
+  action vector_search(r) -> stutter
+  action rerank(r) -> stutter
+  action vector_search_retry(r) -> stutter
+  action rerank_retry(r) -> stutter
+
+  // evaluatorの結果がrequirements層のretrieve_success/retrieve_emptyになる。
+  action evaluate_adequate(r) -> retrieve_success(r)
+  action evaluate_inadequate(r) -> retrieve_empty(r)
+
+  // retry budgetを消費する境界はrequirements層にも見せる。
+  action schedule_retry(r) -> retry_retrieve(r)
+
+  // 証拠不足の終端化はrequirements層の同名actionに対応する。
+  action refuse_low_evidence(r) -> refuse_low_evidence(r)
+  action review_low_evidence(r) -> review_low_evidence(r)
+
+  // drafter投入は内部準備。下書き完成時点だけをrequirements層に見せる。
+  action enqueue_draft(r) -> stutter
+  action draft_answer(r) -> draft_answer(r)
+
+  // guard開始は内部準備。pass/failの結果だけをrequirements層に見せる。
+  action start_output_guard(r) -> stutter
+  action output_guard_pass(r) -> output_guard_pass(r)
+  action output_guard_fail(r) -> output_guard_fail(r)
+
+  // answer公開とguard失敗後の終端化はrequirements層の同名actionに対応する。
+  action publish_answer(r) -> answer(r)
+  action refuse_guard_failure(r) -> refuse_guard_failure(r)
+  action review_guard_failure(r) -> review_guard_failure(r)
+
+  // tool計画は内部準備。承認待ちへ出す時点をrequirements層に見せる。
+  action plan_tool(r) -> stutter
+  action request_tool_approval(r) -> request_tool_approval(r)
+  action approve_tool(r) -> approve_tool(r)
+  action deny_tool(r) -> deny_tool(r)
+  action execute_tool(r) -> execute_tool(r)
+
+  // requirements層のRequestEventuallyHandledを、design層でも進捗として保つ。
+  // ここに列挙したactionは、抽象状態を終端状態へ進めるdesign側の進捗境界。
+  preserve progress {
+    respond RequestEventuallyHandled by publish_answer, refuse_low_evidence, review_low_evidence, refuse_guard_failure, review_guard_failure, deny_tool, execute_tool
+  }
+}

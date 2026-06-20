@@ -1,0 +1,23 @@
+// Progress-preserving version of design_drops_liveness_refines.fsl.
+// Safety still refines, but preserve progress pulls back the upper leadsTo and
+// catches the lower-layer heartbeat lasso.
+refinement DesignDropsLivenessProgressRefinesPolicy {
+  impl DesignDropsLiveness
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DAutoReview then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action route()     -> stutter
+  action heartbeat() -> stutter
+  action approve()   -> approve()
+  action reject()    -> reject()
+  action pay()       -> pay()
+
+  preserve progress {
+    respond EveryClaimDecided by approve, reject
+  }
+}

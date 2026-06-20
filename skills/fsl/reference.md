@@ -98,6 +98,9 @@ refinement <Name> {
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
   // formal params may be bare names or name: Type annotations matching the impl action
   // explicit map/action entries override maps auto; incompatible same-name candidates are type errors
+  preserve progress {                            // optional, only when upper leadsTo must be preserved
+    respond <AbsLeadsTo> by <impl_act>, ...
+  }
 }
 ```
 
@@ -311,6 +314,9 @@ first failed layer and later layers are marked `skipped`.
 - coverage diagnostic:
   `{covered: false, name, display_name?, blocking_requires: [{loc, text}], hint}`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
+- progress-preserving refinement failure: `refinement_failed`,
+  `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
+  `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`).

@@ -1,0 +1,76 @@
+// Agentic RAG requirements層 → business層 refinement mapping。
+//
+// このファイルの役割:
+// - requirements層の細かい状態を、business層の荒い業務段階へ畳み込む。
+// - 検索、retry、draft、guardなどのシステム詳細が、業務上の近道を作って
+//   いないことを確認する。
+// - business層のliveness policyを、requirements層の進捗actionへ対応付ける。
+//
+// 重要な解釈:
+// - requirements層の`Drafted`は、guardが`Passed`になるまでは業務上まだ
+//   `BInProgress`である。
+// - `Drafted + guard == Passed`だけを、顧客へ回答可能な`BReadyForCustomer`に写す。
+// - `ToolApproval`と`ToolApproved`は、業務上それぞれ`BWaitingApproval`と
+//   `BActionApproved`に写す。
+refinement AgenticRagRequirementsRefinesBusiness {
+  impl AgenticRagRequirements
+  abs  AgenticRagBusiness
+
+  // business層が見るのは、依頼の業務段階だけである。
+  // requirements層の証拠・guard・承認状態は、ここでは段階判定にだけ使う。
+  map req_stage[r: Req] =
+    if req[r].st == New then BNew
+    else if req[r].st == Answered then BAnswered
+    else if req[r].st == Refused then BRefused
+    else if req[r].st == HumanReview then BHumanReview
+    else if req[r].st == ActionExecuted then BActionExecuted
+    else if req[r].st == ToolApproval then BWaitingApproval
+    else if req[r].st == ToolApproved then BActionApproved
+    else if req[r].st == Drafted and req[r].guard == Passed then BReadyForCustomer
+    else BInProgress
+
+  // operatorロールの付与は業務フロー上の段階を変えない。
+  action grant_operator(r) -> stutter
+
+  // 監査済みの受け付け境界を、business層のreceiveに対応させる。
+  action receive(r) -> receive(r)
+
+  // 分類・検索・retry・draftは業務上まだ処理中なのでstutter。
+  action classify_answer(r) -> stutter
+  action classify_tool(r) -> stutter
+  action retrieve_success(r) -> stutter
+  action retrieve_empty(r) -> stutter
+  action retry_retrieve(r) -> stutter
+  action draft_answer(r) -> stutter
+
+  // 出力guard通過により、業務上「回答可能」になる。
+  action output_guard_pass(r) -> clear_response(r)
+
+  // guard失敗自体はまだ処理中。拒否またはレビューへ閉じるactionを業務上の終端に写す。
+  action output_guard_fail(r) -> stutter
+
+  // 顧客回答、拒否、人間レビューへの終端化。
+  action answer(r) -> answer(r)
+  action refuse_low_evidence(r) -> cannot_answer(r)
+  action review_low_evidence(r) -> escalate(r)
+  action refuse_guard_failure(r) -> cannot_answer(r)
+  action review_guard_failure(r) -> escalate(r)
+
+  // 副作用toolの承認フロー。
+  action request_tool_approval(r) -> request_approval(r)
+  action approve_tool(r) -> approve_tool(r)
+  action deny_tool(r) -> deny_tool(r)
+  action execute_tool(r) -> execute_tool(r)
+
+  // business層の各policyを、requirements層で進捗を担うactionへ引き戻す。
+  // BP1: InProgressから、回答準備・拒否・人間レビュー・承認待ちへ進む。
+  // BP2: ReadyForCustomerから、実際の回答へ進む。
+  // BP3: WaitingApprovalから、承認または拒否へ進む。
+  // BP4: ActionApprovedから、副作用実行へ進む。
+  preserve progress {
+    respond BP1 by output_guard_pass, refuse_low_evidence, review_low_evidence, refuse_guard_failure, review_guard_failure, request_tool_approval
+    respond BP2 by answer
+    respond BP3 by approve_tool, deny_tool
+    respond BP4 by execute_tool
+  }
+}

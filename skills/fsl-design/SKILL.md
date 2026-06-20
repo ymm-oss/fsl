@@ -48,6 +48,8 @@ for a contract decision.
    - `action impl_action(...) -> abs_action(...)` for visible effects
    - `action impl_action(...) -> stutter` only when the action is confirmed not to
      change abstract observable state
+   - `preserve progress { respond AbsLeadsTo by impl_action, ... }` when an
+     upper `leadsTo` must be checked through the mapping at refine time
 5. Run `fslc refine design.fsl requirements.fsl mapping.fsl`. Repair by deciding
    whether the design is wrong, the mapping is wrong, or the upper contract needs
    human revision.
@@ -59,6 +61,9 @@ for a contract decision.
 - Treat `abs_requires_failed` as a design bypass of an upper guard until proven
   otherwise.
 - Treat `stutter_changed_abs` as a false claim of internal-only behavior.
+- Treat `progress_lost` as a lower-layer liveness failure: inspect the lasso/stall
+  trace, then add/restore `fair` on the lower progress action or write a
+  lower-layer ranked `leadsTo`.
 - Do not model variants by editing the abstract spec each time; keep variant detail
   in the design layer and fold it through the mapping.
 - Report proof categories separately: design invariants proved, refinement to
