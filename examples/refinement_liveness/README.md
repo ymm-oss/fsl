@@ -18,6 +18,7 @@ For details, see the note in `docs/DESIGN-layers.md` §6 and `docs/LANGUAGE.md` 
 | `design_keeps_liveness.fsl` | A design differing from the above only in the `fair` on adjudication (recovers liveness) |
 | `design_bypasses_control.fsl` | A design that pays while skipping approval (safety violation) |
 | `*_refines.fsl` | Mapping of each design ⊒ policy |
+| `*_progress_refines.fsl` | Mapping plus `preserve progress`, which checks the upper `leadsTo` on the design execution |
 
 ## Run and expected results
 
@@ -37,6 +38,12 @@ fslc refine $E/design_keeps_liveness.fsl $E/policy.fsl \
             $E/design_keeps_liveness_refines.fsl --depth 8            # refines
 fslc verify $E/design_keeps_liveness.fsl --depth 8 --deadlock ignore  # verified
 
+# ②b Opt in to liveness-preserving refinement: the dropped-liveness design now fails at refine time
+fslc refine $E/design_drops_liveness.fsl $E/policy.fsl \
+            $E/design_drops_liveness_progress_refines.fsl --depth 8    # refinement_failed / progress_lost
+fslc refine $E/design_keeps_liveness.fsl $E/policy.fsl \
+            $E/design_keeps_liveness_progress_refines.fsl --depth 8    # refines + progress
+
 # ③ Safety propagates: a design that skips approval is caught by refine
 fslc refine $E/design_bypasses_control.fsl $E/policy.fsl \
             $E/design_bypasses_control_refines.fsl --depth 8          # refinement_failed / abs_requires_failed
@@ -54,6 +61,10 @@ fslc refine $E/design_bypasses_control.fsl $E/policy.fsl \
   `fair` annotation on adjudication. `refine` cannot distinguish the two designs
   (the mapping is identical). To preserve liveness, re-verify `leadsTo` at each
   layer and annotate the progress action with `fair`.
+- **②b**: `preserve progress { respond EveryClaimDecided by approve, reject }`
+  keeps ordinary safety refinement semantics unchanged, but additionally checks
+  the upper response property after mapping it into the design state. This catches
+  the heartbeat loop as `progress_lost`.
 - **③**: a safety deviation (`abs_requires_failed`) is reliably detected by refine.
   `fast_pay` jumps to the terminal state `DPaid` but is detected at all depths
   (this also serves as the regression example for the fix to the soundness bug

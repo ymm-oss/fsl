@@ -30,6 +30,12 @@ refinement CartImplRefinesCart {
   // Correspondence of impl action → abs action (all impl actions required)
   action impl_checkout(u: UserId) -> checkout(u)     // params may include matching impl types
   action rebalance(i: ItemId)     -> stutter          // internal action (nothing happens in abs)
+
+  // Optional: pull selected abs leadsTo declarations through the state mapping
+  // and check them on impl executions too.
+  preserve progress {
+    respond CheckoutEventuallyCompletes by impl_checkout
+  }
 }
 ```
 
@@ -52,6 +58,13 @@ refinement CartImplRefinesCart {
   order). They may be written bare (`u`) or with a type annotation matching the
   impl action declaration (`u: UserId`). The abs-side arguments are expressions
   using them and the impl state.
+- `preserve progress { respond <AbsLeadsTo> by <impl_action>, ... }` is an
+  optional liveness-preserving refinement check. It does not change ordinary
+  safety refinement. When present, fslc pulls the named abstract `leadsTo` P/Q
+  through the state mapping and runs the same bounded lasso/stall search on impl
+  executions. The `by` actions are validated impl action names and are returned
+  in JSON as review context; fairness still comes from the impl actions marked
+  `fair`.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
@@ -112,6 +125,10 @@ same implements result.
    for each impl instance, if "the choice is that instance ∧ the negation of the
    correspondence condition" is sat, it is a violation. The impl trace + the abs
    states before and after α are returned as the counterexample.
+4. If `preserve progress` is present and the safety checks above pass, each named
+   abstract `leadsTo P ~> Q` is checked on impl executions as
+   `P(α(s)) ~> Q(α(s))`. A lasso or deadlock/stall counterexample is reported as
+   `refinement_failed / kind:"progress_lost" / violation_kind:"leadsTo"`.
 
 The abs-side invariants are not checked (verifying/proving abs separately is the
 premise. However, if α(s₀..s_K) breaks an abs invariant, that usually manifests

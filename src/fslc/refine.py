@@ -11,11 +11,16 @@ import z3
 from .diagnostics import with_faithfulness
 from .bmc import (
     _bmc_explore,
+    _action_enabled_exprs,
     _build_trace,
+    _deadlock_from_enabled,
     _display_param,
+    _display_leadsto_bindings,
     _eval_requires,
     _expr_static_type,
+    _fairness_ok,
     _last_action,
+    _leadsto_binding_types,
     _logical_eq,
     _logical_eq_var,
     binder_range,
@@ -30,6 +35,7 @@ from .bmc import (
     z3_sort,
     _eval_cache_scope,
     _map_domain,
+    expand_leadsto_bindings,
     _z3_domain_value,
 )
 from .model import (
@@ -48,6 +54,12 @@ _REFINE_HINT = (
 
 _ENSURES_NOTE = (
     "abs ensures are not checked during refinement; verify/prove the abstract spec separately"
+)
+
+_PROGRESS_HINT = (
+    "the impl refines the abstract safety contract, but admits an execution where "
+    "the pulled-back abstract leadsTo remains pending forever; add fairness/progress "
+    "to the lower layer or review the progress mapping"
 )
 
 
@@ -514,6 +526,9 @@ def build_refinement(tree, impl_spec, abs_spec):
     maps_auto = False
     maps = {}
     actions = {}
+    progress_requested = False
+    progress = []
+    progress_loc = None
 
     for it in items:
         tag = it[0]
@@ -584,6 +599,22 @@ def build_refinement(tree, impl_spec, abs_spec):
                     "arg_exprs": arg_exprs,
                     "loc": loc,
                 }
+        elif tag == "preserve_progress":
+            _, items, loc = it
+            if progress_requested:
+                _err("duplicate preserve progress block", kind="type", loc=loc)
+            progress_requested = True
+            progress_loc = loc
+            for item in items:
+                if item[0] != "progress_respond":
+                    _err(f"unknown progress item '{item[0]}'", kind="type", loc=loc)
+                _, leadsto_name, action_names, item_loc = item
+                progress.append({
+                    "kind": "respond",
+                    "leadsto": leadsto_name,
+                    "actions": action_names,
+                    "loc": item_loc,
+                })
 
     if impl_name is None:
         _err("refinement missing impl spec name", kind="type")
@@ -610,6 +641,37 @@ def build_refinement(tree, impl_spec, abs_spec):
     for act in impl_spec["actions"]:
         if act["name"] not in actions:
             _err(f"missing action correspondence for impl action '{act['name']}'", kind="type")
+
+    if progress_requested:
+        abs_leadstos = {lt["name"]: lt for lt in abs_spec.get("leadstos", [])}
+        if not progress:
+            progress = [
+                {
+                    "kind": "respond",
+                    "leadsto": lt["name"],
+                    "actions": [],
+                    "loc": progress_loc,
+                }
+                for lt in abs_spec.get("leadstos", [])
+            ]
+        if not progress:
+            _err("preserve progress requested, but abs spec has no leadsTo declarations",
+                 kind="type", loc=progress_loc)
+        seen_progress = set()
+        impl_actions = {act["name"]: act for act in impl_spec["actions"]}
+        for decl in progress:
+            lt_name = decl["leadsto"]
+            if lt_name in seen_progress:
+                _err(f"duplicate progress declaration for leadsTo '{lt_name}'",
+                     kind="type", loc=decl.get("loc"))
+            seen_progress.add(lt_name)
+            if lt_name not in abs_leadstos:
+                _err(f"unknown abstract leadsTo '{lt_name}'",
+                     kind="type", loc=decl.get("loc"))
+            for aname in decl["actions"]:
+                if aname not in impl_actions:
+                    _err(f"unknown impl progress action '{aname}'",
+                         kind="type", loc=decl.get("loc"))
 
     merged_types = _merge_types_meta(impl_spec, abs_spec)
     merged_impl = {**impl_spec, "types": merged_types}
@@ -675,6 +737,7 @@ def build_refinement(tree, impl_spec, abs_spec):
         "abs": abs_name,
         "maps": maps,
         "actions": actions,
+        "progress": progress,
     }
 
 
@@ -700,6 +763,202 @@ def _check_map_out_of_bounds(
         mismatch=_mismatch_paths(
             m, abs_spec, {}, _alpha_logical_values(m, alpha_t, abs_spec)),
     )
+
+
+def _solver_for_prefix(ctx, upto):
+    s = z3.Solver()
+    s.set(unsat_core=True)
+    s.add(*ctx.get("init_cons", []))
+    for cons in ctx.get("step_cons", [])[:upto]:
+        s.add(*cons)
+    return s
+
+
+def _eval_abs_on_alpha(expr, alpha, binds, abs_spec, expr_cache, cache_key):
+    with _eval_cache_scope(expr_cache, cache_key):
+        return eval_expr(expr, alpha, dict(binds), abs_spec)
+
+
+def _progress_action_summary(decl):
+    return {
+        "leadsTo": decl["leadsto"],
+        "actions": list(decl.get("actions") or []),
+    }
+
+
+def _progress_failure(
+        impl_spec, abs_spec, ctx, model, leadsto, decl, binding_types,
+        extra_binds, step, pending_since, loop_start=None, stutter=False):
+    out = {
+        "result": "refinement_failed",
+        "impl": impl_spec["name"],
+        "abs": abs_spec["name"],
+        "kind": "progress_lost",
+        "violation_kind": "leadsTo",
+        "invariant": leadsto["name"],
+        "bindings": _display_leadsto_bindings(model, extra_binds, abs_spec, binding_types),
+        "pending_since": pending_since,
+        "stutter": stutter,
+        "impl_trace": _build_trace(
+            model, ctx["states"], ctx["choices"], ctx["instances"], impl_spec, step),
+        "progress": _progress_action_summary(decl),
+        "hint": _PROGRESS_HINT,
+    }
+    if leadsto.get("loc"):
+        out["loc"] = leadsto["loc"]
+    if loop_start is not None:
+        out["loop_start"] = loop_start
+    return with_faithfulness(out)
+
+
+def _check_progress_lasso(
+        impl_spec, abs_spec, ctx, alpha_fn, leadsto, decl, binding_types, expr_cache):
+    states = ctx["states"]
+    choices = ctx["choices"]
+    instances = ctx["instances"]
+    K = len(states) - 1
+    if K <= 0:
+        return None
+
+    solver = _solver_for_prefix(ctx, K)
+    alpha_cache = {}
+
+    def alpha_at(t):
+        if t not in alpha_cache:
+            alpha_cache[t] = alpha_fn(states[t])
+        return alpha_cache[t]
+
+    for extra_binds in expand_leadsto_bindings(leadsto, abs_spec):
+        candidates = []
+        meta = []
+        bind_key = tuple(sorted(extra_binds.items()))
+        for i in range(K):
+            for j in range(i + 1, K + 1):
+                loop = _logical_eq(impl_spec, states[i], states[j])
+                for p in range(j):
+                    not_q = [
+                        z3.Not(_eval_abs_on_alpha(
+                            leadsto["Q"], alpha_at(q), extra_binds, abs_spec,
+                            expr_cache, ("progress_q", leadsto["name"], q, bind_key)))
+                        for q in range(min(i, p), j)
+                    ]
+                    p_hold = _eval_abs_on_alpha(
+                        leadsto["P"], alpha_at(p), extra_binds, abs_spec,
+                        expr_cache, ("progress_p", leadsto["name"], p, bind_key))
+                    fair_ok = _fairness_ok(
+                        instances, states, choices, i, j, impl_spec, {}, expr_cache)
+                    cond = z3.And(
+                        loop,
+                        p_hold,
+                        z3.And(*not_q) if not_q else z3.BoolVal(True),
+                        fair_ok,
+                    )
+                    candidates.append(cond)
+                    meta.append((i, j, p, cond))
+
+        if not candidates:
+            continue
+
+        solver.push()
+        solver.add(z3.Or(*candidates))
+        if solver.check() == z3.sat:
+            model = solver.model()
+            chosen = None
+            for i, j, p, cond in meta:
+                if z3.is_true(model.eval(cond, model_completion=True)):
+                    chosen = (i, j, p)
+                    break
+            solver.pop()
+            if chosen is None:
+                return None
+            i, j, p = chosen
+            return _progress_failure(
+                impl_spec, abs_spec, ctx, model, leadsto, decl, binding_types,
+                extra_binds, step=j, pending_since=p, loop_start=i, stutter=False)
+        solver.pop()
+    return None
+
+
+def _check_progress_deadlock(
+        impl_spec, abs_spec, ctx, alpha_fn, leadsto, decl, binding_types, expr_cache):
+    states = ctx["states"]
+    instances = ctx["instances"]
+    alpha_cache = {}
+
+    def alpha_at(t):
+        if t not in alpha_cache:
+            alpha_cache[t] = alpha_fn(states[t])
+        return alpha_cache[t]
+
+    for extra_binds in expand_leadsto_bindings(leadsto, abs_spec):
+        bind_key = tuple(sorted(extra_binds.items()))
+        for t in range(len(states)):
+            solver = _solver_for_prefix(ctx, t)
+            enabled = _action_enabled_exprs(states[t], instances, impl_spec, expr_cache)
+            candidates = []
+            meta = []
+            for p in range(t + 1):
+                not_q = [
+                    z3.Not(_eval_abs_on_alpha(
+                        leadsto["Q"], alpha_at(q), extra_binds, abs_spec,
+                        expr_cache, ("progress_dead_q", leadsto["name"], q, bind_key)))
+                    for q in range(p, t + 1)
+                ]
+                p_hold = _eval_abs_on_alpha(
+                    leadsto["P"], alpha_at(p), extra_binds, abs_spec,
+                    expr_cache, ("progress_dead_p", leadsto["name"], p, bind_key))
+                cond = z3.And(
+                    _deadlock_from_enabled(enabled),
+                    p_hold,
+                    z3.And(*not_q) if not_q else z3.BoolVal(True),
+                )
+                candidates.append(cond)
+                meta.append((p, cond))
+            if not candidates:
+                continue
+            solver.push()
+            solver.add(z3.Or(*candidates))
+            if solver.check() == z3.sat:
+                model = solver.model()
+                pending = None
+                for p, cond in meta:
+                    if z3.is_true(model.eval(cond, model_completion=True)):
+                        pending = p
+                        break
+                solver.pop()
+                if pending is None:
+                    return None
+                return _progress_failure(
+                    impl_spec, abs_spec, ctx, model, leadsto, decl, binding_types,
+                    extra_binds, step=t, pending_since=pending, stutter=True)
+            solver.pop()
+    return None
+
+
+def _check_progress_preservation(impl_spec, abs_spec, mapping, ctx, alpha_fn, depth):
+    progress = mapping.get("progress") or []
+    if not progress:
+        return None, None
+
+    leadstos = {lt["name"]: lt for lt in abs_spec.get("leadstos", [])}
+    checked = {}
+    expr_cache = {}
+    for decl in progress:
+        leadsto = leadstos[decl["leadsto"]]
+        binding_types = _leadsto_binding_types(leadsto, abs_spec)
+        failure = _check_progress_deadlock(
+            impl_spec, abs_spec, ctx, alpha_fn, leadsto, decl, binding_types, expr_cache)
+        if failure is not None:
+            return failure, None
+        failure = _check_progress_lasso(
+            impl_spec, abs_spec, ctx, alpha_fn, leadsto, decl, binding_types, expr_cache)
+        if failure is not None:
+            return failure, None
+        checked[leadsto["name"]] = {
+            "checked_to_depth": min(depth, len(ctx["states"]) - 1),
+            "actions": list(decl.get("actions") or []),
+        }
+    return None, checked
 
 
 def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
@@ -766,7 +1025,13 @@ def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
         step_cons.append(cons)
         states.append(nxt)
         choices.append(ch)
-    ctx = {"states": states, "choices": choices, "instances": instances}
+    ctx = {
+        "states": states,
+        "choices": choices,
+        "instances": instances,
+        "init_cons": init_cons_impl,
+        "step_cons": step_cons,
+    }
 
     # Each prefix is checked with a dedicated solver sp that holds "only the
     # constraints up to step t". Checking on s, which has stacked all
@@ -895,6 +1160,11 @@ def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
         else:
             action_map[aname] = am["abs_action"]
 
+    progress_failure, progress_checked = _check_progress_preservation(
+        impl_spec, abs_spec, mapping, ctx, alpha_fn, depth)
+    if progress_failure is not None:
+        return progress_failure
+
     note = _ENSURES_NOTE if any(a.get("ensures") for a in abs_spec["actions"]) else None
     result = {
         "result": "refines",
@@ -903,6 +1173,8 @@ def refine(impl_spec, abs_spec, mapping, depth, alpha_fn=None):
         "checked_to_depth": depth,
         "action_map": action_map,
     }
+    if progress_checked is not None:
+        result["progress"] = progress_checked
     if note:
         result["note"] = note
     return result
@@ -1024,6 +1296,17 @@ def refine_chain(specs, mappings, depth):
             _err(f"chain: mapping {i} impl '{mp['impl']}' != spec '{specs[i]['name']}'", kind="type")
         if mp["abs"] != specs[i + 1]["name"]:
             _err(f"chain: mapping {i} abs '{mp['abs']}' != spec '{specs[i + 1]['name']}'", kind="type")
+        if mp.get("progress"):
+            link = refine(specs[i], specs[i + 1], mp, depth)
+            if link.get("result") != "refines":
+                link = dict(link)
+                link["chain"] = [s["name"] for s in specs]
+                link["failed_link"] = {
+                    "from": specs[i]["name"],
+                    "to": specs[i + 1]["name"],
+                    "kind": link.get("kind"),
+                }
+                return link
     low, top = specs[0], specs[-1]
 
     # Composed alpha: fold build_alpha across layers (Z3-level composition).

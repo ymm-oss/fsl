@@ -303,6 +303,10 @@ Diagnostics that identify a faithfulness/intent gap may also carry
 `violation_kind` fields and is additive; consumers should keep reading the
 original classification fields for detail.
 
+Progress-preserving refinement failures are reported as `refinement_failed` with
+`kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
+`progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
+
 `verify` / `verify --engine induction` results include `checked_to_depth` and
 `cost: {"elapsed_s": ...}`. BMC `verified` is explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
@@ -571,10 +575,32 @@ What `refine` guarantees is **inclusion of safety** (impl does not break the
 guards/invariants of abs). **Liveness (`leadsTo`) does not propagate** — since
 refine allows stutter, even if impl drops the progress that abs guaranteed with
 `fair`, the result can still be `refines` (the mapping does not require fair
-annotations). If you want to preserve the `leadsTo` of abs, declare `leadsTo` on
-the impl side as well, `verify` it separately, and add `fair` to the actions
-responsible for progress. This is a general property of forward simulation
-(safety is preserved, liveness is not).
+annotations). To opt into checking the abstract response on the lower layer,
+write `preserve progress` in the refinement mapping:
+
+```fsl
+refinement DesignRefinesReq {
+  impl Design
+  abs  Req
+  map st = ...
+  action enqueue(c) -> stutter
+  action answer(c)  -> answer(c)
+  action refuse(c)  -> refuse(c)
+
+  preserve progress {
+    respond EveryRequestHandled by answer, refuse
+  }
+}
+```
+
+This pulls the named abstract `leadsTo` through the state mapping and checks
+`P(α(impl_state)) ~> Q(α(impl_state))` on impl executions. If the lower layer can
+spin forever or deadlock while the abstract response remains pending, the result
+is `refinement_failed` with `kind:"progress_lost"` and
+`violation_kind:"leadsTo"`. The `by` actions are review metadata and must name
+impl actions; fairness still comes from lower-layer `fair action` declarations.
+For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
+`verify --engine induction`.
 
 ## 11. Composition (compose)
 

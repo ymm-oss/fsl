@@ -1,0 +1,23 @@
+// Progress-preserving version of design_keeps_liveness_refines.fsl.
+// The lower approve/reject actions are fair, so the pulled-back upper leadsTo
+// is preserved.
+refinement DesignKeepsLivenessProgressRefinesPolicy {
+  impl DesignKeepsLiveness
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DAutoReview then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action route()     -> stutter
+  action heartbeat() -> stutter
+  action approve()   -> approve()
+  action reject()    -> reject()
+  action pay()       -> pay()
+
+  preserve progress {
+    respond EveryClaimDecided by approve, reject
+  }
+}
