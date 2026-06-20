@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (HTML report) `fslc html <file.fsl> [-o report.html]` generates a self-contained
+  review report from `explain` + `verify`: status summary, state/action tables,
+  an action-to-state SVG graph (arrows show the write direction), traces, witnesses,
+  counterfactual evidence, escaped source, and raw JSON payloads. Counterexamples
+  surface a verdict banner and highlight the violating trace step, with violation
+  facts humanized in the status table; reachable runs are labelled as such. Without
+  `-o`, the HTML is written to stdout.
 - (Refinement) Mapping files can opt into liveness-preserving refinement with
   `preserve progress { respond <AbsLeadsTo> by <impl actions...> }`. The check
   pulls the named abstract `leadsTo` through the state mapping and reports

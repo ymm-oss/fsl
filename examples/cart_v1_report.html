@@ -1,0 +1,1348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShoppingCart - FSL Specification Report</title>
+  <style>
+
+:root {
+  --bg: #f6f7f3;
+  --ink: #171a16;
+  --muted: #62685f;
+  --line: #d9ddd2;
+  --surface: #ffffff;
+  --surface-2: #eef2e9;
+  --teal: #087f7a;
+  --teal-2: #d8f0eb;
+  --amber: #b7791f;
+  --amber-2: #fff2d2;
+  --green: #237a3b;
+  --green-2: #dff3e3;
+  --red: #b83232;
+  --red-2: #ffe1de;
+  --violet: #6554c0;
+  --violet-2: #ebe7ff;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(8, 127, 122, 0.08), transparent 360px),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  letter-spacing: 0;
+}
+a { color: inherit; }
+.shell {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  min-height: 100vh;
+}
+.side {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 24px 20px;
+  border-right: 1px solid var(--line);
+  background: rgba(246, 247, 243, 0.92);
+  backdrop-filter: blur(14px);
+}
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 760;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+.mark span:last-child { overflow-wrap: anywhere; }
+.mark-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--teal), #63b27e);
+}
+.side nav {
+  display: grid;
+  gap: 6px;
+}
+.side a {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+.side a:hover, .side a:focus-visible {
+  background: var(--surface-2);
+  color: var(--ink);
+  outline: none;
+}
+.main {
+  min-width: 0;
+  padding: 32px;
+}
+.hero {
+  display: grid;
+  align-items: end;
+  gap: 18px;
+  padding: 26px 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.96), rgba(255,255,255,0.72)),
+    repeating-linear-gradient(90deg, rgba(8,127,122,0.12) 0, rgba(8,127,122,0.12) 1px, transparent 1px, transparent 38px);
+}
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--teal);
+  font: 700 12px/1.2 var(--mono);
+  text-transform: uppercase;
+}
+h1, h2, h3 {
+  margin: 0;
+  letter-spacing: 0;
+  line-height: 1.14;
+}
+h1 {
+  max-width: 940px;
+  font-size: 42px;
+  overflow-wrap: anywhere;
+}
+h2 { font-size: 26px; }
+h3 { font-size: 16px; }
+.sub {
+  max-width: 760px;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 17px;
+}
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+.metric {
+  min-height: 86px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.78);
+}
+.metric span {
+  display: block;
+  color: var(--muted);
+  font: 700 11px/1.2 var(--mono);
+  text-transform: uppercase;
+}
+.metric strong {
+  display: block;
+  margin-top: 9px;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+.section {
+  margin-top: 24px;
+  padding: 28px 0 0;
+  border-top: 1px solid var(--line);
+}
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.section-head p {
+  margin: 7px 0 0;
+  color: var(--muted);
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: 700 12px/1 var(--mono);
+  white-space: nowrap;
+}
+.badge.ok { color: var(--green); background: var(--green-2); border-color: #b9dfbf; }
+.badge.warn { color: var(--amber); background: var(--amber-2); border-color: #efd39a; }
+.badge.bad { color: var(--red); background: var(--red-2); border-color: #f1b2ac; }
+.badge.info { color: var(--teal); background: var(--teal-2); border-color: #afdcd7; }
+.badge.neutral { color: #4b5563; background: #eef0ec; border-color: #d7dbd2; }
+.grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+}
+.stack {
+  display: grid;
+  gap: 18px;
+}
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.panel-pad { padding: 18px; }
+.table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th, td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+th {
+  color: var(--muted);
+  background: #fafbf8;
+  font: 700 12px/1.3 var(--mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+tr:last-child td { border-bottom: 0; }
+code, pre {
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #eef0ec;
+  font-size: 0.92em;
+}
+pre {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.code-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10130f;
+  color: #eef5e8;
+}
+.code-block pre { padding: 16px; }
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: #eef0ec;
+  color: #363b34;
+  font: 700 12px/1.2 var(--mono);
+  overflow-wrap: anywhere;
+}
+.chip.write { background: var(--teal-2); color: var(--teal); }
+.chip.require { background: var(--amber-2); color: var(--amber); }
+.chip.fair { background: var(--violet-2); color: var(--violet); }
+.flow-svg {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff, #f8faf5);
+}
+.flow-svg text {
+  fill: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+}
+.flow-svg .small { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.timeline {
+  display: grid;
+  gap: 10px;
+}
+.step {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.step-num {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--teal);
+  color: white;
+  font: 800 13px/1 var(--mono);
+}
+.step-body {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+.step-body strong { font-family: var(--mono); font-size: 13px; }
+.changes {
+  margin-top: 8px;
+  display: grid;
+  gap: 5px;
+}
+.change {
+  color: var(--muted);
+  font: 12px/1.45 var(--mono);
+}
+.callout {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.callout.bad { border-color: #f1b2ac; background: var(--red-2); color: #7f2620; }
+.callout.info { border-color: #afdcd7; background: var(--teal-2); color: #0a5d59; }
+.callout-sub { margin-top: 6px; font: 12px/1.45 var(--mono); }
+.step.bad .step-num { background: var(--red); }
+.step.bad .step-body { border-color: #f1b2ac; background: var(--red-2); }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.mini-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 16px;
+}
+.mini-card h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+summary {
+  min-height: 42px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font: 700 13px/1.35 var(--mono);
+}
+details > div { padding: 0 12px 12px; }
+.source-table td:first-child {
+  width: 1%;
+  color: #858b80;
+  text-align: right;
+  user-select: none;
+  font-family: var(--mono);
+}
+.source-table td:last-child {
+  font-family: var(--mono);
+  white-space: pre;
+}
+.empty {
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #fbfcf8;
+}
+@media (max-width: 960px) {
+  .shell { grid-template-columns: 1fr; }
+  .side {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .side nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .main { padding: 18px; }
+  .hero { padding: 26px; }
+  h1 { font-size: 40px; }
+  .meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2, .cards { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .side nav { grid-template-columns: 1fr; }
+  .meta-grid { grid-template-columns: 1fr; }
+  .section { padding-top: 22px; }
+  h1 { font-size: 34px; }
+}
+
+  </style>
+</head>
+<body>
+  <div class="shell">
+
+    <aside class="side" aria-label="Report navigation">
+      <div class="mark"><span class="mark-dot" aria-hidden="true"></span><span>ShoppingCart</span></div>
+      <nav>
+        <a href="#status">Status</a>
+        <a href="#model">Model</a>
+        <a href="#actions">Actions</a>
+        <a href="#properties">Properties</a>
+        <a href="#traces">Traces</a>
+        <a href="#witnesses">Witnesses</a>
+        <a href="#counterfactuals">Counterfactuals</a>
+        <a href="#source">Source</a>
+      </nav>
+    </aside>
+
+    <main class="main" id="top">
+
+      <header class="hero">
+        <div>
+          <p class="eyebrow">FSL specification report</p>
+          <h1>ShoppingCart</h1>
+          <p class="sub">Review the written model through verification status, action/state influence, concrete traces, and counterfactual evidence.</p>
+        </div>
+        <div class="meta-grid" aria-label="Report summary">
+          <div class="metric"><span>Result</span><strong><span class="badge ok">verified</span></strong></div>
+          <div class="metric"><span>Depth</span><strong>4</strong></div>
+          <div class="metric"><span>States</span><strong>2</strong></div>
+          <div class="metric"><span>Actions</span><strong>3</strong></div>
+          <div class="metric"><span>Properties</span><strong>1</strong></div>
+          <div class="metric"><span>Coverage</span><strong>3/3</strong></div>
+        </div>
+        <div class="chips">
+          <span class="chip">specs/cart_v1.fsl</span>
+          <span class="chip">0 warning(s)</span>
+        </div>
+      </header>
+
+
+      <section class="section" id="status">
+        <div class="section-head">
+          <div>
+            <h2>Verification Status</h2>
+            <p>Bounded or proof results from <code>fslc verify</code>.</p>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="panel table-wrap">
+            <table>
+              <tbody><tr><th>Result</th><td><span class="badge ok">verified</span></td></tr><tr><th>Completeness</th><td>bounded</td></tr><tr><th>Checked depth</th><td>4</td></tr><tr><th>Note</th><td>bounded verification: no violation within depth 4</td></tr><tr><th>Hint</th><td>state space not saturated at depth 4; a violation could exist beyond depth 4; consider a larger --depth or the induction engine</td></tr><tr><th>Deadlock</th><td><code>{&quot;found&quot;: false}</code></td></tr></tbody>
+            </table>
+          </div>
+          <div class="panel panel-pad"><h3>Warnings</h3><p class="empty">No warnings reported.</p></div>
+        </div>
+      </section>
+
+
+      <section class="section" id="model">
+        <div class="section-head">
+          <div>
+            <h2>State Model</h2>
+            <p>Declared state and the actions that write to it.</p>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="panel table-wrap">
+            <table>
+              <thead><tr><th>State</th><th>Type</th></tr></thead>
+              <tbody><tr><td><code>cart</code></td><td>Map&lt;0..1, Option&lt;0..1&gt;&gt;</td></tr><tr><td><code>stock</code></td><td>Map&lt;0..1, 0..3&gt;</td></tr></tbody>
+            </table>
+          </div>
+          <div>
+      <svg class="flow-svg" viewBox="0 0 720 320" role="img" aria-label="Action to state write graph">
+        <defs>
+          <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#087f7a"/>
+          </marker>
+        </defs>
+        <text class="small" x="48" y="34">STATE &#8592; writes</text>
+        <text class="small" x="457" y="34">ACTIONS</text>
+        <path d="M 455 72.0 C 360 72.0, 360 72.0, 268 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/><path d="M 455 175.0 C 360 175.0, 360 72.0, 268 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/><path d="M 455 278.0 C 360 278.0, 360 72.0, 268 72.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/><path d="M 455 278.0 C 360 278.0, 360 278.0, 268 278.0" fill="none" stroke="#087f7a" stroke-width="1.6" opacity="0.55" marker-end="url(#flow-arrow)"/>
+        <rect x="46" y="55.0" width="220" height="34" rx="8" fill="#d8f0eb" stroke="#afdcd7"/><text x="62" y="77.0">cart</text><rect x="46" y="261.0" width="220" height="34" rx="8" fill="#d8f0eb" stroke="#afdcd7"/><text x="62" y="283.0">stock</text>
+        <rect x="455" y="55.0" width="220" height="34" rx="8" fill="#fff2d2" stroke="#efd39a"/><text x="471" y="77.0">add_to_cart</text><rect x="455" y="158.0" width="220" height="34" rx="8" fill="#fff2d2" stroke="#efd39a"/><text x="471" y="180.0">remove_from_cart</text><rect x="455" y="261.0" width="220" height="34" rx="8" fill="#fff2d2" stroke="#efd39a"/><text x="471" y="283.0">checkout</text>
+      </svg>
+</div>
+        </div>
+      </section>
+
+
+      <section class="section" id="actions">
+        <div class="section-head">
+          <div>
+            <h2>Actions</h2>
+            <p>Preconditions, writes, postconditions, and coverage.</p>
+          </div>
+        </div>
+        <div class="panel table-wrap">
+          <table>
+            <thead><tr><th>Action</th><th>Params</th><th>Requires</th><th>Writes</th><th>Ensures</th><th>Requirement</th></tr></thead>
+            <tbody><tr><td><code>add_to_cart</code><br><span class="badge ok">covered</span></td><td>u: UserId, i: ItemId</td><td><div class="chips"><span class="chip require">cart[u] == none</span></div></td><td><div class="chips"><span class="chip write">cart</span></div></td><td><span class="chip">none</span></td><td><span class="chip">none</span></td></tr><tr><td><code>remove_from_cart</code><br><span class="badge ok">covered</span></td><td>u: UserId</td><td><div class="chips"><span class="chip require">cart[u] != none</span></div></td><td><div class="chips"><span class="chip write">cart</span></div></td><td><span class="chip">none</span></td><td><span class="chip">none</span></td></tr><tr><td><code>checkout</code><br><span class="badge ok">covered</span></td><td>u: UserId</td><td><div class="chips"><span class="chip require">cart[u] is some(i)</span><span class="chip require">stock[i] &gt; 0</span></div></td><td><div class="chips"><span class="chip write">cart</span><span class="chip write">stock</span></div></td><td><div class="chips"><span class="chip">stock[i] == old(stock[i]) - 1</span></div></td><td><span class="chip">none</span></td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+
+      <section class="section" id="properties">
+        <div class="section-head">
+          <div>
+            <h2>Properties And Automatic Checks</h2>
+            <p>Human-authored properties plus checks inserted by the verifier.</p>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="panel table-wrap">
+            <table>
+              <thead><tr><th>Kind</th><th>Name</th><th>Deadline</th><th>Body</th><th>Requirement</th></tr></thead>
+              <tbody><tr><td>reachable</td><td><code>SoldOut</code></td><td><span class="chip">none</span></td><td>reachable SoldOut {</td><td><span class="chip">none</span></td></tr></tbody>
+            </table>
+          </div>
+          <div class="panel table-wrap">
+            <table>
+              <thead><tr><th>Check</th><th>Target</th><th>Source</th></tr></thead>
+              <tbody><tr><td>type_bound</td><td><code>stock</code></td><td>implicit bounded-domain check</td></tr><tr><td>type_bound</td><td><code>cart</code></td><td>implicit bounded-domain check</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      <section class="section" id="traces">
+        <div class="section-head">
+          <div>
+            <h2>Trace Review</h2>
+            <p>Shortest counterexample or representative reachable trace, step by step.</p>
+          </div>
+        </div>
+        <div class="callout info"><strong>Representative reachable trace</strong> — no violation; a concrete path the model can take.</div>
+        <div class="timeline"><div class="step"><div class="step-num">0</div><div class="step-body"><strong>initial</strong>  <div class="changes"><div class="change">initial state</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+  &quot;cart&quot;: {
+    &quot;0&quot;: null,
+    &quot;1&quot;: null
+  },
+  &quot;stock&quot;: {
+    &quot;0&quot;: 1,
+    &quot;1&quot;: 1
+  }
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">1</div><div class="step-body"><strong>add_to_cart</strong> <code>u=1, i=1</code> <div class="changes"><div class="change">cart[1]: None -> 1</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+  &quot;cart&quot;: {
+    &quot;0&quot;: null,
+    &quot;1&quot;: 1
+  },
+  &quot;stock&quot;: {
+    &quot;0&quot;: 1,
+    &quot;1&quot;: 1
+  }
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>checkout</strong> <code>u=1</code> <div class="changes"><div class="change">cart[1]: 1 -> None</div><div class="change">stock[1]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+  &quot;cart&quot;: {
+    &quot;0&quot;: null,
+    &quot;1&quot;: null
+  },
+  &quot;stock&quot;: {
+    &quot;0&quot;: 1,
+    &quot;1&quot;: 0
+  }
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">3</div><div class="step-body"><strong>add_to_cart</strong> <code>u=1, i=0</code> <div class="changes"><div class="change">cart[1]: None -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+  &quot;cart&quot;: {
+    &quot;0&quot;: null,
+    &quot;1&quot;: 0
+  },
+  &quot;stock&quot;: {
+    &quot;0&quot;: 1,
+    &quot;1&quot;: 0
+  }
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>checkout</strong> <code>u=1</code> <div class="changes"><div class="change">cart[1]: 0 -> None</div><div class="change">stock[0]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+  &quot;cart&quot;: {
+    &quot;0&quot;: null,
+    &quot;1&quot;: null
+  },
+  &quot;stock&quot;: {
+    &quot;0&quot;: 0,
+    &quot;1&quot;: 0
+  }
+}</pre></div></div></details></div></div></div>
+      </section>
+
+
+      <section class="section" id="witnesses">
+        <div class="section-head">
+          <div>
+            <h2>Witnesses</h2>
+            <p>Concrete examples that exercise reachable targets and action coverage.</p>
+          </div>
+        </div>
+        <div class="cards"><article class="mini-card"><h3><span>reach_SoldOut</span><span class="badge info">reachable</span></h3><p><code>SoldOut</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=1, i=0)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. checkout(u=1)</strong></div></div><div class="step"><div class="step-num">3</div><div class="step-body"><strong>3. add_to_cart(u=0, i=1)</strong></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>4. checkout(u=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
+  &quot;expected_states&quot;: [
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: null,
+        &quot;1&quot;: 0
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 1
+      }
+    },
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: null,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 0,
+        &quot;1&quot;: 1
+      }
+    },
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 0,
+        &quot;1&quot;: 1
+      }
+    },
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: null,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 0,
+        &quot;1&quot;: 0
+      }
+    }
+  ],
+  &quot;initial_state&quot;: {
+    &quot;cart&quot;: {
+      &quot;0&quot;: null,
+      &quot;1&quot;: null
+    },
+    &quot;stock&quot;: {
+      &quot;0&quot;: 1,
+      &quot;1&quot;: 1
+    }
+  }
+}</pre></div></div></details></article><article class="mini-card"><h3><span>cover_add_to_cart</span><span class="badge info">action_coverage</span></h3><p><code>add_to_cart</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=0, i=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
+  &quot;expected_states&quot;: [
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: 0,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 1
+      }
+    }
+  ],
+  &quot;initial_state&quot;: {
+    &quot;cart&quot;: {
+      &quot;0&quot;: null,
+      &quot;1&quot;: null
+    },
+    &quot;stock&quot;: {
+      &quot;0&quot;: 1,
+      &quot;1&quot;: 1
+    }
+  }
+}</pre></div></div></details></article><article class="mini-card"><h3><span>cover_remove_from_cart</span><span class="badge info">action_coverage</span></h3><p><code>remove_from_cart</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=0, i=0)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. remove_from_cart(u=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
+  &quot;expected_states&quot;: [
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: 0,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 1
+      }
+    },
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: null,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 1
+      }
+    }
+  ],
+  &quot;initial_state&quot;: {
+    &quot;cart&quot;: {
+      &quot;0&quot;: null,
+      &quot;1&quot;: null
+    },
+    &quot;stock&quot;: {
+      &quot;0&quot;: 1,
+      &quot;1&quot;: 1
+    }
+  }
+}</pre></div></div></details></article><article class="mini-card"><h3><span>cover_checkout</span><span class="badge info">action_coverage</span></h3><p><code>checkout</code></p><div class="timeline"><div class="step"><div class="step-num">1</div><div class="step-body"><strong>1. add_to_cart(u=0, i=1)</strong></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>2. checkout(u=0)</strong></div></div></div><details><summary>State snapshots</summary><div><div class="code-block"><pre>{
+  &quot;expected_states&quot;: [
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 1
+      }
+    },
+    {
+      &quot;cart&quot;: {
+        &quot;0&quot;: null,
+        &quot;1&quot;: null
+      },
+      &quot;stock&quot;: {
+        &quot;0&quot;: 1,
+        &quot;1&quot;: 0
+      }
+    }
+  ],
+  &quot;initial_state&quot;: {
+    &quot;cart&quot;: {
+      &quot;0&quot;: null,
+      &quot;1&quot;: null
+    },
+    &quot;stock&quot;: {
+      &quot;0&quot;: 1,
+      &quot;1&quot;: 1
+    }
+  }
+}</pre></div></div></details></article></div>
+      </section>
+
+
+      <section class="section" id="counterfactuals">
+        <div class="section-head">
+          <div>
+            <h2>Counterfactuals</h2>
+            <p>What would break if a rule or transition detail were removed.</p>
+          </div>
+        </div>
+        <p class="empty">No counterfactuals were generated for this spec.</p>
+      </section>
+
+
+      <section class="section" id="source">
+        <div class="section-head">
+          <div>
+            <h2>Source</h2>
+            <p>Original FSL with stable line numbers for review comments.</p>
+          </div>
+        </div>
+        <div class="panel table-wrap">
+          <table class="source-table">
+            <tbody><tr><td>1</td><td>spec ShoppingCart {</td></tr><tr><td>2</td><td>  type UserId = 0..1</td></tr><tr><td>3</td><td>  type ItemId = 0..1</td></tr><tr><td>4</td><td>  type Qty    = 0..3</td></tr><tr><td>5</td><td></td></tr><tr><td>6</td><td>  state {</td></tr><tr><td>7</td><td>    stock: Map&lt;ItemId, Qty&gt;,</td></tr><tr><td>8</td><td>    cart:  Map&lt;UserId, Option&lt;ItemId&gt;&gt;</td></tr><tr><td>9</td><td>  }</td></tr><tr><td>10</td><td></td></tr><tr><td>11</td><td>  init {</td></tr><tr><td>12</td><td>    forall i: ItemId { stock[i] = 1 }</td></tr><tr><td>13</td><td>    forall u: UserId { cart[u] = none }</td></tr><tr><td>14</td><td>  }</td></tr><tr><td>15</td><td></td></tr><tr><td>16</td><td>  action add_to_cart(u: UserId, i: ItemId) {</td></tr><tr><td>17</td><td>    requires cart[u] == none</td></tr><tr><td>18</td><td>    cart[u] = some(i)</td></tr><tr><td>19</td><td>  }</td></tr><tr><td>20</td><td></td></tr><tr><td>21</td><td>  action remove_from_cart(u: UserId) {</td></tr><tr><td>22</td><td>    requires cart[u] != none</td></tr><tr><td>23</td><td>    cart[u] = none</td></tr><tr><td>24</td><td>  }</td></tr><tr><td>25</td><td></td></tr><tr><td>26</td><td>  action checkout(u: UserId) {</td></tr><tr><td>27</td><td>    requires cart[u] is some(i)</td></tr><tr><td>28</td><td>    requires stock[i] &gt; 0</td></tr><tr><td>29</td><td>    stock[i] = stock[i] - 1</td></tr><tr><td>30</td><td>    cart[u] = none</td></tr><tr><td>31</td><td>    ensures stock[i] == old(stock[i]) - 1</td></tr><tr><td>32</td><td>  }</td></tr><tr><td>33</td><td></td></tr><tr><td>34</td><td>  reachable SoldOut {</td></tr><tr><td>35</td><td>    forall i: ItemId { stock[i] == 0 }</td></tr><tr><td>36</td><td>  }</td></tr><tr><td>37</td><td>}</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+
+      <section class="section" id="raw-data">
+        <div class="section-head">
+          <div>
+            <h2>Raw Data</h2>
+            <p>Original JSON payloads used to build this report.</p>
+          </div>
+        </div>
+        <details><summary>explain JSON</summary><div><div class="code-block"><pre>{
+  &quot;counterfactuals&quot;: [],
+  &quot;depth&quot;: 4,
+  &quot;reachable_counterfactuals&quot;: [
+    {
+      &quot;property&quot;: &quot;SoldOut&quot;,
+      &quot;requirement&quot;: null,
+      &quot;result&quot;: &quot;reachable_failed&quot;,
+      &quot;weakening&quot;: {
+        &quot;loc&quot;: {
+          &quot;column&quot;: 5,
+          &quot;line&quot;: 18
+        },
+        &quot;op&quot;: &quot;assignment-removal&quot;,
+        &quot;source_text&quot;: &quot;cart[u] = some(i)&quot;,
+        &quot;target&quot;: &quot;add_to_cart assignment&quot;
+      }
+    }
+  ],
+  &quot;result&quot;: &quot;explained&quot;,
+  &quot;skeleton&quot;: {
+    &quot;actions&quot;: [
+      {
+        &quot;ensures_text&quot;: [],
+        &quot;name&quot;: &quot;add_to_cart&quot;,
+        &quot;params&quot;: [
+          {
+            &quot;hi&quot;: 1,
+            &quot;lo&quot;: 0,
+            &quot;name&quot;: &quot;u&quot;,
+            &quot;type&quot;: &quot;UserId&quot;
+          },
+          {
+            &quot;hi&quot;: 1,
+            &quot;lo&quot;: 0,
+            &quot;name&quot;: &quot;i&quot;,
+            &quot;type&quot;: &quot;ItemId&quot;
+          }
+        ],
+        &quot;requirement&quot;: null,
+        &quot;requires_text&quot;: [
+          &quot;requires cart[u] == none&quot;
+        ],
+        &quot;writes&quot;: [
+          &quot;cart&quot;
+        ]
+      },
+      {
+        &quot;ensures_text&quot;: [],
+        &quot;name&quot;: &quot;remove_from_cart&quot;,
+        &quot;params&quot;: [
+          {
+            &quot;hi&quot;: 1,
+            &quot;lo&quot;: 0,
+            &quot;name&quot;: &quot;u&quot;,
+            &quot;type&quot;: &quot;UserId&quot;
+          }
+        ],
+        &quot;requirement&quot;: null,
+        &quot;requires_text&quot;: [
+          &quot;requires cart[u] != none&quot;
+        ],
+        &quot;writes&quot;: [
+          &quot;cart&quot;
+        ]
+      },
+      {
+        &quot;ensures_text&quot;: [
+          &quot;ensures stock[i] == old(stock[i]) - 1&quot;
+        ],
+        &quot;name&quot;: &quot;checkout&quot;,
+        &quot;params&quot;: [
+          {
+            &quot;hi&quot;: 1,
+            &quot;lo&quot;: 0,
+            &quot;name&quot;: &quot;u&quot;,
+            &quot;type&quot;: &quot;UserId&quot;
+          }
+        ],
+        &quot;requirement&quot;: null,
+        &quot;requires_text&quot;: [
+          &quot;requires cart[u] is some(i)&quot;,
+          &quot;requires stock[i] &gt; 0&quot;
+        ],
+        &quot;writes&quot;: [
+          &quot;cart&quot;,
+          &quot;stock&quot;
+        ]
+      }
+    ],
+    &quot;auto_checks&quot;: [
+      {
+        &quot;kind&quot;: &quot;type_bound&quot;,
+        &quot;name&quot;: &quot;_bounds_stock&quot;,
+        &quot;requirement&quot;: null,
+        &quot;target&quot;: &quot;stock&quot;
+      },
+      {
+        &quot;kind&quot;: &quot;type_bound&quot;,
+        &quot;name&quot;: &quot;_bounds_cart&quot;,
+        &quot;requirement&quot;: null,
+        &quot;target&quot;: &quot;cart&quot;
+      }
+    ],
+    &quot;properties&quot;: [
+      {
+        &quot;body_text&quot;: &quot;reachable SoldOut {&quot;,
+        &quot;kind&quot;: &quot;reachable&quot;,
+        &quot;name&quot;: &quot;SoldOut&quot;,
+        &quot;requirement&quot;: null
+      }
+    ],
+    &quot;state&quot;: {
+      &quot;cart&quot;: [
+        &quot;map&quot;,
+        [
+          &quot;domain&quot;,
+          0,
+          1
+        ],
+        [
+          &quot;option&quot;,
+          [
+            &quot;domain&quot;,
+            0,
+            1
+          ]
+        ]
+      ],
+      &quot;stock&quot;: [
+        &quot;map&quot;,
+        [
+          &quot;domain&quot;,
+          0,
+          1
+        ],
+        [
+          &quot;domain&quot;,
+          0,
+          3
+        ]
+      ]
+    }
+  },
+  &quot;spec&quot;: &quot;ShoppingCart&quot;,
+  &quot;witnesses&quot;: [
+    {
+      &quot;expected_states&quot;: [
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: null,
+            &quot;1&quot;: 0
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 1
+          }
+        },
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: null,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 0,
+            &quot;1&quot;: 1
+          }
+        },
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 0,
+            &quot;1&quot;: 1
+          }
+        },
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: null,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 0,
+            &quot;1&quot;: 0
+          }
+        }
+      ],
+      &quot;initial_state&quot;: {
+        &quot;cart&quot;: {
+          &quot;0&quot;: null,
+          &quot;1&quot;: null
+        },
+        &quot;stock&quot;: {
+          &quot;0&quot;: 1,
+          &quot;1&quot;: 1
+        }
+      },
+      &quot;kind&quot;: &quot;reachable&quot;,
+      &quot;name&quot;: &quot;reach_SoldOut&quot;,
+      &quot;narration&quot;: [
+        &quot;1. add_to_cart(u=1, i=0)&quot;,
+        &quot;2. checkout(u=1)&quot;,
+        &quot;3. add_to_cart(u=0, i=1)&quot;,
+        &quot;4. checkout(u=0)&quot;
+      ],
+      &quot;requirement&quot;: null,
+      &quot;steps&quot;: [
+        {
+          &quot;action&quot;: &quot;add_to_cart&quot;,
+          &quot;params&quot;: {
+            &quot;i&quot;: 0,
+            &quot;u&quot;: 1
+          }
+        },
+        {
+          &quot;action&quot;: &quot;checkout&quot;,
+          &quot;params&quot;: {
+            &quot;u&quot;: 1
+          }
+        },
+        {
+          &quot;action&quot;: &quot;add_to_cart&quot;,
+          &quot;params&quot;: {
+            &quot;i&quot;: 1,
+            &quot;u&quot;: 0
+          }
+        },
+        {
+          &quot;action&quot;: &quot;checkout&quot;,
+          &quot;params&quot;: {
+            &quot;u&quot;: 0
+          }
+        }
+      ],
+      &quot;target&quot;: &quot;SoldOut&quot;
+    },
+    {
+      &quot;expected_states&quot;: [
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: 0,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 1
+          }
+        }
+      ],
+      &quot;initial_state&quot;: {
+        &quot;cart&quot;: {
+          &quot;0&quot;: null,
+          &quot;1&quot;: null
+        },
+        &quot;stock&quot;: {
+          &quot;0&quot;: 1,
+          &quot;1&quot;: 1
+        }
+      },
+      &quot;kind&quot;: &quot;action_coverage&quot;,
+      &quot;name&quot;: &quot;cover_add_to_cart&quot;,
+      &quot;narration&quot;: [
+        &quot;1. add_to_cart(u=0, i=0)&quot;
+      ],
+      &quot;requirement&quot;: null,
+      &quot;steps&quot;: [
+        {
+          &quot;action&quot;: &quot;add_to_cart&quot;,
+          &quot;params&quot;: {
+            &quot;i&quot;: 0,
+            &quot;u&quot;: 0
+          }
+        }
+      ],
+      &quot;target&quot;: &quot;add_to_cart&quot;
+    },
+    {
+      &quot;expected_states&quot;: [
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: 0,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 1
+          }
+        },
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: null,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 1
+          }
+        }
+      ],
+      &quot;initial_state&quot;: {
+        &quot;cart&quot;: {
+          &quot;0&quot;: null,
+          &quot;1&quot;: null
+        },
+        &quot;stock&quot;: {
+          &quot;0&quot;: 1,
+          &quot;1&quot;: 1
+        }
+      },
+      &quot;kind&quot;: &quot;action_coverage&quot;,
+      &quot;name&quot;: &quot;cover_remove_from_cart&quot;,
+      &quot;narration&quot;: [
+        &quot;1. add_to_cart(u=0, i=0)&quot;,
+        &quot;2. remove_from_cart(u=0)&quot;
+      ],
+      &quot;requirement&quot;: null,
+      &quot;steps&quot;: [
+        {
+          &quot;action&quot;: &quot;add_to_cart&quot;,
+          &quot;params&quot;: {
+            &quot;i&quot;: 0,
+            &quot;u&quot;: 0
+          }
+        },
+        {
+          &quot;action&quot;: &quot;remove_from_cart&quot;,
+          &quot;params&quot;: {
+            &quot;u&quot;: 0
+          }
+        }
+      ],
+      &quot;target&quot;: &quot;remove_from_cart&quot;
+    },
+    {
+      &quot;expected_states&quot;: [
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 1
+          }
+        },
+        {
+          &quot;cart&quot;: {
+            &quot;0&quot;: null,
+            &quot;1&quot;: null
+          },
+          &quot;stock&quot;: {
+            &quot;0&quot;: 1,
+            &quot;1&quot;: 0
+          }
+        }
+      ],
+      &quot;initial_state&quot;: {
+        &quot;cart&quot;: {
+          &quot;0&quot;: null,
+          &quot;1&quot;: null
+        },
+        &quot;stock&quot;: {
+          &quot;0&quot;: 1,
+          &quot;1&quot;: 1
+        }
+      },
+      &quot;kind&quot;: &quot;action_coverage&quot;,
+      &quot;name&quot;: &quot;cover_checkout&quot;,
+      &quot;narration&quot;: [
+        &quot;1. add_to_cart(u=0, i=1)&quot;,
+        &quot;2. checkout(u=0)&quot;
+      ],
+      &quot;requirement&quot;: null,
+      &quot;steps&quot;: [
+        {
+          &quot;action&quot;: &quot;add_to_cart&quot;,
+          &quot;params&quot;: {
+            &quot;i&quot;: 1,
+            &quot;u&quot;: 0
+          }
+        },
+        {
+          &quot;action&quot;: &quot;checkout&quot;,
+          &quot;params&quot;: {
+            &quot;u&quot;: 0
+          }
+        }
+      ],
+      &quot;target&quot;: &quot;checkout&quot;
+    }
+  ]
+}</pre></div></div></details>
+        <details><summary>verify JSON</summary><div><div class="code-block"><pre>{
+  &quot;action_coverage&quot;: {
+    &quot;add_to_cart&quot;: true,
+    &quot;checkout&quot;: true,
+    &quot;remove_from_cart&quot;: true
+  },
+  &quot;checked_to_depth&quot;: 4,
+  &quot;completeness&quot;: &quot;bounded&quot;,
+  &quot;cost&quot;: {
+    &quot;elapsed_s&quot;: 0.160357
+  },
+  &quot;deadlock&quot;: {
+    &quot;found&quot;: false
+  },
+  &quot;depth&quot;: 4,
+  &quot;fsl&quot;: &quot;1.0&quot;,
+  &quot;hint&quot;: &quot;state space not saturated at depth 4; a violation could exist beyond depth 4; consider a larger --depth or the induction engine&quot;,
+  &quot;invariants_checked&quot;: [
+    &quot;_bounds_stock&quot;,
+    &quot;_bounds_cart&quot;
+  ],
+  &quot;note&quot;: &quot;bounded verification: no violation within depth 4&quot;,
+  &quot;reachables&quot;: {
+    &quot;SoldOut&quot;: {
+      &quot;witness&quot;: [
+        {
+          &quot;state&quot;: {
+            &quot;cart&quot;: {
+              &quot;0&quot;: null,
+              &quot;1&quot;: null
+            },
+            &quot;stock&quot;: {
+              &quot;0&quot;: 1,
+              &quot;1&quot;: 1
+            }
+          },
+          &quot;step&quot;: 0
+        },
+        {
+          &quot;action&quot;: {
+            &quot;loc&quot;: {
+              &quot;column&quot;: 3,
+              &quot;line&quot;: 16
+            },
+            &quot;name&quot;: &quot;add_to_cart&quot;,
+            &quot;params&quot;: {
+              &quot;i&quot;: 1,
+              &quot;u&quot;: 1
+            }
+          },
+          &quot;changes&quot;: {
+            &quot;cart[1]&quot;: {
+              &quot;from&quot;: null,
+              &quot;to&quot;: 1
+            }
+          },
+          &quot;state&quot;: {
+            &quot;cart&quot;: {
+              &quot;0&quot;: null,
+              &quot;1&quot;: 1
+            },
+            &quot;stock&quot;: {
+              &quot;0&quot;: 1,
+              &quot;1&quot;: 1
+            }
+          },
+          &quot;step&quot;: 1
+        },
+        {
+          &quot;action&quot;: {
+            &quot;loc&quot;: {
+              &quot;column&quot;: 3,
+              &quot;line&quot;: 26
+            },
+            &quot;name&quot;: &quot;checkout&quot;,
+            &quot;params&quot;: {
+              &quot;u&quot;: 1
+            }
+          },
+          &quot;changes&quot;: {
+            &quot;cart[1]&quot;: {
+              &quot;from&quot;: 1,
+              &quot;to&quot;: null
+            },
+            &quot;stock[1]&quot;: {
+              &quot;from&quot;: 1,
+              &quot;to&quot;: 0
+            }
+          },
+          &quot;state&quot;: {
+            &quot;cart&quot;: {
+              &quot;0&quot;: null,
+              &quot;1&quot;: null
+            },
+            &quot;stock&quot;: {
+              &quot;0&quot;: 1,
+              &quot;1&quot;: 0
+            }
+          },
+          &quot;step&quot;: 2
+        },
+        {
+          &quot;action&quot;: {
+            &quot;loc&quot;: {
+              &quot;column&quot;: 3,
+              &quot;line&quot;: 16
+            },
+            &quot;name&quot;: &quot;add_to_cart&quot;,
+            &quot;params&quot;: {
+              &quot;i&quot;: 0,
+              &quot;u&quot;: 1
+            }
+          },
+          &quot;changes&quot;: {
+            &quot;cart[1]&quot;: {
+              &quot;from&quot;: null,
+              &quot;to&quot;: 0
+            }
+          },
+          &quot;state&quot;: {
+            &quot;cart&quot;: {
+              &quot;0&quot;: null,
+              &quot;1&quot;: 0
+            },
+            &quot;stock&quot;: {
+              &quot;0&quot;: 1,
+              &quot;1&quot;: 0
+            }
+          },
+          &quot;step&quot;: 3
+        },
+        {
+          &quot;action&quot;: {
+            &quot;loc&quot;: {
+              &quot;column&quot;: 3,
+              &quot;line&quot;: 26
+            },
+            &quot;name&quot;: &quot;checkout&quot;,
+            &quot;params&quot;: {
+              &quot;u&quot;: 1
+            }
+          },
+          &quot;changes&quot;: {
+            &quot;cart[1]&quot;: {
+              &quot;from&quot;: 0,
+              &quot;to&quot;: null
+            },
+            &quot;stock[0]&quot;: {
+              &quot;from&quot;: 1,
+              &quot;to&quot;: 0
+            }
+          },
+          &quot;state&quot;: {
+            &quot;cart&quot;: {
+              &quot;0&quot;: null,
+              &quot;1&quot;: null
+            },
+            &quot;stock&quot;: {
+              &quot;0&quot;: 0,
+              &quot;1&quot;: 0
+            }
+          },
+          &quot;step&quot;: 4
+        }
+      ],
+      &quot;witnessed_at_step&quot;: 4
+    }
+  },
+  &quot;result&quot;: &quot;verified&quot;,
+  &quot;spec&quot;: &quot;ShoppingCart&quot;,
+  &quot;transitions_checked&quot;: [],
+  &quot;warnings&quot;: []
+}</pre></div></div></details>
+      </section>
+
+    </main>
+  </div>
+</body>
+</html>

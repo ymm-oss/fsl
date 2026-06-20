@@ -101,6 +101,7 @@ fsl/
 │   ├── bmc.py              #   verify / prove (k-induction) / scenarios / trace generation
 │   ├── runtime.py          #   Monitor concrete interpreter (no Z3 required)
 │   ├── testgen.py          #   pytest conformance-test scaffold generation
+│   ├── html_report.py      #   self-contained HTML review report rendering
 │   └── cli.py              #   CLI and JSON output / error envelope
 └── tests/                  # pytest (v0-compat / v1 / induction / scenarios / runtime /
                             #         dialects / NFR / independent-oracle cross-checking, trace soundness)
@@ -224,6 +225,7 @@ fslc verify specs/cart_v1.fsl --vacuity error   # detect vacuous properties (unr
 fslc verify specs/cart_v1.fsl --strict-tags     # match untagged declarations (fabrication candidates) and unreferenced requirements (omission candidates)
 fslc mutate specs/cart_v1.fsl                    # spec mutation: measure how much the properties constrain behavior
 fslc explain specs/cart_v1.fsl                   # skeleton enumeration + counterfactuals (what would happen without this rule)
+fslc html specs/cart_v1.fsl -o cart_report.html  # self-contained HTML report for team review
 fslc typestate specs/order_workflow.fsl --ts    # state machine → applicability check for phantom types + TS scaffold
 # (in the requirements dialect, the forbidden block can also write "operation sequences that should be rejected")
 

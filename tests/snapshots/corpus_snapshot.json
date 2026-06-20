@@ -1,4 +1,106 @@
 {
+  "examples/agentic_rag/agentic_rag_business.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/agentic_rag_design.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/agentic_rag/agentic_rag_requirements.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/agentic_rag/mutation_slices/answer_safety_slice.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/mutation_slices/tool_approval_slice.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/negative/guard_bypass_design.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/agentic_rag/negative/guard_bypass_refines_requirements.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/agentic_rag/negative/liveness_drop_design.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/agentic_rag/negative/liveness_drop_refines_requirements.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/agentic_rag/negative/liveness_requirements.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/agentic_rag/negative/tool_approval_bypass_design.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/agentic_rag/negative/tool_approval_bypass_refines_requirements.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
   "examples/consulting/asis_expense.fsl": {
     "check": {
       "result": "ok",
@@ -776,6 +878,36 @@
       "implements": "refines",
       "result": "ok",
       "warnings": []
+    }
+  },
+  "examples/multi_agent_system/multi_agent_business.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/multi_agent_system/multi_agent_design.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
+    }
+  },
+  "examples/multi_agent_system/multi_agent_requirements.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/multi_agent_system/multi_agent_requirements_refines_business.fsl": {
+    "check": {
+      "kind": "semantics",
+      "result": "error"
     }
   },
   "examples/nfr/sla_worker.fsl": {
