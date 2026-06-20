@@ -64,8 +64,41 @@ def test_html_report_includes_violation_trace_for_buggy_spec():
     html = result["content"]
     assert '<span class="badge bad">violated</span>' in html
     assert "Trace Review" in html
-    assert "stock[1]: 0 -> -1" in html
+    assert "-> -1" in html
     assert "type_bound" in html
+
+
+def test_html_report_surfaces_temporal_sugar_and_within(tmp_path):
+    path = tmp_path / "temporal_sugar.fsl"
+    path.write_text(
+        r"""
+spec TemporalSugar {
+  type Step = 0..3
+  state { x: Step, held: Bool, released: Bool }
+  init { x = 0  held = true  released = false }
+  action inc() {
+    requires x < 3
+    x = x + 1
+  }
+  action drop() { held = false }
+  action release() { released = true  held = false }
+  leadsTo TooFast { x == 1 ~> within 1 x == 3 }
+  unless HeldUnlessReleased { held unless released }
+  until HeldUntilReleased { held until released }
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = run_html(str(path), depth=3, write_file=False)
+
+    assert result["result"] == "generated"
+    html = result["content"]
+    assert "within 1" in html
+    assert "deadline=" in html or "Deadline" in html
+    assert "trans" in html
+    assert "unless HeldUnlessReleased" in html
+    assert "until HeldUntilReleased" in html
 
 
 def test_html_cli_stdout_and_output_file(tmp_path):

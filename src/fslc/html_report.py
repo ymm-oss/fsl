@@ -505,6 +505,8 @@ def _status_section(verification: dict) -> str:
         rows.append(("Implements", _json_code(verification["implements"])))
     if verification.get("deadlock"):
         rows.append(("Deadlock", _json_code(verification["deadlock"])))
+    if verification.get("violation_kind"):
+        rows.append(("Violation", _violation_detail(verification)))
     warning_html = _warnings(verification.get("warnings") or [])
     return f"""
       <section class="section" id="status">
@@ -542,6 +544,18 @@ def _warnings(warnings) -> str:
         </table>
       </div>
 """
+
+
+def _violation_detail(verification: dict) -> str:
+    parts = []
+    for key in ("violation_kind", "invariant", "pending_since", "deadline", "within"):
+        if verification.get(key) is not None:
+            parts.append(f"{key}={verification[key]}")
+    if not parts:
+        return ""
+    return '<div class="chips">' + "".join(
+        f'<span class="chip">{escape(str(part))}</span>' for part in parts
+    ) + "</div>"
 
 
 def _model_section(state: dict, actions: list) -> str:
@@ -615,10 +629,13 @@ def _actions_section(actions: list, coverage: dict) -> str:
 def _properties_section(properties: list, auto_checks: list) -> str:
     prop_rows = []
     for prop in properties:
+        within = prop.get("within")
+        within_html = f'<span class="chip fair">within {escape(str(within))}</span>' if within is not None else '<span class="chip">none</span>'
         prop_rows.append(
             "<tr>"
             f"<td>{escape(str(prop.get('kind', '')))}</td>"
             f"<td><code>{escape(str(prop.get('name', '')))}</code></td>"
+            f"<td>{within_html}</td>"
             f"<td>{escape(str(prop.get('body_text', '')))}</td>"
             f"<td>{_requirement(prop.get('requirement'))}</td>"
             "</tr>"
@@ -644,8 +661,8 @@ def _properties_section(properties: list, auto_checks: list) -> str:
         <div class="grid-2">
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Kind</th><th>Name</th><th>Body</th><th>Requirement</th></tr></thead>
-              <tbody>{''.join(prop_rows) or '<tr><td colspan="4">No user properties.</td></tr>'}</tbody>
+              <thead><tr><th>Kind</th><th>Name</th><th>Deadline</th><th>Body</th><th>Requirement</th></tr></thead>
+              <tbody>{''.join(prop_rows) or '<tr><td colspan="5">No user properties.</td></tr>'}</tbody>
             </table>
           </div>
           <div class="panel table-wrap">

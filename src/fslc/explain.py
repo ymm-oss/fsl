@@ -85,10 +85,13 @@ def _property_source(source_lines, loc, kind, label):
     local = label.split(".")[-1]
     prefixes = {
         "invariant": ("invariant ",),
+        "trans": ("trans ", "unless ", "until "),
         "reachable": ("reachable ", "goal "),
-        "leadsTo": ("leadsTo ", "policy "),
+        "leadsTo": ("leadsTo ", "policy ", "until "),
     }.get(kind, ())
-    if text.startswith(prefixes) and (local in text or kind == "leadsTo"):
+    if text.startswith(prefixes) and (
+        local in text or kind == "leadsTo" or text.startswith(("unless ", "until "))
+    ):
         return text
     return None
 
@@ -167,7 +170,7 @@ def _action_skeleton(action, spec, source_lines):
 
 def _property_skeleton(kind, item, spec, source_lines):
     label = _public_name(item["name"], spec)
-    return {
+    out = {
         "kind": kind,
         "name": label,
         "body_text": (
@@ -175,6 +178,9 @@ def _property_skeleton(kind, item, spec, source_lines):
         ),
         "requirement": _requirement(item),
     }
+    if kind == "leadsTo" and item.get("within") is not None:
+        out["within"] = item["within"]
+    return out
 
 
 def _auto_checks(spec, source_lines):
@@ -206,6 +212,8 @@ def _skeleton(spec, source_lines):
     properties = []
     properties.extend(_property_skeleton("invariant", inv, spec, source_lines)
                       for inv in spec.get("user_invariants", []))
+    properties.extend(_property_skeleton("trans", tr, spec, source_lines)
+                      for tr in spec.get("transitions", []))
     properties.extend(_property_skeleton("leadsTo", lt, spec, source_lines)
                       for lt in spec.get("leadstos", []))
     properties.extend(_property_skeleton("reachable", reach, spec, source_lines)
@@ -584,7 +592,8 @@ def render_readable(explained: dict, spec: dict, display_names: dict) -> str:
     for prop in skeleton.get("properties") or []:
         req = _requirement_text(prop.get("requirement"))
         req_text = f" {req}" if req else ""
-        prop_items.append(f"  - {prop['kind']} {prop['name']}{req_text}")
+        within = f" [within {prop['within']}]" if prop.get("within") is not None else ""
+        prop_items.append(f"  - {prop['kind']} {prop['name']}{within}{req_text}")
         if prop.get("body_text"):
             prop_items.append(f"    body: {prop['body_text']}")
     section("Properties", prop_items)

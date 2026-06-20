@@ -494,8 +494,8 @@ details > div { padding: 0 12px 12px; }
         <div class="grid-2">
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Kind</th><th>Name</th><th>Body</th><th>Requirement</th></tr></thead>
-              <tbody><tr><td>reachable</td><td><code>SoldOut</code></td><td>reachable SoldOut {</td><td><span class="chip">none</span></td></tr></tbody>
+              <thead><tr><th>Kind</th><th>Name</th><th>Deadline</th><th>Body</th><th>Requirement</th></tr></thead>
+              <tbody><tr><td>reachable</td><td><code>SoldOut</code></td><td><span class="chip">none</span></td><td>reachable SoldOut {</td><td><span class="chip">none</span></td></tr></tbody>
             </table>
           </div>
           <div class="panel table-wrap">
@@ -524,16 +524,16 @@ details > div { padding: 0 12px 12px; }
     &quot;0&quot;: 1,
     &quot;1&quot;: 1
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">1</div><div class="step-body"><strong>add_to_cart</strong> <code>u=1, i=1</code><div class="changes"><div class="change">cart[1]: None -> 1</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">1</div><div class="step-body"><strong>add_to_cart</strong> <code>u=0, i=1</code><div class="changes"><div class="change">cart[0]: None -> 1</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
-    &quot;0&quot;: null,
-    &quot;1&quot;: 1
+    &quot;0&quot;: 1,
+    &quot;1&quot;: null
   },
   &quot;stock&quot;: {
     &quot;0&quot;: 1,
     &quot;1&quot;: 1
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>checkout</strong> <code>u=1</code><div class="changes"><div class="change">stock[1]: 1 -> 0</div><div class="change">cart[1]: 1 -> None</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">2</div><div class="step-body"><strong>checkout</strong> <code>u=0</code><div class="changes"><div class="change">cart[0]: 1 -> None</div><div class="change">stock[1]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
     &quot;0&quot;: null,
     &quot;1&quot;: null
@@ -551,7 +551,7 @@ details > div { padding: 0 12px 12px; }
     &quot;0&quot;: 1,
     &quot;1&quot;: 0
   }
-}</pre></div></div></details></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>checkout</strong> <code>u=1</code><div class="changes"><div class="change">stock[0]: 1 -> 0</div><div class="change">cart[1]: 0 -> None</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
+}</pre></div></div></details></div></div><div class="step"><div class="step-num">4</div><div class="step-body"><strong>checkout</strong> <code>u=1</code><div class="changes"><div class="change">cart[1]: 0 -> None</div><div class="change">stock[0]: 1 -> 0</div></div><details><summary>State</summary><div><div class="code-block"><pre>{
   &quot;cart&quot;: {
     &quot;0&quot;: null,
     &quot;1&quot;: null
@@ -1153,7 +1153,7 @@ details > div { padding: 0 12px 12px; }
   &quot;checked_to_depth&quot;: 4,
   &quot;completeness&quot;: &quot;bounded&quot;,
   &quot;cost&quot;: {
-    &quot;elapsed_s&quot;: 0.187999
+    &quot;elapsed_s&quot;: 0.156529
   },
   &quot;deadlock&quot;: {
     &quot;found&quot;: false
@@ -1191,19 +1191,19 @@ details > div { padding: 0 12px 12px; }
             &quot;name&quot;: &quot;add_to_cart&quot;,
             &quot;params&quot;: {
               &quot;i&quot;: 1,
-              &quot;u&quot;: 1
+              &quot;u&quot;: 0
             }
           },
           &quot;changes&quot;: {
-            &quot;cart[1]&quot;: {
+            &quot;cart[0]&quot;: {
               &quot;from&quot;: null,
               &quot;to&quot;: 1
             }
           },
           &quot;state&quot;: {
             &quot;cart&quot;: {
-              &quot;0&quot;: null,
-              &quot;1&quot;: 1
+              &quot;0&quot;: 1,
+              &quot;1&quot;: null
             },
             &quot;stock&quot;: {
               &quot;0&quot;: 1,
@@ -1220,11 +1220,11 @@ details > div { padding: 0 12px 12px; }
             },
             &quot;name&quot;: &quot;checkout&quot;,
             &quot;params&quot;: {
-              &quot;u&quot;: 1
+              &quot;u&quot;: 0
             }
           },
           &quot;changes&quot;: {
-            &quot;cart[1]&quot;: {
+            &quot;cart[0]&quot;: {
               &quot;from&quot;: 1,
               &quot;to&quot;: null
             },
