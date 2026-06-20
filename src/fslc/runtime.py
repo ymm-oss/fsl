@@ -25,6 +25,7 @@ from .values import (
     eval_field,
     eval_index,
     eval_is,
+    eval_one,
     eval_quant,
     eval_sum,
     logical_map_access,
@@ -511,6 +512,8 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         _err(f"unknown operator '{op}'")
     if tag in ("forall", "exists"):
         return _eval_quant(e, state, binds, spec, old_state, in_ensures)
+    if tag in ("unique", "exactly_one"):
+        return _eval_one(e, state, binds, spec, old_state, in_ensures)
     if tag == "count":
         return _eval_count(e, state, binds, spec, old_state, in_ensures)
     if tag == "sum":
@@ -684,6 +687,9 @@ class _ConcDomain:
     def and_(self, x, y):
         return x and y
 
+    def lt(self, x, y):
+        return x < y
+
     def implies(self, x, y):
         return (not x) or y
 
@@ -705,6 +711,10 @@ _CONC = _ConcDomain()
 
 def _eval_quant(e, state, binds, spec, old_state, in_ensures):
     return eval_quant(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
+
+
+def _eval_one(e, state, binds, spec, old_state, in_ensures):
+    return eval_one(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
 
 
 def _eval_count(e, state, binds, spec, old_state, in_ensures):

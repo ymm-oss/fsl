@@ -409,6 +409,11 @@ def binder_range(binder, consts, types_meta):
         _, v, lo, hi = binder
         lo_i, hi_i = eval_const(lo, consts, {}), eval_const(hi, consts, {})
         return v, lo_i, hi_i, None
+    if binder[0] == "binder_collection":
+        _err(
+            "collection binders are only supported in expressions; use a typed or range binder here",
+            kind="type",
+        )
     _, v, ty_name, where = binder
     if ty_name not in types_meta:
         _err(f"unknown type '{ty_name}' in binder", kind="type")
@@ -956,6 +961,15 @@ def _with_meta(entry, meta):
     return entry
 
 
+def _unless_trans_expr(p, q):
+    return (
+        "bin",
+        "=>",
+        ("bin", "and", ("old", p), ("not", ("old", q))),
+        ("bin", "or", p, q),
+    )
+
+
 def build_spec(tree, display_names=None, semantic_check=True):
     _, name, items = tree
     dialect_display_names = {}
@@ -1040,6 +1054,11 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 action["generated"] = generated
             actions.append(action)
         elif tag == "leadsto":
+            within = it[8] if len(it) > 8 else None
+            if within is not None:
+                within = eval_const(within, consts, types_meta)
+                if within < 0:
+                    _err("leadsTo within bound must be non-negative", kind="type", loc=it[5])
             leadstos.append(_with_meta({
                 "name": it[1],
                 "binders": it[2],
@@ -1047,7 +1066,29 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "Q": it[4],
                 "loc": it[5],
                 "decreases": it[7] if len(it) > 7 else None,
+                "within": within,
             }, it[6] if len(it) > 6 else None))
+        elif tag == "until":
+            transitions.append(_with_meta({
+                "name": f"{it[1]}_until_safety",
+                "expr": _unless_trans_expr(it[2], it[3]),
+                "loc": it[4],
+            }, it[5] if len(it) > 5 else None))
+            leadstos.append(_with_meta({
+                "name": it[1],
+                "binders": [],
+                "P": it[2],
+                "Q": it[3],
+                "loc": it[4],
+                "decreases": None,
+                "within": None,
+            }, it[5] if len(it) > 5 else None))
+        elif tag == "unless":
+            transitions.append(_with_meta({
+                "name": it[1],
+                "expr": _unless_trans_expr(it[2], it[3]),
+                "loc": it[4],
+            }, it[5] if len(it) > 5 else None))
         elif tag == "invariant":
             invariants.append(_with_meta({
                 "name": it[1],

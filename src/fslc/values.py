@@ -103,18 +103,66 @@ def eval_sum(e, state, binds, spec, old_state, in_ensures, dom, ev):
     return acc
 
 
+def iter_binder_terms(binder, state, binds, spec, old_state, in_ensures, dom, ev):
+    if binder[0] == "binder_collection":
+        _, v, collection, where = binder
+        value = ev(collection, state, binds, spec, old_state, in_ensures)
+        if isinstance(value, tuple) and value[0] == "set_val":
+            m, elem_ty = value[1], value[2]
+            lo, hi = domain_range(elem_ty, spec["types"])
+            for i in range(lo, hi + 1):
+                b2 = dict(binds)
+                member = dom.int_lit(i)
+                b2[v] = i
+                w = dom.select(m, member)
+                if where is not None:
+                    w = dom.and_(w, ev(where, state, b2, spec, old_state, in_ensures))
+                yield w, b2
+            return
+        parts = _seq_val_parts(value)
+        if parts is not None:
+            data, length, _elem_ty, cap = parts
+            for i in range(cap):
+                b2 = dict(binds)
+                idx = dom.int_lit(i)
+                b2[v] = dom.select(data, idx)
+                w = dom.lt(idx, length)
+                if where is not None:
+                    w = dom.and_(w, ev(where, state, b2, spec, old_state, in_ensures))
+                yield w, b2
+            return
+        _err("collection binder expects a Set or Seq expression", kind="type")
+
+    v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
+    for i in range(lo, hi + 1):
+        b2 = dict(binds)
+        b2[v] = i
+        w = ev(where, state, b2, spec, old_state, in_ensures) if where is not None else None
+        yield w, b2
+
+
 def eval_quant(e, state, binds, spec, old_state, in_ensures, dom, ev):
     qop, binder, body = e[0], e[1], e[2]
-    v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
 
     def terms():
-        for i in range(lo, hi + 1):
-            b2 = dict(binds)
-            b2[v] = i
-            w = ev(where, state, b2, spec, old_state, in_ensures) if where is not None else None
+        for w, b2 in iter_binder_terms(
+            binder, state, binds, spec, old_state, in_ensures, dom, ev
+        ):
             yield w, (lambda b2=b2: ev(body, state, b2, spec, old_state, in_ensures))
 
     return dom.quantify(qop, terms())
+
+
+def eval_one(e, state, binds, spec, old_state, in_ensures, dom, ev):
+    tag, binder = e[0], e[1]
+    acc = dom.int_lit(0)
+    for w, _b2 in iter_binder_terms(
+        binder, state, binds, spec, old_state, in_ensures, dom, ev
+    ):
+        acc = acc + dom.select_int(w if w is not None else dom.true_(), lambda: dom.int_lit(1))
+    if tag == "unique":
+        return acc <= dom.int_lit(1)
+    return acc == dom.int_lit(1)
 
 
 def option_logical_eq(a, b, dom):

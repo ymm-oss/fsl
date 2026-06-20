@@ -35,8 +35,10 @@ from .values import (
     eval_field,
     eval_index,
     eval_is,
+    eval_one,
     eval_quant,
     eval_sum,
+    iter_binder_terms,
     logical_map_access,
     option_logical_eq,
     option_none_cmp,
@@ -70,6 +72,9 @@ class _SymDomain:
 
     def and_(self, x, y):
         return z3.And(x, y)
+
+    def lt(self, x, y):
+        return x < y
 
     def implies(self, x, y):
         return z3.Implies(x, y)
@@ -651,6 +656,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         _err(f"unknown operator '{op}'")
     if tag in ("forall", "exists"):
         return _eval_quant(e, state, binds, spec, old_state, in_ensures)
+    if tag in ("unique", "exactly_one"):
+        return _eval_one(e, state, binds, spec, old_state, in_ensures)
     if tag == "count":
         return _eval_count(e, state, binds, spec, old_state, in_ensures)
     if tag == "sum":
@@ -921,6 +928,10 @@ def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
 
 def _eval_quant(e, state, binds, spec, old_state, in_ensures):
     return eval_quant(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
+
+
+def _eval_one(e, state, binds, spec, old_state, in_ensures):
+    return eval_one(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
 
 
 def _eval_count(e, state, binds, spec, old_state, in_ensures):
@@ -1632,6 +1643,10 @@ def _binder_static_type(binder, spec):
         ty_name = binder[2]
         if ty_name in spec["types"]:
             return spec["types"][ty_name]["ty"]
+    if binder[0] == "binder_collection":
+        coll_ty = _expr_static_type(binder[2], spec, {})
+        if coll_ty and coll_ty[0] in ("set", "seq"):
+            return coll_ty[1]
     return ("int",)
 
 
@@ -1724,7 +1739,7 @@ def _expr_static_type(e, spec, env):
         a_ty = _expr_static_type(e[2], spec, env)
         b_ty = _expr_static_type(e[3], spec, env)
         return _merge_ite_static_types(a_ty, b_ty)
-    if tag in ("not", "is", "forall", "exists"):
+    if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
         return ("bool",)
     if tag in ("count", "sum", "min", "max", "abs"):
         return ("int",)
@@ -1750,7 +1765,23 @@ def _collect_pattern_binding_types(e, spec, env, out):
             where = binder[3]
             if where is not None:
                 _collect_pattern_binding_types(where, spec, env, out)
+        elif binder[0] == "binder_collection":
+            env = {**env, binder[1]: _binder_static_type(binder, spec)}
+            where = binder[3]
+            if where is not None:
+                _collect_pattern_binding_types(where, spec, env, out)
         _collect_pattern_binding_types(body, spec, env, out)
+        return
+    if tag in ("unique", "exactly_one"):
+        binder = e[1]
+        if binder[0] == "binder_collection":
+            out[binder[1]] = _binder_static_type(binder, spec)
+            if binder[3] is not None:
+                _collect_pattern_binding_types(binder[3], spec, env, out)
+        elif binder[0] == "binder_typed":
+            out[binder[1]] = _binder_static_type(binder, spec)
+            if binder[3] is not None:
+                _collect_pattern_binding_types(binder[3], spec, env, out)
         return
     for child in e[1:]:
         if isinstance(child, tuple):
@@ -1772,20 +1803,19 @@ def violating_bindings(model, inv_expr, state, spec):
     def search(e, binds, env):
         if e[0] in ("forall", "exists"):
             binder, body = e[1], e[2]
-            v, lo, hi, where = binder_range(binder, spec["consts"], spec["types"])
+            v = binder[1]
             bty = _binder_static_type(binder, spec)
             env = {**env, v: bty}
             binding_types[v] = bty
             bad = []
-            for i in range(lo, hi + 1):
-                b2 = {**binds, v: i}
-                if where is not None:
-                    w = eval_expr(where, state, b2, spec)
-                    if z3.is_false(model.eval(w, model_completion=True)):
-                        continue
+            for w, b2 in iter_binder_terms(
+                binder, state, binds, spec, None, False, _SYM, eval_expr
+            ):
+                if w is not None and z3.is_false(model.eval(w, model_completion=True)):
+                    continue
                 inst = eval_expr(body, state, b2, spec)
                 if z3.is_false(model.eval(inst, model_completion=True)):
-                    bad.append(_public_model_bindings(model, {**binds, v: i}, spec, binding_types))
+                    bad.append(_public_model_bindings(model, b2, spec, binding_types))
             return bad if bad else None
         if e[0] == "bin" and e[1] == "and":
             left = search(e[2], binds, env)
@@ -2527,6 +2557,71 @@ def _check_leadsto_stutter_at_step(
         m, states, choices, instances, spec, leadsto, extra_binds, t, p_val, binding_types)
 
 
+def _check_single_leadsto_within(explored, spec, leadsto, extra_binds, binding_types):
+    within = leadsto.get("within")
+    if within is None:
+        return None
+
+    depth = explored["depth"]
+    states = explored["states"]
+    choices = explored["choices"]
+    instances = explored["instances"]
+    s = explored["solver"]
+    expr_cache = explored["expr_cache"]
+
+    candidates = []
+    meta = []
+    for p in range(depth + 1):
+        deadline = p + within
+        if deadline > depth:
+            continue
+        p_hold = _eval_at_state(leadsto["P"], states[p], extra_binds, spec, expr_cache)
+        not_q = [
+            z3.Not(_eval_at_state(leadsto["Q"], states[q], extra_binds, spec, expr_cache))
+            for q in range(p, deadline + 1)
+        ]
+        cond = z3.And(p_hold, z3.And(*not_q) if not_q else z3.BoolVal(True))
+        candidates.append(cond)
+        meta.append((p, deadline, cond))
+
+    if not candidates:
+        return None
+
+    s.push()
+    s.add(z3.Or(*candidates))
+    if s.check() != z3.sat:
+        s.pop()
+        return None
+
+    m = s.model()
+    p_val = deadline_val = None
+    for p, deadline, cond in meta:
+        if z3.is_true(m.eval(cond, model_completion=True)):
+            p_val, deadline_val = p, deadline
+            break
+    s.pop()
+    if p_val is None:
+        return None
+
+    return _attach_requirement({
+        "result": "violated",
+        "spec": spec["name"],
+        "violation_kind": "leadsTo",
+        "invariant": leadsto["name"],
+        "loc": leadsto.get("loc"),
+        "bindings": _display_leadsto_bindings(m, extra_binds, spec, binding_types),
+        "pending_since": p_val,
+        "deadline": deadline_val,
+        "within": within,
+        "stutter": False,
+        "trace": _build_trace(m, states, choices, instances, spec, deadline_val),
+        "hint": (
+            f"leadsTo deadline missed: P holds at step {p_val}, but Q does not hold "
+            f"within {within} step(s)"
+        ),
+    }, leadsto)
+
+
 def _check_single_leadsto(explored, spec, leadsto):
     depth = explored["depth"]
     states = explored["states"]
@@ -2540,6 +2635,11 @@ def _check_single_leadsto(explored, spec, leadsto):
     canonical = [_symmetry_canonical_constraint(spec, states[t]) for t in range(K + 1)]
 
     for extra_binds in expand_leadsto_bindings(leadsto, spec):
+        within_violation = _check_single_leadsto_within(
+            explored, spec, leadsto, extra_binds, binding_types)
+        if within_violation is not None:
+            return within_violation
+
         candidates = []
         meta = []
 
@@ -2612,7 +2712,12 @@ def _check_leadstos(explored, spec):
         violation = _check_single_leadsto(explored, spec, lt)
         if violation is not None:
             return violation, None
-    leads_to = {lt["name"]: {"checked_to_depth": depth} for lt in leadstos}
+    leads_to = {}
+    for lt in leadstos:
+        entry = {"checked_to_depth": depth}
+        if lt.get("within") is not None:
+            entry["within"] = lt["within"]
+        leads_to[lt["name"]] = entry
     return None, leads_to
 
 
@@ -2761,6 +2866,8 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
     proved = {}
     for leadsto in leadstos:
         binding_types = _leadsto_binding_types(leadsto, spec)
+        if leadsto.get("within") is not None:
+            continue
         if leadsto.get("decreases") is not None:
             for extra_binds in expand_leadsto_bindings(leadsto, spec):
                 failure = _prove_leadsto_rank_lower_bound(

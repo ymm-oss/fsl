@@ -79,12 +79,15 @@ Response properties inside a `leadsTo` block:
 ```fsl
 leadsTo <Name> {
   <expr> ~> <expr>                      // once P holds (including the same instant), Q eventually holds
+  <expr> ~> within K <expr>             // Q must hold within K steps after P
   forall x: T { <expr> ~> <expr> }      // checked independently per binding (only an outer forall may nest)
   decreases <int expr>                  // optional; induction-only ranking measure
 }
 ```
 
 `~>` is **exclusive to leadsTo blocks** — it cannot be used in general expressions.
+`within K` is a bounded deadline on a response; `K` must be a non-negative
+constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under
 `fslc verify --engine induction`, the verifier proves the ranked response by
 checking, under the proved invariants, that whenever `P` is pending and `Q` is
@@ -135,8 +138,13 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Quantification (bounded): `forall x: T { expr }` / `exists x: T { expr }` (can be filtered with `where expr`),
-  the v0 form `forall i in lo..hi: expr` is also allowed
+  the v0 form `forall i in lo..hi: expr` is also allowed. Expression quantifiers
+  can also range over a Set or Seq value: `forall x in active { ... }` /
+  `exists x in queue { ... }`; for Seq this ranges over the live prefix values.
 - Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
+- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
+  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
+  matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x is some(v)` (v is bound within that expression).
   **`x == some(e)` is a type error** — extract with `x is some(v)` and compare
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
@@ -146,7 +154,19 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
   `.contains(e)` `.size()`, `==` is equality of length and all elements
 - Inside ensures / trans only: read the pre-transition state with `old(expr)`
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
-  optional `decreases <int expr>` after the response body for induction ranking
+  optional `within K` before Q for a bounded deadline, and optional
+  `decreases <int expr>` after the response body for induction ranking
+
+Top-level temporal sugar:
+
+```fsl
+unless Name { P unless Q }   // while P holds and Q is false, the next state must keep P or make Q true
+until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obligation
+```
+
+Use this sugar for persistent workflow states such as "held until released" or
+"pending until completed". For arbitrary history facts, use an explicit ghost
+variable.
 
 ## 4. Statements (init / action bodies)
 
@@ -447,7 +467,9 @@ Since reachable / invariant look only at state, to talk about "Y after X" as a
 | What you want to write | Means |
 |---|---|
 | "Was X at least once" (a fact of the state) | Ghost variable + invariant / reachable |
+| "Keep X true until Y, and Y may or may not happen" | `unless Name { X unless Y }` |
 | "Once it becomes X, eventually Y" (a response property) | `leadsTo` + `fair action` if needed |
+| "Keep X true until Y, and Y must eventually happen" | `until Name { X until Y }` |
 
 Example: in a FIFO mutex, "a process that has entered the wait queue eventually
 obtains the lock" is
