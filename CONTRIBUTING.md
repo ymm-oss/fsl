@@ -31,6 +31,15 @@ pytest -q                   # Full test suite (about 8 minutes)
 pytest tests/test_v1.py -q  # A single file
 ```
 
+CI is tiered to keep pull-request feedback usable:
+
+- Pull requests run the full suite once on Python 3.12.
+- Pull requests also run a compatibility smoke suite on Python 3.9-3.12:
+  `tests/test_version.py`, `tests/test_v1.py`, `tests/test_temporal.py`, and
+  `tests/test_logic_temporal_sugar.py`.
+- Pushes to `main`, scheduled runs, and manual workflow runs execute the full
+  Python 3.9-3.12 matrix.
+
 The test suite cross-checks the Z3 and concrete Monitor evaluators against each
 other using witness diffs, and additionally validates against a Z3-independent
 brute-force oracle (`tests/oracle.py`) to catch misses (false negatives where

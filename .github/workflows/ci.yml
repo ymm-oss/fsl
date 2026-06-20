@@ -1,21 +1,46 @@
 name: ci
 
-# Run the full test suite on push (main) and on Pull Requests.
-# The only dependencies are lark (pure Python) and z3-solver (prebuilt wheel),
-# so no native build is needed. Tested across a Python 3.9-3.12 matrix.
+# PRs run one full suite plus a smaller cross-version smoke suite for fast
+# feedback. main, scheduled, and manual runs keep the full Python 3.9-3.12 matrix.
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: pytest (py${{ matrix.python-version }})
+  pr-full:
+    name: full pytest (py3.12)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install (editable + dev deps)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run full test suite
+        run: pytest -q
+
+  pr-compat-smoke:
+    name: compat smoke (py${{ matrix.python-version }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -33,5 +58,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run test suite
+      - name: Run compatibility smoke tests
+        run: >
+          pytest -q
+          tests/test_version.py
+          tests/test_v1.py
+          tests/test_temporal.py
+          tests/test_logic_temporal_sugar.py
+
+  full-matrix:
+    name: full pytest (py${{ matrix.python-version }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install (editable + dev deps)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run full test suite
         run: pytest -q

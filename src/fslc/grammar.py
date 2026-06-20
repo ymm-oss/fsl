@@ -19,7 +19,7 @@ spec_def: "spec" NAME "{" item* "}"
 compose_def: "compose" NAME "{" compose_item* "}"
 ?compose_item: use_def | internal_def | compose_state | compose_init
              | sync_action | action_def
-             | invariant_def | trans_def | reachable_def | leadsto_def
+             | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def
 use_def: "use" NAME "as" NAME "from" STRING
 internal_def: "internal" NAME "." NAME
 compose_state: "state" "{" var_decl ("," var_decl)* ","? "}"
@@ -48,7 +48,7 @@ mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
 
 ?item: const_def | type_def | enum_def | struct_def
      | state_def | init_def | action_def
-     | invariant_def | trans_def | reachable_def | leadsto_def | terminal_def
+     | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 
 const_def: "const" NAME "=" expr
 type_def: plain_type_def | symmetric_type_def
@@ -100,18 +100,23 @@ lvalue: NAME "[" expr "]" "." NAME -> lvalue_map_field
 
 binder: NAME ":" qname ["where" expr] -> binder_typed
        | NAME "in" expr ".." expr -> binder_range
+       | NAME "in" expr ["where" expr] -> binder_collection
 
 invariant_def: "invariant" NAME meta_tag? "{" expr "}"
 trans_def: "trans" NAME meta_tag? "{" expr "}"
 reachable_def: "reachable" NAME meta_tag? "{" expr "}"
 terminal_def: "terminal" "{" expr "}"
+until_def: "until" NAME meta_tag? "{" expr _UNTIL expr "}"
+unless_def: "unless" NAME meta_tag? "{" expr _UNLESS expr "}"
 
 leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body leadsto_decreases? "}"
 leadsto_decreases: "decreases" expr
 meta_tag: STRING
 ?lt_body: lt_forall | lt_implies
 lt_forall: "forall" binder [":"] "{" lt_body "}"
-lt_implies: expr "~>" expr
+lt_implies: expr "~>" lt_target
+?lt_target: _WITHIN expr expr -> lt_within
+          | expr -> lt_target
 
 ?expr: quant | implies
 quant: "forall" binder [":"] expr -> quant_forall
@@ -156,6 +161,8 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "max" "(" expr "," expr ")" -> max_e
      | "abs" "(" expr ")" -> abs_e
      | "old" "(" expr ")" -> old_e
+     | "unique" "(" binder ")" -> unique_e
+     | "exactlyOne" "(" binder ")" -> exactly_one_e
      | NAME -> var
      | "(" expr ")"
 struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
@@ -204,6 +211,8 @@ ref_postfix_suffix: "[" ref_expr "]" -> idx_suffix
          | "max" "(" ref_expr "," ref_expr ")" -> max_e
          | "abs" "(" ref_expr ")" -> abs_e
          | "old" "(" ref_expr ")" -> old_e
+         | "unique" "(" binder ")" -> unique_e
+         | "exactlyOne" "(" binder ")" -> exactly_one_e
          | NAME -> var
          | "(" ref_expr ")"
 ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> struct_fields
@@ -213,7 +222,7 @@ requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
                   | state_def | init_def | req_action_def | process_def | time_def
-                  | invariant_def | trans_def | reachable_def | leadsto_def
+                  | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def | maps_auto_def
 requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
@@ -275,6 +284,9 @@ _NOT: /not\b/
 _IF: /if\b/
 _ELSE: /else\b/
 _FAIR: /fair\b/
+_WITHIN: /within\b/
+_UNTIL: /until\b/
+_UNLESS: /unless\b/
 NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 INT: /[0-9]+/
 STRING: /"[^"]*"/
@@ -300,8 +312,8 @@ def _flatten_leadsto(body):
         node = inner
     if node[0] != "lt_implies":
         raise ValueError(f"expected leadsTo implication, got {node[0]}")
-    _, p, q = node
-    return binders, p, q
+    _, p, q, within = node
+    return binders, p, q, within
 
 
 def _parse_meta(s):
@@ -480,6 +492,9 @@ class Ast(Transformer):
     def binder_range(self, meta, v, lo, hi):
         return ("binder_range", v, lo, hi)
 
+    def binder_collection(self, meta, v, collection, where=None):
+        return ("binder_collection", v, collection, where)
+
     def quant_forall(self, meta, b, e):
         return ("forall", b, e)
 
@@ -491,6 +506,12 @@ class Ast(Transformer):
 
     def quant_exists_brace(self, meta, b, e):
         return ("exists", b, e)
+
+    def unique_e(self, meta, binder):
+        return ("unique", binder)
+
+    def exactly_one_e(self, meta, binder):
+        return ("exactly_one", binder)
 
     def lvalue_var(self, meta, n):
         return ("var", n)
@@ -630,6 +651,28 @@ class Ast(Transformer):
     def terminal_def(self, meta, e):
         return ("terminal", e, _loc(meta))
 
+    def until_def(self, meta, n, *rest):
+        req_meta, p, q = None, None, None
+        for r in rest:
+            if isinstance(r, dict):
+                req_meta = r
+            elif p is None:
+                p = r
+            else:
+                q = r
+        return ("until", n, p, q, _loc(meta), req_meta)
+
+    def unless_def(self, meta, n, *rest):
+        req_meta, p, q = None, None, None
+        for r in rest:
+            if isinstance(r, dict):
+                req_meta = r
+            elif p is None:
+                p = r
+            else:
+                q = r
+        return ("unless", n, p, q, _loc(meta), req_meta)
+
     def _action_parts(self, meta, name, *rest):
         params, items, req_meta = [], [], None
         for r in rest:
@@ -702,8 +745,15 @@ class Ast(Transformer):
     def req_action_def(self, meta, node):
         return node
 
-    def lt_implies(self, meta, p, q):
-        return ("lt_implies", p, q)
+    def lt_target(self, meta, q):
+        return ("lt_target", q, None)
+
+    def lt_within(self, meta, bound, q):
+        return ("lt_target", q, bound)
+
+    def lt_implies(self, meta, p, target):
+        _, q, within = target
+        return ("lt_implies", p, q, within)
 
     def lt_forall(self, meta, binder, body):
         return ("lt_forall", binder, body)
@@ -720,8 +770,8 @@ class Ast(Transformer):
                 measure = r[1]
             else:
                 body = r
-        binders, p, q = _flatten_leadsto(body)
-        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure)
+        binders, p, q, within = _flatten_leadsto(body)
+        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure, within)
 
     def top_def(self, meta, child):
         return child
@@ -962,8 +1012,8 @@ class Ast(Transformer):
         return ("biz_policy_invariant", expr)
 
     def policy_responds(self, meta, body):
-        binders, p, q = _flatten_leadsto(body)
-        return ("biz_policy_responds", binders, p, q)
+        binders, p, q, within = _flatten_leadsto(body)
+        return ("biz_policy_responds", binders, p, q, within)
 
     def stage_disjunction(self, meta, *names):
         return list(names)

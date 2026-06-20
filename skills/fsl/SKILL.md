@@ -128,11 +128,14 @@ the formalization memo.**
 | "prohibit/constrain a change from one state to the next" (two-state safety) | `trans` (use `old()` to reference the pre-transition state) |
 | "can only do X when Y" (precondition) | an action's `requires` |
 | "once X happens, Y must eventually happen" (response, progress) | `leadsTo` + `fair` on the action that drives progress |
+| "P must become Q within K steps" (bounded response) | `leadsTo Name { P ~> within K Q }` |
+| "keep P true until Q" (safety, Q may never happen) | `unless Name { P unless Q }` |
+| "keep P true until Q, and Q must happen" (safety + progress) | `until Name { P until Q }` |
 | business-flow stage response for consultants/PMs | `policy POL-1 "..." every Case in Source must eventually be Target [or Target ...]` |
 | business-flow reachability / completion goal | `goal G "..." some Case can reach Target` or `goal G "..." all Case can be Target [or Target ...]` |
 | "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
 | "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
-| "within K times / K ticks" (deadline) | requirements `time` + `deadline` (reference §11) |
+| "within K times / K ticks" (deadline) | kernel `leadsTo ... within K` for step deadlines, or requirements `time` + `deadline` for SLA/tick semantics (reference §11) |
 | upper/lower bound or non-negativity of a number | kernel: `type T = lo..hi`; business/requirements dialects: `number T` plus `verify { values T = lo..hi }` (do not hand-write boundary invariants) |
 | "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
 | "the total equals X" / "the count is X" (aggregate consistency) | an invariant over `sum(...)` / `count(...)` |
