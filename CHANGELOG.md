@@ -14,6 +14,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   links `fslc-lsp` into `~/.local/bin` alongside `fslc`, so the VSCode extension
   finds it on `PATH`.
 
+### Fixed
+- (LSP) Refinement mapping files are parsed without the standalone-spec state
+  block diagnostic, and their `impl`/`abs`, mapped action, and state map
+  references resolve across workspace `.fsl` files by spec name.
+
 ## [2.2.0] - 2026-06-21
 
 ### Changed

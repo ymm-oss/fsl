@@ -5,6 +5,7 @@
 from pathlib import Path
 
 from fslc.lsp.index import build_index, default_load_index
+from fslc.lsp.server import check_source
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +35,57 @@ def _reference(index, name, role, qualifier=None):
         if ref.name == name and ref.role == role and ref.qualifier == qualifier
     ]
     assert matches, f"missing reference {role}:{qualifier or ''}.{name}"
+    return matches[0]
+
+
+def _refinement_fixture_indexes():
+    paths = {
+        "refinement": SPECS / "cart_refines.fsl",
+        "impl": SPECS / "cart_impl.fsl",
+        "abs": SPECS / "cart_v1.fsl",
+    }
+    indexes = {
+        str(path.resolve()): build_index(path.read_text(encoding="utf-8"), str(path))
+        for path in paths.values()
+    }
+    resolver = {
+        "CartImpl": str(paths["impl"].resolve()),
+        "ShoppingCart": str(paths["abs"].resolve()),
+    }
+
+    def load_index(path):
+        return indexes.get(str(Path(path).resolve()))
+
+    def name_resolver(name):
+        return resolver.get(name)
+
+    return paths, indexes[str(paths["refinement"].resolve())], load_index, name_resolver
+
+
+def _definition_for_ref(index, ref, load_index, name_resolver):
+    loc = index.definition_at(
+        ref.range.start.line,
+        ref.range.start.character,
+        load_index,
+        name_resolver,
+    )
+    assert loc is not None, f"unresolved reference {ref.role}:{ref.name}"
+    return loc
+
+
+def _target_text(loc):
+    assert loc.path is not None
+    return _slice(Path(loc.path).read_text(encoding="utf-8"), loc.range)
+
+
+def _ref(index, name, role, target_spec=None):
+    matches = [
+        ref for ref in index.references
+        if ref.name == name
+        and ref.role == role
+        and (target_spec is None or ref.target_spec == target_spec)
+    ]
+    assert matches, f"missing reference {role}:{target_spec or ''}.{name}"
     return matches[0]
 
 
@@ -107,3 +159,112 @@ def test_compose_definition_resolution_crosses_use_imports():
     assert payments_loc is not None
     assert payments_loc.path == str((SPECS / "payment.fsl").resolve())
     assert _slice((SPECS / "payment.fsl").read_text(encoding="utf-8"), payments_loc.range) == "payments"
+
+
+def test_lsp_check_accepts_refinement_mapping_without_state_block_diagnostic():
+    paths, _, _, name_resolver = _refinement_fixture_indexes()
+    source = paths["refinement"].read_text(encoding="utf-8")
+
+    result = check_source(source, str(paths["refinement"]), name_resolver)
+
+    assert result["result"] == "ok"
+    assert "spec has no state block" not in str(result)
+
+
+def test_refinement_spec_definitions_resolve_across_workspace_names():
+    paths, index, load_index, name_resolver = _refinement_fixture_indexes()
+
+    impl_loc = _definition_for_ref(
+        index,
+        _ref(index, "CartImpl", "spec", "CartImpl"),
+        load_index,
+        name_resolver,
+    )
+    assert impl_loc.path == str(paths["impl"].resolve())
+    assert _target_text(impl_loc) == "CartImpl"
+
+    abs_loc = _definition_for_ref(
+        index,
+        _ref(index, "ShoppingCart", "spec", "ShoppingCart"),
+        load_index,
+        name_resolver,
+    )
+    assert abs_loc.path == str(paths["abs"].resolve())
+    assert _target_text(abs_loc) == "ShoppingCart"
+
+
+def test_refinement_action_definitions_resolve_to_impl_and_abs_specs():
+    paths, index, load_index, name_resolver = _refinement_fixture_indexes()
+
+    checkout_loc = _definition_for_ref(
+        index,
+        _ref(index, "checkout", "action", "ShoppingCart"),
+        load_index,
+        name_resolver,
+    )
+    assert checkout_loc.path == str(paths["abs"].resolve())
+    assert _target_text(checkout_loc) == "checkout"
+
+    impl_checkout_loc = _definition_for_ref(
+        index,
+        _ref(index, "impl_checkout", "action", "CartImpl"),
+        load_index,
+        name_resolver,
+    )
+    assert impl_checkout_loc.path == str(paths["impl"].resolve())
+    assert _target_text(impl_checkout_loc) == "impl_checkout"
+
+    reserve_loc = _definition_for_ref(
+        index,
+        _ref(index, "reserve", "action", "CartImpl"),
+        load_index,
+        name_resolver,
+    )
+    assert reserve_loc.path == str(paths["impl"].resolve())
+    assert _target_text(reserve_loc) == "reserve"
+
+
+def test_refinement_map_definitions_resolve_lhs_to_abs_and_rhs_to_impl():
+    paths, index, load_index, name_resolver = _refinement_fixture_indexes()
+
+    for name in ("stock", "cart"):
+        loc = _definition_for_ref(
+            index,
+            _ref(index, name, "value", "ShoppingCart"),
+            load_index,
+            name_resolver,
+        )
+        assert loc.path == str(paths["abs"].resolve())
+        assert _target_text(loc) == name
+
+    for name in ("impl_stock", "impl_cart"):
+        loc = _definition_for_ref(
+            index,
+            _ref(index, name, "value", "CartImpl"),
+            load_index,
+            name_resolver,
+        )
+        assert loc.path == str(paths["impl"].resolve())
+        assert _target_text(loc) == name
+
+
+def test_refinement_local_binders_still_resolve_in_file():
+    paths, index, load_index, name_resolver = _refinement_fixture_indexes()
+
+    i_loc = _definition_for_ref(
+        index,
+        _ref(index, "i", "value", "CartImpl"),
+        load_index,
+        name_resolver,
+    )
+    assert i_loc.path == str(paths["refinement"].resolve())
+    assert _target_text(i_loc) == "i"
+
+    u_loc = _definition_for_ref(
+        index,
+        _ref(index, "u", "value", "ShoppingCart"),
+        load_index,
+        name_resolver,
+    )
+    assert u_loc.path == str(paths["refinement"].resolve())
+    assert _target_text(u_loc) == "u"

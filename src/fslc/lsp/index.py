@@ -104,6 +104,7 @@ class Reference:
     range: Range
     qualifier: Optional[str] = None
     target_path: Optional[str] = None
+    target_spec: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ class Location:
 
 
 LoadIndex = Callable[[str], Optional["DocumentIndex"]]
+NameResolver = Callable[[str], Optional[str]]
 
 
 @dataclass
@@ -190,6 +192,7 @@ class DocumentIndex:
         self,
         ref: Reference,
         load_index: Optional[LoadIndex] = None,
+        name_resolver: Optional[NameResolver] = None,
     ) -> Optional[Location]:
         if ref.qualifier:
             binding = self.import_for_alias(ref.qualifier)
@@ -202,6 +205,23 @@ class DocumentIndex:
             if sym is None:
                 return None
             return Location(target.path, sym.selection_range)
+
+        if ref.target_spec and ref.role != "spec":
+            scoped = self._resolve_scoped(ref)
+            if scoped is not None:
+                return Location(self.path, scoped.selection_range)
+
+        if ref.target_spec and name_resolver is not None:
+            target_path = name_resolver(ref.target_spec)
+            if target_path:
+                target = _load_import_index(target_path, load_index)
+                if target is not None:
+                    sym = target.find_exported_symbol(ref.name, ref.role)
+                    if sym is None and ref.role == "spec":
+                        top = _top_symbol(target)
+                        sym = top if top and top.name == ref.name else None
+                    if sym is not None:
+                        return Location(target.path, sym.selection_range)
 
         if ref.target_path:
             target = _load_import_index(ref.target_path, load_index)
@@ -229,16 +249,21 @@ class DocumentIndex:
         line: int,
         character: int,
         load_index: Optional[LoadIndex] = None,
+        name_resolver: Optional[NameResolver] = None,
     ) -> Optional[Location]:
         ref = self.reference_at(line, character)
         if ref is not None:
-            return self.resolve_reference(ref, load_index)
+            return self.resolve_reference(ref, load_index, name_resolver)
         sym = self.symbol_at(line, character)
         if sym is not None:
             return Location(self.path, sym.selection_range)
         return None
 
     def _resolve_local(self, ref: Reference) -> Optional[Symbol]:
+        scoped = self._resolve_scoped(ref)
+        if scoped is not None:
+            return scoped
+
         roles = _roles_for_reference(ref.role)
         candidates = [
             sym for sym in self.symbols
@@ -247,19 +272,25 @@ class DocumentIndex:
         if not candidates:
             return None
 
-        scoped = [
-            sym for sym in candidates
-            if sym.scope_range is not None and sym.scope_range.contains_range_start(ref.range)
-        ]
-        if scoped:
-            return min(scoped, key=lambda sym: _scope_sort_key(sym))
-
         globals_ = [
             sym for sym in candidates
             if sym.scope_range is None and sym.selection_range != ref.range
         ]
         if globals_:
             return min(globals_, key=lambda sym: sym.selection_range.start_tuple)
+        return None
+
+    def _resolve_scoped(self, ref: Reference) -> Optional[Symbol]:
+        roles = _roles_for_reference(ref.role)
+        scoped = [
+            sym for sym in self.symbols
+            if sym.name == ref.name
+            and sym.role in roles
+            and sym.scope_range is not None
+            and sym.scope_range.contains_range_start(ref.range)
+        ]
+        if scoped:
+            return min(scoped, key=lambda sym: _scope_sort_key(sym))
         return None
 
 
@@ -294,10 +325,16 @@ def definition_at(
     line: int,
     character: int,
     load_index: Optional[LoadIndex] = None,
+    name_resolver: Optional[NameResolver] = None,
 ) -> Optional[Location]:
     """Convenience wrapper for one-shot go-to-definition lookup."""
 
-    return build_index(source, path).definition_at(line, character, load_index)
+    return build_index(source, path).definition_at(
+        line,
+        character,
+        load_index,
+        name_resolver,
+    )
 
 
 class _IndexBuilder:
@@ -307,6 +344,9 @@ class _IndexBuilder:
         self.symbols: List[Symbol] = []
         self.references: List[Reference] = []
         self.imports: List[ImportBinding] = []
+        self._refinement_impl_name: Optional[str] = None
+        self._refinement_abs_name: Optional[str] = None
+        self._reference_target_spec: Optional[str] = None
 
     def visit(
         self,
@@ -394,6 +434,7 @@ class _IndexBuilder:
         role: str,
         qualifier: Optional[str] = None,
         target_path: Optional[str] = None,
+        target_spec: Optional[str] = None,
     ) -> None:
         self.references.append(
             Reference(
@@ -402,8 +443,23 @@ class _IndexBuilder:
                 range=_token_range(token),
                 qualifier=qualifier,
                 target_path=target_path,
+                target_spec=target_spec or self._reference_target_spec,
             )
         )
+
+    def _visit_with_target(
+        self,
+        node: object,
+        parent: Optional[int],
+        local_scope: Optional[Range],
+        target_spec: Optional[str],
+    ) -> None:
+        previous = self._reference_target_spec
+        self._reference_target_spec = target_spec
+        try:
+            self.visit(node, parent, local_scope)
+        finally:
+            self._reference_target_spec = previous
 
     def _visit_start(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_children(node, parent, local_scope)
@@ -427,7 +483,14 @@ class _IndexBuilder:
         self._visit_named_container(node, "governance", None)
 
     def _visit_refinement_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
-        self._visit_named_container(node, "refinement", None, exported=False)
+        previous_impl = self._refinement_impl_name
+        previous_abs = self._refinement_abs_name
+        self._refinement_impl_name, self._refinement_abs_name = _refinement_spec_names(node)
+        try:
+            self._visit_named_container(node, "refinement", None, exported=False)
+        finally:
+            self._refinement_impl_name = previous_impl
+            self._refinement_abs_name = previous_abs
 
     def _visit_named_container(
         self,
@@ -795,25 +858,42 @@ class _IndexBuilder:
     def _visit_refinement_impl(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
         if token is not None:
-            self._add_ref(token, "spec")
+            self._add_ref(token, "spec", target_spec=str(token))
 
     def _visit_refinement_abs(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
         if token is not None:
-            self._add_ref(token, "spec")
+            self._add_ref(token, "spec", target_spec=str(token))
 
     def _visit_map_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
+        map_scope = _tree_range(node)
         if token is not None:
-            self._add_ref(token, "value")
-        self._visit_children_after_first_token(node, parent, local_scope)
+            self._add_ref(token, "value", target_spec=self._refinement_abs_name)
+        skipped_name = False
+        for child in node.children:
+            if not skipped_name and isinstance(child, Token) and child.type == "NAME":
+                skipped_name = True
+                continue
+            if _tree_data(child) in {"binder_typed", "binder_range", "binder_collection"}:
+                self.visit(child, parent, map_scope)
+            else:
+                self._visit_with_target(child, parent, map_scope, self._refinement_impl_name)
 
     def _visit_refinement_action(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
         action_scope = _tree_range(node)
         if token is not None:
-            self._add_ref(token, "action")
-        self._visit_children_after_first_token(node, parent, action_scope)
+            self._add_ref(token, "action", target_spec=self._refinement_impl_name)
+        skipped_name = False
+        for child in node.children:
+            if not skipped_name and isinstance(child, Token) and child.type == "NAME":
+                skipped_name = True
+                continue
+            if _tree_data(child) in {"action_target", "mapped_action_target"}:
+                self._visit_with_target(child, parent, action_scope, self._refinement_abs_name)
+            else:
+                self.visit(child, parent, action_scope)
 
     def _visit_mapped_action_target(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_action_target_ref(node, parent, local_scope)
@@ -830,9 +910,9 @@ class _IndexBuilder:
     def _visit_progress_respond(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         first = _name_token_at(node, 0)
         if first is not None:
-            self._add_ref(first, "property")
+            self._add_ref(first, "property", target_spec=self._refinement_abs_name)
         for token in _name_tokens(node)[1:]:
-            self._add_ref(token, "action")
+            self._add_ref(token, "action", target_spec=self._refinement_impl_name)
 
     def _visit_verify_instances(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
@@ -1231,6 +1311,22 @@ def _load_import_index(path: str, load_index: Optional[LoadIndex]) -> Optional[D
         if loaded is not None:
             return loaded
     return default_load_index(path)
+
+
+def _refinement_spec_names(tree: Tree) -> Tuple[Optional[str], Optional[str]]:
+    impl_name = None
+    abs_name = None
+    for child in tree.children:
+        if not isinstance(child, Tree):
+            continue
+        token = _first_token(child)
+        if token is None:
+            continue
+        if child.data == "refinement_impl":
+            impl_name = str(token)
+        elif child.data == "refinement_abs":
+            abs_name = str(token)
+    return impl_name, abs_name
 
 
 def _top_symbol(index: DocumentIndex) -> Optional[Symbol]:
