@@ -5,6 +5,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- (Grammar) Eliminated ~50-line duplicate `ref_expr` grammar by collapsing it to
+  a thin `?ref_expr: ite | expr` wrapper; `if/then/else` remains accepted only in
+  the four mapping/acceptance positions (map_def, mapped_action_target,
+  req_mapped_action_target, acceptance_arg) and is rejected in ordinary spec
+  expressions.
+- (Grammar) Removed the dead `glue_action` rule that was never referenced.
+- (Grammar/model) Extracted module-level `_args()` helper in `grammar.py` to
+  remove three identical `maybe_placeholders` sentinel-filtering list comprehensions
+  in the `Ast` transformer.
+- (Model) Added `_check_reserved` to `model.py` to reject user-defined state
+  variables, consts, and action parameters whose names collide with FSL bare-atom
+  literals (`true`, `false`, `none`), giving a clear `kind=name` error instead
+  of silent parse ambiguity. Keywords that require an immediately following `(`
+  (`count`, `sum`, `stage`, `min`, `max`, `abs`, `old`, `unique`, `exactlyOne`,
+  `some`) or a binder (`forall`, `exists`) are contextual and parse unambiguously
+  as bare identifiers, so they are not reserved.
+
 ### Added
 - (Governance/Business) Business specs can declare `control` metadata and attach
   it to checkable `policy`/`goal` declarations with `satisfies`. Violations now

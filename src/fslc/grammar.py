@@ -27,7 +27,6 @@ compose_init: "init" "{" stmt* "}"
 sync_action: fair_sync_action | plain_sync_action
 fair_sync_action: _FAIR "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body meta_tag? "{" action_item* "}"
 plain_sync_action: "action" NAME "(" [compose_param ("," compose_param)*] ")" "=" sync_body meta_tag? "{" action_item* "}"
-glue_action: fair_action | plain_action
 sync_body: sync_ref ("||" sync_ref)*
 sync_ref: NAME "." NAME "(" [expr ("," expr)*] ")"
 compose_param: NAME ":" qname -> param_typed
@@ -172,54 +171,9 @@ struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
 expr_list: expr ("," expr)*
 
 ?ref_expr: _IF ref_expr "then" ref_expr _ELSE ref_expr -> ite
-         | ref_quant
-         | ref_implies
-ref_quant: "forall" binder [":"] ref_expr -> quant_forall
-         | "forall" binder [":"] "{" ref_expr "}" -> quant_forall_brace
-         | "exists" binder [":"] ref_expr -> quant_exists
-         | "exists" binder [":"] "{" ref_expr "}" -> quant_exists_brace
-?ref_implies: ref_or_e | ref_or_e "=>" ref_implies -> imp
-?ref_or_e: ref_and_e | ref_or_e _OR ref_and_e -> or_op
-?ref_and_e: ref_not_e | ref_and_e _AND ref_not_e -> and_op
-?ref_not_e: _NOT ref_not_e -> not_op
-          | ref_is_e
-?ref_is_e: ref_cmp ["is" pattern] -> is_pat
-?ref_cmp: ref_sum | ref_sum CMPOP ref_sum -> cmp_op
-?ref_sum: ref_product | ref_sum "+" ref_product -> add | ref_sum "-" ref_product -> sub
-?ref_product: ref_unary | ref_product "*" ref_unary -> mul | ref_product "/" ref_unary -> div | ref_product "%" ref_unary -> mod
-?ref_unary: "-" ref_unary -> neg | ref_postfix
-ref_postfix: ref_atom ref_postfix_suffix* -> postfix
-ref_postfix_suffix: "[" ref_expr "]" -> idx_suffix
-                  | "." "contains" "(" [ref_expr_list] ")" -> method_contains
-                  | "." "add" "(" [ref_expr_list] ")" -> method_add
-                  | "." "remove" "(" [ref_expr_list] ")" -> method_remove
-                  | "." "push" "(" [ref_expr_list] ")" -> method_push
-                  | "." "pop" "(" ")" -> method_pop
-                  | "." "head" "(" ")" -> method_head
-                  | "." "at" "(" ref_expr ")" -> method_at
-                  | "." "size" "(" ")" -> method_size
-                  | "." NAME -> field_suffix
-?ref_atom: INT -> num
-         | "true" -> true_lit
-         | "false" -> false_lit
-         | "none" -> none_lit
-         | "some" "(" ref_expr ")" -> some_lit
-         | "Set" "{" [ref_expr_list] "}" -> set_lit
-         | "Seq" "{" [ref_expr_list] "}" -> seq_lit
          | NAME ref_struct_fields -> struct_lit
-         | "stage" "(" ref_expr ")" -> stage_e
-         | "count" "(" NAME ":" qname "where" ref_expr ")" -> count_e
-         | "sum" "(" NAME ":" qname "of" ref_expr ["where" ref_expr] ")" -> sum_e
-         | "min" "(" ref_expr "," ref_expr ")" -> min_e
-         | "max" "(" ref_expr "," ref_expr ")" -> max_e
-         | "abs" "(" ref_expr ")" -> abs_e
-         | "old" "(" ref_expr ")" -> old_e
-         | "unique" "(" binder ")" -> unique_e
-         | "exactlyOne" "(" binder ")" -> exactly_one_e
-         | NAME -> var
-         | "(" ref_expr ")"
+         | expr
 ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> struct_fields
-ref_expr_list: ref_expr ("," ref_expr)* -> expr_list
 
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
@@ -321,6 +275,11 @@ COMMENT: /\/\/[^\n]*/
 %ignore WS
 %ignore COMMENT
 """
+
+
+def _args(xs):
+    # maybe_placeholders=True gives (None,) for empty arg lists; strip the sentinel.
+    return [x for x in xs if x is not None]
 
 
 def _loc(meta):
@@ -727,8 +686,7 @@ class Ast(Transformer):
         return ("maps", target, _loc(meta))
 
     def req_mapped_action_target(self, meta, name, *exprs):
-        # empty parens foo() become (None,) under maybe_placeholders — treat as 0 args
-        return ("action", name, [e for e in exprs if e is not None])
+        return ("action", name, _args(exprs))
 
     def req_action_target(self, meta, child):
         return child
@@ -844,8 +802,7 @@ class Ast(Transformer):
         return ("stutter",)
 
     def mapped_action_target(self, meta, name, *exprs):
-        # empty parens foo() become (None,) under maybe_placeholders — treat as 0 args
-        return ("action", name, [e for e in exprs if e is not None])
+        return ("action", name, _args(exprs))
 
     def refinement_action(self, meta, name, *params_and_target):
         params = []
@@ -943,8 +900,7 @@ class Ast(Transformer):
         return expr
 
     def acceptance_step(self, meta, name, *args):
-        # empty parens foo() become (None,) under maybe_placeholders — treat as 0 args
-        return ("acceptance_step", name, [a for a in args if a is not None], _loc(meta))
+        return ("acceptance_step", name, _args(args), _loc(meta))
 
     def acceptance_expect(self, meta, expr):
         return ("acceptance_expect", expr, _loc(meta))
