@@ -816,7 +816,14 @@ business ReturnHandling {
 
   kpi refunded = count Return in Refunded
 
+  control CTRL-DECISION
+    "Every return must preserve an adjudication control"
+    owner Manager
+    severity high
+    applies_to Return
+
   policy PAY-2 "every request is eventually decided"
+    satisfies CTRL-DECISION
     every Return in Requested must eventually be Approved or Rejected or Refunded
   goal AllSettled "all cases can be completed"
     all Return can be Refunded or Rejected
@@ -830,6 +837,44 @@ verify {
 The explicit forms remain available when the rule is not just stage progression:
 `policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` and
 `goal ... { exists c: Return { stage(c) == Refunded } }`.
+
+Governance/control metadata can be kept inside `business` or lifted into a
+standalone catalog. `control ID "text" owner NAME severity NAME applies_to Entity`
+does not generate a property by itself; it is a catalog entry. A `policy` or
+`goal` can declare `satisfies CTRL-ID`, and violations then carry both the
+policy/goal requirement and the satisfied controls in JSON:
+
+```fsl
+policy PAY-2 "every request is eventually decided"
+  satisfies CTRL-DECISION
+  every Return in Requested must eventually be Approved or Rejected or Refunded
+```
+
+For controls reused across business specs, use a `governance` catalog:
+
+```fsl
+governance EnterpriseReturnControls {
+  authority Operations owns CTRL-DECISION
+  control CTRL-DECISION "Every return must preserve an adjudication control"
+
+  delegates ReturnHandling from "return_policy.fsl" {
+    require CTRL-DECISION
+    // optional if the business policy already says `satisfies CTRL-DECISION`
+    CTRL-DECISION is satisfied_by policy PAY-2
+  }
+
+  preservation ReturnReform {
+    before AsIsReturn from "asis_return.fsl"
+    after  ToBeReturn from "tobe_return.fsl"
+    preserve CTRL-DECISION
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}
+```
+
+`fslc check governance.fsl` validates all referenced controls, business files,
+policies/goals, and preservation files. Preservation blocks also run the declared
+refinement at depth 8 and report results under `governance.preservations`.
 
 ### 13.4 How to write non-functional requirements (NFRs)
 

@@ -14,7 +14,7 @@ from lark.exceptions import UnexpectedInput
 
 from .grammar import PARSER, Ast
 from .compose import expand_compose
-from .dialects import expand_business, expand_requirements_with_display
+from .dialects import expand_business, expand_governance_with_display, expand_requirements_with_display
 
 
 def parse_src(src, base_dir=None):
@@ -32,6 +32,8 @@ def parse_src(src, base_dir=None):
         ast, display_names = expand_requirements_with_display(ast, base_dir or ".")
     elif ast[0] == "business":
         ast = expand_business(ast)
+    elif ast[0] == "governance":
+        ast, display_names = expand_governance_with_display(ast, base_dir or ".")
     return ast, display_names
 
 

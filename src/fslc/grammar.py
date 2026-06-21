@@ -8,7 +8,7 @@ from lark import Lark, Transformer, v_args
 
 GRAMMAR = r"""
 start: top_def verify_def?
-top_def: spec_def | refinement_def | compose_def | requirements_def | business_def
+top_def: spec_def | refinement_def | compose_def | requirements_def | business_def | governance_def
 
 verify_def: "verify" "{" verify_item* "}"
 verify_item: "instances" NAME "=" INT ";"? -> verify_instances
@@ -252,7 +252,7 @@ age_def: "age" NAME ["[" binder "]"] "while" expr
 deadline_def: "deadline" NAME "<=" expr
 
 business_def: "business" NAME "{" business_item* "}"
-?business_item: actor_def | entity_def | process_def | kpi_def | policy_def | goal_def
+?business_item: actor_def | entity_def | process_def | kpi_def | control_def | policy_def | goal_def
 actor_def: "actor" NAME ("," NAME)* ","?
 process_def: "process" NAME process_with? "{" process_item* "}"
 process_with: "with" proc_field ("," proc_field)*
@@ -267,17 +267,40 @@ trans_set: "set" proc_assign ("," proc_assign)*
 proc_assign: NAME "=" expr
 trans_covers: "covers" REQ_ID STRING
 kpi_def: "kpi" NAME "=" "count" NAME "in" NAME
-policy_def: "policy" REQ_ID STRING policy_body
+control_def: "control" REQ_ID STRING control_attr*
+?control_attr: control_owner | control_severity | control_applies_to
+control_owner: "owner" NAME
+control_severity: "severity" NAME
+control_applies_to: "applies_to" NAME
+satisfies_clause: "satisfies" REQ_ID ("," REQ_ID)* ","?
+policy_def: "policy" REQ_ID STRING satisfies_clause? policy_body
 ?policy_body: policy_invariant | policy_responds | policy_eventually
 policy_invariant: "invariant" "{" expr "}"
 policy_responds: "responds" "{" lt_body "}"
 policy_eventually: "every" NAME "in" NAME "must" "eventually" "be" stage_disjunction
-goal_def: "goal" REQ_ID STRING goal_body
+goal_def: "goal" REQ_ID STRING satisfies_clause? goal_body
 ?goal_body: goal_expr | goal_some_stage | goal_all_stage
 goal_expr: "{" expr "}"
 goal_some_stage: "some" NAME "can" "reach" NAME
 goal_all_stage: "all" NAME "can" "be" stage_disjunction
 stage_disjunction: NAME (_OR NAME)*
+
+governance_def: "governance" NAME "{" governance_item* "}"
+?governance_item: governance_authority | control_def | governance_delegates | governance_preservation
+governance_authority: "authority" NAME "owns" REQ_ID ("," REQ_ID)* ","?
+governance_delegates: "delegates" NAME "from" STRING "{" governance_delegate_item* "}"
+?governance_delegate_item: governance_require | governance_satisfaction
+governance_require: "require" REQ_ID
+governance_satisfaction: REQ_ID "is" "satisfied_by" governance_artifact_ref ("," governance_artifact_ref)* ","?
+?governance_artifact_ref: governance_policy_ref | governance_goal_ref
+governance_policy_ref: "policy" REQ_ID
+governance_goal_ref: "goal" REQ_ID
+governance_preservation: "preservation" NAME "{" preservation_item* "}"
+?preservation_item: preservation_before | preservation_after | preservation_preserve | preservation_refinement
+preservation_before: "before" NAME "from" STRING
+preservation_after: "after" NAME "from" STRING
+preservation_preserve: "preserve" REQ_ID
+preservation_refinement: "checked_by" "refinement" STRING
 
 CMPOP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 REQ_ID: /[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*/
@@ -1030,8 +1053,30 @@ class Ast(Transformer):
     def policy_eventually(self, meta, case_name, source_stage, target_stages):
         return ("biz_policy_eventually", case_name, source_stage, target_stages)
 
-    def policy_def(self, meta, policy_id, text, body):
-        return ("biz_policy", str(policy_id), text, body, _loc(meta))
+    def control_owner(self, meta, name):
+        return ("control_owner", name)
+
+    def control_severity(self, meta, name):
+        return ("control_severity", name)
+
+    def control_applies_to(self, meta, name):
+        return ("control_applies_to", name)
+
+    def control_def(self, meta, control_id, text, *attrs):
+        return ("biz_control", str(control_id), text, [a for a in attrs if a], _loc(meta))
+
+    def satisfies_clause(self, meta, *control_ids):
+        return ("satisfies", [str(cid) for cid in control_ids], _loc(meta))
+
+    def policy_def(self, meta, policy_id, text, *parts):
+        satisfies = []
+        body = None
+        for part in parts:
+            if isinstance(part, tuple) and part[0] == "satisfies":
+                satisfies = part[1]
+            else:
+                body = part
+        return ("biz_policy", str(policy_id), text, body, _loc(meta), satisfies)
 
     def goal_expr(self, meta, expr):
         return ("biz_goal_expr", expr)
@@ -1042,11 +1087,54 @@ class Ast(Transformer):
     def goal_all_stage(self, meta, case_name, stages):
         return ("biz_goal_all_stage", case_name, stages)
 
-    def goal_def(self, meta, goal_id, text, body):
-        return ("biz_goal", str(goal_id), text, body, _loc(meta))
+    def goal_def(self, meta, goal_id, text, *parts):
+        satisfies = []
+        body = None
+        for part in parts:
+            if isinstance(part, tuple) and part[0] == "satisfies":
+                satisfies = part[1]
+            else:
+                body = part
+        return ("biz_goal", str(goal_id), text, body, _loc(meta), satisfies)
 
     def business_def(self, meta, name, *items):
         return ("business", name, [i for i in items if i])
+
+    def governance_authority(self, meta, authority, *control_ids):
+        return ("gov_authority", authority, [str(cid) for cid in control_ids], _loc(meta))
+
+    def governance_require(self, meta, control_id):
+        return ("gov_require", str(control_id), _loc(meta))
+
+    def governance_policy_ref(self, meta, policy_id):
+        return ("policy", str(policy_id), _loc(meta))
+
+    def governance_goal_ref(self, meta, goal_id):
+        return ("goal", str(goal_id), _loc(meta))
+
+    def governance_satisfaction(self, meta, control_id, *policy_refs):
+        return ("gov_satisfaction", str(control_id), [p for p in policy_refs if p], _loc(meta))
+
+    def governance_delegates(self, meta, business_name, path, *items):
+        return ("gov_delegates", business_name, path, [i for i in items if i], _loc(meta))
+
+    def preservation_before(self, meta, spec_name, path):
+        return ("preservation_before", spec_name, path, _loc(meta))
+
+    def preservation_after(self, meta, spec_name, path):
+        return ("preservation_after", spec_name, path, _loc(meta))
+
+    def preservation_preserve(self, meta, control_id):
+        return ("preservation_preserve", str(control_id), _loc(meta))
+
+    def preservation_refinement(self, meta, path):
+        return ("preservation_refinement", path, _loc(meta))
+
+    def governance_preservation(self, meta, name, *items):
+        return ("gov_preservation", name, [i for i in items if i], _loc(meta))
+
+    def governance_def(self, meta, name, *items):
+        return ("governance", name, [i for i in items if i])
 
 
 PARSER = Lark(

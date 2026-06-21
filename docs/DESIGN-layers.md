@@ -86,7 +86,13 @@ business ReturnHandling {
 
   kpi refunded = count Return in Refunded  // → count projection metadata
 
+  control CTRL-DECISION "every request preserves adjudication control"
+    owner Manager
+    severity high
+    applies_to Return
+
   policy EveryRequestDecided "every request is eventually decided"
+    satisfies CTRL-DECISION
     every Return in Requested must eventually be Approved or Rejected or Refunded
   goal AllSettled "all cases can be completed"
     all Return can be Refunded or Rejected
@@ -101,8 +107,37 @@ Expansion rules: `process` → enum + `Map<CaseId, Stage>` + an action per
 transition (`by <actor>` is action metadata; a transition whose actor has a
 parameter becomes a parameter of the actor type). `kpi name = count Entity in
 Stage` → declarative projection metadata only, not a ghost counter and not an
-automatic `_kpi_*` invariant. Readable `every ... must eventually ...` policies
-lower to leadsTo.
+automatic `_kpi_*` invariant. `control ID "text"` is governance metadata only;
+`policy/goal ... satisfies CTRL` attaches that control to the generated
+invariant/leadsTo/reachable so violations identify both the broken policy and the
+control it was meant to satisfy. Readable `every ... must eventually ...`
+policies lower to leadsTo.
+
+When a control is reused across processes or sits above a specific business
+flow, write an optional governance catalog:
+
+```fsl
+governance EnterpriseReturnControls {
+  authority Operations owns CTRL-DECISION
+  control CTRL-DECISION "every request preserves adjudication control"
+
+  delegates ReturnHandling from "return_policy.fsl" {
+    require CTRL-DECISION
+  }
+
+  preservation ReturnReform {
+    before AsIsReturn from "asis_return.fsl"
+    after  ToBeReturn from "tobe_return.fsl"
+    preserve CTRL-DECISION
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}
+```
+
+`fslc check` on the governance file validates control references, confirms that
+delegated business specs satisfy required controls either via business-side
+`satisfies` metadata or explicit `CTRL is satisfied_by policy|goal ID` mappings,
+and runs preservation refinements at depth 8.
 
 **What this layer does not handle (stated explicitly)**: real time, SLA time
 values, probability, continuous quantities of money, org charts, and the prose

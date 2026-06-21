@@ -40,6 +40,8 @@ a sibling top-level `verify` block instead of inline ranges:
 ```fsl
 business <Name> {
   entity <Entity>                          // identity sort; size set by verify.instances
+  control <ID> "<text>"                    // optional governance/control metadata
+  policy <ID> "<text>" satisfies <ID> ...  // optional control traceability
 }
 requirements <Name> {
   entity <Entity>                          // optional explicit identity sort
@@ -49,6 +51,26 @@ requirements <Name> {
 verify {
   instances <Entity> = <N>
   values <Number> = <lo>..<hi>
+}
+```
+
+Optional governance catalog (metadata and cross-business checks; no new kernel
+semantics):
+
+```fsl
+governance <Name> {
+  authority <Actor> owns <ControlID>, ...
+  control <ControlID> "<text>" [owner <Actor>] [severity <Name>] [applies_to <Entity>]...
+  delegates <BusinessName> from "<business.fsl>" {
+    require <ControlID>
+    <ControlID> is satisfied_by policy <PolicyID>, goal <GoalID>
+  }
+  preservation <Name> {
+    before <AsIsBusiness> from "<asis.fsl>"
+    after  <ToBeBusiness> from "<tobe.fsl>"
+    preserve <ControlID>
+    checked_by refinement "<mapping.fsl>"
+  }
 }
 ```
 
@@ -416,7 +438,14 @@ business ReturnHandling {
     transition refund  Approved  -> Refunded by Manager
   }
   kpi refunded = count Return in Refunded     // -> metadata projection count(c: Return where stage(c) == Refunded)
+
+  control CTRL-DECISION "Every return must preserve adjudication control"
+    owner Manager
+    severity high
+    applies_to Return
+
   policy PAY-2 "every request is adjudicated"
+    satisfies CTRL-DECISION
     every Return in Requested must eventually be Approved or Rejected or Refunded
   goal AllSettled "all cases can be settled"
     all Return can be Refunded or Rejected
@@ -432,6 +461,17 @@ verify {
 The natural business forms above are aliases for `responds { forall ... ~> ... }`
 and `goal { forall/exists ... }`; the explicit expression forms remain available
 for policies that cannot be written as a simple stage progression.
+
+`control` declarations are metadata only. Attach them to checkable business
+rules with `policy ... satisfies CTRL` or `goal ... satisfies CTRL`. Unknown
+control references are type errors, unused declared controls are warnings, and a
+violated satisfied policy/goal reports `requirement.controls` in JSON.
+
+For cross-business or enterprise-level controls, use a standalone `governance`
+catalog. `fslc check governance.fsl` verifies that each delegated business spec
+exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
+an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
+`preservation` block runs its declared refinement at depth 8.
 
 ### requirements (the requirements layer)
 

@@ -107,6 +107,12 @@
       "warnings": []
     }
   },
+  "examples/consulting/governance_controls.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/consulting/tobe_expense.fsl": {
     "check": {
       "result": "ok",

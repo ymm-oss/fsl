@@ -148,6 +148,49 @@ def _implements_result(spec, depth=8):
     return {"abs": abs_spec["name"], "result": result.get("result"), "violation": result}
 
 
+def _build_spec_from_file(path):
+    src = open(path, encoding="utf-8").read()
+    ast, display_names = _parse_file(path, src)
+    return build_spec(ast, display_names)
+
+
+def _governance_result(spec, depth=8):
+    gov = spec.get("governance")
+    if not gov:
+        return None
+    out = {
+        "name": gov["name"],
+        "controls": [control["id"] for control in gov.get("controls", [])],
+        "delegates": [
+            {
+                "business": delegate["business"],
+                "required": delegate["required"],
+                "satisfied": delegate["satisfied"],
+            }
+            for delegate in gov.get("delegates", [])
+        ],
+        "preservations": [],
+    }
+    for preservation in gov.get("preservations", []):
+        before_spec = _build_spec_from_file(preservation["before"]["path"])
+        after_spec = _build_spec_from_file(preservation["after"]["path"])
+        mapping_src = open(preservation["refinement"]["path"], encoding="utf-8").read()
+        mapping_ast = parse_refinement(mapping_src)
+        mapping = build_refinement(mapping_ast, after_spec, before_spec)
+        result = refine(after_spec, before_spec, mapping, depth)
+        entry = {
+            "name": preservation["name"],
+            "before": before_spec["name"],
+            "after": after_spec["name"],
+            "preserve": preservation["preserve"],
+            "result": result.get("result"),
+        }
+        if result.get("result") != "refines":
+            entry["violation"] = result
+        out["preservations"].append(entry)
+    return out
+
+
 def _acceptance_error(spec):
     checked = validate_acceptance(spec)
     if checked.get("ok"):
@@ -185,6 +228,9 @@ def run_check(file, strict_tags=False, requirements=None):
         impl = _implements_result(spec)
         if impl:
             out["implements"] = impl
+        gov = _governance_result(spec)
+        if gov:
+            out["governance"] = gov
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
         return _envelope(out)
     except UnexpectedInput as e:

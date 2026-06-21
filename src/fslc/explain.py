@@ -99,7 +99,10 @@ def _property_source(source_lines, loc, kind, label):
 def _requirement_from_meta(meta):
     if not meta:
         return None
-    return {"id": meta["id"], "text": meta.get("text")}
+    out = {"id": meta["id"], "text": meta.get("text")}
+    if meta.get("controls"):
+        out["controls"] = meta["controls"]
+    return out
 
 
 def _actor(action):

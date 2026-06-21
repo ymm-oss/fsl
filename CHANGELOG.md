@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Governance/Business) Business specs can declare `control` metadata and attach
+  it to checkable `policy`/`goal` declarations with `satisfies`. Violations now
+  carry satisfied controls in the requirement payload. New top-level
+  `governance` catalogs validate cross-business control delegation and run
+  preservation refinements during `fslc check`.
 - (HTML report) `fslc html <file.fsl> [-o report.html]` generates a self-contained
   review report from `explain` + `verify`: status summary, state/action tables,
   an action-to-state SVG graph (arrows show the write direction), traces, witnesses,

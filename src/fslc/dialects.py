@@ -12,8 +12,8 @@ from .grammar import Ast, PARSER
 from .model import FslError, eval_const
 
 
-def _err(message, kind="type", loc=None):
-    raise FslError(message, kind=kind, loc=loc)
+def _err(message, kind="type", loc=None, hint=None):
+    raise FslError(message, kind=kind, loc=loc, hint=hint)
 
 
 def _parse_file(path):
@@ -25,6 +25,8 @@ def _parse_file(path):
         return _expand_requirements_with_display(ast, str(Path(path).parent))
     if ast[0] == "business":
         return expand_business(ast), {}
+    if ast[0] == "governance":
+        return expand_governance_with_display(ast, str(Path(path).parent))
     return ast, {}
 
 
@@ -70,6 +72,16 @@ def _expr_to_str(expr):
 
 def _meta(req_id, text):
     return {"id": req_id, "text": text}
+
+
+def _meta_with_controls(req_id, text, control_ids, control_by_id):
+    meta = _meta(req_id, text)
+    if control_ids:
+        meta["controls"] = [
+            {"id": cid, "text": control_by_id[cid]["text"]}
+            for cid in control_ids
+        ]
+    return meta
 
 
 def _collect_verify_bounds(items):
@@ -1094,6 +1106,7 @@ def _collect_business_entities(items):
     cases = {}
     process_items = []
     kpis = []
+    controls = []
     policies = []
     goals = []
     instances, values, bound_locs = _collect_verify_bounds(items)
@@ -1112,6 +1125,8 @@ def _collect_business_entities(items):
             process_items.append(item)
         elif tag == "biz_kpi":
             kpis.append(item)
+        elif tag == "biz_control":
+            controls.append(_control_info(item))
         elif tag == "biz_policy":
             policies.append(item)
         elif tag == "biz_goal":
@@ -1155,7 +1170,60 @@ def _collect_business_entities(items):
     for proc in processes:
         process_by_case.setdefault(proc["name"], []).append(proc)
 
-    return actors, cases, processes, kpis, policies, goals, process_by_case, process_by_name
+    _validate_controls_and_satisfaction(controls, policies, goals)
+
+    return actors, cases, processes, kpis, controls, policies, goals, process_by_case, process_by_name
+
+
+def _control_info(item):
+    _, control_id, text, attrs, loc = item
+    owner = None
+    severity = None
+    applies_to = []
+    for attr in attrs:
+        tag = attr[0]
+        if tag == "control_owner":
+            if owner is not None:
+                _err(f"control '{control_id}' declares owner more than once", loc=loc)
+            owner = attr[1]
+        elif tag == "control_severity":
+            if severity is not None:
+                _err(f"control '{control_id}' declares severity more than once", loc=loc)
+            severity = attr[1]
+        elif tag == "control_applies_to":
+            applies_to.append(attr[1])
+    return {
+        "id": control_id,
+        "text": text,
+        "owner": owner,
+        "severity": severity,
+        "applies_to": applies_to,
+        "loc": loc,
+    }
+
+
+def _satisfies_refs(item):
+    return item[5] if len(item) > 5 and item[5] is not None else []
+
+
+def _validate_controls_and_satisfaction(controls, policies, goals):
+    control_by_id = {}
+    for control in controls:
+        cid = control["id"]
+        if cid in control_by_id:
+            _err(f"duplicate control '{cid}'", loc=control["loc"])
+        control_by_id[cid] = control
+
+    used = set()
+    for item in list(policies) + list(goals):
+        for cid in _satisfies_refs(item):
+            if cid not in control_by_id:
+                _err(
+                    f"{item[0].replace('biz_', '')} '{item[1]}' satisfies unknown control '{cid}'",
+                    loc=item[4],
+                )
+            used.add(cid)
+    return control_by_id, used
 
 
 def _build_kpi_metadata(kpis, process_by_name):
@@ -1231,8 +1299,9 @@ def _any_stage(case_name, var_name, stages, process_by_case, loc):
     ])
 
 
-def _generate_business_items(cases, processes, kpi_infos, policies, goals, process_by_case):
+def _generate_business_items(cases, processes, kpi_infos, controls, policies, goals, process_by_case):
     out = []
+    control_by_id, used_controls = _validate_controls_and_satisfaction(controls, policies, goals)
     for case_name, data in cases.items():
         out.append(("type", case_name, data["lo"], data["hi"]))
     for proc in processes:
@@ -1282,9 +1351,55 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
     if kpi_metadata:
         out.append(("__kpis", kpi_metadata))
 
+    if controls:
+        satisfactions = []
+        for item in policies:
+            for cid in _satisfies_refs(item):
+                satisfactions.append({
+                    "element": "policy",
+                    "id": item[1],
+                    "control": cid,
+                    "loc": item[4],
+                })
+        for item in goals:
+            for cid in _satisfies_refs(item):
+                satisfactions.append({
+                    "element": "goal",
+                    "id": item[1],
+                    "control": cid,
+                    "loc": item[4],
+                })
+        out.append(("__controls", {
+            "controls": [
+                {
+                    "id": control["id"],
+                    "text": control["text"],
+                    "owner": control["owner"],
+                    "severity": control["severity"],
+                    "applies_to": list(control["applies_to"]),
+                    "loc": control["loc"],
+                }
+                for control in controls
+            ],
+            "satisfies": satisfactions,
+        }))
+        unused = sorted(set(control_by_id) - used_controls)
+        if unused:
+            out.append(("__warnings", [
+                {
+                    "kind": "unused_control",
+                    "element": "control",
+                    "name": cid,
+                    "loc": control_by_id[cid]["loc"],
+                    "hint": "no policy or goal declares `satisfies` for this control",
+                }
+                for cid in unused
+            ]))
+
     for item in policies:
-        _, policy_id, text, body, loc = item
-        meta = _meta(policy_id, text)
+        _, policy_id, text, body, loc = item[:5]
+        control_refs = _satisfies_refs(item)
+        meta = _meta_with_controls(policy_id, text, control_refs, control_by_id)
         if body[0] == "biz_policy_invariant":
             expr = _rewrite_stage_expr(body[1], {}, process_by_case)
             out.append(("invariant", policy_id, expr, loc, meta))
@@ -1299,7 +1414,8 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
             out.append(("leadsto", policy_id, [binder], p, q, loc, meta))
 
     for item in goals:
-        _, goal_id, text, body, loc = item
+        _, goal_id, text, body, loc = item[:5]
+        control_refs = _satisfies_refs(item)
         if body[0] == "biz_goal_expr":
             expr = _rewrite_stage_expr(body[1], {}, process_by_case)
         elif body[0] == "biz_goal_some_stage":
@@ -1318,7 +1434,7 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
             )
         else:
             _err(f"unknown business goal body '{body[0]}'", loc=loc)
-        out.append(("reachable", goal_id, expr, loc, _meta(goal_id, text)))
+        out.append(("reachable", goal_id, expr, loc, _meta_with_controls(goal_id, text, control_refs, control_by_id)))
 
     return out
 
@@ -1326,11 +1442,267 @@ def _generate_business_items(cases, processes, kpi_infos, policies, goals, proce
 def expand_business(ast):
     """Expand business AST to a kernel spec AST."""
     _, name, items = ast
-    _, cases, processes, kpis, policies, goals, process_by_case, process_by_name = (
+    _, cases, processes, kpis, controls, policies, goals, process_by_case, process_by_name = (
         _collect_business_entities(items)
     )
     kpi_infos = _build_kpi_metadata(kpis, process_by_name)
     out = _generate_business_items(
-        cases, processes, kpi_infos, policies, goals, process_by_case,
+        cases, processes, kpi_infos, controls, policies, goals, process_by_case,
     )
     return ("spec", name, out)
+
+
+def _resolve_relative(base_dir, path):
+    return Path(base_dir) / path
+
+
+def _collect_governance_controls(items):
+    controls = {}
+    authorities = []
+    for item in items:
+        if item[0] == "biz_control":
+            control = _control_info(item)
+            cid = control["id"]
+            if cid in controls:
+                _err(f"duplicate control '{cid}'", loc=control["loc"])
+            controls[cid] = control
+        elif item[0] == "gov_authority":
+            authorities.append({
+                "authority": item[1],
+                "owns": list(item[2]),
+                "loc": item[3],
+            })
+    for authority in authorities:
+        for cid in authority["owns"]:
+            if cid not in controls:
+                _err(
+                    f"authority '{authority['authority']}' owns unknown control '{cid}'",
+                    loc=authority["loc"],
+                )
+    return controls, authorities
+
+
+def _control_refs_from_meta(meta):
+    refs = []
+    if not isinstance(meta, dict):
+        return refs
+    for control in meta.get("controls") or []:
+        if isinstance(control, dict) and control.get("id"):
+            refs.append(control["id"])
+    return refs
+
+
+def _business_catalog_from_ast(ast):
+    if ast[0] != "spec":
+        _err("governance delegates must reference a business spec", kind="type")
+    policies = {}
+    goals = {}
+    controls = {}
+    satisfies = {}
+    for item in ast[2]:
+        tag = item[0]
+        if tag in ("invariant", "leadsto"):
+            name = item[1]
+            meta = item[4] if tag == "invariant" and len(item) > 4 else item[6] if tag == "leadsto" and len(item) > 6 else None
+            policies[name] = {"id": name, "meta": meta}
+            for cid in _control_refs_from_meta(meta):
+                satisfies.setdefault(cid, []).append({"kind": "policy", "id": name})
+        elif tag == "reachable":
+            name = item[1]
+            meta = item[4] if len(item) > 4 else None
+            goals[name] = {"id": name, "meta": meta}
+            for cid in _control_refs_from_meta(meta):
+                satisfies.setdefault(cid, []).append({"kind": "goal", "id": name})
+        elif tag == "__controls":
+            for control in item[1].get("controls", []):
+                controls[control["id"]] = control
+            for sat in item[1].get("satisfies", []):
+                kind = sat.get("element")
+                if kind in ("policy", "goal"):
+                    satisfies.setdefault(sat["control"], []).append({"kind": kind, "id": sat["id"]})
+    return {
+        "policies": policies,
+        "goals": goals,
+        "controls": controls,
+        "satisfies": satisfies,
+    }
+
+
+def _dedupe_artifacts(artifacts):
+    seen = set()
+    out = []
+    for artifact in artifacts:
+        key = (artifact["kind"], artifact["id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(artifact)
+    return out
+
+
+def _validate_delegate(item, base_dir, controls):
+    _, business_name, path, parts, loc = item
+    abs_path = _resolve_relative(base_dir, path)
+    if not abs_path.is_file():
+        _err(f"file not found: {path}", kind="io", loc=loc)
+    ast, _display_names = _parse_file(abs_path)
+    if ast[0] != "spec" or ast[1] != business_name:
+        _err(f"spec name mismatch: expected '{business_name}', got '{ast[1]}'", loc=loc)
+    catalog = _business_catalog_from_ast(ast)
+    required = []
+    explicit = {}
+    for part in parts:
+        if part[0] == "gov_require":
+            cid = part[1]
+            if cid not in controls:
+                _err(f"delegates '{business_name}' requires unknown control '{cid}'", loc=part[2])
+            required.append(cid)
+        elif part[0] == "gov_satisfaction":
+            cid = part[1]
+            if cid not in controls:
+                _err(
+                    f"delegates '{business_name}' maps unknown control '{cid}'",
+                    loc=part[3],
+                )
+            refs = []
+            for ref in part[2]:
+                kind, artifact_id, ref_loc = ref
+                collection = catalog["policies"] if kind == "policy" else catalog["goals"]
+                if artifact_id not in collection:
+                    _err(
+                        f"delegates '{business_name}' references unknown {kind} '{artifact_id}'",
+                        loc=ref_loc,
+                    )
+                refs.append({"kind": kind, "id": artifact_id})
+            explicit.setdefault(cid, []).extend(refs)
+
+    required = list(dict.fromkeys(required))
+    satisfied = {cid: list(catalog["satisfies"].get(cid, [])) for cid in required}
+    for cid, refs in explicit.items():
+        satisfied.setdefault(cid, []).extend(refs)
+
+    missing = [cid for cid in required if not satisfied.get(cid)]
+    if missing:
+        _err(
+            f"delegates '{business_name}' requires unsatisfied control(s): {', '.join(missing)}",
+            loc=loc,
+            hint="add `policy ... satisfies CTRL` in the business spec or map it with `CTRL is satisfied_by ...`",
+        )
+
+    return {
+        "business": business_name,
+        "path": str(abs_path),
+        "required": required,
+        "satisfied": {
+            cid: _dedupe_artifacts(satisfied.get(cid, []))
+            for cid in required
+        },
+        "loc": loc,
+    }
+
+
+def _validate_preservation(item, base_dir, controls):
+    _, name, parts, loc = item
+    before = None
+    after = None
+    preserves = []
+    refinement = None
+    for part in parts:
+        tag = part[0]
+        if tag == "preservation_before":
+            if before is not None:
+                _err(f"preservation '{name}' declares before more than once", loc=part[3])
+            before = {"spec": part[1], "path": str(_resolve_relative(base_dir, part[2])), "source": part[2], "loc": part[3]}
+        elif tag == "preservation_after":
+            if after is not None:
+                _err(f"preservation '{name}' declares after more than once", loc=part[3])
+            after = {"spec": part[1], "path": str(_resolve_relative(base_dir, part[2])), "source": part[2], "loc": part[3]}
+        elif tag == "preservation_preserve":
+            if part[1] not in controls:
+                _err(f"preservation '{name}' preserves unknown control '{part[1]}'", loc=part[2])
+            preserves.append(part[1])
+        elif tag == "preservation_refinement":
+            if refinement is not None:
+                _err(f"preservation '{name}' declares checked_by more than once", loc=part[2])
+            refinement = {"path": str(_resolve_relative(base_dir, part[1])), "source": part[1], "loc": part[2]}
+    if before is None:
+        _err(f"preservation '{name}' missing before spec", loc=loc)
+    if after is None:
+        _err(f"preservation '{name}' missing after spec", loc=loc)
+    if refinement is None:
+        _err(f"preservation '{name}' missing checked_by refinement", loc=loc)
+    if not preserves:
+        _err(f"preservation '{name}' must preserve at least one control", loc=loc)
+    for entry in (before, after, refinement):
+        if not Path(entry["path"]).is_file():
+            _err(f"file not found: {entry['source']}", kind="io", loc=entry["loc"])
+    for side in (before, after):
+        ast, _display_names = _parse_file(side["path"])
+        if ast[0] != "spec" or ast[1] != side["spec"]:
+            _err(f"spec name mismatch: expected '{side['spec']}', got '{ast[1]}'", loc=side["loc"])
+    return {
+        "name": name,
+        "before": before,
+        "after": after,
+        "preserve": list(dict.fromkeys(preserves)),
+        "refinement": refinement,
+        "loc": loc,
+    }
+
+
+def _governance_kernel_items(name, metadata):
+    return [
+        ("type", "_GovernanceUnit", ("num", 0), ("num", 0)),
+        ("state", [("decl", "_governance_ok", ("bool",))]),
+        ("init", [("assign", ("var", "_governance_ok"), ("bool", True), None)]),
+        (
+            "action",
+            "_governance_noop",
+            [],
+            [("requires", ("bool", False), None)],
+            None,
+            False,
+            _meta("GOV", f"governance catalog {name}"),
+        ),
+        (
+            "invariant",
+            "_governance_catalog_ok",
+            ("bin", "==", ("var", "_governance_ok"), ("bool", True)),
+            None,
+            _meta("GOV", f"governance catalog {name}"),
+        ),
+        ("terminal", ("bool", True), None),
+        ("__generated", ["_governance_noop", "_governance_catalog_ok"]),
+        ("__governance", metadata),
+    ]
+
+
+def expand_governance_with_display(ast, base_dir):
+    """Validate a governance catalog and expand it to a metadata-only kernel spec."""
+    _, name, items = ast
+    controls, authorities = _collect_governance_controls(items)
+    delegates = []
+    preservations = []
+    for item in items:
+        if item[0] == "gov_delegates":
+            delegates.append(_validate_delegate(item, base_dir, controls))
+        elif item[0] == "gov_preservation":
+            preservations.append(_validate_preservation(item, base_dir, controls))
+    metadata = {
+        "name": name,
+        "controls": [
+            {
+                "id": control["id"],
+                "text": control["text"],
+                "owner": control["owner"],
+                "severity": control["severity"],
+                "applies_to": list(control["applies_to"]),
+                "loc": control["loc"],
+            }
+            for control in controls.values()
+        ],
+        "authorities": authorities,
+        "delegates": delegates,
+        "preservations": preservations,
+    }
+    return ("spec", name, _governance_kernel_items(name, metadata)), {}
