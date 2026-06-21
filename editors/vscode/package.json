@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "fslc",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ymm-oss/fsl.git",
+    "directory": "editors/vscode"
+  },
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -37,7 +42,8 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./"
+    "compile": "tsc -p ./",
+    "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

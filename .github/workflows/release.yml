@@ -118,3 +118,32 @@ jobs:
           files: |
             dist/${{ matrix.asset }}
             dist/${{ matrix.asset }}.sha256
+
+  vsix:
+    name: build vscode extension (.vsix)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build .vsix
+        # vscode:prepublish compiles TypeScript before packaging.
+        working-directory: editors/vscode
+        run: |
+          npm install
+          npx --yes @vscode/vsce package --out fsl-vscode.vsix
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-vscode-vsix
+          path: editors/vscode/fsl-vscode.vsix
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: editors/vscode/fsl-vscode.vsix
