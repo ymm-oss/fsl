@@ -163,6 +163,8 @@ the Claude Code skills in `~/.claude/skills/`
 What gets installed:
 
 - the `fslc` command (used from `~/.local/bin/fslc`)
+- the `fslc-lsp` language server (`~/.local/bin/fslc-lsp`) — the VSCode extension in
+  `editors/vscode/` launches it from `PATH`
 - the Claude Code skills (`~/.claude/skills/fsl*`)
 - samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
 
@@ -171,7 +173,7 @@ Windows users should use WSL or refer to the developer instructions (PowerShell)
 Uninstall:
 
 ```bash
-rm -rf ~/.fsl ~/.local/bin/fslc ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
+rm -rf ~/.fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
 ```
 
 ## Developer setup

@@ -10,6 +10,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbols, and go-to-definition over raw Lark parse trees, including compose
   `use ... from` cross-file resolution. Added a VSCode extension scaffold with
   `.fsl` language registration, TextMate highlighting, and an LSP client.
+- (Install) `install.sh` now installs the LSP server (the `[lsp]` extra) and
+  links `fslc-lsp` into `~/.local/bin` alongside `fslc`, so the VSCode extension
+  finds it on `PATH`.
 
 ## [2.2.0] - 2026-06-21
 

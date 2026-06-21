@@ -132,6 +132,7 @@ fi
 VENV_DIR="$REPO_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 FSL_BIN="$VENV_DIR/bin/fslc"
+FSL_LSP_BIN="$VENV_DIR/bin/fslc-lsp"
 
 echo "Preparing the Python virtual environment: $VENV_DIR"
 PYTHONPATH= "$PYTHON_BIN" -m venv "$VENV_DIR" || fail "Failed to create the Python virtual environment. On Linux where python3-venv is required, install it via your OS package manager and re-run."
@@ -141,9 +142,11 @@ PYTHONPATH= "$PYTHON_BIN" -m venv "$VENV_DIR" || fail "Failed to create the Pyth
 echo "Upgrading pip."
 PYTHONPATH= "$VENV_PYTHON" -m pip install --upgrade pip || fail "Failed to upgrade pip. Check your network connection or Python environment and re-run."
 
-echo "Installing fslc."
+echo "Installing fslc (with the LSP server)."
 PIP_INSTALL_LOG=$(mktemp)
-if PYTHONPATH= "$VENV_PYTHON" -m pip install "$REPO_DIR" >"$PIP_INSTALL_LOG" 2>&1; then
+# Use a relative spec via a subshell cd: pip silently no-ops on an absolute
+# path combined with extras ("/abs/path[lsp]"), whereas ".[lsp]" is reliable.
+if ( cd "$REPO_DIR" && PYTHONPATH= "$VENV_PYTHON" -m pip install ".[lsp]" ) >"$PIP_INSTALL_LOG" 2>&1; then
   rm -f "$PIP_INSTALL_LOG"
 else
   rm -f "$PIP_INSTALL_LOG"
@@ -181,22 +184,31 @@ fi
 [ -x "$FSL_BIN" ] || fail "$FSL_BIN not found. Check the result of pip install and re-run."
 
 LOCAL_BIN="$HOME/.local/bin"
-LINK_PATH="$LOCAL_BIN/fslc"
 mkdir -p "$LOCAL_BIN"
 
-if [ -L "$LINK_PATH" ]; then
-  LINK_TARGET=$(readlink "$LINK_PATH" || true)
-  if [ "$LINK_TARGET" = "$FSL_BIN" ]; then
-    echo "The fslc command link is already set up: $LINK_PATH"
+link_command() {
+  cmd_name="$1"
+  target="$2"
+  link_path="$LOCAL_BIN/$cmd_name"
+  if [ -L "$link_path" ]; then
+    link_target=$(readlink "$link_path" || true)
+    if [ "$link_target" = "$target" ]; then
+      echo "The $cmd_name command link is already set up: $link_path"
+    else
+      echo "Warning: $link_path points to a different location (${link_target}). Not overwriting."
+    fi
+  elif [ -e "$link_path" ]; then
+    echo "Warning: $link_path already exists. Not overwriting. If needed, remove it manually and re-run."
   else
-    echo "Warning: $LINK_PATH points to a different location (${LINK_TARGET}). Not overwriting."
+    ln -s "$target" "$link_path"
+    echo "Created the $cmd_name command link: $link_path"
   fi
-elif [ -e "$LINK_PATH" ]; then
-  echo "Warning: $LINK_PATH already exists. Not overwriting. If needed, remove it manually and re-run."
-else
-  ln -s "$FSL_BIN" "$LINK_PATH"
-  echo "Created the fslc command link: $LINK_PATH"
-fi
+}
+
+link_command fslc "$FSL_BIN"
+# The VSCode extension launches `fslc-lsp` from PATH; link it when present
+# (the offline fallback above installs fslc only, without the LSP server).
+[ -x "$FSL_LSP_BIN" ] && link_command fslc-lsp "$FSL_LSP_BIN"
 
 case ":$PATH:" in
   *":$LOCAL_BIN:"*)
