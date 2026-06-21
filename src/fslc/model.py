@@ -20,6 +20,24 @@ def _err(message, kind="semantics", loc=None, expected=None, hint=None):
     raise FslError(message, kind=kind, loc=loc, expected=expected, hint=hint)
 
 
+# Bare-atom literals in the grammar that collide unconditionally with identifiers.
+# Keywords that only act as keywords when immediately followed by "(" (count, sum,
+# stage, min, max, abs, old, unique, exactlyOne, some) or by a binder (forall,
+# exists) are contextual — they parse unambiguously as bare identifiers, so they
+# are NOT reserved.
+_RESERVED = frozenset({"true", "false", "none"})
+
+
+def _check_reserved(name, kind_desc, loc=None):
+    if name in _RESERVED:
+        _err(
+            f"'{name}' is a reserved FSL keyword and cannot be used as a {kind_desc} name",
+            kind="name",
+            loc=loc,
+            hint=f"rename the {kind_desc} to avoid the reserved word '{name}'",
+        )
+
+
 def _euc_div_const(a, b):
     q = a // b
     if a - b * q < 0:
@@ -427,6 +445,7 @@ def normalize_params(params, consts, types_meta):
     for p in params:
         if p[0] == "param_typed":
             _, n, ty_name = p
+            _check_reserved(n, "parameter")
             if ty_name not in types_meta:
                 _err(f"unknown parameter type '{ty_name}'", kind="type")
             ty = types_meta[ty_name]["ty"]
@@ -434,6 +453,7 @@ def normalize_params(params, consts, types_meta):
             out.append((n, lo, hi, ty_name))
         else:
             _, n, lo, hi = p
+            _check_reserved(n, "parameter")
             lo_i, hi_i = eval_const(lo, consts, {}), eval_const(hi, consts, {})
             out.append((n, lo_i, hi_i, None))
     return out
@@ -1012,6 +1032,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     consts = {}
     for it in items:
         if it[0] == "const":
+            _check_reserved(it[1], "const")
             consts[it[1]] = eval_const(it[2], consts, {})
 
     types_meta = collect_types(items, consts)
@@ -1031,6 +1052,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         tag = it[0]
         if tag == "state":
             for _, n, ty_ast in it[1]:
+                _check_reserved(n, "state variable")
                 if n in state:
                     _err(f"duplicate state variable '{n}'", kind="name")
                 state[n] = resolve_type(ty_ast, types_meta, consts)
