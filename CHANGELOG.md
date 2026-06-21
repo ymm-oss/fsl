@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-21
+
 ### Changed
 - (Grammar) Eliminated ~50-line duplicate `ref_expr` grammar by collapsing it to
   a thin `?ref_expr: ite | expr` wrapper; `if/then/else` remains accepted only in
