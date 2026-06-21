@@ -179,11 +179,18 @@ business ReturnHandling {
   kpi refunded = count Return in Refunded  // → metadata projection:
                                            //   count(c: Return where stage(c) == Refunded)
 
+  control CTRL-REFUND-REVIEW
+    "refund payment must preserve review control"
+    owner Manager
+    severity high
+    applies_to Return
+
   policy PAY-1 "refunds only for approved cases" invariant {
     // stage(c) is available in expressions (c is an entity-typed bound variable)
     forall c: Return { stage(c) == Refunded => true }   // example
   }
   policy PAY-2 "every request is eventually adjudicated"
+    satisfies CTRL-REFUND-REVIEW
     every Return in Requested must eventually be Approved or Rejected or Refunded
   goal AllSettled "all cases can complete"
     all Return can be Refunded or Rejected
@@ -211,7 +218,16 @@ verify {
 3. `kpi k = count X in S` → no kernel state/action/invariant. The declaration is
    recorded as metadata for the projection
    `count(c: X where x_stage[c] == S)`.
-4. `policy <ID> "<text>" invariant { expr }` → invariant (with meta).
+4. `control <ID> "<text>" [owner NAME] [severity NAME] [applies_to NAME]...`
+   records business/governance metadata only. It does not generate kernel state
+   or properties by itself. A control becomes checkable when a policy or goal
+   declares `satisfies <ControlID>`.
+5. `policy <ID> "<text>" [satisfies <ControlID>, ...] invariant { expr }` →
+   invariant (with meta). The same optional `satisfies` clause is available on
+   all policy forms and on goals. Unknown control references are type errors;
+   declared but unused controls produce an `unused_control` warning. When a
+   satisfied policy/goal fails, the JSON `requirement` object includes
+   `controls: [{id, text}, ...]`.
    `policy ... responds { P ~> Q }` → leadsTo (with meta).
    `policy ... every <Entity> in <Stage> must eventually be <Stage> [or <Stage> ...]`
    is a readable alias for the common stage-response rule and expands to
@@ -223,16 +239,59 @@ verify {
    `stage(c)` in an expression is rewritten to `x_stage[c]` for the entity-typed
    bound variable c in question (the process is identified from the type of the
    binding; ambiguity is a type error).
-5. The `actor` declaration is a roster (used to validate the `by` of a
+6. The `actor` declaration is a roster (used to validate the `by` of a
    transition; an undeclared actor is a type error). No other semantics.
 
-### 3.3 Tests (tests/test_biz_dialect.py)
+### 3.3 Governance catalog
+
+`governance <Name> { ... }` is an optional top-level form for controls that sit
+above one business process or are reused across multiple business specs:
+
+```fsl
+governance EnterpriseRefundControls {
+  authority Finance owns CTRL-REFUND-REVIEW
+  control CTRL-REFUND-REVIEW "refund payment must preserve review control"
+    owner Finance
+    severity high
+    applies_to Return
+
+  delegates ReturnHandling from "return_policy.fsl" {
+    require CTRL-REFUND-REVIEW
+    // optional when the business file already has `policy ... satisfies CTRL-REFUND-REVIEW`
+    CTRL-REFUND-REVIEW is satisfied_by policy PAY-2
+  }
+
+  preservation AutoApproval {
+    before AsIsExpense from "asis_expense.fsl"
+    after  ToBeExpense from "tobe_expense.fsl"
+    preserve CTRL-REFUND-REVIEW
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}
+```
+
+Expansion rules:
+
+1. A governance catalog expands to a metadata-only kernel spec with generated
+   no-op state/action/property. Kernel verification semantics are unchanged.
+2. `delegates BusinessName from "file.fsl"` parses the referenced business spec,
+   checks the name, and verifies that every `require CTRL` is satisfied either by
+   business-side `policy/goal ... satisfies CTRL` metadata or by an explicit
+   `CTRL is satisfied_by policy|goal ID` mapping. Missing references are type
+   errors.
+3. `preservation` validates the before/after/refinement file references. During
+   `fslc check governance.fsl`, fslc runs `refine(after, before, mapping)` at
+   depth 8 and reports the result under `governance.preservations`.
+
+### 3.4 Tests (tests/test_governance_business.py)
 
 Use the return process of §3.1 as a fixture: check ok / verify verified /
 induction proved / a policy-violating variant carries the requirement
-(= policy ID+text) in the counterexample / KPI projection metadata is recorded
-without generating a counter invariant / the goal is witnessed as reachable / type errors for
-an undeclared actor and a decrementing KPI / all existing tests unchanged.
+(= policy ID+text) and satisfied controls in the counterexample / KPI projection
+metadata is recorded without generating a counter invariant / the goal is
+witnessed as reachable / type errors for an undeclared actor, a decrementing KPI,
+and an unknown satisfied control / governance delegates reject unsatisfied
+controls / preservation runs the declared refinement / all existing tests unchanged.
 Furthermore, `return_policy_biz.fsl`, which rewrites examples/layers'
 return_policy.fsl in this dialect, can **be refined from the requirements layer**
 by the existing return_refines.fsl (with adjusted abs names) (= demonstration

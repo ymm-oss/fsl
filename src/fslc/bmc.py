@@ -241,7 +241,10 @@ def _requirement(source):
     meta = source.get("meta") if isinstance(source, dict) else None
     if not meta:
         return None
-    return {"id": meta["id"], "text": meta.get("text")}
+    out = {"id": meta["id"], "text": meta.get("text")}
+    if meta.get("controls"):
+        out["controls"] = meta["controls"]
+    return out
 
 
 def _attach_requirement(out, source):
@@ -3299,8 +3302,11 @@ def _frozen_tautology_candidates(spec, invariants=None):
     if invariants is None:
         invariants = spec.get("invariants", [])
     selected_invariants = {inv["name"] for inv in invariants}
+    generated = set(spec.get("generated_names") or [])
     for inv in spec.get("user_invariants", []):
         if inv["name"] not in selected_invariants:
+            continue
+        if inv["name"] in generated:
             continue
         if inv.get("implicit"):
             continue
@@ -3464,8 +3470,11 @@ def _vacuity_candidates(spec, invariants=None, leadstos=None):
     if urgency_freeze is not None:
         pending.append(urgency_freeze)
     selected_invariants = {inv["name"] for inv in invariants}
+    generated = set(spec.get("generated_names") or [])
     for inv in spec.get("user_invariants", []):
         if inv["name"] not in selected_invariants:
+            continue
+        if inv["name"] in generated:
             continue
         cand = _implication_antecedent_candidate(inv)
         if cand is not None:

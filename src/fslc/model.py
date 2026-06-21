@@ -980,6 +980,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
     dialect_generated_names = []
     dialect_requirement_ids = []
     dialect_kpis = []
+    dialect_controls = None
+    dialect_governance = None
     dialect_warnings = []
     for it in items:
         if it[0] == "__display_names":
@@ -998,6 +1000,10 @@ def build_spec(tree, display_names=None, semantic_check=True):
             dialect_requirement_ids.extend(it[1])
         elif it[0] == "__kpis":
             dialect_kpis.extend(it[1])
+        elif it[0] == "__controls":
+            dialect_controls = it[1]
+        elif it[0] == "__governance":
+            dialect_governance = it[1]
         elif it[0] == "__warnings":
             dialect_warnings.extend(it[1])
 
@@ -1190,6 +1196,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "generated_names": dialect_generated_names,
         "requirement_ids": dialect_requirement_ids,
         "kpis": dialect_kpis,
+        "controls": dialect_controls,
+        "governance": dialect_governance,
         "symmetry": symmetry,
     }
 

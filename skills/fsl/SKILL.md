@@ -379,7 +379,7 @@ to the kernel, so verify/induction/scenarios/Monitor are used identically:
 Treat the layer boundary as part of the contract. Do not move to the lower layer
 unless the user asks for it or the relevant role skill directs it.
 
-- `business Name { process/policy/kpi/goal }` — the consulting layer. For
+- `business Name { process/control/policy/kpi/goal }` — the consulting layer. For
   PM/consulting-facing files, prefer the readable stage syntax for common rules:
   `policy ... every Case in Source must eventually be Target [or Target ...]`,
   `goal ... some Case can reach Target`, and
@@ -387,7 +387,11 @@ unless the user asks for it or the relevant role skill directs it.
   `responds { forall ... stage(c) ... ~> ... }` / `{ expr }` only when the rule is
   not simple stage progression. Regulation contradiction = invariant violation,
   dead business step = coverage diagnostic, unreachable business goal =
-  reachable_failed
+  reachable_failed. Use `control ID "..."` for governance/catalog metadata and
+  `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
+  then carry both the broken policy/goal and satisfied controls. A standalone
+  `governance Name { ... }` catalog can require controls across business specs
+  and run preservation refinements during `fslc check`.
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
   the process+data profile first for a single-entity lifecycle: transition

@@ -19,8 +19,11 @@ repository, read `examples/consulting/` for As-Is/To-Be work,
 
 Produce business-layer artifacts only:
 
-- A `business` spec with `actor`, `entity`, `process`, `transition`, `policy`,
-  `kpi`, and `goal`, plus a top-level `verify { instances Entity = N }` bound
+- A `business` spec with `actor`, `entity`, `process`, `transition`, optional
+  `control`, `policy`, `kpi`, and `goal`, plus a top-level
+  `verify { instances Entity = N }` bound
+- Optional standalone `governance` catalog when the same controls must be traced
+  across multiple business specs
 - Verification commands/results, usually `fslc verify ... --engine induction`
 - Optional As-Is/To-Be control preservation using `fslc refine` and a mapping file
 
@@ -43,7 +46,8 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
 3. Write the `business` spec. Prefer readable stage syntax:
    - `entity Claim` with `verify { instances Claim = 3 }`
    - `kpi paid_claims = count Claim in Paid`
-   - `policy POL-1 "..." every Case in Source must eventually be Target`
+   - `control CTRL-1 "..." owner Finance severity high applies_to Claim`
+   - `policy POL-1 "..." satisfies CTRL-1 every Case in Source must eventually be Target`
    - `goal G "..." some Case can reach Target`
    - `goal G "..." all Case can be Target or OtherTarget`
 4. Run `fslc check`, then `fslc verify --engine induction`. Use `--deadlock ignore`
@@ -57,8 +61,12 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
 
 ## Guardrails
 
-- Keep IDs and source text verbatim in `policy` declarations. Diagnostics carry
-  this text back to the business reviewer.
+- Keep IDs and source text verbatim in `control` and `policy` declarations.
+  Diagnostics carry policy/goal text and satisfied control text back to the
+  business reviewer.
+- Use `control` for governance/catalog ownership and `policy`/`goal satisfies`
+  for the checkable business rule. A bare `control` does not prove anything by
+  itself.
 - Do not invent missing exception policy, SLA semantics, escalation stages, or
   ownership rules to make the verifier green.
 - A green result means the business spec is internally consistent under the stated

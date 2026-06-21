@@ -16,6 +16,7 @@ workflow:
 | [`asis_expense.fsl`](asis_expense.fsl) | Current operations (interview results): process + control policies CTRL-1/2 + KPI |
 | [`tobe_expense.fsl`](tobe_expense.fsl) | Reform proposal: adds an auto-approval lane, keeps the controls |
 | [`tobe_refines_asis.fsl`](tobe_refines_asis.fsl) | **Control check of the reform**: To-Be's business mapping table (auto-approval = approval act) |
+| [`governance_controls.fsl`](governance_controls.fsl) | Optional governance catalog: Finance owns CTRL-1/2, both business specs delegate to them, and the To-Be preservation refinement is checked |
 
 ## Why this is valuable (3 points)
 
@@ -45,6 +46,10 @@ fslc refine examples/consulting/tobe_expense.fsl \
             examples/consulting/asis_expense.fsl \
             examples/consulting/tobe_refines_asis.fsl --depth 6
 # → {"result": "refines", ...} = the controls are preserved
+
+# Optional governance catalog check: delegation + preservation in one place
+fslc check examples/consulting/governance_controls.fsl
+# → {"governance": {"delegates": ..., "preservations": [{"result": "refines"}]}}
 ```
 
 ## A worked example of "what it looks like when a control is broken"
