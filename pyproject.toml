@@ -43,6 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+lsp = ["pygls>=1.3"]
 
 [project.urls]
 Homepage = "https://github.com/ymm-oss/fsl"
@@ -52,6 +53,7 @@ Issues = "https://github.com/ymm-oss/fsl/issues"
 
 [project.scripts]
 fslc = "fslc.cli:main"
+fslc-lsp = "fslc.lsp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
