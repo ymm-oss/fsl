@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- (LSP) Added a Python `fslc-lsp` language server with diagnostics, document
+  symbols, and go-to-definition over raw Lark parse trees, including compose
+  `use ... from` cross-file resolution. Added a VSCode extension scaffold with
+  `.fsl` language registration, TextMate highlighting, and an LSP client.
+
 ## [2.2.0] - 2026-06-21
 
 ### Changed

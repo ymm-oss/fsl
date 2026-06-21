@@ -1,0 +1,111 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "FSL",
+  "scopeName": "source.fsl",
+  "comment": "Regex-based highlighting is approximate because FSL keywords are contextual.",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#declarations" },
+    { "include": "#builtins" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#methods" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.fsl",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.fsl",
+          "match": "\"[^\"]*\""
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "meta.definition.block.fsl",
+          "match": "\\b(spec|compose|requirements|business|governance|refinement)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fsl" },
+            "2": { "name": "entity.name.type.fsl" }
+          }
+        },
+        {
+          "name": "meta.definition.named.fsl",
+          "match": "\\b(const|type|enum|struct|entity|number|action|invariant|trans|reachable|leadsTo|until|unless|requirement|acceptance|forbidden|kpi|process|control|policy|goal|authority|preservation)\\s+([A-Za-z0-9_][A-Za-z0-9_-]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fsl" },
+            "2": { "name": "entity.name.function.fsl" }
+          }
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.type.fsl",
+          "match": "\\b(Int|Bool|Map|Set|Seq|Option)\\b"
+        },
+        {
+          "name": "support.function.fsl",
+          "match": "\\b(stage|count|sum|min|max|abs|old|unique|exactlyOne|some)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.fsl",
+          "match": "\\b(if|else|forall|exists|where|in|and|or|not|is|within|decreases|then|every|must|eventually|be|can|reach|all|while|when|with|by|from|as|of)\\b"
+        },
+        {
+          "name": "keyword.declaration.fsl",
+          "match": "\\b(verify|instances|values|use|internal|state|init|fair|requires|ensures|let|symmetric|impl|abs|maps|auto|map|stutter|preserve|progress|respond|implements|branches|expect|rejected|time|urgent|age|deadline|actor|stages|initial|transition|set|covers|owner|severity|applies_to|satisfies|delegates|require|satisfied_by|before|after|checked_by|owns)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.fsl",
+          "match": "\\b(true|false|none)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.fsl",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.fsl",
+          "match": "=>|~>|\\|\\||==|!=|<=|>=|\\.\\.|[+\\-*/%<>=]"
+        }
+      ]
+    },
+    "methods": {
+      "patterns": [
+        {
+          "name": "support.function.method.fsl",
+          "match": "\\.(contains|add|remove|push|pop|head|at|size)\\b"
+        }
+      ]
+    }
+  }
+}

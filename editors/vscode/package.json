@@ -1,0 +1,50 @@
+{
+  "name": "fsl-vscode",
+  "displayName": "FSL",
+  "description": "Language support for FSL specifications.",
+  "version": "0.1.0",
+  "publisher": "fslc",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:fsl"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "fsl",
+        "aliases": [
+          "FSL"
+        ],
+        "extensions": [
+          ".fsl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "fsl",
+        "scopeName": "source.fsl",
+        "path": "./syntaxes/fsl.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.3.3"
+  }
+}

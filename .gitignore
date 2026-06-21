@@ -15,6 +15,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# VSCode extension build artifacts
+node_modules/
+editors/vscode/out/
+
 # Claude Code local config (not part of the project)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
