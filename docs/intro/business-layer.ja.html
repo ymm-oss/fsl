@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL 業務層の書き方 — process・policy・goal・KPI</title>
+<meta name="description" content="FSLの業務層 business の書き方を、業務プロセス、統制、ゴール、KPI、検証範囲、要件層とのつなぎ方に分けて学ぶ日本語教材。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="business-layer">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">業務層を書く</p>
+    <h1 class="reveal">業務ルールを、<br><span class="hl">検証できる骨格</span>にする。</h1>
+    <p class="lead reveal">業務層 <code>business</code> は、担当者、業務対象、業務プロセス、統制、ゴール、KPIを書く層です。実装の都合ではなく、業務として守るべき流れを先に固定します。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">目次</p>
+    <h2 class="reveal">このページで決めること</h2>
+    <div class="toc reveal">
+      <a href="#boundary">1. 役割<span>業務層に書くこと・書かないこと</span></a>
+      <a href="#shape">2. 基本形<span><code>actor</code>・<code>entity</code>・<code>process</code></span></a>
+      <a href="#policies">3. 統制とゴール<span><code>policy</code>・<code>goal</code>・<code>kpi</code>・<code>control</code>・<code>governance</code></span></a>
+      <a href="#bounds">4. 検証範囲<span><code>verify</code> の決め方</span></a>
+      <a href="#handoff">5. 要件層への渡し方<span>名前をそろえて詳細化につなぐ</span></a>
+      <a href="#checklist">6. チェックリスト<span>レビュー時に見ること</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>ファイルを分ける理由:</b> 業務層は「何を業務として許すか」を書きます。要件層は「どの入力・条件・受け入れ手順で満たすか」を書きます。混ぜると、業務判断と仕様実装の判断が区別しにくくなります。</p>
+    </div>
+  </div>
+</section>
+
+<section id="boundary" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. 役割</p>
+    <h2 class="reveal">業務層は、実装語ではなく業務語で書く</h2>
+    <p class="lead narrow reveal">業務層は、業務としてのライフサイクルと統制を読むための層です。画面、API、キュー、DBフラグなどはまだ出しません。</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>書く</h3>
+        <p>担当者、業務対象、ステージ、遷移、業務統制、到達したいゴール、KPI。例: 返品申請は承認または却下される、承認後だけ返金できる。</p>
+      </div>
+      <div class="card">
+        <h3>書かない</h3>
+        <p>DBカラム、画面遷移、API名、非同期ジョブ、リトライ詳細、ミリ秒単位の時間、確率、組織図の細部、説明文だけの根拠。</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>判断基準:</b> 業務担当者がそのまま読んで「この流れは正しい」と判断できるなら業務層です。実装者でないと意味が取れない要素は、要件層か設計層へ下げます。</p>
+    </div>
+  </div>
+</section>
+
+<section id="shape">
+  <div class="wrap">
+    <p class="kicker reveal">2. 基本形</p>
+    <h2 class="reveal"><code>actor</code>・<code>entity</code>・<code>process</code> で業務の流れを書く</h2>
+    <p class="lead narrow reveal">最初は、業務対象がどのステージを進むかだけを書きます。FSL はこの流れから、検証できる状態機械を作ります。</p>
+
+    <div class="panel reveal">
+      <pre><code>business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -&gt; Approved by Manager
+    transition reject  Requested -&gt; Rejected by Manager
+    transition refund  Approved  -&gt; Refunded by Manager
+  }
+}
+
+verify {
+  instances Return = 3
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>書くときの目安</th></tr>
+      <tr><td><code>actor</code></td><td>業務操作を行う担当者一覧。</td><td>遷移の <code>by</code> に出る名前を並べます。</td></tr>
+      <tr><td><code>entity</code></td><td>業務対象。</td><td>返品、申請、注文、契約など、1件ずつ状態を持つもの。</td></tr>
+      <tr><td><code>process</code></td><td>業務対象のステージ機械。</td><td>状態名と、業務として許す遷移だけを書きます。</td></tr>
+      <tr><td><code>transition</code></td><td>業務上の1操作。</td><td>誰が、どのステージからどのステージへ進めるか。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="policies" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. 統制とゴール</p>
+    <h2 class="reveal">守るルールは <code>policy</code>、到達したい状態は <code>goal</code></h2>
+    <p class="lead narrow reveal">業務層では「起きてはいけないこと」と「できるべきこと」を分けて書きます。集計したい数は <code>kpi</code> として置きます。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>よく使う読みやすい形</h3>
+        <pre><code>kpi refunded = count Return in Refunded
+
+policy EveryRequestDecided "すべての依頼はいずれ判断される"
+  every Return in Requested must eventually be Approved or Rejected or Refunded
+
+goal AllSettled "すべての依頼は完了状態にできる"
+  all Return can be Refunded or Rejected</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>式で書く形</h3>
+        <pre><code>policy ApprovedEventuallyRefunded "承認済みはいずれ返金される" responds {
+  forall r: Return {
+    stage(r) == Approved ~&gt; stage(r) == Refunded
+  }
+}
+
+goal SomeRefunded "返金完了の例が存在する" {
+  exists r: Return { stage(r) == Refunded }
+}</code></pre>
+      </div>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>目的</th><th>構文</th><th>失敗時にわかること</th></tr>
+      <tr><td>業務上の禁止・安全性</td><td><code>policy ... invariant { ... }</code></td><td>業務ルールを破る手順。</td></tr>
+      <tr><td>放置禁止・いつか完了</td><td><code>policy ... every ... must eventually ...</code></td><td>放置されるケースや進まないループ。</td></tr>
+      <tr><td>到達可能性</td><td><code>goal ... can reach ...</code></td><td>業務上できるはずの完了状態に届かない理由。</td></tr>
+      <tr><td>集計</td><td><code>kpi name = count Entity in Stage</code></td><td>説明・シナリオ用の投影。自動でルールにはなりません。</td></tr>
+    </table>
+
+    <h3 class="reveal" style="margin-top:40px"><code>control</code> で統制を追跡し、<code>governance</code> でまとめる</h3>
+    <p class="reveal narrow"><code>control</code> は名前つきの統制メタデータ（<code>owner</code>・<code>severity</code>・<code>applies_to</code>）で、それ自体は性質を生みません。<code>satisfies</code> で検査可能なルールに結びつけると、違反時に「どの統制が破れたか」が出ます。複数の業務specで共有する統制は、独立した <code>governance</code> カタログにまとめます。</p>
+
+    <div class="split reveal" style="margin-top:16px">
+      <div class="panel" style="margin-top:0">
+        <h3>統制を宣言して結びつける</h3>
+        <pre><code>control CTRL-DECISION
+  "すべての返品は必ず審査される"
+  owner Manager
+  severity high
+  applies_to Return
+
+policy EveryRequestDecided "すべての依頼はいずれ判断される"
+  satisfies CTRL-DECISION
+  every Return in Requested must eventually be Approved or Rejected or Refunded</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>共有の統制をカタログにまとめる</h3>
+        <pre><code>governance EnterpriseReturnControls {
+  authority Operations owns CTRL-DECISION
+  control CTRL-DECISION "すべての返品は必ず審査される"
+
+  delegates ReturnHandling from "return_policy.fsl" {
+    require CTRL-DECISION
+    CTRL-DECISION is satisfied_by policy EveryRequestDecided
+  }
+
+  preservation ReturnReform {
+    before AsIsReturn from "asis_return.fsl"
+    after  ToBeReturn from "tobe_return.fsl"
+    preserve CTRL-DECISION
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}</code></pre>
+      </div>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>注意</th></tr>
+      <tr><td><code>control ID "..." owner ... severity ... applies_to ...</code></td><td>統制のメタデータ。</td><td>カタログの項目のみ。性質は生成しません。</td></tr>
+      <tr><td><code>policy/goal ... satisfies CTRL</code></td><td>検査可能なルールを統制に結びつける。</td><td>違反時、JSONに <code>requirement.controls</code> が載ります。</td></tr>
+      <tr><td><code>governance { authority ... owns ... }</code></td><td>業務をまたぐ独立した統制カタログ。</td><td>業務specの一段上で、所管（オーナー）を記録します。</td></tr>
+      <tr><td><code>delegates B from "..." { require / is satisfied_by }</code></td><td>各統制を業務の <code>policy</code>/<code>goal</code> に対応づける。</td><td><code>fslc check</code> が、要求した統制をすべて満たすか検証します。</td></tr>
+      <tr><td><code>preservation { before / after / preserve / checked_by refinement }</code></td><td>As-Is → To-Be の改革をまたいで統制を保つ。</td><td>詳細化を深さ8で実行し、<code>refines</code> を報告します。</td></tr>
+    </table>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><code>fslc check governance.fsl</code> は、参照する統制・業務ファイル・満たす policy/goal を検証し、各 <code>preservation</code> の詳細化を実行します。結果は <code>governance.preservations</code> に入ります。未知の統制参照はエラー、宣言したのに使われない統制は警告です。</p>
+    </div>
+  </div>
+</section>
+
+<section id="bounds">
+  <div class="wrap">
+    <p class="kicker reveal">4. 検証範囲</p>
+    <h2 class="reveal"><code>verify</code> で、何件の業務対象を同時に見るか決める</h2>
+    <p class="lead narrow reveal">業務層の <code>entity</code> は、<code>verify</code> ブロックで件数を指定します。件数が増えるほど相互作用を見つけやすくなりますが、検証は重くなります。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>単体の流れを見る</h3>
+        <pre><code>verify {
+  instances Return = 1
+}</code></pre>
+        <p>1件だけで基本のステージ遷移を確認します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>複数件の相互作用を見る</h3>
+        <pre><code>verify {
+  instances Return = 3
+}</code></pre>
+        <p>集計、担当者、同時進行、放置の問題を見るなら3件程度から始めます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>数値は要件層へ送る</h3>
+        <pre><code>number Amount
+verify { values Amount = 0..3 }</code></pre>
+        <p>金額や日数の境界は、入力条件を書く要件層で扱うのが基本です。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="handoff" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. 要件層への渡し方</p>
+    <h2 class="reveal">名前をそろえると、要件層が業務層を実装しやすい</h2>
+    <p class="lead narrow reveal">要件層は <code>implements</code> で業務層につながります。業務層の対象名、ステージ名、遷移名を不用意に変えないと、対応関係が読みやすくなります。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>業務層</h3>
+        <pre><code>business ExpenseToBe {
+  actor Employee, Manager, Finance, System
+  entity Claim
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+    transition approve Submitted -&gt; Approved by Manager
+    transition reject Submitted -&gt; Rejected by Manager
+    transition pay Approved -&gt; Paid by Finance
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>要件層</h3>
+        <pre><code>requirements ExpenseRequirements {
+  implements ExpenseToBe from "business.fsl" { }
+
+  number Amount
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee with a: Amount
+      when a &gt; 0 set amount = a
+      covers REQ-1 "申請者が金額を入力して申請する"
+  }
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>注意:</b> 業務層を要件に合わせて弱めてはいけません。詳細化チェックに失敗したら、まず要件層が業務意図を落としていないかを見ます。</p>
+    </div>
+  </div>
+</section>
+
+<section id="checklist">
+  <div class="wrap">
+    <p class="kicker reveal">6. チェックリスト</p>
+    <h2 class="reveal">業務層レビューで見ること</h2>
+    <ol class="lesson reveal">
+      <li>
+        <h3>業務対象は1件ずつ状態を持つものか</h3>
+        <p>申請、返品、注文、契約など。単なる入力値や設定値は <code>entity</code> にしません。</p>
+      </li>
+      <li>
+        <h3>ステージ名は業務担当者の言葉か</h3>
+        <p><code>Queued</code> や <code>Retrying</code> のような実装状態は、必要になるまで設計層へ下げます。</p>
+      </li>
+      <li>
+        <h3>放置してはいけない状態に応答性があるか</h3>
+        <p><code>every ... must eventually ...</code> で「申請済みのまま残らない」などを明示します。</p>
+      </li>
+      <li>
+        <h3>KPIをルールと混同していないか</h3>
+        <p><code>kpi</code> は集計投影です。「必ずN件以下」のような制約は、別の <code>policy</code> や要件層で書きます。</p>
+      </li>
+    </ol>
+
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>次に、要件層で具体化する</h2>
+      <p>業務層で「何を守るか」を固定したら、要件層で入力、条件、受け入れ手順、禁止手順、非機能要件を書きます。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="requirements-layer.ja.html">要件層の書き方へ</a>
+        <a class="btn ghost" href="syntax.ja.html">文法・構文にもどる</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

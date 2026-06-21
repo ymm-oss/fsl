@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Writing the FSL Business Layer — process, policy, goal, KPI</title>
+<meta name="description" content="An English guide to writing FSL business specs with actors, entities, processes, policies, goals, KPIs, verification bounds, and handoff to the requirements layer." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="business-layer">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Writing the Business Layer</p>
+    <h1 class="reveal">Turn business rules into<br><span class="hl">checkable structure</span>.</h1>
+    <p class="lead reveal">The <code>business</code> layer describes actors, entities, business processes, controls, goals, and KPIs before implementation details appear.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Table of Contents</p>
+    <h2 class="reveal">What you decide in this layer</h2>
+    <div class="toc reveal">
+      <a href="#boundary">1. Boundary<span>What belongs here</span></a>
+      <a href="#shape">2. Basic Shape<span><code>actor</code>, <code>entity</code>, <code>process</code></span></a>
+      <a href="#policies">3. Controls and Goals<span><code>policy</code>, <code>goal</code>, <code>kpi</code>, <code>control</code>, <code>governance</code></span></a>
+      <a href="#bounds">4. Verification Bounds<span>Choosing <code>verify</code></span></a>
+      <a href="#handoff">5. Handoff<span>Connecting to requirements</span></a>
+      <a href="#checklist">6. Checklist<span>Review before moving down</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="boundary" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. Boundary</p>
+    <h2 class="reveal">Write business vocabulary, not implementation vocabulary</h2>
+    <p class="lead narrow reveal">The business layer is for lifecycle and controls that domain stakeholders can validate. UI screens, API names, queues, database flags, and retry mechanics belong lower.</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>Write here</h3>
+        <p>Actors, entities, stages, transitions, policies, goals, and KPIs. Example: every return request is eventually approved, rejected, or refunded.</p>
+      </div>
+      <div class="card">
+        <h3>Do not write here</h3>
+        <p>Database columns, screen routing, API endpoints, async-job internals, retry strategy, real-time milliseconds, probabilities, or prose rationale.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="shape">
+  <div class="wrap">
+    <p class="kicker reveal">2. Basic Shape</p>
+    <h2 class="reveal">Use <code>actor</code>, <code>entity</code>, and <code>process</code></h2>
+    <p class="lead narrow reveal">Start with the business object and its allowed stage transitions. FSL expands this readable form into a verifiable state machine.</p>
+
+    <div class="panel reveal">
+      <pre><code>business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -&gt; Approved by Manager
+    transition reject  Requested -&gt; Rejected by Manager
+    transition refund  Approved  -&gt; Refunded by Manager
+  }
+}
+
+verify {
+  instances Return = 3
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Construct</th><th>Meaning</th><th>Guidance</th></tr>
+      <tr><td><code>actor</code></td><td>The roster of people or systems that perform business transitions.</td><td>Names used in <code>by</code> must be declared here.</td></tr>
+      <tr><td><code>entity</code></td><td>The business object with a lifecycle.</td><td>Return, claim, order, contract, ticket.</td></tr>
+      <tr><td><code>process</code></td><td>The stage machine for the entity.</td><td>Write only transitions allowed by the business.</td></tr>
+      <tr><td><code>transition</code></td><td>One business operation.</td><td>Who moves which stage to which stage.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="policies" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. Controls and Goals</p>
+    <h2 class="reveal">Use <code>policy</code> for controls and <code>goal</code> for desired reachability</h2>
+    <p class="lead narrow reveal">Keep "must never happen" and "must be possible" separate. Use <code>kpi</code> for count projections, not for rules.</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Readable stage syntax</h3>
+        <pre><code>kpi refunded = count Return in Refunded
+
+policy EveryRequestDecided "every request is eventually decided"
+  every Return in Requested must eventually be Approved or Rejected or Refunded
+
+goal AllSettled "all cases can be completed"
+  all Return can be Refunded or Rejected</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Expression form</h3>
+        <pre><code>policy ApprovedEventuallyRefunded "approved returns are eventually refunded" responds {
+  forall r: Return {
+    stage(r) == Approved ~&gt; stage(r) == Refunded
+  }
+}
+
+goal SomeRefunded "at least one return can be refunded" {
+  exists r: Return { stage(r) == Refunded }
+}</code></pre>
+      </div>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Purpose</th><th>Construct</th><th>Failure tells you</th></tr>
+      <tr><td>Safety / prohibition</td><td><code>policy ... invariant { ... }</code></td><td>A trace that violates a business rule.</td></tr>
+      <tr><td>No unattended cases</td><td><code>policy ... every ... must eventually ...</code></td><td>A case can remain pending or loop forever.</td></tr>
+      <tr><td>Reachability</td><td><code>goal ... can reach ...</code></td><td>A supposedly possible business outcome is unreachable.</td></tr>
+      <tr><td>Projection</td><td><code>kpi name = count Entity in Stage</code></td><td>Metadata for explanation and scenarios, not a constraint.</td></tr>
+    </table>
+
+    <h3 class="reveal" style="margin-top:40px">Trace controls with <code>control</code>, scale them with <code>governance</code></h3>
+    <p class="reveal narrow">A <code>control</code> is named governance metadata (<code>owner</code>, <code>severity</code>, <code>applies_to</code>). It generates no property by itself — attach it to a checkable rule with <code>satisfies</code> so a violation reports which control broke. Controls shared across business specs lift into a standalone <code>governance</code> catalog.</p>
+
+    <div class="split reveal" style="margin-top:16px">
+      <div class="panel" style="margin-top:0">
+        <h3>Declare and satisfy a control</h3>
+        <pre><code>control CTRL-DECISION
+  "Every return must be adjudicated"
+  owner Manager
+  severity high
+  applies_to Return
+
+policy EveryRequestDecided "every request is eventually decided"
+  satisfies CTRL-DECISION
+  every Return in Requested must eventually be Approved or Rejected or Refunded</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Lift shared controls into a catalog</h3>
+        <pre><code>governance EnterpriseReturnControls {
+  authority Operations owns CTRL-DECISION
+  control CTRL-DECISION "Every return must be adjudicated"
+
+  delegates ReturnHandling from "return_policy.fsl" {
+    require CTRL-DECISION
+    CTRL-DECISION is satisfied_by policy EveryRequestDecided
+  }
+
+  preservation ReturnReform {
+    before AsIsReturn from "asis_return.fsl"
+    after  ToBeReturn from "tobe_return.fsl"
+    preserve CTRL-DECISION
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}</code></pre>
+      </div>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Construct</th><th>Meaning</th><th>Note</th></tr>
+      <tr><td><code>control ID "..." owner ... severity ... applies_to ...</code></td><td>Governance metadata for a control.</td><td>Catalog entry only; generates no property.</td></tr>
+      <tr><td><code>policy/goal ... satisfies CTRL</code></td><td>Ties a checkable rule to a control.</td><td>A violation reports <code>requirement.controls</code> in JSON.</td></tr>
+      <tr><td><code>governance { authority ... owns ... }</code></td><td>A standalone, cross-business control catalog.</td><td>Records enterprise ownership above the business specs.</td></tr>
+      <tr><td><code>delegates B from "..." { require / is satisfied_by }</code></td><td>Maps each control to a business <code>policy</code>/<code>goal</code>.</td><td><code>fslc check</code> verifies every required control is satisfied.</td></tr>
+      <tr><td><code>preservation { before / after / preserve / checked_by refinement }</code></td><td>Keeps controls across an As-Is → To-Be reform.</td><td>Runs the refinement (depth 8); reports <code>refines</code>.</td></tr>
+    </table>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><code>fslc check governance.fsl</code> validates the referenced controls, business files, and satisfying policies/goals, and runs each <code>preservation</code> refinement — results land under <code>governance.preservations</code>. Unknown control references are errors; declared-but-unused controls are warnings.</p>
+    </div>
+  </div>
+</section>
+
+<section id="bounds">
+  <div class="wrap">
+    <p class="kicker reveal">4. Verification Bounds</p>
+    <h2 class="reveal"><code>verify</code> decides how many entities to model</h2>
+    <p class="lead narrow reveal">Business <code>entity</code> declarations are finite for verification. More instances expose interaction bugs but cost more to search.</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Single-case flow</h3>
+        <pre><code>verify {
+  instances Return = 1
+}</code></pre>
+        <p>Useful for validating basic lifecycle transitions.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Multi-case behavior</h3>
+        <pre><code>verify {
+  instances Return = 3
+}</code></pre>
+        <p>Use this when counts, parallel cases, or unattended cases matter.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Numeric bounds belong lower</h3>
+        <pre><code>number Amount
+verify { values Amount = 0..3 }</code></pre>
+        <p>Amounts and deadline values are usually modeled in the requirements layer.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="handoff" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. Handoff</p>
+    <h2 class="reveal">Stable names make requirements refinement easier</h2>
+    <p class="lead narrow reveal">The requirements layer connects with <code>implements</code>. If entity, stage, and transition names stay aligned, FSL can often synthesize identity mappings.</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Business layer</h3>
+        <pre><code>business ExpenseToBe {
+  actor Employee, Manager, Finance, System
+  entity Claim
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+    transition approve Submitted -&gt; Approved by Manager
+    transition reject Submitted -&gt; Rejected by Manager
+    transition pay Approved -&gt; Paid by Finance
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Requirements layer</h3>
+        <pre><code>requirements ExpenseRequirements {
+  implements ExpenseToBe from "business.fsl" { }
+
+  number Amount
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee with a: Amount
+      when a &gt; 0 set amount = a
+      covers REQ-1 "The applicant submits an expense claim by entering an amount"
+  }
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Do not weaken business intent to make refinement pass.</b> If the lower layer fails to implement the business layer, first inspect whether the requirement dropped or changed the business rule.</p>
+    </div>
+  </div>
+</section>
+
+<section id="checklist">
+  <div class="wrap">
+    <p class="kicker reveal">6. Checklist</p>
+    <h2 class="reveal">Review before moving to requirements</h2>
+    <ol class="lesson reveal">
+      <li><h3>Is the entity a lifecycle object?</h3><p>Use <code>entity</code> for objects such as claims, returns, orders, and contracts, not for plain input values.</p></li>
+      <li><h3>Are stage names business-readable?</h3><p>Implementation states such as <code>Queued</code> or <code>Retrying</code> should wait for the design layer unless they are truly business vocabulary.</p></li>
+      <li><h3>Are unattended states covered?</h3><p>Use <code>every ... must eventually ...</code> for cases that must not remain pending.</p></li>
+      <li><h3>Are KPIs separate from rules?</h3><p><code>kpi</code> is a projection. Constraints such as "at most N" should be policies or lower-layer requirements.</p></li>
+    </ol>
+
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>Next: make it concrete in requirements</h2>
+      <p>Once business intent is stable, write inputs, guards, acceptance flows, forbidden flows, and NFRs.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="requirements-layer.en.html">Requirements Layer</a>
+        <a class="btn ghost" href="syntax.en.html">Syntax Guide</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,9 +1,12 @@
-# docs/ Map
+# docs/ マップ
 
-## Start here
+## まず読む
 
 | Document | Contents |
 |---|---|
+| [`index.html`](index.html) / [`intro/index.ja.html`](intro/index.ja.html) / [`intro/index.en.html`](intro/index.en.html) | **GitHub Pages入口**。英語・日本語を選べる静的HTMLマニュアルとして公開できます |
+| [`intro/concept.ja.html`](intro/concept.ja.html) / [`intro/guide.ja.html`](intro/guide.ja.html) / [`intro/mechanism.ja.html`](intro/mechanism.ja.html) / [`intro/business-layer.ja.html`](intro/business-layer.ja.html) / [`intro/requirements-layer.ja.html`](intro/requirements-layer.ja.html) / [`intro/design-layer.ja.html`](intro/design-layer.ja.html) / [`intro/syntax.ja.html`](intro/syntax.ja.html) | **日本語HTMLマニュアル**。固定章ナビつきで、概念入門、使い方、仕組み詳細、業務層、要件層、設計層、文法・構文を順に学べます |
+| [`intro/concept.en.html`](intro/concept.en.html) / [`intro/guide.en.html`](intro/guide.en.html) / [`intro/mechanism.en.html`](intro/mechanism.en.html) / [`intro/business-layer.en.html`](intro/business-layer.en.html) / [`intro/requirements-layer.en.html`](intro/requirements-layer.en.html) / [`intro/design-layer.en.html`](intro/design-layer.en.html) / [`intro/syntax.en.html`](intro/syntax.en.html) | **English HTML manual**. Each article has persistent chapter navigation for concept, workflow, mechanisms, business layer, requirements layer, design layer, and syntax |
 | [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **Introduction to formal methods and FSL**. Background for non-specialists, the role of FSL in AI-driven development, and considerations for an introductory PoC |
 | [`LANGUAGE.md`](LANGUAGE.md) | **Language reference** (full syntax, semantics, CLI, idioms, the three-layer dialects, and NFRs). Read this if you are writing specifications |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
@@ -48,6 +51,7 @@ Findings, bugs, and discoveries from putting each feature into real use. These f
 8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — blind expressibility test (external validation of G1)
 9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — real run of the validation workflow (memo → positive-example pair → repair)
 10. [`DOGFOOD-10.md`](DOGFOOD-10.md) — fault-injection benchmark (measuring detector capture rate by category × mechanism)
+11. [`DOGFOOD-11.md`](DOGFOOD-11.md) — meta-circular dogfooding (modeling fslc's own design contract in FSL; detector blind spots F22-F24)
 
 Worked examples are in [`../specs/`](../specs/) (standalone specs) and [`../examples/`](../examples/)
 (bank: implementation conformance / layers: three-layer chain / nfr: SLA).

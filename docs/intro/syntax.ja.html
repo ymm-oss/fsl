@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL 文法・構文を体系的に学ぶ — 設計・要件・業務・詳細化・合成</title>
+<meta name="description" content="FSLの文法・構文を体系的に学ぶHTML教材。型、式、文、検証する性質、業務層・要件層、詳細化、合成、非機能要件まで。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="syntax">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">文法を通して学ぶ</p>
+    <h1 class="reveal">FSL の文法を、<br><span class="hl">読む順番</span>で学ぶ。</h1>
+    <p class="lead reveal">最小の <code>spec</code> から、型、式、文、検証する性質、業務層・要件層、詳細化、合成、非機能要件まで。</p>
+    <p class="dim reveal" style="margin-top:18px">このページは「AIが書いたFSLを読める」「反例を見て直す場所がわかる」ことをゴールにしています。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">目次</p>
+    <h2 class="reveal">文法の全体像</h2>
+    <div class="toc reveal">
+      <a href="#minimal">1. 最小 spec<span>まず読める形をつかむ</span></a>
+      <a href="#top">2. トップレベル<span>設計・要件・業務・合成・詳細化</span></a>
+      <a href="#types">3. 型<span>値の種類、対応表、集合、列、構造体</span></a>
+      <a href="#state">4. 状態と初期化<span><code>state</code> と <code>init</code></span></a>
+      <a href="#actions">5. 操作<span><code>action</code> と実行条件</span></a>
+      <a href="#expr">6. 式<span>演算子・量化・集約・値の有無</span></a>
+      <a href="#props">7. 検証する性質<span>安全性・到達性・応答性</span></a>
+      <a href="#req">8. 要件層<span>工程・受け入れ手順・禁止手順・非機能要件</span></a>
+      <a href="#biz">9. 業務層<span>担当者・方針・ゴール・KPI</span></a>
+      <a href="#refine-compose">10. 詳細化・合成<span>層と部品を接続する構文</span></a>
+      <a href="#pitfalls">11. 定番パターン<span>よく使う書き方と禁止形</span></a>
+      <a href="#practice">12. 練習<span>構文を自分で読む</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>読み方の前提:</b> <code>spec</code>、<code>requirements</code>、<code>business</code> などはFSLの予約語です。コードの中では英語のまま使いますが、本文では「設計層」「要件層」「業務層」のように日本語の役割名を併記します。</p>
+    </div>
+    <div class="callout reveal" style="margin-top:16px">
+      <p style="margin:0"><b>用語ミニ辞典:</b> 型＝値の種類と範囲。式＝条件や計算。性質＝守るべきルール。要件層＝企画・受け入れ条件を書く層。業務層＝業務ルールを書く層。詳細化＝粗い仕様と細かい仕様の対応確認です。</p>
+    </div>
+  </div>
+</section>
+
+<section id="minimal" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. 最小の仕様</p>
+    <h2 class="reveal">まず、1ファイルの基本形を読む</h2>
+    <p class="lead narrow reveal">設計層の基本は <code>spec Name { ... }</code> です。型を宣言し、状態を置き、初期化し、操作を書き、性質を書きます。</p>
+
+    <div class="panel reveal">
+      <pre><code>spec Counter {
+  const LIMIT = 3
+  type Count = 0..LIMIT
+
+  state { n: Count }
+  init { n = 0 }
+
+  action inc() {
+    requires n &lt; LIMIT
+    n = n + 1
+    ensures n == old(n) + 1
+  }
+
+  invariant NeverTooHigh { n &lt;= LIMIT }
+  reachable CanHitLimit { n == LIMIT }
+  terminal { n == LIMIT }
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>部分</th><th>役割</th><th>注意</th></tr>
+      <tr><td><code>const</code></td><td>整数定数。</td><td>範囲や列の容量に使えます。</td></tr>
+      <tr><td><code>type</code></td><td>範囲つき整数型。</td><td>範囲外は自動で検出されます。</td></tr>
+      <tr><td><code>state</code></td><td>検証対象の論理状態。</td><td>許可される型に制限があります。</td></tr>
+      <tr><td><code>init</code></td><td>初期状態。</td><td>各 <code>state</code> 変数を決定的に1回初期化します。</td></tr>
+      <tr><td><code>action</code></td><td>1ステップの遷移。</td><td>本文の右辺はすべて旧状態を読みます。</td></tr>
+      <tr><td>検証する性質</td><td>守る/到達する/応答する性質。</td><td>結果JSONの診断単位になります。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="top">
+  <div class="wrap">
+    <p class="kicker reveal">2. トップレベル</p>
+    <h2 class="reveal">FSL ファイルの先頭に置ける形式</h2>
+    <p class="lead narrow reveal">FSL のトップレベルは、設計の <code>spec</code> だけではありません。業務、要件、合成、詳細化の対応表も同じ言語セットに含まれます。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><code>spec</code></h3>
+        <pre><code>spec Name {
+  const ...
+  type ...
+  state { ... }
+  init { ... }
+  action ...
+  invariant ...
+}</code></pre>
+        <p>設計層の核。状態機械、データ構造、検証する性質を直接書きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>要件層 <code>requirements</code> + 検証範囲 <code>verify</code></h3>
+        <pre><code>requirements Name {
+  number Amount
+  process Claim with amount: Amount { ... }
+  acceptance AC-1 "..." { ... }
+}
+verify { instances Claim = 3 }</code></pre>
+        <p>要件層。工程、要件ID、受け入れ手順、禁止手順、非機能要件を扱います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>業務層 <code>business</code> + 検証範囲 <code>verify</code></h3>
+        <pre><code>business Name {
+  actor Customer, Manager
+  entity Return
+  process Return { ... }
+  policy POL-1 "..." every Return in Requested must eventually be Approved
+}
+verify { instances Return = 3 }</code></pre>
+        <p>業務層。業務ステージ、統制、KPI、ゴールを書きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>詳細化 <code>refinement</code></h3>
+        <pre><code>refinement ImplRefinesAbs {
+  impl Impl
+  abs Abs
+  maps auto
+  map status = impl_status
+  action do_it(x: Id) -&gt; do_it(x)
+}</code></pre>
+        <p>詳細仕様が抽象仕様を逸脱しないかを見る対応表ファイルです。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>合成 <code>compose</code></h3>
+        <pre><code>compose System {
+  use Cart as cart from "cart.fsl"
+  use Payment as pay from "payment.fsl"
+  action checkout(u: cart.UserId, p: pay.PayId) =
+    cart.checkout(u) || pay.capture(p) { }
+}</code></pre>
+        <p>複数の設計仕様 <code>spec</code> を名前空間つきで合成し、同時に実行する操作 <code>action</code> を書きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>統制カタログ <code>governance</code></h3>
+        <pre><code>governance Controls {
+  authority Finance owns CTRL-1
+  control CTRL-1 "..." owner Finance applies_to Claim
+  delegates Biz from "biz.fsl" {
+    require CTRL-1
+    CTRL-1 is satisfied_by policy POL-1
+  }
+  preservation Reform {
+    before AsIs from "asis.fsl"
+    after  ToBe from "tobe.fsl"
+    preserve CTRL-1
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}</code></pre>
+        <p>業務をまたぐ統制カタログ。<code>fslc check</code> で検証します。</p>
+      </div>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b><code>verify { ... }</code> の配置:</b> 業務層・要件層の有限範囲は、同じファイルのトップレベルに置く別ブロックです。<code>spec</code> の中には置きません。</p>
+    </div>
+  </div>
+</section>
+
+<section id="types" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. 型</p>
+    <h2 class="reveal">型は「検証できる形」に制限されている</h2>
+    <p class="lead narrow reveal">FSL の型は、有限探索しやすく、AIが誤用しにくい範囲に絞られています。<code>state</code> 変数に置ける型には制限があります。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>型</th><th>構文</th><th>使いどころ</th></tr>
+      <tr><td>整数・真偽値</td><td><code>n: Int</code>, <code>ok: Bool</code></td><td>整数と真偽値。<code>Int</code> は非有界なので状態には慎重に使います。</td></tr>
+      <tr><td>範囲つき整数型</td><td><code>type Qty = 0..5</code></td><td>境界チェックが自動で入ります。</td></tr>
+      <tr><td>対称な範囲つき整数型</td><td><code>symmetric type TaskId = 0..2</code></td><td>特別扱いしない主体ID。応答性探索で同じ形の状態をまとめるために使います。</td></tr>
+      <tr><td>列挙型</td><td><code>enum St { Open, Closed }</code></td><td>状態名や分類。</td></tr>
+      <tr><td>対称な列挙型</td><td><code>symmetric enum Worker { A, B }</code></td><td>特別扱いしない有限主体。</td></tr>
+      <tr><td>構造体</td><td><code>struct Order { st: St, buyer: Option&lt;UserId&gt; }</code></td><td>複数フィールドをまとめる。フィールドは単純値または値がない/ある型。</td></tr>
+      <tr><td>値がない/ある型</td><td><code>Option&lt;ItemId&gt;</code></td><td>値がない/ある。<code>-1</code> のような特別値の代わり。</td></tr>
+      <tr><td>対応表</td><td><code>Map&lt;ItemId, Qty&gt;</code></td><td>範囲つきキーから値へ。値は単純値、値がない/ある型、構造体。</td></tr>
+      <tr><td>集合</td><td><code>Set&lt;UserId&gt;</code></td><td>範囲つき値の集合。</td></tr>
+      <tr><td>列</td><td><code>Seq&lt;JobId, CAP&gt;</code></td><td>容量つき列。FIFOやログ。</td></tr>
+      <tr><td>業務対象・数値種別</td><td><code>entity Claim</code>, <code>number Amount</code></td><td>業務層・要件層の型種別。範囲は <code>verify</code> ブロックで指定します。</td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>状態 <code>state</code> 変数に置ける型</h3>
+      <p>許可されるのは、単純値、値がない/ある型、構造体、対応表、集合、列です。対応表や集合のキーには、基本的に有限範囲の値を使います。</p>
+      <pre><code>// OK
+state {
+  status: St,
+  cart: Option&lt;ItemId&gt;,
+  orders: Map&lt;OrderId, Order&gt;,
+  locked: Set&lt;UserId&gt;,
+  queue: Seq&lt;JobId, CAP&gt;
+}
+
+// NG の代表: 対応表の入れ子 / 構造体そのものの Option / 構造体内の集合 など</code></pre>
+    </div>
+  </div>
+</section>
+
+<section id="state">
+  <div class="wrap">
+    <p class="kicker reveal">4. 状態と初期化</p>
+    <h2 class="reveal"><code>state</code> は論理状態、<code>init</code> は探索の出発点</h2>
+    <p class="lead narrow reveal"><code>init</code> は毎回同じ初期状態を作る必要があります。対応表や集合は、直接書く値（リテラル）や <code>forall</code> で初期化できます。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>対応表 <code>Map</code> をまとめて初期化</h3>
+        <pre><code>type ItemId = 0..2
+type Qty = 0..5
+state { stock: Map&lt;ItemId, Qty&gt; }
+init {
+  forall i: ItemId {
+    stock[i] = 1
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>値がない/ある型・集合・列の初期化</h3>
+        <pre><code>state {
+  selected: Option&lt;ItemId&gt;,
+  shipped: Set&lt;OrderId&gt;,
+  queue: Seq&lt;JobId, CAP&gt;
+}
+init {
+  selected = none
+  shipped = Set {}
+  queue = Seq {}
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>初期化の原則:</b> <code>state</code> の各変数は <code>init</code> でちょうど1回値を決めます。未初期化や矛盾した初期化は仕様エラーになります。</p>
+    </div>
+  </div>
+</section>
+
+<section id="actions" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. 操作</p>
+    <h2 class="reveal"><code>action</code> は実行条件、一時変数、代入、事後条件でできている</h2>
+    <p class="lead narrow reveal">1ステップは1つの操作候補です。パラメータつき <code>action</code> は、有限範囲の全パラメータ値について検査されます。</p>
+
+    <div class="panel reveal">
+      <pre><code>fair action checkout(u: UserId) "REQ-4: only stocked item can be checked out" {
+  requires cart[u] is some(i)
+  requires stock[i] &gt; 0
+  let old_stock = stock[i]
+
+  stock[i] = stock[i] - 1
+  cart[u] = none
+
+  ensures stock[i] == old(stock[i]) - 1
+  ensures old_stock == old(stock[i])
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>注意</th></tr>
+      <tr><td><code>fair action</code></td><td>応答性で弱公平性を仮定する操作。</td><td>進捗を担う <code>action</code> にだけ付けます。</td></tr>
+      <tr><td><code>param: Type</code></td><td>型つきパラメータ。</td><td>合成した仕様では <code>alias.Type</code> のように部品名つきの型名も書けます。</td></tr>
+      <tr><td><code>param in lo..hi</code></td><td>範囲パラメータ。</td><td>探索範囲を直接指定します。</td></tr>
+      <tr><td><code>requires expr</code></td><td>実行できる条件。</td><td>複数書くと「すべて成り立つ必要がある」という意味。</td></tr>
+      <tr><td><code>let x = expr</code></td><td><code>action</code> 内の一時的な名前づけ。</td><td>状態更新ではありません。</td></tr>
+      <tr><td><code>ensures expr</code></td><td>事後条件。</td><td><code>old(expr)</code> で旧状態を参照できます。</td></tr>
+      <tr><td><code>"ID: text"</code></td><td>要件タグ。</td><td>診断JSONへ要件情報として流れます。</td></tr>
+    </table>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>代入先</h3>
+        <pre><code>x = expr
+m[k] = expr
+m[k].field = expr
+o.field = expr
+s = s.add(x)
+q = q.pop().push(y)</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>同時代入の意味</h3>
+        <p><code>action</code> 本文の右辺はすべて旧状態を読みます。書かない変数は自動で保持されます。同じパスで同じ変数・同じフィールドを2回書くと意味エラーです。</p>
+        <pre><code>// NG: 同じ path で二重代入
+action bad() {
+  x = 1
+  x = 2
+}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="expr">
+  <div class="wrap">
+    <p class="kicker reveal">6. 式</p>
+    <h2 class="reveal">式の構文をまとめて押さえる</h2>
+    <p class="lead narrow reveal">FSL の式は、算術、比較、論理、量化、集約、集合や列の操作、値がない/ある型の取り出しを組み合わせます。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>分類</th><th>構文</th><th>例</th></tr>
+      <tr><td>算術</td><td><code>+ - * / %</code>, 単項マイナス <code>-</code>, <code>min</code>, <code>max</code>, <code>abs</code></td><td><code>abs(balance) &lt;= LIMIT</code></td></tr>
+      <tr><td>比較</td><td><code>== != &lt; &lt;= &gt; &gt;=</code></td><td><code>stock[i] &gt; 0</code></td></tr>
+      <tr><td>論理</td><td><code>and or not =&gt;</code></td><td><code>paid =&gt; approved</code></td></tr>
+      <tr><td>量化</td><td><code>forall</code>, <code>exists</code></td><td><code>forall i: ItemId { stock[i] &gt;= 0 }</code></td></tr>
+      <tr><td>集約</td><td><code>count</code>, <code>sum</code></td><td><code>sum(i: Idx of log.at(i) where i &lt; log.size())</code></td></tr>
+      <tr><td>一意性</td><td><code>unique</code>, <code>exactlyOne</code></td><td><code>exactlyOne(u: UserId where owner[u])</code></td></tr>
+      <tr><td>値がない/ある型</td><td><code>none</code>, <code>some(e)</code>, <code>x is some(v)</code></td><td><code>cart[u] is some(i) and stock[i] &gt; 0</code></td></tr>
+      <tr><td>集合</td><td><code>Set {}</code>, <code>.add</code>, <code>.remove</code>, <code>.contains</code>, <code>.size()</code></td><td><code>active.contains(u)</code></td></tr>
+      <tr><td>列</td><td><code>Seq {}</code>, <code>.push</code>, <code>.pop</code>, <code>.head</code>, <code>.at</code>, <code>.contains</code>, <code>.size</code></td><td><code>q.size() &gt; 0 =&gt; q.head() == j</code></td></tr>
+      <tr><td>構造体</td><td><code>S { f: e }</code>, <code>x.field</code></td><td><code>orders[o].st == Paid</code></td></tr>
+      <tr><td>特殊</td><td><code>old(expr)</code>, <code>stage(x)</code></td><td><code>total == old(total) + 1</code></td></tr>
+    </table>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>束縛の3形式</h3>
+        <pre><code>forall x: T { expr }
+forall i in 0..CAP-1 { expr }
+forall x in active where ready[x] { expr }</code></pre>
+        <p>型で回す、範囲で回す、集合や列の中身で回す、の3種類です。<code>exists</code>、<code>unique</code>、<code>exactlyOne</code> でも同じ考え方です。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>値がある場合だけ中身を取り出す</h3>
+        <pre><code>// OK
+requires cart[u] is some(i)
+requires stock[i] &gt; 0
+
+// NG
+// requires cart[u] == some(i)</code></pre>
+        <p><code>x == some(e)</code> は型エラーです。<code>x is some(v)</code> で中身に名前をつけて使います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>詳細化の対応表だけで使える if式</h3>
+        <pre><code>map holder[s: SeatId] =
+  if slots[s].st == Sold then slots[s].buyer else none</code></pre>
+        <p><code>if c then a else b</code> は詳細化の <code>map</code> や <code>action</code> 引数の中だけで使えます。通常の <code>spec</code> の式では使いません。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="props" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">7. 検証する性質</p>
+    <h2 class="reveal">どの性質を、どの構文で書くか</h2>
+    <p class="lead narrow reveal">FSL で検証する性質は、検証結果の単位です。1つの要求を1つの宣言に分けると、反例が読みやすくなります。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>例</th></tr>
+      <tr><td><code>invariant Name { P }</code></td><td>全到達状態で P。</td><td><code>status == Shipped =&gt; approved</code></td></tr>
+      <tr><td><code>trans Name { P }</code></td><td>各操作の前後で P。旧状態は <code>old()</code>。</td><td><code>stock[0] &lt;= old(stock[0])</code></td></tr>
+      <tr><td><code>reachable Name { P }</code></td><td>P に到達できること。</td><td><code>stock[0] == 0</code></td></tr>
+      <tr><td><code>leadsTo Name { P ~&gt; Q }</code></td><td>P になったらいつか Q。</td><td><code>pending ~&gt; done</code></td></tr>
+      <tr><td><code>leadsTo ... within K</code></td><td>K手以内の応答。</td><td><code>pending ~&gt; within 3 done</code></td></tr>
+      <tr><td><code>leadsTo ... decreases M</code></td><td>帰納法で使う減少量。</td><td><code>decreases remaining</code></td></tr>
+      <tr><td><code>unless Name { P unless Q }</code></td><td>Q まで P を保つ安全性。</td><td>保持状態の安全性。</td></tr>
+      <tr><td><code>until Name { P until Q }</code></td><td>安全性 <code>unless</code> と応答性 <code>leadsTo</code> の組み合わせ。</td><td>保ちながらいつか完了。</td></tr>
+      <tr><td><code>terminal { P }</code></td><td>意図した停止状態。</td><td><code>status == Done or status == Failed</code></td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>応答性 <code>leadsTo</code> の完全形</h3>
+      <pre><code>leadsTo EventuallyPaid "REQ-9: approved claims are eventually paid" {
+  forall c: Claim {
+    claims[c].st == Approved ~&gt; claims[c].st == Paid
+  }
+  decreases unpaid_count
+}</code></pre>
+      <p style="margin-top:16px">外側の <code>forall</code> は、対象ごとに応答性を分けて検査します。<code>~&gt;</code> は <code>leadsTo</code> の中だけで使えます。</p>
+    </div>
+  </div>
+</section>
+
+<section id="req">
+  <div class="wrap">
+    <p class="kicker reveal">8. 要件層</p>
+    <h2 class="reveal">要件層 <code>requirements</code> は、要件IDと受け入れ条件を持つ</h2>
+    <p class="lead narrow reveal">企画担当が扱う要件は、工程、受け入れ手順、禁止手順で書くのが基本です。複雑な状態が必要なときだけ、設計層と同じ細かい書き方を使います。</p>
+
+    <div class="panel reveal">
+      <pre><code>requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" { }
+
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+      with a: Amount when a &gt; 0 set amount = a
+      covers REQ-1 "申請者が金額を入力して経費を申請する"
+    transition auto_approve Submitted -&gt; Approved by System
+      when amount &lt;= AUTO_LIMIT
+      covers REQ-2 "少額申請は自動承認される"
+    transition pay Approved -&gt; Paid by Finance
+      covers REQ-4 "承認済み申請だけが支払われる"
+  }
+
+  acceptance AC-1 "少額申請は支払いまで進める" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
+  }
+
+  forbidden FB-1 "下書き申請は支払えない" {
+    pay(0)
+    expect rejected
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th></tr>
+      <tr><td><code>implements Abs from "file" { ... }</code></td><td>上位の業務層などを実装する。空なら名前一致の対応表を自動生成。</td></tr>
+      <tr><td><code>process E with f: T</code></td><td>業務対象のステージ機械と持ち回るデータを宣言。</td></tr>
+      <tr><td><code>transition name A -&gt; B by Actor</code></td><td>ステージ遷移。担当者、入力、条件、更新、要件IDを持てます。</td></tr>
+      <tr><td><code>acceptance ID "..." { steps expect ... }</code></td><td>許可されるべき具体手順。検査時に実行器で再生されます。</td></tr>
+      <tr><td><code>forbidden ID "..." { steps expect rejected }</code></td><td>最後の手順が拒否されるべき禁止手順。</td></tr>
+      <tr><td><code>branches { when ... { ... } maps ... }</code></td><td>複雑な操作の分岐を要求ごとに分割。</td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>NFR / SLA の構文</h3>
+      <pre><code>requirements SupportSLA {
+  entity Ticket
+  enum TicketStage { New, Accepted, Responded }
+  state { tickets: Map&lt;Ticket, TicketStage&gt; }
+  init {
+    forall t: Ticket { tickets[t] = New }
+  }
+
+  time {
+    urgent respond_due
+    age wait_age[t: Ticket] while tickets[t] == Accepted
+  }
+
+  requirement NFR-1 "受理から3 tick以内に応答する" {
+    action accept(t: Ticket) {
+      requires tickets[t] == New
+      tickets[t] = Accepted
+    }
+
+    fair action respond_due(t: Ticket) {
+      requires tickets[t] == Accepted
+      requires wait_age[t] &gt;= 3
+      tickets[t] = Responded
+    }
+    deadline wait_age &lt;= 3
+  }
+}
+verify {
+  instances Ticket = 2
+}</code></pre>
+      <p style="margin-top:16px"><code>time</code> は要件層 <code>requirements</code> の直下に1つ。<code>deadline</code> は個別要件 <code>requirement</code> の中に置きます。期限到達時にだけ有効になる操作 <code>action</code> を <code>urgent</code> にするのが基本形です。</p>
+    </div>
+  </div>
+</section>
+
+<section id="biz" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">9. 業務層</p>
+    <h2 class="reveal">業務層 <code>business</code> は、業務プロセスと統制を読む人向けに書く</h2>
+    <p class="lead narrow reveal">業務層では、実装状態名ではなく、担当者、業務対象、工程、方針、ゴール、KPI を使います。</p>
+
+    <div class="panel reveal">
+      <pre><code>business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -&gt; Approved by Manager
+    transition reject Requested -&gt; Rejected by Manager
+    transition refund Approved -&gt; Refunded by Manager
+  }
+
+  kpi refunded = count Return in Refunded
+
+  policy PAY-2 "すべての申請はいずれ判断される"
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+
+  goal AllSettled "すべての申請は完了状態にできる"
+    all Return can be Refunded or Rejected
+}
+verify {
+  instances Return = 3
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th></tr>
+      <tr><td><code>actor A, B</code></td><td>遷移の実行者一覧。</td></tr>
+      <tr><td><code>entity E</code></td><td>業務対象。個数は <code>verify</code> で指定します。</td></tr>
+      <tr><td><code>process E { stages ... }</code></td><td>業務ステージの状態機械。</td></tr>
+      <tr><td><code>policy ID "..." invariant { P }</code></td><td>業務上の安全性。</td></tr>
+      <tr><td><code>policy ... responds { P ~&gt; Q }</code></td><td>明示的な応答性。</td></tr>
+      <tr><td><code>every E in S must eventually be A or B</code></td><td>「Sのものは、いずれAまたはBになる」という読みやすい短縮形。</td></tr>
+      <tr><td><code>goal some E can reach S</code></td><td>到達可能性の業務ゴール。</td></tr>
+      <tr><td><code>goal all E can be A or B</code></td><td>全ケースを完了状態にできること。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="refine-compose">
+  <div class="wrap">
+    <p class="kicker reveal">10. 詳細化と合成</p>
+    <h2 class="reveal">層をつなぐ構文、部品を合成する構文</h2>
+    <p class="lead narrow reveal">大きな仕様は、上位意図と下位設計を詳細化チェックでつなぎ、複数コンポーネントを合成で同期させます。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>詳細化の対応表</h3>
+        <pre><code>refinement DesignRefinesReq {
+  impl Design
+  abs Req
+  maps auto
+
+  map status = if impl_done then Done else Pending
+  map owner[c: Claim] = impl_owner[c]
+
+  action enqueue(c: Claim) -&gt; stutter
+  action pay(c: Claim) -&gt; pay(c)
+
+  preserve progress {
+    respond EveryRequestHandled by pay, reject
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>合成</h3>
+        <pre><code>compose OrderSystem {
+  use ShoppingCart as cart from "cart_v1.fsl"
+  use Payment as pay from "payment.fsl"
+
+  state { linked: Int }
+  init { linked = 0 }
+
+  fair action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) {
+    requires pay.payments[p].st == Authorized
+    linked = linked + 1
+  }
+
+  internal cart.checkout
+  internal pay.capture
+}</code></pre>
+      </div>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th></tr>
+      <tr><td><code>maps auto</code></td><td>同名・互換の状態/操作を自動対応。</td></tr>
+      <tr><td><code>map x = expr</code></td><td>抽象状態変数 x を実装状態から計算。</td></tr>
+      <tr><td><code>map x[k: T] = expr</code></td><td>対応表 <code>Map</code> の要素ごとの写像。</td></tr>
+      <tr><td><code>action impl(...) -&gt; abs(...)</code></td><td>詳細操作を抽象操作に対応。</td></tr>
+      <tr><td><code>action impl(...) -&gt; stutter</code></td><td>抽象状態を変えない内部ステップ。</td></tr>
+      <tr><td><code>preserve progress</code></td><td>上位の応答性が下位で失われていないか追加チェック。</td></tr>
+      <tr><td><code>use Spec as alias from "file"</code></td><td>合成 <code>compose</code> の部品取り込み。</td></tr>
+      <tr><td><code>a.act(...) || b.act(...)</code></td><td>複数部品の操作を同時に実行。</td></tr>
+      <tr><td><code>internal alias.action</code></td><td>その操作の単独実行を禁止。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="pitfalls" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">11. 定番パターン</p>
+    <h2 class="reveal">FSL らしい書き方と、避ける書き方</h2>
+    <p class="lead narrow reveal">文法を覚えるだけでは、良い仕様にはなりません。よくある表現は、次の形に寄せます。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>特別値ではなく <code>Option</code></h3>
+        <pre><code>// OK
+cart: Option&lt;ItemId&gt;
+cart = none
+cart = some(i)</code></pre>
+        <p><code>-1</code> などの特別値を使わない。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>境界ルール <code>invariant</code> ではなく型</h3>
+        <pre><code>type Qty = 0..5
+state { stock: Map&lt;ItemId, Qty&gt; }</code></pre>
+        <p><code>stock[i] &gt;= 0</code> は手書きしない。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>未定義になり得る操作は条件で守る</h3>
+        <pre><code>action take() {
+  requires q.size() &gt; 0
+  x = q.head()
+  q = q.pop()
+}</code></pre>
+        <p>空 pop/head と範囲外 at は自動検出されます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>列 <code>Seq</code> は添字条件で守る</h3>
+        <pre><code>invariant GoodQueue {
+  forall i in 0..CAP-1 {
+    i &lt; q.size() =&gt; jobs[q.at(i)] == Queued
+  }
+}</code></pre>
+        <p><code>at(i)</code> を読むなら、実際に要素が入っている範囲かを条件で守ります。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>2次元の対応表は1つのキーに畳む</h3>
+        <pre><code>const SLOTS = 4
+type Cell = 0..ROOMS*SLOTS-1
+// room = c / SLOTS, slot = c % SLOTS</code></pre>
+        <p>対応表の入れ子は使わず、2つの軸を1つの範囲つき型にまとめます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>過去の事実は補助変数に記録する</h3>
+        <pre><code>state { ever_locked: Map&lt;UserId, Bool&gt; }
+// lock action で ever_locked[u] = true</code></pre>
+        <p>「過去にXした」は、検証用の補助状態に記録します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="practice">
+  <div class="wrap">
+    <p class="kicker reveal">12. 練習</p>
+    <h2 class="reveal">構文を読めるようになる練習</h2>
+    <p class="lead narrow reveal">次の問いを、FSL 構文に対応づけて読んでください。答えは各カードの下にあります。</p>
+
+    <ol class="lesson reveal">
+      <li>
+        <h3>「申請済になったら、いつか承認または却下される」</h3>
+        <p><code>leadsTo</code> または業務層の <code>every ... must eventually be ...</code> で書きます。進捗を担う <code>action</code> に <code>fair</code> が必要かを確認します。</p>
+      </li>
+      <li>
+        <h3>「承認前に支払われてはいけない」</h3>
+        <p><code>invariant</code> で <code>paid =&gt; approved</code>、または要件層 <code>requirements</code> の <code>forbidden</code> で未承認支払い手順を拒否させます。</p>
+      </li>
+      <li>
+        <h3>「在庫はマイナスにならない」</h3>
+        <p><code>type Qty = 0..N</code> を使います。手書きの安全ルールではなく、checkout などに <code>requires stock[i] &gt; 0</code> を付けます。</p>
+      </li>
+      <li>
+        <h3>「詳細設計では予約操作があるが、要件層には見せない」</h3>
+        <p>詳細化の対応表で <code>action reserve(...) -&gt; stutter</code> と書きます。抽象状態が変わらないかが検査されます。</p>
+      </li>
+      <li>
+        <h3>「空キューから取り出さない」</h3>
+        <p><code>requires q.size() &gt; 0</code> または <code>if q.size() &gt; 0 { ... }</code> で <code>head/pop</code> を条件で守ります。</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap narrow center">
+    <div class="cta reveal">
+      <h2>実際の仕様を読んでみる</h2>
+      <p>文法を一通り読んだら、<code>specs/cart_v1.fsl</code>、<code>specs/mutex_queue.fsl</code>、<code>examples/e2e/</code> の順に読むと、基本形から三層構成までつながります。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="business-layer.ja.html">業務層を学ぶ</a>
+        <a class="btn ghost" href="requirements-layer.ja.html">要件層を学ぶ</a>
+        <a class="btn ghost" href="design-layer.ja.html">設計層を学ぶ</a>
+        <a class="btn" href="mechanism.ja.html">仕組み詳細にもどる</a>
+        <a class="btn ghost" href="guide.ja.html">使い方にもどる</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

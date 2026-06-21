@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Writing the FSL Requirements Layer — covers, acceptance, forbidden, NFRs</title>
+<meta name="description" content="An English guide to writing FSL requirements specs with requirement IDs, inputs, guards, acceptance flows, forbidden flows, non-functional requirements, and business-layer refinement." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="requirements-layer">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Writing the Requirements Layer</p>
+    <h1 class="reveal">Make requirements<br><span class="hl">readable by counterexample</span>.</h1>
+    <p class="lead reveal">The <code>requirements</code> layer carries requirement IDs, inputs, guards, acceptance flows, forbidden flows, and NFRs. It makes business intent concrete enough for design and tests.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Table of Contents</p>
+    <h2 class="reveal">What you decide in this layer</h2>
+    <div class="toc reveal">
+      <a href="#boundary">1. Boundary<span>How it differs from business</span></a>
+      <a href="#process">2. Basic Shape<span><code>process</code>, <code>transition</code>, <code>covers</code></span></a>
+      <a href="#examples">3. Positive and Negative Examples<span><code>acceptance</code> and <code>forbidden</code></span></a>
+      <a href="#nfr">4. NFRs<span>Permission, audit, capacity, SLA</span></a>
+      <a href="#implements">5. Business Connection<span><code>implements</code></span></a>
+      <a href="#checklist">6. Checklist<span>Review before design</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="boundary" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. Boundary</p>
+    <h2 class="reveal">Requirements split business intent into inputs, guards, and examples</h2>
+    <p class="lead narrow reveal">The business layer says what the organization allows. The requirements layer says which inputs and conditions move the lifecycle, and which concrete flows must be accepted or rejected.</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>Business layer</h3>
+        <p>A claim is eventually decided; only approved claims are paid; refund handling can reach a settled state.</p>
+      </div>
+      <div class="card">
+        <h3>Requirements layer</h3>
+        <p>Amount input, thresholds, auto approval, manager approval, acceptance flows, forbidden flows, and NFRs.</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Priority:</b> preserve requirement IDs and original text. Counterexamples should tell reviewers which request broke.</p>
+    </div>
+  </div>
+</section>
+
+<section id="process">
+  <div class="wrap">
+    <p class="kicker reveal">2. Basic Shape</p>
+    <h2 class="reveal">Add inputs, guards, updates, and traceability to <code>process</code></h2>
+    <p class="lead narrow reveal">For a single-entity lifecycle, start with <code>process Entity with field: Type</code>.</p>
+
+    <div class="panel reveal">
+      <pre><code>requirements ExpenseRequirements {
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+      with a: Amount
+      when a &gt; 0
+      set amount = a
+      covers REQ-1 "The applicant submits an expense claim by entering an amount"
+
+    transition auto_approve Submitted -&gt; Approved by System
+      when amount &lt;= AUTO_LIMIT
+      covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved"
+
+    transition mgr_approve Submitted -&gt; Approved by Manager
+      when amount &gt; AUTO_LIMIT
+      covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+
+    transition reject Submitted -&gt; Rejected by Manager
+      when amount &gt; AUTO_LIMIT
+      covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+
+    transition pay Approved -&gt; Paid by Finance
+      covers REQ-4 "Only approved claims are paid"
+  }
+}
+
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Construct</th><th>Meaning</th><th>Guidance</th></tr>
+      <tr><td><code>number Amount</code></td><td>A numeric kind.</td><td>Its finite range is set in <code>verify { values ... }</code>.</td></tr>
+      <tr><td><code>process Claim with amount: Amount</code></td><td>Lifecycle plus carried data.</td><td>Keep only data needed for requirement decisions.</td></tr>
+      <tr><td><code>with a: Amount</code></td><td>Operation input.</td><td>A value passed when the transition runs.</td></tr>
+      <tr><td><code>when ...</code></td><td>Enabled condition.</td><td>Thresholds, permissions, state, deadlines.</td></tr>
+      <tr><td><code>set amount = a</code></td><td>Carried-data update.</td><td>Stores values needed later.</td></tr>
+      <tr><td><code>covers REQ-1 "..."</code></td><td>Requirement ID and source text.</td><td>Flows into diagnostics, counterexamples, and scenarios.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="examples" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. Positive and Negative Examples</p>
+    <h2 class="reveal">Use <code>acceptance</code> for must-allow and <code>forbidden</code> for must-reject</h2>
+    <p class="lead narrow reveal">A safety invariant can miss under-constraint. Requirements should include both flows that must work and flows that must be rejected.</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Acceptance flow</h3>
+        <pre><code>acceptance AC-1 "low-amount claims can be paid" {
+  submit(0, 1)
+  auto_approve(0)
+  pay(0)
+  expect Claim 0 in Paid
+}</code></pre>
+        <p>A flow that must be accepted. It is replay-checked and flows into scenarios and test generation.</p>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Forbidden flow</h3>
+        <pre><code>forbidden FB-1 "draft claims cannot be paid" {
+  pay(0)
+  expect rejected
+}</code></pre>
+        <p>A flow whose final step must be rejected. If it is accepted, a guard is probably too weak.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="nfr">
+  <div class="wrap">
+    <p class="kicker reveal">4. Non-Functional Requirements</p>
+    <h2 class="reveal">Permission, audit, capacity, and deadlines can be modeled here</h2>
+    <p class="lead narrow reveal">Many NFRs become ordinary guards or invariants. Deadlines use <code>time</code> and <code>deadline</code>.</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>NFR</th><th>How to write it</th><th>Note</th></tr>
+      <tr><td>Permission</td><td><code>when</code> or <code>requires</code> role checks.</td><td>Make who can run the operation explicit.</td></tr>
+      <tr><td>Audit</td><td>Audit state plus safety rules.</td><td>Implementation logs connect later through replay.</td></tr>
+      <tr><td>Capacity</td><td>Bounded numeric types, <code>Seq</code> capacity, count bounds.</td><td>Prefer type bounds where possible.</td></tr>
+      <tr><td>SLA / timeout</td><td><code>time</code> + <code>deadline</code>.</td><td>Discrete ticks, not wall-clock milliseconds.</td></tr>
+      <tr><td>Probability, percentiles, usability</td><td>Keep in prose documents.</td><td>FSL does not directly guarantee them.</td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>SLA pattern</h3>
+      <pre><code>time {
+  urgent respond_due
+  age wait_age[t: Ticket] while tickets[t] == Accepted
+}
+
+requirement NFR-1 "respond within 3 ticks after acceptance" {
+  fair action respond_due(t: Ticket) {
+    requires tickets[t] == Accepted
+    requires wait_age[t] &gt;= SLA_TICKS
+    tickets[t] = Responded
+  }
+
+  deadline wait_age &lt;= SLA_TICKS
+}</code></pre>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>SLA trap:</b> if an always-enabled action is <code>urgent</code>, time can freeze and the deadline may pass vacuously. Make only the deadline-reached handler urgent.</p>
+    </div>
+  </div>
+</section>
+
+<section id="implements" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. Business Connection</p>
+    <h2 class="reveal"><code>implements</code> checks that requirements preserve business intent</h2>
+    <p class="lead narrow reveal">When requirements implement a business spec, add <code>implements Abs from "file" { }</code>. If names match, FSL can synthesize the mapping.</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Name-aligned connection</h3>
+        <pre><code>requirements ExpenseRequirements {
+  implements ExpenseToBe from "business.fsl" { }
+  ...
+}</code></pre>
+        <p>Keep entity, stage, and transition names aligned when the meaning is the same.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Explicit mapping</h3>
+        <pre><code>implements ExpenseToBe from "business.fsl" {
+  maps auto
+  map status = req_status
+}</code></pre>
+        <p>Use explicit maps only when names or structure differ.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Verification</h3>
+        <pre><code>$ fslc verify requirements.fsl --depth 8</code></pre>
+        <p>The JSON includes both requirements verification and the business refinement result.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checklist">
+  <div class="wrap">
+    <p class="kicker reveal">6. Checklist</p>
+    <h2 class="reveal">Review before design</h2>
+    <ol class="lesson reveal">
+      <li><h3>Does every important transition carry a requirement ID?</h3><p>Without <code>covers REQ-...</code>, counterexamples are harder to trace back to source intent.</p></li>
+      <li><h3>Are boundary conditions explicit?</h3><p>Spell out <code>&lt;= AUTO_LIMIT</code> versus <code>&gt; AUTO_LIMIT</code>. Boundary mistakes are common.</p></li>
+      <li><h3>Do you have both acceptance and forbidden flows?</h3><p>Positive examples alone can miss weak guards.</p></li>
+      <li><h3>Did you separate FSL-checkable NFRs from prose-only NFRs?</h3><p>Permission, audit, capacity, and SLA can be modeled. Probability, percentiles, real milliseconds, and usability stay in prose.</p></li>
+      <li><h3>Did the layer weaken business intent?</h3><p>Treat an <code>implements</code> failure as a possible loss of business meaning.</p></li>
+    </ol>
+
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>Next: hand off to design</h2>
+      <p>Once requirements are stable, use <code>spec</code> and refinement mappings for implementation-near state and actions.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="design-layer.en.html">Design Layer</a>
+        <a class="btn ghost" href="business-layer.en.html">Back to Business</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

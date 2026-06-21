@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Writing the FSL Design Layer — spec, refinement, stutter, compose, conformance</title>
+<meta name="description" content="An English guide to writing the FSL design layer: an internal spec of state and actions, a refinement mapping up to requirements, preserve progress, composition, and the handoff to implementation conformance." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="design-layer">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Writing the Design Layer</p>
+    <h1 class="reveal">Turn a requirements contract into<br><span class="hl">implementable, provable state</span>.</h1>
+    <p class="lead reveal">The design layer is an ordinary <code>spec</code>: internal state, actions, queues, and outboxes. A separate <code>refinement</code> mapping proves the design still obeys the requirements above, and the same spec becomes the oracle for implementation conformance below.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Table of Contents</p>
+    <h2 class="reveal">What you decide in this layer</h2>
+    <div class="toc reveal">
+      <a href="#role">1. Boundary<span>What belongs here</span></a>
+      <a href="#shape">2. Basic Shape<span><code>spec</code>, internal <code>state</code> and <code>action</code></span></a>
+      <a href="#refine">3. Refine Up<span><code>refinement</code>, <code>map</code>, <code>stutter</code></span></a>
+      <a href="#progress">4. Preserve Progress<span>Opt-in liveness</span></a>
+      <a href="#compose">5. Compose<span>Synchronized actions, <code>internal</code></span></a>
+      <a href="#handoff">6. Handoff<span>testgen, replay, Monitor</span></a>
+      <a href="#checklist">7. Checklist<span>Review before implementation</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="role" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. Boundary</p>
+    <h2 class="reveal">Write implementation-near structure, not policy</h2>
+    <p class="lead narrow reveal">The design layer takes an <b>agreed requirements contract</b> and adds the detail an implementer needs: internal substages, queues, two-phase operations, retries, and derived state. It does not re-decide policy — that stays in the layers above.</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>Write here</h3>
+        <p>Internal substages, queues and outboxes, two-phase operations (submit then confirm), retries, decomposition, derived or cached state, and the <code>refinement</code> mapping up to requirements.</p>
+      </div>
+      <div class="card">
+        <h3>Do not do here</h3>
+        <p>Do not weaken or edit the requirements or business spec to make the design pass. If the upper contract is too strict or ambiguous, report the counterexample and ask for a contract decision.</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>The design layer is just <code>spec</code>.</b> Unlike <code>business</code> and <code>requirements</code>, there is no dedicated <code>design</code> keyword: you write the kernel <code>spec</code> at an implementation-near altitude, then connect it upward with a mapping file. <code>business ⊒ requirements ⊒ design ⊒ implementation</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="shape">
+  <div class="wrap">
+    <p class="kicker reveal">2. Basic Shape</p>
+    <h2 class="reveal">An ordinary <code>spec</code> with internal state and actions</h2>
+    <p class="lead narrow reveal">Start from the requirement's lifecycle, then add the states and operations the implementation actually has. The internal substages, the ledger, and the outbox below are design-only — they do not appear in requirements.</p>
+
+    <div class="panel reveal">
+      <pre><code>spec ExpenseDesign {
+  type Claim = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  const OUTBOX_CAP = 3
+  enum DesignSt { DesignDraft, DesignAutoApproved, DesignPaymentSubmitted, DesignPaid }
+  struct DesignClaim { st: DesignSt, amount: Amount }
+
+  state { design: Map&lt;Claim, DesignClaim&gt;, paid_count: Int, outbox: Seq&lt;Claim, OUTBOX_CAP&gt; }
+  init {
+    forall c: Claim { design[c] = DesignClaim { st: DesignDraft, amount: 0 } }
+    paid_count = 0
+    outbox = Seq {}
+  }
+
+  fair action pay_submit(c: Claim) {       // visible: the claim becomes paid
+    requires design[c].st == DesignAutoApproved
+    requires outbox.size() &lt; OUTBOX_CAP
+    design[c].st = DesignPaymentSubmitted
+    paid_count = paid_count + 1
+    outbox = outbox.push(c)
+  }
+  fair action pay_confirm(c: Claim) {      // internal: settle the submitted payment
+    requires design[c].st == DesignPaymentSubmitted
+    design[c].st = DesignPaid
+  }
+  fair action outbox_send() {             // internal: drain the notification outbox
+    requires outbox.size() &gt; 0
+    outbox = outbox.pop()
+  }
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Construct</th><th>Meaning</th><th>Design-layer guidance</th></tr>
+      <tr><td><code>enum DesignSt</code></td><td>Implementation-near substages.</td><td><code>DesignPaymentSubmitted</code> has no requirement-layer counterpart; it collapses upward later.</td></tr>
+      <tr><td><code>state { ... }</code></td><td>Internal logical state.</td><td>Ledgers, queues, and caches that requirements never mention belong here.</td></tr>
+      <tr><td><code>Seq&lt;T, N&gt;</code></td><td>A bounded queue / outbox.</td><td>Capacity is finite so the verifier can search it.</td></tr>
+      <tr><td><code>fair action</code></td><td>An operation the verifier may not starve.</td><td><code>fair</code> is what later powers <code>preserve progress</code>.</td></tr>
+    </table>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">Prove the design on its own first: <code>fslc verify design.fsl --engine induction</code> checks its invariants and partial-operation safety before you connect it upward.</p>
+    </div>
+  </div>
+</section>
+
+<section id="refine" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. Refine Up</p>
+    <h2 class="reveal">Prove the design still obeys requirements with a <code>refinement</code> mapping</h2>
+    <p class="lead narrow reveal">The mapping lives in a third file that pollutes neither spec. It maps every internal action either to one requirement action or to <code>stutter</code> ("nothing happens upstairs"), and maps every abstract state variable back out of the internal state.</p>
+
+    <div class="panel reveal">
+      <pre><code>refinement DesignRefinesRequirements {
+  impl ExpenseDesign        // the detailed/design spec
+  abs  ExpenseRequirements  // the requirements spec
+
+  map claim_stage[c: Claim] =
+    if design[c].st == DesignDraft then Draft
+    else if design[c].st == DesignAutoApproved then Approved
+    else if design[c].st == DesignPaymentSubmitted then Paid
+    else Paid
+  map claim_amount[c: Claim] = design[c].amount
+
+  action pay_submit(c)  -&gt; pay(c)     // visible step → requirement action
+  action pay_confirm(c) -&gt; stutter     // internal: invisible to requirements
+  action outbox_send()  -&gt; stutter
+}</code></pre>
+    </div>
+
+    <p class="reveal" style="margin-top:8px"><code>fslc refine design.fsl requirements.fsl mapping.fsl --depth 8</code> runs a bounded forward simulation and reports <code>result: "refines"</code> or a typed failure.</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>What refine checks</th><th>Meaning</th><th>Failure tells you</th></tr>
+      <tr><td>Init correspondence</td><td>The mapped initial state satisfies the requirement's <code>init</code>.</td><td><code>abs_state_mismatch</code> — a map or init bug.</td></tr>
+      <tr><td>Transition correspondence</td><td>Every design step maps to a requirement action that is <i>enabled</i>, and the update lines up.</td><td><code>abs_requires_failed</code> — the design bypassed an upper guard.</td></tr>
+      <tr><td>Stutter</td><td>An action mapped to <code>stutter</code> truly leaves the abstract view unchanged.</td><td><code>stutter_changed_abs</code> — a false "internal-only" claim.</td></tr>
+      <tr><td>Mapping range</td><td>Mapped values stay inside the abstract type.</td><td><code>map_out_of_bounds</code> — the projection escaped the abstract domain.</td></tr>
+    </table>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>✅ Safety is included</h3>
+        <p>If <code>refine</code> passes, the design cannot break the requirement invariants and guards (the controls). Internal detail is allowed as long as it does not violate the contract.</p>
+      </div>
+      <div class="card">
+        <h3>⚠ Liveness is not — by default</h3>
+        <p>Because refinement permits <code>stutter</code>, a design can drop a response the requirements guaranteed and still pass. To keep it, opt in with <code>preserve progress</code> (next section).</p>
+      </div>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Two mapping mechanisms hide internal detail.</b> <code>action ... -&gt; stutter</code> hides an internal-only operation, and a <code>map</code> expression absorbs internal fields (for example <code>map stock[i] = impl_stock[i] - reserved[i]</code> hides a <code>reserved</code> field). <code>maps auto</code> synthesizes identity entries for same-named state and actions; explicit entries override it. <code>if … then … else …</code> is allowed <i>only</i> inside mapping expressions, never in an ordinary <code>spec</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="progress">
+  <div class="wrap">
+    <p class="kicker reveal">4. Preserve Progress</p>
+    <h2 class="reveal">Pull an upper <code>leadsTo</code> through the mapping</h2>
+    <p class="lead narrow reveal">When a response the requirements promised still matters, add a <code>preserve progress</code> block. It re-checks the named abstract <code>leadsTo</code> over the design's executions, using the design's own <code>fair</code> actions for fairness.</p>
+
+    <div class="panel reveal">
+      <pre><code>refinement DesignKeepsLivenessProgress {
+  impl DesignKeepsLiveness
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action route()   -&gt; stutter
+  action approve() -&gt; approve()
+  action reject()  -&gt; reject()
+  action pay()     -&gt; pay()
+
+  preserve progress {
+    respond EveryClaimDecided by approve, reject   // by-actions name impl actions; fairness comes from their `fair`
+  }
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>If the design…</th><th>Result</th><th>How to fix</th></tr>
+      <tr><td>spins in a cycle while the response is pending</td><td><code>progress_lost</code> (a lasso counterexample)</td><td>Add or restore <code>fair</code> on the lower progress action.</td></tr>
+      <tr><td>deadlocks before responding</td><td><code>progress_lost</code> (a stall)</td><td>Enable a path to the response, or write a lower <code>leadsTo … decreases …</code> and verify with <code>--engine induction</code>.</td></tr>
+    </table>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Liveness comes only from where you ask for it.</b> <code>preserve progress</code> does not change safety refinement, and fairness is never inherited automatically — it comes from the design's <code>fair action</code> declarations.</p>
+    </div>
+  </div>
+</section>
+
+<section id="compose" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. Compose</p>
+    <h2 class="reveal">Assemble verified components with <code>compose</code></h2>
+    <p class="lead narrow reveal">Large designs are built from parts. <code>compose</code> brings verified specs together under namespaces, runs them in lockstep with synchronized actions, and hides steps that should only fire as part of a larger operation.</p>
+
+    <div class="panel reveal">
+      <pre><code>compose OrderSystem {
+  use ShoppingCart as cart from "cart_v1.fsl"
+  use Payment      as pay  from "payment.fsl"
+
+  state { orders_linked: Int }
+  init  { orders_linked = 0 }
+
+  fair action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) {     // both components advance in one step
+    requires pay.payments[p].st == Authorized
+    orders_linked = orders_linked + 1
+  }
+
+  internal cart.checkout                       // fires only via synchronization
+  internal pay.capture
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Construct</th><th>Meaning</th><th>Note</th></tr>
+      <tr><td><code>use A as ns from "..."</code></td><td>Import a component under a namespace.</td><td>State and actions are referenced as <code>ns.x</code>.</td></tr>
+      <tr><td><code>a.act(...) || b.act(...)</code></td><td>A synchronized action: both run together.</td><td>The merged step shares one <code>requires</code> / body / <code>ensures</code>.</td></tr>
+      <tr><td><code>internal ns.action</code></td><td>The action no longer fires on its own.</td><td>It only runs as part of a synchronized action.</td></tr>
+    </table>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Fairness is not inherited through synchronization.</b> A synchronized action is fair only if you declare it so; otherwise FSL warns <code>fair_not_inherited</code>. A <code>compose</code> can itself be the <code>impl</code> side of <code>fslc refine</code>, so a whole assembly can be proven against one requirements contract.</p>
+    </div>
+  </div>
+</section>
+
+<section id="handoff">
+  <div class="wrap">
+    <p class="kicker reveal">6. Handoff</p>
+    <h2 class="reveal">The design becomes the oracle for implementation conformance</h2>
+    <p class="lead narrow reveal">A proven design does not prove the code. You connect them: generate tests from the spec, replay real logs against it, or embed a runtime monitor. Each needs an <code>Adapter</code> that projects implementation state into the spec's logical shape.</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Monitor</h3>
+        <p>Embed <code>fslc.runtime.Monitor</code> in the implementation to reject any step that would violate the spec at run time.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>scenarios</h3>
+        <p>Generate concrete traces (including from <code>covers</code> / acceptance intent) that an implementation must reproduce.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>testgen</h3>
+        <p><code>fslc testgen</code> emits a pytest scaffold that random-walks the implementation with the spec as oracle.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>replay</h3>
+        <p><code>fslc replay</code> checks a finite event log against the spec. Note: <code>leadsTo</code> cannot be judged from a finite log.</p>
+      </div>
+    </div>
+
+    <div class="panel reveal" style="margin-top:24px">
+      <h3>The adapter contract</h3>
+      <p style="color:var(--muted);margin-top:0">The generated test harness calls <code>Adapter.observe()</code>, which reads the real implementation and returns the state in the spec's logical shape — the same variables, the same bounded types. Conformance is only as good as this projection: if <code>observe()</code> lies, the oracle lies.</p>
+      <pre><code>class ExpenseAdapter(Adapter):
+    def observe(self) -&gt; dict:
+        # project the real system into the spec's state variables
+        return {
+            "design": {c.id: {"st": c.stage, "amount": c.amount} for c in self.repo.all()},
+            "paid_count": self.ledger.count(),
+            "outbox": [m.claim_id for m in self.queue.pending()],
+        }</code></pre>
+    </div>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>✅ What the design layer guarantees</h3>
+        <p>The design's own invariants and partial-op safety (with induction, unboundedly); <b>safety inclusion</b> up to requirements via <code>refine</code>; opt-in liveness where you wrote <code>preserve progress</code> + <code>fair</code>; and implementation conformance <i>only where</i> <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p>
+      </div>
+      <div class="card">
+        <h3>⚠ What it does not</h3>
+        <p>That the requirements themselves are correct (refine assumes <code>abs</code> was verified separately); automatic liveness propagation; real code correctness until a harness is anchored; and anything outside the kernel — probability, percentiles, real-time milliseconds, or external-service behavior.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checklist" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">7. Checklist</p>
+    <h2 class="reveal">Review before implementation</h2>
+    <ol class="lesson reveal">
+      <li><h3>Is every internal action mapped?</h3><p>Each design action maps either to one requirement action or to a justified <code>stutter</code>. A missing entry is a <code>type</code> error.</p></li>
+      <li><h3>Is every abstract variable mapped?</h3><p>The mapping must cover all requirement-layer state, or <code>refine</code> reports a missing map.</p></li>
+      <li><h3>Did you prove the design on its own?</h3><p>Re-check its invariants with <code>verify</code> and <code>--engine induction</code> before connecting upward.</p></li>
+      <li><h3>Does any response still matter?</h3><p>If so, cover it with <code>preserve progress</code> <i>and</i> a lower <code>fair</code> action — safety refinement alone will not keep it.</p></li>
+      <li><h3>Are proof categories reported separately?</h3><p>Design invariants proved, refinement-to-requirements proved, and implementation conformance <b>not</b> proved unless <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p></li>
+    </ol>
+
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>Next: read the syntax end to end</h2>
+      <p>With all three layers in place, the syntax guide ties the concrete forms together — types, actions, properties, refinement, and composition.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="syntax.en.html">Syntax Guide</a>
+        <a class="btn ghost" href="requirements-layer.en.html">Back to Requirements</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

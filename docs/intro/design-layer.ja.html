@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL 設計層の書き方 — spec・refinement・stutter・compose・実装適合</title>
+<meta name="description" content="FSLの設計層の書き方を、内部状態と操作の spec、要件層への詳細化対応、応答性の保存、合成、実装適合への受け渡しに分けて学ぶ日本語教材。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="design-layer">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">設計層を書く</p>
+    <h1 class="reveal">要件契約を、<br><span class="hl">実装でき、証明できる状態</span>にする。</h1>
+    <p class="lead reveal">設計層は普通の <code>spec</code> です。内部の状態・操作・キュー・アウトボックスを書き、別ファイルの <code>refinement</code> 対応表で「上位の要件をまだ守っていること」を証明します。同じ spec が、下位の実装適合の判定基準にもなります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">目次</p>
+    <h2 class="reveal">このページで決めること</h2>
+    <div class="toc reveal">
+      <a href="#role">1. 役割<span>ここに書くこと</span></a>
+      <a href="#shape">2. 基本形<span><code>spec</code>・内部の <code>state</code> と <code>action</code></span></a>
+      <a href="#refine">3. 上位へ詳細化<span><code>refinement</code>・<code>map</code>・<code>stutter</code></span></a>
+      <a href="#progress">4. 応答性を保つ<span>応答性は任意で引き継ぐ</span></a>
+      <a href="#compose">5. 合成<span>同期操作・<code>internal</code></span></a>
+      <a href="#handoff">6. 受け渡し<span>testgen・replay・Monitor</span></a>
+      <a href="#checklist">7. チェックリスト<span>実装前に見ること</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>読み方の前提:</b> <code>spec</code>、<code>refinement</code>、<code>map</code>、<code>stutter</code>、<code>compose</code> などはFSLの予約語です。本文では「設計層」「詳細化対応」「内部操作」のように日本語名を併記します。</p>
+    </div>
+  </div>
+</section>
+
+<section id="role" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. 役割</p>
+    <h2 class="reveal">実装に近い構造を書く。ポリシーは書かない</h2>
+    <p class="lead narrow reveal">設計層は、<b>合意済みの要件契約</b>を受け取り、実装者に必要な詳細を足す層です。内部サブステージ、キュー、二段階操作、リトライ、導出状態などを書きます。ポリシーを決め直す層ではありません。</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>ここに書く</h3>
+        <p>内部サブステージ、キューとアウトボックス、二段階操作（提出してから確定）、リトライ、分割、導出・キャッシュ状態、そして要件層への <code>refinement</code> 対応表。</p>
+      </div>
+      <div class="card">
+        <h3>ここでしてはいけない</h3>
+        <p>設計を通すために、要件層や業務層を弱めたり書き換えたりしないこと。上位の契約が厳しすぎる／曖昧なら、反例を示して契約の判断を仰ぎます。</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>設計層は <code>spec</code> そのものです。</b> <code>business</code> や <code>requirements</code> と違い、<code>design</code> という専用予約語はありません。実装に近い抽象度で核言語の <code>spec</code> を書き、対応表ファイルで上位につなぎます。<code>business ⊒ requirements ⊒ design ⊒ implementation</code> という関係です。</p>
+    </div>
+  </div>
+</section>
+
+<section id="shape">
+  <div class="wrap">
+    <p class="kicker reveal">2. 基本形</p>
+    <h2 class="reveal">内部状態と操作を持つ、普通の <code>spec</code></h2>
+    <p class="lead narrow reveal">要件のライフサイクルから出発し、実装が実際に持つ状態と操作を足します。下の内部サブステージ、件数台帳、アウトボックスは設計層だけのもので、要件層には現れません。</p>
+
+    <div class="panel reveal">
+      <pre><code>spec ExpenseDesign {
+  type Claim = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  const OUTBOX_CAP = 3
+  enum DesignSt { DesignDraft, DesignAutoApproved, DesignPaymentSubmitted, DesignPaid }
+  struct DesignClaim { st: DesignSt, amount: Amount }
+
+  state { design: Map&lt;Claim, DesignClaim&gt;, paid_count: Int, outbox: Seq&lt;Claim, OUTBOX_CAP&gt; }
+  init {
+    forall c: Claim { design[c] = DesignClaim { st: DesignDraft, amount: 0 } }
+    paid_count = 0
+    outbox = Seq {}
+  }
+
+  fair action pay_submit(c: Claim) {       // 表に出る: 申請が支払いに進む
+    requires design[c].st == DesignAutoApproved
+    requires outbox.size() &lt; OUTBOX_CAP
+    design[c].st = DesignPaymentSubmitted
+    paid_count = paid_count + 1
+    outbox = outbox.push(c)
+  }
+  fair action pay_confirm(c: Claim) {      // 内部: 提出済みの支払いを確定する
+    requires design[c].st == DesignPaymentSubmitted
+    design[c].st = DesignPaid
+  }
+  fair action outbox_send() {             // 内部: 通知アウトボックスを掃き出す
+    requires outbox.size() &gt; 0
+    outbox = outbox.pop()
+  }
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>設計層での目安</th></tr>
+      <tr><td><code>enum DesignSt</code></td><td>実装に近いサブステージ。</td><td><code>DesignPaymentSubmitted</code> は要件層に対応物がなく、あとで上位に畳まれます。</td></tr>
+      <tr><td><code>state { ... }</code></td><td>内部の論理状態。</td><td>要件が触れない台帳・キュー・キャッシュはここに置きます。</td></tr>
+      <tr><td><code>Seq&lt;T, N&gt;</code></td><td>容量つきのキュー／アウトボックス。</td><td>容量が有限なので検証器が総当たりできます。</td></tr>
+      <tr><td><code>fair action</code></td><td>検証器が放置してはいけない操作。</td><td><code>fair</code> は、のちの <code>preserve progress</code> の土台になります。</td></tr>
+    </table>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">まず設計を単体で証明します。<code>fslc verify design.fsl --engine induction</code> で、上につなぐ前に不変条件と部分操作の安全性を確認します。</p>
+    </div>
+  </div>
+</section>
+
+<section id="refine" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. 上位へ詳細化</p>
+    <h2 class="reveal"><code>refinement</code> 対応表で、設計が要件を守ることを証明する</h2>
+    <p class="lead narrow reveal">対応表は、どちらの spec も汚さない第3のファイルに書きます。すべての内部操作を「ひとつの要件操作」か「<code>stutter</code>（上では何も起きない）」のどちらかに対応づけ、すべての抽象状態を内部状態から取り出します。</p>
+
+    <div class="panel reveal">
+      <pre><code>refinement DesignRefinesRequirements {
+  impl ExpenseDesign        // 詳細(設計)spec
+  abs  ExpenseRequirements  // 要件spec
+
+  map claim_stage[c: Claim] =
+    if design[c].st == DesignDraft then Draft
+    else if design[c].st == DesignAutoApproved then Approved
+    else if design[c].st == DesignPaymentSubmitted then Paid
+    else Paid
+  map claim_amount[c: Claim] = design[c].amount
+
+  action pay_submit(c)  -&gt; pay(c)     // 表に出る操作 → 要件の操作
+  action pay_confirm(c) -&gt; stutter     // 内部: 要件層には見えない
+  action outbox_send()  -&gt; stutter
+}</code></pre>
+    </div>
+
+    <p class="reveal" style="margin-top:8px"><code>fslc refine design.fsl requirements.fsl mapping.fsl --depth 8</code> が有界の前方シミュレーションを回し、<code>result: "refines"</code> か、型のついた失敗を返します。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>refine が見ること</th><th>意味</th><th>失敗が教えること</th></tr>
+      <tr><td>初期状態の対応</td><td>対応づけた初期状態が、要件の <code>init</code> を満たす。</td><td><code>abs_state_mismatch</code> — 対応表か init のバグ。</td></tr>
+      <tr><td>遷移の対応</td><td>すべての設計ステップが、<i>有効な</i>要件操作に対応し、更新も一致する。</td><td><code>abs_requires_failed</code> — 設計が上位の条件を迂回した。</td></tr>
+      <tr><td>stutter</td><td><code>stutter</code> にした操作が、本当に抽象側を変えない。</td><td><code>stutter_changed_abs</code> — 「内部だけ」という主張が嘘。</td></tr>
+      <tr><td>対応値の範囲</td><td>対応づけた値が、抽象の型の範囲に収まる。</td><td><code>map_out_of_bounds</code> — 射影が抽象の範囲を超えた。</td></tr>
+    </table>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>✅ 安全性は含まれる</h3>
+        <p><code>refine</code> が通れば、設計は要件の不変条件と条件（統制）を破れません。内部の詳細は、契約を破らない限り自由に足せます。</p>
+      </div>
+      <div class="card">
+        <h3>⚠ 応答性は——既定では含まれない</h3>
+        <p>詳細化は <code>stutter</code> を許すため、要件が保証した応答を設計が落としても通ってしまいます。残したいなら次節の <code>preserve progress</code> で明示します。</p>
+      </div>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>内部詳細を隠す仕組みは2つ。</b> <code>action ... -&gt; stutter</code> は内部だけの操作を隠し、<code>map</code> 式は内部フィールドを吸収します（例：<code>map stock[i] = impl_stock[i] - reserved[i]</code> で <code>reserved</code> を隠す）。<code>maps auto</code> は同名の状態・操作に恒等対応を生成し、明示の対応が優先されます。<code>if … then … else …</code> は対応表の式の中だけで使え、普通の <code>spec</code> では使えません。</p>
+    </div>
+  </div>
+</section>
+
+<section id="progress">
+  <div class="wrap">
+    <p class="kicker reveal">4. 応答性を保つ</p>
+    <h2 class="reveal">上位の <code>leadsTo</code> を、対応表ごしに引き継ぐ</h2>
+    <p class="lead narrow reveal">要件が約束した応答がまだ重要なら、<code>preserve progress</code> ブロックを足します。名前のついた抽象 <code>leadsTo</code> を、設計の実行上で再検査します。公平性は設計自身の <code>fair</code> 操作から来ます。</p>
+
+    <div class="panel reveal">
+      <pre><code>refinement DesignKeepsLivenessProgress {
+  impl DesignKeepsLiveness
+  abs  ClaimPolicy
+
+  map s = if d == DSubmitted then Submitted
+          else if d == DApproved then Approved
+          else if d == DRejected then Rejected
+          else Paid
+
+  action route()   -&gt; stutter
+  action approve() -&gt; approve()
+  action reject()  -&gt; reject()
+  action pay()     -&gt; pay()
+
+  preserve progress {
+    respond EveryClaimDecided by approve, reject   // by の操作は impl の操作名。公平性はその fair から来る
+  }
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>設計が…</th><th>結果</th><th>直し方</th></tr>
+      <tr><td>応答待ちのまま循環で空回りする</td><td><code>progress_lost</code>（lasso 反例）</td><td>進行させる操作に <code>fair</code> を足す／戻す。</td></tr>
+      <tr><td>応答する前に手詰まりになる</td><td><code>progress_lost</code>（stall）</td><td>応答への経路を有効にする。または下位に <code>leadsTo … decreases …</code> を書き <code>--engine induction</code> で検証する。</td></tr>
+    </table>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>応答性は、頼んだところにしか来ません。</b> <code>preserve progress</code> は安全性の詳細化を変えません。そして公平性は自動継承されず、設計の <code>fair action</code> 宣言からのみ生まれます。</p>
+    </div>
+  </div>
+</section>
+
+<section id="compose" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. 合成</p>
+    <h2 class="reveal">検証済みの部品を <code>compose</code> で組み立てる</h2>
+    <p class="lead narrow reveal">大きな設計は部品から組みます。<code>compose</code> は検証済みの spec を名前空間つきでまとめ、同期操作で歩調をそろえ、単独で発火すべきでないステップを隠します。</p>
+
+    <div class="panel reveal">
+      <pre><code>compose OrderSystem {
+  use ShoppingCart as cart from "cart_v1.fsl"
+  use Payment      as pay  from "payment.fsl"
+
+  state { orders_linked: Int }
+  init  { orders_linked = 0 }
+
+  fair action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) {     // 2つの部品が1ステップで進む
+    requires pay.payments[p].st == Authorized
+    orders_linked = orders_linked + 1
+  }
+
+  internal cart.checkout                       // 同期でだけ発火する
+  internal pay.capture
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>注意</th></tr>
+      <tr><td><code>use A as ns from "..."</code></td><td>部品を名前空間つきで取り込む。</td><td>状態・操作は <code>ns.x</code> で参照します。</td></tr>
+      <tr><td><code>a.act(...) || b.act(...)</code></td><td>同期操作：両方が一緒に進む。</td><td>合わさったステップが <code>requires</code>／本体／<code>ensures</code> を共有します。</td></tr>
+      <tr><td><code>internal ns.action</code></td><td>その操作は単独で発火しなくなる。</td><td>同期操作の一部としてのみ動きます。</td></tr>
+    </table>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>同期では公平性は継承されません。</b> 同期操作が公平なのは、そう宣言したときだけです。さもないと <code>fair_not_inherited</code> の警告が出ます。<code>compose</code> はそれ自体を <code>fslc refine</code> の <code>impl</code> 側にできるので、組み立て全体をひとつの要件契約に対して証明できます。</p>
+    </div>
+  </div>
+</section>
+
+<section id="handoff">
+  <div class="wrap">
+    <p class="kicker reveal">6. 受け渡し</p>
+    <h2 class="reveal">設計層は、実装適合の判定基準になる</h2>
+    <p class="lead narrow reveal">設計を証明しても、コードを証明したことにはなりません。両者をつなぎます。spec からテストを生成する、実ログを spec に再生する、実行時監視器を埋め込む。いずれも、実装状態を spec の論理形に射影する <code>Adapter</code> が要ります。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Monitor（監視器）</h3>
+        <p>実装に <code>fslc.runtime.Monitor</code> を埋め込み、spec を破るステップを実行時に弾きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>scenarios（シナリオ）</h3>
+        <p>具体的なトレース（<code>covers</code>／受け入れの意図を含む）を生成し、実装が再現すべき手順にします。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>testgen（テスト生成）</h3>
+        <p><code>fslc testgen</code> が、spec を判定基準にして実装をランダムウォークする pytest 雛形を出します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>replay（ログ再生）</h3>
+        <p><code>fslc replay</code> が有限のイベントログを spec に照合します。注意：<code>leadsTo</code> は有限ログからは判定できません。</p>
+      </div>
+    </div>
+
+    <div class="panel reveal" style="margin-top:24px">
+      <h3>アダプタの契約</h3>
+      <p style="color:var(--muted);margin-top:0">生成されたテストは <code>Adapter.observe()</code> を呼びます。これは実装を読み、状態を spec の論理形——同じ変数、同じ範囲つき型——で返します。適合の質は、この射影の質と同じです。<code>observe()</code> が嘘をつけば、判定基準も嘘になります。</p>
+      <pre><code>class ExpenseAdapter(Adapter):
+    def observe(self) -&gt; dict:
+        # 実システムを spec の状態変数に射影する
+        return {
+            "design": {c.id: {"st": c.stage, "amount": c.amount} for c in self.repo.all()},
+            "paid_count": self.ledger.count(),
+            "outbox": [m.claim_id for m in self.queue.pending()],
+        }</code></pre>
+    </div>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>✅ 設計層が保証すること</h3>
+        <p>設計自身の不変条件と部分操作の安全性（帰納法を使えば無限の深さで）。<code>refine</code> による要件層までの<b>安全性の包含</b>。<code>preserve progress</code> と <code>fair</code> を書いたところの応答性。そして実装適合は、<code>testgen</code> や <code>replay</code> を実コード・実ログに<i>つないだところだけ</i>。</p>
+      </div>
+      <div class="card">
+        <h3>⚠ 保証しないこと</h3>
+        <p>要件そのものの正しさ（refine は <code>abs</code> が別途検証済みだと仮定する）。応答性の自動継承。雛形をつなぐまでの実コードの正しさ。そして核言語の外——確率、百分位、実時間ミリ秒、外部サービスの挙動。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checklist" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">7. チェックリスト</p>
+    <h2 class="reveal">実装に渡す前に見ること</h2>
+    <ol class="lesson reveal">
+      <li><h3>すべての内部操作が対応づいているか</h3><p>各設計操作は、ひとつの要件操作か、根拠のある <code>stutter</code> のどちらかに対応します。対応漏れは <code>type</code> エラーです。</p></li>
+      <li><h3>すべての抽象変数が対応づいているか</h3><p>対応表は要件層の状態をすべて覆う必要があります。さもないと <code>refine</code> が対応漏れを報告します。</p></li>
+      <li><h3>設計を単体で証明したか</h3><p>上につなぐ前に、<code>verify</code> と <code>--engine induction</code> で不変条件を再確認します。</p></li>
+      <li><h3>まだ重要な応答があるか</h3><p>あるなら <code>preserve progress</code> <i>と</i> 下位の <code>fair</code> 操作で覆います。安全性の詳細化だけでは保てません。</p></li>
+      <li><h3>証明の種類を分けて報告したか</h3><p>設計の不変条件を証明、要件への詳細化を証明、そして実装適合は <code>testgen</code> か <code>replay</code> を実コード・実ログにつながない限り<b>証明していない</b>と分けます。</p></li>
+    </ol>
+
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>次は、文法を通して読む</h2>
+      <p>3つの層がそろったら、文法・構文ページが具体的な書き方——型、操作、性質、詳細化、合成——をまとめてつなぎます。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="syntax.ja.html">文法・構文へ</a>
+        <a class="btn ghost" href="requirements-layer.ja.html">要件層にもどる</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

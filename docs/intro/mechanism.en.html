@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL Verification Mechanisms — State Space, BMC, Induction, Refinement</title>
+<meta name="description" content="A practical English guide to how FSL verifies specs: finite state spaces, bounded model checking, k-induction, liveness, refinement, diagnostics, and implementation connection." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="mechanism">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Deep Dive</p>
+    <h1 class="reveal">What exactly does<br><span class="hl">FSL verify</span>?</h1>
+    <p class="lead reveal">State spaces, brute-force search, counterexamples, induction, liveness, refinement, and implementation conformance.</p>
+    <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
+      <span class="pill">BMC</span>
+      <span class="pill">k-induction</span>
+      <span class="pill">CTI</span>
+      <span class="pill">leadsTo</span>
+      <span class="pill">refinement</span>
+      <span class="pill">testgen / replay</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Map</p>
+    <h2 class="reveal">What this page covers</h2>
+    <div class="toc reveal">
+      <a href="#model">1. Model<span>State, actions, rules</span></a>
+      <a href="#finite">2. Finite State Space<span>Bounded types and model size</span></a>
+      <a href="#bmc">3. BMC<span>All paths up to depth K</span></a>
+      <a href="#induction">4. Induction<span>Proofs and CTIs</span></a>
+      <a href="#liveness">5. Liveness<span>Eventually-style properties</span></a>
+      <a href="#checks">6. Automatic Checks<span>Bounds, partial operations, coverage</span></a>
+      <a href="#layers">7. Layers<span>Business -> requirements -> design</span></a>
+      <a href="#impl">8. Implementation<span>Monitor, testgen, replay</span></a>
+      <a href="#results">9. Reading Results<span>JSON and the repair decision</span></a>
+      <a href="#limits">10. Limits<span>Spec vs. intent gap</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Reading note:</b> words such as <code>state</code>, <code>action</code>, and <code>invariant</code> are FSL keywords. This guide keeps the keyword and explains the role beside it.</p>
+    </div>
+  </div>
+</section>
+
+<section id="model" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. Model</p>
+    <h2 class="reveal">FSL views an application as states plus operations</h2>
+    <p class="lead narrow reveal">FSL does not verify arbitrary implementation code. It extracts the state relevant to the behavior you care about, the operations that move that state, and the rules that must hold.</p>
+
+    <div class="flowline reveal" style="margin-top:24px">
+      <div class="flowbox"><strong>State <code>state</code></strong><span>The logical variables the verifier tracks.</span></div>
+      <div class="flowbox"><strong>Initial State <code>init</code></strong><span>The deterministic starting point.</span></div>
+      <div class="flowbox"><strong>Operation <code>action</code></strong><span>One atomic step, enabled by <code>requires</code>.</span></div>
+      <div class="flowbox"><strong>Property</strong><span><code>invariant</code>, <code>trans</code>, <code>reachable</code>, or <code>leadsTo</code>.</span></div>
+      <div class="flowbox"><strong>Counterexample</strong><span>If a property breaks, FSL returns the shortest trace.</span></div>
+    </div>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Small FSL state machine</h3>
+        <pre><code>spec OrderFlow {
+  enum St { Draft, Submitted, Approved, Shipped }
+  state { status: St, approved: Bool }
+  init { status = Draft approved = false }
+
+  action approve() {
+    requires status == Submitted
+    status = Approved
+    approved = true
+  }
+
+  action ship() {
+    requires status == Approved
+    status = Shipped
+  }
+
+  invariant ShipOnlyAfterApproval {
+    status == Shipped =&gt; approved
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>How to read it</h3>
+        <table class="matrix">
+          <tr><th>FSL</th><th>Meaning</th></tr>
+          <tr><td><code>state</code></td><td>Variables tracked by the verifier.</td></tr>
+          <tr><td><code>init</code></td><td>The starting point for exploration.</td></tr>
+          <tr><td><code>action</code></td><td>A transition that may run when enabled.</td></tr>
+          <tr><td><code>requires</code></td><td>The enabled condition.</td></tr>
+          <tr><td><code>invariant</code></td><td>A rule that must hold in every reachable state.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="finite">
+  <div class="wrap">
+    <p class="kicker reveal">2. Finite State Space</p>
+    <h2 class="reveal">FSL makes the model finite so the machine can search it</h2>
+    <p class="lead narrow reveal">Real systems are unbounded. FSL models the part that matters with bounded integer types, enums, sequence capacities, and verification bounds.</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Bounded integer type</h3>
+        <pre><code>type Qty = 0..5
+type UserId = 0..2</code></pre>
+        <p>Out-of-range values are detected automatically as <code>type_bound</code>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Enum</h3>
+        <pre><code>enum St { Open, Closed }</code></pre>
+        <p>Use enums for stages, statuses, and finite categories.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Sequence capacity</h3>
+        <pre><code>const CAP = 3
+state { q: Seq&lt;JobId, CAP&gt; }</code></pre>
+        <p>Full <code>push</code>, empty <code>pop/head</code>, and out-of-range <code>at</code> are diagnosed.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Dialect bounds</h3>
+        <pre><code>verify {
+  instances Claim = 3
+  values Amount = 0..10
+}</code></pre>
+        <p>Business and requirements layers put entity counts and numeric ranges in <code>verify</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="bmc" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. BMC</p>
+    <h2 class="reveal">Bounded model checking explores all paths up to K steps</h2>
+    <p class="lead narrow reveal">BMC stands for bounded model checking. Starting at <code>init</code>, it explores every combination of <code>action</code> instances at 0, 1, 2, up to K steps. If a counterexample exists, the shortest trace is returned.</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Run</h3>
+        <pre><code>$ fslc verify specs/cart_v1.fsl --depth 8
+{
+  "result": "verified",
+  "completeness": "bounded",
+  "checked_to_depth": 8
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Meaning</h3>
+        <table class="matrix">
+          <tr><th>Result</th><th>How to read it</th></tr>
+          <tr><td><code>verified</code></td><td>No counterexample up to depth K. This is not an infinite proof.</td></tr>
+          <tr><td><code>violated</code></td><td>A counterexample exists. The returned trace is the shortest reproduction.</td></tr>
+          <tr><td><code>reachable_failed</code></td><td>A desired state was not reached within K steps.</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <ol class="lesson reveal">
+      <li>
+        <h3>Place one state</h3>
+        <p>First build the <code>init</code> state. Every <code>invariant</code> is checked here too.</p>
+      </li>
+      <li>
+        <h3>Enumerate enabled <code>action</code> instances</h3>
+        <p>For each <code>action</code> and parameter-value combination, check whether <code>requires</code> holds.</p>
+      </li>
+      <li>
+        <h3>Build the next state</h3>
+        <p>The <code>action</code> body is evaluated as a simultaneous assignment. Variables you do not write are preserved automatically.</p>
+      </li>
+      <li>
+        <h3>Check properties</h3>
+        <p>Safety rules, before/after relations, bounds, partial operations, deadlock, and liveness are all verified.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="induction">
+  <div class="wrap">
+    <p class="kicker reveal">4. Induction</p>
+    <h2 class="reveal">k-induction proves more than reachable paths</h2>
+    <p class="lead narrow reveal">BMC checks states reachable from <code>init</code>. k-induction additionally asks whether every state satisfying the invariants keeps satisfying them after one more step.</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>Base case</h3>
+        <p>Checks that reachable paths up to depth K have no counterexample.</p>
+      </div>
+      <div class="card">
+        <h3>Step case</h3>
+        <p>Checks that arbitrary invariant-satisfying states remain safe after one more step.</p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <h3><code>unknown_cti</code> means information missing for the proof</h3>
+      <p>A failed step case is not necessarily a reachable bug. <code>CTI</code> stands for counterexample-to-induction: a candidate saying "if this state could exist, the next step would break the invariant."</p>
+      <pre><code>{
+  "result": "unknown_cti",
+  "cti": {
+    "states": [
+      { "status": "Approved", "approved": false },
+      { "status": "Shipped", "approved": false }
+    ]
+  }
+}</code></pre>
+      <p style="margin-top:16px">In this example, an <code>Approved</code> order should always have <code>approved == true</code>. Stating that fact as an auxiliary invariant makes the proof go through.</p>
+      <pre><code>invariant ApprovedImpliesFlag {
+  status == Approved =&gt; approved
+}</code></pre>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>The decision:</b> if the CTI start state is genuinely reachable, it is a spec or design bug. If it is unreachable but ruled out by a domain truth, add an auxiliary invariant that expresses that truth.</p>
+    </div>
+  </div>
+</section>
+
+<section id="liveness" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. Liveness</p>
+    <h2 class="reveal"><code>leadsTo</code> checks "eventually" properties</h2>
+    <p class="lead narrow reveal">An <code>invariant</code> says "bad states never occur." A <code>leadsTo</code> property says "once P holds, Q eventually holds."</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Example</h3>
+        <pre><code>fair action finish(j: JobId) {
+  requires jobs[j] == Running
+  jobs[j] = Done
+}
+
+leadsTo EventuallyDone {
+  forall j: JobId {
+    jobs[j] == Running ~&gt; jobs[j] == Done
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Typical failures</h3>
+        <table class="matrix">
+          <tr><th>Shape</th><th>Meaning</th></tr>
+          <tr><td>Lasso</td><td>P remains pending inside a logical loop.</td></tr>
+          <tr><td>Stall</td><td>P remains pending and no action is enabled.</td></tr>
+          <tr><td>Ranking failure</td><td><code>decreases</code> cannot prove progress.</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><code>fair</code></h3>
+        <p>Weak fairness. If an action stays enabled throughout a loop, it is assumed to eventually run. Mark only the <code>action</code>s that carry progress.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>within K</code></h3>
+        <p><code>P ~&gt; within K Q</code> is a bounded response within K steps. It is checked inside the BMC range.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>decreases</code></h3>
+        <p>A ranking measure. If induction can show a value strictly decreases at every step, liveness is proven even at unbounded depth.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="wrap">
+    <p class="kicker reveal">6. Automatic Checks</p>
+    <h2 class="reveal">Some rules are checked even if you do not write them</h2>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Check</th><th>Detects</th><th>Representative result</th></tr>
+      <tr><td><code>type_bound</code></td><td>Out-of-range bounded types, map values, struct fields, live sequence prefix.</td><td><code>violated / type_bound</code></td></tr>
+      <tr><td><code>partial_op</code></td><td>Empty sequence <code>pop/head</code>, out-of-range <code>at</code>, division by zero.</td><td><code>violated / partial_op</code></td></tr>
+      <tr><td>Action coverage</td><td>An <code>action</code> never becomes enabled, plus blocking <code>requires</code>.</td><td><code>action_coverage</code></td></tr>
+      <tr><td>Deadlock</td><td>A state where every <code>action</code> is disabled.</td><td>warning or <code>violated</code></td></tr>
+      <tr><td>Vacuity</td><td>Unreached implication antecedents, unreached liveness triggers, always-true requirements.</td><td><code>warnings</code> or <code>error</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="layers" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">7. Layers</p>
+    <h2 class="reveal">FSL connects layer intent through refinement</h2>
+    <p class="lead narrow reveal">Business, requirements, design, and implementation are not written at the same level. FSL lets each layer use its own vocabulary, then checks that lower layers preserve upper-layer intent.</p>
+
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer"><h3>Business <code>business</code></h3><p>Actors, entities, processes, policies, goals, KPIs.</p></div>
+      <div class="arrow-down">↓ implements / refinement</div>
+      <div class="layer"><h3>Requirements <code>requirements</code></h3><p>Requirement IDs, acceptance flows, forbidden flows, NFRs, SLA.</p></div>
+      <div class="arrow-down">↓ refinement mapping</div>
+      <div class="layer"><h3>Design <code>spec</code></h3><p>State, actions, invariants, reachability, liveness.</p></div>
+      <div class="arrow-down">↓ testgen / replay</div>
+      <div class="layer"><h3>Implementation</h3><p>Adapter or logs are checked against the logical state.</p></div>
+    </div>
+
+    <div class="panel reveal">
+      <h3>What the refinement check actually inspects</h3>
+      <p>Each step on the concrete side maps to one step on the abstract side, or to an internal step that does nothing on the abstract side (a stutter). The check then verifies that init correspondence, transition correspondence, and the abstract enabled conditions and state all hold.</p>
+      <pre><code>refinement CartImplRefinesCart {
+  impl CartImpl
+  abs  ShoppingCart
+
+  maps auto
+  map stock[i: ItemId] = impl_stock[i] - reserved[i]
+  action reserve(i: ItemId) -&gt; stutter
+  action impl_checkout(u: UserId) -&gt; checkout(u)
+}</code></pre>
+      <p style="margin-top:16px">Safety is included in this inclusion: every behavior the implementation allows must be one the abstract spec already allows. Liveness is not carried down automatically unless you opt in with <code>preserve progress</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="impl">
+  <div class="wrap">
+    <p class="kicker reveal">8. Implementation</p>
+    <h2 class="reveal">The spec becomes the oracle for conformance tests</h2>
+    <p class="lead narrow reveal">Verification checks the spec's internal consistency. Implementation conformance is connected through runtime monitoring, scenario generation, test generation, and log replay.</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card"><h3><code>Monitor</code></h3><p>Concrete FSL executor. Steps one <code>action</code> without Z3 and returns state diffs.</p></div>
+      <div class="syntax-card"><h3><code>scenarios</code></h3><p>Generates integration-test skeletons from reachability, action coverage, and liveness.</p></div>
+      <div class="syntax-card"><h3><code>testgen</code></h3><p>Generates a pytest scaffold where you fill in an implementation adapter.</p></div>
+      <div class="syntax-card"><h3><code>replay</code></h3><p>Checks whether an observed event log conforms to the FSL state machine.</p></div>
+    </div>
+
+    <div class="panel reveal">
+      <h3>The adapter contract</h3>
+      <pre><code>class Adapter:
+  def reset(self):
+    ...
+
+  def step(self, action, params):
+    ...
+
+  def observe(self):
+    return {
+      "status": "Submitted",
+      "cart": None,
+      "queue": [0, 1]
+    }</code></pre>
+      <p style="margin-top:16px"><code>observe()</code> projects the implementation's state into the spec's logical shape: enums become their names, optional types become <code>None</code> or a value, sequences become lists, and maps become dicts. The verifier then compares this projection against what the spec predicts.</p>
+    </div>
+  </div>
+</section>
+
+<section id="results" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">9. Reading Results</p>
+    <h2 class="reveal">JSON is the handoff format an AI uses to repair</h2>
+    <p class="lead narrow reveal">FSL output is not a log a human skims. It is structured data an AI agent reads to decide the next repair action, with the verdict, counterexample trace, and unsat-core all in machine-readable form.</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Result</th><th>Meaning</th><th>Next action</th></tr>
+      <tr><td><code>violated</code></td><td>A reachable counterexample exists.</td><td>Read the last action and state diff in the returned trace, then fix the enabled condition, assignment, or property.</td></tr>
+      <tr><td><code>reachable_failed</code></td><td>A desired state is not reached.</td><td>Raise the search depth if it is too shallow; relax the constraints if they are too strong.</td></tr>
+      <tr><td><code>unknown_cti</code></td><td>An auxiliary invariant is missing for induction, or a real bug.</td><td>Decide whether the CTI start state can really occur.</td></tr>
+      <tr><td><code>error</code></td><td>Syntax, type, semantic, acceptance-flow, or forbidden-flow error.</td><td>Use the location, expected syntax, and fix hint to repair it.</td></tr>
+      <tr><td><code>proved</code></td><td>An invariant is proven at unbounded depth.</td><td>Check intent with reachability, vacuity, mutation testing, and implementation conformance.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <p class="kicker reveal">10. Limits</p>
+    <h2 class="reveal">What FSL guarantees, and what it does not</h2>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>Guarantees</h3>
+        <p>The internal consistency of the spec as written: reachable counterexamples, bounded-type violations, partial-operation safety, unbounded proofs once induction succeeds, safety inclusion under refinement, and conformance wherever an adapter or log is anchored.</p>
+      </div>
+      <div class="card">
+        <h3>Does not guarantee</h3>
+        <p>That the spec captures the original intent. Liveness is not propagated down automatically; real code is unchecked until testgen or replay anchors it; probabilities, percentiles, real-time milliseconds, and UI usability are out of scope; and verification is bounded by default unless induction is used.</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Practical point:</b> before writing a spec, a human confirms the states, operations, boundary conditions, exceptions, and priorities. The verifier strongly checks what you wrote; what you should have written but omitted is covered by acceptance flows, forbidden flows, vacuity detection, mutation testing, and human review.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap narrow center">
+    <div class="cta reveal">
+      <h2>Next: author layer-specific specs</h2>
+      <p>Use the business and requirements guides when turning real domain language into FSL.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="business-layer.en.html">Business Layer</a>
+        <a class="btn ghost" href="requirements-layer.en.html">Requirements Layer</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

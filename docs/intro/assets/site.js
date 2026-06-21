@@ -351,7 +351,77 @@
     });
   }
 
+  /* ---------- shared navigation (single source of truth) ----------
+     Chapter order, titles, and the three nav surfaces (top bar, docs
+     sidebar, footer) are generated here so pages cannot drift out of
+     sync. Each page only declares data-page="<stem>" + <html lang>.
+     Format per chapter: [shortLabel, sidebarTitle, sidebarDescription]. */
+  const CHAPTERS = [
+    { id: "concept",            en: ["Concept", "What is FSL?", "Concepts and counterexamples"],          ja: ["概念", "FSLって、なに？", "概念と反例の直感"] },
+    { id: "guide",              en: ["Workflow", "Workflow", "Commands and repair loop"],                 ja: ["使い方", "仕組みと使い方", "検証ループとコマンド"] },
+    { id: "mechanism",          en: ["Mechanisms", "Mechanisms", "BMC, induction, refinement"],           ja: ["仕組み", "仕組み詳細", "BMC・帰納法・詳細化"] },
+    { id: "business-layer",     en: ["Business", "Business Layer", "Processes, controls, KPIs"],           ja: ["業務層", "業務層", "プロセス・統制・KPI"] },
+    { id: "requirements-layer", en: ["Requirements", "Requirements Layer", "IDs, acceptance, forbidden"], ja: ["要件層", "要件層", "要件ID・受け入れ・禁止"] },
+    { id: "design-layer",       en: ["Design", "Design Layer", "Internal state, refinement, compose"],    ja: ["設計層", "設計層", "内部状態・詳細化・合成"] },
+    { id: "syntax",             en: ["Syntax", "Syntax Guide", "Types, actions, properties"],             ja: ["文法", "文法・構文", "型・式・操作・性質"] },
+  ];
+  const NAV_T = {
+    en: { brand: "Manual", index: "English Manual", kicker: "FSL Manual", other: "日本語", otherRead: "日本語で読む",
+          tagline: 'FSL — AI-Native Formal Specification Language. This manual is static HTML under <code>docs/intro/</code>.' },
+    ja: { brand: "Manual", index: "日本語マニュアル", kicker: "FSL Manual", other: "English", otherRead: "Read in English",
+          tagline: 'FSL — AI向け形式仕様言語。このマニュアルは <code>docs/intro/</code> の静的HTMLで構成されています。' },
+  };
+  function initNav() {
+    const lang = (document.documentElement.lang || "en").slice(0, 2) === "ja" ? "ja" : "en";
+    const other = lang === "ja" ? "en" : "ja";
+    const page = document.body.dataset.page || "index"; // file stem, e.g. "concept" or "index"
+    const t = NAV_T[lang];
+    const href = (stem, l) => `${stem}.${l}.html`;
+    const meta = (c) => (lang === "ja" ? c.ja : c.en);
+    const cur = (id) => (id === page ? ' aria-current="page"' : "");
+    const langToggle =
+      `<span class="lang">` +
+      (lang === "ja"
+        ? `<a href="${href(page, "en")}">English</a><a href="${href(page, "ja")}" class="active">日本語</a>`
+        : `<a href="${href(page, "ja")}">日本語</a><a href="${href(page, "en")}" class="active">English</a>`) +
+      `</span>`;
+
+    // Top bar is global chrome only: brand + language. Chapter navigation
+    // lives in the sidebar (content pages), the body grid (home), and the
+    // footer — so the sticky bar stays light and never overflows on mobile.
+    const top = $("header.topbar[data-nav]");
+    if (top) {
+      top.innerHTML =
+        `<a class="brand" href="${href("index", lang)}"><b>FSL</b> ${t.brand}</a>` +
+        `<span class="spacer"></span>` + langToggle;
+    }
+
+    const side = $("aside.docs-sidebar[data-nav]");
+    if (side) {
+      const items = CHAPTERS.map((c, i) => {
+        const m = meta(c);
+        const num = String(i + 1).padStart(2, "0");
+        return `<a class="chapter-link" href="${href(c.id, lang)}"${cur(c.id)}><span class="num">${num}</span><span><strong>${m[1]}</strong><span>${m[2]}</span></span></a>`;
+      }).join("");
+      side.innerHTML =
+        `<a class="docs-sidebar-title" href="${href("index", lang)}"><span>${t.kicker}</span><strong>${t.index}</strong></a>` +
+        `<nav class="docs-chapters">${items}</nav>` +
+        `<p class="docs-note"><a href="${href(page, other)}">${t.otherRead}</a></p>`;
+    }
+
+    const foot = $("footer[data-nav]");
+    if (foot) {
+      const links = CHAPTERS.map((c) => `<a href="${href(c.id, lang)}">${meta(c)[0]}</a>`).join(" · ");
+      foot.innerHTML =
+        `<p>${t.tagline}</p>` +
+        `<p><a href="${href("index", lang)}">Index</a> · ${links} · ` +
+        `<a href="${href(page, other)}">${t.other}</a> · ` +
+        `<a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>`;
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
+    initNav();
     T = Object.assign({}, DEFAULT_T, readJSON("i18n") || {});
     initChrome();
     if ($("#diagram-hero") || $("#diagram-board")) initConcept();
