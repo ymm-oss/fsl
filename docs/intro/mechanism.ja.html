@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL の仕組みを詳細に学ぶ — 状態空間・総当たり検査・帰納法・詳細化</title>
+<meta name="description" content="FSLの検証が何をモデル化し、どのように総当たり検査・k帰納法・応答性・詳細化チェック・実装接続を行うのかを体系的に学ぶ詳細教材。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="mechanism">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">詳しく学ぶ</p>
+    <h1 class="reveal">FSL は、何をどう<br><span class="hl">確かめている</span>のか。</h1>
+    <p class="lead reveal">状態空間、総当たり、反例、帰納法、応答性、詳細化チェック、実装接続。<br>FSL の検証が成立する仕組みを、順に分解します。</p>
+    <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
+      <span class="pill">総当たり検査</span>
+      <span class="pill">k帰納法</span>
+      <span class="pill">反例候補</span>
+      <span class="pill">応答性</span>
+      <span class="pill">詳細化チェック</span>
+      <span class="pill">テスト生成・ログ再生</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">学習マップ</p>
+    <h2 class="reveal">この教材で学ぶこと</h2>
+    <div class="toc reveal">
+      <a href="#model">1. モデル化<span>状態・操作・ルールの図にする</span></a>
+      <a href="#finite">2. 有限化<span>範囲つき型と探索空間</span></a>
+      <a href="#bmc">3. 総当たり検査<span>深さ K までの全手順を調べる</span></a>
+      <a href="#induction">4. 帰納法<span>証明成功と反例候補</span></a>
+      <a href="#temporal">5. 応答性<span>いつか完了する性質</span></a>
+      <a href="#checks">6. 自動チェック<span>境界・部分操作・有効性</span></a>
+      <a href="#layers">7. 階層化<span>業務→要件→設計</span></a>
+      <a href="#implementation">8. 実装接続<span>監視・テスト生成・ログ再生</span></a>
+      <a href="#results">9. 結果の読み方<span>JSONと修復の判断</span></a>
+      <a href="#limits">10. 限界<span>仕様と意図のギャップ</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>読み方の前提:</b> <code>state</code> や <code>action</code> のような英単語は、FSLの「予約語」です。日本語に置き換えて書くことはできないため、この教材では「予約語」と「意味」を必ず並べて説明します。</p>
+    </div>
+    <div class="callout reveal" style="margin-top:16px">
+      <p style="margin:0"><b>用語ミニ辞典:</b> 状態空間＝あり得る状態の集まり。反例＝ルールが破れる具体的な手順。帰納法＝無限に深い手順でも破れないことを示す考え方。応答性＝「いつか完了する」性質。詳細化＝粗い仕様を細かい仕様で実現できているかの確認です。</p>
+    </div>
+  </div>
+</section>
+
+<section id="model" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. モデル化</p>
+    <h2 class="reveal">FSL はアプリを「状態と操作の図」として見る</h2>
+    <p class="lead narrow reveal">FSL の中心にあるのは、状態、操作、ルールです。専門用語ではこの図を遷移系と呼びます。コード全体をそのまま検証するのではなく、守りたい振る舞いに関係する状態だけを取り出します。</p>
+
+    <div class="flowline reveal" style="margin-top:24px">
+      <div class="flowbox"><strong>状態 <code>state</code></strong><span>論理状態。例: 注文ステータス、在庫、キュー、承認済フラグ。</span></div>
+      <div class="flowbox"><strong>初期状態 <code>init</code></strong><span>最初の状態。全ての状態変数を決定的に初期化する。</span></div>
+      <div class="flowbox"><strong>操作 <code>action</code></strong><span>1ステップの操作。<code>requires</code> が実行できる条件、本文が次状態。</span></div>
+      <div class="flowbox"><strong>性質</strong><span><code>invariant</code> / <code>trans</code> / <code>reachable</code> / <code>leadsTo</code> で守ること。</span></div>
+      <div class="flowbox"><strong>反例手順</strong><span>破れるなら、最短の操作列と状態差分が返る。</span></div>
+    </div>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>FSL の小さな状態図</h3>
+        <pre><code>spec OrderFlow {
+  enum St { Draft, Submitted, Approved, Shipped }
+  state { status: St, approved: Bool }
+  init { status = Draft approved = false }
+
+  action submit() {
+    requires status == Draft
+    status = Submitted
+  }
+
+  action approve() {
+    requires status == Submitted
+    status = Approved
+    approved = true
+  }
+
+  action ship() {
+    requires status == Approved
+    status = Shipped
+  }
+
+  invariant ShipOnlyAfterApproval {
+    status == Shipped =&gt; approved
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>読み替え</h3>
+        <table class="matrix">
+          <tr><th>FSL</th><th>意味</th></tr>
+          <tr><td><code>state</code></td><td>検証器が追跡する変数集合。</td></tr>
+          <tr><td><code>init</code></td><td>探索の出発点。</td></tr>
+          <tr><td><code>action</code></td><td>有効なら1手進められる遷移。</td></tr>
+          <tr><td><code>requires</code></td><td>その操作を押せる条件。</td></tr>
+          <tr><td><code>invariant</code></td><td>全到達状態で破れてはいけない性質。</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="finite">
+  <div class="wrap">
+    <p class="kicker reveal">2. 状態空間</p>
+    <h2 class="reveal">総当たりできるように、世界を有限に切る</h2>
+    <p class="lead narrow reveal">FSL はアプリ全体の無限の現実を扱うのではなく、検証したい性質に必要な範囲を有限のモデルにします。有限化の主役は、範囲つき整数型、列挙型、列の容量、検証範囲の指定です。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>範囲つき整数型</h3>
+        <pre><code>type Qty = 0..5
+type UserId = 0..2</code></pre>
+        <p>在庫やユーザーIDを有限範囲にする。範囲外は自動で <code>type_bound</code> として検出されます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>列挙型 <code>enum</code></h3>
+        <pre><code>enum St { Open, Closed }</code></pre>
+        <p>状態名を有限集合にする。状態機械やステージ表現に向きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>列 <code>Seq</code> の容量</h3>
+        <pre><code>const CAP = 3
+state { q: Seq&lt;JobId, CAP&gt; }</code></pre>
+        <p>キューは容量つき。満杯への push や空への pop は自動診断されます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>検証範囲 <code>verify</code></h3>
+        <pre><code>verify {
+  instances Claim = 3
+  values Amount = 0..10
+}</code></pre>
+        <p>業務層・要件層で使う対象数や数値範囲を指定します。</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>有限化は、仕様を弱めることではありません。</b> 検証したい相互作用が現れる最小モデルを選びます。複数主体の相互作用なら、2個では対称性で隠れることがあるため、3個以上を試すのが有効な場合があります。</p>
+    </div>
+  </div>
+</section>
+
+<section id="bmc" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. 総当たり検査</p>
+    <h2 class="reveal">総当たり検査は「深さ K までの全経路」を調べる</h2>
+    <p class="lead narrow reveal">総当たり検査（BMC）は「有界モデル検査」の略です。<code>init</code> から始まり、0手、1手、2手…K手までのすべての操作 <code>action</code> の組み合わせを探索します。反例があれば最短の手順が返ります。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>実行</h3>
+        <pre><code>$ fslc verify specs/cart_v1.fsl --depth 8
+{
+  "result": "verified",
+  "completeness": "bounded",
+  "checked_to_depth": 8
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>意味</h3>
+        <table class="matrix">
+          <tr><th>結果</th><th>読み方</th></tr>
+          <tr><td><code>verified</code></td><td>深さ K まで反例なし。無限の証明ではない。</td></tr>
+          <tr><td><code>violated</code></td><td>反例あり。返ってくる手順は最短の再現手順。</td></tr>
+          <tr><td><code>reachable_failed</code></td><td>到達してほしい状態に K 手以内で届かない。</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <ol class="lesson reveal">
+      <li>
+        <h3>状態を1つ置く</h3>
+        <p>まず <code>init</code> の状態を作ります。全ての <code>invariant</code> はここでも検査対象です。</p>
+      </li>
+      <li>
+        <h3>有効な操作 <code>action</code> を列挙する</h3>
+        <p>各 <code>action</code> とパラメータ値の組について、<code>requires</code> が成り立つかを調べます。</p>
+      </li>
+      <li>
+        <h3>次状態を作る</h3>
+        <p><code>action</code> 本文を同時代入として評価します。書いていない変数は自動的に保持されます。</p>
+      </li>
+      <li>
+        <h3>性質を検査する</h3>
+        <p>安全ルール、前後関係、境界、未定義操作、停止、応答性などを確認します。</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="induction">
+  <div class="wrap">
+    <p class="kicker reveal">4. 帰納法</p>
+    <h2 class="reveal">k帰納法は「到達した状態」だけを見ない</h2>
+    <p class="lead narrow reveal">総当たり検査は <code>init</code> から到達できる範囲を調べます。k帰納法は、より強く「性質を満たすすべての状態から1手進めても性質が保たれるか」を調べます。</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>土台の確認</h3>
+        <p>深さ K まで、実際に到達できる経路に反例がないことを確認します。総当たり検査と同じ役割です。</p>
+      </div>
+      <div class="card">
+        <h3>一歩進める確認</h3>
+        <p>不変条件を満たす任意の状態列から、次の1手で不変条件が破れないことを確認します。</p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <h3><code>unknown_cti</code> は「証明に足りない情報」</h3>
+      <p>帰納法が失敗しても、必ずしも到達可能なバグとは限りません。<code>CTI</code> は「反例候補」のことで、「この状態があり得るなら次の1手で破れる」という候補です。</p>
+      <pre><code>{
+  "result": "unknown_cti",
+  "cti": {
+    "states": [
+      { "status": "Approved", "approved": false },
+      { "status": "Shipped", "approved": false }
+    ]
+  }
+}</code></pre>
+      <p style="margin-top:16px">この例では、実際には <code>Approved</code> なら <code>approved == true</code> のはずです。その事実を補助不変条件として足すと証明できます。</p>
+      <pre><code>invariant ApprovedImpliesFlag {
+  status == Approved =&gt; approved
+}</code></pre>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>判断の分岐:</b> CTI の開始状態が本当に到達可能なら、仕様または設計のバグです。到達不能だがドメイン上の真実で排除できるなら、補助不変条件を追加します。</p>
+    </div>
+  </div>
+</section>
+
+<section id="temporal" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. 応答性</p>
+    <h2 class="reveal"><code>leadsTo</code> は「いつか応答する」を調べる</h2>
+    <p class="lead narrow reveal"><code>invariant</code> は「悪い状態に入らない」を見る安全性です。<code>leadsTo</code> は「ある状態になったら、いずれ別の状態になる」を見る応答性です。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>応答性</h3>
+        <pre><code>fair action finish(j: JobId) {
+  requires jobs[j] == Running
+  jobs[j] = Done
+}
+
+leadsTo EventuallyDone {
+  forall j: JobId {
+    jobs[j] == Running ~&gt; jobs[j] == Done
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>検証器が探す失敗</h3>
+        <table class="matrix">
+          <tr><th>形</th><th>意味</th></tr>
+          <tr><td>輪っか状の反例</td><td>P が保留されたまま同じ論理状態のループに入る。</td></tr>
+          <tr><td>停止による未完了</td><td>P が保留されたまま、全操作ができない状態で止まる。</td></tr>
+          <tr><td>減少量の証明失敗</td><td><code>decreases</code> が非負・単調減少を示せない。</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><code>fair</code></h3>
+        <p>弱公平性。ある操作候補がループ中ずっと有効なら、いつか実行されると仮定します。進捗を担う <code>action</code> にだけ付けます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>within K</code></h3>
+        <p><code>P ~&gt; within K Q</code> は K 手以内の応答。総当たり検査の範囲でチェックされます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>decreases</code></h3>
+        <p>減少量の指定。帰納法で「進むたびに数値が下がる」ことを示せると、応答性も無限深で証明できます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="wrap">
+    <p class="kicker reveal">6. 自動チェック</p>
+    <h2 class="reveal">書かなくても検査されるルールがある</h2>
+    <p class="lead narrow reveal">FSL は、よくある落とし穴を「人間が手でルールを書く注意力」に任せず、自動チェックに寄せています。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>自動チェック</th><th>検出するもの</th><th>代表結果</th></tr>
+      <tr><td><code>type_bound</code></td><td>範囲つき型、対応表 <code>Map</code> の値、構造体フィールド、列 <code>Seq</code> の実データ部分の範囲外。</td><td><code>violated / type_bound</code></td></tr>
+      <tr><td><code>partial_op</code></td><td>空の列 <code>Seq</code> への <code>pop/head</code>、範囲外 <code>at</code>、0除算。</td><td><code>violated / partial_op</code></td></tr>
+      <tr><td>操作の有効性</td><td>一度も実行可能にならない <code>action</code> と、ブロックしている <code>requires</code>。</td><td><code>action_coverage</code></td></tr>
+      <tr><td>意図しない停止</td><td>すべての <code>action</code> が無効になる停止状態。</td><td>警告または <code>violated</code></td></tr>
+      <tr><td>空虚な検証</td><td>前提が一度も成り立たない含意、到達しない応答性のきっかけ、常に真の <code>requires</code>。</td><td><code>warnings</code> または <code>error</code></td></tr>
+    </table>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>重要:</b> <code>type Qty = 0..5</code> と書いたなら、<code>qty &gt;= 0</code> のような境界ルールは書きません。FSL が自動で境界を検査するため、手書きすると仕様の意図がぼやけます。</p>
+    </div>
+  </div>
+</section>
+
+<section id="layers" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">7. 階層化</p>
+    <h2 class="reveal">FSL は層ごとの意図を詳細化チェックでつなぐ</h2>
+    <p class="lead narrow reveal">業務ルール、要件、設計、実装は同じ粒度では書けません。FSL は、各層を別の言葉で書き、下位が上位の意図から逸脱していないかを詳細化チェックで確認します。</p>
+
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer"><h3>業務層 <code>business</code></h3><p>担当者、業務対象、業務プロセス、統制、ゴール、KPI。業務ステージと統制を読む人向けに書く。</p></div>
+      <div class="arrow-down">↓ 実装関係・詳細化チェック</div>
+      <div class="layer"><h3>要件層 <code>requirements</code></h3><p>要件ID、受け入れ手順、禁止手順、非機能要件、SLA。企画担当が確認できる粒度で書く。</p></div>
+      <div class="arrow-down">↓ 詳細化の対応表</div>
+      <div class="layer"><h3>設計層 <code>spec</code></h3><p>状態、操作、安全ルール、前後関係、到達性、応答性。実装に近い状態機械として書く。</p></div>
+      <div class="arrow-down">↓ テスト生成・ログ再生</div>
+      <div class="layer"><h3>実装</h3><p>アダプタやログ投影で、実装の挙動が仕様に合うかを見る。</p></div>
+    </div>
+
+    <div class="panel reveal">
+      <h3>詳細化チェックが見ること</h3>
+      <p>詳細側の1ステップを抽象側の1ステップまたは「抽象側では何も起きない内部ステップ」に写像し、抽象側の実行条件と状態が壊れないかを調べます。</p>
+      <pre><code>refinement CartImplRefinesCart {
+  impl CartImpl
+  abs  ShoppingCart
+
+  maps auto
+  map stock[i: ItemId] = impl_stock[i] - reserved[i]
+  action reserve(i: ItemId) -&gt; stutter
+  action impl_checkout(u: UserId) -&gt; checkout(u)
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section id="implementation">
+  <div class="wrap">
+    <p class="kicker reveal">8. 実装接続</p>
+    <h2 class="reveal">仕様は、実装テストの判定基準になる</h2>
+    <p class="lead narrow reveal">FSL の検証は「仕様自体の整合性」を見るものです。実装が仕様通りかは、監視器、シナリオ生成、テスト生成、ログ再生でつなぎます。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>監視器 <code>Monitor</code></h3>
+        <p>FSL の具体的な実行器。外部の証明器 Z3 なしで <code>action</code> を1手進め、状態差分を返します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>シナリオ生成 <code>scenarios</code></h3>
+        <p>到達性、操作の有効性、応答性から統合テスト用のシナリオ JSON を生成します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>テスト生成 <code>testgen</code></h3>
+        <p>アダプタを埋めるだけの pytest 雛形を生成し、実装と仕様をランダムな操作列で照合します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>ログ再生 <code>replay</code></h3>
+        <p>実システムのイベントログを仕様に流し、有限ログとして適合するか確認します。</p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <h3>アダプタの契約</h3>
+      <pre><code>class Adapter:
+  def reset(self):
+    ...
+
+  def step(self, action, params):
+    ...
+
+  def observe(self):
+    return {
+      "status": "Submitted",
+      "cart": None,
+      "queue": [0, 1]
+    }</code></pre>
+      <p style="margin-top:16px"><code>observe</code> は FSL の論理状態と同じ形に投影します。列挙型は名前、値がない/ある型は <code>None</code> または値、列はリスト、対応表は辞書です。</p>
+    </div>
+  </div>
+</section>
+
+<section id="results" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">9. 診断結果</p>
+    <h2 class="reveal">JSON は、AIが修復するための受け渡し形式</h2>
+    <p class="lead narrow reveal">FSL の出力は、人が眺めるログではなく、AIが読んで次の修復行動を決めるための構造化データです。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>結果</th><th>意味</th><th>次の行動</th></tr>
+      <tr><td><code>violated</code></td><td>到達可能な反例がある。</td><td>返ってきた手順の最後の操作と状態差分を読み、実行条件・代入・性質を直す。</td></tr>
+      <tr><td><code>reachable_failed</code></td><td>到達してほしい状態が届かない。</td><td>深さ不足なら探索深さを上げる。制約が強すぎるなら制約を見直す。</td></tr>
+      <tr><td><code>unknown_cti</code></td><td>帰納法に必要な補助不変条件が不足、または本物のバグ。</td><td>CTI の開始状態が現実にあり得るか判断する。</td></tr>
+      <tr><td><code>error</code></td><td>構文・型・意味・受け入れ手順・禁止手順のエラー。</td><td>位置、期待された構文、修正ヒントを見て直す。</td></tr>
+      <tr><td><code>proved</code></td><td>不変条件が無限深で証明された。</td><td>到達性、空虚な検証、変異検査、実装接続で意図とのズレを確認する。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <p class="kicker reveal">10. 限界</p>
+    <h2 class="reveal">FSL が保証するもの、しないもの</h2>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>保証する</h3>
+        <p>書かれた仕様の内部整合性。到達可能な反例、境界違反、未定義操作、到達不能、応答性の未完了、詳細化の逸脱など。</p>
+      </div>
+      <div class="card">
+        <h3>保証しない</h3>
+        <p>仕様が元の業務意図を正しく表していること。確率、百分位、実時間ミリ秒、UIの使いやすさ、外部サービスの実挙動。</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>実務の要点:</b> 仕様を書く前に、状態・操作・境界条件・例外・優先順位を人が確認します。検証器は「書いたこと」を強く確かめますが、「書くべきだったのに抜けたこと」は、受け入れ手順、禁止手順、空虚な検証の検出、変異検査、人間のレビューで補います。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap narrow center">
+    <div class="cta reveal">
+      <h2>次は、文法を体系的に読む</h2>
+      <p>仕組みを理解したら、実際の FSL ファイルを読めるように、ファイル全体の構造、型、式、文、業務層・要件層、詳細化チェックの構文をまとめて学びます。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="syntax.ja.html">文法・構文教材へ</a>
+        <a class="btn ghost" href="guide.ja.html">使い方にもどる</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

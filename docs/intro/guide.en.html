@@ -7,18 +7,12 @@
 <meta name="description" content="How FSL works (BMC and k-induction, counterexamples to induction) and how to use it: three dialects, refinement, the fslc commands, and the write→verify→repair loop." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
-<body>
+<body class="docs-page" data-page="guide">
 <div class="progress"></div>
 
-<header class="topbar">
-  <span class="brand"><b>FSL</b> how it works</span>
-  <span class="spacer"></span>
-  <a href="concept.en.html">← Back to the concept</a>
-  <span class="lang">
-    <a href="guide.ja.html">日本語</a>
-    <a href="guide.en.html" class="active">EN</a>
-  </span>
-</header>
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
 
 <main>
 
@@ -228,6 +222,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
       <div style="margin-top:20px">
         <a class="btn" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub / README</a>
         <a class="btn ghost" href="concept.en.html">Back to the concept</a>
+        <a class="btn ghost" href="syntax.en.html">Learn syntax</a>
       </div>
     </div>
   </div>
@@ -235,10 +230,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
 
 </main>
 
-<footer>
-  <p>FSL — AI-Native Formal Specification Language. Demos are based on real <code>fslc</code> output (verified / unknown_cti / proved).</p>
-  <p><a href="guide.ja.html">日本語</a> · <a href="concept.en.html">Concept intro</a> · <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
-</footer>
+<footer data-nav></footer>
 
 <script type="application/json" id="diagram-config">
 {

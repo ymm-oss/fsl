@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL Syntax Guide — spec, types, actions, properties, layers, refinement</title>
+<meta name="description" content="An English syntax guide for FSL: spec, top-level forms, types, state/init, actions, expressions, properties, business and requirements layers, refinement, and composition." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="syntax">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Syntax Guide</p>
+    <h1 class="reveal">Read FSL in the<br><span class="hl">order it is written</span>.</h1>
+    <p class="lead reveal">From a minimal <code>spec</code> to types, actions, expressions, properties, business and requirements layers, refinement, and composition.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Table of Contents</p>
+    <h2 class="reveal">Syntax map</h2>
+    <div class="toc reveal">
+      <a href="#minimal">1. Minimal Spec<span>The basic file shape</span></a>
+      <a href="#top">2. Top-Level Forms<span><code>spec</code>, <code>business</code>, <code>requirements</code>, <code>refinement</code>, <code>compose</code></span></a>
+      <a href="#types">3. Types<span>Domains, enums, maps, sets, sequences</span></a>
+      <a href="#state">4. State and Init<span><code>state</code> and <code>init</code></span></a>
+      <a href="#actions">5. Actions<span><code>action</code>, guards, assignments</span></a>
+      <a href="#expr">6. Expressions<span>Operators, quantifiers, collections, Option</span></a>
+      <a href="#props">7. Properties<span>Safety, reachability, liveness</span></a>
+      <a href="#layers">8. Business and Requirements<span>Layer-specific syntax</span></a>
+      <a href="#refine-compose">9. Refinement and Compose<span>Connecting layers and components</span></a>
+      <a href="#idioms">10. Idioms<span>Preferred forms and pitfalls</span></a>
+      <a href="#practice">11. Practice<span>Read the syntax yourself</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Reading note:</b> FSL keywords are English by design. This page explains each keyword's role and links to the layer-specific pages for authoring guidance.</p>
+    </div>
+  </div>
+</section>
+
+<section id="minimal" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. Minimal Spec</p>
+    <h2 class="reveal">Start with one ordinary <code>spec</code></h2>
+    <p class="lead narrow reveal">A design-layer spec declares constants, types, state, initial state, actions, and properties.</p>
+
+    <div class="panel reveal">
+      <pre><code>spec Counter {
+  const LIMIT = 3
+  type Count = 0..LIMIT
+
+  state { n: Count }
+  init { n = 0 }
+
+  action inc() {
+    requires n &lt; LIMIT
+    n = n + 1
+    ensures n == old(n) + 1
+  }
+
+  invariant NeverTooHigh { n &lt;= LIMIT }
+  reachable CanHitLimit { n == LIMIT }
+  terminal { n == LIMIT }
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Part</th><th>Role</th><th>Note</th></tr>
+      <tr><td><code>const</code></td><td>Integer constant.</td><td>Useful for limits and capacities.</td></tr>
+      <tr><td><code>type</code></td><td>Bounded integer domain.</td><td>Out-of-range values are checked automatically.</td></tr>
+      <tr><td><code>state</code></td><td>Logical state being verified.</td><td>Only supported state types are allowed.</td></tr>
+      <tr><td><code>init</code></td><td>Initial state.</td><td>Assign each state variable exactly once.</td></tr>
+      <tr><td><code>action</code></td><td>One atomic transition.</td><td>Right-hand sides read the old state.</td></tr>
+      <tr><td>Properties</td><td>Rules to prove or witnesses to find.</td><td>Each named property appears in diagnostics.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="top">
+  <div class="wrap">
+    <p class="kicker reveal">2. Top-Level Forms</p>
+    <h2 class="reveal">FSL files can contain several top-level forms</h2>
+    <p class="lead narrow reveal">The core <code>spec</code> is not the only entry point. FSL also has role-specific layers and connection files.</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><code>spec</code></h3>
+        <pre><code>spec Name {
+  type ...
+  state { ... }
+  init { ... }
+  action ...
+  invariant ...
+}</code></pre>
+        <p>Design-layer state machine and properties.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>business</code> + <code>verify</code></h3>
+        <pre><code>business Name {
+  actor Customer, Manager
+  entity Return
+  process Return { ... }
+  policy POL-1 "..." every Return in Requested must eventually be Approved
+}
+verify { instances Return = 3 }</code></pre>
+        <p>Business processes, controls, goals, and KPIs.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>requirements</code> + <code>verify</code></h3>
+        <pre><code>requirements Name {
+  number Amount
+  process Claim with amount: Amount { ... }
+  acceptance AC-1 "..." { ... }
+  forbidden FB-1 "..." { ... }
+}
+verify { instances Claim = 3 values Amount = 0..3 }</code></pre>
+        <p>Requirement IDs, inputs, acceptance flows, forbidden flows, and NFRs.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>refinement</code></h3>
+        <pre><code>refinement ImplRefinesAbs {
+  impl Impl
+  abs Abs
+  maps auto
+  map status = impl_status
+  action do_it(x: Id) -&gt; do_it(x)
+}</code></pre>
+        <p>Mapping file used by <code>fslc refine</code>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>compose</code></h3>
+        <pre><code>compose System {
+  use Cart as cart from "cart.fsl"
+  use Payment as pay from "payment.fsl"
+  action checkout(u: cart.UserId, p: pay.PayId) =
+    cart.checkout(u) || pay.capture(p) { }
+}</code></pre>
+        <p>Synchronize actions from multiple specs.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>governance</code></h3>
+        <pre><code>governance Controls {
+  authority Finance owns CTRL-1
+  control CTRL-1 "..." owner Finance applies_to Claim
+  delegates Biz from "biz.fsl" {
+    require CTRL-1
+    CTRL-1 is satisfied_by policy POL-1
+  }
+  preservation Reform {
+    before AsIs from "asis.fsl"
+    after  ToBe from "tobe.fsl"
+    preserve CTRL-1
+    checked_by refinement "tobe_refines_asis.fsl"
+  }
+}</code></pre>
+        <p>Cross-business control catalog, checked by <code>fslc check</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="types" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. Types</p>
+    <h2 class="reveal">Types are restricted so verification stays finite</h2>
+    <p class="lead narrow reveal">FSL accepts enough structure for real workflows, but avoids arbitrary nested data that makes model checking explode.</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Type</th><th>Syntax</th><th>Use</th></tr>
+      <tr><td>Int / Bool</td><td><code>n: Int</code>, <code>ok: Bool</code></td><td>Integers and booleans. Be careful with unbounded <code>Int</code>.</td></tr>
+      <tr><td>Bounded domain</td><td><code>type Qty = 0..5</code></td><td>Automatic boundary checking.</td></tr>
+      <tr><td>Enum</td><td><code>enum St { Open, Closed }</code></td><td>Status names and finite categories.</td></tr>
+      <tr><td>Struct</td><td><code>struct Order { st: St, buyer: Option&lt;UserId&gt; }</code></td><td>Group scalar fields.</td></tr>
+      <tr><td>Option</td><td><code>Option&lt;ItemId&gt;</code></td><td>None or one scalar value. Prefer over sentinel values.</td></tr>
+      <tr><td>Map</td><td><code>Map&lt;ItemId, Qty&gt;</code></td><td>Bounded key to scalar, Option, or struct value.</td></tr>
+      <tr><td>Set</td><td><code>Set&lt;UserId&gt;</code></td><td>A set of bounded scalar values.</td></tr>
+      <tr><td>Seq</td><td><code>Seq&lt;JobId, CAP&gt;</code></td><td>Capacity-bounded queue or log.</td></tr>
+      <tr><td>Dialect kinds</td><td><code>entity Claim</code>, <code>number Amount</code></td><td>Business/requirements kinds bounded by <code>verify</code>.</td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>Allowed state-variable shapes</h3>
+      <p>Use scalar, <code>Option&lt;scalar&gt;</code>, struct, map, set, or sequence. Avoid nested maps and containers inside containers.</p>
+      <pre><code>state {
+  status: St,
+  cart: Option&lt;ItemId&gt;,
+  orders: Map&lt;OrderId, Order&gt;,
+  locked: Set&lt;UserId&gt;,
+  queue: Seq&lt;JobId, CAP&gt;
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section id="state">
+  <div class="wrap">
+    <p class="kicker reveal">4. State and Init</p>
+    <h2 class="reveal"><code>state</code> declares logical state, <code>init</code> sets the start</h2>
+    <p class="lead narrow reveal"><code>init</code> must deterministically assign each state variable exactly once. Maps and sets can be initialized with literals or <code>forall</code>.</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Bulk map initialization</h3>
+        <pre><code>type ItemId = 0..2
+type Qty = 0..5
+state { stock: Map&lt;ItemId, Qty&gt; }
+init {
+  forall i: ItemId {
+    stock[i] = 1
+  }
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Option, Set, Seq</h3>
+        <pre><code>state {
+  selected: Option&lt;ItemId&gt;,
+  shipped: Set&lt;OrderId&gt;,
+  queue: Seq&lt;JobId, CAP&gt;
+}
+init {
+  selected = none
+  shipped = Set {}
+  queue = Seq {}
+}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="actions" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. Actions</p>
+    <h2 class="reveal"><code>action</code> combines guards, local bindings, assignments, and postconditions</h2>
+    <p class="lead narrow reveal">One step is one enabled action instance. Parameterized actions are checked across their finite parameter values.</p>
+
+    <div class="panel reveal">
+      <pre><code>fair action checkout(u: UserId) "REQ-4: only stocked item can be checked out" {
+  requires cart[u] is some(i)
+  requires stock[i] &gt; 0
+  let old_stock = stock[i]
+
+  stock[i] = stock[i] - 1
+  cart[u] = none
+
+  ensures stock[i] == old(stock[i]) - 1
+  ensures old_stock == old(stock[i])
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Syntax</th><th>Meaning</th><th>Note</th></tr>
+      <tr><td><code>fair action</code></td><td>Weak-fair progress action.</td><td>Use only for actions that drive liveness.</td></tr>
+      <tr><td><code>requires expr</code></td><td>Enabled condition.</td><td>Multiple clauses are conjoined.</td></tr>
+      <tr><td><code>let x = expr</code></td><td>Local binding inside an action.</td><td>Not a state update.</td></tr>
+      <tr><td><code>ensures expr</code></td><td>Postcondition.</td><td>Use <code>old(expr)</code> to read pre-state.</td></tr>
+      <tr><td><code>"ID: text"</code></td><td>Traceability tag.</td><td>Flows into diagnostic JSON.</td></tr>
+    </table>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Simultaneous assignment:</b> every right-hand side reads the old state. Assigning to the same variable or field twice on the same path is a semantics error.</p>
+    </div>
+  </div>
+</section>
+
+<section id="expr">
+  <div class="wrap">
+    <p class="kicker reveal">6. Expressions</p>
+    <h2 class="reveal">Expressions combine arithmetic, logic, quantifiers, collections, and Option</h2>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Category</th><th>Syntax</th><th>Example</th></tr>
+      <tr><td>Arithmetic</td><td><code>+ - * / %</code>, <code>min</code>, <code>max</code>, <code>abs</code></td><td><code>abs(balance) &lt;= LIMIT</code></td></tr>
+      <tr><td>Logic</td><td><code>and or not =&gt;</code></td><td><code>paid =&gt; approved</code></td></tr>
+      <tr><td>Quantifiers</td><td><code>forall</code>, <code>exists</code></td><td><code>forall i: ItemId { stock[i] &gt;= 0 }</code></td></tr>
+      <tr><td>Aggregation</td><td><code>count</code>, <code>sum</code></td><td><code>sum(i: Idx of log.at(i) where i &lt; log.size())</code></td></tr>
+      <tr><td>Option</td><td><code>none</code>, <code>some(e)</code>, <code>x is some(v)</code></td><td><code>cart[u] is some(i) and stock[i] &gt; 0</code></td></tr>
+      <tr><td>Set</td><td><code>Set {}</code>, <code>.add</code>, <code>.remove</code>, <code>.contains</code>, <code>.size()</code></td><td><code>active.contains(u)</code></td></tr>
+      <tr><td>Seq</td><td><code>Seq {}</code>, <code>.push</code>, <code>.pop</code>, <code>.head</code>, <code>.at</code>, <code>.size()</code></td><td><code>i &lt; q.size() =&gt; q.at(i) == j</code></td></tr>
+      <tr><td>Special</td><td><code>old(expr)</code>, <code>stage(x)</code></td><td><code>total == old(total) + 1</code></td></tr>
+    </table>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Option extraction</h3>
+        <pre><code>requires cart[u] is some(i)
+requires stock[i] &gt; 0</code></pre>
+        <p>Do not write <code>x == some(e)</code>. Bind the contained value with <code>is some(v)</code>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Index guard for Seq</h3>
+        <pre><code>forall i in 0..CAP-1 {
+  i &lt; q.size() =&gt; jobs[q.at(i)] == Queued
+}</code></pre>
+        <p>Always guard <code>at(i)</code> with a range condition.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Mapping-only conditional</h3>
+        <pre><code>map holder[s: SeatId] =
+  if slots[s].st == Sold then slots[s].buyer else none</code></pre>
+        <p><code>if c then a else b</code> is allowed in refinement mapping expressions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="props" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">7. Properties</p>
+    <h2 class="reveal">Choose the property form that matches the requirement</h2>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Syntax</th><th>Meaning</th><th>Example</th></tr>
+      <tr><td><code>invariant Name { P }</code></td><td>P in every reachable state.</td><td><code>status == Shipped =&gt; approved</code></td></tr>
+      <tr><td><code>trans Name { P }</code></td><td>P over each transition. Use <code>old()</code>.</td><td><code>stock[0] &lt;= old(stock[0])</code></td></tr>
+      <tr><td><code>reachable Name { P }</code></td><td>P can be reached.</td><td><code>stock[0] == 0</code></td></tr>
+      <tr><td><code>leadsTo Name { P ~&gt; Q }</code></td><td>When P happens, Q eventually happens.</td><td><code>pending ~&gt; done</code></td></tr>
+      <tr><td><code>leadsTo ... within K</code></td><td>Q within K steps.</td><td><code>pending ~&gt; within 3 done</code></td></tr>
+      <tr><td><code>leadsTo ... decreases M</code></td><td>Ranking for induction proof of progress.</td><td><code>decreases remaining</code></td></tr>
+      <tr><td><code>unless Name { P unless Q }</code></td><td>Safety: P holds until Q.</td><td>Safety of a held state.</td></tr>
+      <tr><td><code>until Name { P until Q }</code></td><td>Combines <code>unless</code> safety with <code>leadsTo</code> liveness.</td><td>Hold the state, yet eventually complete.</td></tr>
+      <tr><td><code>terminal { P }</code></td><td>Intended stopping state.</td><td><code>status == Done or status == Failed</code></td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>The full form of <code>leadsTo</code> (responsiveness)</h3>
+      <pre><code>leadsTo EventuallyPaid "REQ-9: approved claims are eventually paid" {
+  forall c: Claim {
+    claims[c].st == Approved ~&gt; claims[c].st == Paid
+  }
+  decreases unpaid_count
+}</code></pre>
+      <p style="margin-top:16px">The outer <code>forall</code> checks responsiveness per target. Add <code>fair</code> to the actions that drive progress, <code>within K</code> to bound the response in steps, and <code>decreases M</code> to supply a ranking for the induction proof. The <code>~&gt;</code> arrow is only valid inside <code>leadsTo</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="layers">
+  <div class="wrap">
+    <p class="kicker reveal">8. Business, Requirements, and Design</p>
+    <h2 class="reveal">Use layer-specific pages for authoring</h2>
+    <p class="lead narrow reveal">This page is the shared-kernel reference. Each layer's own forms and idioms live in its authoring guide.</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Business layer</h3>
+        <p>Use <code>business</code> for actors, entities, business processes, policies, goals, and KPIs.</p>
+        <p><a class="btn" href="business-layer.en.html">Business Layer Guide</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Requirements layer</h3>
+        <p>Use <code>requirements</code> for inputs, guards, requirement IDs, acceptance flows, forbidden flows, and NFRs.</p>
+        <p><a class="btn" href="requirements-layer.en.html">Requirements Layer Guide</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Design layer</h3>
+        <p>Use <code>spec</code> for internal state and actions, then <code>refinement</code> to map up to requirements.</p>
+        <p><a class="btn" href="design-layer.en.html">Design Layer Guide</a></p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <h3>NFR / SLA syntax</h3>
+      <pre><code>requirements SupportSLA {
+  entity Ticket
+  enum TicketStage { New, Accepted, Responded }
+  state { tickets: Map&lt;Ticket, TicketStage&gt; }
+  init {
+    forall t: Ticket { tickets[t] = New }
+  }
+
+  time {
+    urgent respond_due
+    age wait_age[t: Ticket] while tickets[t] == Accepted
+  }
+
+  requirement NFR-1 "respond within 3 ticks of acceptance" {
+    action accept(t: Ticket) {
+      requires tickets[t] == New
+      tickets[t] = Accepted
+    }
+
+    fair action respond_due(t: Ticket) {
+      requires tickets[t] == Accepted
+      requires wait_age[t] &gt;= 3
+      tickets[t] = Responded
+    }
+    deadline wait_age &lt;= 3
+  }
+}
+verify {
+  instances Ticket = 2
+}</code></pre>
+      <p style="margin-top:16px">A single <code>time</code> block sits directly under <code>requirements</code>; each <code>deadline</code> lives inside an individual <code>requirement</code>. The usual shape marks the action that only becomes enabled at the deadline as <code>urgent</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="refine-compose" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">9. Refinement and Compose</p>
+    <h2 class="reveal">Connect layers and components explicitly</h2>
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>Refinement mapping</h3>
+        <pre><code>refinement DesignRefinesReq {
+  impl Design
+  abs Req
+  maps auto
+
+  map status = if impl_done then Done else Pending
+  action enqueue(c: Claim) -&gt; stutter
+  action pay(c: Claim) -&gt; pay(c)
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>Composition</h3>
+        <pre><code>compose OrderSystem {
+  use ShoppingCart as cart from "cart_v1.fsl"
+  use Payment as pay from "payment.fsl"
+
+  fair action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) { }
+
+  internal cart.checkout
+  internal pay.capture
+}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="idioms">
+  <div class="wrap">
+    <p class="kicker reveal">10. Idioms</p>
+    <h2 class="reveal">Preferred FSL forms</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Use <code>Option</code>, not sentinels</h3>
+        <pre><code>cart: Option&lt;ItemId&gt;
+cart = none
+cart = some(i)</code></pre>
+      </div>
+      <div class="syntax-card">
+        <h3>Use types, not boundary invariants</h3>
+        <pre><code>type Qty = 0..5
+state { stock: Map&lt;ItemId, Qty&gt; }</code></pre>
+        <p>Do not hand-write <code>stock[i] &gt;= 0</code>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Guard partial operations</h3>
+        <pre><code>action take() {
+  requires q.size() &gt; 0
+  x = q.head()
+  q = q.pop()
+}</code></pre>
+      </div>
+      <div class="syntax-card">
+        <h3>Flatten two-dimensional maps</h3>
+        <pre><code>const SLOTS = 4
+type Cell = 0..ROOMS*SLOTS-1
+// room = c / SLOTS, slot = c % SLOTS</code></pre>
+      </div>
+      <div class="syntax-card">
+        <h3>Record history with ghost state</h3>
+        <pre><code>state { ever_locked: Map&lt;UserId, Bool&gt; }
+// in lock action: ever_locked[u] = true</code></pre>
+      </div>
+      <div class="syntax-card">
+        <h3>Use <code>terminal</code> for intended stops</h3>
+        <pre><code>terminal { status == Done or status == Failed }</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="practice" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">11. Practice</p>
+    <h2 class="reveal">Practice reading real specs</h2>
+    <p class="lead narrow reveal">Map each plain-language requirement to the FSL syntax that expresses it. The reading is given under each card.</p>
+
+    <ol class="lesson reveal">
+      <li>
+        <h3>"Once submitted, it is eventually approved or rejected"</h3>
+        <p>Write a <code>leadsTo</code>, or the business-layer <code>every ... must eventually be ...</code>. Check whether the action that drives progress needs <code>fair</code>.</p>
+      </li>
+      <li>
+        <h3>"It must not be paid before approval"</h3>
+        <p>Use an <code>invariant</code> such as <code>paid =&gt; approved</code>, or a <code>forbidden</code> flow in the <code>requirements</code> layer that rejects an unapproved payment.</p>
+      </li>
+      <li>
+        <h3>"Stock never goes negative"</h3>
+        <p>Use <code>type Qty = 0..N</code>. Instead of a hand-written safety rule, guard checkout with <code>requires stock[i] &gt; 0</code>.</p>
+      </li>
+      <li>
+        <h3>"The detailed design has a reserve action, but it is hidden from the requirements layer"</h3>
+        <p>In the refinement mapping, write <code>action reserve(...) -&gt; stutter</code>. The check confirms the abstract state does not change.</p>
+      </li>
+      <li>
+        <h3>"Never pop from an empty queue"</h3>
+        <p>Guard <code>head</code>/<code>pop</code> with <code>requires q.size() &gt; 0</code>, or <code>if q.size() &gt; 0 { ... }</code>.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap narrow center">
+    <div class="cta reveal">
+      <h2>Read an actual spec</h2>
+      <p>After reading the syntax once, work through <code>specs/cart_v1.fsl</code>, then <code>specs/mutex_queue.fsl</code>, then <code>examples/e2e/</code> to connect the basic shape to the three-layer structure.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="business-layer.en.html">Business Layer Guide</a>
+        <a class="btn ghost" href="requirements-layer.en.html">Requirements Layer Guide</a>
+        <a class="btn ghost" href="design-layer.en.html">Design Layer Guide</a>
+        <a class="btn" href="mechanism.en.html">Back to How It Works</a>
+        <a class="btn ghost" href="guide.en.html">Back to the Guide</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

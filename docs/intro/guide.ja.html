@@ -4,21 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FSL の仕組みと使い方 — 総当たり・証明・方言・運用</title>
-<meta name="description" content="FSLの仕組み（BMCとk帰納法、反例候補CTI）と、3つの方言・refinement・fslcコマンド・write→verify→repairの実運用。" />
+<meta name="description" content="FSLの仕組み（総当たり検査とk帰納法、反例候補）と、3つの書き方・詳細化チェック・fslcコマンド・書く→検証する→直す実運用。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
-<body>
+<body class="docs-page" data-page="guide">
 <div class="progress"></div>
 
-<header class="topbar">
-  <span class="brand"><b>FSL</b> 仕組みと使い方</span>
-  <span class="spacer"></span>
-  <a href="concept.ja.html">← 概念にもどる</a>
-  <span class="lang">
-    <a href="guide.ja.html" class="active">日本語</a>
-    <a href="guide.en.html">EN</a>
-  </span>
-</header>
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
 
 <main>
 
@@ -44,19 +38,19 @@
 
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
-        <h3>① BMC（有界モデル検査）</h3>
+        <h3>① 総当たり検査（BMC）</h3>
         <p class="dim"><code>fslc verify --depth N</code></p>
-        <p>初期状態から <b>N 手以内</b>の全経路を総当たり。反例が出れば<b>確実にバグ</b>。出なければ「深さ N までは反例なし（verified）」。速くて、反例が具体的。</p>
+        <p>初期状態から <b>N 手以内</b>の全経路を総当たり。反例が出れば<b>確実にバグ</b>。出なければ「深さ N までは反例なし（<code>verified</code>）」。速くて、反例が具体的。</p>
       </div>
       <div class="card">
         <h3>② k帰納法（無限の深さ）</h3>
         <p class="dim"><code>fslc verify --engine induction</code></p>
-        <p>「ルールを満たす<b>どんな状態</b>から1手進めても、ルールは保たれる」ことを示す。成功すれば<b>深さ無限で proved</b>。BMC より厳密。</p>
+        <p>「ルールを満たす<b>どんな状態</b>から1手進めても、ルールは保たれる」ことを示す。成功すれば<b>深さ無限で <code>proved</code></b>。総当たり検査より厳密。</p>
       </div>
     </div>
 
     <div class="panel reveal">
-      <p class="dim" style="margin:0 0 6px;font-size:14px">まず BMC：</p>
+      <p class="dim" style="margin:0 0 6px;font-size:14px">まず総当たり検査（BMC）：</p>
       <pre><code>$ fslc verify order_fixed.fsl --depth 8
 <span class="s">{ "result": "verified", "spec": "OrderWorkflow" }</span>   <span class="c">// 深さ8まで反例なし</span></code></pre>
       <p class="reveal" style="margin:18px 0 0">深さ8まで反例なし。<b>でも「どんなに深くても安全」と言い切れる？</b> そこで帰納法の出番です。</p>
@@ -105,16 +99,16 @@
 <section>
   <div class="wrap narrow">
     <p class="kicker reveal">縦のつながり</p>
-    <h2 class="reveal">3つの方言を refinement でつなぐ</h2>
-    <p class="lead reveal">同じドメインを粒度ちがいで書き、<b>refinement（詳細化）</b>で接続します。上の層の意図が下の層で保たれているかを <code>fslc refine</code> が機械的に照合し、<b>要件IDが全層の診断に伝播</b>します。</p>
+    <h2 class="reveal">3つの書き方を詳細化チェックでつなぐ</h2>
+    <p class="lead reveal">同じ対象領域を粒度ちがいで書き、<b>詳細化チェック</b>で接続します。FSL ではこの確認を <code>refinement</code> と呼びます。上の層の意図が下の層で保たれているかを <code>fslc refine</code> が機械的に照合し、<b>要件IDが全層の診断に伝わります</b>。</p>
     <div class="layers reveal" style="margin-top:24px">
-      <div class="layer"><h3>consulting（業務）</h3><p>規則・統制・KPI・ゴール。業務としての矛盾、禁止状態への到達、ゴール到達可能性を確認。</p></div>
-      <div class="arrow-down">↓ refinement</div>
-      <div class="layer"><h3>requirements（要件）</h3><p>要件ID・受け入れ条件・禁止フロー・NFR（権限/監査/SLA等）。反例から元の要望へ遡れる。</p></div>
-      <div class="arrow-down">↓ refinement</div>
-      <div class="layer"><h3>design（設計）</h3><p>状態機械・データ・非同期・合成。invariant / reachable / leadsTo / 写像で要件充足を照合。</p></div>
-      <div class="arrow-down">↓ scenarios / testgen / replay</div>
-      <div class="layer"><h3>実装・QA</h3><p>シナリオ・pytest雛形を生成。実装ログの適合も確認。</p></div>
+      <div class="layer"><h3>業務層 <code>business</code></h3><p>規則・統制・KPI・ゴール。業務としての矛盾、禁止状態への到達、ゴール到達可能性を確認。</p></div>
+      <div class="arrow-down">↓ 詳細化チェック</div>
+      <div class="layer"><h3>要件層 <code>requirements</code></h3><p>要件ID・受け入れ条件・禁止フロー・非機能要件（権限/監査/SLA等）。反例から元の要望へ遡れる。</p></div>
+      <div class="arrow-down">↓ 詳細化チェック</div>
+      <div class="layer"><h3>設計層 <code>design</code></h3><p>状態機械・データ・非同期・合成。安全性・到達性・応答性・写像で要件充足を照合。</p></div>
+      <div class="arrow-down">↓ シナリオ生成・テスト生成・ログ再生</div>
+      <div class="layer"><h3>実装・品質確認</h3><p>シナリオ・pytest雛形を生成。実装ログの適合も確認。</p></div>
     </div>
     <p class="dim reveal" style="margin-top:18px;font-size:14px"><code>fslc refine impl.fsl abs.fsl mapping.fsl</code> で1段の詳細化を、<code>fslc chain fsl-project.toml</code> で全段を一括検証できます。</p>
   </div>
@@ -130,38 +124,38 @@
       <div class="card">
         <h3>書く・検証する</h3>
         <p><code>check</code> — 構文・型のみ（高速ループ）<br>
-        <code>verify --depth N</code> — BMC・最短反例<br>
+        <code>verify --depth N</code> — 総当たり検査・最短反例<br>
         <code>verify --engine induction</code> — 無限の深さで証明</p>
       </div>
       <div class="card">
         <h3>仕様の質を測る</h3>
         <p><code>--vacuity error</code> — 空虚な性質を検出<br>
-        <code>--strict-tags</code> — 未タグ/未参照のlint<br>
+        <code>--strict-tags</code> — タグ漏れ・未参照の検査<br>
         <code>mutate</code> — 制約の強さを測る<br>
         <code>explain</code> — 検証範囲・反実仮想</p>
       </div>
       <div class="card">
         <h3>実装につなぐ</h3>
         <p><code>scenarios</code> — 統合テスト雛形JSON<br>
-        <code>testgen -o test.py</code> — pytest適合雛形<br>
+        <code>testgen -o test.py</code> — pytest用のテスト雛形<br>
         <code>replay --trace log.json</code> — ログ適合チェック<br>
-        <code>typestate --ts</code> — 状態機械→型</p>
+        <code>typestate --ts</code> — 状態の遷移を型に変換</p>
       </div>
       <div class="card">
         <h3>階層をつなぐ</h3>
         <p><code>refine impl abs map</code> — 詳細化の照合<br>
         <code>chain project.toml</code> — 業務→実装を一括<br>
-        合成（compose）した仕様の <code>verify</code> も可能</p>
+        合成した仕様（<code>compose</code>）の <code>verify</code> も可能</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- 5. write -> verify -> repair -->
+<!-- 5. 書く -> 検証する -> 直す -->
 <section>
   <div class="wrap">
     <p class="kicker reveal">実際に回す</p>
-    <h2 class="reveal">write → verify → repair を回す</h2>
+    <h2 class="reveal">書く → 検証する → 直す、を回す</h2>
     <p class="lead narrow reveal">FSL は「人が文法を覚えて書く」前提ではありません。<b>AIが下書きし、<code>fslc</code> が反例を返し、AIが直す</b>。あなたは意図と最終判断を担います。</p>
     <div class="loop reveal" style="margin-top:24px">
       <div class="step"><div class="n">01</div><h3>意図を渡す</h3><p>「未承認は出荷しない」など守りたいことを言葉で。</p></div>
@@ -171,7 +165,7 @@
     </div>
 
     <div class="panel reveal">
-      <p class="dim" style="margin:0 0 6px;font-size:14px">AIが読むのは、こういう JSON（反例トレース）：</p>
+      <p class="dim" style="margin:0 0 6px;font-size:14px">AIが読むのは、こういう JSON（反例の手順データ）：</p>
       <pre><code>{
   <span class="k">"result"</span>: <span class="r">"violated"</span>,
   <span class="k">"invariant"</span>: <span class="s">"ShipOnlyAfterApproval"</span>,
@@ -188,7 +182,7 @@ $ bash install.sh
 
 <span class="c"># 2. AIに頼む（スキル経由）</span>
 「$fsl-requirements で『承認前は出荷不可・返金は二重に走らない』要件を書いて、
- verify して、反例が出たら直して、無くなるまで回して」
+ 検証して、反例が出たら直して、無くなるまで回して」
 
 <span class="c"># 3. 必要ならテスト雛形と実装連携も生成させる</span>
 $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
@@ -214,7 +208,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
       </div>
     </div>
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0">判断基準は「状態の数」ではなく、<b>「操作順やフラグの組み合わせで、意図しない状態に入れてしまうか」</b>。3状態・2フラグでも、戻る/取消/retry/権限分岐があるなら FSL 化する価値があります。まずは2週間で終わる小さな PoC から。</p>
+      <p style="margin:0">判断基準は「状態の数」ではなく、<b>「操作順やフラグの組み合わせで、意図しない状態に入れてしまうか」</b>。3状態・2フラグでも、戻る/取消/再試行/権限分岐があるなら FSL 化する価値があります。まずは2週間で終わる小さな試作検証から。</p>
     </div>
   </div>
 </section>
@@ -228,6 +222,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
       <div style="margin-top:20px">
         <a class="btn" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub / README</a>
         <a class="btn ghost" href="concept.ja.html">概念をもう一度</a>
+        <a class="btn ghost" href="syntax.ja.html">文法・構文を学ぶ</a>
       </div>
     </div>
   </div>
@@ -235,10 +230,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
 
 </main>
 
-<footer>
-  <p>FSL — AI-Native Formal Specification Language. デモは実際の <code>fslc</code> 出力（verified / unknown_cti / proved）に基づきます。</p>
-  <p><a href="guide.en.html">English</a> ・ <a href="concept.ja.html">概念の入門</a> ・ <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
-</footer>
+<footer data-nav></footer>
 
 <script type="application/json" id="diagram-config">
 {

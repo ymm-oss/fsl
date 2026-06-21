@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL 日本語マニュアル — 概念・使い方・業務層・要件層・文法</title>
+<meta name="description" content="FSLの日本語マニュアル。形式手法の概念、使い方、検証の仕組み、業務層、要件層、文法・構文を目的別に読めます。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="manual-home" data-page="index">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">FSL Manual</p>
+    <h1 class="reveal">FSL 日本語マニュアル</h1>
+    <p class="lead reveal">仕様を機械で確かめるために、FSL の考え方、使い方、業務層、要件層、設計層、文法を順に読める入口です。</p>
+    <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
+      <span class="pill">概念</span>
+      <span class="pill">検証の仕組み</span>
+      <span class="pill">業務層</span>
+      <span class="pill">要件層</span>
+      <span class="pill">設計層</span>
+      <span class="pill">文法</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">章一覧</p>
+    <h2 class="reveal">章題からブラウズする</h2>
+    <div class="manual-shell reveal">
+      <nav class="manual-nav" aria-label="マニュアル章一覧">
+        <div class="label">Chapters</div>
+        <a class="chapter-link" href="concept.ja.html"><span class="num">01</span><span><strong>FSLって、なに？</strong><span>概念と反例の直感</span></span></a>
+        <a class="chapter-link" href="guide.ja.html"><span class="num">02</span><span><strong>仕組みと使い方</strong><span>検証ループとコマンド</span></span></a>
+        <a class="chapter-link" href="mechanism.ja.html"><span class="num">03</span><span><strong>仕組み詳細</strong><span>BMC・帰納法・詳細化</span></span></a>
+        <a class="chapter-link" href="business-layer.ja.html"><span class="num">04</span><span><strong>業務層</strong><span>プロセス・統制・KPI</span></span></a>
+        <a class="chapter-link" href="requirements-layer.ja.html"><span class="num">05</span><span><strong>要件層</strong><span>要件ID・受け入れ・禁止</span></span></a>
+        <a class="chapter-link" href="design-layer.ja.html"><span class="num">06</span><span><strong>設計層</strong><span>内部状態・詳細化・合成</span></span></a>
+        <a class="chapter-link" href="syntax.ja.html"><span class="num">07</span><span><strong>文法・構文</strong><span>型・式・操作・性質</span></span></a>
+      </nav>
+      <div class="manual-main">
+        <article class="chapter-card">
+          <span class="num">01</span>
+          <div><h3>FSLって、なに？</h3><p>形式手法を知らない人向け。状態・操作・ルール、反例、総当たり検査の直感をつかみます。</p></div>
+          <a class="btn" href="concept.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">02</span>
+          <div><h3>仕組みと使い方</h3><p>検証の2段構え、反例候補、3層構成、コマンド、AIとの修復ループを理解します。</p></div>
+          <a class="btn" href="guide.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">03</span>
+          <div><h3>仕組み詳細</h3><p>状態空間、総当たり検査、k帰納法、応答性、詳細化チェック、実装接続を深く読みます。</p></div>
+          <a class="btn" href="mechanism.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">04</span>
+          <div><h3>業務層の書き方</h3><p>業務プロセス、統制、ゴール、KPIを、業務担当者が読める粒度で書く方法を学びます。</p></div>
+          <a class="btn" href="business-layer.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">05</span>
+          <div><h3>要件層の書き方</h3><p>要件ID、入力条件、受け入れ手順、禁止手順、非機能要件を設計へ渡せる形にします。</p></div>
+          <a class="btn" href="requirements-layer.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">06</span>
+          <div><h3>設計層の書き方</h3><p>内部の状態と操作を設計し、要件層への詳細化対応を証明し、部品を合成して、実装適合へ受け渡します。</p></div>
+          <a class="btn" href="design-layer.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">07</span>
+          <div><h3>文法・構文</h3><p>実際のFSLファイルを読むために、型、式、操作、性質、詳細化、合成をまとめて確認します。</p></div>
+          <a class="btn" href="syntax.ja.html">読む</a>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">目的別</p>
+    <h2 class="reveal">いま知りたいことから読む</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>まず価値を知りたい</h3>
+        <p>テストとの違い、反例、AI時代に仕様を機械で確かめる意味から読みます。</p>
+        <p><a class="btn" href="concept.ja.html">概念を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>プロジェクトで回したい</h3>
+        <p><code>fslc</code> のコマンド、検証結果の読み方、AIとの修復ループを確認します。</p>
+        <p><a class="btn" href="guide.ja.html">使い方を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>業務ルールを書きたい</h3>
+        <p><code>business</code> で、担当者、業務対象、業務プロセス、統制、ゴールを書きます。</p>
+        <p><a class="btn" href="business-layer.ja.html">業務層を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>要件定義に使いたい</h3>
+        <p><code>requirements</code> で、要件ID、受け入れ条件、禁止手順、SLAを書きます。</p>
+        <p><a class="btn" href="requirements-layer.ja.html">要件層を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>実装を設計したい</h3>
+        <p><code>spec</code> と <code>refinement</code> で、内部状態、<code>stutter</code>、合成、実装適合を書きます。</p>
+        <p><a class="btn" href="design-layer.ja.html">設計層を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>検証の中身を知りたい</h3>
+        <p>BMC、k帰納法、応答性、詳細化チェック、実装接続の考え方を詳しく見ます。</p>
+        <p><a class="btn" href="mechanism.ja.html">仕組み詳細を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>文法を確認したい</h3>
+        <p>コード例を読みながら、型、状態、操作、式、性質、合成、詳細化を調べます。</p>
+        <p><a class="btn" href="syntax.ja.html">文法を読む</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">公開</p>
+    <h2 class="reveal">GitHub Pages で公開する場合</h2>
+    <div class="panel reveal">
+      <p>このマニュアルは静的HTMLなので、GitHub Pages の公開元を <code>main / docs</code> に設定すれば公開できます。</p>
+      <table class="matrix">
+        <tr><th>項目</th><th>値</th></tr>
+        <tr><td>公開元</td><td><code>main</code> ブランチの <code>/docs</code></td></tr>
+        <tr><td>入口</td><td><code>docs/index.html</code> → <code>docs/intro/index.ja.html</code></td></tr>
+        <tr><td>想定URL</td><td><code>https://ymm-oss.github.io/fsl/</code></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

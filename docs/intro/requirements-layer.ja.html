@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL 要件層の書き方 — process・covers・acceptance・forbidden・NFR</title>
+<meta name="description" content="FSLの要件層 requirements の書き方を、要件ID、入力、条件、受け入れ手順、禁止手順、非機能要件、業務層との接続に分けて学ぶ日本語教材。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="requirements-layer">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">要件層を書く</p>
+    <h1 class="reveal">要件を、<br><span class="hl">反例で読める形</span>にする。</h1>
+    <p class="lead reveal">要件層 <code>requirements</code> は、要件ID、入力、条件、受け入れ手順、禁止手順、非機能要件を書く層です。業務意図を、テストと設計へ渡せる粒度まで具体化します。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">目次</p>
+    <h2 class="reveal">このページで決めること</h2>
+    <div class="toc reveal">
+      <a href="#boundary">1. 役割<span>業務層との違い</span></a>
+      <a href="#process">2. 基本形<span><code>process</code>・<code>transition</code>・<code>covers</code></span></a>
+      <a href="#examples">3. 受け入れ・禁止<span><code>acceptance</code> と <code>forbidden</code></span></a>
+      <a href="#nfr">4. 非機能要件<span>権限・監査・容量・SLA</span></a>
+      <a href="#implements">5. 業務層との接続<span><code>implements</code></span></a>
+      <a href="#checklist">6. チェックリスト<span>レビュー時に見ること</span></a>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>読み方の前提:</b> <code>requirements</code>、<code>process</code>、<code>acceptance</code> などはFSLの予約語です。本文では「要件層」「工程」「受け入れ手順」のように日本語名を併記します。</p>
+    </div>
+  </div>
+</section>
+
+<section id="boundary" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. 役割</p>
+    <h2 class="reveal">要件層は、業務意図を入力・条件・例に分解する</h2>
+    <p class="lead narrow reveal">業務層が「何を業務として守るか」を書くのに対し、要件層は「どの入力で、どの条件なら、どう進むか」を書きます。</p>
+
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>業務層</h3>
+        <p>申請は判断される、承認後だけ支払う、返金は完了状態にできる。業務担当者が確認する抽象度。</p>
+      </div>
+      <div class="card">
+        <h3>要件層</h3>
+        <p>金額入力、しきい値、自動承認、管理者承認、受け入れ手順、拒否されるべき手順。企画・受け入れ確認の抽象度。</p>
+      </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>重要:</b> 要件層では、要件IDと原文を落とさないことが最優先です。反例が出たとき、どの要求が破れたのかをJSONから辿れるようにします。</p>
+    </div>
+  </div>
+</section>
+
+<section id="process">
+  <div class="wrap">
+    <p class="kicker reveal">2. 基本形</p>
+    <h2 class="reveal"><code>process</code> に入力・条件・更新・要件IDを足す</h2>
+    <p class="lead narrow reveal">単一の業務対象がステージを進む要件は、<code>process Entity with field: Type</code> で書くのが基本です。</p>
+
+    <div class="panel reveal">
+      <pre><code>requirements ExpenseRequirements {
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+      with a: Amount
+      when a &gt; 0
+      set amount = a
+      covers REQ-1 "申請者が金額を入力して経費を申請する"
+
+    transition auto_approve Submitted -&gt; Approved by System
+      when amount &lt;= AUTO_LIMIT
+      covers REQ-2 "少額申請は自動承認される"
+
+    transition mgr_approve Submitted -&gt; Approved by Manager
+      when amount &gt; AUTO_LIMIT
+      covers REQ-3 "高額申請は管理者が承認する"
+
+    transition reject Submitted -&gt; Rejected by Manager
+      when amount &gt; AUTO_LIMIT
+      covers REQ-3 "高額申請は管理者が却下できる"
+
+    transition pay Approved -&gt; Paid by Finance
+      covers REQ-4 "承認済み申請だけが支払われる"
+  }
+}
+
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}</code></pre>
+    </div>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>構文</th><th>意味</th><th>書くときの目安</th></tr>
+      <tr><td><code>number Amount</code></td><td>数値の種類。</td><td>範囲は <code>verify { values ... }</code> で指定します。</td></tr>
+      <tr><td><code>process Claim with amount: Amount</code></td><td>ステージと持ち回るデータ。</td><td>申請金額、期限、区分など、要件判断に必要な値。</td></tr>
+      <tr><td><code>with a: Amount</code></td><td>操作の入力。</td><td>ユーザーやシステムが操作時に渡す値。</td></tr>
+      <tr><td><code>when ...</code></td><td>実行できる条件。</td><td>しきい値、状態、権限、期限など。</td></tr>
+      <tr><td><code>set amount = a</code></td><td>持ち回るデータの更新。</td><td>あとで判断に使う値だけ保存します。</td></tr>
+      <tr><td><code>covers REQ-1 "..."</code></td><td>要件IDと原文。</td><td>診断JSON、反例、シナリオに伝わります。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="examples" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. 受け入れ・禁止</p>
+    <h2 class="reveal">許す手順は <code>acceptance</code>、拒否すべき手順は <code>forbidden</code></h2>
+    <p class="lead narrow reveal">安全ルールだけでは「本来拒否されるべき操作が受け入れられた」ことを見逃す場合があります。要件層では、正例と負例を両方書きます。</p>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <h3>受け入れ手順</h3>
+        <pre><code>acceptance AC-1 "少額申請は支払いまで進める" {
+  submit(0, 1)
+  auto_approve(0)
+  pay(0)
+  expect Claim 0 in Paid
+}</code></pre>
+        <p>許可されるべき手順です。検査時に実行され、シナリオやテスト生成にも流れます。</p>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>禁止手順</h3>
+        <pre><code>forbidden FB-1 "下書き申請は支払えない" {
+  pay(0)
+  expect rejected
+}</code></pre>
+        <p>最後の操作が拒否されるべき手順です。受け入れられた場合、条件が弱すぎることがわかります。</p>
+      </div>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><b>使い分け:</b> <code>acceptance</code> は「できるべきこと」を守ります。<code>forbidden</code> は「できてはいけないこと」を守ります。重要な要件には、できる例と拒否される例をペアで置くと読みやすくなります。</p>
+    </div>
+  </div>
+</section>
+
+<section id="nfr">
+  <div class="wrap">
+    <p class="kicker reveal">4. 非機能要件</p>
+    <h2 class="reveal">権限・監査・容量・期限は、要件層で扱う</h2>
+    <p class="lead narrow reveal">非機能要件の多くは、通常の条件や安全ルールで書けます。期限のように時間を扱うものだけ、<code>time</code> と <code>deadline</code> を使います。</p>
+
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>非機能要件</th><th>書き方</th><th>注意</th></tr>
+      <tr><td>権限</td><td>操作条件 <code>when</code> または <code>requires</code>。</td><td>誰が実行できるかを曖昧にしない。</td></tr>
+      <tr><td>監査</td><td>監査状態と安全ルール。</td><td>イベントログが必要なら設計層・実装接続へ送る。</td></tr>
+      <tr><td>容量</td><td>範囲つき数値、列 <code>Seq</code> の容量、件数の上限。</td><td>境界は手書きルールではなく型で表せるなら型に寄せる。</td></tr>
+      <tr><td>SLA・期限</td><td><code>time</code> + <code>deadline</code>。</td><td>実時間ミリ秒ではなく、離散的な tick として検査する。</td></tr>
+      <tr><td>確率・百分位・使いやすさ</td><td>FSL外の文書に書く。</td><td>FSLで直接保証しません。</td></tr>
+    </table>
+
+    <div class="panel reveal">
+      <h3>SLA の基本形</h3>
+      <pre><code>requirements SupportSLA {
+  entity Ticket
+  const SLA_TICKS = 3
+  enum TicketStage { New, Accepted, Responded }
+
+  state { tickets: Map&lt;Ticket, TicketStage&gt; }
+  init {
+    forall t: Ticket { tickets[t] = New }
+  }
+
+  time {
+    urgent respond_due
+    age wait_age[t: Ticket] while tickets[t] == Accepted
+  }
+
+  requirement NFR-1 "受理から3 tick以内に応答する" {
+    action accept(t: Ticket) {
+      requires tickets[t] == New
+      tickets[t] = Accepted
+    }
+
+    fair action respond_due(t: Ticket) {
+      requires tickets[t] == Accepted
+      requires wait_age[t] &gt;= SLA_TICKS
+      tickets[t] = Responded
+    }
+
+    deadline wait_age &lt;= SLA_TICKS
+  }
+}
+
+verify {
+  instances Ticket = 2
+}</code></pre>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>SLAの落とし穴:</b> いつでも有効な操作を <code>urgent</code> にすると、時間が進まず、期限が空虚に通ることがあります。期限到達時にだけ有効になる操作を <code>urgent</code> にします。</p>
+    </div>
+  </div>
+</section>
+
+<section id="implements" style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. 業務層との接続</p>
+    <h2 class="reveal"><code>implements</code> で、要件が業務意図を落としていないか見る</h2>
+    <p class="lead narrow reveal">要件層が業務層を実装する場合、<code>implements Abs from "file" { }</code> を置きます。名前がそろっていれば、FSL が対応表を自動生成できます。</p>
+
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>名前一致でつなぐ</h3>
+        <pre><code>requirements ExpenseRequirements {
+  implements ExpenseToBe from "business.fsl" { }
+  ...
+}</code></pre>
+        <p>業務層と同じ対象名・ステージ名・遷移名を使うと、自動対応しやすくなります。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>ずれがある場合</h3>
+        <pre><code>implements ExpenseToBe from "business.fsl" {
+  maps auto
+  map status = req_status
+}</code></pre>
+        <p>名前や構造が違う場合は、明示的な対応を書きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>検証時の見え方</h3>
+        <pre><code>$ fslc verify requirements.fsl --depth 8</code></pre>
+        <p>要件自身の検証に加えて、業務層への詳細化チェック結果がJSONに含まれます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checklist">
+  <div class="wrap">
+    <p class="kicker reveal">6. チェックリスト</p>
+    <h2 class="reveal">要件層レビューで見ること</h2>
+    <ol class="lesson reveal">
+      <li>
+        <h3>各遷移に要件IDがあるか</h3>
+        <p><code>covers REQ-...</code> がないと、反例から原要求へ戻りにくくなります。</p>
+      </li>
+      <li>
+        <h3>境界値が明示されているか</h3>
+        <p><code>&lt;= AUTO_LIMIT</code> と <code>&gt; AUTO_LIMIT</code> のように、境界を曖昧にしません。</p>
+      </li>
+      <li>
+        <h3>受け入れ手順と禁止手順が両方あるか</h3>
+        <p>正例だけだと条件の弱さを見逃します。重要な拒否条件には <code>forbidden</code> を置きます。</p>
+      </li>
+      <li>
+        <h3>非機能要件をFSLで書けるものと書けないものに分けたか</h3>
+        <p>権限・監査・容量・SLAは書けます。確率、百分位、実時間ミリ秒、使いやすさは文書に残します。</p>
+      </li>
+      <li>
+        <h3>業務層を弱めていないか</h3>
+        <p><code>implements</code> の失敗は、要件が業務意図を落とした可能性として読みます。</p>
+      </li>
+    </ol>
+
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>次に、設計層へ渡す</h2>
+      <p>要件層で入力・条件・例を固定したら、設計層 <code>spec</code> で実装に近い状態・操作・詳細化対応を書きます。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="design-layer.ja.html">設計層へ</a>
+        <a class="btn ghost" href="business-layer.ja.html">業務層にもどる</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -7,18 +7,12 @@
 <meta name="description" content="形式手法を知らない人のためのFSL入門。仕様書を『読むもの』から『機械が総当たりで確かめるもの』へ。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
-<body>
+<body class="docs-page" data-page="concept">
 <div class="progress"></div>
 
-<header class="topbar">
-  <span class="brand"><b>FSL</b> 入門</span>
-  <span class="spacer"></span>
-  <a href="guide.ja.html">仕組みと使い方 →</a>
-  <span class="lang">
-    <a href="concept.ja.html" class="active">日本語</a>
-    <a href="concept.en.html">EN</a>
-  </span>
-</header>
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
 
 <main>
 
@@ -127,10 +121,10 @@
       <div class="btns">
         <button class="btn primary" id="play-hero">▶ 検証を再生する</button>
       </div>
-      <p class="dim" style="font-size:13px;margin:14px 0 0">※ このアニメは、実際の <code>fslc verify</code> が返した反例トレース（JSON）をそのまま再生しています。脚色なし。</p>
+      <p class="dim" style="font-size:13px;margin:14px 0 0">※ このアニメは、実際の <code>fslc verify</code> が返した反例の手順データ（JSON）をそのまま再生しています。脚色なし。</p>
     </div>
 
-    <p class="narrow reveal" style="margin-top:28px">これは <b>“バグの再現手順を、実装する前に”</b> 受け取れる、ということ。<br>疲れ知らずのQAが、ありとあらゆる順番を試して、破れる道を1本突きつけてくれます。</p>
+    <p class="narrow reveal" style="margin-top:28px">これは <b>“バグの再現手順を、実装する前に”</b> 受け取れる、ということ。<br>疲れ知らずの品質確認担当が、ありとあらゆる順番を試して、破れる道を1本突きつけてくれます。</p>
   </div>
 </section>
 
@@ -183,12 +177,12 @@
     <p class="lead reveal">同じ「注文」を、粒度を変えて縦に貫けます。上の意図が下までちゃんと反映されているかを、機械が追跡します。</p>
     <div class="layers reveal" style="margin-top:24px">
       <div class="layer"><h3>業務（ビジネスルール）</h3><p>返品は出荷後30日以内、など。業務としての矛盾がないかを確かめる。</p></div>
-      <div class="arrow-down">↓ refinement（詳細化）</div>
+      <div class="arrow-down">↓ 詳細化チェック</div>
       <div class="layer"><h3>要件（PM/受け入れ条件）</h3><p>要件IDつきで記述。検証結果や反例から、元の要望まで遡れる。</p></div>
-      <div class="arrow-down">↓ refinement</div>
+      <div class="arrow-down">↓ 詳細化チェック</div>
       <div class="layer"><h3>設計（状態機械・データ）</h3><p>実装に近い状態遷移。要件をちゃんと満たしているかを照合。</p></div>
-      <div class="arrow-down">↓ scenarios / testgen / replay</div>
-      <div class="layer"><h3>実装・QA</h3><p>仕様からテスト雛形やシナリオを生成。実装のログが仕様に従うかも確認。</p></div>
+      <div class="arrow-down">↓ シナリオ生成・テスト生成・ログ再生</div>
+      <div class="layer"><h3>実装・品質確認</h3><p>仕様からテスト雛形やシナリオを生成。実装のログが仕様に従うかも確認。</p></div>
     </div>
   </div>
 </section>
@@ -225,10 +219,7 @@
 
 </main>
 
-<footer>
-  <p>FSL — AI-Native Formal Specification Language. このページのアニメは実際の <code>fslc verify</code> 出力に基づきます。</p>
-  <p><a href="concept.en.html">English version</a> ・ <a href="guide.ja.html">仕組みと使い方</a> ・ <a href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub</a></p>
-</footer>
+<footer data-nav></footer>
 
 <!-- data: state-machine config (shared by all diagrams on this page) -->
 <script type="application/json" id="diagram-config">
