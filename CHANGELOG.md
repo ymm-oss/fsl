@@ -13,6 +13,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - (Install) `install.sh` now installs the LSP server (the `[lsp]` extra) and
   links `fslc-lsp` into `~/.local/bin` alongside `fslc`, so the VSCode extension
   finds it on `PATH`.
+- (VSCode) The extension is now packageable as a `.vsix` (`vsce package`): added
+  `.vscodeignore`, a `vscode:prepublish` compile step, and a `repository` field.
+  The `release-binaries` workflow builds the `.vsix` and attaches it to the
+  GitHub Release on a `v*` tag.
 
 ## [2.2.0] - 2026-06-21
 
