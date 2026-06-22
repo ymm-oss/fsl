@@ -18,6 +18,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   The `release-binaries` workflow builds the `.vsix` and attaches it to the
   GitHub Release on a `v*` tag.
 
+### Fixed
+- (LSP) Refinement mapping files are parsed without the standalone-spec state
+  block diagnostic, and their `impl`/`abs`, mapped action, and state map
+  references resolve across workspace `.fsl` files by spec name.
+
 ## [2.2.0] - 2026-06-21
 
 ### Changed

@@ -4,20 +4,31 @@
 """pygls language server for FSL files."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from lark.exceptions import UnexpectedInput, VisitError
 
-from fslc.lsp.index import DocumentIndex, Range, Symbol, build_index
+from fslc.lsp.index import DocumentIndex, NameResolver, Range, Symbol, build_index
 
 
 SERVER_NAME = "fslc-lsp"
 SERVER_VERSION = "0.1.0"
 
 
-def check_source(source: str, path: Optional[str]) -> Dict[str, Any]:
+_TOP_LEVEL_NAME = re.compile(
+    r"^\s*(?:spec|compose|requirements|business|governance)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.MULTILINE,
+)
+
+
+def check_source(
+    source: str,
+    path: Optional[str],
+    name_resolver: Optional[NameResolver] = None,
+) -> Dict[str, Any]:
     """Run the same in-process check path as ``fslc check`` for editor text."""
 
     from fslc.acceptance import validate_acceptance, validate_forbidden
@@ -32,6 +43,7 @@ def check_source(source: str, path: Optional[str]) -> Dict[str, Any]:
     )
     from fslc.model import FslError, build_spec
     from fslc.parser import parse_src
+    from fslc.refine import build_refinement
 
     def acceptance_error(spec):
         checked = validate_acceptance(spec)
@@ -52,6 +64,17 @@ def check_source(source: str, path: Optional[str]) -> Dict[str, Any]:
     try:
         base_dir = str(Path(path).parent) if path else "."
         ast, display_names = parse_src(source, base_dir)
+        if ast[0] == "refinement":
+            impl_name, abs_name = _refinement_ast_names(ast)
+            impl_spec = _build_resolved_spec(impl_name, name_resolver, parse_src, build_spec)
+            abs_spec = _build_resolved_spec(abs_name, name_resolver, parse_src, build_spec)
+            if impl_spec is not None and abs_spec is not None:
+                build_refinement(ast, impl_spec, abs_spec)
+            return _envelope({
+                "result": "ok",
+                "refinement": ast[1],
+                "warnings": [],
+            })
         spec = build_spec(ast, display_names, semantic_check=False)
         acc = acceptance_error(spec)
         if acc:
@@ -98,6 +121,35 @@ def check_source(source: str, path: Optional[str]) -> Dict[str, Any]:
         })
 
 
+def _refinement_ast_names(ast) -> Tuple[Optional[str], Optional[str]]:
+    impl_name = None
+    abs_name = None
+    for item in ast[2]:
+        if item[0] == "impl":
+            impl_name = item[1]
+        elif item[0] == "abs":
+            abs_name = item[1]
+    return impl_name, abs_name
+
+
+def _build_resolved_spec(name, name_resolver, parse_src, build_spec):
+    if not name or name_resolver is None:
+        return None
+    try:
+        target_path = name_resolver(name)
+    except Exception:
+        return None
+    if not target_path:
+        return None
+    target = Path(target_path)
+    try:
+        target_source = target.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    ast, display_names = parse_src(target_source, str(target.parent))
+    return build_spec(ast, display_names)
+
+
 def _create_server():
     try:
         from pygls.server import LanguageServer
@@ -110,6 +162,7 @@ def _create_server():
 
     server = LanguageServer(SERVER_NAME, SERVER_VERSION)
     server.fsl_index_cache = {}
+    server.fsl_name_cache = None
 
     def publish(uri: str) -> None:
         source = _source_for_uri(server, uri)
@@ -117,27 +170,31 @@ def _create_server():
             return
         path = _uri_to_path(uri)
         index = _index_for_uri(server, uri)
-        result = check_source(source, path)
+        result = check_source(source, path, _name_resolver_for_server(server, path))
         diagnostics = _result_to_diagnostics(types, source, result, index)
         server.publish_diagnostics(uri, diagnostics)
 
     @server.feature("textDocument/didOpen")
     def did_open(ls, params):
+        _drop_name_cache(server)
         publish(params.text_document.uri)
 
     @server.feature("textDocument/didChange")
     def did_change(ls, params):
         _drop_index(server, params.text_document.uri)
+        _drop_name_cache(server)
         publish(params.text_document.uri)
 
     @server.feature("textDocument/didSave")
     def did_save(ls, params):
         _drop_index(server, params.text_document.uri)
+        _drop_name_cache(server)
         publish(params.text_document.uri)
 
     @server.feature("textDocument/didClose")
     def did_close(ls, params):
         _drop_index(server, params.text_document.uri)
+        _drop_name_cache(server)
         server.publish_diagnostics(params.text_document.uri, [])
 
     @server.feature("textDocument/documentSymbol")
@@ -161,6 +218,7 @@ def _create_server():
             params.position.line,
             params.position.character,
             _loader_for_server(server),
+            _name_resolver_for_server(server, _uri_to_path(uri)),
         )
         if loc is None:
             return None
@@ -208,6 +266,111 @@ def _index_for_uri(server, uri: str) -> Optional[DocumentIndex]:
 
 def _drop_index(server, uri: str) -> None:
     server.fsl_index_cache.pop(uri, None)
+
+
+def _drop_name_cache(server) -> None:
+    server.fsl_name_cache = None
+
+
+def _name_resolver_for_server(server, current_path: Optional[str]) -> NameResolver:
+    def resolve(name: str) -> Optional[str]:
+        return _workspace_spec_name_map(server, current_path).get(name)
+
+    return resolve
+
+
+def _workspace_spec_name_map(server, current_path: Optional[str]) -> Dict[str, str]:
+    roots = _workspace_roots(server, current_path)
+    current_dir = _normalize_dir(Path(current_path).parent) if current_path else None
+    cache_key = (
+        tuple(str(root) for root in roots),
+        str(current_dir) if current_dir is not None else None,
+    )
+    cached = getattr(server, "fsl_name_cache", None)
+    if cached is not None and cached[0] == cache_key:
+        return cached[1]
+
+    candidates: Dict[str, List[Path]] = {}
+    for root in roots:
+        try:
+            files = sorted(root.rglob("*.fsl"))
+        except OSError:
+            continue
+        for file_path in files:
+            if not file_path.is_file():
+                continue
+            name = _extract_top_level_name(file_path)
+            if name is None:
+                continue
+            candidates.setdefault(name, []).append(file_path)
+
+    name_map = {
+        name: str(min(paths, key=lambda path: _resolver_path_rank(path, current_dir)))
+        for name, paths in candidates.items()
+    }
+    server.fsl_name_cache = (cache_key, name_map)
+    return name_map
+
+
+def _workspace_roots(server, current_path: Optional[str]) -> List[Path]:
+    roots: List[Path] = []
+    workspace = getattr(server, "workspace", None)
+    folders = getattr(workspace, "folders", None)
+    if folders:
+        values = folders.values() if isinstance(folders, dict) else folders
+        for folder in values:
+            uri = getattr(folder, "uri", None)
+            path = _uri_to_path(uri) if uri else getattr(folder, "path", None)
+            if path:
+                roots.append(Path(path))
+
+    root_uri = getattr(workspace, "root_uri", None)
+    if root_uri:
+        root_path = _uri_to_path(root_uri)
+        if root_path:
+            roots.append(Path(root_path))
+    root_path = getattr(workspace, "root_path", None)
+    if root_path:
+        roots.append(Path(root_path))
+
+    if current_path:
+        roots.append(Path(current_path).parent)
+    if not roots:
+        roots.append(Path.cwd())
+
+    deduped: List[Path] = []
+    seen = set()
+    for root in roots:
+        normalized = _normalize_dir(root)
+        if normalized in seen or not normalized.exists():
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _extract_top_level_name(path: Path) -> Optional[str]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _TOP_LEVEL_NAME.search(source)
+    return match.group(1) if match else None
+
+
+def _resolver_path_rank(path: Path, current_dir: Optional[Path]) -> Tuple[int, int, int, str]:
+    normalized = _normalize_dir(path)
+    same_dir = current_dir is not None and normalized.parent == current_dir
+    return (
+        0 if same_dir else 1,
+        len(normalized.stem),
+        len(str(normalized)),
+        str(normalized),
+    )
+
+
+def _normalize_dir(path: Path) -> Path:
+    return path.expanduser().resolve(strict=False)
 
 
 def _loader_for_server(server):
