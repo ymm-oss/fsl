@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-22
+
 ### Added
 - (LSP) Added a Python `fslc-lsp` language server with diagnostics, document
   symbols, and go-to-definition over raw Lark parse trees, including compose
