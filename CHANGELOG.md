@@ -6,6 +6,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- examples/structural: Step 1 demand-validation specs for issue #35 (Alloy-style structural discovery via the populate+reachable idiom)
 - (Docs) New manual chapter "When to Use FSL" (`docs/intro/when-to-use.{ja,en}.html`,
   wired into the chapter nav as #2, after Concept): criteria for deciding whether to
   use FSL — the interaction-not-size test, three gates, the high-yield / low-priority

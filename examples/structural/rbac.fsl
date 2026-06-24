@@ -1,0 +1,54 @@
+// Structural demand-validation example for issue #35 Step 1.
+//
+// This spec encodes a small RBAC configuration problem using only the existing
+// FSL kernel. It is intentionally written in an Alloy-style structural idiom,
+// but every construct below is already available in FSL.
+//
+// Alloy analog map:
+// - relation = flattened-product Map<Cell,Bool>. `ur` is User x Role flattened
+//   into URCell, and `rp` is Role x Perm flattened into RPCell.
+// - lone/one = `unique(...)` for at-most-one and `exactlyOne(...)` for
+//   exactly-one multiplicity.
+// - some = `exists ... { ... }`.
+// - relational join (.) = nested exists over the shared axis. The user-to-perm
+//   join is encoded as `exists r` plus `exists p` over `ur[u*NR + r]` and
+//   `rp[r*NP + p]`.
+// - Alloy run = `reachable` witness search. `WellFormedAssignment` asks the BMC
+//   engine to find a bounded valid configuration assembled by populate actions.
+//
+// The actions populate one tuple at a time. The invariant and reachable target
+// validate referential integrity, multiplicity, and joined access without adding
+// relational syntax to the language.
+spec Rbac {
+  const NU = 2
+  const NR = 2
+  const NP = 2
+  type User = 0..NU-1
+  type Role = 0..NR-1
+  type Perm = 0..NP-1
+  type URCell = 0..NU*NR-1
+  type RPCell = 0..NR*NP-1
+  state {
+    ur: Map<URCell, Bool>,
+    rp: Map<RPCell, Bool>
+  }
+  init {
+    forall c: URCell { ur[c] = false }
+    forall c: RPCell { rp[c] = false }
+  }
+  action assign_role(u: User, r: Role) {
+    requires not (exists r2: Role { ur[u*NR + r2] })
+    ur[u*NR + r] = true
+  }
+  action grant_perm(r: Role, p: Perm) {
+    rp[r*NP + p] = true
+  }
+  invariant AtMostOneRolePerUser {
+    forall u: User { unique(r: Role where ur[u*NR + r]) }
+  }
+  reachable WellFormedAssignment {
+    (forall u: User { exactlyOne(r: Role where ur[u*NR + r]) })
+    and (forall r: Role { (exists u: User { ur[u*NR + r] }) => (exists p: Perm { rp[r*NP + p] }) })
+    and (forall u: User { exists r: Role { exists p: Perm { ur[u*NR + r] and rp[r*NP + p] } } })
+  }
+}
