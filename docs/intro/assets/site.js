@@ -358,6 +358,7 @@
      Format per chapter: [shortLabel, sidebarTitle, sidebarDescription]. */
   const CHAPTERS = [
     { id: "concept",            en: ["Concept", "What is FSL?", "Concepts and counterexamples"],          ja: ["概念", "FSLって、なに？", "概念と反例の直感"] },
+    { id: "when-to-use",        en: ["When to use", "When to Use FSL", "Fit, gates, and scope"],          ja: ["使いどころ", "FSLを使うべきか", "効くドメインと判断ゲート"] },
     { id: "guide",              en: ["Workflow", "Workflow", "Commands and repair loop"],                 ja: ["使い方", "仕組みと使い方", "検証ループとコマンド"] },
     { id: "mechanism",          en: ["Mechanisms", "Mechanisms", "BMC, induction, refinement"],           ja: ["仕組み", "仕組み詳細", "BMC・帰納法・詳細化"] },
     { id: "business-layer",     en: ["Business", "Business Layer", "Processes, controls, KPIs"],           ja: ["業務層", "業務層", "プロセス・統制・KPI"] },
