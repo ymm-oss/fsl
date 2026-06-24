@@ -12,6 +12,45 @@ read it before writing a spec). Within the repository, `docs/LANGUAGE.md` is the
 complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
 form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
 
+## First, decide whether FSL fits (self-check)
+
+Before reaching for a spec, run this filter. FSL is not for every task, and forcing
+it where it does not fit wastes effort and produces hollow specs. **This is a
+judgment aid, not a gate**: when the answer is "no," say so and recommend the better
+tool (usually ordinary tests) instead of writing FSL anyway.
+
+**The one test — judge by _interaction_, not size:** can some **order of operations
+or combination of flags** reach a state that must never happen? Even 3 states + 2
+flags qualify if back / cancel / retry / permission branching is involved; a hundred
+states on one linear path do not.
+
+Three gates, top to bottom — stop at the first "no":
+
+1. **State machine?** Can you draw boxes (states) + arrows (operations)? No → static
+   display, simple CRUD, decoration. Out of scope; recommend ordinary tests.
+2. **Interaction can reach a bad state?** order / flags / permissions / async /
+   retry combine into a forbidden state. No → linear path; tests usually suffice
+   (low priority).
+3. **Finite & discrete?** real-time values, probability, continuous quantities, or
+   free-text meaning are **not** the core. No → the core won't fit the model; FSL is
+   at most an aid. (SLA is fine only as a *relative, discrete-step* deadline, not a
+   wall-clock value — reference §11.)
+
+Keep "**low priority** (possible but thin)" distinct from "**out of scope** (not
+expressible)." High-yield: payments/refunds, approvals/send-backs,
+inventory/allocation, permissions/audit, queues/async, SLA/timeout/retry, screen
+transitions / double-submit / unsaved-changes. Out of scope: real time, probability,
+continuous money, free-text correctness, absolute latency.
+
+Even past the gates, the value is conditional: **FSL checks the spec, not the
+product.** If no human owns the rules, or (for conformance) no faithful Adapter/log
+is feasible, keep it to lightweight pre-implementation review and do not claim
+implementation conformance. A spec that no mutation kills is hollow comfort — check
+`fslc mutate` kill-rate (a very low kill-rate signals a hollow spec).
+
+Full rationale, plus the per-feature vs per-project distinction, is the manual's
+"When to Use FSL" chapter (`docs/intro/when-to-use.{ja,en}.html`).
+
 ## Choose the right role skill first
 
 This skill is the shared language/verifier reference. For authoring from natural

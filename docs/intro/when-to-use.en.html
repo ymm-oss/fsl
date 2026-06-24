@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>When to Use FSL — deciding where it fits</title>
+<meta name="description" content="Where FSL pays off and where it doesn't. The one test (interaction of state, order, and flags), three gates, the fit / low-priority / out-of-scope split, the preconditions for real value, and which layer to write." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="when-to-use">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<!-- 0. HERO -->
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">When to use it</p>
+    <h1 class="reveal">Whether to use FSL<br>isn't about <span class="hl">how many states</span> you have.</h1>
+    <p class="lead reveal">It's about how it breaks. Can some <b>order of operations</b> or <b>combination of flags</b><br>slip into a state that must never happen? That's the whole test.</p>
+    <p class="reveal" style="margin-top:24px">FSL is not a tool to apply to everything.<br>This page is the line you take home: <b>where it pays off, and where you don't need it</b>. <span class="dim">(10 min, no jargon)</span></p>
+    <div class="scroll-hint reveal">▽ Scroll</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<!-- 1. The one test -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">The one test</p>
+    <h2 class="reveal">Decide by how it breaks, not how many states</h2>
+    <p class="lead narrow reveal">The number of states is irrelevant. Ask one thing —<br>can some <b>order of operations</b> or <b>combination of flags</b> slip into a state that can't legitimately exist?</p>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>❌ Not "many states → use it"</h3>
+        <p class="dim" style="margin-top:10px">A hundred screens on a single linear browse flow rarely hide loopholes. Sheer count is not a reason to reach for FSL.</p>
+      </div>
+      <div class="card">
+        <h3>✅ "Breakable by interaction → use it"</h3>
+        <p class="dim" style="margin-top:10px">Even 3 states and 2 flags hide loopholes once <b>back, cancel, retry, or permission branching</b> get involved. That's where it pays off.</p>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">So the same test fits a tiny <b>confirmation modal</b> and a huge <b>payment flow</b> alike.<br>The difference isn't scale — only "can order or flags break it?"</p>
+  </div>
+</section>
+
+<!-- 2. Decision flow: three gates -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Decision flow</p>
+    <h2 class="reveal">Pass three gates, top to bottom</h2>
+    <p class="lead narrow reveal">Work down in order. Wherever you get stuck — that's your answer.</p>
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer">
+        <h3>① Is there a state machine?</h3>
+        <p>Can you draw boxes (states) and arrows (operations)?<br><b style="color:var(--danger)">No → static display, simple CRUD, decoration. Out of scope.</b></p>
+      </div>
+      <div class="arrow-down">↓ Yes</div>
+      <div class="layer">
+        <h3>② Can interaction reach a "bad" state?</h3>
+        <p>Do order, flags, permissions, async, or retry combine to slip into a state that must never happen?<br><b style="color:var(--warn)">No → linear path. Tests usually suffice (low priority).</b></p>
+      </div>
+      <div class="arrow-down">↓ Yes</div>
+      <div class="layer">
+        <h3>③ Is it expressible as finite &amp; discrete?</h3>
+        <p>Are real-time values, probability, continuous quantities, or free text <em>not</em> the core?<br><b style="color:var(--danger)">No → the core of the model won't fit. Out of scope (table below).</b></p>
+      </div>
+      <div class="arrow-down">↓ Yes</div>
+      <div class="layer" style="border-left-color:var(--ok)">
+        <h3>✅ A candidate for FSL</h3>
+        <p>What remains is whether you can realize the value — covered next.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Three buckets -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Where it fits</p>
+    <h2 class="reveal">High-yield, low-priority, and out of scope</h2>
+    <p class="lead narrow reveal">The crucial split: <b>"possible but thin (low priority)"</b> versus <b>"not expressible at all (out of scope)."</b> Don't conflate them.</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3 style="color:var(--ok)">✅ High-yield</h3>
+        <ul>
+          <li>Payments, refunds, billing</li>
+          <li>Applications, approvals, send-backs</li>
+          <li>Reservations, inventory, allocation</li>
+          <li>Permissions, authorization, audit logs</li>
+          <li>Queues, jobs, async processing</li>
+          <li>SLA, timeout, retry</li>
+          <li>Contract states, plan changes, cancellation</li>
+          <li>Screen transitions / wizards / double-submit guards / unsaved-changes / disable-while-loading</li>
+        </ul>
+      </div>
+      <div class="syntax-card">
+        <h3 style="color:var(--warn)">△ Low priority (possible but thin)</h3>
+        <ul>
+          <li>Static-display-only screens</li>
+          <li>Simple CRUD</li>
+          <li>UI decoration with few constraints</li>
+          <li>Processing with almost no transitions</li>
+        </ul>
+        <p style="margin-top:10px">On a linear path, existing tests usually suffice.</p>
+      </div>
+      <div class="syntax-card">
+        <h3 style="color:var(--danger)">⛔ Out of scope (not expressible)</h3>
+        <ul>
+          <li>Real-time values, continuous amounts of money</li>
+          <li>Probability, expected value, statistical properties</li>
+          <li>Semantic correctness of free text / prompts</li>
+          <li>Continuous quantities, physical units, org structure</li>
+          <li>Absolute performance (measured latency)</li>
+        </ul>
+        <p style="margin-top:10px">If this is the core of the problem, FSL is at most an aid.<br>(SLA works only as a <em>relative, discrete step</em> notion.)</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Preconditions for real value -->
+<section style="background:var(--surface-2)">
+  <div class="wrap narrow">
+    <p class="kicker reveal">So the value isn't fake</p>
+    <h2 class="reveal">FSL checks the spec, not the product</h2>
+    <p class="lead reveal">Even past the gates, if the next pieces are missing, <b>a green CI lies to you</b>. "Should we use it" must include whether you can realize the value.</p>
+    <div class="callout warn reveal" style="margin-top:20px">
+      <p style="margin:0 0 12px"><b>Correct rules are a separate matter.</b> If the rules themselves are wrong, the verdict rests on wrong rules. → Always assign a human owner of the rules.</p>
+      <p style="margin:0 0 12px"><b>A hollow spec is false comfort.</b> Zero counterexamples may mean "correct" — or "constrains nothing." → Use <code>fslc mutate</code> kill-rate to confirm the spec actually bites.</p>
+      <p style="margin:0 0 12px"><b>If you connect an implementation, the Adapter is everything.</b> If <code>observe()</code> doesn't reflect real state, tests pass while the impl is broken. → Treat the Adapter as a human-review object.</p>
+      <p style="margin:0"><b>Liveness does not propagate through refinement.</b> Safety (invariants) flows down; response (leadsTo) does not. → Re-verify per layer, or use <code>preserve progress</code>.</p>
+    </div>
+    <p class="reveal" style="margin-top:24px">If you can't meet these, the right call — even when gates ① and ② pass — is to <b>keep it to lightweight use (an aid for pre-implementation spec review)</b>. Don't force it all the way to implementation conformance.<br><span class="dim">(For the full "not omnipotent" picture, see the <a href="concept.en.html">concept page</a>.)</span></p>
+  </div>
+</section>
+
+<!-- 5. Two "should we use it" altitudes -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Two "should we use it" questions</p>
+    <h2 class="reveal">Per-feature and per-project are different calls</h2>
+    <p class="lead narrow reveal">"Write it for this feature now" and "adopt it on the project" are different questions, with different criteria.</p>
+    <div class="split reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>Per feature: write it now?</h3>
+        <p>Answering the three core questions is enough.</p>
+        <ul>
+          <li>① Is there a state machine?</li>
+          <li>② Can order/flags reach a bad state?</li>
+          <li>③ Is it finite &amp; discrete?</li>
+        </ul>
+        <p style="margin-top:10px">Three yeses → write it. <b>AI drafts the spec, so authoring cost is near zero</b> — drop the old "worth it?" threshold far lower than before.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Per project: adopt it?</h3>
+        <p>Here you ask about the setup.</p>
+        <ul>
+          <li>Is there a human owner of the rules?</li>
+          <li>Is there a reviewer for AI-written FSL?</li>
+          <li>(If connecting) can you build an Adapter / logs?</li>
+          <li>Can CI stop on verification failure?</li>
+        </ul>
+        <p style="margin-top:10px">Multiplier: <b>the more you let AI write the state logic</b>, the more value an external standard adds. Start with a <b>2-week, one-flow PoC</b>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. Which layer -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Which layer</p>
+    <h2 class="reveal">Once you decide to use it, pick a layer</h2>
+    <p class="lead narrow reveal">When unsure, start at the <b>requirements</b> layer. Use business only when the As-Is/To-Be control mapping is clear, and design only when an agreed requirements contract exists.</p>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Layer</th><th>Use it when</th><th>Main vocabulary</th><th>Guide</th></tr>
+      <tr>
+        <td><code>business</code></td>
+        <td>Business policy, controls, KPIs, As-Is/To-Be consistency / control preservation</td>
+        <td><code>actor</code> / <code>stage</code> / <code>policy</code> / <code>goal</code></td>
+        <td><a href="business-layer.en.html">Business Layer</a></td>
+      </tr>
+      <tr>
+        <td><code>requirements</code></td>
+        <td>Acceptance criteria, forbidden flows, NFRs, requirement-ID traceability</td>
+        <td><code>entity</code> / <code>acceptance</code> / <code>forbidden</code> / REQ-ID</td>
+        <td><a href="requirements-layer.en.html">Requirements Layer</a></td>
+      </tr>
+      <tr>
+        <td><code>design</code></td>
+        <td>Internal state, queues, compose, refinement to requirements, typestate</td>
+        <td><code>state</code> / <code>action</code> / <code>mapping</code></td>
+        <td><a href="design-layer.en.html">Design Layer</a></td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- 7. Summary + CTA -->
+<section>
+  <div class="wrap narrow center">
+    <p class="kicker reveal">In one line</p>
+    <h2 class="reveal">Remember this sentence</h2>
+    <div class="callout reveal" style="margin-top:20px;text-align:left">
+      <p style="margin:0;font-size:18px"><b>It's a state machine, the interaction of order/flags/permissions can reach a dangerous state, it's expressible as finite &amp; discrete, and there's a human owner of the rules</b> — that's when FSL pays off.<br><span class="dim">Size (the number of states) is not a deciding factor.</span></p>
+    </div>
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>Now run it</h2>
+      <p>Once you see where it fits, next is how to drive <code>fslc</code>.<br>On to the verification loop and the commands.</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="guide.en.html">Read how it works →</a>
+        <a class="btn ghost" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -21,6 +21,7 @@
     <p class="lead reveal">仕様を機械で確かめるために、FSL の考え方、使い方、業務層、要件層、設計層、文法を順に読める入口です。</p>
     <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
       <span class="pill">概念</span>
+      <span class="pill">使いどころ</span>
       <span class="pill">検証の仕組み</span>
       <span class="pill">業務層</span>
       <span class="pill">要件層</span>
@@ -38,12 +39,13 @@
       <nav class="manual-nav" aria-label="マニュアル章一覧">
         <div class="label">Chapters</div>
         <a class="chapter-link" href="concept.ja.html"><span class="num">01</span><span><strong>FSLって、なに？</strong><span>概念と反例の直感</span></span></a>
-        <a class="chapter-link" href="guide.ja.html"><span class="num">02</span><span><strong>仕組みと使い方</strong><span>検証ループとコマンド</span></span></a>
-        <a class="chapter-link" href="mechanism.ja.html"><span class="num">03</span><span><strong>仕組み詳細</strong><span>BMC・帰納法・詳細化</span></span></a>
-        <a class="chapter-link" href="business-layer.ja.html"><span class="num">04</span><span><strong>業務層</strong><span>プロセス・統制・KPI</span></span></a>
-        <a class="chapter-link" href="requirements-layer.ja.html"><span class="num">05</span><span><strong>要件層</strong><span>要件ID・受け入れ・禁止</span></span></a>
-        <a class="chapter-link" href="design-layer.ja.html"><span class="num">06</span><span><strong>設計層</strong><span>内部状態・詳細化・合成</span></span></a>
-        <a class="chapter-link" href="syntax.ja.html"><span class="num">07</span><span><strong>文法・構文</strong><span>型・式・操作・性質</span></span></a>
+        <a class="chapter-link" href="when-to-use.ja.html"><span class="num">02</span><span><strong>FSLを使うべきか</strong><span>効くドメインと判断ゲート</span></span></a>
+        <a class="chapter-link" href="guide.ja.html"><span class="num">03</span><span><strong>仕組みと使い方</strong><span>検証ループとコマンド</span></span></a>
+        <a class="chapter-link" href="mechanism.ja.html"><span class="num">04</span><span><strong>仕組み詳細</strong><span>BMC・帰納法・詳細化</span></span></a>
+        <a class="chapter-link" href="business-layer.ja.html"><span class="num">05</span><span><strong>業務層</strong><span>プロセス・統制・KPI</span></span></a>
+        <a class="chapter-link" href="requirements-layer.ja.html"><span class="num">06</span><span><strong>要件層</strong><span>要件ID・受け入れ・禁止</span></span></a>
+        <a class="chapter-link" href="design-layer.ja.html"><span class="num">07</span><span><strong>設計層</strong><span>内部状態・詳細化・合成</span></span></a>
+        <a class="chapter-link" href="syntax.ja.html"><span class="num">08</span><span><strong>文法・構文</strong><span>型・式・操作・性質</span></span></a>
       </nav>
       <div class="manual-main">
         <article class="chapter-card">
@@ -53,31 +55,36 @@
         </article>
         <article class="chapter-card">
           <span class="num">02</span>
+          <div><h3>FSLを使うべきか</h3><p>状態×操作順×フラグの相互作用という判断軸で、効くドメイン・低優先・対象外を切り分け、層の選び方まで。</p></div>
+          <a class="btn" href="when-to-use.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">03</span>
           <div><h3>仕組みと使い方</h3><p>検証の2段構え、反例候補、3層構成、コマンド、AIとの修復ループを理解します。</p></div>
           <a class="btn" href="guide.ja.html">読む</a>
         </article>
         <article class="chapter-card">
-          <span class="num">03</span>
+          <span class="num">04</span>
           <div><h3>仕組み詳細</h3><p>状態空間、総当たり検査、k帰納法、応答性、詳細化チェック、実装接続を深く読みます。</p></div>
           <a class="btn" href="mechanism.ja.html">読む</a>
         </article>
         <article class="chapter-card">
-          <span class="num">04</span>
+          <span class="num">05</span>
           <div><h3>業務層の書き方</h3><p>業務プロセス、統制、ゴール、KPIを、業務担当者が読める粒度で書く方法を学びます。</p></div>
           <a class="btn" href="business-layer.ja.html">読む</a>
         </article>
         <article class="chapter-card">
-          <span class="num">05</span>
+          <span class="num">06</span>
           <div><h3>要件層の書き方</h3><p>要件ID、入力条件、受け入れ手順、禁止手順、非機能要件を設計へ渡せる形にします。</p></div>
           <a class="btn" href="requirements-layer.ja.html">読む</a>
         </article>
         <article class="chapter-card">
-          <span class="num">06</span>
+          <span class="num">07</span>
           <div><h3>設計層の書き方</h3><p>内部の状態と操作を設計し、要件層への詳細化対応を証明し、部品を合成して、実装適合へ受け渡します。</p></div>
           <a class="btn" href="design-layer.ja.html">読む</a>
         </article>
         <article class="chapter-card">
-          <span class="num">07</span>
+          <span class="num">08</span>
           <div><h3>文法・構文</h3><p>実際のFSLファイルを読むために、型、式、操作、性質、詳細化、合成をまとめて確認します。</p></div>
           <a class="btn" href="syntax.ja.html">読む</a>
         </article>
@@ -95,6 +102,11 @@
         <h3>まず価値を知りたい</h3>
         <p>テストとの違い、反例、AI時代に仕様を機械で確かめる意味から読みます。</p>
         <p><a class="btn" href="concept.ja.html">概念を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>使うべきか見極めたい</h3>
+        <p>「状態の多さ」ではなく「壊れ方」で決める判断軸。効くドメインと対象外を切り分けます。</p>
+        <p><a class="btn" href="when-to-use.ja.html">使いどころを読む</a></p>
       </div>
       <div class="syntax-card">
         <h3>プロジェクトで回したい</h3>

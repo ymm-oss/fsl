@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>使いどころ — FSLを使うべきか見極める</title>
+<meta name="description" content="FSLをどこに使い、どこには要らないか。状態×操作順×フラグの相互作用という判断軸、3つのゲート、効く/低優先/対象外の切り分け、価値の前提、層の選び方。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="when-to-use">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<!-- 0. HERO -->
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">いつ使うべきか</p>
+    <h1 class="reveal">「使うべき？」の答えは、<br><span class="hl">状態の数</span>では決まらない。</h1>
+    <p class="lead reveal">決め手は「壊れ方」。ある<b>操作の順番</b>や<b>フラグの組み合わせ</b>で、<br>あってはならない状態に滑り込めるか——基準はそれだけです。</p>
+    <p class="reveal" style="margin-top:24px">FSL は全部に使う道具ではありません。<br>このページは、<b>どこに効いて、どこは要らないか</b>の線引きを持ち帰るためのものです。<span class="dim">（10分・専門用語なし）</span></p>
+    <div class="scroll-hint reveal">▽ スクロール</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<!-- 1. 核心：たったひとつの判断軸 -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">たったひとつの判断軸</p>
+    <h2 class="reveal">「状態の多さ」ではなく「壊れ方」で決める</h2>
+    <p class="lead narrow reveal">状態がいくつあるかは関係ありません。問うのはひとつ——<br>ある<b>操作の順番</b>や<b>フラグの組み合わせ</b>で、本来あり得ない状態に滑り込めるか。</p>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>❌ 「状態が多い＝使う」ではない</h3>
+        <p class="dim" style="margin-top:10px">100画面あっても、一本道の閲覧フローなら抜け穴は生まれにくい。数の多さは出番の理由になりません。</p>
+      </div>
+      <div class="card">
+        <h3>✅ 「相互作用で壊れ得る＝使う」</h3>
+        <p class="dim" style="margin-top:10px">3状態2フラグでも、<b>戻る・取消・再試行・権限分岐</b>が絡めば、人が一目で追えない抜け穴が生まれる。ここが出番です。</p>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">だから、小さな<b>確認モーダル</b>にも、巨大な<b>決済フロー</b>にも、同じ基準が効きます。<br>違うのは規模ではなく、「順番やフラグで壊れ得るか」だけ。</p>
+  </div>
+</section>
+
+<!-- 2. 判断フロー：3つのゲート -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">判断フロー</p>
+    <h2 class="reveal">3つのゲートを、上から順に通す</h2>
+    <p class="lead narrow reveal">上から順に通します。どこかで詰まったら、そこが答えです。</p>
+    <div class="layers reveal" style="margin-top:24px">
+      <div class="layer">
+        <h3>① 状態遷移があるか</h3>
+        <p>箱（状態）と矢印（操作）で描けるか。<br><b style="color:var(--danger)">No → 静的表示・単純CRUD・装飾。対象外。</b></p>
+      </div>
+      <div class="arrow-down">↓ Yes</div>
+      <div class="layer">
+        <h3>② 相互作用で「危険な状態」に入り得るか</h3>
+        <p>順序・フラグ・権限・非同期・再試行が絡んで、あってはならない状態へ滑り込めるか。<br><b style="color:var(--warn)">No → 一本道。多くはテストで足りる（低優先）。</b></p>
+      </div>
+      <div class="arrow-down">↓ Yes</div>
+      <div class="layer">
+        <h3>③ 有限・離散で表現できるか</h3>
+        <p>実時間の値・確率・連続量・自由文が「核心」でないか。<br><b style="color:var(--danger)">No → モデルの核心が乗らない。対象外（下の表）。</b></p>
+      </div>
+      <div class="arrow-down">↓ Yes</div>
+      <div class="layer" style="border-left-color:var(--ok)">
+        <h3>✅ FSL候補</h3>
+        <p>残るは「価値を実現できる前提」を満たすか——それは次の節で。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. どこに効くか：3バケツ -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">どこに効くか</p>
+    <h2 class="reveal">効きやすい・効きにくい・そもそも対象外</h2>
+    <p class="lead narrow reveal">いちばん大事なのは、<b>「やればできるが薄い（低優先）」</b>と<b>「そもそも表現できない（対象外）」</b>を混同しないこと。</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3 style="color:var(--ok)">✅ 効きやすい（高利得）</h3>
+        <ul>
+          <li>決済・返金・請求</li>
+          <li>申請・承認・差戻し</li>
+          <li>予約・在庫・引当</li>
+          <li>権限・認可・監査ログ</li>
+          <li>キュー・ジョブ・非同期</li>
+          <li>SLA・timeout・再試行</li>
+          <li>契約状態・プラン変更・解約</li>
+          <li>画面遷移／ウィザード／二重送信防止／未保存確認／loading中の操作禁止</li>
+        </ul>
+      </div>
+      <div class="syntax-card">
+        <h3 style="color:var(--warn)">△ 低優先（できるが薄い）</h3>
+        <ul>
+          <li>静的表示だけの画面</li>
+          <li>単純CRUD</li>
+          <li>制約の少ないUI装飾</li>
+          <li>状態遷移がほぼない処理</li>
+        </ul>
+        <p style="margin-top:10px">一本道なら、既存テストで足りることが多い。</p>
+      </div>
+      <div class="syntax-card">
+        <h3 style="color:var(--danger)">⛔ 対象外（表現できない）</h3>
+        <ul>
+          <li>実時間の値・連続的なお金の量</li>
+          <li>確率・期待値・統計的性質</li>
+          <li>自由文／プロンプトの意味的正しさ</li>
+          <li>連続量・物理量・組織構造</li>
+          <li>性能の絶対値（レイテンシ実測）</li>
+        </ul>
+        <p style="margin-top:10px">ここが問題の核心なら、FSLは補助止まり。<br>（SLAは「離散ステップの相対」としてのみ可）</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. 価値が"偽物"にならない前提 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap narrow">
+    <p class="kicker reveal">価値が“偽物”にならない前提</p>
+    <h2 class="reveal">FSLが確かめるのは「仕様」であって、製品ではない</h2>
+    <p class="lead reveal">ゲートを通っても、次が欠けると<b>緑のCIが嘘をつきます</b>。「使うべきか」には、価値を実現できる体制まで含めて判断します。</p>
+    <div class="callout warn reveal" style="margin-top:20px">
+      <p style="margin:0 0 12px"><b>ルールの正しさは別物。</b> 書いたルールが間違っていれば、検証結果もその間違いに基づきます。→ ルールの最終責任者（人間）を必ず置く。</p>
+      <p style="margin:0 0 12px"><b>空仕様は“偽の安心”。</b> 反例ゼロは「正しい」のではなく「何も制約していない」のかもしれない。→ <code>fslc mutate</code> のkill-rateで、仕様が実際に効いているかを確認する。</p>
+      <p style="margin:0 0 12px"><b>接続するなら Adapter が命。</b> <code>observe()</code> が実状態を映さなければ、壊れていてもテストが通る。→ Adapterは人間レビューの対象。</p>
+      <p style="margin:0"><b>liveness は詳細化で伝播しない。</b> 安全性（invariant）は下層へ伝わるが、応答性（leadsTo）は伝わらない。→ 各層で再検証 or <code>preserve progress</code>。</p>
+    </div>
+    <p class="reveal" style="margin-top:24px">これらを満たせないなら、ゲート①②が○でも<b>「軽量用途（実装前の仕様レビューの補助）に留める」</b>のが正解です。実装接続まで無理に広げない。<br><span class="dim">（“万能ではない”の全体像は<a href="concept.ja.html">概念ページ</a>へ）</span></p>
+  </div>
+</section>
+
+<!-- 5. 二つの「使うべきか」 -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">二つの「使うべきか」</p>
+    <h2 class="reveal">案件単位の判断と、導入の判断は別もの</h2>
+    <p class="lead narrow reveal">「いま、この機能に書くか」と「プロジェクトに導入するか」は、別の問いです。基準も違います。</p>
+    <div class="split reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>案件単位：いま、これを書く？</h3>
+        <p>核心の3問に即答できれば足ります。</p>
+        <ul>
+          <li>① 状態遷移があるか</li>
+          <li>② 順序やフラグで不正状態に入り得るか</li>
+          <li>③ 有限・離散で書けるか</li>
+        </ul>
+        <p style="margin-top:10px">3つYesなら書く。<b>AIが初稿を書くので作図コストはほぼゼロ</b>——従来の「割に合う線」より大幅に下げてよい。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>プロジェクト単位：導入する？</h3>
+        <p>問うのは体制です。</p>
+        <ul>
+          <li>ルールの最終責任者がいるか</li>
+          <li>生成FSLをレビューする人がいるか</li>
+          <li>（接続時）Adapter・ログを用意できるか</li>
+          <li>CIで検証失敗を止められるか</li>
+        </ul>
+        <p style="margin-top:10px">乗数：<b>AIにstate logicを書かせている度合いが高いほど</b>、外部基準としての価値が上がる。進め方は<b>2週間・1フローのPoC</b>から。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. どの層で書くか -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">どの層で書くか</p>
+    <h2 class="reveal">「使う」と決めたら、層を選ぶ</h2>
+    <p class="lead narrow reveal">迷ったら<b>要件層</b>から。業務層は「As-Is/To-Beの統制」が明確なとき、設計層は「合意済みの要件契約」があるときだけ。</p>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>層</th><th>使うとき</th><th>主な語彙</th><th>教材</th></tr>
+      <tr>
+        <td><code>business</code></td>
+        <td>業務ポリシー・統制・KPI・As-Is/To-Beの無矛盾／統制保存</td>
+        <td><code>actor</code> / <code>stage</code> / <code>policy</code> / <code>goal</code></td>
+        <td><a href="business-layer.ja.html">業務層</a></td>
+      </tr>
+      <tr>
+        <td><code>requirements</code></td>
+        <td>受入基準・禁止フロー・NFR・要件IDトレース</td>
+        <td><code>entity</code> / <code>acceptance</code> / <code>forbidden</code> / REQ-ID</td>
+        <td><a href="requirements-layer.ja.html">要件層</a></td>
+      </tr>
+      <tr>
+        <td><code>design</code></td>
+        <td>内部状態・キュー・compose・要件への詳細化・typestate</td>
+        <td><code>state</code> / <code>action</code> / <code>mapping</code></td>
+        <td><a href="design-layer.ja.html">設計層</a></td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- 7. まとめ + CTA -->
+<section>
+  <div class="wrap narrow center">
+    <p class="kicker reveal">まとめ</p>
+    <h2 class="reveal">覚えるのは、この一文</h2>
+    <div class="callout reveal" style="margin-top:20px;text-align:left">
+      <p style="margin:0;font-size:18px"><b>状態機械であり、順序・フラグ・権限の相互作用で危険状態に入り得て、有限・離散で書けて、ルールの責任者がいる</b>——このときFSLが効く。<br><span class="dim">サイズ（状態の多さ）は判断材料ではない。</span></p>
+    </div>
+    <div class="cta reveal" style="margin-top:32px">
+      <h2>では、動かしてみる</h2>
+      <p>使いどころが見えたら、次は <code>fslc</code> の回し方。<br>検証ループとコマンドへ。</p>
+      <div style="margin-top:20px">
+        <a class="btn" href="guide.ja.html">仕組みと使い方を読む →</a>
+        <a class="btn ghost" href="https://github.com/ymm-oss/fsl" target="_blank" rel="noopener">GitHub で見る</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>
