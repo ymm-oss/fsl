@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FSL Manual — Concepts, Workflow, Business Layer, Requirements Layer, Syntax</title>
-<meta name="description" content="The English FSL manual. Read the concept, workflow, verification mechanisms, business layer, requirements layer, and syntax guide." />
+<meta name="description" content="The English FSL manual. Read the concept, when to use FSL, workflow, verification mechanisms, business layer, requirements layer, and syntax guide." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="manual-home" data-page="index">
@@ -21,6 +21,7 @@
     <p class="lead reveal">A practical manual for machine-checked specifications, from concepts and workflow to business, requirements, design, and syntax.</p>
     <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
       <span class="pill">Concept</span>
+      <span class="pill">When to use</span>
       <span class="pill">Verification</span>
       <span class="pill">Business Layer</span>
       <span class="pill">Requirements Layer</span>
@@ -38,12 +39,13 @@
       <nav class="manual-nav" aria-label="Manual chapters">
         <div class="label">Chapters</div>
         <a class="chapter-link" href="concept.en.html"><span class="num">01</span><span><strong>What is FSL?</strong><span>Concepts and counterexamples</span></span></a>
-        <a class="chapter-link" href="guide.en.html"><span class="num">02</span><span><strong>Workflow</strong><span>Commands and repair loop</span></span></a>
-        <a class="chapter-link" href="mechanism.en.html"><span class="num">03</span><span><strong>Mechanisms</strong><span>BMC, induction, refinement</span></span></a>
-        <a class="chapter-link" href="business-layer.en.html"><span class="num">04</span><span><strong>Business Layer</strong><span>Processes, controls, KPIs</span></span></a>
-        <a class="chapter-link" href="requirements-layer.en.html"><span class="num">05</span><span><strong>Requirements Layer</strong><span>IDs, acceptance, forbidden</span></span></a>
-        <a class="chapter-link" href="design-layer.en.html"><span class="num">06</span><span><strong>Design Layer</strong><span>Internal state, refinement, compose</span></span></a>
-        <a class="chapter-link" href="syntax.en.html"><span class="num">07</span><span><strong>Syntax Guide</strong><span>Types, actions, properties</span></span></a>
+        <a class="chapter-link" href="when-to-use.en.html"><span class="num">02</span><span><strong>When to Use FSL</strong><span>Fit, gates, and scope</span></span></a>
+        <a class="chapter-link" href="guide.en.html"><span class="num">03</span><span><strong>Workflow</strong><span>Commands and repair loop</span></span></a>
+        <a class="chapter-link" href="mechanism.en.html"><span class="num">04</span><span><strong>Mechanisms</strong><span>BMC, induction, refinement</span></span></a>
+        <a class="chapter-link" href="business-layer.en.html"><span class="num">05</span><span><strong>Business Layer</strong><span>Processes, controls, KPIs</span></span></a>
+        <a class="chapter-link" href="requirements-layer.en.html"><span class="num">06</span><span><strong>Requirements Layer</strong><span>IDs, acceptance, forbidden</span></span></a>
+        <a class="chapter-link" href="design-layer.en.html"><span class="num">07</span><span><strong>Design Layer</strong><span>Internal state, refinement, compose</span></span></a>
+        <a class="chapter-link" href="syntax.en.html"><span class="num">08</span><span><strong>Syntax Guide</strong><span>Types, actions, properties</span></span></a>
       </nav>
       <div class="manual-main">
         <article class="chapter-card">
@@ -53,31 +55,36 @@
         </article>
         <article class="chapter-card">
           <span class="num">02</span>
+          <div><h3>When to Use FSL</h3><p>Decide by interaction (state x order x flags), not by size. Gates, the fit / low-priority / out-of-scope split, and which layer to write.</p></div>
+          <a class="btn" href="when-to-use.en.html">Read</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">03</span>
           <div><h3>How FSL Works and How to Use It</h3><p>Learn verification modes, CTIs, layer chains, commands, and the AI-assisted repair loop.</p></div>
           <a class="btn" href="guide.en.html">Read</a>
         </article>
         <article class="chapter-card">
-          <span class="num">03</span>
+          <span class="num">04</span>
           <div><h3>Verification Mechanisms</h3><p>Go deeper into finite state spaces, BMC, k-induction, liveness, refinement, and implementation connection.</p></div>
           <a class="btn" href="mechanism.en.html">Read</a>
         </article>
         <article class="chapter-card">
-          <span class="num">04</span>
+          <span class="num">05</span>
           <div><h3>Writing the Business Layer</h3><p>Write business processes, controls, goals, and KPIs in a vocabulary business readers can validate.</p></div>
           <a class="btn" href="business-layer.en.html">Read</a>
         </article>
         <article class="chapter-card">
-          <span class="num">05</span>
+          <span class="num">06</span>
           <div><h3>Writing the Requirements Layer</h3><p>Turn business intent into requirement IDs, inputs, guards, acceptance flows, forbidden flows, and NFRs.</p></div>
           <a class="btn" href="requirements-layer.en.html">Read</a>
         </article>
         <article class="chapter-card">
-          <span class="num">06</span>
+          <span class="num">07</span>
           <div><h3>Writing the Design Layer</h3><p>Design internal state and actions, prove a refinement mapping up to requirements, compose components, and hand off to conformance.</p></div>
           <a class="btn" href="design-layer.en.html">Read</a>
         </article>
         <article class="chapter-card">
-          <span class="num">07</span>
+          <span class="num">08</span>
           <div><h3>Syntax Guide</h3><p>Read actual FSL files: types, state, actions, expressions, properties, refinement, and composition.</p></div>
           <a class="btn" href="syntax.en.html">Read</a>
         </article>
@@ -95,6 +102,11 @@
         <h3>Understand the value</h3>
         <p>Read why machine-checked specs matter and how counterexamples differ from ordinary tests.</p>
         <p><a class="btn" href="concept.en.html">Read Concept</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Decide whether to use it</h3>
+        <p>Judge by how it breaks, not how many states. Tell apart where FSL fits from what's out of scope.</p>
+        <p><a class="btn" href="when-to-use.en.html">Read When to Use</a></p>
       </div>
       <div class="syntax-card">
         <h3>Run it in a project</h3>

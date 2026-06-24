@@ -7,6 +7,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ### Added
 - examples/structural: Step 1 demand-validation specs for issue #35 (Alloy-style structural discovery via the populate+reachable idiom)
+- (Docs) New manual chapter "When to Use FSL" (`docs/intro/when-to-use.{ja,en}.html`,
+  wired into the chapter nav as #2, after Concept): criteria for deciding whether to
+  use FSL — the interaction-not-size test, three gates, the high-yield / low-priority
+  / out-of-scope split, the spec-not-product preconditions, per-feature vs
+  per-project altitudes, and a layer selector. Concept's closing CTA now leads here.
+- (Skill) `skills/fsl/SKILL.md` gained a "First, decide whether FSL fits" self-check
+  (the one test + three gates, framed as a recommendation rather than a gate) so the
+  agent filters out non-FSL-shaped tasks and recommends tests instead of writing a
+  hollow spec.
 
 ## [2.3.0] - 2026-06-22
 
