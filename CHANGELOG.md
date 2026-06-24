@@ -5,6 +5,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- examples/structural: Step 1 demand-validation specs for issue #35 (Alloy-style structural discovery via the populate+reachable idiom)
+
 ## [2.3.0] - 2026-06-22
 
 ### Added

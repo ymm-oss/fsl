@@ -1,0 +1,42 @@
+// Structural demand-validation example for issue #35 Step 1.
+//
+// This spec probes graph reachability using only existing FSL constructs.
+//
+// Closure encoding:
+// - FSL has no transitive-closure operator here, so reachability is encoded as a
+//   hand-inlined n-step union.
+// - For N = 3, the target reachability predicate is the union of direct edges,
+//   two-hop paths, and three-hop paths.
+//
+// Hop-bound soundness:
+// - Distinct-pair reachability in a finite graph needs paths up to K = N-1.
+// - Cycle/self-reachability can require paths up to K = N.
+// - A uniform K = N union therefore covers both cases soundly.
+//
+// The duplicated inlined closure at the target reachability use site and the
+// acyclicity use site is intentional. It is a Step 1 finding about current
+// ergonomics, not a bug to fix in this example.
+spec GraphReach {
+  const N = 3
+  type Node = 0..N-1
+  type Edge = 0..N*N-1
+  state { adj: Map<Edge, Bool> }
+  init { forall e: Edge { adj[e] = false } }
+
+  action add_edge(a: Node, b: Node) { adj[a*N + b] = true }
+
+  trans MonotoneEdges { forall e: Edge { old(adj[e]) => adj[e] } }
+
+  reachable ReachAcyclicDAG {
+    ( adj[0*N + (N-1)]
+      or (exists m1: Node { adj[0*N + m1] and adj[m1*N + (N-1)] })
+      or (exists m1: Node { exists m2: Node { adj[0*N + m1] and adj[m1*N + m2] and adj[m2*N + (N-1)] } })
+    )
+    and (forall x: Node {
+      not ( adj[x*N + x]
+        or (exists m1: Node { adj[x*N + m1] and adj[m1*N + x] })
+        or (exists m1: Node { exists m2: Node { adj[x*N + m1] and adj[m1*N + m2] and adj[m2*N + x] } })
+      )
+    })
+  }
+}

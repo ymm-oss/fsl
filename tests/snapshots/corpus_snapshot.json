@@ -1063,6 +1063,18 @@
       "warnings": []
     }
   },
+  "examples/structural/graph_reach.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/structural/rbac.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/ui_spike/navstack.fsl": {
     "check": {
       "result": "ok",
