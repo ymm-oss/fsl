@@ -16,6 +16,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (the one test + three gates, framed as a recommendation rather than a gate) so the
   agent filters out non-FSL-shaped tasks and recommends tests instead of writing a
   hollow spec.
+- (Skill) `skills/fsl-requirements/SKILL.md` now defines an explicit faithfulness
+  gate (definition of done): a step-1 coverage map from every source requirement to
+  an FSL element, mandatory provenance tags (`covers` or `MODEL:`/`ASSUME-n:`) on
+  every declaration, and a `fslc check --strict-tags` gate that must report zero
+  `untagged` and zero `unreferenced_requirement`. Closes the gap where specs derived
+  from a requirements document came out both thin (dropped requirements) and
+  over-reaching (invented rules).
 
 ### Changed
 - Removed the maintainer contact email from `SECURITY.md` and `pyproject.toml`;
