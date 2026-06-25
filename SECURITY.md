@@ -11,9 +11,8 @@ untrusted input (`.fsl` files, trace JSON). If you find an issue that could lead
 to a parser or evaluator crash, an infinite loop, or arbitrary code execution,
 please report it privately **before opening a public issue**.
 
-- Preferred: a private report via GitHub **Security Advisories** (the repository's
+- Please file a private report via GitHub **Security Advisories** (the repository's
   "Security" → "Report a vulnerability").
-- Or by email: ryoichi.a.izumita@accenture.com
 
 Please include a minimal reproducing `.fsl` (or trace), the command you ran, and
 the observed vs. expected behavior.

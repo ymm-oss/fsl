@@ -17,6 +17,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   agent filters out non-FSL-shaped tasks and recommends tests instead of writing a
   hollow spec.
 
+### Changed
+- Removed the maintainer contact email from `SECURITY.md` and `pyproject.toml`;
+  vulnerability reports are now routed solely through GitHub Security Advisories
+  (Private Vulnerability Reporting).
+
 ## [2.3.0] - 2026-06-22
 
 ### Added
