@@ -66,7 +66,7 @@ Reproduction commands:
 ```bash
 cp examples/e2e/3_design.fsl /private/tmp/3_design_shortcut.fsl
 cp examples/e2e/3_refines_2.fsl /private/tmp/3_refines_shortcut.fsl
-perl -0pi -e 's/\n  fair action pay_submit\(c: Claim\) \{/\n  fair action pay_without_approval(c: Claim) {\n    requires design[c].st == DesignDraft\n    requires outbox.size() < OUTBOX_CAP\n    design[c].st = DesignPaymentSubmitted\n    paid_count = paid_count + 1\n    outbox = outbox.push(c)\n  }\n\n  fair action pay_submit(c: Claim) {/s' /private/tmp/3_design_shortcut.fsl
+perl -0pi -e 's/\n  fair action pay_submit\(c: Claim\)/\n  fair action pay_without_approval(c: Claim) {\n    requires design[c].st == DesignDraft\n    requires outbox.size() < OUTBOX_CAP\n    design[c].st = DesignPaymentSubmitted\n    paid_count = paid_count + 1\n    outbox = outbox.push(c)\n  }\n\n  fair action pay_submit(c: Claim)/s' /private/tmp/3_design_shortcut.fsl
 perl -0pi -e 's/\n  action pay_submit\(c\)      -> pay\(c\)/\n  action pay_without_approval(c) -> pay(c)\n  action pay_submit(c)      -> pay(c)/' /private/tmp/3_refines_shortcut.fsl
 ./.venv/bin/python -m fslc refine /private/tmp/3_design_shortcut.fsl examples/e2e/2_requirements.fsl /private/tmp/3_refines_shortcut.fsl --depth 4
 ```
@@ -87,7 +87,7 @@ The output actually obtained:
       "c": 0
     },
     "loc": {
-      "line": 81,
+      "line": 91,
       "column": 3
     }
   },
@@ -142,7 +142,7 @@ The output actually obtained:
           "c": 0
         },
         "loc": {
-          "line": 81,
+          "line": 91,
           "column": 3
         }
       },

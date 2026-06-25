@@ -126,7 +126,7 @@ def test_e2e_readme_commands_and_break_demo_are_current():
     design_src = broken_design.read_text(encoding="utf-8")
     broken_design.write_text(
         design_src.replace(
-            "\n  fair action pay_submit(c: Claim) {",
+            "\n  fair action pay_submit(c: Claim)",
             "\n  fair action pay_without_approval(c: Claim) {\n"
             "    requires design[c].st == DesignDraft\n"
             "    requires outbox.size() < OUTBOX_CAP\n"
@@ -134,7 +134,7 @@ def test_e2e_readme_commands_and_break_demo_are_current():
             "    paid_count = paid_count + 1\n"
             "    outbox = outbox.push(c)\n"
             "  }\n\n"
-            "  fair action pay_submit(c: Claim) {",
+            "  fair action pay_submit(c: Claim)",
         ),
         encoding="utf-8",
     )
