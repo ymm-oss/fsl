@@ -11,7 +11,7 @@ requires-python = ">=3.9"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [
-    { name = "Ryoichi Izumita", email = "ryoichi.a.izumita@accenture.com" },
+    { name = "Ryoichi Izumita" },
 ]
 keywords = [
     "formal-methods",
