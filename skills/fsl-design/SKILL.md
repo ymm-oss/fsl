@@ -69,3 +69,8 @@ for a contract decision.
 - Report proof categories separately: design invariants proved, refinement to
   requirements proved, implementation conformance not yet proved unless `testgen`
   or `replay` has been anchored to real code/logs.
+- Author the design spec as documentation: declare domains with `entity`/`number`
+  (sizes in the `verify` block, not in `type X = 0..N`), tag every action/invariant
+  with `"ID: intent"` (prefix verification-only invariants `MODEL-`/`ASSUME-`), and
+  prefer `forall x in coll { … }` over index quantifiers in invariant bodies. See
+  `skills/fsl/reference.md` → "Authoring specs as readable documentation".

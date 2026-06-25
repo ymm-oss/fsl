@@ -48,7 +48,7 @@ preserve_progress_def: "preserve" "progress" "{" progress_item* "}"
 ?progress_item: progress_respond
 progress_respond: "respond" NAME "by" NAME ("," NAME)* ","?
 
-?item: const_def | type_def | enum_def | struct_def
+?item: const_def | type_def | enum_def | struct_def | entity_def | number_def
      | state_def | init_def | action_def
      | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 

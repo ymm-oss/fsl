@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Kernel `spec` now accepts `entity`/`number` declarations (previously dialect-only),
+  desugared to `type X = lo..hi` via the `verify` block (`instances`/`values`). This
+  separates domain identity from the verification world size so a design-layer spec
+  reads as documentation instead of asserting a domain size that is only a model
+  bound. Reuses the requirements desugar path (no new semantics); see
+  `docs/DESIGN-spec-domains.md`. A new "Authoring specs as readable documentation"
+  section in `skills/fsl/reference.md` records the doc-first conventions, and
+  `examples/e2e/3_design.fsl` / `examples/e2e/2_requirements.fsl` are rewritten to it.
 - examples/structural: Step 1 demand-validation specs for issue #35 (Alloy-style structural discovery via the populate+reachable idiom)
 - (Docs) New manual chapter "When to Use FSL" (`docs/intro/when-to-use.{ja,en}.html`,
   wired into the chapter nav as #2, after Concept): criteria for deciding whether to

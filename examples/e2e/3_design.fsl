@@ -13,14 +13,19 @@
 //   payment count matches".
 //
 // How to read it:
-//   From here on, the granularity is close to APIs, jobs, and notification
-//   queues. The FSL-independent Python implementation connects to the
-//   conformance harness generated from this spec.
+//   This file IS the design document — every rule is both prose and a
+//   machine-checked constraint, so reading it never drifts from what is
+//   verified. Domain identity is declared with `entity`/`number` (the
+//   verification world sizes live in the `verify` block, not in the types);
+//   the real handle for each rule is its declaration name. Each rule also
+//   carries a traceability tag: "REQ-n: ..." when it realizes a requirement
+//   (checkable with `fslc check --strict-tags --requirements <ids>`), or
+//   "MODEL: ..." when it is design-internal scaffolding absent from the
+//   requirements. The outbox invariant quantifies over members directly.
 // ════════════════════════════════════════════════════════════════
 spec ExpenseDesign {
-  type Claim = 0..2
-  type Amount = 0..3
-  type OutboxIndex = 0..2
+  entity Claim
+  number Amount
   const AUTO_LIMIT = 1
   const OUTBOX_CAP = 3
 
@@ -38,8 +43,8 @@ spec ExpenseDesign {
 
   state {
     design: Map<Claim, DesignClaim>,
-    paid_count: Int,
-    outbox: Seq<Claim, OUTBOX_CAP>
+    paid_count: Int,                 // ghost counter for the no-double-pay rule (CountsMatchSubmittedOrPaid)
+    outbox: Seq<Claim, OUTBOX_CAP>   // pending payment-notification queue
   }
   init {
     forall c: Claim { design[c] = DesignClaim { st: DesignDraft, amount: 0 } }
@@ -47,38 +52,44 @@ spec ExpenseDesign {
     outbox = Seq {}
   }
 
-  fair action submit_small(c: Claim, a: Amount) {
+  fair action submit_small(c: Claim, a: Amount)
+      "REQ-1: an employee files a low-amount claim (at or below the auto-approval limit); it enters automatic review" {
     requires design[c].st == DesignDraft
     requires a > 0
     requires a <= AUTO_LIMIT
     design[c] = DesignClaim { st: DesignAutoReview, amount: a }
   }
 
-  fair action submit_large(c: Claim, a: Amount) {
+  fair action submit_large(c: Claim, a: Amount)
+      "REQ-1: an employee files a high-amount claim (above the auto-approval limit); it enters manager review" {
     requires design[c].st == DesignDraft
     requires a > AUTO_LIMIT
     design[c] = DesignClaim { st: DesignManagerReview, amount: a }
   }
 
-  fair action auto_approve(c: Claim) {
+  fair action auto_approve(c: Claim)
+      "REQ-2: the system auto-approves a low-amount claim that is in automatic review" {
     requires design[c].st == DesignAutoReview
     requires design[c].amount <= AUTO_LIMIT
     design[c].st = DesignAutoApproved
   }
 
-  fair action mgr_approve(c: Claim) {
+  fair action mgr_approve(c: Claim)
+      "REQ-3: a manager approves a high-amount claim that is in manager review" {
     requires design[c].st == DesignManagerReview
     requires design[c].amount > AUTO_LIMIT
     design[c].st = DesignManagerApproved
   }
 
-  fair action mgr_reject(c: Claim) {
+  fair action mgr_reject(c: Claim)
+      "REQ-3: a manager rejects a high-amount claim that is in manager review" {
     requires design[c].st == DesignManagerReview
     requires design[c].amount > AUTO_LIMIT
     design[c].st = DesignRejected
   }
 
-  fair action pay_submit(c: Claim) {
+  fair action pay_submit(c: Claim)
+      "REQ-4: Finance submits an approved claim for payment, bumps the payment count, and queues a notification" {
     requires design[c].st == DesignAutoApproved or design[c].st == DesignManagerApproved
     requires outbox.size() < OUTBOX_CAP
     design[c].st = DesignPaymentSubmitted
@@ -86,24 +97,29 @@ spec ExpenseDesign {
     outbox = outbox.push(c)
   }
 
-  fair action pay_confirm(c: Claim) {
+  fair action pay_confirm(c: Claim)
+      "REQ-4: a payment that was submitted is confirmed as paid" {
     requires design[c].st == DesignPaymentSubmitted
     design[c].st = DesignPaid
   }
 
-  fair action outbox_send() {
+  fair action outbox_send()
+      "MODEL: the oldest queued payment notification is sent and leaves the outbox (notification dispatch is design-internal, absent from the requirements)" {
     requires outbox.size() > 0
     outbox = outbox.pop()
   }
 
-  invariant CountsMatchSubmittedOrPaid {
+  invariant CountsMatchSubmittedOrPaid
+      "MODEL: the recorded payment count always equals the number of claims that have entered payment (submitted for payment or already paid) — no under-counting, no double-counting (ghost-counter integrity)" {
     paid_count == count(c: Claim where design[c].st == DesignPaymentSubmitted or design[c].st == DesignPaid)
   }
 
-  invariant OutboxOnlyForPaymentSubmittedOrPaid {
-    forall i in 0..2 {
-      i < outbox.size() =>
-        (design[outbox.at(i)].st == DesignPaymentSubmitted or design[outbox.at(i)].st == DesignPaid)
-    }
+  invariant OutboxOnlyForPaymentSubmittedOrPaid
+      "MODEL: every claim sitting in the notification outbox has genuinely entered payment (submitted for payment or paid)" {
+    forall c in outbox { design[c].st == DesignPaymentSubmitted or design[c].st == DesignPaid }
   }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
 }
