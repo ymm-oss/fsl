@@ -1053,6 +1053,210 @@ def emit_dart(collected, spec_path, output_path=None):
 
 
 # --------------------------------------------------------------------------
+# PHPUnit emitter (PHP 8.1+ / PHPUnit 10+)
+# --------------------------------------------------------------------------
+def _php_string(s):
+    """Render a Python str as a PHP single-quoted string literal. Single-quoted
+    PHP interpolates nothing and only recognises ``\\\\`` and ``\\'``."""
+    return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _php_literal(obj):
+    """Render a JSON-serialisable scenario value as a PHP literal. int and float
+    are kept distinct (``1`` vs ``1.0``) because leaves are compared with
+    ``assertSame`` (``===``), which treats them as unequal — the whole point of the
+    PHP target. JSON array -> PHP list, JSON object -> associative array (PHP
+    coerces numeric string keys like ``'0'`` to int, consistently on both sides).
+    bool is checked before int (``True`` is an ``int`` in Python)."""
+    if obj is None:
+        return "null"
+    if obj is True:
+        return "true"
+    if obj is False:
+        return "false"
+    if isinstance(obj, str):
+        return _php_string(obj)
+    if isinstance(obj, int):
+        return str(obj)
+    if isinstance(obj, float):
+        s = repr(obj)
+        if not any(c in s for c in ".eEnN"):
+            s += ".0"
+        return s
+    if isinstance(obj, list):
+        return "[" + ", ".join(_php_literal(x) for x in obj) + "]"
+    if isinstance(obj, dict):
+        if not obj:
+            return "[]"
+        items = ", ".join(
+            f"{_php_string(str(k))} => {_php_literal(v)}" for k, v in obj.items())
+        return "[" + items + "]"
+    raise TypeError(f"cannot render {type(obj).__name__} as a PHP literal")
+
+
+_PHP_PREAMBLE = '''\
+<?php
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (PHPUnit, PHP 8.1+ / PHPUnit 10+).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired, setUp() marks
+// every test skipped (mirroring the other targets' skip-when-unwired behaviour).
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+declare(strict_types=1);
+
+use PHPUnit\\Framework\\TestCase;
+
+interface Adapter
+{
+    public function reset(): void;
+    // Return ['ok' => bool, 'kind' => ?string] for forbidden-rejection scenarios;
+    // null is fine for ordinary steps.
+    public function step(string $action, array $params): ?array;
+    public function observe(): array;
+}
+'''
+
+
+_PHP_CLASS_HELPERS = '''\
+    private ?Adapter $adapter = null;
+
+    // Wire your implementation here: return your adapter instead of throwing.
+    protected function makeAdapter(): Adapter
+    {
+        throw new \\RuntimeException('wire your implementation: implement makeAdapter()');
+    }
+
+    protected function setUp(): void
+    {
+        try {
+            $a = $this->makeAdapter();
+            $a->reset();
+            $a->observe();
+            $this->adapter = $a;
+        } catch (\\Throwable $e) {
+            $this->markTestSkipped('Adapter not wired: ' . $e->getMessage());
+        }
+    }
+
+    // Compare the spec's expected state against the observed state. Recurse into
+    // arrays by the EXPECTED keys (so maps match by key — order-independent, and
+    // only the fields the spec mentions are asserted; PHP coerces numeric string
+    // keys like '0' to int consistently on both sides). A list-shaped expected
+    // also pins the length, so sequences are exact. Leaves use assertSame (===),
+    // so int/float, bool and null never coerce — the point of the PHP target.
+    private function assertPartial(mixed $expected, mixed $observed, string $path = 'state'): void
+    {
+        if (is_array($expected) && is_array($observed)) {
+            if (array_is_list($expected)) {
+                $this->assertCount(count($expected), $observed, "length at $path");
+            }
+            foreach ($expected as $key => $value) {
+                $this->assertArrayHasKey($key, $observed, "missing $path.$key");
+                $this->assertPartial($value, $observed[$key], "$path.$key");
+            }
+        } else {
+            $this->assertSame($expected, $observed, "at $path");
+        }
+    }
+
+    private function assertRejected(?array $result, ?string $expectedKind): void
+    {
+        $this->assertIsArray($result, 'forbidden step must return a result array');
+        $this->assertFalse($result['ok']);
+        if ($expectedKind !== null) {
+            $this->assertSame($expectedKind, $result['kind']);
+        }
+    }
+'''
+
+
+def _php_scenario_block(scen, seen_names):
+    name = scen["name"]
+    method = _unique_ident(name, seen_names, "testScenario_")
+    lines = [
+        f"    public function {method}(): void",
+        "    {",
+        "        $a = $this->adapter;",
+        "        $a->reset();",
+    ]
+    steps = scen.get("steps", [])
+    expected_states = scen.get("expected_states", [])
+    for i, step in enumerate(steps):
+        lines.append(
+            f"        $a->step({_php_string(step['action'])}, {_php_literal(step['params'])});")
+        exp = expected_states[i] if i < len(expected_states) else {}
+        lines.append(f"        $this->assertPartial({_php_literal(exp)}, $a->observe());")
+    if scen.get("kind") == "forbidden" and scen.get("forbidden_step"):
+        forbidden_step = scen["forbidden_step"]
+        rejected_by = scen.get("rejected_by")
+        rejected = _php_string(rejected_by) if rejected_by is not None else "null"
+        lines.append(
+            f"        $result = $a->step({_php_string(forbidden_step['action'])}, "
+            f"{_php_literal(forbidden_step['params'])});")
+        lines.append(f"        $this->assertRejected($result, {rejected});")
+    lines.append("    }")
+    return "\n".join(lines)
+
+
+def emit_phpunit(collected, spec_path, output_path=None):
+    spec = collected["spec"]
+    spec_name = collected["spec_name"]
+    scenario_data = collected["scenarios"]
+    walk = _bake_random_walk(spec)
+
+    parts = [_PHP_PREAMBLE.replace("__SOURCE__", Path(spec_path).name)]
+
+    class_lines = [
+        f"final class {spec_name}ConformanceTest extends TestCase",
+        "{",
+        _PHP_CLASS_HELPERS.rstrip("\n"),
+    ]
+    seen_names = {}
+    for scen in scenario_data:
+        class_lines.append("")
+        class_lines.append(_php_scenario_block(scen, seen_names))
+
+    if walk["steps"]:
+        walk_rows = ",\n".join(
+            "        ["
+            f"'action' => {_php_string(s['action'])}, "
+            f"'params' => {_php_literal(s['params'])}, "
+            f"'expected' => {_php_literal(s['expected'])}"
+            "]"
+            for s in walk["steps"]
+        )
+        walk_literal = "[\n" + walk_rows + ",\n    ]"
+    else:
+        walk_literal = "[]"
+    class_lines.extend([
+        "",
+        f"    private const INITIAL = {_php_literal(walk['initial'])};",
+        f"    private const WALK = {walk_literal};",
+        "",
+        "    public function testRandomWalkConformance(): void",
+        "    {",
+        "        // random-walk conformance (baked oracle trace)",
+        "        $a = $this->adapter;",
+        "        $a->reset();",
+        "        $this->assertPartial(self::INITIAL, $a->observe());",
+        "        foreach (self::WALK as $step) {",
+        "            $a->step($step['action'], $step['params']);",
+        "            $this->assertPartial($step['expected'], $a->observe());",
+        "        }",
+        "    }",
+        "}",
+    ])
+    parts.append("\n".join(class_lines))
+
+    return "\n\n".join(parts) + "\n"
+
+
+# --------------------------------------------------------------------------
 # emitter dispatch + public API
 # --------------------------------------------------------------------------
 _EMITTERS = {
@@ -1061,6 +1265,7 @@ _EMITTERS = {
     "swift": emit_swift,
     "kotlin": emit_kotlin,
     "dart": emit_dart,
+    "phpunit": emit_phpunit,
 }
 
 # How each target names its default output file. Conventions diverge (prefix vs
@@ -1072,6 +1277,7 @@ _TARGET_OUTPUT_NAME = {
     "swift": lambda name, module: f"{name}ConformanceTests.swift",
     "kotlin": lambda name, module: f"{name}ConformanceTest.kt",
     "dart": lambda name, module: f"{_snake_case(name)}_conformance_test.dart",
+    "phpunit": lambda name, module: f"{name}ConformanceTest.php",
 }
 
 

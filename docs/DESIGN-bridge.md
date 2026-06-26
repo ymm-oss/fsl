@@ -124,7 +124,7 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
 
 The scenario-collection core (`scenarios()`) is language independent, so `testgen.py`
@@ -265,6 +265,35 @@ The Dart emitter renders the same scenarios to a self-contained `package:test` f
 
 (No syntax gate in tests: `dart analyze` needs a pub package context, so there is no
 clean dependency-free parse-only mode — the Dart tests assert on shape + baked walk.)
+
+### 3.5 `--target phpunit` (PHPUnit)
+
+The PHPUnit emitter targets PHP 8.1+ / PHPUnit 10+ (`declare(strict_types=1)`),
+reusing the baked walk. The choices:
+
+- **Strict leaf equality is the whole point.** PHP's loose `==` makes `0 == "0"`
+  and `1 == true` true, which is unsafe for a conformance test, so every leaf is
+  compared with `assertSame` (`===`), and `_php_literal` keeps `int` (`1`) distinct
+  from `float` (`1.0`) — `assertSame(1, 1.0)` is false.
+- **Dict vs the numeric-key trap.** `params`/`observe()` are associative `array`s,
+  but PHP coerces a numeric string key like `'0'` to int `0`, which collapses the
+  map/list distinction. `assertPartial` therefore recurses by the *expected* keys
+  (so a `Map<0..1, …>` matches by key — order-independent — and only the mentioned
+  fields are asserted) and, for a genuinely list-shaped expected (`array_is_list`),
+  also pins the length so sequences stay exact. Both sides see the same key coercion,
+  so it cancels out.
+- **Skip-when-unwired.** `makeAdapter()` throws until wired; `setUp()` probes it and
+  calls `markTestSkipped`, so the whole class is skipped (not failed) until an
+  adapter is connected — the PHPUnit analog of the pytest skip.
+- **Literals.** Strings are single-quoted (PHP single-quotes interpolate nothing;
+  only `\\`/`\'` are escaped); JSON arrays render to PHP lists, JSON objects to
+  associative arrays; the baked walk is a `private const WALK`. Output defaults to
+  `<SpecName>ConformanceTest.php` (PSR-4: class name = file name), test methods are
+  `testScenario_<name>` / `testRandomWalkConformance`.
+
+(Syntax gate in tests: `php -l` lints syntax without loading PHPUnit — a clean
+dependency-free check like swiftc -parse, so the PHP tests run it when php is present
+and skip it otherwise.)
 
 ## 4. CLI / public API
 

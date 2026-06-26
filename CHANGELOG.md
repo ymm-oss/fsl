@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc testgen --target phpunit`: a PHPUnit emitter (PHP 8.1+ / PHPUnit 10+,
+  `declare(strict_types=1)`), the sixth harness on the pluggable emitter from #43.
+  Same `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Leaves
+  compare with `assertSame` (`===`), keeping `int`/`float`, `bool` and `null` from
+  coercing (PHP's loose `==` would conflate `0 == "0"`); `_php_literal` renders `int`
+  (`1`) distinct from `float` (`1.0`). `assertPartial` recurses by the expected keys
+  (maps match order-independently — sidestepping PHP's numeric-string-key coercion —
+  and list-shaped values also pin length). `setUp()` calls `markTestSkipped` until
+  `makeAdapter()` is wired. Output defaults to `<SpecName>ConformanceTest.php` (PSR-4
+  class = file name). Tests gate syntax with `php -l` (skips when php is absent).
+  Docs: `docs/LANGUAGE.md` §12, `skills/fsl/reference.md` §9,
+  `docs/DESIGN-bridge.md` §3.5. (#47)
 - `fslc testgen --target dart`: a `package:test` emitter (also runs under
   `flutter test`), the fifth harness on the pluggable emitter from #43. Same
   `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Dynamic

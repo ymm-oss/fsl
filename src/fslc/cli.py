@@ -681,7 +681,8 @@ def _build_arg_parser():
     tg.add_argument("file")
     tg.add_argument("--depth", type=int, default=8)
     tg.add_argument("-o", "--output", default=None)
-    tg.add_argument("--target", choices=["pytest", "vitest", "swift", "kotlin", "dart"],
+    tg.add_argument("--target",
+                    choices=["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"],
                     default="pytest", help="test harness to emit (default: pytest)")
     tg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
     tg.add_argument("--strict", action="store_true")
