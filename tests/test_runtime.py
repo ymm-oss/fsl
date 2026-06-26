@@ -625,6 +625,97 @@ def test_testgen_swift_output_name_and_target(tmp_path):
     assert "import Testing" in written
 
 
+# --------------------------------------------------------------------------
+# testgen --target kotlin (issue #45)
+# --------------------------------------------------------------------------
+# No compiler gate: kotlinc has no dependency-free parse-only mode (a real
+# compile needs kotlin-test on the classpath), unlike swiftc -parse / node
+# --check. We assert on harness shape and the baked walk instead.
+def test_testgen_kotlin_emits_kotlin_test_harness():
+    content = generate_test_file(str(SPECS / "cart_v1.fsl"), depth=8, target="kotlin")
+
+    # kotlin.test harness shape.
+    assert content.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert "import kotlin.test.Test" in content
+    assert "data class StepResult(val ok: Boolean, val kind: String? = null)" in content
+    assert "interface Adapter {" in content
+    assert "fun makeAdapter(): Adapter? = null" in content
+    assert "fun assertPartial(" in content
+    assert "fun assertRejected(" in content
+    assert "class ShoppingCartConformanceTest {" in content
+
+    # Scenarios -> @Test funcs; assert on stable names/shape (witness params vary).
+    assert "@Test fun scenario_reach_SoldOut() {" in content
+    assert "@Test fun scenario_cover_add_to_cart() {" in content
+    assert "val a = makeAdapter() ?: return" in content
+    assert 'a.step("add_to_cart"' in content
+    assert "assertPartial(a.observe()," in content
+
+    # Acceptance: random walk baked, no fslc/Python at runtime. The only imports
+    # are kotlin.test.* (no fslc/runtime), so nothing is shelled out.
+    assert "@Test fun randomWalkConformance() {" in content
+    assert "baked oracle trace" in content
+    assert ("val walk: List<Triple<String, Map<String, Any?>, Map<String, Any?>>> = listOf("
+            in content)
+    import_lines = [ln for ln in content.splitlines() if ln.lstrip().startswith("import ")]
+    assert import_lines and all(ln.startswith("import kotlin.test.") for ln in import_lines)
+
+    # Option None bakes as Kotlin null; Map keys as strings.
+    assert '"cart" to mapOf("0" to null' in content
+
+    walk_actions = re.findall(r'Triple\("(\w+)"', content)
+    assert walk_actions, "cart_v1 should bake a non-empty random walk"
+    assert set(walk_actions) <= {"add_to_cart", "remove_from_cart", "checkout"}
+
+
+def test_testgen_kotlin_forbidden_rejection(tmp_path):
+    src = """
+requirements ForbiddenKotlin {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid, Shipped, Cancelled }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  action pay(o: OrderId) { requires order[o] == Cart order[o] = Paid }
+  action ship(o: OrderId) { requires order[o] == Paid order[o] = Shipped }
+  action cancel(o: OrderId) { requires order[o] == Paid order[o] = Cancelled }
+  forbidden FB-1 "shipped order cannot be cancelled" {
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "forbidden_kotlin.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    content = generate_test_file(str(path), depth=4, target="kotlin")
+
+    assert "class ForbiddenKotlinConformanceTest {" in content
+    assert "@Test fun scenario_forbidden_FB_1() {" in content
+    assert 'val result = a.step("cancel", mapOf("o" to 0))' in content
+    assert 'assertRejected(result, "requires_failed")' in content
+    # Enum values baked as member-name strings; Map keys as strings.
+    assert ('assertPartial(a.observe(), mapOf("order" to mapOf("0" to "Paid", "1" to "Cart")))'
+            in content)
+
+
+def test_testgen_kotlin_output_name_and_target(tmp_path):
+    spec = str(SPECS / "cart_v1.fsl")
+    assert default_output_name(spec, target="kotlin") == "ShoppingCartConformanceTest.kt"
+    assert default_output_name(spec, target="swift") == "ShoppingCartConformanceTests.swift"
+    assert default_output_name(spec, target="pytest") == "test_shoppingCart.py"
+
+    out = tmp_path / "Cart.kt"
+    result = run_testgen(spec, output=str(out), target="kotlin")
+    assert result["result"] == "generated"
+    assert result["target"] == "kotlin"
+    assert result["output"] == str(out)
+    written = out.read_text(encoding="utf-8")
+    assert written.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert "import kotlin.test.Test" in written
+
+
 def test_enabled_matches_guarded_instances():
     mon = Monitor(str(SPECS / "cart_v1.fsl"))
     mon.reset()

@@ -124,7 +124,7 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
 
 The scenario-collection core (`scenarios()`) is language independent, so `testgen.py`
@@ -212,6 +212,34 @@ Rejected alternatives mirror Vitest's: no shell-out to `fslc`, no second `Monito
 port. An `Encodable` generated-struct model was considered over dict-plus-helper but
 deferred — the dict keeps the first version small and matches the language-independent
 scenario JSON directly.
+
+### 3.3 `--target kotlin` (kotlin.test)
+
+The Kotlin emitter renders the same scenarios to a self-contained kotlin.test file,
+again reusing the baked walk. The choices:
+
+- **Framework: kotlin.test** (over JUnit5 / Kotest). It is multiplatform and on the
+  JVM delegates to JUnit, so the generated file carries the lightest dependency. The
+  imports are fixed to `kotlin.test.{Test, assertEquals, assertFalse, assertNotNull,
+  assertTrue}`.
+- **Dynamic dict is the easy case.** `params`/`observe()` are `Map<String, Any?>`,
+  and Kotlin's structural `==` is already deep on `List`/`Map` and discriminates a
+  boxed `Int` from a `Double`, so `assertPartial` is a plain recursion that asserts
+  only the expected keys and leans on `assertEquals` for leaves.
+- **Skip-when-unwired.** kotlin.test has no portable runtime skip (no
+  `assumeTrue`), so `makeAdapter(): Adapter?` returns `null` until wired and each
+  `@Test` starts `val a = makeAdapter() ?: return` — an unwired suite no-ops rather
+  than fails. This is the one deliberate divergence from the pytest/Vitest/Swift
+  "reported as skipped" behaviour, forced by the framework.
+- **Literals.** `_kotlin_literal` renders int as `Int`, float as `Double`, `null`,
+  `listOf`/`mapOf` (empty ones carry explicit type args), and strings with Kotlin
+  escapes — notably `$` must be escaped (string templates). The baked walk is a
+  `List<Triple<String, Map<String, Any?>, Map<String, Any?>>>`. Output defaults to
+  `<SpecName>ConformanceTest.kt`.
+
+(No `swiftc -parse`-style syntax gate in tests: kotlinc has no dependency-free
+parse-only mode — a real compile needs kotlin-test on the classpath — so the Kotlin
+tests assert on harness shape and the baked walk instead.)
 
 ## 4. CLI / public API
 
