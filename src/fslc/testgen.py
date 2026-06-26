@@ -391,16 +391,264 @@ def emit_vitest(collected, spec_path, output_path=None):
 
 
 # --------------------------------------------------------------------------
+# Swift Testing emitter
+# --------------------------------------------------------------------------
+def _swift_string(s):
+    """Render a Python str as a Swift string literal (Swift escape rules, which
+    differ from JSON: ``\\u{XX}`` rather than ``\\uXXXX``, no ``\\b``/``\\f``)."""
+    out = ['"']
+    for ch in s:
+        if ch == '"':
+            out.append('\\"')
+        elif ch == "\\":
+            out.append("\\\\")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\0":
+            out.append("\\0")
+        elif ord(ch) < 0x20:
+            out.append(f"\\u{{{ord(ch):x}}}")
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+def _swift_literal(obj):
+    """Render a JSON-serialisable scenario value as a Swift literal in the
+    ``[String: Any]`` world. ``None`` -> ``FSLNull.instance`` (a self-contained
+    sentinel so the harness depends only on ``Testing``); int and float stay
+    distinct (``1`` is ``Int``, ``1.0`` is ``Double``) and ``fslEqual``
+    discriminates them. bool is checked before int (``True`` is an ``int`` in
+    Python)."""
+    if obj is None:
+        return "FSLNull.instance"
+    if obj is True:
+        return "true"
+    if obj is False:
+        return "false"
+    if isinstance(obj, str):
+        return _swift_string(obj)
+    if isinstance(obj, int):
+        return str(obj)
+    if isinstance(obj, float):
+        s = repr(obj)
+        if not any(c in s for c in ".eEnN"):  # ensure a Double literal, not Int
+            s += ".0"
+        return s
+    if isinstance(obj, list):
+        return "[" + ", ".join(_swift_literal(x) for x in obj) + "]"
+    if isinstance(obj, dict):
+        if not obj:
+            return "[String: Any]()"  # `[:]` is ambiguous outside an annotated slot
+        items = ", ".join(
+            f"{_swift_string(str(k))}: {_swift_literal(v)}" for k, v in obj.items())
+        return "[" + items + "]"
+    raise TypeError(f"cannot render {type(obj).__name__} as a Swift literal")
+
+
+def _sanitize_ident(display_name, fallback="scenario"):
+    return re.sub(r"[^A-Za-z0-9_]+", "_", display_name).strip("_") or fallback
+
+
+def _unique_ident(display_name, seen_names, prefix):
+    safe = _sanitize_ident(display_name)
+    count = seen_names.get(safe, 0) + 1
+    seen_names[safe] = count
+    if count > 1:
+        safe = f"{safe}_{count}"
+    return f"{prefix}{safe}"
+
+
+_SWIFT_PREAMBLE = '''\
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (Swift Testing).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired every test is
+// skipped (the `.enabled(if:)` trait checks the adapter and disables the test).
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+import Testing
+
+struct StepResult {
+    let ok: Bool
+    let kind: String?
+}
+
+// A self-contained JSON-null sentinel so the harness depends only on `Testing`
+// (no Foundation/NSNull). Project a None/absent Option state field to this.
+struct FSLNull: Equatable {
+    static let instance = FSLNull()
+}
+
+enum FSLNotWired: Error { case notWired }
+
+/// Connect your implementation to the spec actions/state.
+///  - reset(): put the implementation in the same initial state as spec `init`
+///  - step(action, params): drive one spec action; return a StepResult for
+///    forbidden-rejection scenarios (nil is fine for ordinary steps)
+///  - observe(): project implementation state onto the spec's logical-state shape
+///    (enum = name string, Option = FSLNull.instance|value, Seq = [Any],
+///     Map = [String: Any], struct = [String: Any])
+protocol Adapter {
+    func reset()
+    func step(_ action: String, _ params: [String: Any]) -> StepResult?
+    func observe() -> [String: Any]
+}
+
+// Wire your implementation here. Throwing leaves the suite skipped (not failed).
+func makeAdapter() throws -> any Adapter {
+    throw FSLNotWired.notWired
+}
+
+func isAdapterWired() -> Bool {
+    do {
+        let a = try makeAdapter()
+        a.reset()
+        _ = a.observe()
+        return true
+    } catch {
+        return false
+    }
+}
+
+// Deep equality over the JSON-normal world: Bool/Int/Double/String/FSLNull,
+// [Any] (ordered) and [String: Any] (by key). Int and Double do not cross-match.
+func fslEqual(_ a: Any, _ b: Any) -> Bool {
+    switch (a, b) {
+    case (is FSLNull, is FSLNull): return true
+    case let (x as Bool, y as Bool): return x == y
+    case let (x as Int, y as Int): return x == y
+    case let (x as Double, y as Double): return x == y
+    case let (x as String, y as String): return x == y
+    case let (x as [Any], y as [Any]):
+        return x.count == y.count && zip(x, y).allSatisfy { fslEqual($0, $1) }
+    case let (x as [String: Any], y as [String: Any]):
+        return x.count == y.count && x.allSatisfy { (k, v) in
+            guard let w = y[k] else { return false }
+            return fslEqual(v, w)
+        }
+    default: return false
+    }
+}
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct) shapes.
+func assertPartial(_ observed: [String: Any], _ expected: [String: Any]) {
+    for (key, val) in expected {
+        let seen = observed[key]
+        if let v = val as? [String: Any], let s = seen as? [String: Any] {
+            assertPartial(s, v)
+        } else {
+            #expect(seen != nil, "missing state key \\(key)")
+            if let s = seen {
+                #expect(fslEqual(s, val), "state \\(key): expected \\(val), got \\(s)")
+            }
+        }
+    }
+}
+
+func assertRejected(_ result: StepResult?, _ expectedKind: String?) {
+    #expect(result != nil, "forbidden step must return a StepResult")
+    #expect(result?.ok == false)
+    if let kind = expectedKind {
+        #expect(result?.kind == kind)
+    }
+}
+'''
+
+
+def _swift_scenario_block(scen, seen_names):
+    name = scen["name"]
+    func = _unique_ident(name, seen_names, "scenario_")
+    lines = [
+        f"@Test(.enabled(if: isAdapterWired())) func {func}() throws {{",
+        "    let a = try makeAdapter()",
+        "    a.reset()",
+    ]
+    steps = scen.get("steps", [])
+    expected_states = scen.get("expected_states", [])
+    for i, step in enumerate(steps):
+        lines.append(
+            f"    _ = a.step({_swift_string(step['action'])}, {_swift_literal(step['params'])})")
+        exp = expected_states[i] if i < len(expected_states) else {}
+        lines.append(f"    assertPartial(a.observe(), {_swift_literal(exp)})")
+    if scen.get("kind") == "forbidden" and scen.get("forbidden_step"):
+        forbidden_step = scen["forbidden_step"]
+        rejected_by = scen.get("rejected_by")
+        rejected = _swift_string(rejected_by) if rejected_by is not None else "nil"
+        lines.append(
+            f"    let result = a.step({_swift_string(forbidden_step['action'])}, "
+            f"{_swift_literal(forbidden_step['params'])})")
+        lines.append(f"    assertRejected(result, {rejected})")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def emit_swift(collected, spec_path, output_path=None):
+    spec = collected["spec"]
+    scenario_data = collected["scenarios"]
+    walk = _bake_random_walk(spec)
+
+    parts = [_SWIFT_PREAMBLE.replace("__SOURCE__", Path(spec_path).name)]
+
+    seen_names = {}
+    for scen in scenario_data:
+        parts.append(_swift_scenario_block(scen, seen_names))
+
+    walk_type = "[(action: String, params: [String: Any], expected: [String: Any])]"
+    if walk["steps"]:
+        walk_rows = ",\n".join(
+            f"        (action: {_swift_string(s['action'])}, "
+            f"params: {_swift_literal(s['params'])}, "
+            f"expected: {_swift_literal(s['expected'])})"
+            for s in walk["steps"]
+        )
+        walk_literal = "[\n" + walk_rows + ",\n    ]"
+    else:
+        walk_literal = "[]"
+    walk_section = "\n".join([
+        "@Test(.enabled(if: isAdapterWired())) func randomWalkConformance() throws {",
+        "    // random-walk conformance (baked oracle trace)",
+        "    let a = try makeAdapter()",
+        "    a.reset()",
+        f"    let initial: [String: Any] = {_swift_literal(walk['initial'])}",
+        "    assertPartial(a.observe(), initial)",
+        f"    let walk: {walk_type} = {walk_literal}",
+        "    for step in walk {",
+        "        _ = a.step(step.action, step.params)",
+        "        assertPartial(a.observe(), step.expected)",
+        "    }",
+        "}",
+    ])
+    parts.append(walk_section)
+
+    return "\n\n".join(parts) + "\n"
+
+
+# --------------------------------------------------------------------------
 # emitter dispatch + public API
 # --------------------------------------------------------------------------
 _EMITTERS = {
     "pytest": emit_pytest,
     "vitest": emit_vitest,
+    "swift": emit_swift,
 }
 
-_TARGET_EXTENSION = {
-    "pytest": "py",
-    "vitest": "test.ts",
+# How each target names its default output file. Conventions diverge (prefix vs
+# suffix, camelCase vs PascalCase), so this is a per-target function of the spec
+# name and its camelCase module form rather than a bare extension swap.
+_TARGET_OUTPUT_NAME = {
+    "pytest": lambda name, module: f"test_{module}.py",
+    "vitest": lambda name, module: f"{module}.test.ts",
+    "swift": lambda name, module: f"{name}ConformanceTests.swift",
 }
 
 
@@ -446,7 +694,6 @@ def default_output_name(spec_path, target="pytest"):
     src = path.read_text(encoding="utf-8")
     ast, display_names = parse_src(src, str(path.parent))
     spec = build_spec(ast, display_names)
-    module = _module_name(spec["name"])
-    if target == "vitest":
-        return f"{module}.test.ts"
-    return f"test_{module}.py"
+    name = spec["name"]
+    namer = _TARGET_OUTPUT_NAME.get(target, _TARGET_OUTPUT_NAME["pytest"])
+    return namer(name, _module_name(name))

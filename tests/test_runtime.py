@@ -512,6 +512,119 @@ def test_testgen_unknown_target_rejected():
         generate_test_bundle(str(SPECS / "cart_v1.fsl"), depth=4, target="jest")
 
 
+# --------------------------------------------------------------------------
+# testgen --target swift (issue #44)
+# --------------------------------------------------------------------------
+def _swiftc_available():
+    return shutil.which("swiftc") is not None
+
+
+def _assert_swift_syntax_ok(content):
+    """Syntax-only gate (parse, no module resolution) — the swiftc analog of the
+    vitest `node --check`. `import Testing` need not resolve under `-parse`."""
+    if not _swiftc_available():
+        pytest.skip("swiftc not available")
+    swiftc = shutil.which("swiftc")
+    with tempfile.NamedTemporaryFile("w", suffix=".swift", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        path = f.name
+    try:
+        proc = subprocess.run([swiftc, "-parse", path], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_testgen_swift_emits_swift_testing_harness():
+    content = generate_test_file(str(SPECS / "cart_v1.fsl"), depth=8, target="swift")
+
+    # Swift Testing harness shape (not XCTest, not pytest).
+    assert content.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert "import Testing" in content
+    assert "protocol Adapter {" in content
+    assert "func makeAdapter() throws -> any Adapter {" in content
+    assert "func assertPartial(" in content
+    assert "func assertRejected(" in content
+    assert "struct FSLNull: Equatable {" in content
+
+    # Scenarios -> @Test funcs gated by the adapter-wired trait; assert on the
+    # stable scenario names/shape, not specific witness params (the reach_/cover_
+    # witness Z3 returns varies run to run — exact steps live in the forbidden test).
+    assert "@Test(.enabled(if: isAdapterWired())) func scenario_reach_SoldOut() throws {" in content
+    assert "@Test(.enabled(if: isAdapterWired())) func scenario_cover_add_to_cart() throws {" in content
+    assert "    let a = try makeAdapter()" in content
+    assert "    a.reset()" in content
+    assert '    _ = a.step("add_to_cart"' in content
+    assert "    assertPartial(a.observe()," in content
+
+    # Acceptance: the random walk is baked, so the file needs no fslc/Python/Monitor
+    # at runtime. The only import is Testing (no Foundation); nothing is shelled out.
+    assert "func randomWalkConformance() throws {" in content
+    assert "baked oracle trace" in content
+    assert "let walk: [(action: String, params: [String: Any], expected: [String: Any])] = [" in content
+    import_lines = [ln for ln in content.splitlines() if ln.lstrip().startswith("import ")]
+    assert import_lines == ["import Testing"]
+
+    # Option None bakes as the self-contained null sentinel; enum members as strings.
+    assert "FSLNull.instance" in content
+
+    walk_actions = re.findall(r'\(action: "(\w+)"', content)
+    assert walk_actions, "cart_v1 should bake a non-empty random walk"
+    assert set(walk_actions) <= {"add_to_cart", "remove_from_cart", "checkout"}
+
+    _assert_swift_syntax_ok(content)
+
+
+def test_testgen_swift_forbidden_rejection(tmp_path):
+    src = """
+requirements ForbiddenSwift {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid, Shipped, Cancelled }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  action pay(o: OrderId) { requires order[o] == Cart order[o] = Paid }
+  action ship(o: OrderId) { requires order[o] == Paid order[o] = Shipped }
+  action cancel(o: OrderId) { requires order[o] == Paid order[o] = Cancelled }
+  forbidden FB-1 "shipped order cannot be cancelled" {
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "forbidden_swift.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    content = generate_test_file(str(path), depth=4, target="swift")
+
+    # Hyphen in the forbidden ID is sanitized into a valid Swift identifier.
+    assert "func scenario_forbidden_FB_1() throws {" in content
+    assert 'let result = a.step("cancel", ["o": 0])' in content
+    assert 'assertRejected(result, "requires_failed")' in content
+    # Enum values are baked as their member-name strings; Map keys as strings.
+    assert 'assertPartial(a.observe(), ["order": ["0": "Paid", "1": "Cart"]])' in content
+
+    _assert_swift_syntax_ok(content)
+
+
+def test_testgen_swift_output_name_and_target(tmp_path):
+    spec = str(SPECS / "cart_v1.fsl")
+    # ShoppingCart -> ShoppingCartConformanceTests.swift; pytest/vitest unchanged.
+    assert default_output_name(spec, target="swift") == "ShoppingCartConformanceTests.swift"
+    assert default_output_name(spec, target="vitest") == "shoppingCart.test.ts"
+    assert default_output_name(spec, target="pytest") == "test_shoppingCart.py"
+
+    out = tmp_path / "Cart.swift"
+    result = run_testgen(spec, output=str(out), target="swift")
+    assert result["result"] == "generated"
+    assert result["target"] == "swift"
+    assert result["output"] == str(out)
+    written = out.read_text(encoding="utf-8")
+    assert written.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert "import Testing" in written
+
+
 def test_enabled_matches_guarded_instances():
     mon = Monitor(str(SPECS / "cart_v1.fsl"))
     mon.reset()

@@ -124,14 +124,14 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
 
 The scenario-collection core (`scenarios()`) is language independent, so `testgen.py`
 splits into that shared core (`_collect_scenarios`) plus per-target emitters
-(`emit_pytest` / `emit_vitest`) chosen by `--target`. Adding a harness (Jest, Go, …)
-is a new emitter, not a redesign — the same kernel-stays-narrow principle as the
-dialect frontends.
+(`emit_pytest` / `emit_vitest` / `emit_swift`, …) chosen by `--target`. Adding a
+harness (Jest, Go, …) is a new emitter, not a redesign — the same kernel-stays-narrow
+principle as the dialect frontends.
 
 The output is a **self-contained pytest file** (the primary dependencies are
 `fslc.runtime` and `pytest`. In addition, only the standard library needed for
@@ -185,6 +185,33 @@ Rejected alternatives: (b) shelling out to `fslc` from the TS test (adds a runti
 coupling), and (c) porting `Monitor` to TS (duplicates the dual-evaluator surface
 that the agreement/oracle tests exist to protect). Output defaults to
 `<spec>.test.ts`.
+
+### 3.2 `--target swift` (Swift Testing)
+
+The Swift emitter renders the same scenarios to a self-contained Swift Testing file
+(`import Testing` / `@Test` / `#expect` / `#require` — **not XCTest**), reusing the
+language-independent baked walk. The Swift-specific points:
+
+- **Dynamic dict + equality.** `params`/`observe()` are `[String: Any]`. `Any`
+  values have no usable `==`, so the harness bundles `fslEqual` (a deep equality over
+  the JSON-normal world: `Bool`/`Int`/`Double`/`String`/`FSLNull`/`[Any]`/`[String:
+  Any]`, with `Int` and `Double` kept distinct) and an `assertPartial` that recurses
+  by the expected keys and asserts only the fields the spec mentions.
+- **Null.** An Option `None` bakes as `FSLNull.instance`, a one-line sentinel struct,
+  so the generated file depends only on `Testing` (no Foundation/`NSNull`).
+- **Skip-when-unwired.** `makeAdapter()` throws until wired; each `@Test` carries
+  `.enabled(if: isAdapterWired())`, so the suite is *disabled* (not failed) until an
+  adapter is connected — the Swift analog of the pytest skip / Vitest `test.skip`.
+- **Literals.** `_swift_literal` renders int as `Int`, float as `Double` (always with
+  a decimal point), bool/null per above, and strings with Swift escape rules
+  (`\u{XX}`, which differ from JSON). The baked walk is an inline labelled-tuple
+  array `[(action:params:expected:)]` (kept local to the test, so no global
+  non-`Sendable` state). Output defaults to `<SpecName>ConformanceTests.swift`.
+
+Rejected alternatives mirror Vitest's: no shell-out to `fslc`, no second `Monitor`
+port. An `Encodable` generated-struct model was considered over dict-plus-helper but
+deferred — the dict keeps the first version small and matches the language-independent
+scenario JSON directly.
 
 ## 4. CLI / public API
 

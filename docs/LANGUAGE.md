@@ -265,7 +265,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
-fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
@@ -693,7 +693,7 @@ implementation (see `DESIGN-bridge.md`).
 |---|---|
 | `fslc.runtime.Monitor` | A concrete interpreter of the spec (no Z3 needed). Embed it in the implementation for runtime checking |
 | `fslc replay` | Check a real system's event-log JSON against the spec |
-| `fslc testgen` | Generate a conformance-test scaffold — pytest (default) or Vitest via `--target vitest` (wire the implementation into the Adapter) |
+| `fslc testgen` | Generate a conformance-test scaffold — pytest (default), Vitest (`--target vitest`), or Swift Testing (`--target swift`) (wire the implementation into the Adapter) |
 
 Recommended workflow: **`verify` / `prove` the spec → generate the scaffold with
 `testgen` → wire the implementation into the `Adapter` → run the tests**. `Monitor`
@@ -710,6 +710,12 @@ from per-target emitters, so the same scenarios render to multiple harnesses:
   the `(action, params, expected_state)` trace is embedded as a static fixture, so the
   generated tests need **no `fslc`/Python at runtime**. The output extension defaults
   to `<spec>.test.ts`.
+- `--target swift`: emits a self-contained Swift Testing file (`import Testing`,
+  `@Test`, `#expect`; **not XCTest**). Same baked-walk design as Vitest. Dynamic
+  state is `[String: Any]` with a bundled deep-equality/partial-match helper; an
+  Option `None` bakes as the self-contained `FSLNull.instance` sentinel (no
+  Foundation). Until `makeAdapter()` is wired every test is disabled via
+  `@Test(.enabled(if:))`. Output defaults to `<SpecName>ConformanceTests.swift`.
 
 ```python
 from fslc import Monitor
@@ -723,6 +729,7 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
+fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
 ```
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
