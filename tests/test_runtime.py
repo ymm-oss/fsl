@@ -807,6 +807,123 @@ def test_testgen_dart_output_name_and_target(tmp_path):
     assert "import 'package:test/test.dart';" in written
 
 
+# --------------------------------------------------------------------------
+# testgen --target phpunit (issue #47)
+# --------------------------------------------------------------------------
+def _assert_php_syntax_ok(content):
+    """Syntax-only gate via `php -l` (a lint that does NOT load PHPUnit), the PHP
+    analog of swiftc -parse / node --check. Skips when php is absent."""
+    php = shutil.which("php")
+    if php is None:
+        pytest.skip("php not available")
+    with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        path = f.name
+    try:
+        proc = subprocess.run([php, "-l", path], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_testgen_phpunit_emits_phpunit_harness():
+    content = generate_test_file(str(SPECS / "cart_v1.fsl"), depth=8, target="phpunit")
+
+    # PHPUnit harness shape.
+    assert content.startswith("<?php\n")
+    assert "// SPDX-License-Identifier: Apache-2.0" in content
+    assert "declare(strict_types=1);" in content
+    assert "use PHPUnit\\Framework\\TestCase;" in content
+    assert "interface Adapter" in content
+    assert "final class ShoppingCartConformanceTest extends TestCase" in content
+    assert "protected function makeAdapter(): Adapter" in content
+    assert "protected function setUp(): void" in content
+    assert "$this->markTestSkipped(" in content
+    assert "private function assertPartial(" in content
+    assert "private function assertRejected(" in content
+    # Strict, type-discriminating leaf comparison.
+    assert "$this->assertSame(" in content
+    assert "array_is_list(" in content
+
+    # Scenarios -> test methods; assert on stable names/shape (witness params vary).
+    assert "public function testScenario_reach_SoldOut(): void" in content
+    assert "public function testScenario_cover_add_to_cart(): void" in content
+    assert "$a = $this->adapter;" in content
+    assert "$a->step('add_to_cart'," in content
+    assert "$this->assertPartial(" in content
+    # int params render bare (not quoted) so assertSame keeps them int.
+    assert "'u' => 1" in content
+
+    # Acceptance: random walk baked, no fslc/Python at runtime. The only `use` is
+    # PHPUnit and nothing shells out / loads extra files.
+    assert "public function testRandomWalkConformance(): void" in content
+    assert "private const WALK = [" in content
+    assert "foreach (self::WALK as $step)" in content
+    assert "baked oracle trace" in content
+    use_lines = [ln for ln in content.splitlines() if ln.strip().startswith("use ")]
+    assert use_lines == ["use PHPUnit\\Framework\\TestCase;"]
+    assert "exec(" not in content and "shell_exec" not in content
+
+    # Option None bakes as PHP null; Map keys as (numeric) strings in the literal.
+    assert "'cart' => ['0' => null" in content
+
+    walk_actions = re.findall(r"'action' => '(\w+)'", content)
+    assert walk_actions, "cart_v1 should bake a non-empty random walk"
+    assert set(walk_actions) <= {"add_to_cart", "remove_from_cart", "checkout"}
+
+    _assert_php_syntax_ok(content)
+
+
+def test_testgen_phpunit_forbidden_rejection(tmp_path):
+    src = """
+requirements ForbiddenPhpUnit {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid, Shipped, Cancelled }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  action pay(o: OrderId) { requires order[o] == Cart order[o] = Paid }
+  action ship(o: OrderId) { requires order[o] == Paid order[o] = Shipped }
+  action cancel(o: OrderId) { requires order[o] == Paid order[o] = Cancelled }
+  forbidden FB-1 "shipped order cannot be cancelled" {
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "forbidden_phpunit.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    content = generate_test_file(str(path), depth=4, target="phpunit")
+
+    assert "final class ForbiddenPhpUnitConformanceTest extends TestCase" in content
+    assert "public function testScenario_forbidden_FB_1(): void" in content
+    assert "$result = $a->step('cancel', ['o' => 0]);" in content
+    assert "$this->assertRejected($result, 'requires_failed');" in content
+    # Enum values baked as member-name strings; Map keys as strings.
+    assert ("$this->assertPartial(['order' => ['0' => 'Paid', '1' => 'Cart']], $a->observe());"
+            in content)
+
+    _assert_php_syntax_ok(content)
+
+
+def test_testgen_phpunit_output_name_and_target(tmp_path):
+    spec = str(SPECS / "cart_v1.fsl")
+    assert default_output_name(spec, target="phpunit") == "ShoppingCartConformanceTest.php"
+    assert default_output_name(spec, target="dart") == "shopping_cart_conformance_test.dart"
+    assert default_output_name(spec, target="pytest") == "test_shoppingCart.py"
+
+    out = tmp_path / "Cart.php"
+    result = run_testgen(spec, output=str(out), target="phpunit")
+    assert result["result"] == "generated"
+    assert result["target"] == "phpunit"
+    assert result["output"] == str(out)
+    written = out.read_text(encoding="utf-8")
+    assert written.startswith("<?php\n")
+    assert "use PHPUnit\\Framework\\TestCase;" in written
+
+
 def test_enabled_matches_guarded_instances():
     mon = Monitor(str(SPECS / "cart_v1.fsl"))
     mon.reset()

@@ -265,7 +265,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
-fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
@@ -693,7 +693,7 @@ implementation (see `DESIGN-bridge.md`).
 |---|---|
 | `fslc.runtime.Monitor` | A concrete interpreter of the spec (no Z3 needed). Embed it in the implementation for runtime checking |
 | `fslc replay` | Check a real system's event-log JSON against the spec |
-| `fslc testgen` | Generate a conformance-test scaffold — pytest (default), Vitest (`--target vitest`), Swift Testing (`--target swift`), kotlin.test (`--target kotlin`), or Dart `package:test` (`--target dart`) (wire the implementation into the Adapter) |
+| `fslc testgen` | Generate a conformance-test scaffold — pytest (default), Vitest (`--target vitest`), Swift Testing (`--target swift`), kotlin.test (`--target kotlin`), Dart `package:test` (`--target dart`), or PHPUnit (`--target phpunit`) (wire the implementation into the Adapter) |
 
 Recommended workflow: **`verify` / `prove` the spec → generate the scaffold with
 `testgen` → wire the implementation into the `Adapter` → run the tests**. `Monitor`
@@ -731,6 +731,14 @@ from per-target emitters, so the same scenarios render to multiple harnesses:
   A top-level probe sets `skip:` on each `test()` until `makeAdapter()` is wired.
   Output defaults to `<spec_name>_conformance_test.dart` (snake_case, the
   `_test.dart` suffix the runner expects).
+- `--target phpunit`: emits a self-contained PHPUnit file (PHP 8.1+ / PHPUnit 10+,
+  `declare(strict_types=1)`). Same baked-walk design. Dynamic state is an
+  associative `array`; leaves are compared with `assertSame` (`===`), which keeps
+  `int`/`float`, `bool` and `null` from coercing (PHP's loose `==` would conflate
+  `0 == "0"` etc.). `assertPartial` recurses by the expected keys (maps match
+  order-independently; list-shaped values also pin length). `setUp()` skips every
+  test until `makeAdapter()` is wired. Output defaults to
+  `<SpecName>ConformanceTest.php` (PSR-4 class = file name).
 
 ```python
 from fslc import Monitor
@@ -747,6 +755,7 @@ fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
+fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 ```
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
