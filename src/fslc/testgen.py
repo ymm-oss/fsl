@@ -634,12 +634,213 @@ def emit_swift(collected, spec_path, output_path=None):
 
 
 # --------------------------------------------------------------------------
+# Kotlin emitter (kotlin.test — multiplatform, delegates to JUnit on the JVM)
+# --------------------------------------------------------------------------
+def _kotlin_string(s):
+    """Render a Python str as a Kotlin string literal. Kotlin needs ``$`` escaped
+    (it starts a string template) and uses ``\\uXXXX`` (4 hex) like JSON."""
+    out = ['"']
+    for ch in s:
+        if ch == '"':
+            out.append('\\"')
+        elif ch == "\\":
+            out.append("\\\\")
+        elif ch == "$":
+            out.append("\\$")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ord(ch) < 0x20:
+            out.append(f"\\u{ord(ch):04x}")
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+def _kotlin_literal(obj):
+    """Render a JSON-serialisable scenario value as a Kotlin literal in the
+    ``Map<String, Any?>`` world. None -> null; int -> Int, float -> Double (kept
+    distinct — boxed ``Int`` and ``Double`` are unequal); list -> listOf, dict ->
+    mapOf. Empty collections carry explicit type args for inference in ``Any?``
+    slots. bool is checked before int (``True`` is an ``int`` in Python)."""
+    if obj is None:
+        return "null"
+    if obj is True:
+        return "true"
+    if obj is False:
+        return "false"
+    if isinstance(obj, str):
+        return _kotlin_string(obj)
+    if isinstance(obj, int):
+        return str(obj)
+    if isinstance(obj, float):
+        s = repr(obj)
+        if not any(c in s for c in ".eEnN"):
+            s += ".0"
+        return s
+    if isinstance(obj, list):
+        if not obj:
+            return "listOf<Any?>()"
+        return "listOf(" + ", ".join(_kotlin_literal(x) for x in obj) + ")"
+    if isinstance(obj, dict):
+        if not obj:
+            return "mapOf<String, Any?>()"
+        items = ", ".join(
+            f"{_kotlin_string(str(k))} to {_kotlin_literal(v)}" for k, v in obj.items())
+        return "mapOf(" + items + ")"
+    raise TypeError(f"cannot render {type(obj).__name__} as a Kotlin literal")
+
+
+_KOTLIN_PREAMBLE = '''\
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (kotlin.test).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired it returns null
+// and every test returns early (kotlin.test has no portable runtime skip), so the
+// suite passes trivially rather than failing — mirroring the other targets.
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+data class StepResult(val ok: Boolean, val kind: String? = null)
+
+/**
+ * Connect your implementation to the spec actions/state.
+ *  - reset(): put the implementation in the same initial state as spec `init`
+ *  - step(action, params): drive one spec action; return a StepResult for
+ *    forbidden-rejection scenarios (null is fine for ordinary steps)
+ *  - observe(): project implementation state onto the spec's logical-state shape
+ *    (enum = name string, Option = null|value, Seq = List, Map = Map with string
+ *     keys, struct = Map)
+ */
+interface Adapter {
+    fun reset()
+    fun step(action: String, params: Map<String, Any?>): StepResult?
+    fun observe(): Map<String, Any?>
+}
+
+// Wire your implementation here. Return your adapter instead of null.
+fun makeAdapter(): Adapter? = null
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct)
+// shapes. Kotlin's `==` is deep on List/Map and discriminates Int from Double, so
+// leaf assertEquals does the right thing.
+fun assertPartial(observed: Map<String, Any?>, expected: Map<String, Any?>) {
+    for ((key, value) in expected) {
+        assertTrue(observed.containsKey(key), "missing state key $key")
+        val seen = observed[key]
+        if (value is Map<*, *> && seen is Map<*, *>) {
+            @Suppress("UNCHECKED_CAST")
+            assertPartial(seen as Map<String, Any?>, value as Map<String, Any?>)
+        } else {
+            assertEquals(value, seen, "state $key")
+        }
+    }
+}
+
+fun assertRejected(result: StepResult?, expectedKind: String?) {
+    assertNotNull(result, "forbidden step must return a StepResult")
+    assertFalse(result.ok)
+    if (expectedKind != null) {
+        assertEquals(expectedKind, result.kind)
+    }
+}
+'''
+
+
+def _kotlin_scenario_block(scen, seen_names):
+    name = scen["name"]
+    func = _unique_ident(name, seen_names, "scenario_")
+    lines = [
+        f"    @Test fun {func}() {{",
+        "        val a = makeAdapter() ?: return",
+        "        a.reset()",
+    ]
+    steps = scen.get("steps", [])
+    expected_states = scen.get("expected_states", [])
+    for i, step in enumerate(steps):
+        lines.append(
+            f"        a.step({_kotlin_string(step['action'])}, {_kotlin_literal(step['params'])})")
+        exp = expected_states[i] if i < len(expected_states) else {}
+        lines.append(f"        assertPartial(a.observe(), {_kotlin_literal(exp)})")
+    if scen.get("kind") == "forbidden" and scen.get("forbidden_step"):
+        forbidden_step = scen["forbidden_step"]
+        rejected_by = scen.get("rejected_by")
+        rejected = _kotlin_string(rejected_by) if rejected_by is not None else "null"
+        lines.append(
+            f"        val result = a.step({_kotlin_string(forbidden_step['action'])}, "
+            f"{_kotlin_literal(forbidden_step['params'])})")
+        lines.append(f"        assertRejected(result, {rejected})")
+    lines.append("    }")
+    return "\n".join(lines)
+
+
+def emit_kotlin(collected, spec_path, output_path=None):
+    spec = collected["spec"]
+    spec_name = collected["spec_name"]
+    scenario_data = collected["scenarios"]
+    walk = _bake_random_walk(spec)
+
+    body = [_KOTLIN_PREAMBLE.replace("__SOURCE__", Path(spec_path).name)]
+
+    class_lines = [f"class {spec_name}ConformanceTest {{"]
+    seen_names = {}
+    for scen in scenario_data:
+        class_lines.append("")
+        class_lines.append(_kotlin_scenario_block(scen, seen_names))
+
+    walk_type = "List<Triple<String, Map<String, Any?>, Map<String, Any?>>>"
+    if walk["steps"]:
+        walk_rows = ",\n".join(
+            f"            Triple({_kotlin_string(s['action'])}, "
+            f"{_kotlin_literal(s['params'])}, "
+            f"{_kotlin_literal(s['expected'])})"
+            for s in walk["steps"]
+        )
+        walk_literal = "listOf(\n" + walk_rows + ",\n        )"
+    else:
+        walk_literal = "listOf<Triple<String, Map<String, Any?>, Map<String, Any?>>>()"
+    class_lines.extend([
+        "",
+        "    @Test fun randomWalkConformance() {",
+        "        // random-walk conformance (baked oracle trace)",
+        "        val a = makeAdapter() ?: return",
+        "        a.reset()",
+        f"        val initial: Map<String, Any?> = {_kotlin_literal(walk['initial'])}",
+        "        assertPartial(a.observe(), initial)",
+        f"        val walk: {walk_type} = {walk_literal}",
+        "        for ((action, params, expected) in walk) {",
+        "            a.step(action, params)",
+        "            assertPartial(a.observe(), expected)",
+        "        }",
+        "    }",
+        "}",
+    ])
+    body.append("\n".join(class_lines))
+
+    return "\n\n".join(body) + "\n"
+
+
+# --------------------------------------------------------------------------
 # emitter dispatch + public API
 # --------------------------------------------------------------------------
 _EMITTERS = {
     "pytest": emit_pytest,
     "vitest": emit_vitest,
     "swift": emit_swift,
+    "kotlin": emit_kotlin,
 }
 
 # How each target names its default output file. Conventions diverge (prefix vs
@@ -649,6 +850,7 @@ _TARGET_OUTPUT_NAME = {
     "pytest": lambda name, module: f"test_{module}.py",
     "vitest": lambda name, module: f"{module}.test.ts",
     "swift": lambda name, module: f"{name}ConformanceTests.swift",
+    "kotlin": lambda name, module: f"{name}ConformanceTest.kt",
 }
 
 

@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc testgen --target kotlin`: a kotlin.test emitter (multiplatform; the JVM
+  delegates to JUnit), the fourth harness on the pluggable emitter from #43. Same
+  `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Dynamic
+  state is `Map<String, Any?>`, where Kotlin's structural `==` is deep on `List`/`Map`
+  and distinguishes `Int` from `Double`, so the partial-match helper is a plain
+  recursion. The one framework-forced divergence: kotlin.test has no portable runtime
+  skip, so `makeAdapter()` returns `null` until wired and each `@Test` returns early
+  rather than reporting "skipped". Strings escape `$` (Kotlin string templates).
+  Output defaults to `<SpecName>ConformanceTest.kt`. Docs: `docs/LANGUAGE.md` §12,
+  `skills/fsl/reference.md` §9, `docs/DESIGN-bridge.md` §3.3. (#45)
 - `fslc testgen --target swift`: a Swift Testing emitter (`import Testing` / `@Test` /
   `#expect`; not XCTest), the third harness on the pluggable emitter from #43. Same
   `reset`/`step`/`observe` `Adapter` contract and same baked-walk design as Vitest:

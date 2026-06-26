@@ -259,7 +259,7 @@ fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emi
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
-fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing)
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
@@ -423,6 +423,12 @@ emit the same scenarios:
   Option `None` bakes as the `FSLNull.instance` sentinel (no Foundation). Tests
   are disabled via `@Test(.enabled(if: isAdapterWired()))` until `makeAdapter()`
   is wired. Output defaults to `<SpecName>ConformanceTests.swift`.
+- `kotlin`: a self-contained kotlin.test file (multiplatform; JVM delegates to
+  JUnit), same `Adapter` contract and same baked walk. Dynamic state is
+  `Map<String, Any?>` — Kotlin's `==` is deep on `List`/`Map` and distinguishes
+  `Int`/`Double`, so the partial-match helper is a plain recursion. No portable
+  runtime skip, so an unwired `makeAdapter()` returns `null` and each test
+  returns early. Output defaults to `<SpecName>ConformanceTest.kt`.
 
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a
