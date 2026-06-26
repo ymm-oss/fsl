@@ -265,7 +265,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
-fslc testgen   <file.fsl> [--depth K] [--strict] [-o out.py]  # implementation-conformance pytest scaffold (§12)
+fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
@@ -693,11 +693,23 @@ implementation (see `DESIGN-bridge.md`).
 |---|---|
 | `fslc.runtime.Monitor` | A concrete interpreter of the spec (no Z3 needed). Embed it in the implementation for runtime checking |
 | `fslc replay` | Check a real system's event-log JSON against the spec |
-| `fslc testgen` | Generate a pytest conformance-test scaffold (wire the implementation into the Adapter) |
+| `fslc testgen` | Generate a conformance-test scaffold — pytest (default) or Vitest via `--target vitest` (wire the implementation into the Adapter) |
 
 Recommended workflow: **`verify` / `prove` the spec → generate the scaffold with
-`testgen` → wire the implementation into the `Adapter` → pytest**. `Monitor` is
-used as an oracle in random-walk testing.
+`testgen` → wire the implementation into the `Adapter` → run the tests**. `Monitor`
+is used as an oracle in random-walk testing.
+
+`testgen` separates a language-independent scenario-collection core (`scenarios`)
+from per-target emitters, so the same scenarios render to multiple harnesses:
+
+- `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
+  and drive the random walk live as the oracle.
+- `--target vitest`: emits a self-contained TypeScript (Vitest) file. Deterministic
+  scenarios and forbidden-rejection assertions translate directly; the random walk
+  is **baked at generation time** — the Python `Monitor` runs the fixed-seed walk and
+  the `(action, params, expected_state)` trace is embedded as a static fixture, so the
+  generated tests need **no `fslc`/Python at runtime**. The output extension defaults
+  to `<spec>.test.ts`.
 
 ```python
 from fslc import Monitor
@@ -709,7 +721,8 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 
 ```bash
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
-fslc testgen specs/cart_v1.fsl -o test_cart_v1.py   # partial reachability warnings unless --strict
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
+fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 ```
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated

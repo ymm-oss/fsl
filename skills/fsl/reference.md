@@ -259,7 +259,7 @@ fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emi
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
-fslc testgen <f> [--depth K] [--strict] [-o out.py]  # Adapter skeleton + conformance pytest
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
@@ -405,6 +405,18 @@ The random-walk test uses the Monitor (the spec's concrete interpreter) as the
 oracle, stepping through the implementation one step at a time. A failure = a
 divergence between implementation and spec (read the trace to decide which one is
 correct).
+
+`--target` chooses the harness; the scenario-collection core is shared, so both
+emit the same scenarios:
+- `pytest` (default): Python tests; the random walk imports `fslc.runtime.Monitor`
+  and runs the fixed-seed walk live as the oracle. Output defaults to `test_<spec>.py`.
+- `vitest`: a self-contained TypeScript (Vitest) file with the same `Adapter`
+  contract (`reset`/`step`/`observe`). Deterministic and forbidden scenarios map
+  directly; the random walk is **baked at generation time** (the Python Monitor
+  runs the seed-fixed walk and the `(action, params, expected_state)` trace is
+  embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
+  Until `makeAdapter()` is wired the suite is skipped. Output defaults to
+  `<spec>.test.ts`.
 
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a

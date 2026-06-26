@@ -481,15 +481,17 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=True, strict=False):
+def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=True, strict=False,
+                target="pytest"):
     try:
-        out_path = output or default_output_name(file)
+        out_path = output or default_output_name(file, target=target)
         bundle = generate_test_bundle(
             file,
             depth=depth,
             deadlock_mode=deadlock_mode,
             output_path=output if output else None,
             strict=strict,
+            target=target,
         )
         content = bundle["content"]
         if write_file and output:
@@ -497,6 +499,7 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
         result = {
             "result": "generated",
             "spec": bundle["spec"],
+            "target": bundle.get("target", target),
             "output": out_path,
             "content": content,
         }
@@ -678,6 +681,8 @@ def _build_arg_parser():
     tg.add_argument("file")
     tg.add_argument("--depth", type=int, default=8)
     tg.add_argument("-o", "--output", default=None)
+    tg.add_argument("--target", choices=["pytest", "vitest"], default="pytest",
+                    help="test harness to emit (default: pytest)")
     tg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
     tg.add_argument("--strict", action="store_true")
 
@@ -752,7 +757,8 @@ def _dispatch(args):
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "testgen":
         result = run_testgen(args.file, args.depth, args.output, args.deadlock,
-                            write_file=bool(args.output), strict=args.strict)
+                            write_file=bool(args.output), strict=args.strict,
+                            target=args.target)
         if result.get("result") == "generated":
             content = result.pop("content")
             out = result.get("output")
