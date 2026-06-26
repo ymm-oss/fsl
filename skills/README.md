@@ -16,6 +16,7 @@ artifacts by accident:
 | [`fsl-requirements/`](fsl-requirements/) | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `requirements` spec |
 | [`fsl-design/`](fsl-design/) | engineering design, internal state/actions, refinement mapping, testgen/replay handoff | kernel `spec` + mapping |
 | [`fsl-design-review/`](fsl-design-review/) | design review, variants, SOLID/LSP/OCP/substitutability judgment | contract-conformance report |
+| [`fsl-from-code/`](fsl-from-code/) | reverse-engineering a design spec from existing code, anchored by conformance back to that code | kernel `spec` + conformance harness |
 | [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
@@ -37,6 +38,9 @@ layers and needs lifecycle coordination.
   refinement guardrails
 - [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — review procedure and
   design-principle interpretation
+- [`fsl-from-code/SKILL.md`](fsl-from-code/SKILL.md) — code→design extraction
+  procedure, the formalization-memo question set, and the two-axis anti-hollow
+  conformance gate
 - [`fsl-delivery/SKILL.md`](fsl-delivery/SKILL.md) — lifecycle orchestration
   across business, requirements, design, verification, and implementation
   conformance

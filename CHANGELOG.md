@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Skill) `skills/fsl-from-code/` — reverse-engineers an FSL design-layer spec from
+  existing source code. Encodes the three-zone extraction (mechanical skeleton vs.
+  human-confirmed invariants vs. mechanical truth-check), a formalization-memo
+  question set that forces cross-action invariant discovery, and a two-axis
+  anti-hollow gate (`fslc mutate` for invariant teeth + the `testgen` harness
+  replayed against the real code for fidelity). Anchored downward via conformance,
+  not upward via refinement; specgraphen evaluated and not adopted.
 - examples/structural: Step 1 demand-validation specs for issue #35 (Alloy-style structural discovery via the populate+reachable idiom)
 - (Docs) New manual chapter "When to Use FSL" (`docs/intro/when-to-use.{ja,en}.html`,
   wired into the chapter nav as #2, after Concept): criteria for deciding whether to
