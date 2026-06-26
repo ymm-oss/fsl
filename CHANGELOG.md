@@ -14,6 +14,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `docs/DESIGN-spec-domains.md`. A new "Authoring specs as readable documentation"
   section in `skills/fsl/reference.md` records the doc-first conventions, and
   `examples/e2e/3_design.fsl` / `examples/e2e/2_requirements.fsl` are rewritten to it.
+- (Skill) `skills/fsl-from-code/` — reverse-engineers an FSL design-layer spec from
+  existing source code. Encodes the three-zone extraction (mechanical skeleton vs.
+  human-confirmed invariants vs. mechanical truth-check), a formalization-memo
+  question set that forces cross-action invariant discovery, and a two-axis
+  anti-hollow gate (`fslc mutate` for invariant teeth + the `testgen` harness
+  replayed against the real code for fidelity). Anchored downward via conformance,
+  not upward via refinement; specgraphen evaluated and not adopted.
 - examples/structural: Step 1 demand-validation specs for issue #35 (Alloy-style structural discovery via the populate+reachable idiom)
 - (Docs) New manual chapter "When to Use FSL" (`docs/intro/when-to-use.{ja,en}.html`,
   wired into the chapter nav as #2, after Concept): criteria for deciding whether to
@@ -24,6 +31,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (the one test + three gates, framed as a recommendation rather than a gate) so the
   agent filters out non-FSL-shaped tasks and recommends tests instead of writing a
   hollow spec.
+- (Skill) `skills/fsl-requirements/SKILL.md` now defines an explicit faithfulness
+  gate (definition of done): a step-1 coverage map from every source requirement to
+  an FSL element, mandatory provenance tags (`covers` or `MODEL:`/`ASSUME-n:`) on
+  every declaration, and a `fslc check --strict-tags` gate that must report zero
+  `untagged` and zero `unreferenced_requirement`. Closes the gap where specs derived
+  from a requirements document came out both thin (dropped requirements) and
+  over-reaching (invented rules).
 
 ### Changed
 - Removed the maintainer contact email from `SECURITY.md` and `pyproject.toml`;
