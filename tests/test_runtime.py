@@ -3,6 +3,8 @@ import sys
 import ast
 import copy
 import json
+import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -11,7 +13,7 @@ import pytest
 
 from fslc import parse, build_spec, verify, scenarios, FslError, Monitor
 from fslc.cli import run_replay, run_testgen, exit_code
-from fslc.testgen import generate_test_file
+from fslc.testgen import generate_test_file, generate_test_bundle, default_output_name
 
 ROOT = Path(__file__).resolve().parent.parent
 SPECS = ROOT / "specs"
@@ -375,6 +377,139 @@ def adapter():
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "failed" not in proc.stdout.lower()
+
+
+# --------------------------------------------------------------------------
+# testgen --target vitest (issue #43)
+# --------------------------------------------------------------------------
+def _node_supports_ts_check():
+    """True if a local `node --check` can syntax-check a typed .ts file."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    with tempfile.NamedTemporaryFile("w", suffix=".ts", delete=False, encoding="utf-8") as f:
+        # ESM probe with a type annotation: node only strips TS types when the
+        # file is detected as a module (the generated harness always imports vitest).
+        f.write('import { a } from "b";\nconst x: number = 1;\nvoid a;\nvoid x;\n')
+        probe = f.name
+    try:
+        proc = subprocess.run([node, "--check", probe], capture_output=True, text=True)
+        return proc.returncode == 0
+    finally:
+        Path(probe).unlink(missing_ok=True)
+
+
+def _assert_ts_syntax_ok(content):
+    if not _node_supports_ts_check():
+        pytest.skip("node with TypeScript stripping not available")
+    node = shutil.which("node")
+    with tempfile.NamedTemporaryFile("w", suffix=".test.ts", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        path = f.name
+    try:
+        proc = subprocess.run([node, "--check", path], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_testgen_vitest_emits_typescript_harness():
+    content = generate_test_file(str(SPECS / "cart_v1.fsl"), depth=8, target="vitest")
+
+    # Vitest harness shape, not pytest.
+    assert 'import { test, expect } from "vitest";' in content
+    assert "export interface Adapter {" in content
+    assert "function makeAdapter(): Adapter {" in content
+    assert "function assertPartial(" in content
+    assert "function assertRejected(" in content
+
+    # Scenarios are emitted as reset + step + partial-match assertions. The
+    # concrete witness Z3 returns for reach_/cover_ varies run to run, so assert
+    # on the stable scenario names and shape, not on specific step params
+    # (exact-step assertions live in the deterministic forbidden test below).
+    assert 'scenario("scenario: reach_SoldOut", () => {' in content
+    assert 'scenario("scenario: cover_add_to_cart", () => {' in content
+    assert 'scenario("scenario: cover_checkout", () => {' in content
+    assert "adapter.reset();" in content
+    assert 'adapter.step("add_to_cart"' in content
+    assert "assertPartial(adapter.observe()," in content
+
+    # Acceptance criterion: the random walk is baked, so the file needs no fslc
+    # / Python / Monitor at runtime. The only import is vitest; nothing is
+    # require()'d or shelled out to.
+    assert "const RANDOM_WALK: WalkStep[] = [" in content
+    assert "baked oracle trace" in content
+    import_lines = [ln for ln in content.splitlines() if ln.lstrip().startswith("import ")]
+    assert import_lines == ['import { test, expect } from "vitest";']
+    assert "require(" not in content
+
+    # The baked literals are well-formed JSON (language independent).
+    initial = re.search(
+        r"const RANDOM_WALK_INITIAL: Record<string, unknown> = (\{.*?\});", content)
+    assert initial, "missing baked initial state"
+    json.loads(initial.group(1))
+    walk = re.search(r"const RANDOM_WALK: WalkStep\[\] = (\[.*?\n\]);", content, re.DOTALL)
+    assert walk, "missing baked walk array"
+    steps = json.loads(re.sub(r",(\s*\])", r"\1", walk.group(1)))  # drop TS trailing comma
+    assert steps, "cart_v1 should bake a non-empty random walk"
+    assert all({"action", "params", "expected"} <= set(s) for s in steps)
+    assert {s["action"] for s in steps} <= {"add_to_cart", "remove_from_cart", "checkout"}
+
+    _assert_ts_syntax_ok(content)
+
+
+def test_testgen_vitest_forbidden_rejection(tmp_path):
+    src = """
+requirements ForbiddenVitest {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid, Shipped, Cancelled }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  action pay(o: OrderId) { requires order[o] == Cart order[o] = Paid }
+  action ship(o: OrderId) { requires order[o] == Paid order[o] = Shipped }
+  action cancel(o: OrderId) { requires order[o] == Paid order[o] = Cancelled }
+  forbidden FB-1 "shipped order cannot be cancelled" {
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "forbidden_vitest.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    content = generate_test_file(str(path), depth=4, target="vitest")
+
+    assert 'scenario("scenario: forbidden_FB-1", () => {' in content
+    assert 'const result = adapter.step("cancel", {"o": 0});' in content
+    assert 'assertRejected(result, "requires_failed");' in content
+    # Enum values are baked as their member-name strings.
+    assert 'assertPartial(adapter.observe(), {"order": {"0": "Paid", "1": "Cart"}});' in content
+
+    _assert_ts_syntax_ok(content)
+
+
+def test_testgen_vitest_output_name_and_target(tmp_path):
+    spec = str(SPECS / "cart_v1.fsl")
+    # ShoppingCart -> shoppingCart.test.ts (vitest) ; test_shoppingCart.py (pytest, unchanged)
+    assert default_output_name(spec, target="vitest") == "shoppingCart.test.ts"
+    assert default_output_name(spec, target="pytest") == "test_shoppingCart.py"
+    assert default_output_name(spec) == "test_shoppingCart.py"  # default stays pytest
+
+    out = tmp_path / "cart.test.ts"
+    result = run_testgen(spec, output=str(out), target="vitest")
+    assert result["result"] == "generated"
+    assert result["target"] == "vitest"
+    assert result["output"] == str(out)
+    written = out.read_text(encoding="utf-8")
+    assert written.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert 'import { test, expect } from "vitest";' in written
+
+
+def test_testgen_unknown_target_rejected():
+    with pytest.raises(ValueError):
+        generate_test_bundle(str(SPECS / "cart_v1.fsl"), depth=4, target="jest")
 
 
 def test_enabled_matches_guarded_instances():

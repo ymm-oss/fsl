@@ -124,8 +124,14 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [--strict] [-o <out.py>]    # default: test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
+
+The scenario-collection core (`scenarios()`) is language independent, so `testgen.py`
+splits into that shared core (`_collect_scenarios`) plus per-target emitters
+(`emit_pytest` / `emit_vitest`) chosen by `--target`. Adding a harness (Jest, Go, …)
+is a new emitter, not a redesign — the same kernel-stays-narrow principle as the
+dialect frontends.
 
 The output is a **self-contained pytest file** (the primary dependencies are
 `fslc.runtime` and `pytest`. In addition, only the standard library needed for
@@ -154,6 +160,31 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
    the fail message as **a bug in the spec itself**.
 4. While the Adapter is unimplemented (NotImplementedError), make all tests
    `pytest.skip`, so that pytest does not error even right after generation.
+
+### 3.1 `--target vitest` (TypeScript / Vitest)
+
+The Vitest emitter renders the **same scenarios** to a self-contained TypeScript
+file with the same `reset`/`step`/`observe` `Adapter` contract. Parts 1, 2, and 4
+above port directly: an `Adapter` interface + `makeAdapter()` stub, deterministic
+scenario tests (`assertPartial`), forbidden-rejection tests (`assertRejected`), and
+skip-when-unwired (a top-level guard flips `test` to `test.skip`).
+
+Part 3 — the random walk — is the one real design point, because TypeScript has no
+`Monitor`. The chosen approach **bakes the trace at generation time**: the Python
+Monitor runs the fixed-seed (`Random(0)`) walk and the resulting
+`(action, params, expected_state)` sequence is embedded as a static fixture; the
+Vitest test only replays it and asserts. Rationale:
+
+- The walk is already deterministic (`Random(0)` + deterministic Monitor), so baking
+  under the same seed yields the identical trace — equal coverage, nothing lost.
+- It keeps the **single independent oracle** invariant: there is still exactly one
+  Monitor (in Python), not a second reimplementation in TypeScript.
+- The generated file is `fslc`-free at runtime — no shell-out, no Python dependency.
+
+Rejected alternatives: (b) shelling out to `fslc` from the TS test (adds a runtime
+coupling), and (c) porting `Monitor` to TS (duplicates the dual-evaluator surface
+that the agreement/oracle tests exist to protect). Output defaults to
+`<spec>.test.ts`.
 
 ## 4. CLI / public API
 

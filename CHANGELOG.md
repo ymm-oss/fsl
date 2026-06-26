@@ -6,6 +6,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc testgen --target {pytest,vitest}` (default `pytest`): the emitter is now
+  pluggable. `testgen.py` separates the language-independent scenario-collection
+  core (`scenarios()`) from per-target emitters (`emit_pytest`/`emit_vitest`), so a
+  new harness is a backend, not a redesign. The first new target is **Vitest**: a
+  self-contained TypeScript file with the same `reset`/`step`/`observe` `Adapter`
+  contract. Deterministic and forbidden-rejection scenarios translate directly; the
+  `random-walk` oracle is **baked at generation time** — the Python `Monitor` runs the
+  fixed-seed (`Random(0)`) walk and the `(action, params, expected_state)` trace is
+  embedded as a static fixture, so the generated tests require no `fslc`/Python at
+  runtime (the single independent oracle stays in Python). pytest output is unchanged
+  (byte-for-byte on identical scenario input). Vitest output defaults to
+  `<spec>.test.ts`; `--target` and `target` flow through `cli.py`/`run_testgen`.
+  Docs: `docs/LANGUAGE.md` §12 and `skills/fsl/reference.md` §9. (#43)
 - Kernel `spec` now accepts `entity`/`number` declarations (previously dialect-only),
   desugared to `type X = lo..hi` via the `verify` block (`instances`/`values`). This
   separates domain identity from the verification world size so a design-layer spec
