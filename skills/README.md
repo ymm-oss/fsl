@@ -7,7 +7,9 @@ extension or by manual copy.
 ## Skill set
 
 FSL work is split by layer so an agent does not turn PM requirements into design
-artifacts by accident:
+artifacts by accident — but the layers are also **connected by refinement**, and
+verifying that connection (cross-layer alignment / traceability) is one of FSL's
+primary uses, not a tail-end advanced topic:
 
 | Skill | Use for | Main deliverable |
 |---|---|---|
@@ -21,8 +23,14 @@ artifacts by accident:
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or
-repairing verifier output. Use `fsl-delivery/` when the task spans multiple
-layers and needs lifecycle coordination.
+repairing verifier output.
+
+**Cross-layer alignment is one of FSL's primary uses.** When the value is in the
+*seams* — a requirement provably honored by the design, a control preserved across an
+As-Is→To-Be change, end-to-end traceability — reach for `fsl-delivery/`. It
+orchestrates business ⊒ requirements ⊒ design ⊒ implementation and gates the seams
+with `chain` / `refine` / `implements`. Use a single role skill when one layer is the
+whole job; use `fsl-delivery/` whenever keeping the layers aligned is the deliverable.
 
 ## Files
 

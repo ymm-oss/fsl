@@ -40,6 +40,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   over-reaching (invented rules).
 
 ### Changed
+- (Skill) Reframed the FSL skill set from "single-spec verification" toward
+  "verifying cross-layer connection" (issue #48) — framing/routing only, no kernel
+  or verifier change. `skills/fsl/SKILL.md` gains a one-paragraph connectivity lead,
+  a connectivity-value lens in the fit self-check (a recommended lens with an
+  abstraction-tax warning, explicitly *not* a fourth gate), a "Connected workflow
+  (across layers)" juxtaposed with the single-spec workflow with `implements` /
+  `refine` / `preserve progress` / `chain` as first-class operations, and a
+  heading-level "Two soundness facts about connection" (safety descends but liveness
+  does not; a chain is only as strong as its refinement soundness). Role boundaries
+  are now stated as refinement seams (contracts), not plain baton passes, and the six
+  role skills (`fsl-business` / `fsl-requirements` / `fsl-design` /
+  `fsl-design-review` / `fsl-delivery` / `fsl-from-code`) are audited to express the
+  handoff consistently. `skills/README.md` promotes cross-layer alignment
+  (`fsl-delivery`) to a primary use, and the same connectivity-value criterion is
+  synced into the manual's "When to Use FSL" chapter
+  (`docs/intro/when-to-use.{ja,en}.html`).
 - Removed the maintainer contact email from `SECURITY.md` and `pyproject.toml`;
   vulnerability reports are now routed solely through GitHub Security Advisories
   (Private Vulnerability Reporting).
