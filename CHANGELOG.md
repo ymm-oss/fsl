@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc testgen --target swift`: a Swift Testing emitter (`import Testing` / `@Test` /
+  `#expect`; not XCTest), the third harness on the pluggable emitter from #43. Same
+  `reset`/`step`/`observe` `Adapter` contract and same baked-walk design as Vitest:
+  deterministic and forbidden-rejection scenarios translate directly; the random walk
+  is baked at generation time so the file needs no `fslc`/Python at runtime. Dynamic
+  state is `[String: Any]` with a bundled `fslEqual`/`assertPartial` deep-equality
+  helper (`Int`/`Double` kept distinct); an Option `None` bakes as the self-contained
+  `FSLNull.instance` sentinel (no Foundation). Tests are disabled via
+  `@Test(.enabled(if: isAdapterWired()))` until `makeAdapter()` is wired. Output
+  defaults to `<SpecName>ConformanceTests.swift` (output naming is now a per-target
+  registry). Docs: `docs/LANGUAGE.md` §12, `skills/fsl/reference.md` §9,
+  `docs/DESIGN-bridge.md` §3.2. (#44)
 - `fslc testgen --target {pytest,vitest}` (default `pytest`): the emitter is now
   pluggable. `testgen.py` separates the language-independent scenario-collection
   core (`scenarios()`) from per-target emitters (`emit_pytest`/`emit_vitest`), so a

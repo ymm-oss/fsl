@@ -259,7 +259,7 @@ fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emi
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
-fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest)
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
@@ -417,6 +417,12 @@ emit the same scenarios:
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
   Until `makeAdapter()` is wired the suite is skipped. Output defaults to
   `<spec>.test.ts`.
+- `swift`: a self-contained Swift Testing file (`import Testing` / `@Test` /
+  `#expect`; not XCTest), same `Adapter` contract and same baked walk. Dynamic
+  state is `[String: Any]` with a bundled deep-equality + partial-match helper;
+  Option `None` bakes as the `FSLNull.instance` sentinel (no Foundation). Tests
+  are disabled via `@Test(.enabled(if: isAdapterWired()))` until `makeAdapter()`
+  is wired. Output defaults to `<SpecName>ConformanceTests.swift`.
 
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a
