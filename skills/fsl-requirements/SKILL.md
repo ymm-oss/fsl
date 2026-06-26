@@ -114,7 +114,11 @@ design decision but does not state it, ask rather than choosing.
   or record why not (out-of-scope / needs-decision) — but never close a gap by
   inventing a rule the source does not state.
 - Stop at the requirements contract. Do not continue into design just because a
-  design could be inferred.
+  design could be inferred. The handoff downward is a **refinement seam, not a plain
+  baton pass**: when design work begins, this spec becomes the frozen contract the
+  design layer refines via `fslc refine`, so author it as a contract a lower layer can
+  honor. Upward, `implements BusinessName` is the same kind of seam to the business
+  layer — `verify` checks it and reports it under `implements` in the result JSON.
 - Do not add retries, storage rules, asynchronous jobs, queues, screen internals,
   or API shape unless the source explicitly requires them.
 - A green `implements` result means the requirements contract conforms to the

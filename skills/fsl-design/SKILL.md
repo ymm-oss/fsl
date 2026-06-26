@@ -7,7 +7,10 @@ description: Write and verify FSL design-layer specs for engineers from an agree
 
 Use this skill after a requirements contract exists or the user explicitly asks
 for engineering design. The design layer is an ordinary kernel `spec` plus an
-optional refinement mapping back to the requirements layer.
+optional refinement mapping back to the requirements layer. That mapping is the
+**refinement seam, not a plain baton pass**: the design must refine the (frozen)
+requirements contract, and `fslc refine` verifies the seam. When a seam breaks,
+repair the design or the mapping — not the upper contract, unless a human revises it.
 
 Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
 shared FSL verifier workflow and language rules. When working inside this

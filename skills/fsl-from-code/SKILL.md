@@ -9,8 +9,11 @@ Use this skill when the input is **existing code** and the deliverable is an FSL
 **design-layer** spec. The direction is the reverse of `fsl-design`: there is no
 upper requirements contract to refine to, so the spec is anchored **downward** —
 its faithfulness is proved by replaying the generated conformance harness against
-the very code it was read from. If the user later wants an upper requirements
-contract, that is `fsl-design`'s job, not this skill's.
+the very code it was read from. That conformance harness is this skill's **seam**:
+the downward analogue of a refinement seam, a contract checked against real code
+rather than against an upper spec. If the user later wants an upper requirements
+contract, building that *upward* refinement seam is `fsl-design`'s job, not this
+skill's.
 
 Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
 shared language rules, verifier workflow, and repair protocol. Inside this

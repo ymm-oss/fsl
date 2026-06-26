@@ -12,6 +12,15 @@ read it before writing a spec). Within the repository, `docs/LANGUAGE.md` is the
 complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
 form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
 
+**What makes FSL different — connectivity, not just per-spec checking.** Classic
+formal methods describe one hard spot and verify it in isolation (the "island"
+model). FSL's distinctive value is stitching business ⊒ requirements ⊒ design
+together with refinement, so **cross-layer alignment (traceability) is itself
+checkable** — the dominant question moves from "is this spec correct?" to "do these
+layers still mean the same thing?" Verify a one-off hard spot with a single spec;
+when the value is keeping the layers aligned, reach for the connected workflow
+(`fslc chain`) and the `fsl-delivery` skill. The two workflows are juxtaposed below.
+
 ## First, decide whether FSL fits (self-check)
 
 Before reaching for a spec, run this filter. FSL is not for every task, and forcing
@@ -42,6 +51,19 @@ inventory/allocation, permissions/audit, queues/async, SLA/timeout/retry, screen
 transitions / double-submit / unsaved-changes. Out of scope: real time, probability,
 continuous money, free-text correctness, absolute latency.
 
+**A recommended second lens (optional — not a fourth gate): is there connectivity
+value?** The three gates score a spec *as a single island*. But FSL can also verify
+*cross-layer alignment*, so a spec that rates "low priority (possible but thin)" on
+its own can be high-value once connection is the point — a requirement provably
+honored by the design, a regulatory control that still bites at the lowest layer, an
+As-Is→To-Be change that preserves a control. When that alignment is the deliverable,
+author the layers and gate the seams with `chain` (the connected workflow below) even
+if any single layer is thin. The converse is the **abstraction tax**: if there is
+really only one hard altitude, do *not* manufacture three layers — you would just
+write the same thing three times at different verbosity. Island-shaped hard spots
+stay single-spec, exactly as before. This is a judgment lens, never a mandate to make
+every task three-layered. (Same criterion in the manual's "When to Use FSL" chapter.)
+
 Even past the gates, the value is conditional: **FSL checks the spec, not the
 product.** If no human owns the rules, or (for conformance) no faithful Adapter/log
 is feasible, keep it to lightweight pre-implementation review and do not claim
@@ -67,6 +89,12 @@ If a PM asks for a requirements specification, do not continue into design
 artifacts unless explicitly asked. If a consultant asks for business controls, do
 not infer system requirements. If an engineer asks for design, do not weaken the
 upper business/requirements contract to make refinement pass.
+
+These boundaries are not mere hygiene: each handoff is a **refinement seam, not a
+plain baton pass**. The lower layer refines the upper one (`implements` at the
+requirements→business seam, `fslc refine` at the design→requirements seam), so the
+upper spec is a frozen contract and the seam itself is verified — which is exactly
+why weakening the upper layer to make a lower one pass defeats the point.
 
 ## Prerequisite: the fslc verifier
 
@@ -179,7 +207,7 @@ the formalization memo.**
 | "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
 | "the total equals X" / "the count is X" (aggregate consistency) | an invariant over `sum(...)` / `count(...)` |
 
-## Standard workflow (treat proved as the standard)
+## Standard workflow (single spec; treat proved as the standard)
 
 1. Write the spec → `fslc check file.fsl` (syntax and types only, fast; fix
    following the error's `loc`/`expected`/`hint`).
@@ -214,6 +242,53 @@ the formalization memo.**
    contract**. If implementation conformance is also required, anchor to the
    implementation with `testgen` (pytest via an Adapter) / `replay` (matching
    against execution logs).
+
+## Connected workflow (across layers — when alignment is the deliverable)
+
+When the value is cross-layer alignment rather than one spec (the connectivity lens
+in the self-check), the workflow changes shape: author each layer, then verify the
+**seams** between them. Here the connecting operations are the stars, not an advanced
+afterthought. (Layer syntax: reference.md §10 and "Three-layer dialects" below; route
+authoring through the role skills.)
+
+1. **Author each layer** as its own spec — `business` ⊒ `requirements` ⊒ `design`
+   (⊒ implementation) — via the role skills (fsl-business / fsl-requirements /
+   fsl-design). Verify each on its own first with the single-spec workflow above
+   (`check` → `verify` → `--engine induction`).
+2. **Stitch the seams downward — each seam is a refinement obligation = a contract:**
+   - requirements → business: put `implements BusinessName from "business.fsl" { }`
+     in the requirements spec; `verify` then also runs the refine and reports it under
+     the `implements` field of the result JSON (an empty body auto-generates identity
+     refinement when names match).
+   - design → requirements: a mapping file + `fslc refine design.fsl requirements.fsl
+     mapping.fsl`.
+   - when an upper response must survive the seam, add
+     `preserve progress { respond AbsLeadsTo by impl_action, ... }` to the mapping
+     (see the soundness note below).
+3. **Gate the whole chain at once** with `fslc chain fsl-project.toml`: it runs
+   business → requirements → design → impl from a manifest and returns a per-layer
+   table (a failed layer stops the chain unless `--keep-going`). This is the connected
+   analogue of single-spec `verify`.
+4. **Read counterexamples by seam.** A `refinement_failed` / `implements.violation`
+   names the seam that broke; repair in line with the contract — never weaken the
+   upper layer just to make the lower one pass (that hollows out the very traceability
+   the chain exists to prove).
+
+### Two soundness facts about connection (read before trusting a chain)
+
+- **Safety descends, liveness does not.** Refinement propagates safety (`invariant` /
+  `trans`) downward for free, but a response property (`leadsTo`) does **not** ride
+  down with it: a safety refinement can return `refines` while a lower-layer `leadsTo`
+  fails. To keep an upper response across a seam, either re-prove it at the layer that
+  owns progress, or pull it through the mapping with `preserve progress` (failure is
+  `refinement_failed / progress_lost`; the actual lasso exclusion still comes from
+  lower-layer `fair action` declarations). This is a general property of forward
+  simulation, not an fslc limitation.
+- **A chain is exactly as strong as its refinement soundness.** "Verified
+  traceability" is real only if each seam genuinely fails when it should; a link that
+  silently passes where it ought to break turns the chain into false confidence. So
+  treat a green seam like a green single spec — confirm it is not vacuous (e.g. the
+  `mutate` kill-rate per layer) and never relax a mapping just to turn a seam green.
 
 ## Repair protocol (result → next move)
 
@@ -413,10 +488,13 @@ The flagship example threading all three roles through one domain is
 
 A spec can be written in three layers. Chain **business ⊒ requirements ⊒ design ⊒
 implementation** via refinement (syntax in reference.md §10). Every layer expands
-to the kernel, so verify/induction/scenarios/Monitor are used identically:
+to the kernel, so verify/induction/scenarios/Monitor are used identically. This
+section is the **per-layer syntax**; for driving the layers end-to-end with
+`implements` / `refine` / `chain`, see the connected workflow above.
 
-Treat the layer boundary as part of the contract. Do not move to the lower layer
-unless the user asks for it or the relevant role skill directs it.
+Treat the layer boundary as part of the contract — it is the refinement seam the
+lower layer must honor. Do not move to the lower layer unless the user asks for it or
+the relevant role skill directs it.
 
 - `business Name { process/control/policy/kpi/goal }` — the consulting layer. For
   PM/consulting-facing files, prefer the readable stage syntax for common rules:

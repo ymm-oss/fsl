@@ -73,3 +73,8 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
   interpretation. It does not prove downstream requirements, design, or code.
 - If the user later asks for requirement IDs, acceptance criteria, or NFR deadlines,
   switch to `fsl-requirements` and treat this business file as the upper contract.
+  The handoff is a **refinement seam, not a plain baton pass**: the requirements
+  layer will `implements` this business spec, so this file becomes the frozen contract
+  that the lower layer must refine, and the seam is verified at the lower layer's
+  `verify` time. Author this spec so that seam can hold — do not leave controls/goals
+  that only a later weakening could satisfy.

@@ -57,10 +57,14 @@ rules in this skill.
    - `fslc check <file>`
    - `fslc verify <file> --depth 8`
    - `fslc verify <file> --engine induction`
-5. Connect layers downward:
-   - requirements implements/refines business
-   - design refines requirements with an explicit mapping
+5. Connect layers downward. Each handoff is a **refinement seam (a contract), not a
+   plain baton pass** — the seam itself is verified, and a green chain is exactly as
+   strong as the soundness of these seams:
+   - requirements implements/refines business (`implements`, reported under the
+     `implements` field of the requirements `verify` JSON)
+   - design refines requirements with an explicit mapping (`fslc refine`)
    - implementation conforms through generated tests or event-log replay
+   - gate the whole chain at once with `fslc chain` when a manifest exists
 6. Report proof categories separately. Never collapse "model is verified",
    "design refines requirements", and "implementation conforms" into one claim.
 
