@@ -124,7 +124,7 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
 
 The scenario-collection core (`scenarios()`) is language independent, so `testgen.py`
@@ -240,6 +240,31 @@ again reusing the baked walk. The choices:
 (No `swiftc -parse`-style syntax gate in tests: kotlinc has no dependency-free
 parse-only mode — a real compile needs kotlin-test on the classpath — so the Kotlin
 tests assert on harness shape and the baked walk instead.)
+
+### 3.4 `--target dart` (package:test)
+
+The Dart emitter renders the same scenarios to a self-contained `package:test` file
+(which also runs under `flutter test`), reusing the baked walk. The choices:
+
+- **Equality is the catch.** `params`/`observe()` are `Map<String, dynamic>`, and
+  Dart's `==` is *reference* equality on `List`/`Map`, not structural. Rather than
+  pull in `package:collection`'s `DeepCollectionEquality`, `assertPartial` recurses
+  by the expected keys and compares leaves/sequences with the `equals` matcher, which
+  *is* deep and is re-exported by `package:test` — so the generated file's only
+  dependency stays `package:test`.
+- **int/float.** Unlike PHP, Dart treats `1 == 1.0` as true, so `_dart_literal`
+  renders the right syntax (`1` vs `1.0`) but the values compare equal — this is Dart
+  semantics, not a fidelity gap.
+- **Skip-when-unwired.** `package:test`'s `skip:` argument is static, so a top-level
+  `_adapterWired()` probe runs once in `main()` and every `test(..., skip: wired ?
+  null : 'Adapter not wired')` is conditionally skipped until an adapter is connected.
+- **Literals.** Strings are single-quoted with `$` escaped (interpolation); empty
+  collections carry explicit type args (`<String, dynamic>{}`); the baked walk is a
+  `List<Map<String, dynamic>>` of `{action, params, expected}`. Output defaults to
+  `<spec_name>_conformance_test.dart` (snake_case + the runner's `_test.dart` suffix).
+
+(No syntax gate in tests: `dart analyze` needs a pub package context, so there is no
+clean dependency-free parse-only mode — the Dart tests assert on shape + baked walk.)
 
 ## 4. CLI / public API
 
