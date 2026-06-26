@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Kernel `spec` now accepts `entity`/`number` declarations (previously dialect-only),
+  desugared to `type X = lo..hi` via the `verify` block (`instances`/`values`). This
+  separates domain identity from the verification world size so a design-layer spec
+  reads as documentation instead of asserting a domain size that is only a model
+  bound. Reuses the requirements desugar path (no new semantics); see
+  `docs/DESIGN-spec-domains.md`. A new "Authoring specs as readable documentation"
+  section in `skills/fsl/reference.md` records the doc-first conventions, and
+  `examples/e2e/3_design.fsl` / `examples/e2e/2_requirements.fsl` are rewritten to it.
 - (Skill) `skills/fsl-from-code/` — reverse-engineers an FSL design-layer spec from
   existing source code. Encodes the three-zone extraction (mechanical skeleton vs.
   human-confirmed invariants vs. mechanical truth-check), a formalization-memo

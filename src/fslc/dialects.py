@@ -27,6 +27,8 @@ def _parse_file(path):
         return expand_business(ast), {}
     if ast[0] == "governance":
         return expand_governance_with_display(ast, str(Path(path).parent))
+    if ast[0] == "spec":
+        return expand_spec_domains(ast), {}
     return ast, {}
 
 
@@ -111,6 +113,75 @@ def _collect_verify_bounds(items):
                 values[name] = (lo, hi)
                 locs["values"][name] = loc
     return instances, values, locs
+
+
+def _collect_entity_number_locs(items):
+    """Scan `entity`/`number` declarations into name->loc maps, with duplicate and
+    entity/number-conflict checks. Shared by the requirements dialect and `spec`."""
+    entity_locs = {}
+    number_locs = {}
+    for item in items:
+        tag = item[0]
+        if tag == "entity":
+            _, entity_name, loc = item
+            if entity_name in entity_locs:
+                _err(f"duplicate entity '{entity_name}'", loc=loc)
+            if entity_name in number_locs:
+                _err(f"'{entity_name}' cannot be both entity and number", loc=loc)
+            entity_locs[entity_name] = loc
+        elif tag == "number":
+            _, number_name, loc = item
+            if number_name in number_locs:
+                _err(f"duplicate number '{number_name}'", loc=loc)
+            if number_name in entity_locs:
+                _err(f"'{number_name}' cannot be both entity and number", loc=loc)
+            number_locs[number_name] = loc
+    return entity_locs, number_locs
+
+
+def _entity_number_to_types(entity_locs, number_locs, instances, values, bound_locs):
+    """Lower `entity`/`number` declarations to kernel `type X = lo..hi` decls using
+    the verify-block bounds. Shared by the requirements dialect and kernel `spec`."""
+    out = []
+    for entity_name, loc in entity_locs.items():
+        if entity_name not in instances:
+            _err(f"entity '{entity_name}' has no 'instances' bound in verify block", loc=loc)
+        n = instances[entity_name]
+        if n < 1:
+            _err(f"entity '{entity_name}' instances bound must be >= 1", loc=bound_locs["instances"][entity_name])
+        out.append(("type", entity_name, ("num", 0), ("num", n - 1)))
+    for number_name, loc in number_locs.items():
+        if number_name not in values:
+            _err(f"number '{number_name}' has no 'values' bound in verify block", loc=loc)
+        lo, hi = values[number_name]
+        out.append(("type", number_name, lo, hi))
+    for entity_name in instances:
+        if entity_name not in entity_locs:
+            _err(
+                f"verify instances for undeclared entity '{entity_name}'",
+                loc=bound_locs["instances"][entity_name],
+            )
+    for number_name in values:
+        if number_name not in number_locs:
+            _err(
+                f"verify values for undeclared number '{number_name}'",
+                loc=bound_locs["values"][number_name],
+            )
+    return out
+
+
+def expand_spec_domains(ast):
+    """Desugar `entity`/`number` declarations in a kernel `spec` into `type` decls
+    using the `verify` block bounds. A spec without `entity`/`number` is returned
+    unchanged, so existing kernel specs are unaffected."""
+    _, name, items = ast
+    if not any(it[0] in ("entity", "number") for it in items):
+        return ast
+    instances, values, bound_locs = _collect_verify_bounds(items)
+    entity_locs, number_locs = _collect_entity_number_locs(items)
+    type_items = _entity_number_to_types(entity_locs, number_locs, instances, values, bound_locs)
+    rest = [it for it in items if it[0] not in ("entity", "number", "verify_bounds")]
+    return ("spec", name, type_items + rest)
 
 
 def _with_meta(item, meta):
@@ -744,27 +815,10 @@ def _expand_requirements_with_display(ast, base_dir):
     generated_names = []
     consts = _collect_consts(items)
     instances, values, bound_locs = _collect_verify_bounds(items)
-    entity_locs = {}
-    number_locs = {}
+    entity_locs, number_locs = _collect_entity_number_locs(items)
     process_entity_locs = {}
-
     for item in items:
-        tag = item[0]
-        if tag == "entity":
-            _, entity_name, loc = item
-            if entity_name in entity_locs:
-                _err(f"duplicate entity '{entity_name}'", loc=loc)
-            if entity_name in number_locs:
-                _err(f"'{entity_name}' cannot be both entity and number", loc=loc)
-            entity_locs[entity_name] = loc
-        elif tag == "number":
-            _, number_name, loc = item
-            if number_name in number_locs:
-                _err(f"duplicate number '{number_name}'", loc=loc)
-            if number_name in entity_locs:
-                _err(f"'{number_name}' cannot be both entity and number", loc=loc)
-            number_locs[number_name] = loc
-        elif tag == "biz_process":
+        if item[0] == "biz_process":
             _, entity_name, _fields, _parts, loc = item
             process_entity_locs.setdefault(entity_name, loc)
 
@@ -773,30 +827,7 @@ def _expand_requirements_with_display(ast, base_dir):
             _err(f"'{entity_name}' cannot be both process entity and number", loc=loc)
         entity_locs.setdefault(entity_name, loc)
 
-    for entity_name, loc in entity_locs.items():
-        if entity_name not in instances:
-            _err(f"entity '{entity_name}' has no 'instances' bound in verify block", loc=loc)
-        n = instances[entity_name]
-        if n < 1:
-            _err(f"entity '{entity_name}' instances bound must be >= 1", loc=bound_locs["instances"][entity_name])
-        out.append(("type", entity_name, ("num", 0), ("num", n - 1)))
-    for number_name, loc in number_locs.items():
-        if number_name not in values:
-            _err(f"number '{number_name}' has no 'values' bound in verify block", loc=loc)
-        lo, hi = values[number_name]
-        out.append(("type", number_name, lo, hi))
-    for entity_name in instances:
-        if entity_name not in entity_locs:
-            _err(
-                f"verify instances for undeclared entity '{entity_name}'",
-                loc=bound_locs["instances"][entity_name],
-            )
-    for number_name in values:
-        if number_name not in number_locs:
-            _err(
-                f"verify values for undeclared number '{number_name}'",
-                loc=bound_locs["values"][number_name],
-            )
+    out.extend(_entity_number_to_types(entity_locs, number_locs, instances, values, bound_locs))
 
     processes, process_by_name = _collect_requirements_processes(items, entity_locs, number_locs)
     process_by_ast_name = {proc["name"]: proc for proc in processes}

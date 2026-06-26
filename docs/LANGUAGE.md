@@ -47,10 +47,16 @@ spec <Name> {
 }
 ```
 
-Business and requirements dialects also have type-kinds whose finite domains are
-set by a sibling top-level `verify` block rather than by inline ranges:
+Any layer — including a kernel `spec` — may declare identity/number sorts whose
+finite sizes come from a sibling top-level `verify` block instead of an inline
+`type X = lo..hi` range. This keeps the domain declaration (what exists) separate
+from the verification world size (how much is checked):
 
 ```fsl
+spec <Name> {
+  entity <Entity>          // identity sort; size from verify { instances <Entity> = N }
+  number <Number>          // numeric sort; range from verify { values <Number> = lo..hi }
+}
 business <Name> {
   entity <Entity>
 }
@@ -64,6 +70,11 @@ verify {
   values <Number> = <lo>..<hi>
 }
 ```
+
+`entity`/`number` desugar to `type <Name> = lo..hi` before verification, so they
+are exactly equivalent to writing the bounded type directly — the difference is
+only readability (a design spec reads as documentation instead of asserting a
+domain size that is really a model bound). See `docs/DESIGN-spec-domains.md`.
 
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
@@ -102,8 +113,8 @@ used for the base BMC check and reachable/coverage evidence.
 |---|---|---|
 | `Int` / `Bool` | `count: Int` | Unbounded integer / boolean |
 | Domain type | `type Qty = 0..5` | Bounded integer. **The range is checked automatically** (§6) |
-| Entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements. Size is set by `verify { instances Claim = N }` |
-| Number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements. Range is set by `verify { values Amount = lo..hi }` |
+| Entity kind | `entity Claim` / `process Claim ...` | Finite identity sort. Allowed in any layer incl. kernel `spec`; size set by `verify { instances Claim = N }`; desugars to `type Claim = 0..N-1` |
+| Number kind | `number Amount` | Finite numeric sort. Allowed in any layer incl. kernel `spec`; range set by `verify { values Amount = lo..hi }`; desugars to `type` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
 | struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | Fields are scalars or `Option<scalar>` |
 | `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`. Used instead of a sentinel value |

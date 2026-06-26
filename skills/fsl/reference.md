@@ -424,6 +424,33 @@ leadsTo / action:
 `invariant PaidLedger "REQ-3: ledger consistency" { ... }` →
 `requirement: {id, text}` in violated / unknown_cti / coverage diagnostic / scenarios.
 
+### Authoring specs as readable documentation (requirements + design)
+
+The spec source IS the documentation: a rule you can read is also the rule that is
+verified, so it never drifts. In the requirements and design (kernel) layers:
+
+1. **Tag every invariant/action/property** with `"ID: one-sentence intent"` — the only
+   in-source prose that flows into all output (explain / html / counterexamples). It is
+   NOT verified, so keep it a faithful paraphrase of the expression, not a rival truth.
+2. **Quarantine verification scaffolding by ID prefix.** Domain rules: `REQ-…` / `INV-…`.
+   Verification-only artifacts (k-induction CTI auxiliary invariants, ghost-counter
+   relations): `MODEL-…` / `ASSUME-…`, so a reader can skip them.
+3. **Prefer member-quantification** `forall x in coll { P(x) }` over the index idiom
+   `forall i in 0..N { i < coll.size() => P(coll.at(i)) }` — but ONLY (a) in expression
+   position (invariant/property bodies; NOT action/init `forall` *statements*, which
+   reject collection binders) and (b) for element-wise properties. Keep explicit indices
+   for position, ordering, adjacency, or no-duplicates.
+4. **Separate domain from verification bound.** Declare `entity X` / `number X` and put
+   sizes in `verify { instances/values }` instead of `type X = lo..hi`. Allowed in a
+   kernel `spec` too (desugars to `type`), so `type Claim = 0..2` no longer has to read
+   as a false domain fact.
+5. **Multi-line transitions** (requirements): `with` / `when` / `set` / `covers` each on
+   their own indented line.
+6. **Order:** domain content first, proof scaffolding last.
+
+`fslc explain --readable` then renders the whole spec (state, tagged actions,
+properties) as a structured digest — a view of the source, not a separate document.
+
 ### business (the consulting layer)
 
 ```fsl
