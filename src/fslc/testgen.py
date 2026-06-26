@@ -34,6 +34,15 @@ def _module_name(spec_name):
     return spec_name[0].lower() + spec_name[1:] if spec_name else "spec"
 
 
+def _snake_case(spec_name):
+    """PascalCase/camelCase -> snake_case (e.g. ShoppingCart -> shopping_cart)."""
+    if not spec_name:
+        return "spec"
+    s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", spec_name)
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+    return s.lower()
+
+
 def _collect_scenarios(spec_path, depth=8, deadlock_mode="warn", strict=False):
     """Parse, build, and run ``scenarios`` once; the result feeds every emitter."""
     path = Path(spec_path)
@@ -834,6 +843,216 @@ def emit_kotlin(collected, spec_path, output_path=None):
 
 
 # --------------------------------------------------------------------------
+# Dart emitter (package:test — also runs under `flutter test`)
+# --------------------------------------------------------------------------
+def _dart_string(s):
+    """Render a Python str as a Dart single-quoted string literal. Dart needs
+    ``$`` escaped (string interpolation) and uses ``\\u{XX}``."""
+    out = ["'"]
+    for ch in s:
+        if ch == "'":
+            out.append("\\'")
+        elif ch == "\\":
+            out.append("\\\\")
+        elif ch == "$":
+            out.append("\\$")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ord(ch) < 0x20:
+            out.append(f"\\u{{{ord(ch):x}}}")
+        else:
+            out.append(ch)
+    out.append("'")
+    return "".join(out)
+
+
+def _dart_literal(obj):
+    """Render a JSON-serialisable scenario value as a Dart literal in the
+    ``Map<String, dynamic>`` world. None -> null; int -> int, float -> double
+    (Dart's ``==`` treats ``1 == 1.0`` as true, so they compare equal — this is
+    language semantics, not a bug); list/map literals (empty ones carry explicit
+    type args). bool is checked before int (``True`` is an ``int`` in Python)."""
+    if obj is None:
+        return "null"
+    if obj is True:
+        return "true"
+    if obj is False:
+        return "false"
+    if isinstance(obj, str):
+        return _dart_string(obj)
+    if isinstance(obj, int):
+        return str(obj)
+    if isinstance(obj, float):
+        s = repr(obj)
+        if not any(c in s for c in ".eEnN"):
+            s += ".0"
+        return s
+    if isinstance(obj, list):
+        if not obj:
+            return "<dynamic>[]"
+        return "[" + ", ".join(_dart_literal(x) for x in obj) + "]"
+    if isinstance(obj, dict):
+        if not obj:
+            return "<String, dynamic>{}"
+        items = ", ".join(
+            f"{_dart_string(str(k))}: {_dart_literal(v)}" for k, v in obj.items())
+        return "{" + items + "}"
+    raise TypeError(f"cannot render {type(obj).__name__} as a Dart literal")
+
+
+_DART_PREAMBLE = '''\
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (package:test).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired every test is
+// skipped (a top-level probe sets `skip:` on each test), mirroring the other
+// targets' skip-when-unwired behaviour.
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+import 'package:test/test.dart';
+
+class StepResult {
+  final bool ok;
+  final String? kind;
+  StepResult(this.ok, [this.kind]);
+}
+
+/// Connect your implementation to the spec actions/state.
+///  - reset(): put the implementation in the same initial state as spec `init`
+///  - step(action, params): drive one spec action; return a StepResult for
+///    forbidden-rejection scenarios (null is fine for ordinary steps)
+///  - observe(): project implementation state onto the spec's logical-state shape
+///    (enum = name string, Option = null|value, Seq = List, Map = Map with string
+///     keys, struct = Map)
+abstract class Adapter {
+  void reset();
+  StepResult? step(String action, Map<String, dynamic> params);
+  Map<String, dynamic> observe();
+}
+
+// Wire your implementation here. Return your adapter instead of throwing.
+Adapter makeAdapter() =>
+    throw UnimplementedError('wire your implementation: implement makeAdapter()');
+
+bool _adapterWired() {
+  try {
+    final a = makeAdapter();
+    a.reset();
+    a.observe();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct)
+// shapes. `equals` (from package:test's matcher) is deep on List/Map, so leaves
+// and sequences are compared structurally with the generated file depending only
+// on package:test.
+void assertPartial(Map<String, dynamic> observed, Map<String, dynamic> expected) {
+  expected.forEach((key, value) {
+    expect(observed.containsKey(key), isTrue, reason: 'missing state key $key');
+    final seen = observed[key];
+    if (value is Map && seen is Map) {
+      assertPartial(
+        Map<String, dynamic>.from(seen),
+        Map<String, dynamic>.from(value),
+      );
+    } else {
+      expect(seen, equals(value), reason: 'state $key');
+    }
+  });
+}
+
+void assertRejected(StepResult? result, String? expectedKind) {
+  expect(result, isNotNull, reason: 'forbidden step must return a StepResult');
+  expect(result!.ok, isFalse);
+  if (expectedKind != null) {
+    expect(result.kind, equals(expectedKind));
+  }
+}
+'''
+
+
+def _dart_scenario_block(scen):
+    name = scen["name"]
+    lines = [
+        f"  test({_dart_string('scenario: ' + name)}, () {{",
+        "    final a = makeAdapter();",
+        "    a.reset();",
+    ]
+    steps = scen.get("steps", [])
+    expected_states = scen.get("expected_states", [])
+    for i, step in enumerate(steps):
+        lines.append(
+            f"    a.step({_dart_string(step['action'])}, {_dart_literal(step['params'])});")
+        exp = expected_states[i] if i < len(expected_states) else {}
+        lines.append(f"    assertPartial(a.observe(), {_dart_literal(exp)});")
+    if scen.get("kind") == "forbidden" and scen.get("forbidden_step"):
+        forbidden_step = scen["forbidden_step"]
+        rejected_by = scen.get("rejected_by")
+        rejected = _dart_string(rejected_by) if rejected_by is not None else "null"
+        lines.append(
+            f"    final result = a.step({_dart_string(forbidden_step['action'])}, "
+            f"{_dart_literal(forbidden_step['params'])});")
+        lines.append(f"    assertRejected(result, {rejected});")
+    lines.append("  }, skip: wired ? null : 'Adapter not wired');")
+    return "\n".join(lines)
+
+
+def emit_dart(collected, spec_path, output_path=None):
+    spec = collected["spec"]
+    scenario_data = collected["scenarios"]
+    walk = _bake_random_walk(spec)
+
+    parts = [_DART_PREAMBLE.replace("__SOURCE__", Path(spec_path).name)]
+
+    main_lines = ["void main() {", "  final wired = _adapterWired();"]
+    for scen in scenario_data:
+        main_lines.append("")
+        main_lines.append(_dart_scenario_block(scen))
+
+    if walk["steps"]:
+        walk_rows = ",\n".join(
+            "      {"
+            f"'action': {_dart_string(s['action'])}, "
+            f"'params': {_dart_literal(s['params'])}, "
+            f"'expected': {_dart_literal(s['expected'])}"
+            "}"
+            for s in walk["steps"]
+        )
+        walk_literal = "<Map<String, dynamic>>[\n" + walk_rows + ",\n    ]"
+    else:
+        walk_literal = "<Map<String, dynamic>>[]"
+    main_lines.extend([
+        "",
+        "  test('random-walk conformance (baked oracle trace)', () {",
+        "    final a = makeAdapter();",
+        "    a.reset();",
+        f"    final initial = {_dart_literal(walk['initial'])};",
+        "    assertPartial(a.observe(), Map<String, dynamic>.from(initial));",
+        f"    final walk = {walk_literal};",
+        "    for (final step in walk) {",
+        "      a.step(step['action'] as String, step['params'] as Map<String, dynamic>);",
+        "      assertPartial(a.observe(), step['expected'] as Map<String, dynamic>);",
+        "    }",
+        "  }, skip: wired ? null : 'Adapter not wired');",
+        "}",
+    ])
+    parts.append("\n".join(main_lines))
+
+    return "\n\n".join(parts) + "\n"
+
+
+# --------------------------------------------------------------------------
 # emitter dispatch + public API
 # --------------------------------------------------------------------------
 _EMITTERS = {
@@ -841,6 +1060,7 @@ _EMITTERS = {
     "vitest": emit_vitest,
     "swift": emit_swift,
     "kotlin": emit_kotlin,
+    "dart": emit_dart,
 }
 
 # How each target names its default output file. Conventions diverge (prefix vs
@@ -851,6 +1071,7 @@ _TARGET_OUTPUT_NAME = {
     "vitest": lambda name, module: f"{module}.test.ts",
     "swift": lambda name, module: f"{name}ConformanceTests.swift",
     "kotlin": lambda name, module: f"{name}ConformanceTest.kt",
+    "dart": lambda name, module: f"{_snake_case(name)}_conformance_test.dart",
 }
 
 

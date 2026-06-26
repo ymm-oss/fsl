@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc testgen --target dart`: a `package:test` emitter (also runs under
+  `flutter test`), the fifth harness on the pluggable emitter from #43. Same
+  `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Dynamic
+  state is `Map<String, dynamic>`; Dart's `==` is reference-based on collections, so
+  the bundled `assertPartial` recurses by the expected keys and compares leaves with
+  the `equals` matcher (re-exported by `package:test`, keeping the generated file's
+  only dependency `package:test`). `package:test`'s `skip:` is static, so a top-level
+  probe runs once in `main()` and conditionally skips every `test()` until
+  `makeAdapter()` is wired. Strings escape `$` (interpolation). Output defaults to
+  `<spec_name>_conformance_test.dart` (snake_case). Docs: `docs/LANGUAGE.md` §12,
+  `skills/fsl/reference.md` §9, `docs/DESIGN-bridge.md` §3.4. (#46)
 - `fslc testgen --target kotlin`: a kotlin.test emitter (multiplatform; the JVM
   delegates to JUnit), the fourth harness on the pluggable emitter from #43. Same
   `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Dynamic

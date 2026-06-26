@@ -716,6 +716,97 @@ def test_testgen_kotlin_output_name_and_target(tmp_path):
     assert "import kotlin.test.Test" in written
 
 
+# --------------------------------------------------------------------------
+# testgen --target dart (issue #46)
+# --------------------------------------------------------------------------
+# No compiler gate: `dart analyze` needs a pub package context (package:test
+# resolved), so there is no clean dependency-free parse-only mode like swiftc
+# -parse / node --check. We assert on harness shape and the baked walk.
+def test_testgen_dart_emits_package_test_harness():
+    content = generate_test_file(str(SPECS / "cart_v1.fsl"), depth=8, target="dart")
+
+    # package:test harness shape.
+    assert content.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert "import 'package:test/test.dart';" in content
+    assert "class StepResult {" in content
+    assert "abstract class Adapter {" in content
+    assert "Adapter makeAdapter() =>" in content
+    assert "void assertPartial(" in content
+    assert "void assertRejected(" in content
+    assert "void main() {" in content
+    assert "final wired = _adapterWired();" in content
+
+    # Scenarios -> test(...) blocks; assert on stable names/shape.
+    assert "test('scenario: reach_SoldOut', () {" in content
+    assert "test('scenario: cover_add_to_cart', () {" in content
+    assert "final a = makeAdapter();" in content
+    assert "a.step('add_to_cart'," in content
+    assert "assertPartial(a.observe()," in content
+    # Skip-when-unwired: every test carries the conditional skip.
+    assert "}, skip: wired ? null : 'Adapter not wired');" in content
+
+    # Acceptance: random walk baked, no fslc/Python at runtime. The only import is
+    # package:test; nothing is shelled out.
+    assert "test('random-walk conformance (baked oracle trace)', () {" in content
+    assert "final walk = <Map<String, dynamic>>[" in content
+    import_lines = [ln for ln in content.splitlines() if ln.lstrip().startswith("import ")]
+    assert import_lines == ["import 'package:test/test.dart';"]
+
+    # Option None bakes as Dart null; Map keys as strings.
+    assert "'cart': {'0': null" in content
+
+    walk_actions = re.findall(r"'action': '(\w+)'", content)
+    assert walk_actions, "cart_v1 should bake a non-empty random walk"
+    assert set(walk_actions) <= {"add_to_cart", "remove_from_cart", "checkout"}
+
+
+def test_testgen_dart_forbidden_rejection(tmp_path):
+    src = """
+requirements ForbiddenDart {
+  type OrderId = 0..1
+  enum OSt { Cart, Paid, Shipped, Cancelled }
+  state { order: Map<OrderId, OSt> }
+  init { forall o: OrderId { order[o] = Cart } }
+  action pay(o: OrderId) { requires order[o] == Cart order[o] = Paid }
+  action ship(o: OrderId) { requires order[o] == Paid order[o] = Shipped }
+  action cancel(o: OrderId) { requires order[o] == Paid order[o] = Cancelled }
+  forbidden FB-1 "shipped order cannot be cancelled" {
+    pay(0)
+    ship(0)
+    cancel(0)
+    expect rejected
+  }
+}
+"""
+    path = tmp_path / "forbidden_dart.fsl"
+    path.write_text(src, encoding="utf-8")
+
+    content = generate_test_file(str(path), depth=4, target="dart")
+
+    assert "test('scenario: forbidden_FB-1', () {" in content
+    assert "final result = a.step('cancel', {'o': 0});" in content
+    assert "assertRejected(result, 'requires_failed');" in content
+    # Enum values baked as member-name strings; Map keys as strings.
+    assert "assertPartial(a.observe(), {'order': {'0': 'Paid', '1': 'Cart'}});" in content
+
+
+def test_testgen_dart_output_name_and_target(tmp_path):
+    spec = str(SPECS / "cart_v1.fsl")
+    # ShoppingCart -> shopping_cart_conformance_test.dart (snake_case + _test.dart).
+    assert default_output_name(spec, target="dart") == "shopping_cart_conformance_test.dart"
+    assert default_output_name(spec, target="kotlin") == "ShoppingCartConformanceTest.kt"
+    assert default_output_name(spec, target="pytest") == "test_shoppingCart.py"
+
+    out = tmp_path / "cart_test.dart"
+    result = run_testgen(spec, output=str(out), target="dart")
+    assert result["result"] == "generated"
+    assert result["target"] == "dart"
+    assert result["output"] == str(out)
+    written = out.read_text(encoding="utf-8")
+    assert written.startswith("// SPDX-License-Identifier: Apache-2.0")
+    assert "import 'package:test/test.dart';" in written
+
+
 def test_enabled_matches_guarded_instances():
     mon = Monitor(str(SPECS / "cart_v1.fsl"))
     mon.reset()

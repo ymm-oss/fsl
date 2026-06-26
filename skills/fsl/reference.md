@@ -259,7 +259,7 @@ fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emi
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
-fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test)
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
@@ -429,6 +429,13 @@ emit the same scenarios:
   `Int`/`Double`, so the partial-match helper is a plain recursion. No portable
   runtime skip, so an unwired `makeAdapter()` returns `null` and each test
   returns early. Output defaults to `<SpecName>ConformanceTest.kt`.
+- `dart`: a self-contained `package:test` file (also runs under `flutter test`),
+  same `Adapter` contract and same baked walk. Dynamic state is
+  `Map<String, dynamic>`; Dart's `==` is reference-based on collections, so
+  `assertPartial` recurses by the expected keys and compares leaves with the
+  `equals` matcher (the only dependency stays `package:test`). A top-level probe
+  sets `skip:` on each `test()` until `makeAdapter()` is wired. Output defaults
+  to `<spec_name>_conformance_test.dart`.
 
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a
