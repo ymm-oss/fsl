@@ -582,11 +582,13 @@ verify {
   business and requirements; it does not create a ghost counter or an automatic
   `_kpi_*` invariant.
 - When `implements Abs from "file" { }` is present and process/action/stage names
-  match, fslc synthesizes the identity refinement mapping. `maps auto` is also
-  allowed inside an `implements` block for same-name kernel-wrapper state/actions,
-  and explicit `map` / action correspondences override it. Auto-mapped process
-  transitions are statically actor-checked; an actor mismatch is a check-time
-  type error.
+  match, fslc synthesizes the identity refinement mapping. Inside the
+  `implements { }` block you write only state `map` entries, `maps auto`, and
+  `preserve progress` — **not `action`** (the grammar rejects an action there).
+  Action↔action correspondence is instead the `maps <abs_act>(...)` clause **on
+  the requirement-level action** (auto-synthesized for matching names; `maps auto`
+  covers same-name kernel-wrapper actions). Auto-mapped process transitions are
+  statically actor-checked; an actor mismatch is a check-time type error.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
@@ -637,6 +639,12 @@ in each layer's documents).
   **age is readable from guards as an ordinary state variable** (`requires m[c] >= K`).
 - **urgent semantics = time freeze**: while any of the listed actions is enabled,
   `tick` cannot fire.
+- **`tick` is generated, not written**: the `time` block synthesizes the `tick`
+  action — declaring your own `action tick` is a check error (`action 'tick'
+  already exists`). It advances age counters only and auto-maps to `stutter` under
+  refinement; reference it as `tick()` (e.g. to advance time in an `acceptance`
+  scenario). Modeling tick-side work (service time, etc.) needs the kernel-wrapper
+  form (§10).
 
 ### ⚠ The vacuous-SLA trap and the deadline-urgency pattern
 

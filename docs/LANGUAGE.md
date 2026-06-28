@@ -830,10 +830,13 @@ verify {
 - With `implements`, `fslc verify` **also runs the refine to the upper layer
   simultaneously**, and the result carries `implements: {abs, result}`. An empty
   body (`implements X from "..." { }`) auto-generates identity refinement when
-  process/action/stage names match. `maps auto` is allowed inside `implements`
-  for same-name kernel-wrapper state/actions, and explicit maps override it.
-  Auto-mapped process transitions are actor-checked; a transition whose actor
-  differs from the business action's actor is a check-time error.
+  process/action/stage names match. Inside the `implements { }` block you write
+  only state `map` entries, `maps auto`, and `preserve progress` — not `action`;
+  action↔action correspondence is the `maps <abs_act>(...)` clause on the
+  requirement-level action. `maps auto` covers same-name kernel-wrapper
+  state/actions, and explicit maps override it. Auto-mapped process transitions
+  are actor-checked; a transition whose actor differs from the business action's
+  actor is a check-time error.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen
@@ -967,6 +970,10 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   inside a requirement (the requirement ID is tied to the violation). An age is
   +1 per tick (reset to 0 if while is false) and can be read from guards as an
   ordinary state variable.
+- `tick` is generated — do not declare your own `action tick` (it is a check
+  error). It advances age counters only and auto-maps to `stutter` under
+  refinement; reference it as `tick()` (e.g. in an `acceptance` scenario).
+  Tick-side work (service time, etc.) needs the kernel-wrapper form.
 - **⚠ The vacuous-SLA trap**: making an action that can always be enabled urgent
   freezes time, and any K satisfies the deadline vacuously (even `<= 0` is
   green). The correct form is **to make urgent only the guarded action that

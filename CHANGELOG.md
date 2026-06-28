@@ -5,6 +5,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Documentation
+- Clarified in `docs/LANGUAGE.md` and `skills/fsl/reference.md`: the `implements { }`
+  block takes only state `map` / `maps auto` / `preserve progress` (action↔action
+  correspondence goes on the requirement-level action's `maps` clause, not inside
+  `implements`), and the `time`-block `tick` is generated (declaring `action tick` is a
+  check error), advances age only, auto-maps to `stutter`, and is referenced as
+  `tick()`. (#58)
+
 ### Added
 - `fslc testgen --target phpunit`: a PHPUnit emitter (PHP 8.1+ / PHPUnit 10+,
   `declare(strict_types=1)`), the sixth harness on the pluggable emitter from #43.
