@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Documentation
+- Documented the cross-layer discrete-time SLA rule: a `deadline` is a safety
+  property of the clock that declares it, so a refinement carries it only across a
+  *shared* clock (a finer-clock design fails `fslc refine` with
+  `abs_requires_failed` — the same non-propagation as liveness). Added a worked
+  shared-clock refinement (`examples/nfr/sla_worker_design.fsl` +
+  `sla_worker_refines.fsl` → `refines`), corrected the `examples/nfr/README.md`
+  framing (the kernel and requirements specs are *different machines*, not two
+  encodings of one), and recorded the analysis and the deferred options in
+  `docs/DESIGN-nfr.md` §6 / `docs/DESIGN-layers.md` §6 / `docs/LANGUAGE.md` /
+  `skills/fsl/reference.md`. No kernel/grammar/refine change. (#56)
 - Clarified in `docs/LANGUAGE.md` and `skills/fsl/reference.md`: the `implements { }`
   block takes only state `map` / `maps auto` / `preserve progress` (action↔action
   correspondence goes on the requirement-level action's `maps` clause, not inside

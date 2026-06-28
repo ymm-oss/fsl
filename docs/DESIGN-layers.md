@@ -255,7 +255,12 @@ connect to the implementation via testgen/replay/Monitor (all implemented).
    mapping and reports `refinement_failed / progress_lost` if the lower layer can
    spin or stall while the upper response remains pending. This is a general
    property of forward simulation (safety is preserved, liveness is not), and is
-   not an fslc defect. Concrete example: a design that, after placing the
+   not an fslc defect. **Discrete-time SLAs follow the same rule**: a `deadline`
+   is a safety property of the clock that declares it, so a refinement carries it
+   only across a *shared* clock — a design with a finer clock (extra `tick`-side
+   time steps) has no abstract image for those steps and cannot refine a coarser
+   timed abstract. Verify a timed property at the clock-owning layer; share the
+   clock to carry it down (`DESIGN-nfr.md` §6). Concrete example: a design that, after placing the
    submission on an internal queue, keeps spinning a stutter loop instead of a
    non-fair adjudication passes ordinary refine but breaks the business leadsTo;
    with `preserve progress`, the same mapping fails as a progress-lost refinement.

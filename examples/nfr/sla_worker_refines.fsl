@@ -1,0 +1,21 @@
+// design (SlaWorkerDesign) ⊒ requirements (SlaWorker): the shared-clock case.
+// `tick → tick` is valid because the design mirrors the generated requirements
+// tick exactly; the design-only `audit` step maps to stutter.
+//
+//   fslc refine examples/nfr/sla_worker_design.fsl examples/nfr/sla_worker.fsl \
+//               examples/nfr/sla_worker_refines.fsl --depth 6     # => refines
+refinement SlaWorkerDesignRefinesReq {
+  impl SlaWorkerDesign
+  abs  SlaWorker
+
+  map pending[r: Req] = pending[r]
+  map served[r: Req]  = served[r]
+  map age[r: Req]     = age[r]
+  map serving         = serving
+
+  action submit(r) -> submit(r)
+  action start(r)  -> start(r)
+  action finish()  -> finish()
+  action tick()    -> tick()
+  action audit(r)  -> stutter
+}
