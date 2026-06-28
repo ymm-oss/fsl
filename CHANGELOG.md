@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-29
+
 ### Documentation
 - `skills/fsl/SKILL.md` repair protocol: added the over-constraint mirror of the
   hollowing warning — after fixing a `forbidden`/`violated` by tightening a guard,
