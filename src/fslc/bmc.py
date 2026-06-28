@@ -1215,6 +1215,25 @@ def compute_updates(stmts, state, binds, spec):
 def init_constraints(spec, s0):
     cons = []
 
+    def require_bool(term):
+        if not isinstance(term, z3.ExprRef) or term.sort().kind() != z3.Z3_BOOL_SORT:
+            _err("if condition must be Bool", kind="type")
+        return term
+
+    def append_if_constraints(cond, then_stmts, else_stmts, binds, out):
+        c0 = require_bool(eval_expr(cond, s0, binds, spec))
+        then_saved = []
+        for s2 in then_stmts:
+            run_collect(s2, binds, s0, then_saved)
+        for c in then_saved:
+            out.append(z3.Implies(c0, c))
+        if else_stmts:
+            else_saved = []
+            for s2 in else_stmts:
+                run_collect(s2, binds, s0, else_saved)
+            for c in else_saved:
+                out.append(z3.Implies(z3.Not(c0), c))
+
     def run(st, binds):
         tag = st[0]
         if tag == "assign":
@@ -1238,7 +1257,8 @@ def init_constraints(spec, s0):
                     for s2 in body:
                         run(s2, b2)
         elif tag == "if":
-            _err("if in init is not supported", kind="semantics")
+            _, cond, then_stmts, else_stmts, _ = st
+            append_if_constraints(cond, then_stmts, else_stmts, binds, cons)
 
     def run_collect(st, binds, s0, out):
         if st[0] == "assign":
@@ -1261,6 +1281,9 @@ def init_constraints(spec, s0):
                 else:
                     for s2 in body:
                         run_collect(s2, b2, s0, out)
+        elif st[0] == "if":
+            _, cond, then_stmts, else_stmts, _ = st
+            append_if_constraints(cond, then_stmts, else_stmts, binds, out)
 
     for st in spec["init"]:
         run(st, {})
