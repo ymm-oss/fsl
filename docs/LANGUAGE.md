@@ -113,6 +113,7 @@ used for the base BMC check and reachable/coverage evidence.
 |---|---|---|
 | `Int` / `Bool` | `count: Int` | Unbounded integer / boolean |
 | Domain type | `type Qty = 0..5` | Bounded integer. **The range is checked automatically** (§6) |
+| Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
 | Entity kind | `entity Claim` / `process Claim ...` | Finite identity sort. Allowed in any layer incl. kernel `spec`; size set by `verify { instances Claim = N }`; desugars to `type Claim = 0..N-1` |
 | Number kind | `number Amount` | Finite numeric sort. Allowed in any layer incl. kernel `spec`; range set by `verify { values Amount = lo..hi }`; desugars to `type` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
@@ -122,7 +123,9 @@ used for the base BMC check and reachable/coverage evidence.
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
 
-**Scalar** = Int / Bool / domain type / enum.
+**Scalar** = Int / Bool / domain type / enum. In a `state` declaration,
+`x: lo..hi` is accepted as an anonymous domain type and is equivalent to
+declaring `type X = lo..hi` and writing `x: X`.
 
 **Types legal as state variables** (anything else is rejected by `check` as a type error):
 scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)

@@ -69,6 +69,7 @@ state_def: "state" "{" var_decl ("," var_decl)* ","? "}"
 var_decl: NAME ":" type
 ?type: "Int"  -> t_int
      | "Bool" -> t_bool
+     | expr ".." expr -> t_range
      | "Map" "<" type "," type ">" -> t_map
      | "Set" "<" type ">" -> t_set
      | "Seq" "<" type "," cap ">" -> t_seq
@@ -545,6 +546,9 @@ class Ast(Transformer):
 
     def t_bool(self, meta):
         return ("bool",)
+
+    def t_range(self, meta, lo, hi):
+        return ("range", lo, hi)
 
     def t_map(self, meta, k, v):
         return ("map", k, v)
