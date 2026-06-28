@@ -100,6 +100,14 @@ def resolve_seq_capacity(cap_ast, consts):
     return cap
 
 
+def _resolve_inline_range(ty, consts):
+    lo_i = eval_const(ty[1], consts)
+    hi_i = eval_const(ty[2], consts)
+    if lo_i > hi_i:
+        _err(f"inline range type has empty range {lo_i}..{hi_i}", kind="type")
+    return ("domain", lo_i, hi_i)
+
+
 def resolve_type(ty, types, consts=None):
     if ty[0] in ("int", "bool"):
         return ty
@@ -108,6 +116,8 @@ def resolve_type(ty, types, consts=None):
         if n not in types:
             _err(f"unknown type '{n}'", kind="type")
         return types[n]["ty"]
+    if ty[0] == "range":
+        return _resolve_inline_range(ty, consts)
     if ty[0] == "map":
         return ("map", resolve_type(ty[1], types, consts), resolve_type(ty[2], types, consts))
     if ty[0] == "set":
@@ -170,6 +180,8 @@ def resolve_type_ref(ty, types, consts=None):
         if n not in types:
             _err(f"unknown type '{n}'", kind="type")
         return ("named", n)
+    if ty[0] == "range":
+        return _resolve_inline_range(ty, consts)
     if ty[0] == "map":
         return (
             "map",

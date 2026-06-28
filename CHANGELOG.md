@@ -8,6 +8,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ### Added
 - `init` blocks now support statement-level `if`/`else` in both the symbolic
   verifier and concrete runtime monitor. (#55)
+- State declarations may now use inline anonymous range types such as
+  `state { x: 0..3 }`, desugared to the existing domain type machinery. (#57)
 - `fslc testgen --target phpunit`: a PHPUnit emitter (PHP 8.1+ / PHPUnit 10+,
   `declare(strict_types=1)`), the sixth harness on the pluggable emitter from #43.
   Same `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Leaves

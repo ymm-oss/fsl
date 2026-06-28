@@ -132,6 +132,7 @@ refinement <Name> {
 |---|---|---|
 | Int / Bool | `n: Int` | Int is unbounded |
 | Domain type | `type Qty = 0..5` | **automatic bound check** (violated/type_bound) |
+| Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
 | symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
 | entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements; bound by `verify { instances Claim = N }` |
 | number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements; bound by `verify { values Amount = lo..hi }` |
@@ -143,7 +144,9 @@ refinement <Name> {
 | Set<T> | `s: Set<OrderId>` | T is a bounded scalar |
 | Seq<T, N> | `q: Seq<JobId, CAP>` | T is a scalar, N is a positive constant. FIFO |
 
-Scalar = Int / Bool / domain type / enum.
+Scalar = Int / Bool / domain type / enum. In a `state` declaration,
+`x: lo..hi` is an anonymous domain type and is equivalent to declaring
+`type X = lo..hi` and writing `x: X`.
 **State-variable whitelist**: scalar | Option<scalar> | struct |
 Map<bounded scalar, scalar|Option|struct> | Set<bounded scalar> | Seq<scalar, N>.
 Anything else (nested structs, Set/Map/Seq as a Map value, etc.) is rejected by
