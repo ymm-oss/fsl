@@ -182,7 +182,8 @@ check as a type error.
 
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`
 - Set/Seq are re-assigned: `s = s.add(x)`, `q = q.pop().push(y)` (chaining allowed)
-- `if expr { stmt... } [else { stmt... }]` (may nest with an if inside else)
+- `if expr { stmt... } [else { stmt... }]` is allowed in both `init` and action
+  bodies (may nest with an if inside else)
 - `forall x: T { stmt... }` (bulk assignment)
 
 ## 5. Semantic rules

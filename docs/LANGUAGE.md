@@ -186,7 +186,8 @@ variable.
 
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
 - Updating a Set/Seq uses the **reassignment idiom**: `s = s.add(x)`, `q = q.pop()`
-- `if expr { stmt... } else { stmt... }` (can be nested with an if inside the else)
+- `if expr { stmt... } else { stmt... }` is allowed in both `init` and action bodies
+  (can be nested with an if inside the else)
 - `forall x: T { stmt... }` (bulk initialization / bulk update)
 
 ## 5. Semantics
