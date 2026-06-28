@@ -5,6 +5,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Documentation
+- Clarified in `docs/LANGUAGE.md` and `skills/fsl/reference.md`: the `implements { }`
+  block takes only state `map` / `maps auto` / `preserve progress` (action↔action
+  correspondence goes on the requirement-level action's `maps` clause, not inside
+  `implements`), and the `time`-block `tick` is generated (declaring `action tick` is a
+  check error), advances age only, auto-maps to `stutter`, and is referenced as
+  `tick()`. (#58)
+
 ### Added
 - `init` blocks now support statement-level `if`/`else` in both the symbolic
   verifier and concrete runtime monitor. (#55)
