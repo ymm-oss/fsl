@@ -50,6 +50,52 @@ def recommended_action_for(faithfulness_class):
     return FAITHFULNESS_ACTIONS.get(faithfulness_class)
 
 
+# Vacuity finding kinds that surface as `{"result": "error", "kind": <here>}`
+# under `--vacuity error` (see bmc._finalize_vacuity_findings).
+_VACUITY_KINDS = frozenset({
+    "vacuous_implication", "vacuous_leadsto", "tautology_over_frozen",
+    "urgency_freeze", "always_true_requires",
+})
+
+
+def trace_type_for(diagnostic):
+    """Unified repair-routing discriminator for a top-level result.
+
+    Derived from fields the result already carries — no engine change — so an
+    agent can route a fix by channel (and tell an SLA deadline from a structural
+    invariant). Returns None for non-counterexample results (verified/ok/spec
+    errors), so it is only set where there is something to repair.
+    """
+    if not isinstance(diagnostic, dict):
+        return None
+    result = diagnostic.get("result")
+    if result == "refinement_failed":
+        return "refinement"
+    if result == "reachable_failed":
+        return "reachable"
+    if result == "nonconformant":
+        return "conformance"
+    if result == "unknown_cti":
+        return "induction_cti"
+    if result == "violated":
+        vk = diagnostic.get("violation_kind")
+        # SLA deadlines are generated invariants named `_deadline_<req>_<age>_<n>`
+        # (dialects._deadline_invariant_name); the `_` prefix is reserved, so the
+        # match is unambiguous.
+        if vk == "invariant" and str(diagnostic.get("invariant", "")).startswith("_deadline_"):
+            return "sla"
+        return vk or "invariant"
+    if result == "error":
+        kind = diagnostic.get("kind")
+        if kind == "acceptance":
+            return "acceptance"
+        if kind in ("forbidden", "forbidden_setup"):
+            return "forbidden"
+        if kind in _VACUITY_KINDS:
+            return "vacuity"
+    return None
+
+
 def with_faithfulness(value):
     """Return value with additive faithfulness routing fields on diagnostics."""
     if isinstance(value, list):

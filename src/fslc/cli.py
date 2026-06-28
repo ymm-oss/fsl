@@ -11,7 +11,7 @@ from lark.exceptions import UnexpectedInput, VisitError
 
 from pathlib import Path
 
-from .diagnostics import with_faithfulness
+from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
 from .model import build_spec, check_spec, FslError, strict_tag_warnings
 from .bmc import verify, prove, scenarios
@@ -33,7 +33,11 @@ FSL_VERSION = "1.0"
 def _envelope(result):
     out = {"fsl": FSL_VERSION}
     out.update(result)
-    return with_faithfulness(out)
+    out = with_faithfulness(out)
+    tt = trace_type_for(out)
+    if tt is not None:
+        out.setdefault("trace_type", tt)
+    return out
 
 
 def _error_envelope(kind, message, loc=None, expected=None, hint=None):
