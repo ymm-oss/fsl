@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Documentation
+- `skills/fsl/SKILL.md` repair protocol: added the over-constraint mirror of the
+  hollowing warning — after fixing a `forbidden`/`violated` by tightening a guard,
+  re-run `verify` and confirm the action's `action_coverage` is still `true` (and
+  affected `reachable`s still witnessed), since an over-tight guard surfaces as a
+  *new* `reachable_failed`/`covered:false`. (Surfaced by the #22 repair DOGFOOD,
+  where fslc-arm agents did exactly this self-check.)
 - Documented the cross-layer discrete-time SLA rule: a `deadline` is a safety
   property of the clock that declares it, so a refinement carries it only across a
   *shared* clock (a finer-clock design fails `fslc refine` with
