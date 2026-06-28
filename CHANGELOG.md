@@ -6,6 +6,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `init` blocks now support statement-level `if`/`else` in both the symbolic
+  verifier and concrete runtime monitor. (#55)
 - `fslc testgen --target phpunit`: a PHPUnit emitter (PHP 8.1+ / PHPUnit 10+,
   `declare(strict_types=1)`), the sixth harness on the pluggable emitter from #43.
   Same `reset`/`step`/`observe` `Adapter` contract and same baked-walk design. Leaves
