@@ -128,3 +128,54 @@ Add an "how to write NFRs" section to LANGUAGE.md / skills:
    the dialect version side by side + README.
 4. LANGUAGE.md (time/deadline in §13, a new "how to write NFRs" section), skills/fsl
    (SKILL.md rules + reference.md), DOGFOOD-5.md (record of this spike).
+
+## 6. Discrete-time SLA across layers (issue #56)
+
+A discrete-time SLA is a **safety property of the clock that declares it** (the
+`deadline` invariant ranges over the `age` counter that the `time` block's `tick`
+advances). Refinement is forward simulation — every *impl* `tick` must have an
+*abstract* image — so a refinement carries the SLA **only across a shared clock**.
+This is the same non-propagation result as liveness (`DESIGN-layers.md` §6): a
+lower layer is free to introduce internal steps the upper layer does not model,
+and time steps are no exception. It is a property of forward simulation, not an
+`fslc` defect.
+
+Concretely, `examples/nfr/sla_worker_kernel.fsl` is a **finer clock** than
+`examples/nfr/sla_worker.fsl`: its `tick` also consumes a `busy` service-time
+counter, so it ticks *while serving*, where the requirements `tick` is
+urgency-disabled (`urgent finish`). Mapping that design onto the requirements
+spec fails with `abs_requires_failed` on the service tick — the finer tick has no
+coarse image. (`sla_worker_kernel.fsl` is therefore a *different machine*, not a
+second encoding of `sla_worker.fsl`.)
+
+**Two idioms that do work** (and are exercised in the corpus):
+
+1. **Clock at the upper layer; the design shares it.** A kernel design that
+   mirrors the generated `tick` exactly refines the timed requirements; it may add
+   detail the requirements abstracts away as long as it introduces no finer time
+   steps. Worked example: `examples/nfr/sla_worker_design.fsl` +
+   `sla_worker_refines.fsl` → `refines`.
+2. **Clock at the design layer; the upper layer is time-less.** Put the SLA
+   `time`/`tick` in the lower kernel `spec`, verify the deadline there, and erase
+   `tick` with `tick → stutter` against a time-agnostic abstract contract. Worked
+   example: `examples/validation/order_refund_windowed.fsl`.
+
+**Options considered and deferred.** Extending the language was evaluated and not
+adopted, because none removes the underlying clock-granularity mismatch without
+disproportionate cost or a kernel-semantics change the architecture forbids
+(`DESIGN-layers.md` §8, "do not add new semantics to the kernel"):
+
+- *Open `time` to the kernel/design layer* — relocates the dialect sugar but the
+  generated `tick` is still age-only, so it does not let a design model finer time;
+  the mismatch remains.
+- *Tick-side effects in the `time` block (`on tick { … }`)* — would let a
+  requirements clock match a finer design clock, but it forces both layers to
+  duplicate the same timed machine (the refinement becomes near-trivial) and
+  pushes a service-time *how* into the requirements *what*. A possible future
+  consolidation (it could subsume the kernel fixture), not a present need.
+- *A cross-granularity refinement bridge (N impl ticks ⊒ 1 abstract tick)* — the
+  general fix, but it changes the refinement core where the dual-evaluator /
+  oracle soundness invariant lives, for a narrow benefit.
+
+The guidance above (verify a timed property at the clock-owning layer; share the
+clock to carry it across a refinement) is the supported approach.

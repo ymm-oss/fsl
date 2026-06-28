@@ -649,6 +649,18 @@ in each layer's documents).
   refinement; reference it as `tick()` (e.g. to advance time in an `acceptance`
   scenario). Modeling tick-side work (service time, etc.) needs the kernel-wrapper
   form (§10).
+- **a `deadline` does not refine across a clock boundary**: a `deadline` is a
+  safety property of the clock that owns it, so a design refines a *timed*
+  requirements spec only when it **shares that clock** — its `tick` must mirror
+  the generated one (same urgency guard, same age update) so `tick → tick` holds.
+  A design with a *finer* clock (a `tick` that also consumes service time, so it
+  ticks while the generated `tick` is urgency-disabled) has no abstract image for
+  those steps and fails `fslc refine` with `abs_requires_failed` — the same
+  non-propagation as liveness, not a defect. Then verify the SLA at the design
+  layer and keep the upper contract time-less (`tick → stutter`). Worked example:
+  `examples/nfr/sla_worker_design.fsl` (shared clock, refines) vs
+  `examples/nfr/sla_worker_kernel.fsl` (finer clock, cannot); see
+  `examples/validation/order_refund_windowed.fsl` for the time-less-upper idiom.
 
 ### ⚠ The vacuous-SLA trap and the deadline-urgency pattern
 

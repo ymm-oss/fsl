@@ -978,6 +978,15 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   error). It advances age counters only and auto-maps to `stutter` under
   refinement; reference it as `tick()` (e.g. in an `acceptance` scenario).
   Tick-side work (service time, etc.) needs the kernel-wrapper form.
+- **Across layers, a `deadline` refines only over a shared clock.** A `deadline`
+  is a safety property of the clock that declares it, so a design refines a
+  *timed* requirements spec only when its `tick` mirrors the generated one; a
+  design with a finer clock (a `tick` that also consumes service time) has no
+  abstract image for those steps and fails `fslc refine` with
+  `abs_requires_failed` — the same non-propagation as liveness. Verify a timed
+  property at the clock-owning layer, or keep the upper contract time-less and put
+  the clock in the design kernel (`tick → stutter`). See `docs/DESIGN-nfr.md` §6
+  and `examples/nfr/sla_worker_design.fsl`.
 - **⚠ The vacuous-SLA trap**: making an action that can always be enabled urgent
   freezes time, and any K satisfies the deadline vacuously (even `<= 0` is
   green). The correct form is **to make urgent only the guarded action that

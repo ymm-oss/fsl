@@ -1,10 +1,11 @@
 from pathlib import Path
 
-from fslc.cli import run_check, run_verify
+from fslc.cli import run_check, run_refine, run_verify
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SLA_WORKER = ROOT / "examples" / "nfr" / "sla_worker.fsl"
+NFR = ROOT / "examples" / "nfr"
+SLA_WORKER = NFR / "sla_worker.fsl"
 
 
 def _write(tmp_path, src, name="nfr_case.fsl"):
@@ -56,6 +57,54 @@ def test_nfr_sla_worker_auxiliary_invariant_induction_proved(tmp_path):
 
     assert result["result"] == "proved"
     assert "AgeZeroUnderUrgency" in result["invariants_checked"]
+
+
+# --- cross-layer SLA refinement (issue #56) --------------------------------
+# A design refines a *timed* requirements spec only when it SHARES the clock.
+
+def test_nfr_shared_clock_design_refines_requirements():
+    # SlaWorkerDesign mirrors the generated requirements tick exactly, so
+    # tick -> tick is a valid step and the deadline invariant is preserved.
+    result = run_refine(
+        str(NFR / "sla_worker_design.fsl"),
+        str(SLA_WORKER),
+        str(NFR / "sla_worker_refines.fsl"),
+        depth=6,
+    )
+    assert result["result"] == "refines"
+
+
+def test_nfr_finer_clock_design_cannot_refine_requirements(tmp_path):
+    # sla_worker_kernel.fsl is a *finer* clock: its tick also consumes a `busy`
+    # service-time counter, so it ticks while serving — where the requirements
+    # tick is urgency-disabled. Forward simulation has no abstract image for
+    # that service tick, so refinement fails (a clock-granularity mismatch, the
+    # same reason liveness does not propagate, not an fslc defect).
+    mapping = _write(
+        tmp_path,
+        '''refinement KernelRefinesReq {
+  impl SlaSpike
+  abs  SlaWorker
+  map pending[r: Req] = pending[r]
+  map served[r: Req]  = served[r]
+  map age[r: Req]     = age[r]
+  map serving         = serving
+  action submit(r) -> submit(r)
+  action start(r)  -> start(r)
+  action finish()  -> finish()
+  action tick()    -> tick()
+}
+''',
+        "kernel_refines_req.fsl",
+    )
+
+    result = run_refine(
+        str(NFR / "sla_worker_kernel.fsl"), str(SLA_WORKER), str(mapping), depth=6
+    )
+
+    assert result["result"] == "refinement_failed"
+    assert result["kind"] == "abs_requires_failed"
+    assert result["impl_action"]["name"] == "tick"
 
 
 BASE_STATIC = r'''requirements StaticNfr {
