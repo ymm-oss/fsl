@@ -337,6 +337,18 @@ first failed layer and later layers are marked `skipped`.
 - faithfulness diagnostics may add `faithfulness_class` and
   `recommended_action`: `partial_op_unguarded`, `frozen_only_invariant`,
   `intent_unexercised`, or `liveness_not_refined`.
+- **repair routing (`trace_type`)**: every counterexample/failure result carries a
+  `trace_type` discriminator — one of `invariant` | `sla` | `type_bound` | `trans`
+  | `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` |
+  `reachable` | `refinement` | `acceptance` | `forbidden` | `vacuity` |
+  `conformance` | `induction_cti` — so an agent can route a fix by channel (and
+  tell an `sla` deadline from a structural `invariant`). Passing results and spec
+  (parse/type/…) errors carry no `trace_type`. The remaining repair inputs already
+  exist — no separate field is added for them: `requirement: {id, text}` (now also
+  at the `refinement_failed` root) localizes intent; `trace` / `impl_trace` /
+  `cti.states` / `accepted_trace` are the counterexample steps; `checked_to_depth`
+  + `completeness` are the guarantee bound; `hint` / `recommended_action` are the
+  suggested fix; `unreached[].blocking_requires` is the dead-reachable core.
 - coverage diagnostic:
   `{covered: false, name, display_name?, blocking_requires: [{loc, text}], hint}`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
@@ -464,7 +476,8 @@ in §7 work as-is.
 `"ID: source"` immediately before the `{` of an invariant / trans / reachable /
 leadsTo / action:
 `invariant PaidLedger "REQ-3: ledger consistency" { ... }` →
-`requirement: {id, text}` in violated / unknown_cti / coverage diagnostic / scenarios.
+`requirement: {id, text}` in violated / unknown_cti / coverage diagnostic /
+scenarios / `refinement_failed` (root).
 
 ### Authoring specs as readable documentation (requirements + design)
 

@@ -1368,7 +1368,7 @@ def _failure(
         model, explored["states"], explored["choices"],
         explored["instances"], impl_spec, step,
     )
-    return with_faithfulness({
+    out = {
         "result": "refinement_failed",
         "impl": impl_spec["name"],
         "abs": abs_spec["name"],
@@ -1382,4 +1382,10 @@ def _failure(
         "abs_after_actual": alpha_after_actual,
         "mismatch": mismatch,
         "hint": _REFINE_HINT,
-    })
+    }
+    # Hoist the involved impl action's requirement to the root, for parity with
+    # verify violations (which carry `requirement` at the top level).
+    req = impl_action.get("requirement") if isinstance(impl_action, dict) else None
+    if req:
+        out["requirement"] = req
+    return with_faithfulness(out)

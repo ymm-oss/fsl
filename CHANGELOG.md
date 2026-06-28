@@ -24,6 +24,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `tick()`. (#58)
 
 ### Added
+- `fslc` JSON results now carry a `trace_type` repair-routing discriminator on
+  every counterexample/failure (`invariant` | `sla` | `type_bound` | `trans` |
+  `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` | `reachable`
+  | `refinement` | `acceptance` | `forbidden` | `vacuity` | `conformance` |
+  `induction_cti`), so an agent can route a fix by channel and tell an SLA
+  deadline from a structural invariant. Derived in the CLI envelope from existing
+  fields (no engine change); passing/spec-error results carry none. `requirement`
+  is now also hoisted to the `refinement_failed` root, for parity with verify
+  violations. The other repair inputs the issue proposed already exist (`trace`,
+  `checked_to_depth`+`completeness`, `hint`/`recommended_action`,
+  `unreached[].blocking_requires`) and are documented as the repair-field map in
+  `skills/fsl/reference.md` §7. Backward compatible (additive). (#23)
 - `init` blocks now support statement-level `if`/`else` in both the symbolic
   verifier and concrete runtime monitor. (#55)
 - State declarations may now use inline anonymous range types such as
