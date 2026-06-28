@@ -356,7 +356,12 @@ the source material or the human confirms it. If the counterexample exposes a
 missing requirement or design decision, ask instead of choosing the repair on the
 user's behalf. The shortest path to verified is often "weakening the spec," so
 without confirmation and a record of what was weakened and why, you later cannot
-distinguish a hollowing-out repair from a legitimate fix.
+distinguish a hollowing-out repair from a legitimate fix. The mirror failure is
+**over-constraining**: a guard added to fix a `forbidden`/`violated` can tighten
+the action into a dead one. After such a fix, re-run `verify` and confirm the
+repaired action's `action_coverage` is still `true` (and any affected `reachable`
+still witnessed) — over-tightening surfaces as a *new* `reachable_failed` /
+`covered:false`, not as a failure of the original fix.
 
 ## Minimal syntax (details and the full catalog are in reference.md)
 
