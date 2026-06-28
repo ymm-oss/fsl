@@ -175,12 +175,11 @@ def _collect_state_refs(expr, spec, out=None):
 
 
 def _check_deterministic_init(spec):
-    assigned = set()
-    allowed = set(spec["consts"].keys())
+    consts = set(spec["consts"].keys())
 
-    def check_rhs(rhs):
-        refs = _collect_state_refs(rhs, spec)
-        bad = refs - allowed
+    def check_expr(expr, definitely_assigned):
+        refs = _collect_state_refs(expr, spec)
+        bad = refs - (consts | definitely_assigned)
         if bad:
             _err(
                 f"init references state variable '{sorted(bad)[0]}' before it is assigned",
@@ -188,72 +187,62 @@ def _check_deterministic_init(spec):
                 hint=_INIT_HINT,
             )
 
-    def walk(stmts, in_forall=False):
+    def duplicate_assignment(logical, in_forall):
+        scope = "init forall" if in_forall else "init"
+        _err(
+            f"state variable '{logical}' assigned more than once in {scope}",
+            kind="semantics",
+            hint=_INIT_HINT,
+        )
+
+    def walk(stmts, definitely_assigned, possibly_assigned, in_forall=False):
+        definitely_assigned = set(definitely_assigned)
+        possibly_assigned = set(possibly_assigned)
         for st in stmts:
             tag = st[0]
             if tag == "assign":
                 logical = _logical_var_from_lv(st[1])
                 if logical is None:
                     _err("invalid init assignment target", kind="semantics", hint=_INIT_HINT)
-                if logical in assigned and not in_forall:
-                    _err(
-                        f"state variable '{logical}' assigned more than once in init",
-                        kind="semantics",
-                        hint=_INIT_HINT,
-                    )
-                check_rhs(st[2])
-                if not in_forall:
-                    assigned.add(logical)
-                    allowed.add(logical)
+                if logical in possibly_assigned:
+                    duplicate_assignment(logical, in_forall)
+                check_expr(st[2], definitely_assigned)
+                definitely_assigned.add(logical)
+                possibly_assigned.add(logical)
             elif tag == "forall_stmt":
                 if in_forall:
                     _err("nested forall in init is not supported", kind="semantics", hint=_INIT_HINT)
                 _, binder, body, _ = st
-                targets = []
-                for s2 in body:
-                    if s2[0] == "forall_stmt":
-                        _err("nested forall in init is not supported", kind="semantics", hint=_INIT_HINT)
-                    if s2[0] == "if":
-                        _err("if in init is not supported", kind="semantics", hint=_INIT_HINT)
-                    if s2[0] != "assign":
-                        continue
-                    logical = _logical_var_from_lv(s2[1])
-                    if logical is None:
-                        _err("invalid init assignment target", kind="semantics", hint=_INIT_HINT)
-                    if logical in assigned:
-                        _err(
-                            f"state variable '{logical}' assigned more than once in init",
-                            kind="semantics",
-                            hint=_INIT_HINT,
-                        )
-                    if logical in targets:
-                        _err(
-                            f"state variable '{logical}' assigned more than once in init forall",
-                            kind="semantics",
-                            hint=_INIT_HINT,
-                        )
-                    targets.append(logical)
-                body_allowed = set(allowed)
-                for s2 in body:
-                    if s2[0] != "assign":
-                        continue
-                    refs = _collect_state_refs(s2[2], spec)
-                    bad = refs - body_allowed
-                    if bad:
-                        _err(
-                            f"init references state variable '{sorted(bad)[0]}' before it is assigned",
-                            kind="semantics",
-                            hint=_INIT_HINT,
-                        )
-                    logical = _logical_var_from_lv(s2[1])
-                    body_allowed.add(logical)
-                for logical in targets:
-                    assigned.add(logical)
-                    allowed.add(logical)
+                if binder[0] in ("binder_typed", "binder_collection") and binder[3] is not None:
+                    check_expr(binder[3], definitely_assigned)
+                body_definite, body_possible = walk(
+                    body,
+                    definitely_assigned,
+                    possibly_assigned,
+                    in_forall=True,
+                )
+                definitely_assigned = body_definite
+                possibly_assigned = body_possible
             elif tag == "if":
-                _err("if in init is not supported", kind="semantics", hint=_INIT_HINT)
+                _, cond, then_stmts, else_stmts, _ = st
+                check_expr(cond, definitely_assigned)
+                then_definite, then_possible = walk(
+                    then_stmts,
+                    definitely_assigned,
+                    possibly_assigned,
+                    in_forall=in_forall,
+                )
+                else_definite, else_possible = walk(
+                    else_stmts,
+                    definitely_assigned,
+                    possibly_assigned,
+                    in_forall=in_forall,
+                )
+                definitely_assigned = then_definite & else_definite
+                possibly_assigned = then_possible | else_possible
+        return definitely_assigned, possibly_assigned
 
-    walk(spec["init"])
+    assigned, _ = walk(spec["init"], set(), set())
     missing = set(spec["state"]) - assigned
     if missing:
         _err(
@@ -986,7 +975,11 @@ def _exec_init(spec):
                 for s2 in body:
                     run(s2, b2)
         elif tag == "if":
-            _err("if in init is not supported", kind="semantics")
+            _, cond, then_stmts, else_stmts, _ = st
+            c = eval_concrete(cond, state, binds, spec)
+            branch = then_stmts if _as_bool(c) else else_stmts
+            for s2 in branch:
+                run(s2, binds)
 
     for st in spec["init"]:
         run(st, binds)
