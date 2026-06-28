@@ -26,6 +26,10 @@ from .html_report import (
     default_output_name as default_html_output_name,
     render_html_report,
 )
+from .ledger import (
+    default_output_name as default_ledger_output_name,
+    render_ledger,
+)
 
 FSL_VERSION = "1.0"
 
@@ -623,6 +627,44 @@ def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None, write_file=True):
+    """Generate a business audit ledger (markdown) from verifier evidence (#24)."""
+    try:
+        src = Path(file).read_text(encoding="utf-8")
+        ast, display_names = parse_src(src, str(Path(file).parent))
+        spec = build_spec(ast, display_names)
+        verification = run_verify(file, depth, deadlock_mode)
+        scenarios_result = run_scenarios(file, depth, deadlock_mode)
+        replay_result = run_replay(file, impl_log) if impl_log else None
+        content = render_ledger(file, spec, verification, scenarios_result, replay_result)
+        out_path = output or default_ledger_output_name(file)
+        if write_file and output:
+            open(output, "w", encoding="utf-8").write(content)
+        return _envelope({
+            "result": "generated",
+            "kind": "audit_ledger",
+            "spec": spec["name"],
+            "output": out_path,
+            "content": content,
+        })
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"), str(orig), _loc_from_exc(orig),
+            getattr(orig, "expected", None), getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
@@ -708,6 +750,15 @@ def _build_arg_parser():
     hr.add_argument("-o", "--output", default=None)
     hr.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
 
+    lg = sub.add_parser("ledger",
+                        help="generate a business audit ledger (markdown) by requirement id")
+    lg.add_argument("file")
+    lg.add_argument("--depth", type=int, default=8)
+    lg.add_argument("-o", "--output", default=None)
+    lg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="ignore")
+    lg.add_argument("--impl-log", default=None,
+                    help="optional implementation trace JSON to score conformance (fslc replay)")
+
     rf = sub.add_parser("refine")
     rf.add_argument("impl")
     rf.add_argument("abs")
@@ -787,6 +838,18 @@ def _dispatch(args):
     elif args.cmd == "html":
         result = run_html(args.file, args.depth, args.output, args.deadlock,
                           write_file=bool(args.output))
+        if result.get("result") == "generated":
+            content = result.pop("content")
+            if args.output:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                sys.stdout.write(content)
+                sys.exit(0)
+        else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "ledger":
+        result = run_ledger(args.file, args.depth, args.output, args.deadlock,
+                            impl_log=args.impl_log, write_file=bool(args.output))
         if result.get("result") == "generated":
             content = result.pop("content")
             if args.output:

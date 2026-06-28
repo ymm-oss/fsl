@@ -267,7 +267,18 @@ fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dar
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
+fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review report (dev audience)
+fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
 ```
+
+`ledger` (issue #24) re-organizes `verify`/`scenarios`/`replay` findings **by
+requirement id** into a Markdown audit ledger a PM / governance / internal-audit
+reader can decide approve/reject/risk-accept from. It is a presentation layer
+(no new verification): the `trace_type` discriminator drives a per-finding
+business translation, governance columns (risk/decider) come from `control`
+metadata when present (fill-in otherwise), and the guarantee limit is stated in
+positive form. Raw JSON is demoted to a collapsed appendix. See
+`docs/DESIGN-ledger.md`.
 
 `chain` reads `fsl-project.toml` by default. Each `[business]`,
 `[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`

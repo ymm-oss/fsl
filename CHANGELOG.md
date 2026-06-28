@@ -24,6 +24,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `tick()`. (#58)
 
 ### Added
+- `fslc ledger <spec.fsl> [--impl-log run.json] [-o ledger.md]`: a business
+  **audit ledger** (Markdown) that re-organizes `verify` / `scenarios` / `replay`
+  findings **by requirement id** so a PM / governance / internal-audit reader can
+  decide approve/reject/risk-accept per requirement from the ledger alone. A
+  presentation layer over the verifier (no new evaluation): the `trace_type`
+  discriminator (#23) drives a per-finding business translation, governance
+  columns (risk/decider) come from `control` metadata when present (fill-in
+  otherwise), the guarantee limit is stated in positive form, and raw JSON is
+  demoted to a collapsed appendix. Docs: `docs/DESIGN-ledger.md`,
+  `skills/fsl/reference.md` §7. (#24)
 - `fslc` JSON results now carry a `trace_type` repair-routing discriminator on
   every counterexample/failure (`invariant` | `sla` | `type_bound` | `trans` |
   `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` | `reachable`
