@@ -28,6 +28,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `implements`), and the `time`-block `tick` is generated (declaring `action tick` is a
   check error), advances age only, auto-maps to `stutter`, and is referenced as
   `tick()`. (#58)
+- Reframed the "When to Use FSL" manual chapter (`docs/intro/when-to-use.{ja,en}.html`)
+  and the `skills/fsl/SKILL.md` self-check toward FSL's distinctive edge: cross-layer
+  alignment is a **primary use**, not an optional "second lens." The page now leads
+  with two payoffs — ① a single spec's way of breaking (the classic island check) and
+  ② layer-spanning alignment (write the contract layers in FSL and the machine keeps
+  catching cross-layer drift) — so it no longer reads as generic formal-methods
+  adoption guidance. Brakes kept intact (abstraction tax, hollow-spec / mutate
+  kill-rate, judgment-aid-not-mandate, "contract spine, not the entire product
+  process").
 
 ### Added
 - `fslc ledger <spec.fsl> [--impl-log run.json] [-o ledger.md]`: a business
