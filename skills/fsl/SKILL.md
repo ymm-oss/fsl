@@ -51,18 +51,23 @@ inventory/allocation, permissions/audit, queues/async, SLA/timeout/retry, screen
 transitions / double-submit / unsaved-changes. Out of scope: real time, probability,
 continuous money, free-text correctness, absolute latency.
 
-**A recommended second lens (optional — not a fourth gate): is there connectivity
-value?** The three gates score a spec *as a single island*. But FSL can also verify
-*cross-layer alignment*, so a spec that rates "low priority (possible but thin)" on
-its own can be high-value once connection is the point — a requirement provably
-honored by the design, a regulatory control that still bites at the lowest layer, an
-As-Is→To-Be change that preserves a control. When that alignment is the deliverable,
-author the layers and gate the seams with `chain` (the connected workflow below) even
-if any single layer is thin. The converse is the **abstraction tax**: if there is
-really only one hard altitude, do *not* manufacture three layers — you would just
-write the same thing three times at different verbosity. Island-shaped hard spots
-stay single-spec, exactly as before. This is a judgment lens, never a mandate to make
-every task three-layered. (Same criterion in the manual's "When to Use FSL" chapter.)
+**The second lens — one of FSL's primary uses, not a fourth gate: is there
+connectivity value?** The three gates score a spec *as a single island*, but that is
+only half of when FSL pays off. FSL's distinctive edge over classic formal methods is
+that it *also* verifies *cross-layer alignment*, so a spec that rates "low priority
+(possible but thin)" on its own can be high-value once connection is the point — a
+requirement provably honored by the design, a regulatory control that still bites at
+the lowest layer, an As-Is→To-Be change that preserves a control. When that alignment
+is the deliverable, author the layers and gate the seams with `chain` (the connected
+workflow below) even if any single layer is thin; verifying the connection is a
+primary use, not a tail-end advanced topic. The converse — the brake on writing *too*
+much — is the **abstraction tax**: if there is really only one hard altitude, do *not*
+manufacture three layers — you would just write the same thing three times at
+different verbosity. Island-shaped hard spots stay single-spec, exactly as before. So
+the wider you write across genuine layers, the more alignment you can mechanically
+manage — but this stays a judgment lens, never a mandate to make every task
+three-layered (FSL is the contract spine, not the entire product process). (Same
+criterion in the manual's "When to Use FSL" chapter.)
 
 Even past the gates, the value is conditional: **FSL checks the spec, not the
 product.** If no human owns the rules, or (for conformance) no faithful Adapter/log

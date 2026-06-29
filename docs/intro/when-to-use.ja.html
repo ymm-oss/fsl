@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>使いどころ — FSLを使うべきか見極める</title>
-<meta name="description" content="FSLをどこに使い、どこには要らないか。状態×操作順×フラグの相互作用という判断軸、3つのゲート、効く/低優先/対象外の切り分け、価値の前提、層の選び方。" />
+<meta name="description" content="FSLをどこに使い、どこには要らないか。2つの効きどころ（単一仕様の壊れ方／層をまたぐ整合というFSLの差別化）、3ゲート、効く/低優先/対象外、価値の前提、層の選び方。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="when-to-use">
@@ -20,9 +20,9 @@
 <section class="hero">
   <div class="wrap narrow center">
     <p class="kicker reveal">いつ使うべきか</p>
-    <h1 class="reveal">「使うべき？」の答えは、<br><span class="hl">状態の数</span>では決まらない。</h1>
-    <p class="lead reveal">決め手は「壊れ方」。ある<b>操作の順番</b>や<b>フラグの組み合わせ</b>で、<br>あってはならない状態に滑り込めるか——基準はそれだけです。</p>
-    <p class="reveal" style="margin-top:24px">FSL は全部に使う道具ではありません。<br>このページは、<b>どこに効いて、どこは要らないか</b>の線引きを持ち帰るためのものです。<span class="dim">（10分・専門用語なし）</span></p>
+    <h1 class="reveal">「使うべき？」は、<span class="hl">2つの効きどころ</span>で決まる。</h1>
+    <p class="lead reveal">ひとつは単一仕様の<b>壊れ方</b>——順序やフラグの相互作用で危険状態に入り得るか。<br>もうひとつが FSL の真価：<b>業務・要件・設計を貫いて書ける</b>から、層と層のズレまで機械が検出する。</p>
+    <p class="reveal" style="margin-top:24px">後者は一般的な形式手法にない差別化。だから<b>契約の層を広く書くほど、アプリの整合管理</b>になります。とはいえ全部に使う道具ではありません——<b>どこに効いて、どこは要らないか</b>の線引きまで持ち帰る。<span class="dim">（10分・専門用語なし）</span></p>
     <div class="scroll-hint reveal">▽ スクロール</div>
   </div>
 </section>
@@ -32,9 +32,9 @@
 <!-- 1. 核心：たったひとつの判断軸 -->
 <section>
   <div class="wrap">
-    <p class="kicker reveal">たったひとつの判断軸</p>
+    <p class="kicker reveal">効きどころ ①：単一仕様</p>
     <h2 class="reveal">「状態の多さ」ではなく「壊れ方」で決める</h2>
-    <p class="lead narrow reveal">状態がいくつあるかは関係ありません。問うのはひとつ——<br>ある<b>操作の順番</b>や<b>フラグの組み合わせ</b>で、本来あり得ない状態に滑り込めるか。</p>
+    <p class="lead narrow reveal">まずは仕様ひとつの中の話。状態がいくつあるかは関係ありません。問うのは——<br>ある<b>操作の順番</b>や<b>フラグの組み合わせ</b>で、本来あり得ない状態に滑り込めるか。</p>
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
         <h3>❌ 「状態が多い＝使う」ではない</h3>
@@ -49,12 +49,34 @@
   </div>
 </section>
 
+<hr class="soft" />
+
+<!-- 1b. 効きどころ②：層をまたぐ整合（FSLの差別化） -->
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">効きどころ ②：層をまたぐ整合 — ここがFSLの差別化</p>
+    <h2 class="reveal">「島をひとつ検証する」では終わらない</h2>
+    <p class="lead narrow reveal">一般的な形式手法は、難所を<b>ひとつ</b>取り出して検証します（島モデル）。<br>FSLが違うのは、<b>業務・要件・設計・実装</b>を refinement で縫い合わせ、<b>層と層が同じ意味を保っているか</b>まで機械検証できること。</p>
+    <div class="vs reveal" style="margin-top:24px">
+      <div class="card">
+        <h3>🏝 一般的な形式手法＝島モデル</h3>
+        <p class="dim" style="margin-top:10px">難所をひとつモデル化して「この仕様は正しいか」を問う。層をまたぐ整合は、人手の管理に残る。</p>
+      </div>
+      <div class="card">
+        <h3>🔗 FSL＝層を貫く</h3>
+        <p class="dim" style="margin-top:10px">業務⊒要件⊒設計⊒実装をつなぎ、<b>要件が設計に守られる／規制が下層まで効く／As-Is→To-Beが統制を保存する</b>かを検証。問いは「これらの層はまだ同じ意味か」へ。</p>
+      </div>
+    </div>
+    <p class="narrow reveal" style="margin-top:28px">だから<b>契約の層（業務・要件・設計）を広くFSLで書くほど</b>、層間の不整合＝仕様と実装のズレを機械が拾い続けます。これが<b>FSLによるアプリの整合管理</b>。連結の検証は応用編ではなく、<b>FSLの主用途のひとつ</b>です。</p>
+  </div>
+</section>
+
 <!-- 2. 判断フロー：3つのゲート -->
 <section style="background:var(--surface-2)">
   <div class="wrap">
-    <p class="kicker reveal">判断フロー</p>
+    <p class="kicker reveal">判断フロー（効きどころ①の見極め）</p>
     <h2 class="reveal">3つのゲートを、上から順に通す</h2>
-    <p class="lead narrow reveal">上から順に通します。どこかで詰まったら、そこが答えです。</p>
+    <p class="lead narrow reveal">まず<b>単一仕様として</b>効くかを見極めます。上から順に通し、どこかで詰まったら、そこが答えです。<br>（層をまたぐ整合＝効きどころ②は、この下の「もうひとつのレンズ」で。）</p>
     <div class="layers reveal" style="margin-top:24px">
       <div class="layer">
         <h3>① 状態遷移があるか</h3>
@@ -77,10 +99,10 @@
       </div>
     </div>
     <div class="callout reveal" style="margin-top:28px;text-align:left">
-      <p style="margin:0 0 10px"><b>もうひとつのレンズ（推奨・任意）：連結に価値があるか。</b></p>
-      <p style="margin:0 0 10px">上の3ゲートは「単一スペックとしての難所」を測ります。けれど FSL は<b>層をまたぐ整合</b>も検証できます——<b>要件が設計に確かに守られる／規制が下層まで効く／As-Is→To-Be が統制を保存する</b>、といった整合が要点なら、単発では薄くても <code>chain</code> で高価値になりえます。</p>
-      <p style="margin:0 0 10px">逆に<b>本当の高度がひとつ</b>なら3層を作らないこと（<b>抽象化税</b>：同じものを冗長度違いで3回書くだけになる）。島型の難所はこれまで通り単一スペックで。</p>
-      <p style="margin:0" class="dim">これは判断の補助であって、全タスクを3層に強制する規則ではありません。</p>
+      <p style="margin:0 0 10px"><b>もうひとつのレンズ：連結に価値があるか（効きどころ②の見極め）。</b></p>
+      <p style="margin:0 0 10px">3ゲートが○でなくても——単発では「低優先（薄い）」でも——<b>層をまたぐ整合</b>が要点なら高価値です。<b>要件が設計に確かに守られる／規制が下層まで効く／As-Is→To-Be が統制を保存する</b>、これらが狙いなら各層を書いて <code>chain</code> でつなぎ目を検証する。これは応用編ではなく、<b>FSLの主用途</b>です。</p>
+      <p style="margin:0 0 10px">ただし<b>やりすぎ防止</b>も同じレンズで測ります。<b>本当の高度がひとつ</b>なら3層を作らないこと（<b>抽象化税</b>：同じものを冗長度違いで3回書くだけになる）。島型の難所はこれまで通り単一スペックで。</p>
+      <p style="margin:0" class="dim">広く書くほど整合管理は効きますが、これは判断の補助であって、全タスクを3層に強制する規則ではありません（FSLは“契約の背骨”であって、製品プロセス全体ではない）。</p>
     </div>
   </div>
 </section>
@@ -113,7 +135,7 @@
           <li>制約の少ないUI装飾</li>
           <li>状態遷移がほぼない処理</li>
         </ul>
-        <p style="margin-top:10px">一本道なら、既存テストで足りることが多い。</p>
+        <p style="margin-top:10px">一本道なら、既存テストで足りることが多い。<br><span class="dim">ただし<b>上位層との整合</b>（効きどころ②）の一部なら、単発で薄くても書く価値がある。</span></p>
       </div>
       <div class="syntax-card">
         <h3 style="color:var(--danger)">⛔ 対象外（表現できない）</h3>
@@ -214,7 +236,7 @@
     <p class="kicker reveal">まとめ</p>
     <h2 class="reveal">覚えるのは、この一文</h2>
     <div class="callout reveal" style="margin-top:20px;text-align:left">
-      <p style="margin:0;font-size:18px"><b>状態機械であり、順序・フラグ・権限の相互作用で危険状態に入り得て、有限・離散で書けて、ルールの責任者がいる</b>——このときFSLが効く。<br><span class="dim">サイズ（状態の多さ）は判断材料ではない。</span></p>
+      <p style="margin:0;font-size:18px"><b>単一仕様の「壊れ方」を検出でき、かつ／または 業務〜設計の「層をまたぐズレ」を検出できる</b>——このときFSLが効く。後者は一般的な形式手法にない差別化で、<b>契約の層を広く書くほどアプリの整合管理</b>になる。<br><span class="dim">サイズ（状態の多さ）は判断材料ではない。</span></p>
     </div>
     <div class="cta reveal" style="margin-top:32px">
       <h2>では、動かしてみる</h2>
