@@ -15,6 +15,7 @@ from lark.exceptions import UnexpectedInput
 from .grammar import PARSER, Ast
 from .compose import expand_compose
 from .dialects import (
+    apply_verify_bounds_overrides,
     expand_business,
     expand_governance_with_display,
     expand_requirements_with_display,
@@ -22,14 +23,21 @@ from .dialects import (
 )
 
 
-def parse_src(src, base_dir=None):
-    """Parse FSL source; expand compose specs when ``base_dir`` is set."""
+def parse_src(src, base_dir=None, bounds_overrides=None):
+    """Parse FSL source; expand compose specs when ``base_dir`` is set.
+
+    ``bounds_overrides`` (``{"instances": {name: n}, "values": {name: (lo, hi)}}``)
+    comes from ``fslc verify --instances``/``--values`` and replaces the matching
+    ``verify { ... }`` bounds before dialect desugaring runs.
+    """
     try:
         tree = PARSER.parse(src)
     except UnexpectedInput as e:
         e.source = src
         raise
     ast = Ast().transform(tree)
+    if bounds_overrides:
+        ast = apply_verify_bounds_overrides(ast, bounds_overrides)
     display_names = {}
     if ast[0] == "compose":
         ast, display_names = expand_compose(ast, base_dir or ".")

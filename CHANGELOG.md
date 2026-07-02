@@ -5,6 +5,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- `fslc verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
+  override a `verify { ... }` block's `entity`/`number` bounds from the CLI,
+  so liveness/induction runs can shrink the model without editing the spec.
+  An undeclared `NAME` or a malformed value is a spec error (exit 2); the
+  effective override is echoed back as `bounds_overrides` in the JSON
+  envelope. (#86)
+
 ## [2.5.0] - 2026-07-02
 
 ### Added

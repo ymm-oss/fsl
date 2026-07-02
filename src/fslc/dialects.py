@@ -86,6 +86,78 @@ def _meta_with_controls(req_id, text, control_ids, control_by_id):
     return meta
 
 
+_BOUNDS_OVERRIDE_TAGS = ("spec", "business", "requirements")
+
+
+def apply_verify_bounds_overrides(ast, overrides):
+    """Merge CLI ``--instances``/``--values`` overrides (``fslc verify``) into the
+    parsed AST's ``verify { ... }`` block, replacing any existing bound of the same
+    name (or adding one) before dialect desugaring runs `_collect_verify_bounds`.
+
+    Only applies to `spec`/`business`/`requirements` ASTs whose bounds are backed
+    by `entity`/`number` declarations. An override naming something that is not
+    declared as `entity`/`number` is not checked here — it surfaces via the
+    existing undeclared-entity/undeclared-number checks in
+    `_entity_number_to_types` / `_collect_business_entities` once desugaring runs.
+    """
+    new_instances = dict(overrides.get("instances") or {})
+    new_values = dict(overrides.get("values") or {})
+    if not new_instances and not new_values:
+        return ast
+    tag, name, items = ast
+    if tag not in _BOUNDS_OVERRIDE_TAGS:
+        _err(
+            "--instances/--values only apply to business/requirements specs, or "
+            "a kernel spec with entity/number declarations",
+            kind="semantics",
+        )
+    if tag == "spec" and not any(it[0] in ("entity", "number") for it in items):
+        _err(
+            "--instances/--values only apply to specs with entity/number "
+            "declarations; this spec declares neither",
+            kind="semantics",
+        )
+
+    def _values_expr(bound_range):
+        lo, hi = bound_range
+        return ("num", lo), ("num", hi)
+
+    out_items = []
+    found_block = False
+    for item in items:
+        if item[0] != "verify_bounds":
+            out_items.append(item)
+            continue
+        found_block = True
+        merged = []
+        for bound in item[1]:
+            if bound[0] == "verify_instances":
+                _, bname, n, bloc = bound
+                if bname in new_instances:
+                    n = new_instances.pop(bname)
+                merged.append(("verify_instances", bname, n, bloc))
+            elif bound[0] == "verify_values":
+                _, bname, lo, hi, bloc = bound
+                if bname in new_values:
+                    lo, hi = _values_expr(new_values.pop(bname))
+                merged.append(("verify_values", bname, lo, hi, bloc))
+            else:
+                merged.append(bound)
+        for bname, n in new_instances.items():
+            merged.append(("verify_instances", bname, n, None))
+        for bname, bound_range in new_values.items():
+            lo, hi = _values_expr(bound_range)
+            merged.append(("verify_values", bname, lo, hi, None))
+        out_items.append(("verify_bounds", merged, item[2]))
+    if not found_block:
+        merged = [("verify_instances", bname, n, None) for bname, n in new_instances.items()]
+        for bname, bound_range in new_values.items():
+            lo, hi = _values_expr(bound_range)
+            merged.append(("verify_values", bname, lo, hi, None))
+        out_items.append(("verify_bounds", merged, None))
+    return (tag, name, out_items)
+
+
 def _collect_verify_bounds(items):
     instances = {}
     values = {}

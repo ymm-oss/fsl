@@ -148,8 +148,8 @@ def _parse_error_result(e):
     })
 
 
-def _parse_file(file, src):
-    return parse_src(src, str(Path(file).parent))
+def _parse_file(file, src, bounds_overrides=None):
+    return parse_src(src, str(Path(file).parent), bounds_overrides)
 
 
 def _read_requirement_ids(path):
@@ -315,18 +315,60 @@ def run_typestate(file):
                           "message": f"file not found: {file}"})
 
 
-def _read_spec(file):
+def _read_spec(file, bounds_overrides=None):
     src = open(file, encoding="utf-8").read()
-    ast, display_names = _parse_file(file, src)
+    ast, display_names = _parse_file(file, src, bounds_overrides)
     return build_spec(ast, display_names), src.splitlines()
+
+
+def _parse_instances_override(raw):
+    name, sep, val = raw.partition("=")
+    name = name.strip()
+    if not sep or not name:
+        raise FslError(
+            f"invalid --instances value '{raw}': expected NAME=N", kind="semantics")
+    try:
+        n = int(val.strip())
+    except ValueError:
+        raise FslError(
+            f"invalid --instances value '{raw}': '{val.strip()}' is not an integer",
+            kind="semantics")
+    return name, n
+
+
+def _parse_values_override(raw):
+    name, sep, rng = raw.partition("=")
+    name = name.strip()
+    lo_s, dots, hi_s = rng.partition("..")
+    if not sep or not name or not dots:
+        raise FslError(
+            f"invalid --values value '{raw}': expected NAME=LO..HI", kind="semantics")
+    try:
+        lo, hi = int(lo_s.strip()), int(hi_s.strip())
+    except ValueError:
+        raise FslError(
+            f"invalid --values value '{raw}': bounds must be integers", kind="semantics")
+    return name, (lo, hi)
+
+
+def _build_bounds_overrides(instances, values):
+    overrides = {"instances": {}, "values": {}}
+    for raw in instances or []:
+        name, n = _parse_instances_override(raw)
+        overrides["instances"][name] = n
+    for raw in values or []:
+        name, bounds = _parse_values_override(raw)
+        overrides["values"][name] = bounds
+    return overrides
 
 
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None):
+        exclude_property_names=None, instances=None, values=None):
     try:
-        spec, source_lines = _read_spec(file)
+        bounds_overrides = _build_bounds_overrides(instances, values)
+        spec, source_lines = _read_spec(file, bounds_overrides)
         acc = _acceptance_error(spec)
         if acc:
             return _envelope(acc)
@@ -356,6 +398,12 @@ def run_verify(
             out = dict(out)
             out["implements"] = impl
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
+        if bounds_overrides["instances"] or bounds_overrides["values"]:
+            out = dict(out)
+            out["bounds_overrides"] = {
+                "instances": dict(bounds_overrides["instances"]),
+                "values": {k: [lo, hi] for k, (lo, hi) in bounds_overrides["values"].items()},
+            }
         return _envelope(out)
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -741,6 +789,12 @@ def _build_arg_parser():
                    action="append", default=None,
                    help="skip a named property; repeat to omit invariants/trans/"
                         "leadsTo/reachable declarations")
+    v.add_argument("--instances", action="append", default=None,
+                   help="override a verify-block 'instances NAME = N' bound "
+                        "(NAME=N; repeatable) — e.g. shrink to 1 entity for liveness")
+    v.add_argument("--values", action="append", default=None,
+                   help="override a verify-block 'values NAME = LO..HI' bound "
+                        "(NAME=LO..HI; repeatable)")
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
 
@@ -896,7 +950,9 @@ def _dispatch(args):
                             strict_tags=args.strict_tags,
                             requirements=args.requirements,
                             property_name=args.property_name,
-                            exclude_property_names=args.exclude_property_names)
+                            exclude_property_names=args.exclude_property_names,
+                            instances=args.instances,
+                            values=args.values)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

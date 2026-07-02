@@ -78,6 +78,23 @@ are exactly equivalent to writing the bounded type directly — the difference i
 only readability (a design spec reads as documentation instead of asserting a
 domain size that is really a model bound). See `docs/DESIGN-spec-domains.md`.
 
+`fslc verify` can override a `verify` block's `instances`/`values` bounds from
+the command line, without editing the spec:
+
+```bash
+fslc verify spec.fsl --instances Case=1 --property EventuallyLeavesInProgress
+fslc verify spec.fsl --values Amount=0..3
+```
+
+Both flags are repeatable (`--instances A=1 --instances B=2`) and replace the
+bound of the matching `entity`/`number` name — handy for shrinking to a
+1-entity model for liveness/induction runs (see §7) without touching the file.
+A `NAME` with no matching `entity`/`number` declaration, or a spec whose bounds
+are not `entity`/`number`-backed (a kernel `type X = lo..hi` literal), is a spec
+error (exit code 2), as is a malformed value (`Case=abc`, `N=5..1`). The
+effective overridden bounds are echoed back in the JSON envelope's
+`bounds_overrides` field.
+
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 
