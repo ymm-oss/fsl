@@ -408,6 +408,109 @@ _CTI_HINT = (
     "then re-run"
 )
 
+_MONOTONE_DIRECTION_OP = {"increasing": (">=", "below"), "decreasing": ("<=", "above")}
+
+
+def _monotone_direction(values):
+    diffs = [b - a for a, b in zip(values[:-1], values[1:]) if b != a]
+    if not diffs:
+        return None
+    if all(d > 0 for d in diffs):
+        return "increasing"
+    if all(d < 0 for d in diffs):
+        return "decreasing"
+    return None
+
+
+def _monotone_qualifies(direction, cti0, v0):
+    return cti0 < v0 if direction == "increasing" else cti0 > v0
+
+
+def _monotone_sentence(name, direction, v0, expr):
+    _, side = _MONOTONE_DIRECTION_OP[direction]
+    return (
+        f"'{name}' only {direction} in this CTI but starts {side} its initial "
+        f"value {v0}; adding invariant {expr} may exclude this unreachable start state"
+    )
+
+
+def _map_key_type_name(name, spec):
+    ref = (spec.get("state_type_refs") or {}).get(name)
+    if isinstance(ref, tuple) and ref[0] == "map":
+        key_ref = ref[1]
+        if isinstance(key_ref, tuple) and key_ref[0] == "named":
+            return key_ref[1]
+    return None
+
+
+def _suggest_monotone_invariants(trace, spec):
+    """Heuristically suggest auxiliary invariants for k-induction CTIs.
+
+    Scans the (already-built) CTI trace for state variables that only ever
+    move in one direction across the trace and whose CTI start value lies on
+    the unreachable side of the concrete initial value — the classic "ghost
+    counter" false start. Trace-monotonicity is not a proof of global
+    monotonicity, so this is a suggestion, not a repair.
+    """
+    if len(trace) < 2:
+        return []
+    try:
+        from .runtime import Monitor
+        init_state = Monitor(spec).reset()
+    except Exception:
+        return []
+
+    suggestions = []
+    for name, ty in spec["state"].items():
+        if ty[0] in ("int", "domain"):
+            values = [entry["state"].get(name) for entry in trace]
+            v0 = init_state.get(name)
+            if not isinstance(v0, int) or not all(isinstance(v, int) for v in values):
+                continue
+            direction = _monotone_direction(values)
+            if direction is None or not _monotone_qualifies(direction, values[0], v0):
+                continue
+            op, _ = _MONOTONE_DIRECTION_OP[direction]
+            expr = f"{name} {op} {v0}"
+            suggestions.append((expr, _monotone_sentence(name, direction, v0, expr)))
+        elif ty[0] == "map" and ty[2][0] in ("int", "domain"):
+            key_ty = _map_key_type_name(name, spec)
+            init_map = init_state.get(name)
+            if key_ty is None or not isinstance(init_map, dict) or not init_map:
+                continue
+            init_values = set(init_map.values())
+            if len(init_values) != 1 or not isinstance(next(iter(init_values)), int):
+                continue
+            v0 = next(iter(init_values))
+            keys = set()
+            for entry in trace:
+                keys.update((entry["state"].get(name) or {}).keys())
+            directions = set()
+            for key in keys:
+                values = [(entry["state"].get(name) or {}).get(key) for entry in trace]
+                if any(not isinstance(v, int) for v in values):
+                    continue
+                direction = _monotone_direction(values)
+                if direction and _monotone_qualifies(direction, values[0], v0):
+                    directions.add(direction)
+            if len(directions) != 1:
+                continue
+            direction = directions.pop()
+            op, _ = _MONOTONE_DIRECTION_OP[direction]
+            expr = f"forall k: {key_ty} {{ {name}[k] {op} {v0} }}"
+            suggestions.append((expr, _monotone_sentence(name, direction, v0, expr)))
+    return suggestions
+
+
+def _cti_hint_fields(trace, spec):
+    suggestions = _suggest_monotone_invariants(trace, spec)
+    if not suggestions:
+        return {"hint": _CTI_HINT}
+    exprs = [expr for expr, _ in suggestions]
+    sentences = " ".join(sentence for _, sentence in suggestions)
+    return {"hint": f"{_CTI_HINT} {sentences}", "suggested_invariants": exprs}
+
+
 _PARTIAL_OP_HINT = (
     "guard the action with requires q.size() > 0 (or bound the index)"
 )
@@ -562,6 +665,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         n = e[1]
         if n in binds:
             b = binds[n]
+            if isinstance(b, bool):
+                return z3.BoolVal(b)
             return b if not isinstance(b, int) else z3.IntVal(b)
         if n in consts:
             return z3.IntVal(consts[n])
@@ -1307,13 +1412,18 @@ def build_instances(spec):
     instances = []
     for act in spec["actions"]:
         names = [p[0] for p in act["params"]]
+        is_bool = [p[3] == "Bool" for p in act["params"]]
         ranges = [range(p[1], p[2] + 1) for p in act["params"]]
         combos = itertools.product(*ranges) if ranges else [()]
         for combo in combos:
+            binds = {
+                n: (bool(v) if b else v)
+                for n, v, b in zip(names, combo, is_bool)
+            }
             instances.append({
                 "action": act["name"],
                 "action_def": act,
-                "binds": dict(zip(names, combo)),
+                "binds": binds,
                 "requires": act["requires"],
                 "lets": act["lets"],
                 "stmts": act["stmts"],
@@ -1895,7 +2005,7 @@ def _build_trace(model, states, choices, instances, spec, upto):
 def _display_param(name, val, act, spec):
     for p in act["params"]:
         if p[0] == name and p[3]:
-            ty = spec["types"][p[3]]["ty"]
+            ty = ("bool",) if p[3] == "Bool" else spec["types"][p[3]]["ty"]
             return _display_value(ty, val, spec)
     return val
 
@@ -4715,7 +4825,7 @@ def prove(
                         },
                         "invariants_checked": [i["name"] for i in invariants],
                         "transitions_checked": [tr["name"] for tr in transitions],
-                        "hint": _CTI_HINT,
+                        **_cti_hint_fields(trace, spec),
                     }, trans), spec, base_depth, started, completeness="bounded")
                 s.pop()
 
@@ -4737,7 +4847,7 @@ def prove(
                 "states": trace,
                 "violated_at": k,
             },
-            "hint": _CTI_HINT,
+            **_cti_hint_fields(trace, spec),
         }, inv), spec, base_depth, started, completeness="bounded")
 
     rank_failure, ranked_leadstos = _prove_ranked_leadstos(

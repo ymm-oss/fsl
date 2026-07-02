@@ -17,6 +17,64 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   inline `action ...` item and a requirement action's `maps` clause both target
   the same impl action. (#73; docs: `docs/DESIGN-refinement.md` §1.2,
   `docs/LANGUAGE.md`, `skills/fsl/reference.md`)
+- k-induction `unknown_cti` results now suggest auxiliary invariants for the
+  common monotone-counter idiom: when the CTI trace shows an `Int`/domain
+  scalar or a `Map<K, Int>` counter moving in only one direction and starting
+  on the unreachable side of the concrete initial value (a ghost/huge/negative
+  start), the result gains `"suggested_invariants": ["<expr>", ...]` and the
+  matching sentence is appended to `hint` (e.g. `"audit >= 0"` or, for a
+  uniformly-initialized map, `"forall k: Case { audit[k] >= 0 }"`).
+  Post-processing only (trace diff against `runtime.Monitor(spec).reset()`) —
+  no solver/engine semantics change, so verdicts are unaffected; the field is
+  additive and absent when no such counter is found. (`bmc.py`, `docs/LANGUAGE.md`,
+  `docs/DESIGN-induction.md`, `skills/fsl/reference.md`, `tests/test_cti_suggestions.py`) (#74)
+- Business-layer no-bypass precedence policy: `policy ID "text" every <Entity>
+  reaching <Stage> [or <Stage> ...] must have passed through <Stage> [or
+  <Stage> ...]`. Synthesizes an invisible `Map<Entity, Bool>` history flag
+  (dedup'd across policies over the same process/waypoint-set), sets it on
+  the transition(s) landing on a waypoint, and compiles to a kernel invariant
+  carrying the policy's REQ-ID — closing "no-bypass" controls at the business
+  layer without descending to `requirements`. See
+  `docs/DESIGN-precedence-policy.md`. (#75)
+- `terminal { }` now works in the `requirements` dialect (`terminal_def` is a
+  `requirements_item`; it passes through unchanged to the kernel spec, same
+  one-block-per-spec rule as the kernel). The `business` dialect gets no new
+  syntax: `terminal { }` is instead derived automatically from each process's
+  sink stages (stages with no outgoing `transition`) — if every process has
+  at least one sink, the generated predicate is the conjunction, over
+  processes, of "every entity of that process is at one of its sinks". A
+  process with no sink at all (a genuine cycle) still generates no terminal,
+  matching prior behavior exactly. Previously, neither dialect could declare
+  intended stop states, so `--deadlock ignore` was the only way to silence
+  the deadlock check at a completed stage — discarding detection of
+  unintended deadlocks along with it. (#69)
+- Allow the builtin `Bool` as an action parameter type (`p: Bool`), matching
+  its existing use as a state `Map` value/key. `Bool` params are first-class
+  z3/concrete booleans in expressions — usable bare as a guard
+  (`requires b` / `requires not b`) or assigned into `Bool`-typed state
+  (`flag[i] = b`) — not a 0/1 int carrier, keeping BMC and the concrete
+  `Monitor` in agreement. `Int` stays rejected (unbounded, can't be
+  enumerated); the error now hints at a range parameter
+  (`p in <lo>..<hi>`). (#68)
+- `acceptance`/`forbidden` action arguments now accept enum member names (and
+  const names) in addition to numeric ordinals, matching the name resolution
+  already used by `requires`/`invariant`/`expect` expressions
+  (`_is_enum_member` in `values.py`). An undefined name is still a
+  `kind: "acceptance"`/`"forbidden"` check-time error, now reported as
+  "undefined const or enum member". (#67)
+
+### Documentation
+- Documented `leadsTo ... decreases` placement and ranking discipline in
+  `docs/LANGUAGE.md` and `skills/fsl/reference.md`: `decreases` sits outside
+  the `forall` wrapper (nesting it inside is a parse error, not a "ranking
+  doesn't work under forall" limitation); a per-entity measure
+  (`decreases level[c]`) always fails under interleaving
+  (`rank_failure: "non_decreasing_action"`) because every enabled action must
+  strictly decrease it; the working idiom is a global sum measure over a
+  fixed small domain (`decreases level[0] + level[1]`), since there is no
+  `sum()` aggregate to generalize it (fairness-aware per-entity ranking is
+  tracked separately as #72). Also added a targeted parse-error hint in
+  `cli.py` for `decreases` nested inside a `forall` body. (#71)
 
 ## [2.4.0] - 2026-06-29
 
