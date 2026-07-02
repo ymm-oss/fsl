@@ -5,6 +5,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- The requirements-dialect inline `implements Abs from "file" { }` block now
+  accepts `action <impl>(<params>) -> <abs>(<args>) | stutter` items (grammar.py
+  `?implements_item` gains `refinement_action`), the same action-correspondence
+  syntax as a separate refinement file, including an arity change between the
+  impl and abs action's parameters. The inline desugar already merged the
+  block's items into the same mapping AST a separate-file `refinement` parses,
+  so `dialects.py`/`refine.py` needed no changes — including duplicate-map
+  detection (`kind: "type"`, `"duplicate action map for '<name>'"`) when an
+  inline `action ...` item and a requirement action's `maps` clause both target
+  the same impl action. (#73; docs: `docs/DESIGN-refinement.md` §1.2,
+  `docs/LANGUAGE.md`, `skills/fsl/reference.md`)
+
 ## [2.4.0] - 2026-06-29
 
 ### Documentation
