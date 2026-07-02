@@ -108,6 +108,56 @@ Observed result: `fslc check refine_impl.fsl` returned `result:"ok"` with
 `fslc verify refine_impl.fsl --depth 1` returned `result:"verified"` with the
 same implements result.
 
+### 1.2 Inline `implements { }` action items (v2.x — #73)
+
+The requirements-dialect inline `implements Abs from "file" { }` block
+originally only accepted `map`/`maps auto`/`preserve progress` — an
+arity-changing action correspondence had to go through `maps` on the
+requirement action (§1.1, same arity/argument shape as the impl action's own
+params) or a separate refinement file's `action <impl>(...) -> <abs>(...)`
+item (§1).
+
+`implements_item` now also accepts `refinement_action` (grammar.py), i.e. the
+block can contain:
+
+```fsl
+requirements Impl {
+  implements Abs from "abs.fsl" {
+    map done[c: CaseId] = paid[c]
+    action pay(c: CaseId, m: Method) -> refund(c)   // arity change: drops m
+  }
+  ...
+}
+```
+
+This is not a new mechanism: `refinement_action`'s transformer output
+(`("action_map", name, params, target, loc)`) is the same AST node the
+separate-file parser already produces, and the inline desugar
+(dialects.py `_expand_requirements_with_display`) already merges
+`implements["maps"]` (the block's items) into the same `mapping_items` list
+as the auto-derived action maps from requirement-action `maps` clauses and
+process transitions, before building the same `("refinement", ...)` AST that
+`refine.py.build_refinement` consumes for both the inline and separate-file
+paths. Adding the grammar alternative was the entire change; `dialects.py`
+and `refine.py` needed none.
+
+Two consequences fall out of reusing the same merge, not from new logic:
+
+- **Duplicate correspondence.** `build_refinement` already rejects a second
+  `action_map` entry for the same impl action name
+  (`kind: "type"`, `"duplicate action map for '<name>'"`). Since the inline
+  block's items are merged ahead of the auto-derived ones, an impl action that
+  has *both* a `maps` clause and a matching inline `action ...` item now hits
+  that same pre-existing check — mirroring what a separate-file mapping that
+  lists an action twice already does.
+- **Branch-split action names.** `branches` splits an action into aliased
+  kernel actions (`name__b1`, `name__b2`, ...; dialects.py
+  `_split_branch_action`), so the impl spec `build_refinement` type-checks
+  against never has an action under the pre-split name. An inline
+  `action <pre_split_name>(...) -> ...` item is therefore `"unknown impl
+  action '<pre_split_name>'"` — reference the generated alias instead, same as
+  a separate-file mapping would need to.
+
 ## 2. Checking Semantics (Bounded Forward Simulation)
 
 α(s) := the mapping that defines the impl state → abs state mapping.

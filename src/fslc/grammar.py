@@ -182,7 +182,7 @@ requirements_def: "requirements" NAME "{" requirements_item* "}"
                   | state_def | init_def | req_action_def | process_def | time_def
                   | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
-?implements_item: map_def | maps_auto_def | preserve_progress_def
+?implements_item: map_def | maps_auto_def | refinement_action | preserve_progress_def
 requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
 ?requirement_item: req_action_def | invariant_def | trans_def | reachable_def | leadsto_def | deadline_def
 req_action_def: req_fair_action | req_plain_action

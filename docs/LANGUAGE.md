@@ -915,12 +915,18 @@ verify {
   simultaneously**, and the result carries `implements: {abs, result}`. An empty
   body (`implements X from "..." { }`) auto-generates identity refinement when
   process/action/stage names match. Inside the `implements { }` block you write
-  only state `map` entries, `maps auto`, and `preserve progress` — not `action`;
-  action↔action correspondence is the `maps <abs_act>(...)` clause on the
-  requirement-level action. `maps auto` covers same-name kernel-wrapper
-  state/actions, and explicit maps override it. Auto-mapped process transitions
-  are actor-checked; a transition whose actor differs from the business action's
-  actor is a check-time error.
+  state `map` entries, `maps auto`, `preserve progress`, and — since #73 —
+  `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter`, the same
+  correspondence syntax as a separate refinement file's `refinement_action`
+  (`docs/DESIGN-refinement.md` §1), including an arity change between the impl
+  and abs action. Action↔action correspondence can also still be written as the
+  `maps <abs_act>(...)` clause on the requirement-level action; `maps auto`
+  covers same-name kernel-wrapper state/actions, and explicit maps override it.
+  An impl action with both a `maps` clause and a matching inline `action ...`
+  item is a duplicate-correspondence, `kind: "type"` check-time error (same as
+  a mapping file that lists the same action twice). Auto-mapped process
+  transitions are actor-checked; a transition whose actor differs from the
+  business action's actor is a check-time error.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen

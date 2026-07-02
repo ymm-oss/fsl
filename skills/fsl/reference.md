@@ -660,12 +660,19 @@ verify {
   `_kpi_*` invariant.
 - When `implements Abs from "file" { }` is present and process/action/stage names
   match, fslc synthesizes the identity refinement mapping. Inside the
-  `implements { }` block you write only state `map` entries, `maps auto`, and
-  `preserve progress` — **not `action`** (the grammar rejects an action there).
-  Action↔action correspondence is instead the `maps <abs_act>(...)` clause **on
-  the requirement-level action** (auto-synthesized for matching names; `maps auto`
-  covers same-name kernel-wrapper actions). Auto-mapped process transitions are
-  statically actor-checked; an actor mismatch is a check-time type error.
+  `implements { }` block you write state `map` entries, `maps auto`,
+  `preserve progress`, and `action <impl>(<params>) -> <abs>(<args>) | stutter`
+  (same syntax as a separate refinement file's `action` item, including an
+  arity change between impl and abs params — #73). Action↔action
+  correspondence can also still be written as the `maps <abs_act>(...)` clause
+  **on the requirement-level action** (auto-synthesized for matching names;
+  `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
+  clause on an action and a matching inline `action ...` item for the same impl
+  action name is a duplicate-correspondence error (`kind: "type"`,
+  "duplicate action map for '<name>'"). An inline `action` item cannot target
+  a `branches`-split action by its pre-split name — reference the generated
+  `name__b<N>` alias. Auto-mapped process transitions are statically
+  actor-checked; an actor mismatch is a check-time type error.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
