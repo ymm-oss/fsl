@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-07-03
+
 ### Added
 - `fslc verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
   override a `verify { ... }` block's `entity`/`number` bounds from the CLI,
