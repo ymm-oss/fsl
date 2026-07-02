@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-07-02
+
 ### Added
 - Requirements-layer `process E with f: T { ... }` carried fields now accept
   `Bool` and enum types declared in the same spec, not just `number`. Number
