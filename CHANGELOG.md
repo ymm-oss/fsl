@@ -5,6 +5,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- `docs/LANGUAGE.md` and `skills/fsl/reference.md` wrongly claimed there is
+  no `sum()` aggregate usable in a `decreases` ranking measure, steering
+  readers toward hand-written sums (`decreases level[0] + level[1]`) that
+  only scale to domains small enough to enumerate by hand. The kernel's
+  bounded `sum(x: T of expr [where expr])` aggregate has always been usable
+  there (`decreases sum(k: Case of level[k])`), proves `unbounded`
+  completeness under `--engine induction`, and is instances-count
+  independent (composes with `--instances` overrides, #86). Corrected both
+  docs and added regression coverage in `tests/test_sum_decreases.py`. (#91,
+  see also the still-open per-entity fairness gap, #72)
+
 ## [2.6.1] - 2026-07-03
 
 ### Fixed
