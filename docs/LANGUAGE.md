@@ -571,6 +571,26 @@ invariant NoDupQueue {
 }
 ```
 
+For the common "monotone counter" idiom — an `Int` or `Map<K, Int>` state
+variable that only ever moves in one direction — `unknown_cti` results carry
+an additive `suggested_invariants: [<expr>, ...]` field (and the matching
+sentence appended to `hint`) whenever the CTI's counter starts on the
+unreachable side of its concrete initial value (e.g. a huge or negative
+"ghost" start a real execution could never produce). This is a heuristic
+computed by diffing the CTI trace against the concrete init (not a proof of
+global monotonicity), so treat it as a starting point:
+
+```fsl
+// CTI: audit = -101 (only increases in this trace, but starts below its
+// init value 0) → suggested_invariants: ["audit >= 0"]
+invariant AuditNonNeg { audit >= 0 }
+```
+
+A `Map<K, Int>` counter suggests the `forall`-quantified form
+(`forall k: K { audit[k] >= 0 }`) when every key shares the same initial
+value. If no monotone counter is detected, or the CTI start does not violate
+the would-be bound, no suggestion is added and `hint` is unchanged.
+
 ## 10. Refinement (fidelity of a detailed spec)
 
 After first `verify`-ing / `prove`-ing the abstract spec (abs), check with

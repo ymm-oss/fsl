@@ -353,7 +353,12 @@ first failed layer and later layers are marked `skipped`.
   null|value / Seq as an array / composition as `alias.var` keys). Internal names
   (`__`) do not appear.
 - `unknown_cti`: `cti.states` (k+1 states) + `violated_at`. The starting state is an
-  unreachable phantom — add an auxiliary invariant to exclude it.
+  unreachable phantom — add an auxiliary invariant to exclude it. For invariant
+  CTIs (not `leadsTo_rank`), a monotone `Int`/`Map<K, Int>` counter whose CTI
+  start lies on the unreachable side of its concrete init value gets a concrete
+  candidate in `suggested_invariants: [<expr>, ...]` (also appended to `hint`) —
+  a heuristic from trace-monotonicity, not a proof; absent when no such counter
+  is found.
 - `verified` / `reachable_failed` / `violated` from BMC are bounded and include
   `completeness:"bounded"`, `checked_to_depth`, and `cost: {"elapsed_s": ...}`.
   Bounded `verified` may include a saturation `hint` when the depth-K frontier

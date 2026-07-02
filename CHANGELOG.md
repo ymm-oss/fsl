@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- k-induction `unknown_cti` results now suggest auxiliary invariants for the
+  common monotone-counter idiom: when the CTI trace shows an `Int`/domain
+  scalar or a `Map<K, Int>` counter moving in only one direction and starting
+  on the unreachable side of the concrete initial value (a ghost/huge/negative
+  start), the result gains `"suggested_invariants": ["<expr>", ...]` and the
+  matching sentence is appended to `hint` (e.g. `"audit >= 0"` or, for a
+  uniformly-initialized map, `"forall k: Case { audit[k] >= 0 }"`).
+  Post-processing only (trace diff against `runtime.Monitor(spec).reset()`) —
+  no solver/engine semantics change, so verdicts are unaffected; the field is
+  additive and absent when no such counter is found. (`bmc.py`, `docs/LANGUAGE.md`,
+  `docs/DESIGN-induction.md`, `skills/fsl/reference.md`, `tests/test_cti_suggestions.py`) (#74)
 - Business-layer no-bypass precedence policy: `policy ID "text" every <Entity>
   reaching <Stage> [or <Stage> ...] must have passed through <Stage> [or
   <Stage> ...]`. Synthesizes an invisible `Map<Entity, Bool>` history flag
