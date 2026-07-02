@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-07-03
+
 ### Fixed
 - `docs/LANGUAGE.md` and `skills/fsl/reference.md` wrongly claimed there is
   no `sum()` aggregate usable in a `decreases` ranking measure, steering
