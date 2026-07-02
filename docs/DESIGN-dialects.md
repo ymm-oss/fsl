@@ -144,6 +144,14 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    naturally into testgen.
 9. The name of the expanded spec is the name of `requirements`. All other items
    (type/enum/struct/state/init/top-level actions, etc.) pass through unchanged.
+10. `terminal { <expr> }` is one of these pass-through items (added as a
+    `requirements_item` grammar alternative, #69) — it takes the generic
+    `_expand_item` fallback (`return [item], []`), so no dialects.py case was
+    added for it specifically. Only one `terminal` block is allowed per spec
+    (the kernel's own rule, unchanged). If the spec uses `process E { ... }`,
+    the predicate is written against the synthesized stage map
+    (`e_stage[c]`, rule 2 above) — the natural-language `stage(c)` form is
+    business-only (§3.2 rule 7).
 
 ### 2.3 Tests (tests/test_req_dialect.py)
 
@@ -241,6 +249,19 @@ verify {
    binding; ambiguity is a type error).
 6. The `actor` declaration is a roster (used to validate the `by` of a
    transition; an undeclared actor is a type error). No other semantics.
+7. No `terminal` syntax exists in business (#69). Instead, after all
+   processes are expanded, each process's **sink stages** — stages that are
+   never a transition's source (`tr["src"]`) — are collected. If every
+   process has >=1 sink, one kernel `terminal { }` item is generated: the
+   conjunction (`and`), over processes, of
+   `forall c: X { _any_stage(X, c, sinks) }` (reusing the same `_stage_is` /
+   `_any_stage` helpers rule 5's `all <Entity> can be <Stage>` goal uses). If
+   any process is cyclic (no sink at all), no terminal is generated for the
+   whole spec and deadlock checking is unaffected — a cyclic process always
+   has an enabled transition, so it can never contribute to a real deadlock
+   anyway. This makes "stopping at a process's last stage" verify clean by
+   default; `--deadlock ignore` is no longer required for a pure stage-graph
+   business spec.
 
 ### 3.3 Governance catalog
 

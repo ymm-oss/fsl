@@ -1378,6 +1378,22 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
                 _meta(tr["name"], f"by {tr['actor']}"),
             ))
 
+    if processes:
+        sink_exprs = []
+        for proc in processes:
+            outgoing = {tr["src"] for tr in proc["transitions"]}
+            sinks = [stage for stage in proc["stages"] if stage not in outgoing]
+            if not sinks:
+                sink_exprs = None
+                break
+            sink_exprs.append((
+                "forall",
+                ("binder_typed", "c", proc["name"], None),
+                _any_stage(proc["name"], "c", sinks, process_by_case, proc["loc"]),
+            ))
+        if sink_exprs:
+            out.append(("terminal", _and_all(sink_exprs), None))
+
     kpi_metadata = _project_kpi_metadata(kpi_infos)
     if kpi_metadata:
         out.append(("__kpis", kpi_metadata))

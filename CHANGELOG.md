@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `terminal { }` now works in the `requirements` dialect (`terminal_def` is a
+  `requirements_item`; it passes through unchanged to the kernel spec, same
+  one-block-per-spec rule as the kernel). The `business` dialect gets no new
+  syntax: `terminal { }` is instead derived automatically from each process's
+  sink stages (stages with no outgoing `transition`) — if every process has
+  at least one sink, the generated predicate is the conjunction, over
+  processes, of "every entity of that process is at one of its sinks". A
+  process with no sink at all (a genuine cycle) still generates no terminal,
+  matching prior behavior exactly. Previously, neither dialect could declare
+  intended stop states, so `--deadlock ignore` was the only way to silence
+  the deadlock check at a completed stage — discarding detection of
+  unintended deadlocks along with it. (#69)
 - Allow the builtin `Bool` as an action parameter type (`p: Bool`), matching
   its existing use as a state `Map` value/key. `Bool` params are first-class
   z3/concrete booleans in expressions — usable bare as a guard
