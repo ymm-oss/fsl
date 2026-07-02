@@ -1376,24 +1376,70 @@ def _validate_precedence_stage(policy_id, case_name, stage, proc, loc):
         )
 
 
+def _precedence_dominated_stages(proc, waypoints):
+    """Stages dominated by waypoint set W in `proc`'s transition graph, in
+    stage-declaration order: `D = W ∪ {s : s is unreachable from proc's
+    initial stage in the transition graph with all W nodes -- and their
+    incident edges -- removed}`.
+
+    This is *not* "W and everything downstream of W": a downstream stage
+    that is also reachable by a path that never touches W is not dominated
+    (see docs/DESIGN-precedence-policy.md for the counterexample), so a
+    single reachability pass with W nodes deleted is the correct -- and
+    sufficient -- computation.
+    """
+    waypoint_set = set(waypoints)
+    adj = {}
+    for tr in proc["transitions"]:
+        if tr["src"] in waypoint_set or tr["dst"] in waypoint_set:
+            continue
+        adj.setdefault(tr["src"], []).append(tr["dst"])
+    reachable = set()
+    initial = proc["initial"]
+    if initial not in waypoint_set:
+        stack = [initial]
+        reachable.add(initial)
+        while stack:
+            node = stack.pop()
+            for nxt in adj.get(node, []):
+                if nxt not in reachable:
+                    reachable.add(nxt)
+                    stack.append(nxt)
+    return [
+        stage for stage in proc["stages"]
+        if stage in waypoint_set or stage not in reachable
+    ]
+
+
 def _collect_precedence_policies(policies, process_by_case):
     """Resolve `biz_policy_precedence` bodies and dedupe their history maps.
 
     Two policies over the same (process, waypoint-set) share one synthesized
     `Map<Entity, Bool>` history flag, named `<state_var>_via_<Waypoint...>`
     (waypoints ordered by declaration order in the process, for determinism).
+    Alongside the history map, a stabilizing auxiliary invariant is
+    synthesized once per distinct (process, waypoint-set): `forall c {
+    stage[c] in dominated(W) => visited[c] }`. It is true by construction
+    (the dominated set comes from the graph, independent of policy
+    compliance) and, paired with the policy invariant, is inductive at k=1
+    -- see docs/DESIGN-precedence-policy.md.
     Returns:
       - history_var_by_item: id(policy item) -> history var name
       - history_specs: [(proc, history_var, sorted_waypoints), ...], one per
         distinct history map, in first-seen order
       - dst_history_vars: (proc_name, stage) -> [history_var, ...] for every
         history map whose waypoint set contains that stage
+      - stability_specs: [(proc, history_var, dominated_stages, meta), ...],
+        one per distinct history map, in first-seen order; meta carries the
+        id/text of the first policy that introduced the (process,
+        waypoint-set) key so diagnostics attribute to that policy
     """
     history_var_by_item = {}
     history_var_by_key = {}
     history_specs = []
+    stability_specs = []
     for item in policies:
-        _, policy_id, _text, body, loc = item[:5]
+        _, policy_id, text, body, loc = item[:5]
         if body[0] != "biz_policy_precedence":
             continue
         _, case_name, targets, waypoints = body
@@ -1410,18 +1456,24 @@ def _collect_precedence_policies(policies, process_by_case):
             history_var = "_".join([proc["state_var"], "via", *sorted_waypoints])
             history_var_by_key[key] = history_var
             history_specs.append((proc, history_var, sorted_waypoints))
+            dominated = _precedence_dominated_stages(proc, sorted_waypoints)
+            stability_meta = _meta(
+                f"{policy_id}_stability",
+                f"stability: {text} (auto-synthesized, dominated-set invariant for k-induction)",
+            )
+            stability_specs.append((proc, history_var, dominated, stability_meta))
         history_var_by_item[id(item)] = history_var
     dst_history_vars = {}
     for proc, history_var, waypoints in history_specs:
         for stage in waypoints:
             dst_history_vars.setdefault((proc["name"], stage), []).append(history_var)
-    return history_var_by_item, history_specs, dst_history_vars
+    return history_var_by_item, history_specs, dst_history_vars, stability_specs
 
 
 def _generate_business_items(cases, processes, kpi_infos, controls, policies, goals, process_by_case):
     out = []
     control_by_id, used_controls = _validate_controls_and_satisfaction(controls, policies, goals)
-    precedence_history_by_item, precedence_history_specs, precedence_dst_history_vars = (
+    precedence_history_by_item, precedence_history_specs, precedence_dst_history_vars, precedence_stability_specs = (
         _collect_precedence_policies(policies, process_by_case)
     )
     for case_name, data in cases.items():
@@ -1574,6 +1626,13 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
             visited = ("index", history_var, ("var", "c"))
             expr = ("forall", binder, ("bin", "=>", reached_target, visited))
             out.append(("invariant", policy_id, expr, loc, meta))
+
+    for proc, history_var, dominated, meta in precedence_stability_specs:
+        binder = ("binder_typed", "c", proc["name"], None)
+        in_dominated = _any_stage(proc["name"], "c", dominated, process_by_case, proc["loc"])
+        visited = ("index", history_var, ("var", "c"))
+        expr = ("forall", binder, ("bin", "=>", in_dominated, visited))
+        out.append(("invariant", meta["id"], expr, proc["loc"], meta))
 
     for item in goals:
         _, goal_id, text, body, loc = item[:5]
