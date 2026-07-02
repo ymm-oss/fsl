@@ -54,7 +54,9 @@ business <Name> {
 requirements <Name> {
   entity <Entity>                          // optional explicit identity sort
   number <Number>                          // numeric sort; range set by verify.values
-  process <Entity> with f: <Number> { ... } // process also declares the entity kind
+  process <Entity> with f: <Number>, g: Bool = <bool>, h: <Enum> = <Member> { ... }
+                                             // process also declares the entity kind; Bool/enum
+                                             // carried fields require an explicit `= ...` initializer
 }
 verify {
   instances <Entity> = <N>
@@ -654,7 +656,12 @@ verify {
 - The process+data profile is the default requirements form for a single-entity
   lifecycle. `process E with f: T { ... }` creates the entity stage map and
   carried fields; transition clauses add input (`with a: T`), guards (`when`),
-  field updates (`set f = expr`), and traceability (`covers REQ-n "text"`).
+  field updates (`set f = expr`), and traceability (`covers REQ-n "text"`). A
+  carried field's type `T` is a `number`, `Bool`, or an enum declared in the
+  same requirements spec. Numbers default to the domain's `lo` bound and may
+  take an optional explicit `f: T = <const-expr>` initializer; `Bool` and enum
+  fields have no invented default and **require** an explicit initializer
+  (`f: Bool = true/false`, `f: T = Member`) — omitting it is a check-time error.
 - `kpi NAME = count ENTITY in STAGE` is a declarative projection in both
   business and requirements; it does not create a ghost counter or an automatic
   `_kpi_*` invariant.

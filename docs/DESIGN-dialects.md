@@ -105,6 +105,25 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    action per transition. Transition `with a: T` becomes an action parameter,
    `when` becomes a requires clause, `set f = expr` becomes a field-map
    assignment for that entity, and `covers REQ-n "text"` attaches traceability.
+   A carried field's type `T` is one of three kinds, each with its own
+   initialization rule (no invented default for Bool/enum):
+   - `number` (declared via `number T` + `verify { values T = lo..hi }`):
+     unchanged from the original profile — defaults to the domain's `lo`
+     when `f: T` has no initializer; `f: T = <const-expr>` is an optional
+     explicit initializer, const-evaluated at desugar time (out-of-bounds
+     values are caught by the kernel's ordinary type-bound invariant, not by
+     a separate desugar-time bounds check).
+   - `Bool`: **requires** an explicit initializer, `f: Bool = true` or
+     `f: Bool = false`; the field-map value type is the kernel `Bool`, not a
+     0/1 domain. Missing the initializer is a check-time error.
+   - an `enum` declared in the same requirements spec: **requires** an
+     explicit initializer that is one of that enum's members, `f: T = Member`;
+     the assignment reuses the same `("var", Member)` pattern the synthesized
+     stage-init already uses. An initializer that names a non-member, or a
+     missing initializer, is a check-time error.
+   Any other type is rejected with "carried process field must be a number,
+   Bool, or enum type". Carried fields are never auto-mapped for refinement —
+   only the stage map (`e_stage`) participates in `maps auto`.
 3. `kpi k = count E in S` → no kernel state/action/invariant. The declaration is
    recorded as metadata for the projection
    `count(c: E where e_stage[c] == S)`.

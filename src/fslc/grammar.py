@@ -211,7 +211,7 @@ business_def: "business" NAME "{" business_item* "}"
 actor_def: "actor" NAME ("," NAME)* ","?
 process_def: "process" NAME process_with? "{" process_item* "}"
 process_with: "with" proc_field ("," proc_field)*
-proc_field: NAME ":" qname
+proc_field: NAME ":" qname ["=" expr]
 ?process_item: process_stages | process_initial | process_transition
 process_stages: "stages" NAME ("," NAME)* ","?
 process_initial: "initial" NAME
@@ -952,8 +952,8 @@ class Ast(Transformer):
     def process_initial(self, meta, name):
         return ("biz_initial", name, _loc(meta))
 
-    def proc_field(self, meta, n, ty):
-        return ("proc_field", n, ty)
+    def proc_field(self, meta, n, ty, init=None):
+        return ("proc_field", n, ty, init)
 
     def process_with(self, meta, *fields):
         return ("proc_fields", list(fields), _loc(meta))

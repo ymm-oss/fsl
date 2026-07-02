@@ -63,7 +63,9 @@ business <Name> {
 requirements <Name> {
   entity <Entity>          // optional explicit identity sort
   number <Number>
-  process <Entity> with f: <Number> { ... }  // process also declares the entity kind
+  process <Entity> with f: <Number>, g: Bool = <bool>, h: <Enum> = <Member> { ... }
+                            // process also declares the entity kind; Bool/enum
+                            // carried fields require an explicit `= ...` initializer
 }
 verify {
   instances <Entity> = <N>
@@ -904,7 +906,14 @@ verify {
 - The process+data profile is the primary requirements form for a single-entity
   lifecycle. `process E with f: T { ... }` creates the entity stage map and
   carried fields; transitions can add an input (`with a: T`), guard (`when`),
-  field update (`set f = expr`), and traceability (`covers REQ-n "text"`).
+  field update (`set f = expr`), and traceability (`covers REQ-n "text"`). A
+  carried field's type `T` is a `number`, `Bool`, or an enum declared in the
+  same requirements spec:
+  - `number` fields default to the domain's `lo` bound; `f: T = <expr>` is an
+    optional explicit initializer (a compile-time constant expression).
+  - `Bool` and enum fields have no invented default — `f: Bool = true/false`
+    and `f: T = Member` are **required**; omitting the initializer is a
+    check-time error (no silently-chosen `false` or first enum member).
 - `number Amount` declares a value kind; the finite verifier range lives in
   `verify { values Amount = lo..hi }`. Entity sizes live in
   `verify { instances Entity = N }`.
