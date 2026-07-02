@@ -555,6 +555,19 @@ The natural business forms above are aliases for `responds { forall ... ~> ... }
 and `goal { forall/exists ... }`; the explicit expression forms remain available
 for policies that cannot be written as a simple stage progression.
 
+**No-bypass precedence** (#75): `policy CTRL-APPROVAL "..." every Return
+reaching Refunded must have passed through Approved` synthesizes an invisible
+`Map<Return, Bool>` history flag (`return_stage_via_Approved`), sets it `true`
+on the transition landing on `Approved`, and compiles to `forall c: Return {
+stage(c) == Refunded => return_stage_via_Approved[c] }`. A direct
+`Requested -> Refunded` transition is then a genuine invariant violation with
+the bypass shown in the trace. Both sides take a disjunction (`reaching A or
+B`, `passed through X or Y`); two policies over the same `(process,
+waypoint-set)` share one history flag (dedup, name deterministic by the
+process's stage order). Design in `DESIGN-precedence-policy.md`. Limitation:
+the flag is business-layer-only synthesized state — a `requirements` spec
+refining it must map the flag explicitly or restate the rule at its own layer.
+
 `control` declarations are metadata only. Attach them to checkable business
 rules with `policy ... satisfies CTRL` or `goal ... satisfies CTRL`. Unknown
 control references are type errors, unused declared controls are warnings, and a

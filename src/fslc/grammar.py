@@ -229,10 +229,11 @@ control_severity: "severity" NAME
 control_applies_to: "applies_to" NAME
 satisfies_clause: "satisfies" REQ_ID ("," REQ_ID)* ","?
 policy_def: "policy" REQ_ID STRING satisfies_clause? policy_body
-?policy_body: policy_invariant | policy_responds | policy_eventually
+?policy_body: policy_invariant | policy_responds | policy_eventually | policy_precedence
 policy_invariant: "invariant" "{" expr "}"
 policy_responds: "responds" "{" lt_body "}"
 policy_eventually: "every" NAME "in" NAME "must" "eventually" "be" stage_disjunction
+policy_precedence: "every" NAME "reaching" stage_disjunction "must" "have" "passed" "through" stage_disjunction
 goal_def: "goal" REQ_ID STRING satisfies_clause? goal_body
 ?goal_body: goal_expr | goal_some_stage | goal_all_stage
 goal_expr: "{" expr "}"
@@ -1012,6 +1013,9 @@ class Ast(Transformer):
 
     def policy_eventually(self, meta, case_name, source_stage, target_stages):
         return ("biz_policy_eventually", case_name, source_stage, target_stages)
+
+    def policy_precedence(self, meta, case_name, targets, waypoints):
+        return ("biz_policy_precedence", case_name, targets, waypoints)
 
     def control_owner(self, meta, name):
         return ("control_owner", name)
