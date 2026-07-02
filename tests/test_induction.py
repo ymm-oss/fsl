@@ -88,7 +88,12 @@ spec Sync {
     assert r["completeness"] == "bounded"
     assert r["checked_to_depth"] == 8
     assert r["invariant"] == "Sync"
-    assert r["hint"] == CTI_HINT
+    # x is a free, monotonically-increasing counter in this CTI (no invariant
+    # bounds it) — depending on which shortest CTI Z3 picks, the
+    # monotone-counter heuristic (#74) may append a concrete suggestion to
+    # the generic hint; see tests/test_cti_suggestions.py for a fixture that
+    # pins this deterministically.
+    assert r["hint"].startswith(CTI_HINT)
     assert r["k"] == 1
     cti = r["cti"]
     assert cti["violated_at"] == 1
