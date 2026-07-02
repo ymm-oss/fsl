@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Business-layer no-bypass precedence policy: `policy ID "text" every <Entity>
+  reaching <Stage> [or <Stage> ...] must have passed through <Stage> [or
+  <Stage> ...]`. Synthesizes an invisible `Map<Entity, Bool>` history flag
+  (dedup'd across policies over the same process/waypoint-set), sets it on
+  the transition(s) landing on a waypoint, and compiles to a kernel invariant
+  carrying the policy's REQ-ID — closing "no-bypass" controls at the business
+  layer without descending to `requirements`. See
+  `docs/DESIGN-precedence-policy.md`. (#75)
 - `terminal { }` now works in the `requirements` dialect (`terminal_def` is a
   `requirements_item`; it passes through unchanged to the kernel spec, same
   one-block-per-spec rule as the kernel). The `business` dialect gets no new

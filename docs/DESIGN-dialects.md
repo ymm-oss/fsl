@@ -262,6 +262,38 @@ verify {
    anyway. This makes "stopping at a process's last stage" verify clean by
    default; `--deadlock ignore` is no longer required for a pure stage-graph
    business spec.
+8. `policy <ID> "<text>" every <Entity> reaching <Stage> [or <Stage> ...]
+   must have passed through <Stage> [or <Stage> ...]` (#75, no-bypass
+   precedence) synthesizes one more layer of invisible state on top of rule 2
+   — a history flag alongside the stage map:
+   - For each **distinct** `(process, waypoint-set)` pair across all
+     precedence policies (deduped, so two policies over the same waypoints
+     share one flag), one `history_var: Map<X, Bool>` is added to the same
+     `state { }` block rule 2 emits, named
+     `<x_stage>_via_<Waypoint1>[_<Waypoint2>...]` (waypoints ordered by
+     declaration order in the process, for a deterministic name regardless of
+     the order the policy lists them in — it appears in traces).
+   - `init` sets it `true` for every entity if the process's `initial` stage
+     is itself in the waypoint set, else `false` — folded into the same
+     `init { }` block rule 2 emits.
+   - Every transition (rule 2) whose destination stage is in the waypoint
+     set gets `history_var[c] = true` appended to its body (before the
+     `requires`/`set` transformation runs, so this is only a body-append, not
+     a new transition).
+   - The policy itself compiles to a kernel invariant (with meta, so the
+     REQ-ID propagates like every other policy form):
+     `forall c: Entity { _any_stage(Entity, c, targets) => history_var[c] }`.
+   - Unknown stage / unknown entity referenced by the policy is a type error
+     naming the policy's REQ-ID.
+   - Semantics notes: if the initial stage is in `targets` but not in the
+     waypoint set, the invariant is violated at init — reported as a genuine
+     violation, not special-cased. A waypoint equal to a target is allowed
+     (trivially satisfied on entry through it).
+   - Limitation: the history flag is synthesized only in the business spec.
+     A requirements-layer spec that refines a business spec carrying a
+     precedence policy must either map that flag explicitly in its
+     refinement mapping or restate the policy at its own layer — refinement
+     does not currently propagate synthesized business-layer state.
 
 ### 3.3 Governance catalog
 

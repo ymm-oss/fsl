@@ -972,6 +972,26 @@ The explicit forms remain available when the rule is not just stage progression:
 `policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` and
 `goal ... { exists c: Return { stage(c) == Refunded } }`.
 
+For a **no-bypass** control — a target stage that must never be reached
+without first passing through a required waypoint — use the precedence form
+(#75; design rationale in `DESIGN-precedence-policy.md`):
+
+```fsl
+policy CTRL-APPROVAL "承認を経ずに完了しない"
+  every Return reaching Refunded must have passed through Approved
+```
+
+This synthesizes an invisible `Map<Return, Bool>` history flag (named
+`return_stage_via_Approved`, so it is legible in traces), sets it `true` on
+any transition landing on `Approved`, and compiles the policy to
+`forall c: Return { stage(c) == Refunded => return_stage_via_Approved[c] }`.
+A `Requested -> Refunded` transition that skips `Approved` is then a genuine
+invariant violation, with the trace showing exactly which bypass transition
+fired. Both sides accept a disjunction —
+`every Return reaching Refunded or Closed must have passed through Approved
+or Rejected` — and two policies over the same `(process, waypoint-set)` share
+one synthesized history flag.
+
 Business has no `terminal` syntax of its own. Instead, each process's **sink
 stages** (stages with no outgoing `transition`) are collected automatically:
 if every process has at least one sink, a kernel `terminal { }` is generated
