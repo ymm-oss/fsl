@@ -281,6 +281,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--property <Name>]                  # check one named property in isolation
                                                     #   (invariant / trans / leadsTo / reachable)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
+               [--instances NAME=N]...              # override verify-block `instances NAME = N`
+               [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
                [--strict-tags] [--requirements ids.txt]
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
@@ -326,6 +328,15 @@ first failed layer and later layers are marked `skipped`.
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same
   property, exclusion wins.
+- `verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
+  override the matching `entity`/`number` bound from a `verify { ... }` block
+  without editing the spec — the CLI equivalent of hand-shrinking the model
+  for the liveness strategy above. `NAME` must be a declared `entity`/`number`
+  (in the business/requirements dialects, or a kernel `spec` using
+  `entity`/`number`); an undeclared `NAME` or a malformed value (`Case=abc`,
+  `N=5..1`) is a spec error, and it does not apply to a kernel `spec` whose
+  domain is a raw `type X = lo..hi` literal. The effective override is echoed
+  back as `bounds_overrides` in the JSON envelope.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -411,7 +422,11 @@ depth ~12. This is a known limit, not a pathological encoding.
 Practical strategy:
 - Verify **liveness on the smallest model that still exhibits the interleaving** —
   shrink the entity-count range (e.g. `0..1` instead of `0..3`) and use a shallow
-  `--depth`. One entity is often enough to find a real `leadsTo` bug.
+  `--depth`. One entity is often enough to find a real `leadsTo` bug. If the
+  bound is an `entity`/`number` (not a raw `type` literal), shrink it from the
+  CLI with `fslc verify spec.fsl --instances Case=1` instead of editing the
+  spec (see §7) — the file keeps its normal verify-block size for everything
+  else.
 - Verify **safety separately on the full-size model** at the depth you need.
 - Use `--property <leadsToName>` to run a single liveness property in isolation
   while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.
