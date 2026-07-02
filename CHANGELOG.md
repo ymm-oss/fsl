@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-07-03
+
 ### Fixed
 - `fslc verify --instances`/`--values` overrides (#86) no longer hard-error
   when an `acceptance`/`forbidden` scenario hardcodes an id/number from the
