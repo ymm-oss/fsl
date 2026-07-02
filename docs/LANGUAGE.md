@@ -1044,6 +1044,17 @@ fired. Both sides accept a disjunction —
 or Rejected` — and two policies over the same `(process, waypoint-set)` share
 one synthesized history flag.
 
+Alongside the history flag, a second invariant, `<PolicyId>_stability`, is
+auto-synthesized from the process's stage graph (#85; design rationale in
+`DESIGN-precedence-policy.md`) so that a **compliant** precedence policy
+proves under `--engine induction` out of the box, with no manual invariant
+needed — no ghost counterexample-to-induction from the history flag being
+"true but not yet provably so" at an arbitrary induction step.
+
+```json
+{"result": "proved", "k_used": {"CTRL-APPROVAL": 1, "CTRL-APPROVAL_stability": 1}}
+```
+
 Business has no `terminal` syntax of its own. Instead, each process's **sink
 stages** (stages with no outgoing `transition`) are collected automatically:
 if every process has at least one sink, a kernel `terminal { }` is generated

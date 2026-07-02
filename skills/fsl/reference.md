@@ -607,9 +607,13 @@ stage(c) == Refunded => return_stage_via_Approved[c] }`. A direct
 the bypass shown in the trace. Both sides take a disjunction (`reaching A or
 B`, `passed through X or Y`); two policies over the same `(process,
 waypoint-set)` share one history flag (dedup, name deterministic by the
-process's stage order). Design in `DESIGN-precedence-policy.md`. Limitation:
-the flag is business-layer-only synthesized state — a `requirements` spec
-refining it must map the flag explicitly or restate the rule at its own layer.
+process's stage order). Alongside the flag, a `<PolicyId>_stability`
+auxiliary invariant is auto-synthesized from the process's stage graph
+(dominated-set of the waypoints; #85), so a **compliant** precedence policy
+proves under `--engine induction` out of the box — no manual invariant, no
+ghost CTI. Design in `DESIGN-precedence-policy.md`. Limitation: the flag is
+business-layer-only synthesized state — a `requirements` spec refining it
+must map the flag explicitly or restate the rule at its own layer.
 
 `control` declarations are metadata only. Attach them to checkable business
 rules with `policy ... satisfies CTRL` or `goal ... satisfies CTRL`. Unknown

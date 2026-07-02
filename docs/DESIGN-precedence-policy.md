@@ -86,6 +86,80 @@ appended — that part runs where every other policy body is already handled, af
 and the transition loop, so it composes with #69's terminal-from-sinks derivation which runs
 right after the transition loop and needs no changes).
 
+## Stabilizing auxiliary invariant for k-induction (#85)
+
+BMC alone accepts a compliant precedence policy fine, but **k-induction stalls on a ghost CTI**:
+`stage[c] == Approved && return_stage_via_Approved[c] == false`. That combination is unreachable
+in any real run (the flag is set the instant `c` lands on the waypoint), but induction only gets to
+assume the invariant held at step `k`, not that it's structurally tied to how the flag was derived —
+so it can't rule the combination out on its own, and stuttering every *other* entity preserves it
+at any depth. `suggested_invariants` (#73) doesn't help here either: it targets monotone counters,
+not booleans.
+
+The fix synthesizes a second, auxiliary invariant alongside the history flag — the one piece of
+"why the flag is trustworthy" that k-induction needs spelled out as a property of its own:
+
+```
+forall c { stage[c] ∈ D  =>  visited[c] }
+```
+
+named `<PolicyId>_stability` (id and text carried in its `meta`, from the first policy that
+introduces the (process, waypoint-set) key — same first-seen rule the history-map dedup already
+uses), where **D is the set of stages *dominated* by the waypoint set `W`**:
+
+```
+D = W ∪ { s : s is unreachable from the process's initial stage in the transition graph
+              with every node in W (and its incident edges) deleted }
+```
+
+One reachability pass (BFS/DFS from `initial`, skipping — not stopping at, *deleting* — waypoint
+nodes) computes `D` statically at desugar time, purely from the process's declared stage graph.
+
+### Why *dominated*, not "W and its downstream"
+
+The naive alternative — "W plus everything reachable from W" — is unsound: a stage can be
+downstream of `W` in the graph *and* reachable by a different path that never touches `W`. Concrete
+counterexample: stages `R, A, B, C` with transitions `R->A, R->B, A->B, A->C`, and policy `every
+Item reaching C must have passed through A` (a compliant policy — there's no direct `R->C`).
+`B` is downstream of `A` (`A->B`), so "W and downstream" would put `B` in scope of the aux and claim
+`stage == B => visited`. But `R->B` reaches `B` without ever touching `A`, so that claim is false the
+moment that transition fires — a *sound* history flag would correctly have `visited == false` at
+that point, and the invented aux invariant would be wrong, not just weak. The dominated-set version
+excludes `B` (removing node `A` from the graph still leaves `R->B` reachable) and includes `C` (with
+`A` removed, `C` has no other path in), which is exactly the set the flag can honestly promise.
+
+### True by construction, independent of policy compliance
+
+`D` is computed from the process's transition graph alone — it does not depend on whether any
+policy holds. For a stage `s ∈ D` to be reached, every path from `initial` to `s` must pass through
+some node in `W` (that's what "unreachable with `W` deleted" means), and the flag is set-only on
+entry to `W`, never cleared — so being at `s ∈ D` implies the flag was set on the way in. This holds
+even in a spec whose *policy* is violated by a bypass elsewhere in the graph: the bypass edge
+changes what's reachable, so it can also enlarge the reachable set and shrink `D` for the bypassed
+target — but whatever `D` ends up being for that graph, the aux stays true, and diagnostics for a
+bypass still attribute to the policy invariant, not to `<PolicyId>_stability`
+(`tests/test_precedence_policy.py::test_precedence_policy_bypass_is_violated` asserts this).
+
+### Inductive at k=1, cyclic processes included
+
+For `X ∈ D`, every predecessor `P` with an edge `P -> X` is either `P ∈ D` (flag true by the
+induction hypothesis) or `P ∈ W` (flag just got set entering `W` on this very step) — if `P` were
+neither, there would be a path `initial -> ... -> P -> X` avoiding `W` entirely, contradicting
+`X ∈ D`. That argument is a property of *paths*, not of acyclicity, so it holds unchanged when the
+process graph has a cycle (e.g. an `Approved -> Requested` rework loop after the waypoint has
+already been passed) — no separate acyclic-only fast path is needed; one aux invariant covers both
+cases.
+
+### Composes with the policy invariant to close induction automatically
+
+In a compliant business spec, the policy's own target set is always a subset of `D` (if it weren't
+— if the target were reachable around every node of `W` — the *policy* itself would already be
+violated under BMC, independent of induction). So `(policy invariant ∧ aux invariant)` is inductive
+at k=1 by the argument above, and **every compliant business-layer precedence policy now proves
+under `--engine induction` with no additional user action** — see
+`tests/test_precedence_policy.py`'s `..._proves_under_induction` tests for the reproduction (linear,
+downstream-vs-dominator, cyclic, and waypoint-disjunction cases).
+
 ## Semantics notes (not "fixed", documented)
 
 - **Initial stage inside targets, not inside waypoints**: violated at init. See step 4 above.
