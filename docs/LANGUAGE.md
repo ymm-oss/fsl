@@ -79,6 +79,15 @@ domain size that is really a model bound). See `docs/DESIGN-spec-domains.md`.
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 
+**Action parameter types** (`<p>: <type name>`): a domain type, enum, or the
+builtin `Bool` — anything BMC can enumerate. `Bool` behaves exactly like a
+`Bool` state variable: use it bare as a boolean guard (`requires b`,
+`requires not b`) or assign it into `Bool`-typed state
+(`flag[i] = b`). The builtin `Int` is rejected (an unbounded parameter can't
+be enumerated); use a range parameter instead: `p in <lo>..<hi>` (an inline
+alternative to `<p>: <type name>` that doesn't require declaring a named
+domain type).
+
 The hierarchy of properties: `invariant` is one-state safety, `trans` is
 two-state safety (the pre-transition state can be referenced with `old()`), and
 `leadsTo` is response liveness. Without a ranking function, `leadsTo` is checked
@@ -106,6 +115,48 @@ false: the measure is non-negative; some action is enabled; and every enabled
 action either makes `Q` true or keeps `P` true while strictly decreasing the
 measure. Ranked proof success is independent of `--depth`; `--depth` is still
 used for the base BMC check and reachable/coverage evidence.
+
+**Placement.** `decreases` is a sibling of the response body inside the
+`leadsTo` block, *outside* any `forall` wrapper — never nested inside the
+forall's braces. Nesting it inside `forall` is a parse error, not a
+limitation of ranking under `forall`:
+
+```fsl
+// valid: decreases after the forall's closing }
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 }
+  decreases level[0] + level[1]
+}
+
+// parse error: decreases nested inside the forall body
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 decreases level[0] + level[1] }
+}
+```
+
+**Per-entity measures fail under interleaving.** The ranking discipline
+above applies to *every* enabled action, not just the one that resolves the
+pending binding. A measure that mentions only the bound entity, e.g.
+`decreases level[c]` inside `forall c: Case { level[c] > 0 ~> level[c] == 0 }`,
+therefore always fails: an action that advances a *different* entity (say
+`step(c=1)` while the pending binding is `c=0`) leaves `level[c=0]`
+unchanged, and the discipline requires every enabled action to strictly
+decrease the measure. The verifier reports this as
+`rank_failure: "non_decreasing_action"`, with the CTI's `last_action`
+showing the other entity's binding — this is by design, not a bug. Proving
+per-entity liveness under interleaving needs a fairness-aware discipline
+(only the binding's own "helpful" action must decrease); that is not
+implemented and is tracked separately (issue #72).
+
+**Working idiom: a global sum measure.** Sum the tracked quantity across a
+fixed, small domain, e.g. `decreases level[0] + level[1]` for a 2-element
+`Case` domain — every action then strictly decreases the total, and
+induction returns `"proved"` with `"completeness": "unbounded"`. There is no
+`sum()` aggregate over a domain type usable here, so this idiom only scales
+to domains small enough to enumerate by hand. (Conditional expressions can't
+substitute for a per-branch measure either: `if/then/else` is legal only in
+refinement-mapping expressions (§10), not in the general expression grammar
+that `decreases` draws from.)
 
 ## 2. Types
 
@@ -250,6 +301,15 @@ variable.
   be detected. Whereas `--deadlock ignore` uniformly ignores **all stopping
   states**, `terminal` lets you select **which stops are intentional**.
   Example: `terminal { status == Done or status == Failed }`.
+  - **requirements**: `terminal { }` is a `requirements_item` and passes
+    through unchanged to the kernel spec (§13.2). Inside a spec that uses
+    `process E { ... }`, write the predicate against the synthesized stage
+    map — the lowercased process/entity name + `_stage` (e.g. `process Claim`
+    → `claim_stage`), so `terminal { forall c: Claim { claim_stage[c] ==
+    Approved or claim_stage[c] == Rejected } }`.
+  - **business**: no `terminal` syntax exists at all — it is derived
+    automatically from each process's sink stages (stages with no outgoing
+    `transition`); see §13.3.
 - **Do not write** an invariant like "inventory is at least 0" — make it
   `type Qty = 0..N` and it is detected automatically.
 - A full `push` into a Seq is also detected automatically as `type_bound`
@@ -865,6 +925,10 @@ verify {
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen
   (= the acceptance criteria become conformance tests for the implementation).
+  Action arguments in `acceptance`/`forbidden` steps accept enum member names
+  and const names in addition to numeric literals (e.g. `answer(0, Triggered)`
+  is equivalent to `answer(0, 1)` when `Triggered` is `Trigger`'s second
+  member) — an undefined name is a check-time error.
 - Use the kernel-wrapper form only for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history not expressible as a carried field, or
   behavior that needs explicit kernel state. That fallback still supports
@@ -872,6 +936,12 @@ verify {
   `branches` automatically splits an action by each when condition (displayed as
   `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
   correspondence to the upper layer.
+- `terminal { <expr> }` is allowed at the top level of a `requirements` spec
+  and passes through to the kernel unchanged (§6) — there is exactly one
+  `terminal` block per spec, same as the kernel. If the spec uses
+  `process E { ... }`, the predicate must reference the synthesized stage map
+  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`), not
+  `stage(c)` (that natural-language form is business-only, §13.3).
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
@@ -921,6 +991,38 @@ verify {
 The explicit forms remain available when the rule is not just stage progression:
 `policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` and
 `goal ... { exists c: Return { stage(c) == Refunded } }`.
+
+For a **no-bypass** control — a target stage that must never be reached
+without first passing through a required waypoint — use the precedence form
+(#75; design rationale in `DESIGN-precedence-policy.md`):
+
+```fsl
+policy CTRL-APPROVAL "承認を経ずに完了しない"
+  every Return reaching Refunded must have passed through Approved
+```
+
+This synthesizes an invisible `Map<Return, Bool>` history flag (named
+`return_stage_via_Approved`, so it is legible in traces), sets it `true` on
+any transition landing on `Approved`, and compiles the policy to
+`forall c: Return { stage(c) == Refunded => return_stage_via_Approved[c] }`.
+A `Requested -> Refunded` transition that skips `Approved` is then a genuine
+invariant violation, with the trace showing exactly which bypass transition
+fired. Both sides accept a disjunction —
+`every Return reaching Refunded or Closed must have passed through Approved
+or Rejected` — and two policies over the same `(process, waypoint-set)` share
+one synthesized history flag.
+
+Business has no `terminal` syntax of its own. Instead, each process's **sink
+stages** (stages with no outgoing `transition`) are collected automatically:
+if every process has at least one sink, a kernel `terminal { }` is generated
+as the conjunction, over processes, of `forall c: <Entity> { stage(c) in
+{Sink1, Sink2, ...} }` — so a deadlock is "intended" only once every entity of
+every process is simultaneously parked at one of its own sinks. `ReturnHandling`
+above therefore verifies clean at `Rejected`/`Refunded` without
+`--deadlock ignore`. If any process is cyclic (every stage has an outgoing
+transition, so it has no sink), no terminal is generated at all and deadlock
+checking is unaffected — cyclic processes never deadlock in the first place,
+since some transition is always enabled.
 
 Governance/control metadata can be kept inside `business` or lifted into a
 standalone catalog. `control ID "text" owner NAME severity NAME applies_to Entity`

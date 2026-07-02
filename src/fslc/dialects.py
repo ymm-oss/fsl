@@ -1330,9 +1330,75 @@ def _any_stage(case_name, var_name, stages, process_by_case, loc):
     ])
 
 
+def _process_for_precedence(policy_id, case_name, process_by_case, loc):
+    processes = process_by_case.get(case_name, [])
+    if not processes:
+        _err(f"policy '{policy_id}': entity '{case_name}' has no process", loc=loc)
+    if len(processes) > 1:
+        _err(
+            f"policy '{policy_id}': entity '{case_name}' has multiple processes; "
+            "precedence policy is ambiguous",
+            loc=loc,
+        )
+    return processes[0]
+
+
+def _validate_precedence_stage(policy_id, case_name, stage, proc, loc):
+    if stage not in proc["stages"]:
+        _err(
+            f"policy '{policy_id}': stage '{stage}' is not declared for process '{case_name}'",
+            loc=loc,
+        )
+
+
+def _collect_precedence_policies(policies, process_by_case):
+    """Resolve `biz_policy_precedence` bodies and dedupe their history maps.
+
+    Two policies over the same (process, waypoint-set) share one synthesized
+    `Map<Entity, Bool>` history flag, named `<state_var>_via_<Waypoint...>`
+    (waypoints ordered by declaration order in the process, for determinism).
+    Returns:
+      - history_var_by_item: id(policy item) -> history var name
+      - history_specs: [(proc, history_var, sorted_waypoints), ...], one per
+        distinct history map, in first-seen order
+      - dst_history_vars: (proc_name, stage) -> [history_var, ...] for every
+        history map whose waypoint set contains that stage
+    """
+    history_var_by_item = {}
+    history_var_by_key = {}
+    history_specs = []
+    for item in policies:
+        _, policy_id, _text, body, loc = item[:5]
+        if body[0] != "biz_policy_precedence":
+            continue
+        _, case_name, targets, waypoints = body
+        proc = _process_for_precedence(policy_id, case_name, process_by_case, loc)
+        for stage in targets:
+            _validate_precedence_stage(policy_id, case_name, stage, proc, loc)
+        for stage in waypoints:
+            _validate_precedence_stage(policy_id, case_name, stage, proc, loc)
+        order = {stage: i for i, stage in enumerate(proc["stages"])}
+        sorted_waypoints = sorted(dict.fromkeys(waypoints), key=lambda s: order[s])
+        key = (proc["name"], tuple(sorted_waypoints))
+        history_var = history_var_by_key.get(key)
+        if history_var is None:
+            history_var = "_".join([proc["state_var"], "via", *sorted_waypoints])
+            history_var_by_key[key] = history_var
+            history_specs.append((proc, history_var, sorted_waypoints))
+        history_var_by_item[id(item)] = history_var
+    dst_history_vars = {}
+    for proc, history_var, waypoints in history_specs:
+        for stage in waypoints:
+            dst_history_vars.setdefault((proc["name"], stage), []).append(history_var)
+    return history_var_by_item, history_specs, dst_history_vars
+
+
 def _generate_business_items(cases, processes, kpi_infos, controls, policies, goals, process_by_case):
     out = []
     control_by_id, used_controls = _validate_controls_and_satisfaction(controls, policies, goals)
+    precedence_history_by_item, precedence_history_specs, precedence_dst_history_vars = (
+        _collect_precedence_policies(policies, process_by_case)
+    )
     for case_name, data in cases.items():
         out.append(("type", case_name, data["lo"], data["hi"]))
     for proc in processes:
@@ -1341,6 +1407,8 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
     state_decls = []
     for proc in processes:
         state_decls.append(("decl", proc["state_var"], ("map", ("name", proc["name"]), ("name", proc["enum"]))))
+    for proc, history_var, _waypoints in precedence_history_specs:
+        state_decls.append(("decl", history_var, ("map", ("name", proc["name"]), ("bool",))))
     if state_decls:
         out.append(("state", state_decls))
 
@@ -1350,6 +1418,13 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
             "forall_stmt",
             ("binder_typed", "c", proc["name"], None),
             [("assign", ("index", proc["state_var"], ("var", "c")), ("var", proc["initial"]), proc["loc"])],
+            proc["loc"],
+        ))
+    for proc, history_var, waypoints in precedence_history_specs:
+        init_stmts.append((
+            "forall_stmt",
+            ("binder_typed", "c", proc["name"], None),
+            [("assign", ("index", history_var, ("var", "c")), ("bool", proc["initial"] in waypoints), proc["loc"])],
             proc["loc"],
         ))
     if init_stmts:
@@ -1368,6 +1443,13 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
                  ("var", tr["dst"]),
                  tr["loc"]),
             ]
+            for history_var in precedence_dst_history_vars.get((proc["name"], tr["dst"]), []):
+                body.append((
+                    "assign",
+                    ("index", history_var, ("var", "c")),
+                    ("bool", True),
+                    tr["loc"],
+                ))
             out.append((
                 "action",
                 tr["name"],
@@ -1377,6 +1459,22 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
                 True,
                 _meta(tr["name"], f"by {tr['actor']}"),
             ))
+
+    if processes:
+        sink_exprs = []
+        for proc in processes:
+            outgoing = {tr["src"] for tr in proc["transitions"]}
+            sinks = [stage for stage in proc["stages"] if stage not in outgoing]
+            if not sinks:
+                sink_exprs = None
+                break
+            sink_exprs.append((
+                "forall",
+                ("binder_typed", "c", proc["name"], None),
+                _any_stage(proc["name"], "c", sinks, process_by_case, proc["loc"]),
+            ))
+        if sink_exprs:
+            out.append(("terminal", _and_all(sink_exprs), None))
 
     kpi_metadata = _project_kpi_metadata(kpi_infos)
     if kpi_metadata:
@@ -1443,6 +1541,14 @@ def _generate_business_items(cases, processes, kpi_infos, controls, policies, go
             p = _stage_is(case_name, "c", source_stage, process_by_case, loc)
             q = _any_stage(case_name, "c", target_stages, process_by_case, loc)
             out.append(("leadsto", policy_id, [binder], p, q, loc, meta))
+        elif body[0] == "biz_policy_precedence":
+            _, case_name, targets, _waypoints = body
+            history_var = precedence_history_by_item[id(item)]
+            binder = ("binder_typed", "c", case_name, None)
+            reached_target = _any_stage(case_name, "c", targets, process_by_case, loc)
+            visited = ("index", history_var, ("var", "c"))
+            expr = ("forall", binder, ("bin", "=>", reached_target, visited))
+            out.append(("invariant", policy_id, expr, loc, meta))
 
     for item in goals:
         _, goal_id, text, body, loc = item[:5]

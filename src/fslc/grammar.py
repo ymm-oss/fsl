@@ -180,7 +180,7 @@ requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
                   | state_def | init_def | req_action_def | process_def | time_def
-                  | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def
+                  | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def | maps_auto_def | preserve_progress_def
 requirement_def: "requirement" REQ_ID STRING "{" requirement_item* "}"
@@ -229,10 +229,11 @@ control_severity: "severity" NAME
 control_applies_to: "applies_to" NAME
 satisfies_clause: "satisfies" REQ_ID ("," REQ_ID)* ","?
 policy_def: "policy" REQ_ID STRING satisfies_clause? policy_body
-?policy_body: policy_invariant | policy_responds | policy_eventually
+?policy_body: policy_invariant | policy_responds | policy_eventually | policy_precedence
 policy_invariant: "invariant" "{" expr "}"
 policy_responds: "responds" "{" lt_body "}"
 policy_eventually: "every" NAME "in" NAME "must" "eventually" "be" stage_disjunction
+policy_precedence: "every" NAME "reaching" stage_disjunction "must" "have" "passed" "through" stage_disjunction
 goal_def: "goal" REQ_ID STRING satisfies_clause? goal_body
 ?goal_body: goal_expr | goal_some_stage | goal_all_stage
 goal_expr: "{" expr "}"
@@ -1012,6 +1013,9 @@ class Ast(Transformer):
 
     def policy_eventually(self, meta, case_name, source_stage, target_stages):
         return ("biz_policy_eventually", case_name, source_stage, target_stages)
+
+    def policy_precedence(self, meta, case_name, targets, waypoints):
+        return ("biz_policy_precedence", case_name, targets, waypoints)
 
     def control_owner(self, meta, name):
         return ("control_owner", name)
