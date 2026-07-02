@@ -692,6 +692,11 @@ class _ConcDomain:
         return all(parts)
 
     def select(self, container, idx):
+        if isinstance(container, dict):
+            try:
+                return container[idx]
+            except KeyError:
+                raise _EvalError(f"index {idx} out of range")
         return container[idx]
 
 

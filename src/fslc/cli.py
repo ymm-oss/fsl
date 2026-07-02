@@ -229,22 +229,52 @@ def _governance_result(spec, depth=8):
     return out
 
 
-def _acceptance_error(spec):
-    checked = validate_acceptance(spec)
+def _acceptance_error(spec, skip_out_of_range=False):
+    """Returns (error_envelope_or_None, skipped_ids). `skipped_ids` lists
+    acceptance ids downgraded from hard-error to skip because they reference
+    ids/numbers outside CLI-overridden bounds (only possible when
+    skip_out_of_range is True, i.e. --instances/--values are active)."""
+    checked = validate_acceptance(spec, skip_out_of_range=skip_out_of_range)
     if checked.get("ok"):
-        return None
+        return None, checked.get("skipped") or []
     out = dict(checked)
     out.pop("ok", None)
-    return {"result": "error", **out}
+    out.pop("skipped", None)
+    return {"result": "error", **out}, []
 
 
-def _forbidden_error(spec):
-    checked = validate_forbidden(spec)
+def _forbidden_error(spec, skip_out_of_range=False):
+    """Mirror of `_acceptance_error` for `forbidden` scenarios."""
+    checked = validate_forbidden(spec, skip_out_of_range=skip_out_of_range)
     if checked.get("ok"):
-        return None
+        return None, checked.get("skipped") or []
     out = dict(checked)
     out.pop("ok", None)
-    return {"result": "error", **out}
+    out.pop("skipped", None)
+    return {"result": "error", **out}, []
+
+
+def _bounds_overrides_desc(bounds_overrides):
+    parts = [f"{name}={n}" for name, n in bounds_overrides["instances"].items()]
+    parts += [f"{name}={lo}..{hi}" for name, (lo, hi) in bounds_overrides["values"].items()]
+    return ", ".join(parts)
+
+
+def _bounds_skip_warnings(ids, kind, bounds_overrides):
+    if not ids:
+        return []
+    desc = _bounds_overrides_desc(bounds_overrides)
+    return [
+        {
+            "kind": f"{kind}_skipped",
+            "id": scenario_id,
+            "message": (
+                f"{kind} '{scenario_id}' skipped: references values outside "
+                f"overridden bounds ({desc})"
+            ),
+        }
+        for scenario_id in ids
+    ]
 
 
 def run_check(file, strict_tags=False, requirements=None):
@@ -252,10 +282,10 @@ def run_check(file, strict_tags=False, requirements=None):
         src = open(file, encoding="utf-8").read()
         ast, display_names = _parse_file(file, src)
         spec = build_spec(ast, display_names, semantic_check=False)
-        acc = _acceptance_error(spec)
+        acc, _ = _acceptance_error(spec)
         if acc:
             return _envelope(acc)
-        forb = _forbidden_error(spec)
+        forb, _ = _forbidden_error(spec)
         if forb:
             return _envelope(forb)
         out = {
@@ -368,11 +398,12 @@ def run_verify(
         exclude_property_names=None, instances=None, values=None):
     try:
         bounds_overrides = _build_bounds_overrides(instances, values)
+        has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
         spec, source_lines = _read_spec(file, bounds_overrides)
-        acc = _acceptance_error(spec)
+        acc, acc_skipped = _acceptance_error(spec, skip_out_of_range=has_bounds_overrides)
         if acc:
             return _envelope(acc)
-        forb = _forbidden_error(spec)
+        forb, forb_skipped = _forbidden_error(spec, skip_out_of_range=has_bounds_overrides)
         if forb:
             return _envelope(forb)
         if engine == "induction":
@@ -398,7 +429,14 @@ def run_verify(
             out = dict(out)
             out["implements"] = impl
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
-        if bounds_overrides["instances"] or bounds_overrides["values"]:
+        skip_warnings = (
+            _bounds_skip_warnings(acc_skipped, "acceptance", bounds_overrides)
+            + _bounds_skip_warnings(forb_skipped, "forbidden", bounds_overrides)
+        )
+        if skip_warnings:
+            out = dict(out)
+            out["warnings"] = list(out.get("warnings") or []) + skip_warnings
+        if has_bounds_overrides:
             out = dict(out)
             out["bounds_overrides"] = {
                 "instances": dict(bounds_overrides["instances"]),

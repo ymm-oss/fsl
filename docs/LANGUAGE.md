@@ -95,6 +95,19 @@ error (exit code 2), as is a malformed value (`Case=abc`, `N=5..1`). The
 effective overridden bounds are echoed back in the JSON envelope's
 `bounds_overrides` field.
 
+`acceptance`/`forbidden` scenarios often hardcode ids/numbers from the spec's
+original world (`accept(2)`), which can fall outside a shrunken override
+(`--instances Case=1`). When overrides are active, a scenario whose replay
+fails *purely* because it references a value outside the overridden bounds
+(an out-of-range action argument, or an out-of-range index inside its
+`expect`) is downgraded per-scenario from a hard error to a skip, reported in
+the envelope's `warnings` (`{"kind": "acceptance_skipped"/"forbidden_skipped",
+"id": ..., "message": ...}`); the rest of the scenarios still run. Without
+overrides — or for any other failure (a false `expect`, an unmet `requires`)
+— behavior is unchanged: hard error. This is what makes `--instances Case=1
+--property <Liveness>` usable even when the spec's acceptance scenarios were
+written against the original `verify { instances Case = N }` bound.
+
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 

@@ -336,7 +336,14 @@ first failed layer and later layers are marked `skipped`.
   `entity`/`number`); an undeclared `NAME` or a malformed value (`Case=abc`,
   `N=5..1`) is a spec error, and it does not apply to a kernel `spec` whose
   domain is a raw `type X = lo..hi` literal. The effective override is echoed
-  back as `bounds_overrides` in the JSON envelope.
+  back as `bounds_overrides` in the JSON envelope. When an override is active,
+  an `acceptance`/`forbidden` scenario that no longer fits the shrunken world
+  (a hardcoded id/number outside the overridden bounds, in a step argument or
+  inside its `expect`) is skipped per-scenario instead of hard-erroring the
+  whole `verify`, with a `warnings` entry (`kind: "acceptance_skipped"` /
+  `"forbidden_skipped"`) naming it; other scenarios still replay normally.
+  Without an override, or for a failure unrelated to bounds, the scenario
+  still hard-errors as before.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -426,7 +433,11 @@ Practical strategy:
   bound is an `entity`/`number` (not a raw `type` literal), shrink it from the
   CLI with `fslc verify spec.fsl --instances Case=1` instead of editing the
   spec (see §7) — the file keeps its normal verify-block size for everything
-  else.
+  else. If the spec has `acceptance`/`forbidden` scenarios hardcoding ids from
+  the original (larger) world, they are not a blocker: under an active
+  override, a scenario that no longer fits is skipped with a `warnings` entry
+  rather than hard-erroring the run (see §7), so `--instances Case=1
+  --property <Liveness>` stays usable without editing those scenarios too.
 - Verify **safety separately on the full-size model** at the depth you need.
 - Use `--property <leadsToName>` to run a single liveness property in isolation
   while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.
