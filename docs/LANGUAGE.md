@@ -180,15 +180,32 @@ per-entity liveness under interleaving needs a fairness-aware discipline
 (only the binding's own "helpful" action must decrease); that is not
 implemented and is tracked separately (issue #72).
 
-**Working idiom: a global sum measure.** Sum the tracked quantity across a
-fixed, small domain, e.g. `decreases level[0] + level[1]` for a 2-element
-`Case` domain — every action then strictly decreases the total, and
-induction returns `"proved"` with `"completeness": "unbounded"`. There is no
-`sum()` aggregate over a domain type usable here, so this idiom only scales
-to domains small enough to enumerate by hand. (Conditional expressions can't
-substitute for a per-branch measure either: `if/then/else` is legal only in
-refinement-mapping expressions (§10), not in the general expression grammar
-that `decreases` draws from.)
+**Working idiom: a `sum` measure.** Sum the tracked quantity across the
+binder's whole (always-bounded) domain:
+
+```fsl
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 }
+  decreases sum k: Case { level[k] }
+}
+```
+
+`sum k: T [where expr] { expr }` enumerates `T`'s bounded domain (the same
+binder machinery `forall`/`exists` use, including range/collection binders
+and an optional `where` filter) and folds the body with `+` — no solver-side
+novelty, just the generalization of hand-enumerating
+`decreases level[0] + level[1] + level[2]`. Because the sum ranges over the
+*whole* domain, every action still strictly decreases the total (the
+discipline in the paragraph above is unaffected), and — unlike the
+hand-written idiom — the measure does not need to be rewritten when
+`instances Case = N` changes: `sum` is instances-independent by
+construction. See `docs/DESIGN-sum-aggregate.md` for the design rationale,
+and note Phase 2 of #72 (a fairness-aware "helpful action" discipline) is
+still open for the cases `sum` doesn't reach — where some other entity's
+action neither resolves the pending binding nor changes the sum at all.
+(Conditional expressions can't substitute for a per-branch measure either:
+`if/then/else` is legal only in refinement-mapping expressions (§10), not in
+the general expression grammar that `decreases` draws from.)
 
 ## 2. Types
 
@@ -238,7 +255,12 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
   the v0 form `forall i in lo..hi: expr` is also allowed. Expression quantifiers
   can also range over a Set or Seq value: `forall x in active { ... }` /
   `exists x in queue { ... }`; for Seq this ranges over the live prefix values.
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
+- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`, and the
+  quantifier-shaped `sum x: T [where expr] { expr }` (brace form, reuses the same
+  `binder` grammar as `forall`/`exists`, incl. range/collection binders — see
+  §1 for its role as a `decreases` measure and `docs/DESIGN-sum-aggregate.md`
+  for the design rationale). The body must be Int-valued; a Bool body is a
+  check-time type error.
 - Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
   `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
   matching binding, while `exactlyOne` means exactly one.

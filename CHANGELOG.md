@@ -5,6 +5,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- `sum k: T [where expr] { expr }` aggregate expression: enumerates the
+  binder's bounded domain (same machinery as `forall`/`exists`, including
+  range/collection binders and `where`) and folds with `+`. Fixes the
+  documented per-entity `decreases` trap (`rank_failure:
+  "non_decreasing_action"` under interleaving) without hand-writing
+  `decreases level[0] + level[1] + ...`, and — unlike that idiom — is
+  instances-independent: the measure text doesn't change when `instances
+  Case = N` changes or is overridden via `--instances`/`--values` (#86).
+  General expression, usable anywhere `expr` is legal, not special-cased to
+  `decreases`. Phase 1 of #72; Phase 2 (fairness-aware "helpful action"
+  ranking) remains open. (#91)
+
 ## [2.6.1] - 2026-07-03
 
 ### Fixed

@@ -23,8 +23,8 @@ def _err(message, kind="semantics", loc=None, expected=None, hint=None):
 # Bare-atom literals in the grammar that collide unconditionally with identifiers.
 # Keywords that only act as keywords when immediately followed by "(" (count, sum,
 # stage, min, max, abs, old, unique, exactlyOne, some) or by a binder (forall,
-# exists) are contextual — they parse unambiguously as bare identifiers, so they
-# are NOT reserved.
+# exists, and sum in its `sum k: T { ... }` aggregate form) are contextual —
+# they parse unambiguously as bare identifiers, so they are NOT reserved.
 _RESERVED = frozenset({"true", "false", "none"})
 
 
@@ -450,6 +450,104 @@ def binder_range(binder, consts, types_meta):
     ty = types_meta[ty_name]["ty"]
     lo, hi = domain_range(ty, types_meta)
     return v, lo, hi, where
+
+
+# --- `sum k: T [where ...] { body }` type checking -------------------------
+#
+# A minimal, self-contained Bool/Int static typing used only to validate
+# `quant_sum` (the `sum` aggregate) nodes at check time: the bound variable's
+# type must resolve like a forall/exists binder does, `where` must be Bool,
+# and `body` must be Int-family. Returns "bool" / "int" / None (type unknown
+# to this narrow checker, e.g. structs — such expressions are left unchecked
+# rather than rejected).
+
+def _sum_binder_var_type(binder, types_meta):
+    if binder[0] == "binder_typed":
+        ty_name = binder[2]
+        if ty_name not in types_meta:
+            _err(f"unknown type '{ty_name}' in binder", kind="type")
+        return "int"
+    if binder[0] == "binder_range":
+        return "int"
+    # binder_collection: element type isn't tracked by this narrow checker.
+    return None
+
+
+def _sum_expr_type(e, types_meta, state, env):
+    if not isinstance(e, tuple):
+        return None
+    tag = e[0]
+    if tag == "num":
+        return "int"
+    if tag == "bool":
+        return "bool"
+    if tag in ("neg", "abs", "min", "max", "count", "old"):
+        return "int"
+    if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
+        return "bool"
+    if tag == "bin":
+        return "int" if e[1] in ("+", "-", "*", "/", "%") else "bool"
+    if tag == "quant_sum":
+        _check_quant_sum(e, types_meta, state, env)
+        return "int"
+    if tag == "var":
+        n = e[1]
+        if n in env:
+            return env[n]
+        if n in state:
+            vty = state[n]
+            if vty[0] == "bool":
+                return "bool"
+            if vty[0] in ("int", "domain", "enum"):
+                return "int"
+            return None
+        for info in types_meta.values():
+            if info["kind"] == "enum" and n in info.get("members", ()):
+                return "int"
+        return None
+    if tag == "index":
+        base = e[1]
+        name = base if isinstance(base, str) else (base[1] if base[0] == "var" else None)
+        vty = state.get(name) if name else None
+        if vty and vty[0] == "map":
+            inner = vty[2]
+            if inner[0] == "bool":
+                return "bool"
+            if inner[0] in ("int", "domain", "enum"):
+                return "int"
+        return None
+    return None
+
+
+def _check_quant_sum(e, types_meta, state, env):
+    _, binder, body = e
+    v = binder[1]
+    where = binder[3] if len(binder) > 3 else None
+    inner_env = {**env, v: _sum_binder_var_type(binder, types_meta)}
+    if where is not None:
+        where_ty = _sum_expr_type(where, types_meta, state, inner_env)
+        if where_ty is not None and where_ty != "bool":
+            _err("sum where clause must be Bool", kind="type")
+    body_ty = _sum_expr_type(body, types_meta, state, inner_env)
+    if body_ty is not None and body_ty != "int":
+        _err(f"sum body must be Int, got {body_ty}", kind="type")
+
+
+def _find_sum_nodes(node, types_meta, state):
+    """Recursively locate every `quant_sum` node in `node` and type-check it,
+    regardless of how deeply it's nested (mirrors _check_no_stage_expr's
+    generic tuple/list/dict walk)."""
+    if isinstance(node, tuple):
+        if node and node[0] == "quant_sum":
+            _check_quant_sum(node, types_meta, state, {})
+        for part in node[1:]:
+            _find_sum_nodes(part, types_meta, state)
+    elif isinstance(node, list):
+        for item in node:
+            _find_sum_nodes(item, types_meta, state)
+    elif isinstance(node, dict):
+        for item in node.values():
+            _find_sum_nodes(item, types_meta, state)
 
 
 def normalize_params(params, consts, types_meta):
@@ -1201,6 +1299,11 @@ def build_spec(tree, display_names=None, semantic_check=True):
         _err("spec has no actions", kind="semantics")
 
     check_seq_literal_sizes(state, init, actions, types_meta)
+
+    for _coll in (actions, all_invariants, transitions, reachables, leadstos, init):
+        _find_sum_nodes(_coll, types_meta, state)
+    if terminal is not None:
+        _find_sum_nodes(terminal, types_meta, state)
 
     all_display_names = dict(display_names or {})
     all_display_names.update(dialect_display_names)

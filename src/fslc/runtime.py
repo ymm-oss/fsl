@@ -28,6 +28,7 @@ from .values import (
     eval_one,
     eval_quant,
     eval_sum,
+    eval_sum_binder,
     logical_map_access,
     option_logical_eq,
     option_none_cmp,
@@ -507,6 +508,8 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         return _eval_count(e, state, binds, spec, old_state, in_ensures)
     if tag == "sum":
         return _eval_sum(e, state, binds, spec, old_state, in_ensures)
+    if tag == "quant_sum":
+        return _eval_sum_binder(e, state, binds, spec, old_state, in_ensures)
     if tag == "min":
         a = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
         b = eval_concrete(e[2], state, binds, spec, old_state, in_ensures)
@@ -717,6 +720,10 @@ def _eval_count(e, state, binds, spec, old_state, in_ensures):
 
 def _eval_sum(e, state, binds, spec, old_state, in_ensures):
     return eval_sum(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
+
+
+def _eval_sum_binder(e, state, binds, spec, old_state, in_ensures):
+    return eval_sum_binder(e, state, binds, spec, old_state, in_ensures, _CONC, eval_concrete)
 
 
 

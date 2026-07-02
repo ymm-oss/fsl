@@ -126,6 +126,7 @@ quant: "forall" binder [":"] expr -> quant_forall
      | "forall" binder [":"] "{" expr "}" -> quant_forall_brace
      | "exists" binder [":"] expr -> quant_exists
      | "exists" binder [":"] "{" expr "}" -> quant_exists_brace
+     | "sum" binder [":"] "{" expr "}" -> quant_sum
 ?implies: or_e | or_e "=>" implies -> imp
 ?or_e: and_e | or_e _OR and_e -> or_op
 ?and_e: not_e | and_e _AND not_e -> and_op
@@ -493,6 +494,9 @@ class Ast(Transformer):
 
     def quant_exists_brace(self, meta, b, e):
         return ("exists", b, e)
+
+    def quant_sum(self, meta, b, e):
+        return ("quant_sum", b, e)
 
     def unique_e(self, meta, binder):
         return ("unique", binder)

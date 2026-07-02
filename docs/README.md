@@ -36,6 +36,7 @@
 | [`DESIGN-html-report.md`](DESIGN-html-report.md) | `fslc html` (self-contained visual review report from explain + verify evidence) |
 | [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate` (applicability check for state machine → typestate + TS scaffold) |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
+| [`DESIGN-sum-aggregate.md`](DESIGN-sum-aggregate.md) | `sum k: T [where expr] { expr }` aggregate expression (bounded-domain expansion, instances-independent `decreases` measures, relation to #72 Phase 2) |
 
 ## Dogfooding records (DOGFOOD-*)
 

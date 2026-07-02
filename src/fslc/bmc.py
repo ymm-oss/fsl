@@ -38,6 +38,7 @@ from .values import (
     eval_one,
     eval_quant,
     eval_sum,
+    eval_sum_binder,
     iter_binder_terms,
     logical_map_access,
     option_logical_eq,
@@ -770,6 +771,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         return _eval_count(e, state, binds, spec, old_state, in_ensures)
     if tag == "sum":
         return _eval_sum(e, state, binds, spec, old_state, in_ensures)
+    if tag == "quant_sum":
+        return _eval_sum_binder(e, state, binds, spec, old_state, in_ensures)
     if tag == "min":
         a, b = eval_expr(e[1], state, binds, spec, old_state, in_ensures), \
                eval_expr(e[2], state, binds, spec, old_state, in_ensures)
@@ -1048,6 +1051,10 @@ def _eval_count(e, state, binds, spec, old_state, in_ensures):
 
 def _eval_sum(e, state, binds, spec, old_state, in_ensures):
     return eval_sum(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
+
+
+def _eval_sum_binder(e, state, binds, spec, old_state, in_ensures):
+    return eval_sum_binder(e, state, binds, spec, old_state, in_ensures, _SYM, eval_expr)
 
 
 
@@ -1877,7 +1884,7 @@ def _expr_static_type(e, spec, env):
         return _merge_ite_static_types(a_ty, b_ty)
     if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
         return ("bool",)
-    if tag in ("count", "sum", "min", "max", "abs"):
+    if tag in ("count", "sum", "quant_sum", "min", "max", "abs"):
         return ("int",)
     return None
 
@@ -2269,6 +2276,13 @@ def _leadsto_measure_label(expr):
         cond_label = _leadsto_measure_label(cond)
         if cond_label is not None:
             return f"count({v}: {ty} where {cond_label})"
+    if tag == "quant_sum":
+        _, binder, body = expr
+        body_label = _leadsto_measure_label(body)
+        if body_label is not None and binder[0] == "binder_typed":
+            v, ty, where = binder[1], binder[2], binder[3]
+            where_label = f" where {_leadsto_measure_label(where)}" if where is not None else ""
+            return f"sum {v}: {ty}{where_label} {{ {body_label} }}"
     return "decreases expression"
 
 

@@ -153,6 +153,21 @@ def eval_quant(e, state, binds, spec, old_state, in_ensures, dom, ev):
     return dom.quantify(qop, terms())
 
 
+def eval_sum_binder(e, state, binds, spec, old_state, in_ensures, dom, ev):
+    """Evaluate the `sum k: T [where ...] { body }` aggregate: enumerate the
+    binder's bounded domain (the same iter_binder_terms machinery forall /
+    exists / unique use) and fold with +, filtering each term through `where`
+    via dom.select_int (symbolically If(where, body, 0)). Empty domain -> 0."""
+    binder, body = e[1], e[2]
+    acc = dom.int_lit(0)
+    for w, b2 in iter_binder_terms(
+        binder, state, binds, spec, old_state, in_ensures, dom, ev
+    ):
+        term = lambda b2=b2: ev(body, state, b2, spec, old_state, in_ensures)
+        acc = acc + (dom.select_int(w, term) if w is not None else term())
+    return acc
+
+
 def eval_one(e, state, binds, spec, old_state, in_ensures, dom, ev):
     tag, binder = e[0], e[1]
     acc = dom.int_lit(0)

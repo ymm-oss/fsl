@@ -172,7 +172,11 @@ check as a type error.
   allowed), `forall x in set_or_seq { expr }` / `exists x in set_or_seq { expr }`
   for expression-only Set/Seq iteration, and the v0 form
   `forall i in lo..hi: expr` (range is a constant expression: `0..CAP-1` recommended)
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
+- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`,
+  and `sum x: T [where expr] { expr }` (brace form; same `binder` as
+  forall/exists incl. range/collection binders; body must be Int — a Bool
+  body is a check-time type error). This is the recommended form for a
+  `decreases` measure (see rule 7 below).
 - Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
   `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
   matching binding; `exactlyOne` means exactly one.
@@ -239,9 +243,13 @@ check as a type error.
      every enabled action must decrease M, so an action advancing a
      *different* entity (`step(c=1)` while `c=0` is pending) violates it.
      Reported as `rank_failure: "non_decreasing_action"`. Working idiom:
-     a **global sum measure** over a fixed small domain, e.g.
-     `decreases level[0] + level[1]`, since there is no `sum()` aggregate to
-     generalize it. Fairness-aware per-entity ranking is future work (#72).
+     `decreases sum k: Case { level[k] }` — sums the quantity over the
+     binder's whole bounded domain (generalizes the old hand-written
+     `decreases level[0] + level[1] + …` idiom) and is **instances-independent**:
+     it doesn't need editing when `instances Case = N` changes. Every enabled
+     action must still strictly decrease the *total*; the discipline itself is
+     unchanged. Fairness-aware per-entity ranking (for actions that touch
+     neither the pending binding nor the sum) is future work (#72 Phase 2).
 8. `symmetric type` / `symmetric enum` means those values are interchangeable
    entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
    representative state using canonical rows from `Map<SymmetricType, V>` and
