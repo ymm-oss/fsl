@@ -5,6 +5,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- Business-dialect no-bypass precedence policies (`every <Entity> reaching
+  <Targets> must have passed through <Waypoints>`, #75) now auto-synthesize a
+  second, stabilizing auxiliary invariant (`<PolicyId>_stability`) alongside
+  the history flag: `forall c { stage[c] in dominated(Waypoints) =>
+  visited[c] }`, where the dominated set is computed by one reachability
+  pass over the process's transition graph with the waypoint nodes removed.
+  Previously a compliant precedence policy verified under BMC but stalled at
+  `unknown_cti` under `--engine induction` on a ghost CTI (`stage[c] ==
+  Waypoint && visited[c] == false`, unreachable in practice but not provable
+  by induction alone); it now proves at k=1, including for cyclic process
+  graphs and waypoint disjunctions. Docs: `docs/DESIGN-precedence-policy.md`,
+  `docs/LANGUAGE.md`, `skills/fsl/reference.md`. (#85)
+
 ## [2.5.0] - 2026-07-02
 
 ### Added

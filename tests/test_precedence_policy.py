@@ -9,6 +9,12 @@ a kernel invariant — the same "business already synthesizes state" pattern
 the stage enum/map/init/fair-actions synthesis already uses (see
 ``docs/DESIGN-precedence-policy.md``). Two policies over the same
 (process, waypoint-set) share one history map (dedup).
+
+#85 additionally synthesizes a stabilizing auxiliary invariant, `<PolicyId>_stability`,
+alongside the history flag: `forall c { stage[c] in dominated(W) => visited[c] }`,
+where `dominated(W)` is the set of stages dominated by the waypoint set `W` in
+the process graph. This closes k-induction (k=1) for compliant precedence
+policies without a ghost CTI.
 """
 from fslc.cli import run_check, run_verify
 from fslc.model import FslError, build_spec
@@ -53,6 +59,13 @@ def test_precedence_policy_bypass_is_violated(tmp_path):
 
     # the trace demonstrates the bypass transition, not some unrelated path
     assert result["last_action"]["name"] == "bypass"
+
+    # #85: the auto-synthesized stability aux is a *separate* invariant and
+    # must not be what the counterexample attributes to -- the bypass
+    # transition (Requested -> Refunded) also enlarges the dominated set to
+    # exclude Refunded (it's now reachable around Approved), so the aux
+    # stays true and only the real policy invariant is violated.
+    assert result["invariant"] != "CTRL-APPROVAL_stability"
 
 
 # --------------------------------------------------------------------------
@@ -313,3 +326,112 @@ def test_precedence_policy_unknown_entity_names_policy_id():
     except FslError as exc:
         assert "CTRL-BAD" in str(exc)
         assert "Invoice" in str(exc)
+
+
+# --------------------------------------------------------------------------
+# #85: auto-synthesized dominated-set stability invariant closes k-induction
+# --------------------------------------------------------------------------
+
+
+def test_precedence_policy_compliant_proves_under_induction(tmp_path):
+    # Reproduces the ghost CTI from #85: before the fix, this compliant
+    # linear-process spec verified under BMC but stalled at unknown_cti
+    # under `--engine induction`.
+    f = tmp_path / "compliant.fsl"
+    f.write_text(BIZ_COMPLIANT_SRC, encoding="utf-8")
+
+    result = run_verify(str(f), 8, "warn", engine="induction")
+    assert result["result"] == "proved"
+    assert result["invariants_checked"] == ["_bounds_return_stage", "CTRL-APPROVAL", "CTRL-APPROVAL_stability"]
+    assert result["k_used"]["CTRL-APPROVAL_stability"] == 1
+
+
+BIZ_DOWNSTREAM_DOMINATOR_SRC = r'''business DownstreamDominator {
+  actor Worker
+  entity Item
+
+  process Item {
+    stages R, A, B, C
+    initial R
+    transition toA R -> A by Worker
+    transition toB R -> B by Worker
+    transition aToB A -> B by Worker
+    transition aToC A -> C by Worker
+  }
+
+  policy CTRL-DOM "C is reached only via A"
+    every Item reaching C must have passed through A
+}
+verify {
+  instances Item = 2
+}
+'''
+
+
+def test_precedence_policy_downstream_but_reachable_around_waypoint_proves(tmp_path):
+    # B is downstream of A (A -> B) but is *also* directly reachable from the
+    # initial stage without passing through A (R -> B). "downstream of W"
+    # would wrongly include B in the aux invariant's domain and make it
+    # unsound (R -> B falsifies it); the dominated-set computation must
+    # exclude B. C, by contrast, is only reachable via A, so C IS dominated.
+    ast = parse(BIZ_DOWNSTREAM_DOMINATOR_SRC)
+    invariants = {item[1]: item[2] for item in ast[2] if item[0] == "invariant"}
+    stability_expr = invariants["CTRL-DOM_stability"]
+    # expr shape: ("forall", binder, ("bin", "=>", in_dominated, visited))
+    in_dominated = stability_expr[2][2]
+
+    def stage_names(expr):
+        if expr[0] == "bin" and expr[1] == "==":
+            return {expr[3][1]}
+        assert expr[0] == "bin" and expr[1] == "or"
+        return stage_names(expr[2]) | stage_names(expr[3])
+
+    assert stage_names(in_dominated) == {"A", "C"}
+
+    f = tmp_path / "dominator.fsl"
+    f.write_text(BIZ_DOWNSTREAM_DOMINATOR_SRC, encoding="utf-8")
+    result = run_verify(str(f), 8, "warn", engine="induction")
+    assert result["result"] == "proved"
+
+
+BIZ_CYCLIC_SRC = r'''business ReturnCycle {
+  actor Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition reject Requested -> Rejected by Manager
+    transition rework Approved -> Requested by Manager
+    transition refund Approved -> Refunded by Manager
+  }
+
+  policy CTRL-APPROVAL "no completion without approval"
+    every Return reaching Refunded must have passed through Approved
+}
+verify {
+  instances Return = 3
+}
+'''
+
+
+def test_precedence_policy_cyclic_process_proves_under_induction(tmp_path):
+    # `rework` goes back upstream (Approved -> Requested) after the waypoint
+    # has already been passed; the aux invariant must still hold (and be
+    # inductive) despite the cycle.
+    f = tmp_path / "cyclic.fsl"
+    f.write_text(BIZ_CYCLIC_SRC, encoding="utf-8")
+
+    result = run_verify(str(f), 8, "warn", engine="induction")
+    assert result["result"] == "proved"
+    assert "CTRL-APPROVAL_stability" in result["invariants_checked"]
+
+
+def test_precedence_policy_waypoint_disjunction_proves_under_induction(tmp_path):
+    f = tmp_path / "disjunction.fsl"
+    f.write_text(BIZ_DISJUNCTION_SRC, encoding="utf-8")
+
+    result = run_verify(str(f), 8, "warn", engine="induction")
+    assert result["result"] == "proved"
+    assert "CTRL-DECIDED_stability" in result["invariants_checked"]
