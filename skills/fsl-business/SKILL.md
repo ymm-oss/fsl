@@ -48,11 +48,17 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
    - `kpi paid_claims = count Claim in Paid`
    - `control CTRL-1 "..." owner Finance severity high applies_to Claim`
    - `policy POL-1 "..." satisfies CTRL-1 every Case in Source must eventually be Target`
+   - `policy POL-2 "..." satisfies CTRL-1 every Case reaching Completed must have passed
+     through AwaitingApproval` — the no-bypass form; desugars to an invisible history
+     flag plus a kernel invariant, without descending to `requirements`
    - `goal G "..." some Case can reach Target`
    - `goal G "..." all Case can be Target or OtherTarget`
-4. Run `fslc check`, then `fslc verify --engine induction`. Use `--deadlock ignore`
-   only for business process models where terminal stops are intentionally handled
-   by goals/policies rather than kernel `terminal`.
+4. Run `fslc check`, then `fslc verify --engine induction`. A pure stage-graph
+   business spec needs no flag for intentional stops: `terminal { }` is derived
+   automatically from each process's sink stages (stages with no outgoing
+   `transition`), so a spec that ends cleanly at those stages verifies with no
+   flag. `--deadlock ignore` is not the tool for intended stops — it silences all
+   deadlock detection, including unintended ones.
 5. If comparing As-Is and To-Be, keep them in separate files. Write an explicit
    mapping that states the business interpretation, then run `fslc refine
    tobe.fsl asis.fsl mapping.fsl`.

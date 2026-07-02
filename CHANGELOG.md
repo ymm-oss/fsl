@@ -83,6 +83,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `sum()` aggregate to generalize it (fairness-aware per-entity ranking is
   tracked separately as #72). Also added a targeted parse-error hint in
   `cli.py` for `decreases` nested inside a `forall` body. (#71)
+- Updated the workflow skills (`skills/fsl/SKILL.md`, `skills/fsl-business/SKILL.md`,
+  `skills/fsl-requirements/SKILL.md`) to track the v2.5 feature set:
+  auto-derived business `terminal` and the requirements-layer `terminal`
+  passthrough (#69), `Bool`/enum carried fields with initializers (#70),
+  `unknown_cti`'s `suggested_invariants` (#74), the no-bypass precedence
+  `policy` form (#75), inline `implements { action ... }` correspondence with
+  arity changes (#73), `Bool` action params (#68), and enum member names in
+  `acceptance`/`forbidden` arguments (#67). `skills/fsl/reference.md` already
+  covered these; the workflow skills had not. (#67 #68 #69 #70 #73 #74 #75)
 
 ## [2.4.0] - 2026-06-29
 
