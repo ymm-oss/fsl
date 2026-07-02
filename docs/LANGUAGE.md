@@ -180,13 +180,19 @@ per-entity liveness under interleaving needs a fairness-aware discipline
 (only the binding's own "helpful" action must decrease); that is not
 implemented and is tracked separately (issue #72).
 
-**Working idiom: a global sum measure.** Sum the tracked quantity across a
-fixed, small domain, e.g. `decreases level[0] + level[1]` for a 2-element
-`Case` domain — every action then strictly decreases the total, and
-induction returns `"proved"` with `"completeness": "unbounded"`. There is no
-`sum()` aggregate over a domain type usable here, so this idiom only scales
-to domains small enough to enumerate by hand. (Conditional expressions can't
-substitute for a per-branch measure either: `if/then/else` is legal only in
+**Working idiom: a global sum measure.** Sum the tracked quantity across the
+domain with the built-in `sum()` aggregate (§3): `decreases sum(k: Case of
+level[k])`. `sum()` enumerates the bounded `Case` domain itself, so the
+measure is instances-count independent — the same `decreases` clause works
+unchanged whether `Case` is sized via `verify { instances Case = N }` or
+shrunk with a CLI `--instances` override. Because every fair `step` decrements
+exactly one `level[k]`, every enabled action strictly decreases the total, so
+induction returns `"proved"` with `"completeness": "unbounded"`. This idiom
+only covers designs where *every* enabled action decreases the total; a
+design where some enabled action advances the domain without shrinking the
+sum is still an open case, needing the fairness-aware "helpful action"
+discipline from issue #72 above. (Conditional expressions can't substitute
+for a per-branch measure either: `if/then/else` is legal only in
 refinement-mapping expressions (§10), not in the general expression grammar
 that `decreases` draws from.)
 
