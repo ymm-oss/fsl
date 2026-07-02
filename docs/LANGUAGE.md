@@ -250,6 +250,15 @@ variable.
   be detected. Whereas `--deadlock ignore` uniformly ignores **all stopping
   states**, `terminal` lets you select **which stops are intentional**.
   Example: `terminal { status == Done or status == Failed }`.
+  - **requirements**: `terminal { }` is a `requirements_item` and passes
+    through unchanged to the kernel spec (§13.2). Inside a spec that uses
+    `process E { ... }`, write the predicate against the synthesized stage
+    map — the lowercased process/entity name + `_stage` (e.g. `process Claim`
+    → `claim_stage`), so `terminal { forall c: Claim { claim_stage[c] ==
+    Approved or claim_stage[c] == Rejected } }`.
+  - **business**: no `terminal` syntax exists at all — it is derived
+    automatically from each process's sink stages (stages with no outgoing
+    `transition`); see §13.3.
 - **Do not write** an invariant like "inventory is at least 0" — make it
   `type Qty = 0..N` and it is detected automatically.
 - A full `push` into a Seq is also detected automatically as `type_bound`
@@ -852,6 +861,12 @@ verify {
   `branches` automatically splits an action by each when condition (displayed as
   `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
   correspondence to the upper layer.
+- `terminal { <expr> }` is allowed at the top level of a `requirements` spec
+  and passes through to the kernel unchanged (§6) — there is exactly one
+  `terminal` block per spec, same as the kernel. If the spec uses
+  `process E { ... }`, the predicate must reference the synthesized stage map
+  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`), not
+  `stage(c)` (that natural-language form is business-only, §13.3).
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
@@ -901,6 +916,18 @@ verify {
 The explicit forms remain available when the rule is not just stage progression:
 `policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` and
 `goal ... { exists c: Return { stage(c) == Refunded } }`.
+
+Business has no `terminal` syntax of its own. Instead, each process's **sink
+stages** (stages with no outgoing `transition`) are collected automatically:
+if every process has at least one sink, a kernel `terminal { }` is generated
+as the conjunction, over processes, of `forall c: <Entity> { stage(c) in
+{Sink1, Sink2, ...} }` — so a deadlock is "intended" only once every entity of
+every process is simultaneously parked at one of its own sinks. `ReturnHandling`
+above therefore verifies clean at `Rejected`/`Refunded` without
+`--deadlock ignore`. If any process is cyclic (every stage has an outgoing
+transition, so it has no sink), no terminal is generated at all and deadlock
+checking is unaffected — cyclic processes never deadlock in the first place,
+since some transition is always enabled.
 
 Governance/control metadata can be kept inside `business` or lifted into a
 standalone catalog. `control ID "text" owner NAME severity NAME applies_to Entity`

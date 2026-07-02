@@ -566,6 +566,16 @@ exists, each `require CTRL` is satisfied by business-side `satisfies` metadata o
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8.
 
+No `terminal` syntax exists in business — it is derived automatically. Each
+process's sink stages (stages with no outgoing `transition`, e.g.
+`Rejected`/`Refunded` above) are collected; if every process has >=1 sink, one
+kernel `terminal { }` is generated as the conjunction (over processes) of
+`forall c: X { stage(c) in {sinks...} }` — so `ReturnHandling` above verifies
+clean at its two sinks with no `--deadlock ignore`. If any process is cyclic
+(every stage has an outgoing edge, so no sink), no terminal is generated for
+the whole spec and deadlock checking is unchanged (a cyclic process always has
+an enabled transition, so it can never deadlock anyway).
+
 ### requirements (the requirements layer)
 
 ```fsl
@@ -638,6 +648,11 @@ verify {
   `submit[a <= AUTO_LIMIT]`; diagnostics keep the internal name (`submit__b1`)
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.
+- `terminal { <expr> }` is allowed at the top level (pass-through to the
+  kernel, one block per spec, same as the kernel). In the process+data
+  profile, write the predicate against the synthesized stage map
+  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`) — not
+  `stage(c)`, which is business-only.
 
 ### Drawing the layer boundary
 
