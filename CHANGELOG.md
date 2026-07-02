@@ -14,6 +14,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `Monitor` in agreement. `Int` stays rejected (unbounded, can't be
   enumerated); the error now hints at a range parameter
   (`p in <lo>..<hi>`). (#68)
+- `acceptance`/`forbidden` action arguments now accept enum member names (and
+  const names) in addition to numeric ordinals, matching the name resolution
+  already used by `requires`/`invariant`/`expect` expressions
+  (`_is_enum_member` in `values.py`). An undefined name is still a
+  `kind: "acceptance"`/`"forbidden"` check-time error, now reported as
+  "undefined const or enum member". (#67)
 
 ## [2.4.0] - 2026-06-29
 
