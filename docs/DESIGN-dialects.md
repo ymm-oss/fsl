@@ -163,6 +163,14 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    naturally into testgen.
 9. The name of the expanded spec is the name of `requirements`. All other items
    (type/enum/struct/state/init/top-level actions, etc.) pass through unchanged.
+10. `terminal { <expr> }` is one of these pass-through items (added as a
+    `requirements_item` grammar alternative, #69) — it takes the generic
+    `_expand_item` fallback (`return [item], []`), so no dialects.py case was
+    added for it specifically. Only one `terminal` block is allowed per spec
+    (the kernel's own rule, unchanged). If the spec uses `process E { ... }`,
+    the predicate is written against the synthesized stage map
+    (`e_stage[c]`, rule 2 above) — the natural-language `stage(c)` form is
+    business-only (§3.2 rule 7).
 
 ### 2.3 Tests (tests/test_req_dialect.py)
 
@@ -260,6 +268,51 @@ verify {
    binding; ambiguity is a type error).
 6. The `actor` declaration is a roster (used to validate the `by` of a
    transition; an undeclared actor is a type error). No other semantics.
+7. No `terminal` syntax exists in business (#69). Instead, after all
+   processes are expanded, each process's **sink stages** — stages that are
+   never a transition's source (`tr["src"]`) — are collected. If every
+   process has >=1 sink, one kernel `terminal { }` item is generated: the
+   conjunction (`and`), over processes, of
+   `forall c: X { _any_stage(X, c, sinks) }` (reusing the same `_stage_is` /
+   `_any_stage` helpers rule 5's `all <Entity> can be <Stage>` goal uses). If
+   any process is cyclic (no sink at all), no terminal is generated for the
+   whole spec and deadlock checking is unaffected — a cyclic process always
+   has an enabled transition, so it can never contribute to a real deadlock
+   anyway. This makes "stopping at a process's last stage" verify clean by
+   default; `--deadlock ignore` is no longer required for a pure stage-graph
+   business spec.
+8. `policy <ID> "<text>" every <Entity> reaching <Stage> [or <Stage> ...]
+   must have passed through <Stage> [or <Stage> ...]` (#75, no-bypass
+   precedence) synthesizes one more layer of invisible state on top of rule 2
+   — a history flag alongside the stage map:
+   - For each **distinct** `(process, waypoint-set)` pair across all
+     precedence policies (deduped, so two policies over the same waypoints
+     share one flag), one `history_var: Map<X, Bool>` is added to the same
+     `state { }` block rule 2 emits, named
+     `<x_stage>_via_<Waypoint1>[_<Waypoint2>...]` (waypoints ordered by
+     declaration order in the process, for a deterministic name regardless of
+     the order the policy lists them in — it appears in traces).
+   - `init` sets it `true` for every entity if the process's `initial` stage
+     is itself in the waypoint set, else `false` — folded into the same
+     `init { }` block rule 2 emits.
+   - Every transition (rule 2) whose destination stage is in the waypoint
+     set gets `history_var[c] = true` appended to its body (before the
+     `requires`/`set` transformation runs, so this is only a body-append, not
+     a new transition).
+   - The policy itself compiles to a kernel invariant (with meta, so the
+     REQ-ID propagates like every other policy form):
+     `forall c: Entity { _any_stage(Entity, c, targets) => history_var[c] }`.
+   - Unknown stage / unknown entity referenced by the policy is a type error
+     naming the policy's REQ-ID.
+   - Semantics notes: if the initial stage is in `targets` but not in the
+     waypoint set, the invariant is violated at init — reported as a genuine
+     violation, not special-cased. A waypoint equal to a target is allowed
+     (trivially satisfied on entry through it).
+   - Limitation: the history flag is synthesized only in the business spec.
+     A requirements-layer spec that refines a business spec carrying a
+     precedence policy must either map that flag explicitly in its
+     refinement mapping or restate the policy at its own layer — refinement
+     does not currently propagate synthesized business-layer state.
 
 ### 3.3 Governance catalog
 

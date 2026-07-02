@@ -34,6 +34,14 @@ spec <Name> {
 }
 ```
 
+Action parameter types (`<p>: <type name>`): domain type, enum, or builtin
+`Bool` — anything BMC can enumerate. `Bool` params behave like `Bool` state:
+usable bare as a guard (`requires b`, `requires not b`) or assigned into
+`Bool`-typed state (`flag[i] = b`). Builtin `Int` is rejected (unbounded,
+can't be enumerated) — use a range parameter instead:
+`action f(p in <lo>..<hi>) { ... }` (inline alternative to `<p>: <type name>`,
+no named domain type required).
+
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:
 
@@ -221,6 +229,19 @@ check as a type error.
    false, M is non-negative, some action is enabled, and every enabled action
    either makes Q true or keeps P true while strictly decreasing M. Without
    `decreases`, leadsTo remains bounded to `--depth`.
+   - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
+     its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
+     Nesting it inside the forall body is a **parse error**
+     (`fslc` reports `unexpected 'decreases' here` with a placement hint),
+     not "ranking doesn't work under forall".
+   - **Per-entity measure trap**: `decreases level[c]` inside
+     `forall c: Case { level[c] > 0 ~> level[c] == 0 }` always fails —
+     every enabled action must decrease M, so an action advancing a
+     *different* entity (`step(c=1)` while `c=0` is pending) violates it.
+     Reported as `rank_failure: "non_decreasing_action"`. Working idiom:
+     a **global sum measure** over a fixed small domain, e.g.
+     `decreases level[0] + level[1]`, since there is no `sum()` aggregate to
+     generalize it. Fairness-aware per-entity ranking is future work (#72).
 8. `symmetric type` / `symmetric enum` means those values are interchangeable
    entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
    representative state using canonical rows from `Map<SymmetricType, V>` and
@@ -334,7 +355,12 @@ first failed layer and later layers are marked `skipped`.
   null|value / Seq as an array / composition as `alias.var` keys). Internal names
   (`__`) do not appear.
 - `unknown_cti`: `cti.states` (k+1 states) + `violated_at`. The starting state is an
-  unreachable phantom — add an auxiliary invariant to exclude it.
+  unreachable phantom — add an auxiliary invariant to exclude it. For invariant
+  CTIs (not `leadsTo_rank`), a monotone `Int`/`Map<K, Int>` counter whose CTI
+  start lies on the unreachable side of its concrete init value gets a concrete
+  candidate in `suggested_invariants: [<expr>, ...]` (also appended to `hint`) —
+  a heuristic from trace-monotonicity, not a proof; absent when no such counter
+  is found.
 - `verified` / `reachable_failed` / `violated` from BMC are bounded and include
   `completeness:"bounded"`, `checked_to_depth`, and `cost: {"elapsed_s": ...}`.
   Bounded `verified` may include a saturation `hint` when the depth-K frontier
@@ -557,6 +583,19 @@ The natural business forms above are aliases for `responds { forall ... ~> ... }
 and `goal { forall/exists ... }`; the explicit expression forms remain available
 for policies that cannot be written as a simple stage progression.
 
+**No-bypass precedence** (#75): `policy CTRL-APPROVAL "..." every Return
+reaching Refunded must have passed through Approved` synthesizes an invisible
+`Map<Return, Bool>` history flag (`return_stage_via_Approved`), sets it `true`
+on the transition landing on `Approved`, and compiles to `forall c: Return {
+stage(c) == Refunded => return_stage_via_Approved[c] }`. A direct
+`Requested -> Refunded` transition is then a genuine invariant violation with
+the bypass shown in the trace. Both sides take a disjunction (`reaching A or
+B`, `passed through X or Y`); two policies over the same `(process,
+waypoint-set)` share one history flag (dedup, name deterministic by the
+process's stage order). Design in `DESIGN-precedence-policy.md`. Limitation:
+the flag is business-layer-only synthesized state — a `requirements` spec
+refining it must map the flag explicitly or restate the rule at its own layer.
+
 `control` declarations are metadata only. Attach them to checkable business
 rules with `policy ... satisfies CTRL` or `goal ... satisfies CTRL`. Unknown
 control references are type errors, unused declared controls are warnings, and a
@@ -567,6 +606,16 @@ catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8.
+
+No `terminal` syntax exists in business — it is derived automatically. Each
+process's sink stages (stages with no outgoing `transition`, e.g.
+`Rejected`/`Refunded` above) are collected; if every process has >=1 sink, one
+kernel `terminal { }` is generated as the conjunction (over processes) of
+`forall c: X { stage(c) in {sinks...} }` — so `ReturnHandling` above verifies
+clean at its two sinks with no `--deadlock ignore`. If any process is cyclic
+(every stage has an outgoing edge, so no sink), no terminal is generated for
+the whole spec and deadlock checking is unchanged (a cyclic process always has
+an enabled transition, so it can never deadlock anyway).
 
 ### requirements (the requirements layer)
 
@@ -618,16 +667,25 @@ verify {
   `_kpi_*` invariant.
 - When `implements Abs from "file" { }` is present and process/action/stage names
   match, fslc synthesizes the identity refinement mapping. Inside the
-  `implements { }` block you write only state `map` entries, `maps auto`, and
-  `preserve progress` — **not `action`** (the grammar rejects an action there).
-  Action↔action correspondence is instead the `maps <abs_act>(...)` clause **on
-  the requirement-level action** (auto-synthesized for matching names; `maps auto`
-  covers same-name kernel-wrapper actions). Auto-mapped process transitions are
-  statically actor-checked; an actor mismatch is a check-time type error.
+  `implements { }` block you write state `map` entries, `maps auto`,
+  `preserve progress`, and `action <impl>(<params>) -> <abs>(<args>) | stutter`
+  (same syntax as a separate refinement file's `action` item, including an
+  arity change between impl and abs params — #73). Action↔action
+  correspondence can also still be written as the `maps <abs_act>(...)` clause
+  **on the requirement-level action** (auto-synthesized for matching names;
+  `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
+  clause on an action and a matching inline `action ...` item for the same impl
+  action name is a duplicate-correspondence error (`kind: "type"`,
+  "duplicate action map for '<name>'"). An inline `action` item cannot target
+  a `branches`-split action by its pre-split name — reference the generated
+  `name__b<N>` alias. Auto-mapped process transitions are statically
+  actor-checked; an actor mismatch is a check-time type error.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
-  scenarios as `acceptance_<ID>`, and flows to testgen.
+  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments accept
+  enum member names and const names, not just numeric literals (`answer(0, Triggered)`
+  == `answer(0, 1)`); an undefined name is a check-time error.
 - `forbidden FB-1 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected** (not-enabled, or an
@@ -645,6 +703,11 @@ verify {
   `submit[a <= AUTO_LIMIT]`; diagnostics keep the internal name (`submit__b1`)
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.
+- `terminal { <expr> }` is allowed at the top level (pass-through to the
+  kernel, one block per spec, same as the kernel). In the process+data
+  profile, write the predicate against the synthesized stage map
+  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`) — not
+  `stage(c)`, which is business-only.
 
 ### Drawing the layer boundary
 

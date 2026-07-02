@@ -458,7 +458,17 @@ def normalize_params(params, consts, types_meta):
         if p[0] == "param_typed":
             _, n, ty_name = p
             _check_reserved(n, "parameter")
+            if ty_name == "Bool":
+                out.append((n, 0, 1, ty_name))
+                continue
             if ty_name not in types_meta:
+                if ty_name == "Int":
+                    _err(
+                        f"unknown parameter type '{ty_name}'",
+                        kind="type",
+                        hint="Int parameters cannot be enumerated; use a range "
+                        "parameter (p in lo..hi) or declare a number/domain type",
+                    )
                 _err(f"unknown parameter type '{ty_name}'", kind="type")
             ty = types_meta[ty_name]["ty"]
             lo, hi = domain_range(ty, types_meta)
