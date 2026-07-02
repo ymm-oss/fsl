@@ -467,7 +467,7 @@ def normalize_params(params, consts, types_meta):
                         f"unknown parameter type '{ty_name}'",
                         kind="type",
                         hint="Int parameters cannot be enumerated; use a range "
-                        "parameter (p: lo..hi) or declare a number/domain type",
+                        "parameter (p in lo..hi) or declare a number/domain type",
                     )
                 _err(f"unknown parameter type '{ty_name}'", kind="type")
             ty = types_meta[ty_name]["ty"]
