@@ -5,6 +5,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- `fslc verify --instances`/`--values` overrides (#86) no longer hard-error
+  when an `acceptance`/`forbidden` scenario hardcodes an id/number from the
+  spec's original (larger) world. When an override is active, a scenario
+  whose replay fails purely because it references a value outside the
+  overridden bounds (an out-of-range action argument or an out-of-range
+  `expect` index) is downgraded per-scenario to a skip, reported via
+  `warnings` (`kind: "acceptance_skipped"`/`"forbidden_skipped"`); other
+  scenarios still replay normally. Without an override, or for any other
+  failure reason, behavior is unchanged (hard error). This makes
+  `--instances Case=1 --property <Liveness>` usable without editing
+  acceptance/forbidden scenarios written for the full-size model. (#89)
+
 ## [2.6.0] - 2026-07-03
 
 ### Added

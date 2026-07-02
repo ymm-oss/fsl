@@ -141,14 +141,34 @@ def replay_acceptance(spec, ac):
     }
 
 
-def validate_acceptance(spec):
+def _out_of_range_failure(result):
+    """True if a replay failure is caused purely by a hardcoded id/number
+    falling outside the current (possibly CLI-overridden) domain bounds:
+    either an action-argument `bad_call` (`parameter 'x' out of range [...]`)
+    or an out-of-range index inside the `expect` expression (surfaced as the
+    _EvalError message set by runtime.py's concrete map/seq `select`)."""
+    for step_result in result.get("step_results") or []:
+        if step_result.get("kind") == "bad_call" and "out of range" in step_result.get("message", ""):
+            return True
+    message = result.get("message")
+    return bool(message and "out of range" in message)
+
+
+def validate_acceptance(spec, skip_out_of_range=False):
     scenarios = []
+    skipped = []
     for ac in spec.get("acceptance") or []:
         result = replay_acceptance(spec, ac)
         if not result.get("ok"):
+            if skip_out_of_range and _out_of_range_failure(result):
+                skipped.append(ac["id"])
+                continue
             return result
         scenarios.append(result["scenario"])
-    return {"ok": True, "scenarios": scenarios}
+    out = {"ok": True, "scenarios": scenarios}
+    if skipped:
+        out["skipped"] = skipped
+    return out
 
 
 def _param_error_result(exc, item, idx, name, args, spec, loc, kind):
@@ -258,11 +278,18 @@ def replay_forbidden(spec, fb):
     }
 
 
-def validate_forbidden(spec):
+def validate_forbidden(spec, skip_out_of_range=False):
     scenarios = []
+    skipped = []
     for fb in spec.get("forbidden") or []:
         result = replay_forbidden(spec, fb)
         if not result.get("ok"):
+            if skip_out_of_range and _out_of_range_failure(result):
+                skipped.append(fb["id"])
+                continue
             return result
         scenarios.append(result["scenario"])
-    return {"ok": True, "scenarios": scenarios}
+    out = {"ok": True, "scenarios": scenarios}
+    if skipped:
+        out["skipped"] = skipped
+    return out
