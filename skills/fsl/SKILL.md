@@ -316,7 +316,7 @@ existing result/kind fields:
 | `violated` / `ensures` | Postcondition not satisfied | Decide whether the body or the ensures is correct, and fix accordingly |
 | `violated` / `leadsTo` | Response-property counterexample (lasso / stall) | Check the trace's `loop_start`. Either add `fair` to the action that drives progress, or fix the spec |
 | `reachable_failed` | A state you want to reach is unreachable | Read `action_coverage`'s `blocking_requires` (unsat core). Loosen a guard / add an action / increase `--depth` |
-| `unknown_cti` | The invariant is true but not inductive | **The CTI's starting state = a phantom state satisfying all invariants. Add an auxiliary invariant (one that is a domain truth) that excludes it, then re-run.** Track record: converges in one round (e.g. "no duplicates in the queue," "refunds only from Captured") |
+| `unknown_cti` | The invariant is true but not inductive | **The CTI's starting state = a phantom state satisfying all invariants. Add an auxiliary invariant (one that is a domain truth) that excludes it, then re-run.** Check `suggested_invariants` first — for the monotone-counter idiom the result carries ready-made candidate expressions. Track record: converges in one round (e.g. "no duplicates in the queue," "refunds only from Captured") |
 | warning / `vacuous_implication` | The antecedent of an implication invariant is never reached within depth | Check whether an action / reachable witness that makes the antecedent hold is missing, or whether the antecedent expression is reversed or too strong relative to intent. Do not simply weaken the consequent |
 | warning / `vacuous_leadsto` | The leadsTo trigger is not reached within depth | Check the action / guard / initial condition for entering the trigger state. Look first at whether P (not the response target Q) actually occurs in the spec |
 | warning / `always_true_requires` | Under the context of the preceding requires, this requires clause is not effective as a constraint | Decide whether the clause is redundant or whether a path to the state where the clause bites is missing. Do not delete it automatically |
@@ -451,6 +451,12 @@ spec Cart {
   stopping is correct) would become a deadlock warning → declare it with
   `terminal { <predicate> }` (applying `--deadlock ignore` globally hides even
   unintended deadlocks). Stops not included in terminal continue to be detected.
+  `terminal { }` also passes through unchanged at the `requirements` layer (write
+  it against the synthesized `<entity>_stage` map when using `process`, e.g.
+  `terminal { forall c: Case { case_stage[c] == Closed } }`); the `business`
+  dialect needs no `terminal` syntax at all — it derives the predicate
+  automatically from each process's sink stages (stages with no outgoing
+  `transition`).
 
 ## Recommended practices (optional — by risk; may be skipped for small specs)
 
@@ -509,7 +515,9 @@ the relevant role skill directs it.
 - `business Name { process/control/policy/kpi/goal }` — the consulting layer. For
   PM/consulting-facing files, prefer the readable stage syntax for common rules:
   `policy ... every Case in Source must eventually be Target [or Target ...]`,
-  `goal ... some Case can reach Target`, and
+  `policy ... every Case reaching Target [or Target ...] must have passed
+  through Waypoint [or Waypoint ...]` (no-bypass; desugars to an invisible
+  history flag + kernel invariant), `goal ... some Case can reach Target`, and
   `goal ... all Case can be Target [or Target ...]`. Use explicit
   `responds { forall ... stage(c) ... ~> ... }` / `{ expr }` only when the rule is
   not simple stage progression. Regulation contradiction = invariant violation,
@@ -528,14 +536,19 @@ the relevant role skill directs it.
   to the upper layer (the `implements` field in the result JSON); an empty body
   auto-generates identity refinement when names match, `maps auto` is allowed for
   same-name kernel-wrapper state/actions, and auto-mapped process transitions are
-  actor-checked. `acceptance` is replay-checked at check time and supports
-  `expect E id in Stage` as well as `expect <expr>`, then flows scenarios →
-  testgen. `forbidden` (must-forbid) conversely writes an "operation sequence
-  that should be rejected" and verifies at check time that the last step is
-  rejected (not-enabled or a violation) — if accepted, `kind: "forbidden"`. Use
-  kernel-wrapper `struct` / `state` / `init`, `fair action`, `branches`, and
-  explicit `maps` only for hard cases such as multi-entity behavior,
-  conservation rules, SLA/time, or history not expressible as a carried field.
+  actor-checked; the inline block also takes action-correspondence items
+  (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
+  syntax a separate refinement file uses. `acceptance` is replay-checked at
+  check time and supports `expect E id in Stage` as well as `expect <expr>`,
+  then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
+  accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
+  conversely writes an "operation sequence that should be rejected" and
+  verifies at check time that the last step is rejected (not-enabled or a
+  violation) — if accepted, `kind: "forbidden"`. Carried fields (`f: T`) accept
+  `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
+  required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
+  `branches`, and explicit `maps` only for hard cases such as multi-entity
+  behavior, conservation rules, SLA/time, or history that needs kernel state.
   An independent channel for catching under-constraint (missing guards) that a
   safety invariant stays silent about (a receptacle for cross-validation where a
   separate agent writes positive/negative traces from NL)

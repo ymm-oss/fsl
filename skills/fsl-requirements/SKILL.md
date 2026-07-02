@@ -77,17 +77,25 @@ design decision but does not state it, ask rather than choosing.
    `number Amount`, `process Claim with amount: Amount`, transition `with`
    inputs, `when` guards, `set` field updates, and `covers` traceability. Put
    finite bounds in a top-level `verify` block with `instances Claim = N` and
-   `values Amount = lo..hi`.
+   `values Amount = lo..hi`. Carried fields also accept `Bool` and enum types
+   declared in the spec: `number` keeps an optional initializer
+   (`f: Amount = <const-expr>`, defaults to the domain's `lo`), `Bool`/enum
+   fields require one (`retried: Bool = false`, `f: T = Member`) — this covers
+   simple history flags without routing to kernel-wrapper.
 5. Use the kernel-wrapper form (`struct` / `state` / `init`, `fair action`,
    `branches`, explicit `maps`) only for hard cases: multi-entity behavior,
-   conservation rules, SLA/time, history not expressible as a carried field, or
-   a user-visible operation whose data-dependent outcomes need separate upper
+   conservation rules, SLA/time, history that needs kernel state (multiple
+   entities, sequences, etc. — a simple flag fits in a carried field, see step 4),
+   or a user-visible operation whose data-dependent outcomes need separate upper
    correspondences.
 6. Put positive examples in `acceptance`; put must-reject procedures in
    `forbidden`. Use `forbidden` for missing-guard risk because a safety invariant
    often stays silent when an invalid operation is accepted. Prefer
    `expect Entity id in Stage` for process-stage checks; use `expect <expr>` for
-   other predicates.
+   other predicates. `acceptance`/`forbidden` action arguments accept enum member
+   names (not just numeric ordinals); an action parameter may also be typed
+   `Bool` (a first-class boolean, not a 0/1 int — `Int` is still rejected as
+   unbounded).
 7. For `implements`:
    - `implements BusinessName from "business.fsl" { }` auto-generates identity
      refinement when process/action/stage names match
@@ -95,6 +103,9 @@ design decision but does not state it, ask rather than choosing.
      state/actions; explicit `map` and action correspondences override it
    - auto-mapped process transitions are actor-checked; a requirements transition
      whose actor differs from the business action's actor is a check-time error
+   - the inline block also accepts action correspondence items —
+     `action impl(...) -> abs(...) | stutter` — including an arity change
+     between impl and abs params, the same syntax a separate refinement file uses
 8. For NFRs:
    - permissions: role guard plus invariant when needed
    - audit/capacity/reliability: ordinary invariants and response properties
