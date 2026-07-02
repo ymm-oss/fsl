@@ -34,6 +34,14 @@ spec <Name> {
 }
 ```
 
+Action parameter types (`<p>: <type name>`): domain type, enum, or builtin
+`Bool` — anything BMC can enumerate. `Bool` params behave like `Bool` state:
+usable bare as a guard (`requires b`, `requires not b`) or assigned into
+`Bool`-typed state (`flag[i] = b`). Builtin `Int` is rejected (unbounded,
+can't be enumerated) — use a range parameter instead:
+`action f(p in <lo>..<hi>) { ... }` (inline alternative to `<p>: <type name>`,
+no named domain type required).
+
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:
 

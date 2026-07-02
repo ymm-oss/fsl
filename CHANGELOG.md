@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Allow the builtin `Bool` as an action parameter type (`p: Bool`), matching
+  its existing use as a state `Map` value/key. `Bool` params are first-class
+  z3/concrete booleans in expressions — usable bare as a guard
+  (`requires b` / `requires not b`) or assigned into `Bool`-typed state
+  (`flag[i] = b`) — not a 0/1 int carrier, keeping BMC and the concrete
+  `Monitor` in agreement. `Int` stays rejected (unbounded, can't be
+  enumerated); the error now hints at a range parameter
+  (`p in <lo>..<hi>`). (#68)
 - `acceptance`/`forbidden` action arguments now accept enum member names (and
   const names) in addition to numeric ordinals, matching the name resolution
   already used by `requires`/`invariant`/`expect` expressions
