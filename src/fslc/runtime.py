@@ -1051,7 +1051,7 @@ def _logical_val(state, name, ty, spec):
 def _display_param(name, val, act, spec):
     for p in act["params"]:
         if p[0] == name and p[3]:
-            ty = spec["types"][p[3]]["ty"]
+            ty = ("bool",) if p[3] == "Bool" else spec["types"][p[3]]["ty"]
             return _display_value(ty, val, spec)
     return val
 
@@ -1254,6 +1254,8 @@ class Monitor:
                     "kind": "bad_call",
                     "message": f"parameter '{pname}' out of range [{lo}..{hi}]",
                 }
+            if pdef[3] == "Bool":
+                val = bool(val)
             binds[pname] = val
 
         inst = {

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from .model import FslError, resolve_action_name
 from .runtime import Monitor, _EvalError, _as_bool, eval_concrete
+from .values import _is_enum_member
 
 
 def _err(message, loc=None, kind="acceptance"):
@@ -24,7 +25,10 @@ def _literal_value(expr, spec, loc=None, kind="acceptance"):
         name = expr[1]
         if name in spec["consts"]:
             return spec["consts"][name]
-        _err(f"undefined const '{name}' in {kind} action argument", loc=loc, kind=kind)
+        ordinal = _is_enum_member(name, spec)
+        if ordinal is not None:
+            return ordinal
+        _err(f"undefined const or enum member '{name}' in {kind} action argument", loc=loc, kind=kind)
     _err(f"{kind} action arguments must be literals", loc=loc, kind=kind)
 
 

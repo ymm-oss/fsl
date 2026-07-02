@@ -79,6 +79,15 @@ domain size that is really a model bound). See `docs/DESIGN-spec-domains.md`.
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 
+**Action parameter types** (`<p>: <type name>`): a domain type, enum, or the
+builtin `Bool` — anything BMC can enumerate. `Bool` behaves exactly like a
+`Bool` state variable: use it bare as a boolean guard (`requires b`,
+`requires not b`) or assign it into `Bool`-typed state
+(`flag[i] = b`). The builtin `Int` is rejected (an unbounded parameter can't
+be enumerated); use a range parameter instead: `p in <lo>..<hi>` (an inline
+alternative to `<p>: <type name>` that doesn't require declaring a named
+domain type).
+
 The hierarchy of properties: `invariant` is one-state safety, `trans` is
 two-state safety (the pre-transition state can be referenced with `old()`), and
 `leadsTo` is response liveness. Without a ranking function, `leadsTo` is checked
@@ -887,6 +896,10 @@ verify {
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen
   (= the acceptance criteria become conformance tests for the implementation).
+  Action arguments in `acceptance`/`forbidden` steps accept enum member names
+  and const names in addition to numeric literals (e.g. `answer(0, Triggered)`
+  is equivalent to `answer(0, 1)` when `Triggered` is `Trigger`'s second
+  member) — an undefined name is a check-time error.
 - Use the kernel-wrapper form only for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history not expressible as a carried field, or
   behavior that needs explicit kernel state. That fallback still supports

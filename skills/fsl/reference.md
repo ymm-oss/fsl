@@ -34,6 +34,14 @@ spec <Name> {
 }
 ```
 
+Action parameter types (`<p>: <type name>`): domain type, enum, or builtin
+`Bool` — anything BMC can enumerate. `Bool` params behave like `Bool` state:
+usable bare as a guard (`requires b`, `requires not b`) or assigned into
+`Bool`-typed state (`flag[i] = b`). Builtin `Int` is rejected (unbounded,
+can't be enumerated) — use a range parameter instead:
+`action f(p in <lo>..<hi>) { ... }` (inline alternative to `<p>: <type name>`,
+no named domain type required).
+
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:
 
@@ -633,7 +641,9 @@ verify {
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
-  scenarios as `acceptance_<ID>`, and flows to testgen.
+  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments accept
+  enum member names and const names, not just numeric literals (`answer(0, Triggered)`
+  == `answer(0, 1)`); an undefined name is a check-time error.
 - `forbidden FB-1 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected** (not-enabled, or an
