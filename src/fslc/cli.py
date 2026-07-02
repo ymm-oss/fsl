@@ -96,6 +96,24 @@ def _invalid_identifier_near(e):
     return src[start:end]
 
 
+def _decreases_inside_forall(e):
+    """True if the error token is a standalone 'decreases' keyword — the
+    signature left when someone nests it inside a leadsTo's forall braces
+    instead of placing it directly inside the leadsTo block."""
+    src = getattr(e, "source", None)
+    pos = getattr(e, "pos_in_stream", None)
+    if src is None or pos is None or pos < 0:
+        return False
+    end = pos + len("decreases")
+    if src[pos:end] != "decreases":
+        return False
+    if pos > 0 and _IDENTIFIER_CHARS.fullmatch(src[pos - 1]):
+        return False
+    if end < len(src) and _IDENTIFIER_CHARS.fullmatch(src[end]):
+        return False
+    return True
+
+
 def _parse_error_result(e):
     loc = {"line": e.line, "column": e.column}
     near = _invalid_identifier_near(e)
@@ -107,6 +125,18 @@ def _parse_error_result(e):
             "message": (
                 f"invalid identifier near '{near}': identifiers may contain "
                 "letters, digits and '_', and must start with a letter or '_'"
+            ),
+        })
+    if _decreases_inside_forall(e):
+        return _envelope({
+            "result": "error",
+            "kind": "parse",
+            "loc": loc,
+            "message": "unexpected 'decreases' here",
+            "hint": (
+                "decreases belongs directly inside the leadsTo block, after the "
+                "closing '}' of forall — not inside the forall body. Example: "
+                "leadsTo L { forall c: Case { P ~> Q } decreases M }"
             ),
         })
     return _envelope({

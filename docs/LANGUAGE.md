@@ -116,6 +116,48 @@ action either makes `Q` true or keeps `P` true while strictly decreasing the
 measure. Ranked proof success is independent of `--depth`; `--depth` is still
 used for the base BMC check and reachable/coverage evidence.
 
+**Placement.** `decreases` is a sibling of the response body inside the
+`leadsTo` block, *outside* any `forall` wrapper — never nested inside the
+forall's braces. Nesting it inside `forall` is a parse error, not a
+limitation of ranking under `forall`:
+
+```fsl
+// valid: decreases after the forall's closing }
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 }
+  decreases level[0] + level[1]
+}
+
+// parse error: decreases nested inside the forall body
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 decreases level[0] + level[1] }
+}
+```
+
+**Per-entity measures fail under interleaving.** The ranking discipline
+above applies to *every* enabled action, not just the one that resolves the
+pending binding. A measure that mentions only the bound entity, e.g.
+`decreases level[c]` inside `forall c: Case { level[c] > 0 ~> level[c] == 0 }`,
+therefore always fails: an action that advances a *different* entity (say
+`step(c=1)` while the pending binding is `c=0`) leaves `level[c=0]`
+unchanged, and the discipline requires every enabled action to strictly
+decrease the measure. The verifier reports this as
+`rank_failure: "non_decreasing_action"`, with the CTI's `last_action`
+showing the other entity's binding — this is by design, not a bug. Proving
+per-entity liveness under interleaving needs a fairness-aware discipline
+(only the binding's own "helpful" action must decrease); that is not
+implemented and is tracked separately (issue #72).
+
+**Working idiom: a global sum measure.** Sum the tracked quantity across a
+fixed, small domain, e.g. `decreases level[0] + level[1]` for a 2-element
+`Case` domain — every action then strictly decreases the total, and
+induction returns `"proved"` with `"completeness": "unbounded"`. There is no
+`sum()` aggregate over a domain type usable here, so this idiom only scales
+to domains small enough to enumerate by hand. (Conditional expressions can't
+substitute for a per-branch measure either: `if/then/else` is legal only in
+refinement-mapping expressions (§10), not in the general expression grammar
+that `decreases` draws from.)
+
 ## 2. Types
 
 | Type | Example | Description |

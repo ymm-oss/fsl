@@ -466,6 +466,24 @@ def test_parse_error_invalid_identifier_message():
     assert "STRING" not in out["message"]
 
 
+def test_parse_error_decreases_inside_forall_hint():
+    out = check_inline(
+        "spec X { type Case = 0..1 state { level: Map<Case, 0..2> } "
+        "init { forall c: Case { level[c] = 2 } } "
+        "action step(c: Case) { requires level[c] > 0 level[c] = level[c] - 1 } "
+        "leadsTo L { forall c: Case { level[c] > 0 ~> level[c] == 0 "
+        "decreases level[0] + level[1] } } }"
+    )
+    assert out["result"] == "error"
+    assert out["kind"] == "parse"
+    assert out["message"] == "unexpected 'decreases' here"
+    assert out["hint"] == (
+        "decreases belongs directly inside the leadsTo block, after the "
+        "closing '}' of forall — not inside the forall body. Example: "
+        "leadsTo L { forall c: Case { P ~> Q } decreases M }"
+    )
+
+
 def test_parse_error_includes_expected_tokens():
     broken = ROOT / "specs" / "_parse_break.fsl"
     broken.write_text("spec X { state {", encoding="utf-8")

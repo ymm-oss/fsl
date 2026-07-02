@@ -21,6 +21,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `kind: "acceptance"`/`"forbidden"` check-time error, now reported as
   "undefined const or enum member". (#67)
 
+### Documentation
+- Documented `leadsTo ... decreases` placement and ranking discipline in
+  `docs/LANGUAGE.md` and `skills/fsl/reference.md`: `decreases` sits outside
+  the `forall` wrapper (nesting it inside is a parse error, not a "ranking
+  doesn't work under forall" limitation); a per-entity measure
+  (`decreases level[c]`) always fails under interleaving
+  (`rank_failure: "non_decreasing_action"`) because every enabled action must
+  strictly decrease it; the working idiom is a global sum measure over a
+  fixed small domain (`decreases level[0] + level[1]`), since there is no
+  `sum()` aggregate to generalize it (fairness-aware per-entity ranking is
+  tracked separately as #72). Also added a targeted parse-error hint in
+  `cli.py` for `decreases` nested inside a `forall` body. (#71)
+
 ## [2.4.0] - 2026-06-29
 
 ### Documentation

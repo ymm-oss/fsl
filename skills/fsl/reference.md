@@ -227,6 +227,19 @@ check as a type error.
    false, M is non-negative, some action is enabled, and every enabled action
    either makes Q true or keeps P true while strictly decreasing M. Without
    `decreases`, leadsTo remains bounded to `--depth`.
+   - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
+     its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
+     Nesting it inside the forall body is a **parse error**
+     (`fslc` reports `unexpected 'decreases' here` with a placement hint),
+     not "ranking doesn't work under forall".
+   - **Per-entity measure trap**: `decreases level[c]` inside
+     `forall c: Case { level[c] > 0 ~> level[c] == 0 }` always fails —
+     every enabled action must decrease M, so an action advancing a
+     *different* entity (`step(c=1)` while `c=0` is pending) violates it.
+     Reported as `rank_failure: "non_decreasing_action"`. Working idiom:
+     a **global sum measure** over a fixed small domain, e.g.
+     `decreases level[0] + level[1]`, since there is no `sum()` aggregate to
+     generalize it. Fairness-aware per-entity ranking is future work (#72).
 8. `symmetric type` / `symmetric enum` means those values are interchangeable
    entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
    representative state using canonical rows from `Map<SymmetricType, V>` and
