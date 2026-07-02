@@ -562,6 +562,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         n = e[1]
         if n in binds:
             b = binds[n]
+            if isinstance(b, bool):
+                return z3.BoolVal(b)
             return b if not isinstance(b, int) else z3.IntVal(b)
         if n in consts:
             return z3.IntVal(consts[n])
@@ -1307,13 +1309,18 @@ def build_instances(spec):
     instances = []
     for act in spec["actions"]:
         names = [p[0] for p in act["params"]]
+        is_bool = [p[3] == "Bool" for p in act["params"]]
         ranges = [range(p[1], p[2] + 1) for p in act["params"]]
         combos = itertools.product(*ranges) if ranges else [()]
         for combo in combos:
+            binds = {
+                n: (bool(v) if b else v)
+                for n, v, b in zip(names, combo, is_bool)
+            }
             instances.append({
                 "action": act["name"],
                 "action_def": act,
-                "binds": dict(zip(names, combo)),
+                "binds": binds,
                 "requires": act["requires"],
                 "lets": act["lets"],
                 "stmts": act["stmts"],
@@ -1895,7 +1902,7 @@ def _build_trace(model, states, choices, instances, spec, upto):
 def _display_param(name, val, act, spec):
     for p in act["params"]:
         if p[0] == name and p[3]:
-            ty = spec["types"][p[3]]["ty"]
+            ty = ("bool",) if p[3] == "Bool" else spec["types"][p[3]]["ty"]
             return _display_value(ty, val, spec)
     return val
 

@@ -34,6 +34,14 @@ spec <Name> {
 }
 ```
 
+Action parameter types (`<p>: <type name>`): domain type, enum, or builtin
+`Bool` — anything BMC can enumerate. `Bool` params behave like `Bool` state:
+usable bare as a guard (`requires b`, `requires not b`) or assigned into
+`Bool`-typed state (`flag[i] = b`). Builtin `Int` is rejected (unbounded,
+can't be enumerated) — use a range parameter instead:
+`action f(p in <lo>..<hi>) { ... }` (inline alternative to `<p>: <type name>`,
+no named domain type required).
+
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:
 
@@ -219,6 +227,19 @@ check as a type error.
    false, M is non-negative, some action is enabled, and every enabled action
    either makes Q true or keeps P true while strictly decreasing M. Without
    `decreases`, leadsTo remains bounded to `--depth`.
+   - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
+     its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
+     Nesting it inside the forall body is a **parse error**
+     (`fslc` reports `unexpected 'decreases' here` with a placement hint),
+     not "ranking doesn't work under forall".
+   - **Per-entity measure trap**: `decreases level[c]` inside
+     `forall c: Case { level[c] > 0 ~> level[c] == 0 }` always fails —
+     every enabled action must decrease M, so an action advancing a
+     *different* entity (`step(c=1)` while `c=0` is pending) violates it.
+     Reported as `rank_failure: "non_decreasing_action"`. Working idiom:
+     a **global sum measure** over a fixed small domain, e.g.
+     `decreases level[0] + level[1]`, since there is no `sum()` aggregate to
+     generalize it. Fairness-aware per-entity ranking is future work (#72).
 8. `symmetric type` / `symmetric enum` means those values are interchangeable
    entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
    representative state using canonical rows from `Map<SymmetricType, V>` and
@@ -630,7 +651,9 @@ verify {
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
-  scenarios as `acceptance_<ID>`, and flows to testgen.
+  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments accept
+  enum member names and const names, not just numeric literals (`answer(0, Triggered)`
+  == `answer(0, 1)`); an undefined name is a check-time error.
 - `forbidden FB-1 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected** (not-enabled, or an

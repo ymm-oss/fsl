@@ -18,6 +18,33 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   intended stop states, so `--deadlock ignore` was the only way to silence
   the deadlock check at a completed stage — discarding detection of
   unintended deadlocks along with it. (#69)
+- Allow the builtin `Bool` as an action parameter type (`p: Bool`), matching
+  its existing use as a state `Map` value/key. `Bool` params are first-class
+  z3/concrete booleans in expressions — usable bare as a guard
+  (`requires b` / `requires not b`) or assigned into `Bool`-typed state
+  (`flag[i] = b`) — not a 0/1 int carrier, keeping BMC and the concrete
+  `Monitor` in agreement. `Int` stays rejected (unbounded, can't be
+  enumerated); the error now hints at a range parameter
+  (`p in <lo>..<hi>`). (#68)
+- `acceptance`/`forbidden` action arguments now accept enum member names (and
+  const names) in addition to numeric ordinals, matching the name resolution
+  already used by `requires`/`invariant`/`expect` expressions
+  (`_is_enum_member` in `values.py`). An undefined name is still a
+  `kind: "acceptance"`/`"forbidden"` check-time error, now reported as
+  "undefined const or enum member". (#67)
+
+### Documentation
+- Documented `leadsTo ... decreases` placement and ranking discipline in
+  `docs/LANGUAGE.md` and `skills/fsl/reference.md`: `decreases` sits outside
+  the `forall` wrapper (nesting it inside is a parse error, not a "ranking
+  doesn't work under forall" limitation); a per-entity measure
+  (`decreases level[c]`) always fails under interleaving
+  (`rank_failure: "non_decreasing_action"`) because every enabled action must
+  strictly decrease it; the working idiom is a global sum measure over a
+  fixed small domain (`decreases level[0] + level[1]`), since there is no
+  `sum()` aggregate to generalize it (fairness-aware per-entity ranking is
+  tracked separately as #72). Also added a targeted parse-error hint in
+  `cli.py` for `decreases` nested inside a `forall` body. (#71)
 
 ## [2.4.0] - 2026-06-29
 
