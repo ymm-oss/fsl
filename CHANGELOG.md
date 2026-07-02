@@ -5,6 +5,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- Requirements-layer `process E with f: T { ... }` carried fields now accept
+  `Bool` and enum types declared in the same spec, not just `number`. Number
+  fields keep the original default (the domain's `lo` bound) and gained an
+  optional explicit initializer (`f: T = <const-expr>`); `Bool`/enum fields
+  have no invented default and **require** an explicit initializer
+  (`f: Bool = true/false`, `f: T = Member`) — a missing one is a check-time
+  error. Docs: `docs/LANGUAGE.md`, `docs/DESIGN-dialects.md`,
+  `skills/fsl/reference.md`. (#70)
+
 ## [2.4.0] - 2026-06-29
 
 ### Documentation

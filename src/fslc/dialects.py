@@ -452,6 +452,7 @@ def _param_name(param):
 
 
 def _collect_requirements_processes(items, entity_locs, number_locs):
+    enum_members = {item[1]: set(item[2]) for item in items if item[0] == "enum"}
     process_items = [item for item in items if item[0] == "biz_process"]
     processes = []
     process_by_name = {}
@@ -469,15 +470,34 @@ def _collect_requirements_processes(items, entity_locs, number_locs):
         field_names = set()
         fields = []
         for field in proc["fields"]:
-            _, fname, ty = field
+            _, fname, ty, init = field
             if fname in field_names:
                 _err(f"duplicate carried process field '{fname}'", loc=proc["loc"])
             field_names.add(fname)
-            if not isinstance(ty, str) or ty not in number_locs:
-                _err("carried process field must be a number type", loc=proc["loc"])
+            if isinstance(ty, str) and ty in number_locs:
+                kind = "number"
+            elif ty == "Bool":
+                kind = "bool"
+                if init is None or init[0] != "bool":
+                    _err(
+                        "carried Bool field requires an explicit initializer (= true / = false)",
+                        loc=proc["loc"],
+                    )
+            elif isinstance(ty, str) and ty in enum_members:
+                kind = "enum"
+                if init is None or init[0] != "var" or init[1] not in enum_members[ty]:
+                    _err(
+                        f"carried enum field '{fname}' requires an explicit initializer "
+                        f"that is a member of enum '{ty}'",
+                        loc=proc["loc"],
+                    )
+            else:
+                _err("carried process field must be a number, Bool, or enum type", loc=proc["loc"])
             fields.append({
                 "name": fname,
                 "type": ty,
+                "kind": kind,
+                "init": init,
                 "state_var": _process_field_state_var(proc["name"], fname),
             })
         proc["fields"] = fields
@@ -535,10 +555,11 @@ def _expand_requirements_process(proc, values, consts):
         ("decl", proc["state_var"], ("map", ("name", proc["name"]), ("name", proc["enum"]))),
     ]
     for field in proc["fields"]:
+        value_ty = ("bool",) if field["kind"] == "bool" else ("name", field["type"])
         state_decls.append((
             "decl",
             field["state_var"],
-            ("map", ("name", proc["name"]), ("name", field["type"])),
+            ("map", ("name", proc["name"]), value_ty),
         ))
     out.append(("state", state_decls))
 
@@ -551,11 +572,15 @@ def _expand_requirements_process(proc, values, consts):
         )
     ]
     for field in proc["fields"]:
-        lo_expr, _hi_expr = values[field["type"]]
+        if field["kind"] == "number":
+            src_expr = field["init"] if field["init"] is not None else values[field["type"]][0]
+            init_value = ("num", eval_const(src_expr, consts, {}))
+        else:
+            init_value = field["init"]
         init_body.append((
             "assign",
             ("index", field["state_var"], ("var", "c")),
-            ("num", eval_const(lo_expr, consts, {})),
+            init_value,
             proc["loc"],
         ))
     _merge_init(out, [(
