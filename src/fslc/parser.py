@@ -42,7 +42,8 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
     if ast[0] == "compose":
         ast, display_names = expand_compose(ast, base_dir or ".")
     elif ast[0] == "requirements":
-        ast, display_names = expand_requirements_with_display(ast, base_dir or ".")
+        ast, display_names = expand_requirements_with_display(
+            ast, base_dir or ".", bounds_overrides)
     elif ast[0] == "business":
         ast = expand_business(ast)
     elif ast[0] == "governance":

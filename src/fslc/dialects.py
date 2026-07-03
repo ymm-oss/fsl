@@ -16,13 +16,16 @@ def _err(message, kind="type", loc=None, hint=None):
     raise FslError(message, kind=kind, loc=loc, hint=hint)
 
 
-def _parse_file(path):
+def _parse_file(path, bounds_overrides=None):
     src = Path(path).read_text(encoding="utf-8")
     ast = Ast().transform(PARSER.parse(src))
+    filtered = _overrides_for_declared_names(ast, bounds_overrides)
+    if filtered is not None:
+        ast = apply_verify_bounds_overrides(ast, filtered)
     if ast[0] == "compose":
         return expand_compose(ast, str(Path(path).parent))
     if ast[0] == "requirements":
-        return _expand_requirements_with_display(ast, str(Path(path).parent))
+        return _expand_requirements_with_display(ast, str(Path(path).parent), bounds_overrides)
     if ast[0] == "business":
         return expand_business(ast), {}
     if ast[0] == "governance":
@@ -156,6 +159,26 @@ def apply_verify_bounds_overrides(ast, overrides):
             merged.append(("verify_values", bname, lo, hi, None))
         out_items.append(("verify_bounds", merged, None))
     return (tag, name, out_items)
+
+
+def _overrides_for_declared_names(ast, overrides):
+    """Restrict CLI bounds overrides to names this AST declares as
+    `entity`/`number`. Used when propagating a `fslc verify` override into an
+    inline-implements *abstract* spec: the impl already validated the full
+    override against its own declarations, and the abstract must be shrunk to
+    the same world size for the refinement check to stay well-posed — but only
+    for the entities/numbers it shares (an impl-only name like a carried
+    `Amount` has no counterpart in the abstract and must not reach it)."""
+    if not overrides:
+        return None
+    declared = {it[1] for it in ast[2] if it[0] in ("entity", "number")}
+    filtered = {
+        "instances": {n: v for n, v in (overrides.get("instances") or {}).items() if n in declared},
+        "values": {n: v for n, v in (overrides.get("values") or {}).items() if n in declared},
+    }
+    if not filtered["instances"] and not filtered["values"]:
+        return None
+    return filtered
 
 
 def _collect_verify_bounds(items):
@@ -896,7 +919,7 @@ def _expand_time(out, time_block, deadlines, action_aliases, action_maps, implem
     return generated_names
 
 
-def _expand_requirements_with_display(ast, base_dir):
+def _expand_requirements_with_display(ast, base_dir, bounds_overrides=None):
     _, name, items = ast
     out = []
     display_names = {}
@@ -944,7 +967,7 @@ def _expand_requirements_with_display(ast, base_dir):
             abs_path = Path(base_dir) / path
             if not abs_path.is_file():
                 _err(f"file not found: {path}", kind="io", loc=loc)
-            abs_ast, abs_display_names = _parse_file(abs_path)
+            abs_ast, abs_display_names = _parse_file(abs_path, bounds_overrides)
             if abs_ast[0] != "spec" or abs_ast[1] != abs_name:
                 _err(f"spec name mismatch: expected '{abs_name}', got '{abs_ast[1]}'", loc=loc)
             implements = {
@@ -1046,9 +1069,13 @@ def expand_requirements(ast, base_dir):
     return expanded
 
 
-def expand_requirements_with_display(ast, base_dir):
-    """Expand requirements AST and return display names for parser plumbing."""
-    return _expand_requirements_with_display(ast, base_dir)
+def expand_requirements_with_display(ast, base_dir, bounds_overrides=None):
+    """Expand requirements AST and return display names for parser plumbing.
+
+    ``bounds_overrides`` (from ``fslc verify --instances``/``--values``) is
+    propagated into any inline-implements *abstract* spec so the refinement
+    check runs at the same overridden world size on both sides (#94)."""
+    return _expand_requirements_with_display(ast, base_dir, bounds_overrides)
 
 
 def _type_name_from_binder(binder):
