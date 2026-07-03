@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.6.3] - 2026-07-03
+
 ### Fixed
 - `fslc verify --instances`/`--values` overrides (#86) now propagate into an
   inline `implements` abstract spec, restricted to the entity/number names the
