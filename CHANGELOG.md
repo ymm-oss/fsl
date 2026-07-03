@@ -5,6 +5,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- `fslc verify --instances`/`--values` overrides (#86) now propagate into an
+  inline `implements` abstract spec, restricted to the entity/number names the
+  abstract declares. Refinement is a same-world-size forward simulation, so a
+  shrunken impl (`--instances Claim=1`) against a still-full-size abstract
+  previously failed the refinement with `map_out_of_bounds` (surfaced only in
+  the `implements` sub-field, with the overall `result` staying `verified`).
+  Both sides now shrink together; an impl-only carried number (e.g. `Amount`,
+  absent from a business abstract) applies to the impl only. (#94)
+
 ## [2.6.2] - 2026-07-03
 
 ### Fixed

@@ -95,6 +95,14 @@ error (exit code 2), as is a malformed value (`Case=abc`, `N=5..1`). The
 effective overridden bounds are echoed back in the JSON envelope's
 `bounds_overrides` field.
 
+When the spec has an inline `implements`, the override also propagates into the
+abstract spec — restricted to the entity/number names the abstract itself
+declares — so the refinement check runs at the same world size on both sides
+(refinement is a same-size forward simulation; without this, a shrunken impl
+and a full-size abstract would fail with `map_out_of_bounds`). An impl-only
+carried number (e.g. `Amount`, absent from a business abstract) applies to the
+impl only.
+
 `acceptance`/`forbidden` scenarios often hardcode ids/numbers from the spec's
 original world (`accept(2)`), which can fall outside a shrunken override
 (`--instances Case=1`). When overrides are active, a scenario whose replay

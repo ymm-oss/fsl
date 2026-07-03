@@ -345,7 +345,12 @@ first failed layer and later layers are marked `skipped`.
   whole `verify`, with a `warnings` entry (`kind: "acceptance_skipped"` /
   `"forbidden_skipped"`) naming it; other scenarios still replay normally.
   Without an override, or for a failure unrelated to bounds, the scenario
-  still hard-errors as before.
+  still hard-errors as before. When the spec has an inline `implements`, the
+  override also propagates into the abstract spec (restricted to the
+  entity/number names the abstract declares) so refinement is checked at the
+  same world size on both sides — otherwise a shrunken impl vs a full-size
+  abstract fails `map_out_of_bounds`; an impl-only carried number applies to
+  the impl only.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
