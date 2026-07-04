@@ -4,7 +4,17 @@
 """Regression tests for the raw-tree LSP index."""
 from pathlib import Path
 
-from fslc.lsp.index import build_index, default_load_index
+from fslc.lsp.index import (
+    SEMANTIC_TOKEN_MODIFIERS,
+    SEMANTIC_TOKEN_TYPES,
+    CompletionCandidate,
+    HoverInfo,
+    Range,
+    SemanticToken,
+    build_index,
+    default_load_index,
+    encode_semantic_tokens,
+)
 from fslc.lsp.server import check_source
 
 
@@ -268,3 +278,346 @@ def test_refinement_local_binders_still_resolve_in_file():
     )
     assert u_loc.path == str(paths["refinement"].resolve())
     assert _target_text(u_loc) == "u"
+
+
+def test_policy_precedence_case_name_and_stages_are_indexed():
+    # grammar: policy_precedence: "every" NAME "reaching" stage_disjunction
+    #   "must" "have" "passed" "through" stage_disjunction
+    # (business-layer no-bypass control, docs/DESIGN-precedence-policy.md;
+    # source shape mirrors tests/test_precedence_policy.py's BIZ_COMPLIANT_SRC)
+    source = '''business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition reject Requested -> Rejected by Manager
+    transition refund Approved -> Refunded by Manager
+  }
+
+  policy CTRL-APPROVAL "no bypass"
+    every Return reaching Refunded must have passed through Approved
+}
+verify {
+  instances Return = 3
+}
+'''
+    index = build_index(source)
+
+    _reference(index, "Return", "type")
+    _reference(index, "Refunded", "value")
+    _reference(index, "Approved", "value")
+
+
+def test_struct_fields_keys_are_indexed_as_field_references():
+    # grammar: struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
+    # (also reached via the ref_struct_fields alias inside refinement maps)
+    source = '''spec StructFieldsDemo {
+  type K = 0..1
+
+  struct Point { x: K, y: K }
+
+  state {
+    p: Point
+  }
+
+  init {
+    p = Point { x: 0, y: 0 }
+  }
+}
+'''
+    index = build_index(source)
+
+    _reference(index, "x", "field")
+    _reference(index, "y", "field")
+
+
+def test_postfix_multi_level_field_access_indexes_tail_as_field_reference():
+    # grammar: postfix: atom postfix_suffix*, field_suffix: "." NAME
+    # a.b.c: the first field_suffix after a leading var (b) stays the
+    # existing alias.member "value" reference (compose namespace lookups
+    # depend on it); the second-level field_suffix (c) must now surface as
+    # a "field" reference too.
+    source = '''spec PostfixFieldChain {
+  type K = 0..1
+
+  struct Inner { amount: K }
+  struct Outer { payload: Inner }
+
+  state {
+    outer: Outer
+  }
+
+  invariant TailFieldAccessed {
+    outer.payload.amount == 0
+  }
+}
+'''
+    index = build_index(source)
+
+    _reference(index, "outer", "value")
+    _reference(index, "payload", "value", qualifier="outer")
+    _reference(index, "amount", "field")
+
+
+def test_hover_on_reference_reports_definition_role_and_snippet():
+    source = '''spec HoverDemo {
+  type K = 0..1
+
+  state {
+    counter: K
+  }
+
+  init {
+    counter = 0
+  }
+
+  invariant CounterBounded {
+    counter >= 0
+  }
+}
+'''
+    index = build_index(source)
+    ref = _reference(index, "counter", "value")
+
+    hover = index.hover_at(ref.range.start.line, ref.range.start.character)
+
+    assert isinstance(hover, HoverInfo)
+    assert hover.range == ref.range
+    assert "state_var" in hover.markdown
+    assert "counter" in hover.markdown
+    assert "```fsl" in hover.markdown
+
+
+def test_hover_on_definition_reports_own_role():
+    source = '''spec HoverDefDemo {
+  type K = 0..1
+
+  state {
+    counter: K
+  }
+
+  init {
+    counter = 0
+  }
+
+  action bump() {
+    requires counter < 1
+    counter = counter + 1
+  }
+}
+'''
+    index = build_index(source)
+    action_sym = _symbol(index, "bump", "action")
+
+    hover = index.hover_at(
+        action_sym.selection_range.start.line,
+        action_sym.selection_range.start.character,
+    )
+
+    assert isinstance(hover, HoverInfo)
+    assert hover.range == action_sym.selection_range
+    assert "action" in hover.markdown
+    assert "bump" in hover.markdown
+    assert "```fsl" in hover.markdown
+
+
+def test_references_at_collects_all_uses_and_declaration():
+    source = '''spec ReferencesDemo {
+  type K = 0..2
+
+  state {
+    counter: K
+  }
+
+  init {
+    counter = 0
+  }
+
+  action bump() {
+    requires counter < 2
+    counter = counter + 1
+  }
+
+  invariant CounterBounded {
+    counter >= 0
+  }
+}
+'''
+    index = build_index(source)
+    counter_sym = _symbol(index, "counter", "state_var")
+    value_refs = [r for r in index.references if r.name == "counter" and r.role == "value"]
+    assert len(value_refs) >= 3  # init assignment, guard + body uses, invariant use
+
+    with_decl = index.references_at(
+        counter_sym.selection_range.start.line,
+        counter_sym.selection_range.start.character,
+        include_declaration=True,
+    )
+    without_decl = index.references_at(
+        counter_sym.selection_range.start.line,
+        counter_sym.selection_range.start.character,
+        include_declaration=False,
+    )
+
+    assert all(isinstance(rng, Range) for rng in with_decl)
+    assert len(with_decl) == len(value_refs) + 1
+    assert len(without_decl) == len(value_refs)
+    assert counter_sym.selection_range in with_decl
+    assert counter_sym.selection_range not in without_decl
+    for ref in value_refs:
+        assert ref.range in with_decl
+        assert ref.range in without_decl
+        assert _slice(source, ref.range) == "counter"
+    assert _slice(source, counter_sym.selection_range) == "counter"
+
+    # querying from a usage position aggregates the identical set
+    from_usage = index.references_at(
+        value_refs[0].range.start.line,
+        value_refs[0].range.start.character,
+        include_declaration=True,
+    )
+    assert from_usage == with_decl
+
+
+def test_semantic_tokens_classify_core_roles():
+    source = '''spec SemanticDemo {
+  type K = 0..1
+  enum Status { Active, Done }
+
+  state {
+    counter: K,
+    status: Status
+  }
+
+  init {
+    counter = 0
+    status = Active
+  }
+
+  action bump() {
+    requires counter < 1
+    counter = counter + 1
+  }
+}
+'''
+    index = build_index(source)
+    tokens = index.semantic_tokens()
+
+    assert tokens
+    assert all(isinstance(tok, SemanticToken) for tok in tokens)
+    assert all(tok.token_type in SEMANTIC_TOKEN_TYPES for tok in tokens)
+
+    by_type = {}
+    for tok in tokens:
+        by_type.setdefault(tok.token_type, []).append(tok)
+
+    assert "type" in by_type        # type K
+    assert "function" in by_type    # action bump
+    assert "variable" in by_type    # counter/status state vars and value refs
+    assert "enum" in by_type        # enum Status
+    assert "enumMember" in by_type  # Active, Done
+
+    assert any("definition" in tok.modifiers for tok in by_type["function"])
+    assert any("definition" in tok.modifiers for tok in by_type["enumMember"])
+
+
+def test_encode_semantic_tokens_roundtrip():
+    tokens = [
+        SemanticToken(line=2, start_char=4, length=3, token_type="type", modifiers=("definition",)),
+        SemanticToken(line=2, start_char=10, length=5, token_type="variable", modifiers=()),
+        SemanticToken(
+            line=5, start_char=2, length=6, token_type="function",
+            modifiers=("definition", "readonly"),
+        ),
+    ]
+
+    encoded = encode_semantic_tokens(tokens)
+
+    assert all(isinstance(n, int) for n in encoded)
+    assert len(encoded) == 5 * len(tokens)
+
+    # first token: absolute deltaLine/deltaStartChar (previous position is (0, 0))
+    assert encoded[0:5] == [
+        2,
+        4,
+        3,
+        SEMANTIC_TOKEN_TYPES.index("type"),
+        1 << SEMANTIC_TOKEN_MODIFIERS.index("definition"),
+    ]
+    # second token: same line -> deltaLine 0, deltaStartChar relative to previous start
+    assert encoded[5:10] == [
+        0,
+        10 - 4,
+        5,
+        SEMANTIC_TOKEN_TYPES.index("variable"),
+        0,
+    ]
+    # third token: new line -> deltaLine relative, deltaStartChar absolute again
+    expected_mod = (
+        (1 << SEMANTIC_TOKEN_MODIFIERS.index("definition"))
+        | (1 << SEMANTIC_TOKEN_MODIFIERS.index("readonly"))
+    )
+    assert encoded[10:15] == [
+        5 - 2,
+        2,
+        6,
+        SEMANTIC_TOKEN_TYPES.index("function"),
+        expected_mod,
+    ]
+
+
+def test_completion_includes_symbols_and_keywords():
+    source = '''spec CompletionDemo {
+  type K = 0..1
+
+  state {
+    counter: K
+  }
+
+  init {
+    counter = 0
+  }
+
+  invariant CounterBounded {
+    counter >= 0
+  }
+}
+'''
+    index = build_index(source)
+    completions = index.completions_at(0, 0)
+
+    assert all(isinstance(c, CompletionCandidate) for c in completions)
+    labels = {c.label for c in completions}
+    assert "K" in labels
+    assert "CounterBounded" in labels
+    assert "invariant" in labels
+    assert "forall" in labels
+
+    type_candidates = [c for c in completions if c.label == "K"]
+    assert type_candidates and type_candidates[0].role == "type"
+    keyword_candidates = [c for c in completions if c.label == "invariant"]
+    assert keyword_candidates and keyword_candidates[0].role == "keyword"
+
+
+def test_completion_member_after_alias_dot():
+    path = SPECS / "order_system.fsl"
+    source = path.read_text(encoding="utf-8")
+    index = build_index(source, str(path))
+
+    lines = source.splitlines()
+    line_no = next(i for i, text in enumerate(lines) if "cart." in text)
+    character = lines[line_no].index("cart.") + len("cart.")
+
+    completions = index.completions_at(line_no, character, load_index=default_load_index)
+
+    assert completions
+    assert all(isinstance(c, CompletionCandidate) for c in completions)
+    assert all(c.role != "keyword" for c in completions)
+
+    cart_index = default_load_index(str((SPECS / "cart_v1.fsl").resolve()))
+    exported_names = {sym.name for sym in cart_index.symbols if sym.exported}
+    labels = {c.label for c in completions}
+    assert labels == exported_names

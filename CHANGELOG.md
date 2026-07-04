@@ -5,6 +5,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- (LSP) `fslc-lsp` now serves four more `textDocument/*` features as thin
+  lsprotocol adapters over the existing raw-tree index
+  (`src/fslc/lsp/server.py`, `src/fslc/lsp/index.py` unchanged): `hover`,
+  `references` (same-file plus cross-file, following `use`-imported aliases
+  and workspace spec-name resolution), `completion` (triggered on `.` for
+  alias-member completion, alongside local symbols and keywords), and
+  `semanticTokens/full` (legend-registered token types/modifiers).
+
+### Fixed
+- (LSP) The raw-tree symbol/reference indexer (`src/fslc/lsp/index.py`) now
+  covers three parse-tree shapes it previously fell through to generic
+  child-recursion for: a `policy ... every <Case> reaching ... must have
+  passed through ...` precedence policy's case name (`type` reference), a
+  struct literal's field keys (`field` references), and every `field_suffix`
+  beyond the first in a multi-level `a.b.c` postfix chain (`field`
+  references) — the pre-existing `a.b` alias.member `value` reference is
+  unchanged.
+
 ## [2.6.3] - 2026-07-03
 
 ### Fixed
