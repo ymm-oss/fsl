@@ -10,6 +10,7 @@ position, not by spelling.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -39,6 +40,67 @@ ACTION_ROLES = {"action", "transition"}
 PROPERTY_ROLES = {"property", "policy", "goal"}
 SPEC_ROLES = {"business", "compose", "governance", "requirements", "spec"}
 CONTROL_ROLES = {"control", "goal", "policy", "requirement"}
+
+# Semantic-token legend (index = position in the list; server registers the same order)
+SEMANTIC_TOKEN_TYPES = [
+    "namespace", "type", "class", "struct", "enum", "enumMember",
+    "function", "variable", "parameter", "property", "event", "keyword",
+]
+SEMANTIC_TOKEN_MODIFIERS = ["declaration", "definition", "readonly"]
+
+# Symbol.role / Reference.role -> semantic token type name.
+# Covers every role emitted by _add_symbol/_add_ref. Unknown roles fall back to "variable".
+_ROLE_TO_TOKEN_TYPE = {
+    # spec containers / namespaces
+    "spec": "namespace", "compose": "namespace", "requirements": "namespace",
+    "business": "namespace", "governance": "namespace", "refinement": "namespace",
+    "alias": "namespace",
+    # types
+    "type": "type", "number": "type", "entity": "class", "struct": "struct",
+    "enum": "enum", "enum_member": "enumMember",
+    # callables
+    "action": "function", "transition": "function",
+    # values
+    "const": "variable", "state_var": "variable", "binder": "variable",
+    "let": "variable", "actor": "variable", "kpi": "variable", "authority": "variable",
+    "value": "variable",
+    "parameter": "parameter",
+    "field": "property",
+    "process": "class", "stage": "enumMember",
+    # properties / obligations (declared-name highlighting)
+    "property": "event", "requirement": "event", "acceptance": "event",
+    "forbidden": "event", "control": "event", "policy": "event", "goal": "event",
+}
+
+# Roles that are synthetic block markers whose selection_range is a keyword, not an
+# identifier -- excluded from semantic tokens (they'd double-color the keyword).
+_NON_IDENTIFIER_SYMBOL_ROLES = {"state", "init", "time"}
+
+# Roles that get the "readonly" modifier when they appear as a definition.
+_READONLY_SYMBOL_ROLES = {"const"}
+
+# FSL keywords for completion (from grammar.py). Order not important.
+FSL_KEYWORDS = [
+    "spec", "compose", "requirements", "business", "governance", "refinement",
+    "verify", "instances", "values", "use", "as", "from", "internal",
+    "const", "type", "symmetric", "enum", "struct", "entity", "number",
+    "state", "init", "action", "fair", "requires", "ensures", "let",
+    "if", "else", "forall", "exists", "invariant", "trans", "reachable",
+    "terminal", "until", "unless", "leadsTo", "decreases", "within",
+    "map", "maps", "auto", "impl", "abs", "preserve", "progress", "respond", "by",
+    "implements", "requirement", "acceptance", "forbidden", "expect", "rejected",
+    "time", "urgent", "age", "while", "deadline",
+    "actor", "process", "with", "stages", "initial", "transition", "when", "set", "covers",
+    "kpi", "count", "in", "control", "owner", "severity", "applies_to",
+    "satisfies", "policy", "responds", "every", "reaching", "must", "have",
+    "passed", "through", "eventually", "be", "goal", "some", "can", "reach", "all",
+    "authority", "owns", "delegates", "require", "satisfied_by",
+    "preservation", "before", "after", "checked_by",
+    "Int", "Bool", "Map", "Set", "Seq", "Option",
+    "true", "false", "none", "is", "and", "or", "not",
+    "stage", "sum", "min", "max", "abs", "old", "unique", "exactlyOne",
+    "add", "remove", "push", "pop", "head", "at", "size", "contains", "then",
+]
 
 
 @dataclass(frozen=True)
@@ -127,6 +189,30 @@ class Location:
 
     path: Optional[str]
     range: Range
+
+
+@dataclass(frozen=True)
+class HoverInfo:
+    markdown: str
+    range: Range
+
+
+@dataclass(frozen=True)
+class SemanticToken:
+    """Absolute-position token; server encodes to LSP relative form."""
+
+    line: int
+    start_char: int
+    length: int
+    token_type: str          # one of SEMANTIC_TOKEN_TYPES
+    modifiers: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CompletionCandidate:
+    label: str
+    role: str                # symbol role or "keyword"; server maps to CompletionItemKind
+    detail: str = ""
 
 
 LoadIndex = Callable[[str], Optional["DocumentIndex"]]
@@ -259,6 +345,169 @@ class DocumentIndex:
             return Location(self.path, sym.selection_range)
         return None
 
+    def references_at(
+        self,
+        line: int,
+        character: int,
+        include_declaration: bool = True,
+        load_index: Optional[LoadIndex] = None,
+        name_resolver: Optional[NameResolver] = None,
+    ) -> List[Range]:
+        """All same-document ranges referring to the symbol at ``line``/``character``."""
+
+        ref = self.reference_at(line, character)
+        if ref is not None:
+            target_loc = self.resolve_reference(ref, load_index, name_resolver)
+            target_name = ref.name
+        else:
+            sym = self.symbol_at(line, character)
+            if sym is None:
+                return []
+            target_loc = Location(self.path, sym.selection_range)
+            target_name = sym.name
+
+        if target_loc is None:
+            return []
+
+        matches: List[Range] = []
+        for candidate in self.references:
+            if candidate.name != target_name:
+                continue
+            loc = self.resolve_reference(candidate, load_index, name_resolver)
+            if loc is not None and _same_location(loc, target_loc):
+                matches.append(candidate.range)
+
+        if include_declaration and _normalize_path(target_loc.path) == self.path:
+            matches.append(target_loc.range)
+
+        unique = list(dict.fromkeys(matches))
+        unique.sort(key=lambda rng: (rng.start.line, rng.start.character))
+        return unique
+
+    def hover_at(
+        self,
+        line: int,
+        character: int,
+        load_index: Optional[LoadIndex] = None,
+        name_resolver: Optional[NameResolver] = None,
+    ) -> Optional[HoverInfo]:
+        """Hover markdown for the reference or symbol at ``line``/``character``."""
+
+        ref = self.reference_at(line, character)
+        if ref is not None:
+            loc = self.resolve_reference(ref, load_index, name_resolver)
+            def_sym: Optional[Symbol] = None
+            def_source = self.source
+            if loc is not None:
+                if loc.path == self.path:
+                    def_sym = next(
+                        (sym for sym in self.symbols if sym.selection_range == loc.range),
+                        None,
+                    )
+                elif loc.path is not None:
+                    target = _load_import_index(loc.path, load_index)
+                    if target is not None:
+                        def_sym = target.symbol_at(loc.range.start.line, loc.range.start.character)
+                        def_source = target.source
+            if def_sym is not None:
+                snippet = _declaration_snippet(def_source, def_sym)
+                markdown = f"```fsl\n{snippet}\n```\n**{def_sym.role}** `{def_sym.name}`"
+            else:
+                markdown = f"**{ref.role}** `{ref.name}`"
+            return HoverInfo(markdown=markdown, range=ref.range)
+
+        sym = self.symbol_at(line, character)
+        if sym is not None:
+            snippet = _declaration_snippet(self.source, sym)
+            markdown = f"```fsl\n{snippet}\n```\n**{sym.role}** `{sym.name}`"
+            return HoverInfo(markdown=markdown, range=sym.selection_range)
+
+        return None
+
+    def semantic_tokens(self) -> List[SemanticToken]:
+        """Absolute-position semantic tokens for every classifiable symbol/reference."""
+
+        tokens: List[SemanticToken] = []
+        for sym in self.symbols:
+            if sym.role in _NON_IDENTIFIER_SYMBOL_ROLES:
+                continue
+            sr = sym.selection_range
+            if sr.start.line != sr.end.line:
+                continue
+            modifiers = ["definition"]
+            if sym.role in _READONLY_SYMBOL_ROLES:
+                modifiers.append("readonly")
+            tokens.append(
+                SemanticToken(
+                    line=sr.start.line,
+                    start_char=sr.start.character,
+                    length=sr.end.character - sr.start.character,
+                    token_type=_token_type_for_role(sym.role),
+                    modifiers=tuple(modifiers),
+                )
+            )
+        for ref in self.references:
+            rr = ref.range
+            if rr.start.line != rr.end.line:
+                continue
+            tokens.append(
+                SemanticToken(
+                    line=rr.start.line,
+                    start_char=rr.start.character,
+                    length=rr.end.character - rr.start.character,
+                    token_type=_token_type_for_role(ref.role),
+                    modifiers=(),
+                )
+            )
+
+        tokens.sort(key=lambda tok: (tok.line, tok.start_char))
+        deduped: List[SemanticToken] = []
+        seen = set()
+        for tok in tokens:
+            key = (tok.line, tok.start_char)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(tok)
+        return deduped
+
+    def completions_at(
+        self,
+        line: int,
+        character: int,
+        load_index: Optional[LoadIndex] = None,
+        name_resolver: Optional[NameResolver] = None,
+    ) -> List[CompletionCandidate]:
+        """Completion candidates for the cursor at ``line``/``character``."""
+
+        lines = self.source.splitlines()
+        prefix = lines[line][:character] if 0 <= line < len(lines) else ""
+        match = re.search(r'([A-Za-z_]\w*)\.\w*$', prefix)
+        if match:
+            binding = self.import_for_alias(match.group(1))
+            if binding is not None:
+                if binding.resolved_path is None:
+                    return []
+                target = _load_import_index(binding.resolved_path, load_index)
+                if target is None:
+                    return []
+                return [
+                    CompletionCandidate(label=sym.name, role=sym.role, detail=sym.detail)
+                    for sym in target.symbols
+                    if sym.exported
+                ]
+
+        candidates: Dict[str, CompletionCandidate] = {}
+        for sym in self.symbols:
+            if sym.outline or sym.exported:
+                candidates.setdefault(
+                    sym.name,
+                    CompletionCandidate(label=sym.name, role=sym.role, detail=sym.detail),
+                )
+        for keyword in FSL_KEYWORDS:
+            candidates.setdefault(keyword, CompletionCandidate(label=keyword, role="keyword"))
+        return list(candidates.values())
+
     def _resolve_local(self, ref: Reference) -> Optional[Symbol]:
         scoped = self._resolve_scoped(ref)
         if scoped is not None:
@@ -335,6 +584,34 @@ def definition_at(
         load_index,
         name_resolver,
     )
+
+
+def encode_semantic_tokens(
+    tokens: Sequence[SemanticToken],
+    token_types: Sequence[str] = SEMANTIC_TOKEN_TYPES,
+    token_modifiers: Sequence[str] = SEMANTIC_TOKEN_MODIFIERS,
+) -> List[int]:
+    """LSP relative encoding: [dLine, dStartChar, length, typeIdx, modBits]* .
+
+    Assumes ``tokens`` sorted by (line, start_char).
+    """
+
+    encoded: List[int] = []
+    prev_line = 0
+    prev_char = 0
+    for tok in tokens:
+        delta_line = tok.line - prev_line
+        delta_char = tok.start_char if delta_line != 0 else tok.start_char - prev_char
+        type_name = tok.token_type if tok.token_type in token_types else "variable"
+        type_idx = token_types.index(type_name)
+        mod_bits = 0
+        for modifier in tok.modifiers:
+            if modifier in token_modifiers:
+                mod_bits |= 1 << token_modifiers.index(modifier)
+        encoded.extend([delta_line, delta_char, tok.length, type_idx, mod_bits])
+        prev_line = tok.line
+        prev_char = tok.start_char
+    return encoded
 
 
 class _IndexBuilder:
@@ -1066,6 +1343,13 @@ class _IndexBuilder:
         for child in node.children:
             self.visit(child, parent, local_scope)
 
+    def _visit_policy_precedence(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        case_name = _name_token_at(node, 0)
+        if case_name is not None:
+            self._add_ref(case_name, "type")
+        for child in node.children:
+            self.visit(child, parent, local_scope)
+
     def _visit_goal_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_req_id_symbol(node, parent, "goal")
 
@@ -1169,6 +1453,13 @@ class _IndexBuilder:
             self._add_ref(names[0], "alias")
             self._add_ref(names[1], "type", qualifier=str(names[0]))
 
+    def _visit_struct_fields(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _name_tokens(node):
+            self._add_ref(token, "field")
+        for child in node.children:
+            if isinstance(child, Tree):
+                self.visit(child, parent, local_scope)
+
     def _visit_struct_lit(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
         if token is not None:
@@ -1177,13 +1468,23 @@ class _IndexBuilder:
 
     def _visit_postfix(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         children = list(node.children)
-        if len(children) >= 2 and _tree_data(children[0]) == "var" and _tree_data(children[1]) == "field_suffix":
+        first_is_alias_field = (
+            len(children) >= 2
+            and _tree_data(children[0]) == "var"
+            and _tree_data(children[1]) == "field_suffix"
+        )
+        if first_is_alias_field:
             alias_token = _first_token(children[0])
             field_token = _first_token(children[1])
             if alias_token is not None and field_token is not None:
                 self._add_ref(field_token, "value", qualifier=str(alias_token))
-        for child in children:
+        for i, child in enumerate(children):
             if _tree_data(child) == "field_suffix":
+                if first_is_alias_field and i == 1:
+                    continue  # already recorded as alias.member above
+                field_token = _first_token(child)
+                if field_token is not None:
+                    self._add_ref(field_token, "field")
                 continue
             self.visit(child, parent, local_scope)
 
@@ -1311,6 +1612,22 @@ def _load_import_index(path: str, load_index: Optional[LoadIndex]) -> Optional[D
         if loaded is not None:
             return loaded
     return default_load_index(path)
+
+
+def _same_location(a: Location, b: Location) -> bool:
+    return _normalize_path(a.path) == _normalize_path(b.path) and a.range == b.range
+
+
+def _declaration_snippet(source: str, sym: Symbol) -> str:
+    lines = source.splitlines()
+    line_no = sym.range.start.line
+    if 0 <= line_no < len(lines):
+        return lines[line_no].strip()
+    return sym.name
+
+
+def _token_type_for_role(role: str) -> str:
+    return _ROLE_TO_TOKEN_TYPE.get(role, "variable")
 
 
 def _refinement_spec_names(tree: Tree) -> Tuple[Optional[str], Optional[str]]:

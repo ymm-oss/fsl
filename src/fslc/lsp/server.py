@@ -11,7 +11,18 @@ from urllib.parse import unquote, urlparse
 
 from lark.exceptions import UnexpectedInput, VisitError
 
-from fslc.lsp.index import DocumentIndex, NameResolver, Range, Symbol, build_index
+from fslc.lsp.index import (
+    SEMANTIC_TOKEN_MODIFIERS,
+    SEMANTIC_TOKEN_TYPES,
+    CompletionCandidate,
+    DocumentIndex,
+    Location,
+    NameResolver,
+    Range,
+    Symbol,
+    build_index,
+    encode_semantic_tokens,
+)
 
 
 SERVER_NAME = "fslc-lsp"
@@ -225,6 +236,65 @@ def _create_server():
         target_uri = _path_to_uri(loc.path) if loc.path else uri
         return types.Location(uri=target_uri, range=_to_lsp_range(types, loc.range))
 
+    @server.feature(types.TEXT_DOCUMENT_HOVER)
+    def hover(ls, params):
+        uri = params.text_document.uri
+        index = _index_for_uri(server, uri)
+        if index is None:
+            return None
+        info = index.hover_at(
+            params.position.line,
+            params.position.character,
+            _loader_for_server(server),
+            _name_resolver_for_server(server, _uri_to_path(uri)),
+        )
+        if info is None:
+            return None
+        return types.Hover(
+            contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=info.markdown),
+            range=_to_lsp_range(types, info.range),
+        )
+
+    @server.feature(types.TEXT_DOCUMENT_REFERENCES)
+    def references(ls, params):
+        uri = params.text_document.uri
+        include_declaration = True
+        if getattr(params, "context", None) is not None:
+            include_declaration = params.context.include_declaration
+        locations = _workspace_references(
+            server, uri, params.position.line, params.position.character, include_declaration
+        )
+        return locations or None
+
+    @server.feature(types.TEXT_DOCUMENT_COMPLETION, types.CompletionOptions(trigger_characters=["."]))
+    def completion(ls, params):
+        uri = params.text_document.uri
+        index = _index_for_uri(server, uri)
+        if index is None:
+            return None
+        candidates = index.completions_at(
+            params.position.line,
+            params.position.character,
+            _loader_for_server(server),
+            _name_resolver_for_server(server, _uri_to_path(uri)),
+        )
+        items = [_to_completion_item(types, c) for c in candidates]
+        return types.CompletionList(is_incomplete=False, items=items)
+
+    @server.feature(
+        types.TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
+        types.SemanticTokensLegend(
+            token_types=list(SEMANTIC_TOKEN_TYPES),
+            token_modifiers=list(SEMANTIC_TOKEN_MODIFIERS),
+        ),
+    )
+    def semantic_tokens_full(ls, params):
+        index = _index_for_uri(server, params.text_document.uri)
+        if index is None:
+            return types.SemanticTokens(data=[])
+        data = encode_semantic_tokens(index.semantic_tokens())
+        return types.SemanticTokens(data=data)
+
     return server
 
 
@@ -387,6 +457,98 @@ def _loader_for_server(server):
     return load
 
 
+def _definition_target(
+    index: DocumentIndex,
+    line: int,
+    character: int,
+    load_index,
+    name_resolver,
+) -> Optional[Tuple[str, Location]]:
+    """The (name, declaration-location) pair for the symbol under the cursor, if any."""
+
+    ref = index.reference_at(line, character)
+    if ref is not None:
+        loc = index.resolve_reference(ref, load_index, name_resolver)
+        if loc is None:
+            return None
+        return ref.name, loc
+    sym = index.symbol_at(line, character)
+    if sym is not None:
+        return sym.name, Location(index.path, sym.selection_range)
+    return None
+
+
+def _loc_equal(a: Location, b: Location) -> bool:
+    def normalize(path: Optional[str]) -> Optional[str]:
+        return str(Path(path).resolve(strict=False)) if path else None
+
+    return normalize(a.path) == normalize(b.path) and a.range == b.range
+
+
+def _dedupe_locations(locations: List[Any]) -> List[Any]:
+    seen = set()
+    deduped: List[Any] = []
+    for loc in locations:
+        key = (
+            loc.uri,
+            loc.range.start.line,
+            loc.range.start.character,
+            loc.range.end.line,
+            loc.range.end.character,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(loc)
+    return deduped
+
+
+def _workspace_references(
+    server, uri: str, line: int, character: int, include_declaration: bool
+) -> List[Any]:
+    """Same-document references plus references from every other workspace ``.fsl`` file."""
+
+    from lsprotocol import types
+
+    index = _index_for_uri(server, uri)
+    if index is None:
+        return []
+    loader = _loader_for_server(server)
+    this_path = _uri_to_path(uri)
+    resolver = _name_resolver_for_server(server, this_path)
+
+    local_ranges = index.references_at(line, character, include_declaration, loader, resolver)
+    results = [types.Location(uri=uri, range=_to_lsp_range(types, r)) for r in local_ranges]
+
+    target = _definition_target(index, line, character, loader, resolver)
+    if target is None:
+        return _dedupe_locations(results)
+    target_name, target_loc = target
+
+    this_norm = str(Path(this_path).resolve(strict=False)) if this_path else None
+    for root in _workspace_roots(server, this_path):
+        for fsl_path in sorted(root.rglob("*.fsl")):
+            if not fsl_path.is_file():
+                continue
+            normalized = str(fsl_path.resolve(strict=False))
+            if this_norm is not None and normalized == this_norm:
+                continue  # already covered by references_at() above
+            other_uri = _path_to_uri(str(fsl_path))
+            other_index = _index_for_uri(server, other_uri)
+            if other_index is None:
+                continue
+            for candidate in other_index.references:
+                if candidate.name != target_name:
+                    continue
+                loc = other_index.resolve_reference(candidate, loader, resolver)
+                if loc is not None and _loc_equal(loc, target_loc):
+                    results.append(
+                        types.Location(uri=other_uri, range=_to_lsp_range(types, candidate.range))
+                    )
+
+    return _dedupe_locations(results)
+
+
 def _result_to_diagnostics(types, source: str, result: Dict[str, Any], index: Optional[DocumentIndex]):
     diagnostics = []
     if result.get("result") == "error":
@@ -503,6 +665,52 @@ def _symbol_kind(types, sym: Symbol):
         "type": types.SymbolKind.Class,
     }
     return by_role.get(sym.role, types.SymbolKind.Variable)
+
+
+def _to_completion_item(types, candidate: CompletionCandidate):
+    by_role = {
+        "spec": types.CompletionItemKind.Module,
+        "compose": types.CompletionItemKind.Module,
+        "requirements": types.CompletionItemKind.Module,
+        "business": types.CompletionItemKind.Module,
+        "governance": types.CompletionItemKind.Module,
+        "refinement": types.CompletionItemKind.Module,
+        "alias": types.CompletionItemKind.Module,
+        "type": types.CompletionItemKind.Class,
+        "entity": types.CompletionItemKind.Class,
+        "struct": types.CompletionItemKind.Struct,
+        "number": types.CompletionItemKind.Class,
+        "enum": types.CompletionItemKind.Enum,
+        "enum_member": types.CompletionItemKind.EnumMember,
+        "action": types.CompletionItemKind.Function,
+        "transition": types.CompletionItemKind.Function,
+        "const": types.CompletionItemKind.Constant,
+        "state_var": types.CompletionItemKind.Variable,
+        "binder": types.CompletionItemKind.Variable,
+        "let": types.CompletionItemKind.Variable,
+        "value": types.CompletionItemKind.Variable,
+        "actor": types.CompletionItemKind.Variable,
+        "kpi": types.CompletionItemKind.Variable,
+        "authority": types.CompletionItemKind.Variable,
+        "parameter": types.CompletionItemKind.Variable,
+        "field": types.CompletionItemKind.Field,
+        "process": types.CompletionItemKind.Class,
+        "stage": types.CompletionItemKind.EnumMember,
+        "property": types.CompletionItemKind.Event,
+        "requirement": types.CompletionItemKind.Event,
+        "acceptance": types.CompletionItemKind.Event,
+        "forbidden": types.CompletionItemKind.Event,
+        "control": types.CompletionItemKind.Event,
+        "policy": types.CompletionItemKind.Event,
+        "goal": types.CompletionItemKind.Event,
+        "keyword": types.CompletionItemKind.Keyword,
+    }
+    kind = by_role.get(candidate.role, types.CompletionItemKind.Variable)
+    return types.CompletionItem(
+        label=candidate.label,
+        kind=kind,
+        detail=candidate.detail or candidate.role,
+    )
 
 
 def _to_lsp_range(types, rng: Range):
