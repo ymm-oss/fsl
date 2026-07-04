@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-07-04
+
 ### Added
 - (LSP) `fslc-lsp` now serves four more `textDocument/*` features as thin
   lsprotocol adapters over the existing raw-tree index
