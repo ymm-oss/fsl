@@ -111,6 +111,7 @@
       <div class="layer"><h3>Implementation / QA</h3><p>Generate scenarios and pytest scaffolds. Check that implementation logs conform.</p></div>
     </div>
     <p class="dim reveal" style="margin-top:18px;font-size:14px"><code>fslc refine impl.fsl abs.fsl mapping.fsl</code> checks one refinement step; <code>fslc chain fsl-project.toml</code> verifies the whole chain at once.</p>
+    <p class="reveal" style="margin-top:14px">Run this in CI, not just once before shipping: every commit re-verifies the whole corpus, a change at one layer becomes a mechanical check of the layers below it, and drift between spec and implementation gets caught immediately instead of resurfacing as an incident. The same corpus is also what a new engineer — or an AI agent picking up the code — reads first to understand how the system is supposed to behave.</p>
   </div>
 </section>
 
@@ -195,11 +196,12 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
   <div class="wrap">
     <p class="kicker reveal">Adoption</p>
     <h2 class="reveal">Where do you start?</h2>
+    <p class="lead narrow reveal">Start high-risk-first — that's a sequencing choice, not the finish line. The spec corpus is your project's documentation, not a scarce resource to spend only where failure hurts, so the target end state is broad coverage across business, requirements, and design.</p>
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
         <h3>🎯 High-risk core</h3>
         <p class="dim">Close to traditional formal methods.</p>
-        <p>Payments/refunds, applications/approvals, reservations/inventory allocation, permissions/audit, queues/async, SLA/timeouts. <b>Focus where mistakes hurt.</b></p>
+        <p>Payments/refunds, applications/approvals, reservations/inventory allocation, permissions/audit, queues/async, SLA/timeouts. <b>Start here — mistakes hurt most.</b></p>
       </div>
       <div class="card">
         <h3>🧩 Small state management</h3>
@@ -208,7 +210,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
       </div>
     </div>
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0">The criterion isn't "how many states" but <b>"whether some order of operations or flag combination can enter an unintended state."</b> Even 3 states and 2 flags are worth FSL-ing if back/cancel/retry/permission branching is involved. Start with a small PoC you can finish in two weeks.</p>
+      <p style="margin:0">The criterion isn't "how many states" but <b>"whether some order of operations or flag combination can enter an unintended state."</b> Even 3 states and 2 flags are worth FSL-ing if back/cancel/retry/permission branching is involved. Start with a small PoC you can finish in two weeks, then keep expanding coverage — the corpus stays the project's living documentation, not a one-off exercise.</p>
     </div>
   </div>
 </section>

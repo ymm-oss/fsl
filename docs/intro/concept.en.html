@@ -22,7 +22,7 @@
     <p class="kicker reveal">FSL for people who don't know formal methods</p>
     <h1 class="reveal">You can <span class="hl">read</span> a spec.<br>Whether it's <span class="hl">correct</span>,<br>you can't check.</h1>
     <p class="lead reveal">AI now writes specs, code, and tests at high speed.<br>So who guarantees they're actually correct?</p>
-    <p class="reveal" style="margin-top:24px">FSL is a language for letting <b>a machine check your spec by brute force</b>.<br>By the end of this page, you'll feel what that means. <span class="dim">(10 min, no jargon)</span></p>
+    <p class="reveal" style="margin-top:24px">FSL is a language for letting <b>a machine check your spec by brute force</b>.<br>You write it <b>in place of</b> the plain-language spec doc you'd write anyway — the same text people read is the text the machine verifies, so it can never drift out of sync.<br>By the end of this page, you'll feel what that means. <span class="dim">(10 min, no jargon)</span></p>
     <div class="scroll-hint reveal">▽ Scroll</div>
   </div>
 </section>
@@ -184,6 +184,7 @@
       <div class="arrow-down">↓ scenarios / testgen / replay</div>
       <div class="layer"><h3>Implementation / QA</h3><p>Generate test scaffolds and scenarios from the spec. Check that impl logs conform.</p></div>
     </div>
+    <p class="narrow reveal" style="margin-top:24px">This isn't a one-time proof before you ship. The whole chain lives in CI: every change to any layer re-verifies it, <code>refine</code> turns an upper-layer edit into a mechanical check of what's below, and drift gets caught on the next commit — not after it reaches production. The same chain of specs also works as onboarding material, for new engineers and for AI agents alike.</p>
   </div>
 </section>
 
@@ -195,6 +196,7 @@
     <div class="callout warn reveal">
       <p style="margin:0 0 10px"><b>It checks only the range of the rules you wrote.</b> If the rules themselves are wrong, the verdict rests on wrong rules.</p>
       <p style="margin:0 0 10px"><b>It's not a replacement for tests.</b> Implementation, UI, and integrations are tests' job. The two complement each other.</p>
+      <p style="margin:0 0 10px"><b>It is a replacement for the spec document, though.</b> The prose design/spec doc you'd otherwise write by hand — FSL is that doc, in a form the machine can also check. <code>fslc html</code> and <code>explain --readable</code> render that same source as reading material for people, so there's no separate document to keep in sync.</p>
       <p style="margin:0"><b>A human decides in the end.</b> Whether an AI-written spec truly captures the original rules is for a human to confirm. FSL is an external standard that aids that judgment.</p>
     </div>
   </div>
