@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>When to Use FSL — deciding where it fits</title>
-<meta name="description" content="Where FSL pays off and where it doesn't. Two payoffs (a single spec's way of breaking / cross-layer alignment, FSL's edge), three gates, the fit / low-priority / out-of-scope split, the preconditions for real value, and which layer to write." />
+<meta name="description" content="The default: if you'd document it, write it in FSL. Two extra payoffs (a single spec's way of breaking / cross-layer alignment, FSL's edge) decide how far to lean in. Three gates, what's genuinely out of scope, the preconditions for real value, and which layer to write." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="when-to-use">
@@ -20,9 +20,9 @@
 <section class="hero">
   <div class="wrap narrow center">
     <p class="kicker reveal">When to use it</p>
-    <h1 class="reveal">"Should we use FSL?" turns on <span class="hl">two ways it pays off</span>.</h1>
-    <p class="lead reveal">One is a single spec's <b>way of breaking</b> — can order or flags interact into a state that must never happen?<br>The other is FSL's real edge: because you write <b>business, requirements, and design</b> in it, it catches the <b>drift between layers</b> too.</p>
-    <p class="reveal" style="margin-top:24px">That second one is what classic formal methods don't give you — so <b>the more of the contract layers you write, the more it manages your app's alignment</b>. Still, it isn't a tool for everything — you also take home <b>where it pays off and where you don't need it</b>. <span class="dim">(10 min, no jargon)</span></p>
+    <h1 class="reveal">Start from a plain fact: you'd <span class="hl">document this anyway</span>.</h1>
+    <p class="lead reveal">Any business rule, requirement, or design worth writing down in prose is worth writing in FSL instead — it costs about the same, and now a machine can check it. From there, two payoffs decide how much further to lean in: a single spec's <b>way of breaking</b> — can order or flags interact into a state that must never happen? — and FSL's real edge, that writing <b>business, requirements, and design</b> in it catches the <b>drift between layers</b> too.</p>
+    <p class="reveal" style="margin-top:24px">Because writing it costs what documenting it would have cost anyway, the default is to <b>write broadly across the layers</b>, not to ration FSL for only the highest-risk spot. It still isn't a tool for everything — you'll also take home exactly <b>what FSL genuinely can't express</b>. <span class="dim">(10 min, no jargon)</span></p>
     <div class="scroll-hint reveal">▽ Scroll</div>
   </div>
 </section>
@@ -67,7 +67,7 @@
         <p class="dim" style="margin-top:10px">Connect business ⊒ requirements ⊒ design ⊒ implementation and verify that <b>a requirement is honored by the design / a control still bites at the lowest layer / an As-Is→To-Be change preserves a control</b>. The question becomes "do these layers still mean the same thing?"</p>
       </div>
     </div>
-    <p class="narrow reveal" style="margin-top:28px">So <b>the more of the contract layers (business, requirements, design) you write in FSL</b>, the more the machine keeps catching cross-layer drift — spec-vs-implementation mismatch. That is <b>FSL managing your app's alignment</b>. Verifying the connection is not an advanced topic — it is <b>one of FSL's primary uses</b>.</p>
+    <p class="narrow reveal" style="margin-top:28px">So <b>the more of the contract layers (business, requirements, design) you write in FSL</b>, the more the machine keeps catching cross-layer drift — spec-vs-implementation mismatch. That is <b>FSL managing your app's alignment</b>. Verifying the connection is not an advanced topic — it is <b>one of FSL's primary uses</b>, and combined with the documentation baseline above, it's another reason the default is breadth: writing only the highest-risk island forfeits this payoff entirely.</p>
   </div>
 </section>
 
@@ -80,12 +80,12 @@
     <div class="layers reveal" style="margin-top:24px">
       <div class="layer">
         <h3>① Is there a state machine?</h3>
-        <p>Can you draw boxes (states) and arrows (operations)?<br><b style="color:var(--danger)">No → static display, simple CRUD, decoration. Out of scope.</b></p>
+        <p>Can you draw boxes (states) and arrows (operations)?<br><b style="color:var(--danger)">No → static display, pure decoration, free-text content. Out of scope — there's nothing here to verify or to write a spec about.</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer">
         <h3>② Can interaction reach a "bad" state?</h3>
-        <p>Do order, flags, permissions, async, or retry combine to slip into a state that must never happen?<br><b style="color:var(--warn)">No → linear path. Tests usually suffice (low priority).</b></p>
+        <p>Do order, flags, permissions, async, or retry combine to slip into a state that must never happen?<br><b style="color:var(--warn)">No → verification payoff is low, but write it anyway as a thin spec if it's something you'd document — that's the default. Skip FSL only where you'd write no doc and run no check at all.</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer">
@@ -100,9 +100,9 @@
     </div>
     <div class="callout reveal" style="margin-top:28px;text-align:left">
       <p style="margin:0 0 10px"><b>The second lens: is there connectivity value? (sizing up payoff ②)</b></p>
-      <p style="margin:0 0 10px">Even if the three gates don't all pass — even if a spec is "low priority (thin)" on its own — it is high-value when <b>cross-layer alignment</b> is the point: <b>a requirement provably honored by the design, a regulatory control that still bites at the lowest layer, an As-Is→To-Be change that preserves a control</b>. When that's the goal, write the layers and verify the seams with <code>chain</code>. This is not an advanced topic — it is a <b>primary use of FSL</b>.</p>
-      <p style="margin:0 0 10px">The same lens also says <b>when to stop</b>: the <b>abstraction tax</b>. If there is really only one hard altitude, don't manufacture three layers (you'd just write the same thing three times at different verbosity). Island-shaped hard spots stay single-spec, as before.</p>
-      <p style="margin:0" class="dim">The wider you write, the more alignment management pays off — but this is a judgment aid, not a mandate to make every task three-layered (FSL is the contract <em>spine</em>, not the entire product process).</p>
+      <p style="margin:0 0 10px">Even if the three gates don't all pass — even if payoff ① alone is thin — it is high-value when <b>cross-layer alignment</b> is the point: <b>a requirement provably honored by the design, a regulatory control that still bites at the lowest layer, an As-Is→To-Be change that preserves a control</b>. When that's the goal, write the layers and verify the seams with <code>chain</code>. This is not an advanced topic — it is a <b>primary use of FSL</b>.</p>
+      <p style="margin:0 0 10px">The same lens also says <b>when to stop</b>: the <b>abstraction tax</b>. If there is really only one hard altitude, don't manufacture three layers (you'd just write the same thing three times at different verbosity). Island-shaped hard spots stay single-spec, as before. This guards against <em>fake</em> layering, not against breadth — writing one honest layer per real altitude is still the default.</p>
+      <p style="margin:0" class="dim">The wider you write, the more alignment management pays off — but this is a judgment aid, not a mandate to make every task three-layered: write broadly because it's the documentation you'd produce anyway, not because every feature needs all three layers (FSL is the contract <em>spine</em>, not the entire product process).</p>
     </div>
   </div>
 </section>
@@ -111,8 +111,8 @@
 <section>
   <div class="wrap">
     <p class="kicker reveal">Where it fits</p>
-    <h2 class="reveal">High-yield, low-priority, and out of scope</h2>
-    <p class="lead narrow reveal">The crucial split: <b>"possible but thin (low priority)"</b> versus <b>"not expressible at all (out of scope)."</b> Don't conflate them.</p>
+    <h2 class="reveal">High-yield, thin-but-worth-it, and out of scope</h2>
+    <p class="lead narrow reveal">The crucial split: <b>"thin verification payoff, but still your documentation"</b> versus <b>"not expressible at all (out of scope)."</b> Don't conflate them — thin is a reason to keep the spec small, never a reason to skip writing it if you'd document the thing anyway.</p>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3 style="color:var(--ok)">✅ High-yield</h3>
@@ -128,14 +128,14 @@
         </ul>
       </div>
       <div class="syntax-card">
-        <h3 style="color:var(--warn)">△ Low priority (possible but thin)</h3>
+        <h3 style="color:var(--warn)">△ Thin verification payoff — write it anyway</h3>
         <ul>
           <li>Static-display-only screens</li>
           <li>Simple CRUD</li>
           <li>UI decoration with few constraints</li>
           <li>Processing with almost no transitions</li>
         </ul>
-        <p style="margin-top:10px">On a linear path, existing tests usually suffice.<br><span class="dim">But if it's part of <b>alignment with an upper layer</b> (payoff ②), it can be worth writing even when thin on its own.</span></p>
+        <p style="margin-top:10px">These rarely hide a loophole worth verifying — but if you'd write a design or requirements note for them anyway, write a thin FSL spec instead: same cost, and now it's checked. Reach for tests alone only where you'd neither document nor verify this at all.<br><span class="dim">And if it's part of <b>alignment with an upper layer</b> (payoff ②), it's worth writing even when thin on its own.</span></p>
       </div>
       <div class="syntax-card">
         <h3 style="color:var(--danger)">⛔ Out of scope (not expressible)</h3>
@@ -146,7 +146,7 @@
           <li>Continuous quantities, physical units, org structure</li>
           <li>Absolute performance (measured latency)</li>
         </ul>
-        <p style="margin-top:10px">If this is the core of the problem, FSL is at most an aid.<br>(SLA works only as a <em>relative, discrete step</em> notion.)</p>
+        <p style="margin-top:10px">This bucket is reserved for what FSL <em>cannot express</em>, not for what merely has low verification payoff — that case belongs in the "thin" bucket above, and is still worth writing. If continuous or probabilistic behavior is the core of the problem, FSL is at most an aid.<br>(SLA works only as a <em>relative, discrete step</em> notion.)</p>
       </div>
     </div>
   </div>
@@ -183,7 +183,7 @@
           <li>② Can order/flags reach a bad state?</li>
           <li>③ Is it finite &amp; discrete?</li>
         </ul>
-        <p style="margin-top:10px">Three yeses → write it. <b>AI drafts the spec, so authoring cost is near zero</b> — drop the old "worth it?" threshold far lower than before.</p>
+        <p style="margin-top:10px">Three yeses → write it. Even on two — no on ② — write it anyway if you'd document the thing regardless. <b>AI drafts the spec, so authoring cost is near zero</b> — drop the old "worth it?" threshold far lower than before.</p>
       </div>
       <div class="syntax-card">
         <h3>Per project: adopt it?</h3>
@@ -195,6 +195,7 @@
           <li>Can CI stop on verification failure?</li>
         </ul>
         <p style="margin-top:10px">Multiplier: <b>the more you let AI write the state logic</b>, the more value an external standard adds. Start with a <b>2-week, one-flow PoC</b>.</p>
+        <p style="margin-top:10px" class="dim">Once it's in CI, the corpus is never "proved once and done": every change re-verifies it, <code>refine</code>/<code>chain</code> turns a change in one layer into a mechanical check of the layers below, and drift or regressions get caught on the next commit — not rediscovered in production. The same corpus doubles as onboarding context, for new engineers and for AI agents alike.</p>
       </div>
     </div>
   </div>
@@ -236,7 +237,7 @@
     <p class="kicker reveal">In one line</p>
     <h2 class="reveal">Remember this sentence</h2>
     <div class="callout reveal" style="margin-top:20px;text-align:left">
-      <p style="margin:0;font-size:18px"><b>You can detect a single spec's "way of breaking," and/or the "cross-layer drift" from business to design</b> — that's when FSL pays off. The latter is the edge classic formal methods lack: <b>the more of the contract layers you write, the more it manages your app's alignment</b>.<br><span class="dim">Size (the number of states) is not a deciding factor.</span></p>
+      <p style="margin:0;font-size:18px"><b>If you'd write documentation for it anyway, write it in FSL.</b> On top of that baseline, watch for two payoffs: a single spec's "way of breaking," and/or the "cross-layer drift" from business to design. The latter is the edge classic formal methods lack: <b>the more of the contract layers you write, the more it manages your app's alignment</b>.<br><span class="dim">Size (the number of states) is not a deciding factor.</span></p>
     </div>
     <div class="cta reveal" style="margin-top:32px">
       <h2>Now run it</h2>

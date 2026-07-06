@@ -111,6 +111,7 @@
       <div class="layer"><h3>実装・品質確認</h3><p>シナリオ・pytest雛形を生成。実装ログの適合も確認。</p></div>
     </div>
     <p class="dim reveal" style="margin-top:18px;font-size:14px"><code>fslc refine impl.fsl abs.fsl mapping.fsl</code> で1段の詳細化を、<code>fslc chain fsl-project.toml</code> で全段を一括検証できます。</p>
+    <p class="reveal" style="margin-top:14px">これは実装前に一度だけ回すものではなく、CIの上で回してください。コミットのたびにコーパス全体が再検証され、ある層への変更は下位層への機械的なチェックに変換され、仕様と実装のズレはインシデントとして表面化する前にその場で捕まります。同じコーパスは、新しく入るエンジニアや、コードを引き継ぐAIエージェントが、システムの振る舞いを理解するために最初に読むものにもなります。</p>
   </div>
 </section>
 
@@ -195,11 +196,12 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
   <div class="wrap">
     <p class="kicker reveal">適用</p>
     <h2 class="reveal">どこから始める？</h2>
+    <p class="lead narrow reveal">リスクの高い所から始めるのは、あくまで<b>着手順の話</b>であってゴールではありません。仕様コーパスはプロジェクトのドキュメントそのものであり、失敗が痛い所だけに配分する希少資源ではないので、目指す最終状態は業務・要件・設計を通じた<b>広いカバレッジ</b>です。</p>
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
         <h3>🎯 リスクの高い基幹</h3>
         <p class="dim">従来の形式手法に近い使い方。</p>
-        <p>決済・返金 / 申請・承認 / 予約・在庫引当 / 権限・監査 / キュー・非同期 / SLA・タイムアウト。<b>間違うと痛い</b>所に集中投下。</p>
+        <p>決済・返金 / 申請・承認 / 予約・在庫引当 / 権限・監査 / キュー・非同期 / SLA・タイムアウト。<b>まずはここから</b>——間違うといちばん痛い所。</p>
       </div>
       <div class="card">
         <h3>🧩 小さな状態管理</h3>
@@ -208,7 +210,7 @@ $ fslc testgen spec.fsl -o tests/test_conformance.py</code></pre>
       </div>
     </div>
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0">判断基準は「状態の数」ではなく、<b>「操作順やフラグの組み合わせで、意図しない状態に入れてしまうか」</b>。3状態・2フラグでも、戻る/取消/再試行/権限分岐があるなら FSL 化する価値があります。まずは2週間で終わる小さな試作検証から。</p>
+      <p style="margin:0">判断基準は「状態の数」ではなく、<b>「操作順やフラグの組み合わせで、意図しない状態に入れてしまうか」</b>。3状態・2フラグでも、戻る/取消/再試行/権限分岐があるなら FSL 化する価値があります。まずは2週間で終わる小さな試作検証から始め、そこからカバレッジを広げ続けてください——コーパスは一度きりの演習ではなく、プロジェクトが生きているドキュメントであり続けます。</p>
     </div>
   </div>
 </section>

@@ -2,15 +2,27 @@
 
 ## Goal
 
-`fslc html <file.fsl> [-o report.html]` turns existing verifier evidence into a
-single HTML file that project members can review without reading raw formulas or
-running the CLI. The report is a presentation layer over `explain` and `verify`;
-it does not introduce a second parser, evaluator, or verifier.
+`fslc html <file.fsl> [-o report.html]` renders a `.fsl` spec as a human-readable
+document — the project philosophy is that the spec source *is* the
+documentation, and `fslc html` is its rendering for human readers (PMs, new
+engineers), not just a verification-tool dump. The report is a presentation
+layer over `explain` and `verify`; it does not introduce a second parser,
+evaluator, or verifier.
 
 ## Inputs
 
 - `explain_file(file, depth)` supplies the review skeleton: state, actions,
-  properties, automatic checks, witnesses, and counterfactuals.
+  properties, automatic checks, witnesses, counterfactuals, and — where the
+  spec has them — KPI declarations, entity/domain instance counts, enum member
+  lists, and derived stage-transition flows (`stage_flows`, reconstructed from
+  enum-valued state plus guard/assignment shape; this is how a business
+  `process` block compiles down, but the derivation itself is dialect-agnostic).
+  Action `requires`/`ensures` text and property bodies are rendered from the
+  AST (`_expr_to_text`), not a single truncated source line, so multi-line
+  predicates show in full. Declarations synthesized by a dialect frontend (a
+  `deadline`-derived invariant, the time-block-generated `tick` action) are
+  tagged `"generated"` in the skeleton; the report routes them into the
+  auto-checks table instead of the human Actions/Properties tables.
 - `run_verify(file, depth, deadlock)` supplies the current verification result:
   status, warnings, action coverage, reachable witnesses, counterexample traces,
   and boundedness metadata.
@@ -33,17 +45,33 @@ fslc html spec.fsl --depth 8 -o report.html
 ## Report structure
 
 The HTML is intentionally self-contained: no CDN, no external JavaScript, and no
-runtime dependency. It contains:
+runtime dependency. Sections are ordered model-first — the written model before
+the verifier's verdict on it:
 
-- a status hero with result, depth, state/action/property counts, and coverage
+- a hero with a spec-derived one-line summary (state/action/property counts,
+  entity/KPI counts when present), plus result, depth, and coverage
+- state table (enum-typed state shows its member list) plus an inline SVG
+  action-to-state write graph; when present, an Entities & Domains panel, a
+  KPI table, and a stage-transition ("process flow") panel per enum-valued
+  state var
+- action table (only human-authored actions; an optional Actor column when
+  any action has one) and property table (`invariant`/`trans`/`leadsTo`/
+  `reachable`), plus an automatic-checks table that also holds anything
+  dialect-generated (type-bound checks, partial-op checks, generated actions,
+  deadline invariants)
 - verification status and warnings
-- state table plus an inline SVG action-to-state write graph
-- action/property/automatic-check tables
 - counterexample or reachable trace timeline
 - witness examples with state snapshots
 - counterfactual table
 - escaped source with line numbers
 - collapsed raw `explain` and `verify` JSON
+
+`ID: sentence` requirement/policy meta renders as a caption under the
+declaration's own name (not a trailing "Requirement" column), and is omitted
+entirely for a row that has none — no `none` filler cells. The same principle
+applies elsewhere: the property table's "Deadline" column only appears when at
+least one property has a `leadsTo ... within`, and an action's Ensures cell is
+left empty rather than a "none" chip when the action has no `ensures` clause.
 
 ## Design constraints
 
