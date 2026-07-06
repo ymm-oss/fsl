@@ -79,7 +79,9 @@ but **they are not checked** (fslc says nothing even if you violate them).
 
 ### Step 4 — Check, and translate the result into a design judgment
 
-`fslc refine impl.fsl abs.fsl map.fsl` (+ `verify` each spec on its own).
+`fslc refine impl.fsl abs.fsl map.fsl` (+ `verify` each spec on its own). Also run
+`verify --strict-tags` (traceability) and `explain --readable` (the doc rendering) —
+standard practice for every review, not high-risk-only.
 The mechanical repair steps for the result follow the fsl skill's repair protocol
 table, but in design exploration you must always decide, before fixing, "**is the
 design proposal bad, or is the contract excessive?**" — either conclusion is a

@@ -9,7 +9,16 @@ extension or by manual copy.
 FSL work is split by layer so an agent does not turn PM requirements into design
 artifacts by accident — but the layers are also **connected by refinement**, and
 verifying that connection (cross-layer alignment / traceability) is one of FSL's
-primary uses, not a tail-end advanced topic:
+primary uses, not a tail-end advanced topic.
+
+**A `.fsl` spec replaces the prose spec/design doc you would write anyway** — one
+source is both what people read and what the verifier checks, so there is no second
+document to drift out of sync. That is why broad coverage across
+business/requirements/design layers is the default target, not a per-feature
+verification-ROI decision: high-risk-first is a valid adoption *order*, not the end
+state of coverage. The resulting corpus is a living single source of truth, continuously
+re-verified as it changes (regression, drift, cross-layer change-impact via
+`refine`), and doubles as onboarding context for humans and AI alike:
 
 | Skill | Use for | Main deliverable |
 |---|---|---|
