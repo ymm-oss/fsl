@@ -1025,6 +1025,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     dialect_controls = None
     dialect_governance = None
     dialect_warnings = []
+    spec_kind = None
     for it in items:
         if it[0] == "__display_names":
             dialect_display_names.update(it[1])
@@ -1048,6 +1049,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
             dialect_governance = it[1]
         elif it[0] == "__warnings":
             dialect_warnings.extend(it[1])
+        elif it[0] == "__spec_meta":
+            spec_kind = it[1]
 
     check_stage_usage(items)
 
@@ -1243,6 +1246,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "controls": dialect_controls,
         "governance": dialect_governance,
         "symmetry": symmetry,
+        "kind": spec_kind,
     }
 
 

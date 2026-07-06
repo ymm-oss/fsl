@@ -23,6 +23,26 @@ def _counterfactual(out, invariant):
     raise AssertionError(f"missing counterfactual for {invariant}")
 
 
+def test_spec_level_kind_tag_surfaces_in_explain_and_readable():
+    ui = EXAMPLES / "ui_spike" / "return_ui.fsl"
+    out = explain_file(str(ui), depth=3)
+    assert out["skeleton"]["spec_kind"] == {
+        "id": "ui",
+        "text": "return-request screen flow (behavioral slice only)",
+    }
+    # The full CLI envelope path (with_faithfulness / trace_type_for) walks every
+    # nested dict; a `spec_kind` dict under a reserved key would crash it. Guard.
+    enveloped = run_explain(str(ui), depth=3)
+    assert enveloped["result"] == "explained"
+    readable = explain_file(str(ui), depth=3, readable=True)["readable"]
+    assert "Kind: ui: return-request screen flow (behavioral slice only)" in readable
+
+
+def test_spec_without_kind_tag_has_null_spec_kind():
+    out = explain_file(str(SPECS / "cart_v1.fsl"), depth=3)
+    assert out["skeleton"]["spec_kind"] is None
+
+
 def test_cart_v1_skeleton_lists_actions_properties_auto_checks_and_tags():
     out = explain_file(str(SPECS / "cart_v1.fsl"), depth=4)
     assert out["result"] == "explained"

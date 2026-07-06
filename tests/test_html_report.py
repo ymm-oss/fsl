@@ -10,6 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 SPECS = ROOT / "specs"
 
 
+def test_spec_level_kind_tag_renders_title_badge():
+    ui = ROOT / "examples" / "ui_spike" / "return_ui.fsl"
+    result = run_html(str(ui), depth=3, write_file=False)
+
+    assert result["result"] == "generated"
+    html = result["content"]
+    assert '<span class="badge neutral kind"' in html
+    assert 'title="return-request screen flow (behavioral slice only)"' in html
+    assert ">ui</span>" in html
+
+
 def test_run_html_generates_self_contained_report():
     result = run_html(str(SPECS / "cart_v1.fsl"), depth=4, write_file=False)
 

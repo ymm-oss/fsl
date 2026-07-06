@@ -6,7 +6,7 @@ of rules as of v2.x.
 ## 1. Top-level structure
 
 ```fsl
-spec <Name> {
+spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
   type  <Name> = <lo>..<hi>               // domain type (bounded integer)
   symmetric type <Name> = <lo>..<hi>      // interchangeable entity identities

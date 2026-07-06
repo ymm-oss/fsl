@@ -363,6 +363,9 @@ def _skeleton(spec, source_lines):
     properties.extend(_property_skeleton("reachable", reach, spec)
                       for reach in spec.get("reachables", []))
     return {
+        # `spec_kind`, not `kind`: the enveloped result tree reserves `kind` for the
+        # string diagnostic discriminator that with_faithfulness/trace_type_for scan.
+        "spec_kind": spec.get("kind"),
         "state": {
             _public_name(name, spec): _public_type(ty)
             for name, ty in spec.get("state", {}).items()
@@ -746,6 +749,10 @@ def render_readable(explained: dict, spec: dict, display_names: dict) -> str:
     """Render an explain result as deterministic human-readable text."""
     skeleton = explained.get("skeleton") or {}
     lines = [f"Spec: {spec['name']} (depth {explained.get('depth')})"]
+    kind = spec.get("kind")
+    if kind:
+        tag = kind["id"] if kind.get("text") is None else f"{kind['id']}: {kind['text']}"
+        lines.append(f"Kind: {tag}")
 
     def section(title, items):
         if not items:
