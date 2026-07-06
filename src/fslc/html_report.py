@@ -24,6 +24,7 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
     domains = skeleton.get("domains") or []
     kpis = skeleton.get("kpis") or []
     stage_flows = skeleton.get("stage_flows") or []
+    kind = skeleton.get("spec_kind")
 
     all_actions = skeleton.get("actions") or []
     actions = [a for a in all_actions if not a.get("generated")]
@@ -48,7 +49,7 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
     subtitle = _hero_subtitle(len(state), len(actions), len(properties), domains, kpis)
 
     body = "\n".join([
-        _hero(spec, file, depth, status, len(state), len(actions), len(properties), coverage_label, warnings, subtitle),
+        _hero(spec, file, depth, status, len(state), len(actions), len(properties), coverage_label, warnings, subtitle, kind),
         _model_section(state, actions, enums, domains, kpis, stage_flows),
         _actions_section(actions, coverage),
         _properties_section(properties, auto_checks),
@@ -544,13 +545,13 @@ def _generated_property_check(prop: dict) -> dict:
     }
 
 
-def _hero(spec, file, depth, status, states, actions, properties, coverage, warnings, subtitle) -> str:
+def _hero(spec, file, depth, status, states, actions, properties, coverage, warnings, subtitle, kind=None) -> str:
     status_class = _status_class(status)
     return f"""
       <header class="hero">
         <div>
           <p class="eyebrow">FSL specification report</p>
-          <h1>{escape(spec)}</h1>
+          <h1>{escape(spec)}{_kind_badge(kind)}</h1>
           <p class="sub">{escape(subtitle)}</p>
         </div>
         <div class="meta-grid" aria-label="Report summary">
@@ -567,6 +568,16 @@ def _hero(spec, file, depth, status, states, actions, properties, coverage, warn
         </div>
       </header>
 """
+
+
+def _kind_badge(kind) -> str:
+    """A neutral pill next to the spec title classifying the whole spec (e.g. `ui`)."""
+    if not kind:
+        return ""
+    label = escape(str(kind.get("id", "")))
+    text = kind.get("text")
+    title = f' title="{escape(str(text))}"' if text else ""
+    return f' <span class="badge neutral kind"{title}>{label}</span>'
 
 
 def _metric(label, value) -> str:

@@ -21,7 +21,7 @@ the implementation design of each feature can be reached from
 ## 1. Structure of a specification
 
 ```fsl
-spec <Name> {
+spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
   type  <Name> = <lo>..<hi>            // domain type (bounded integer)
   symmetric type <Name> = <lo>..<hi>   // domain whose values are interchangeable identities
@@ -46,6 +46,14 @@ spec <Name> {
   terminal { <expr> }                   // intended terminal states (excluded from deadlock checking)
 }
 ```
+
+The optional string after the spec name is a **spec-level tag**
+(`"<kind>: <intent>"`, e.g. `spec ReturnUI "ui: screen flow" { … }`). Like the
+per-declaration tags, it is **metadata only** — never verified — and is surfaced by
+`fslc explain` / `fslc html` as a classification badge next to the spec name (JSON:
+`skeleton.spec_kind = {id, text}`). Use it to record what kind of thing the whole
+spec is (e.g. `ui` for a screen-flow spec that models only the behavioral slice);
+it carries no kernel semantics and desugars to nothing. See `docs/DESIGN-ui.md`.
 
 Any layer — including a kernel `spec` — may declare identity/number sorts whose
 finite sizes come from a sibling top-level `verify` block instead of an inline

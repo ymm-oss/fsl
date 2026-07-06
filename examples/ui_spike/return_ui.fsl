@@ -2,7 +2,7 @@
 // screen=enum / navigate=action / guard=requires / no dead ends=leadsTo /
 // all screens reachable=reachable / no double submit=invariant. No new syntax is used.
 // Note: the screen name Done is renamed so it does not clash with abs's St.Paid (avoiding an enum collision; see F below).
-spec ReturnUI {
+spec ReturnUI "ui: return-request screen flow (behavioral slice only)" {
   type Amount = 0..3
   const AUTO_LIMIT = 1
   enum Screen { Form, Submitting, ReadyToPay, MgrPending, Done, Error }

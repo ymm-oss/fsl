@@ -5,6 +5,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- Optional **spec-level tag** classifying a whole spec: an intent string right
+  after the spec name, `spec ReturnUI "ui: screen flow" { … }`. Metadata only —
+  it desugars to nothing and is never verified (corpus snapshot unchanged) — and
+  is surfaced by `fslc explain` (`skeleton.spec_kind = {id, text}` + a `Kind:` line
+  in `--readable`) and by `fslc html` (a neutral badge next to the spec title).
+  It carries the machine-readable and at-a-glance "this is a UI spec" classification
+  the fsl-ui spike (issue #9) identified, without the `expand_ui` dialect; see
+  `docs/DESIGN-ui.md`. Touches `grammar.py`, `model.py`, `explain.py`,
+  `html_report.py`. (The surfaced field is `spec_kind`, not `kind`, because the
+  enveloped result tree reserves `kind` for the diagnostic discriminator.)
+
 ### Fixed
 - `fslc html`/`fslc explain` now render a declaration's full logic instead of a
   truncated first source line: action `requires`/`ensures` and property bodies

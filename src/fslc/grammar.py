@@ -14,7 +14,7 @@ verify_def: "verify" "{" verify_item* "}"
 verify_item: "instances" NAME "=" INT ";"? -> verify_instances
            | "values" NAME "=" expr ".." expr ";"? -> verify_values
 
-spec_def: "spec" NAME "{" item* "}"
+spec_def: "spec" NAME meta_tag? "{" item* "}"
 
 compose_def: "compose" NAME "{" compose_item* "}"
 ?compose_item: use_def | internal_def | compose_state | compose_init
@@ -781,7 +781,13 @@ class Ast(Transformer):
         return child
 
     def spec_def(self, meta, name, *items):
-        return ("spec", name, [i for i in items if i])
+        kept = [i for i in items if i]
+        # An optional leading meta_tag (a dict from _parse_meta) classifies the
+        # whole spec, e.g. `spec ReturnUI "ui: screen flow" { ... }`. It is carried
+        # as a pseudo-item so the ("spec", name, items) shape stays a 3-tuple.
+        if kept and isinstance(kept[0], dict):
+            return ("spec", name, [("__spec_meta", kept[0])] + kept[1:])
+        return ("spec", name, kept)
 
     def refinement_impl(self, meta, name):
         return ("impl", name)
