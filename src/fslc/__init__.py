@@ -6,6 +6,7 @@ from .parser import parse
 from .model import build_spec, check_spec, FslError
 from .bmc import verify, prove, scenarios
 from .runtime import Monitor
+from .analysis import analyze, analyze_projection, build_tsg
 
 try:
     from importlib.metadata import version as _pkg_version, PackageNotFoundError
@@ -18,5 +19,5 @@ except Exception:
 
 __all__ = [
     "parse", "build_spec", "check_spec", "verify", "prove", "scenarios",
-    "Monitor", "FslError", "__version__",
+    "Monitor", "FslError", "analyze", "analyze_projection", "build_tsg", "__version__",
 ]

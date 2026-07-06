@@ -149,7 +149,7 @@ python -m fslc <subcommand> ...  # or via the venv python
 ```
 
 Output is always a single JSON document on stdout. exit: 0=success
-(verified/proved/generated), 1=property not satisfied
+(verified/proved/generated/analyzed), 1=property not satisfied
 (violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
 (parse/type/semantics/io), 3=internal error.
 
@@ -265,6 +265,11 @@ the formalization memo.**
    that surfaces verification bounds, fairness, KPI projections, branch lowering,
    and synthesized refinement mappings. For PMs/consultants, ask them to
    adjudicate concrete traces rather than logical formulas),
+   `fslc analyze file.fsl --profile ai-review`
+   (emits structural review findings over the Typed Semantic Graph, such as
+   disconnected requirements, unanchored properties, and progressless cycles.
+   These are review signals with `formal_status:"not_a_violation"`, not proof
+   failures),
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a

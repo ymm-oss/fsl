@@ -227,6 +227,7 @@ fslc verify specs/cart_v1.fsl --vacuity error   # detect vacuous properties (unr
 fslc verify specs/cart_v1.fsl --strict-tags     # match untagged declarations (fabrication candidates) and unreferenced requirements (omission candidates)
 fslc mutate specs/cart_v1.fsl                    # spec mutation: measure how much the properties constrain behavior
 fslc explain specs/cart_v1.fsl                   # skeleton enumeration + counterfactuals (what would happen without this rule)
+fslc analyze specs/cart_v1.fsl --profile ai-review # structural review findings (not proof failures)
 fslc html specs/cart_v1.fsl -o cart_report.html  # self-contained HTML report for team review
 fslc typestate specs/order_workflow.fsl --ts    # state machine → applicability check for phantom types + TS scaffold
 # (in the requirements dialect, the forbidden block can also write "operation sequences that should be rejected")
@@ -237,7 +238,7 @@ python -m fslc verify specs/cart_v1_buggy.fsl
 
 The output is JSON on stdout (`fslc chain` also writes its human status table to
 stderr). Exit codes: 0 = verified / proved / refines /
-conformant / generated / mutated / explained / typestate; 1 = violated /
+conformant / generated / mutated / explained / analyzed / typestate; 1 = violated /
 refinement_failed / reachable_failed / unknown_cti / nonconformant;
 2 = spec error (`error`, including vacuity under `--vacuity error`); 3 = internal error.
 `cart_v1_buggy.fsl` returns the shortest counterexample trace for the automatic bounds check (`type_bound`).

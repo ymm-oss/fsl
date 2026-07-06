@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc analyze` structural observation JSON. `--projection tsg` emits a stable
+  Typed Semantic Graph over requirements, actions, state variables, properties,
+  acceptance/forbidden scenarios, and traceability metadata. Graph projections
+  (`action_state_graph`, `requirement_property_graph`, `property_state_graph`)
+  add deterministic components, SCCs, representative cycles, and degree
+  summaries. `--profile ai-review` emits AI-readable review findings
+  (`disconnected_requirement`, `unanchored_property`, `progressless_cycle`) with
+  `formal_status:"not_a_violation"` so structural observations are not confused
+  with proof failures. See `docs/DESIGN-analysis.md`.
 - Optional **spec-level tag** classifying a whole spec: an intent string right
   after the spec name, `spec ReturnUI "ui: screen flow" { … }`. Metadata only —
   it desugars to nothing and is never verified (corpus snapshot unchanged) — and
