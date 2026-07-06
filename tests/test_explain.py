@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from fslc.cli import exit_code, run_explain
-from fslc.explain import explain_file
+from fslc.explain import _expr_to_text, explain_file
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +46,7 @@ def test_cart_v1_skeleton_lists_actions_properties_auto_checks_and_tags():
 
     properties = _by_name(skeleton["properties"])
     assert properties["SoldOut"]["kind"] == "reachable"
-    assert properties["SoldOut"]["body_text"] == "reachable SoldOut {"
+    assert properties["SoldOut"]["body_text"] == "forall i: ItemId: stock[i] == 0"
     assert properties["SoldOut"]["requirement"] is None
 
     checks = {(check["kind"], check["target"]) for check in skeleton["auto_checks"]}
@@ -79,13 +79,31 @@ def test_cancel_flow_dialect_carries_requirement_text_in_skeleton_and_witnesses(
         "id": "POL-1",
         "text": "A cancellation request must always be met with a retention offer",
     }
-    assert "policy POL-1" in props["POL-1"]["body_text"]
+    assert props["POL-1"]["body_text"] == (
+        "forall c: Sub: sub_stage[c] == CancelRequested ~> sub_stage[c] == OfferShown"
+    )
 
     actions = _by_name(out["skeleton"]["actions"])
     assert actions["request_cancel"]["actor"] == "Customer"
     assert actions["request_cancel"]["requires_text"] == [
-        "transition request_cancel Active          -> CancelRequested by Customer"
+        "requires sub_stage[c] == Active"
     ]
+
+    skeleton = out["skeleton"]
+    assert skeleton["kpis"] == [
+        {"name": "churned", "entity": "Sub", "stage": "Churned"},
+        {"name": "retained", "entity": "Sub", "stage": "Retained"},
+    ]
+    assert skeleton["domains"] == ["Sub: 3 instances (0..2)"]
+    assert skeleton["enums"] == {
+        "SubStage": ["Active", "CancelRequested", "OfferShown", "Retained", "Churned"],
+    }
+    flow = skeleton["stage_flows"][0]
+    assert flow["state"] == "sub_stage"
+    assert flow["stages"] == ["Active", "CancelRequested", "OfferShown", "Retained", "Churned"]
+    assert {
+        "action": "request_cancel", "from": "Active", "to": "CancelRequested", "actor": "Customer",
+    } in flow["transitions"]
 
     requirements = [w["requirement"] for w in out["witnesses"] if w.get("requirement")]
     assert props["POL-1"]["requirement"] in requirements
@@ -98,9 +116,42 @@ def test_compose_spec_source_fallback_does_not_crash():
     assert out["skeleton"]["actions"]
     assert out["skeleton"]["properties"]
     bank_settle = _by_name(out["skeleton"]["actions"])["bank.settle"]
-    assert bank_settle["requires_text"] == [
-        "source unavailable; using name/structure (component-origin or generated element)"
-    ]
+    # Rendered from the AST rather than a matched source line, so a composed
+    # (component-origin) action still gets a real, non-sentinel guard string.
+    assert bank_settle["requires_text"] == ["requires bank.pending > 0"]
+
+
+def test_deadline_invariant_and_generated_tick_are_tagged_generated():
+    out = explain_file(str(EXAMPLES / "nfr" / "support_sla.fsl"), depth=2)
+    skeleton = out["skeleton"]
+
+    properties = _by_name(skeleton["properties"])
+    deadline = next(p for p in properties.values() if p["name"].startswith("_deadline_"))
+    assert deadline["generated"] is True
+    assert deadline["body_text"] == "forall c: CaseId: resp_age[c] <= SLA_TICKS"
+
+    actions = _by_name(skeleton["actions"])
+    assert actions["tick"]["generated"] == {
+        "kind": "time_tick", "urgent_actions": ("respond_due",),
+    }
+    # A hand-written action literally named `tick` (no time block involved) is
+    # not generated — only the dialect-synthesized one is tagged.
+    design = explain_file(str(EXAMPLES / "nfr" / "sla_worker_design.fsl"), depth=2)
+    design_actions = _by_name(design["skeleton"]["actions"])
+    assert "generated" not in design_actions["tick"]
+
+    assert skeleton["enums"] == {"St": ["Waiting", "Accepted", "Responded"]}
+    assert skeleton["domains"] == ["CaseId: 3 instances (0..2)"]
+    assert skeleton["stage_flows"] == [{
+        "state": "cases",
+        "type": "St",
+        "stages": ["Waiting", "Accepted", "Responded"],
+        "transitions": [
+            {"action": "accept", "from": "Waiting", "to": "Accepted"},
+            {"action": "respond", "from": "Accepted", "to": "Responded"},
+            {"action": "respond_due", "from": "Accepted", "to": "Responded"},
+        ],
+    }]
 
 
 def test_explain_cli_exit_zero_for_valid_specs():
@@ -225,3 +276,50 @@ def test_explain_output_is_json_serializable():
     ]:
         out = explain_file(str(path), depth=2)
         json.dumps(out, ensure_ascii=False)
+
+
+def _var(name):
+    return ("var", name)
+
+
+def _bin(op, a, b):
+    return ("bin", op, a, b)
+
+
+def test_expr_to_text_parenthesizes_where_semantics_require_it():
+    # not (A and B) must not render as "not A and B", which re-parses as
+    # (not A) and B -- a different (inverted) formula.
+    assert (
+        _expr_to_text(("not", _bin("and", _var("pending"), _var("served"))))
+        == "not (pending and served)"
+    )
+    # (A or B) and C: the "or" binds looser than "and", so the grouping must
+    # survive.
+    assert (
+        _expr_to_text(_bin("and", _bin("or", _var("A"), _var("B")), _var("C")))
+        == "(A or B) and C"
+    )
+    # a * (b + c): "+" binds looser than "*".
+    assert (
+        _expr_to_text(_bin("*", _var("a"), _bin("+", _var("b"), _var("c"))))
+        == "a * (b + c)"
+    )
+    # a - (b - c) vs a - b - c: "-" is left-associative but not associative,
+    # so an explicitly-grouped right operand must keep its parens.
+    assert (
+        _expr_to_text(_bin("-", _var("a"), _bin("-", _var("b"), _var("c"))))
+        == "a - (b - c)"
+    )
+    assert (
+        _expr_to_text(_bin("-", _bin("-", _var("a"), _var("b")), _var("c")))
+        == "a - b - c"
+    )
+
+
+def test_expr_to_text_omits_parens_not_required_by_precedence():
+    # "and" binds tighter than "or", so a left-nested `(A and B) or C` needs
+    # no parens around the "and" -- this is the natural, unparenthesized parse.
+    assert (
+        _expr_to_text(_bin("or", _bin("and", _var("A"), _var("B")), _var("C")))
+        == "A and B or C"
+    )
