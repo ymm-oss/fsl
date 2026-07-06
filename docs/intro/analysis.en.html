@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Structural Analysis with fslc analyze — FSL Manual</title>
+<meta name="description" content="How to use fslc analyze for Typed Semantic Graph output, graph projections, AI-review findings, and review-only structural observations." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="analysis">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Structural observation</p>
+    <h1 class="reveal">Use <code>fslc analyze</code> to inspect the shape of a spec</h1>
+    <p class="lead reveal">Verification answers whether declared contracts hold. Analysis answers a different question: what is connected to what, and what deserves review?</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="../DESIGN-analysis.md">DESIGN-analysis.md</a>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Boundary</p>
+    <h2 class="reveal">Analyze is not verify</h2>
+    <p class="lead narrow reveal"><code>fslc analyze</code> builds deterministic structural JSON from the validated spec model. It does not call Z3, explore reachable states, replay logs, or prove refinement.</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>Use it for review</h3>
+        <p>Find disconnected requirements, unanchored properties, graph cycles, and traceability gaps before deeper verification work.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Keep proof separate</h3>
+        <p>Use <code>verify</code>, <code>refine</code>, and <code>replay</code> when you need formal evidence or implementation conformance.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Read the status honestly</h3>
+        <p>Structural findings carry <code>formal_status: "not_a_violation"</code>. A cycle is not automatically a bug.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Commands</p>
+    <h2 class="reveal">Run projections and findings</h2>
+    <div class="panel reveal">
+      <pre><code>fslc analyze spec.fsl --projection tsg --format json
+fslc analyze spec.fsl --projection action_state_graph --format json
+fslc analyze spec.fsl --projection requirement_property_graph --format json
+fslc analyze spec.fsl --projection property_state_graph --format json
+fslc analyze spec.fsl --profile ai-review --format json</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Projection</th><th>What it shows</th></tr>
+      <tr><td><code>tsg</code></td><td>The full Typed Semantic Graph over specs, state, actions, guards, effects, properties, requirements, and scenarios.</td></tr>
+      <tr><td><code>action_state_graph</code></td><td>Actions connected to state variables they read and write.</td></tr>
+      <tr><td><code>requirement_property_graph</code></td><td>Requirement IDs connected to covered actions, properties, scenarios, KPI, and control nodes.</td></tr>
+      <tr><td><code>property_state_graph</code></td><td>User properties connected to the state variables they read or check.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">AI-review</p>
+    <h2 class="reveal">Initial findings</h2>
+    <div class="cards reveal">
+      <div class="card">
+        <h3><code>disconnected_requirement</code></h3>
+        <p>A requirement is declared but has no useful structural anchor such as an action, property, scenario, KPI, or control.</p>
+      </div>
+      <div class="card">
+        <h3><code>unanchored_property</code></h3>
+        <p>A user property has no requirement tag, scenario/governance anchor, or action-state anchor.</p>
+      </div>
+      <div class="card">
+        <h3><code>progressless_cycle</code></h3>
+        <p>A requirement/scenario-linked multi-action cycle has no visible progress story such as <code>leadsTo</code>, <code>fair action</code>, or <code>terminal</code>.</p>
+      </div>
+    </div>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">The cycle finding does not inspect English keywords in names. It relies on structural anchors such as requirement tags and scenarios, so non-English requirement text is preserved without being interpreted by core fslc.</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Schemas</p>
+    <h2 class="reveal">Output families</h2>
+    <table class="matrix reveal">
+      <tr><th>Output</th><th>Schema version</th><th>Use</th></tr>
+      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>Stable graph data for downstream projections and tools.</td></tr>
+      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, and degree.</td></tr>
+      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>Structured review findings with witnesses, repairs, and caveats.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Limits</p>
+    <h2 class="reveal">What it does not do yet</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>No natural-language inference</h3>
+        <p>Requirement text is carried through the graph, but the core analyzer does not interpret its meaning.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>No refinement-file graph yet</h3>
+        <p>Standalone mapping-file analysis is tracked separately from the current single-spec projections.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>No visual graph export yet</h3>
+        <p>DOT, Mermaid, project-wide traceability, JSON Schema, and editor diagnostics are follow-up issues.</p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -30,6 +30,8 @@ from .ledger import (
     default_output_name as default_ledger_output_name,
     render_ledger,
 )
+from .analysis import analyze as analyze_structure, analyze_projection, build_tsg
+from .analysis.projections import SUPPORTED_PROJECTIONS
 
 FSL_VERSION = "1.0"
 
@@ -343,6 +345,53 @@ def run_typestate(file):
     except FileNotFoundError:
         return _envelope({"result": "error", "kind": "io",
                           "message": f"file not found: {file}"})
+
+
+def run_analyze(file, projection="tsg", profile=None, output_format="json"):
+    try:
+        if output_format != "json":
+            raise FslError(f"unsupported analyze format: {output_format}", kind="semantics")
+        spec, _source_lines = _read_spec(file)
+        if profile:
+            out = {
+                "result": "analyzed",
+                "spec": spec["name"],
+                **analyze_structure(spec, profile=profile),
+            }
+        elif projection == "tsg":
+            out = {
+                "result": "analyzed",
+                "spec": spec["name"],
+                **build_tsg(spec),
+            }
+        elif projection in SUPPORTED_PROJECTIONS:
+            out = {
+                "result": "analyzed",
+                "spec": spec["name"],
+                **analyze_projection(spec, projection),
+            }
+        else:
+            raise FslError(f"unsupported analyze projection: {projection}", kind="semantics")
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
 def _read_spec(file, bounds_overrides=None):
@@ -784,7 +833,7 @@ def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
-             "refines", "typestate", "mutated", "explained"):
+             "refines", "typestate", "mutated", "explained", "analyzed"):
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant", "refinement_failed"):
         return 1
@@ -899,6 +948,18 @@ def _build_arg_parser():
     ts.add_argument("--ts", action="store_true",
                     help="emit only the derivable entities' TypeScript to stdout instead of JSON")
 
+    an = sub.add_parser("analyze",
+                        help="emit structural analysis JSON for a spec")
+    an.add_argument("file")
+    an.add_argument("--projection",
+                    choices=["tsg", *sorted(SUPPORTED_PROJECTIONS)],
+                    default="tsg",
+                    help="structural projection to emit")
+    an.add_argument("--profile", choices=["ai-review"], default=None,
+                    help="emit AI-readable structural review findings")
+    an.add_argument("--format", choices=["json"], default="json",
+                    dest="output_format")
+
     return ap
 
 
@@ -981,6 +1042,9 @@ def _dispatch(args):
                 sys.exit(0)
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "analyze":
+        result = run_analyze(args.file, args.projection, args.profile, args.output_format)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
                             engine=args.engine, k_ind=args.k_ind,

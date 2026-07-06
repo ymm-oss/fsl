@@ -388,6 +388,7 @@ fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed 
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
+fslc analyze   <file.fsl> [--projection tsg|action_state_graph|requirement_property_graph|property_state_graph] [--profile ai-review]  # structural review JSON (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 ```
@@ -408,7 +409,7 @@ from the run and from checked-property outputs (`invariants_checked`,
 `--exclude-property` name the same property, exclusion wins.
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / typestate,
+mutated / explained / analyzed / typestate,
 `1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error.
@@ -1260,6 +1261,14 @@ DESIGN-*.md).
   narration. Moves human review from reading logical formulas to adjudicating
   concrete examples. JSON mode remains available without `--readable`. →
   [`DESIGN-explain.md`](DESIGN-explain.md)
+- **`fslc analyze`** — emits structural observation JSON. `--projection tsg`
+  returns the Typed Semantic Graph of requirements, actions, state, properties,
+  and scenarios. Graph projections return connected components, SCCs, and
+  representative cycles. `--profile ai-review` emits review findings such as
+  `disconnected_requirement`, `unanchored_property`, and `progressless_cycle`.
+  These findings carry `formal_status: "not_a_violation"`; a structural cycle or
+  disconnected component is not a proof failure. →
+  [`DESIGN-analysis.md`](DESIGN-analysis.md)
 - **`fslc html`** — a self-contained HTML report over the same explain/verify
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and

@@ -153,6 +153,14 @@ code diverges from it — make this distinction explicit in the report.
 
 ## Recommended practices (optional — by risk and importance)
 
+- **Structural review before repair**: for AI-authored or heavily patched specs,
+  run `fslc analyze <file> --profile ai-review` alongside `check`/`verify`.
+  Findings such as `disconnected_requirement`, `unanchored_property`, and
+  `progressless_cycle` are review signals, not LSP/refinement failures. Use them
+  to ask whether the contract has traceability holes or missing progress intent
+  before changing the spec. Do not weaken a contract merely to remove an
+  `analyze` finding; the finding's `formal_status` is normally
+  `not_a_violation`.
 - **Variant matrix**: when there are multiple variants, push the refine of all
   variants × the abstract contract (a mechanical check that "all variants are
   substitutable"). Only for high-risk contracts.
