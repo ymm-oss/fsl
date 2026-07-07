@@ -125,6 +125,36 @@
       "result": "error"
     }
   },
+  "examples/db/safe_add_nullable_column.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_drop_column_with_old_server.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_drop_column_with_worker.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_not_null_before_backfill.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/e2e/1_business.fsl": {
     "check": {
       "result": "ok",

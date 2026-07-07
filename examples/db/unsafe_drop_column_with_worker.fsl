@@ -1,0 +1,32 @@
+dbsystem UnsafeDropColumnWithWorker {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column legacy_name: Text present backfilled nullable;
+    }
+  }
+
+  migration drop_legacy_name from 0 to 1 {
+    drop users.legacy_name;
+  }
+
+  artifact server_v2 {
+    reads users.id;
+  }
+
+  artifact worker_v1 {
+    reads users.legacy_name;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v2 when schema 1..1;
+    may_exist worker_v1 when schema 0..1;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule removed_only_after_unused;
+  }
+}

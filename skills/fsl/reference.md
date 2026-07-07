@@ -84,6 +84,47 @@ governance <Name> {
 }
 ```
 
+Database compatibility dialect (MVP; expands to the same kernel):
+
+```fsl
+dbsystem <Name> {
+  database <db> {
+    schema <initial_version>
+    table <table> {
+      column <column>: <db_type> present backfilled not_null;
+      column <future_column>: <db_type> absent;
+    }
+  }
+  migration <name> from <v0> to <v1> {
+    add <table>.<column> nullable;
+    backfill <table>.<column>;
+    set_not_null <table>.<column>;
+    drop <table>.<column>;
+  }
+  artifact <version> {
+    reads <table>.<column>, ...;
+    writes <table>.<column>, ...;
+  }
+  environment <env> {
+    schema <lo>..<hi>;
+    active <version> when schema <lo>..<hi>;
+    supported <version> when schema <lo>..<hi>;
+    may_exist <version> when schema <lo>..<hi>;
+  }
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}
+```
+
+`dbsystem` checks database migration compatibility, not DB-engine behavior. Schema
+ranges are finite reachable rollout snapshots; percentages and wall-clock TTLs
+must be modeled as finite coexistence windows/ticks. Use `fslc db check` for
+stable fsl-db findings (`verified_under_assumptions` on success).
+
 Composite spec (a separate top-level form):
 
 ```fsl
@@ -309,6 +350,7 @@ fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|requirement_p
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
+fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
 ```
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`

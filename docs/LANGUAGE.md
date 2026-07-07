@@ -86,6 +86,54 @@ are exactly equivalent to writing the bounded type directly — the difference i
 only readability (a design spec reads as documentation instead of asserting a
 domain size that is really a model bound). See `docs/DESIGN-spec-domains.md`.
 
+The database compatibility dialect is another frontend over the same kernel:
+
+```fsl
+dbsystem <Name> {
+  database <db> {
+    schema <initial_version>
+    table <table> {
+      column <column>: <db_type> present backfilled not_null;
+      column <future_column>: <db_type> absent;
+    }
+  }
+
+  migration <name> from <v0> to <v1> {
+    add <table>.<column> nullable;
+    backfill <table>.<column>;
+    set_not_null <table>.<column>;
+    drop <table>.<column>;
+  }
+
+  artifact <version> {
+    reads <table>.<column>, ...;
+    writes <table>.<column>, ...;
+  }
+
+  environment <env> {
+    schema <lo>..<hi>;
+    active <version> when schema <lo>..<hi>;
+    supported <version> when schema <lo>..<hi>;
+    may_exist <version> when schema <lo>..<hi>;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}
+```
+
+`dbsystem` expands to a kernel spec with scalar state and `Map<Column, Bool>`
+column lifecycle maps. It never uses nested `Map<_, Set<_>>` state. `fslc check`
+and `fslc verify` work on it after expansion; `fslc db check` additionally emits
+stable fsl-db findings and returns `verified_under_assumptions` for successful
+formal checks. Environment schema ranges are finite reachable snapshots in the
+declared migration order; rollout percentages and wall-clock TTLs must be modeled
+as finite coexistence windows/ticks. See `docs/DESIGN-db.md`.
+
 `fslc verify` can override a `verify` block's `instances`/`values` bounds from
 the command line, without editing the spec:
 
@@ -413,6 +461,7 @@ fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable t
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
+fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
 ```
 
 In addition to `reachable` and action coverage, `scenarios` outputs, for each
@@ -1234,12 +1283,40 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   auxiliary invariant (the `age + remaining work <= K` form) (derived from the
   CTI; real examples in `examples/nfr/`).
 
-### 13.5 What is not handled (the boundary of the layers)
+### 13.5 Database compatibility layer: `dbsystem` (fsl-db)
+
+`dbsystem` models schema migration compatibility across application artifacts and
+environments. It is a dialect expansion, not a DB engine model: SQL parsers,
+ORM importers, optimizer behavior, lock timing, and production-data completeness
+are outside the MVP.
+
+The MVP checks column lifecycle and read/write capabilities:
+
+- `column_removed_while_still_read`
+- `column_removed_while_still_written`
+- `not_null_before_backfill`
+
+Use `fslc db check` when you want fsl-db vocabulary:
+
+```bash
+fslc db check examples/db/safe_add_nullable_column.fsl
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
+```
+
+Successful checks return `verified_under_assumptions` with the finite rollout and
+capability-completeness assumptions. Compatibility failures return
+`finding_schema_version: "fsl-db-finding.v0"` plus `findings[]` containing the
+environment, artifact, migration/schema element, minimal conflict set, and repair
+candidates. Use ordinary `fslc verify` when you want to inspect the generated
+kernel counterexample directly.
+
+### 13.6 What is not handled (the boundary of the layers)
 
 The majority of non-functional requirements (permissions, audit, capacity,
 reliability behavior, discrete-time SLA) can be handled (§13.4). What remains
 outside FSL is: **probability, percentiles (99.9% etc.), real time (wall-clock
-ms), usability, and prose rationale** (write these in each layer's document).
+ms), usability, DB optimizer/lock timing, full production-data proof, and prose
+rationale** (write these in each layer's document).
 FSL is responsible for the **checkable skeleton** of each artifact.
 
 ## 14. Library API

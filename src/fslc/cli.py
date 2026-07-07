@@ -41,6 +41,7 @@ from .analysis import (
 )
 from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
+from .db_check import check_dbsystem, load_dbsystem
 
 FSL_VERSION = "1.0"
 
@@ -1192,10 +1193,41 @@ def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_db_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
+    try:
+        system = load_dbsystem(file)
+        return _envelope(check_dbsystem(
+            system,
+            depth=depth,
+            engine=engine,
+            deadlock_mode=deadlock_mode,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
-             "refines", "typestate", "mutated", "explained", "analyzed"):
+             "refines", "typestate", "mutated", "explained", "analyzed",
+             "verified_under_assumptions"):
         return 0
     if r == "sweep_passed":
         return 0
@@ -1343,6 +1375,14 @@ def _build_arg_parser():
     an.add_argument("--format", choices=sorted(ANALYZE_FORMATS), default="json",
                     dest="output_format")
 
+    db = sub.add_parser("db", help="database compatibility dialect commands")
+    db_sub = db.add_subparsers(dest="db_cmd", required=True)
+    dbc = db_sub.add_parser("check", help="check a dbsystem and emit fsl-db findings")
+    dbc.add_argument("file")
+    dbc.add_argument("--depth", type=int, default=8)
+    dbc.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    dbc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+
     return ap
 
 
@@ -1440,6 +1480,17 @@ def _dispatch(args):
         if args.output_format != "json" and result.get("result") == "analyzed" and "content" in result:
             sys.stdout.write(result["content"])
         else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "db":
+        if args.db_cmd == "check":
+            result = run_db_check(args.file, args.depth, args.engine, args.deadlock)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown db command: {args.db_cmd}",
+            })
             print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,

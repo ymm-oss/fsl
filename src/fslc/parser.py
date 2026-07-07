@@ -21,6 +21,8 @@ from .dialects import (
     expand_requirements_with_display,
     expand_spec_domains,
 )
+from .db_expand import expand_dbsystem
+from .db_parser import is_dbsystem_source, parse_dbsystem
 
 
 def parse_src(src, base_dir=None, bounds_overrides=None):
@@ -30,6 +32,21 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
     comes from ``fslc verify --instances``/``--values`` and replaces the matching
     ``verify { ... }`` bounds before dialect desugaring runs.
     """
+    if is_dbsystem_source(src):
+        has_bounds_overrides = bool(
+            bounds_overrides
+            and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
+        )
+        if has_bounds_overrides:
+            from .model import FslError
+            raise FslError(
+                "--instances/--values do not apply to dbsystem; set finite schema windows in the dbsystem file",
+                kind="semantics",
+            )
+        system = parse_dbsystem(src)
+        expanded = expand_dbsystem(system)
+        return expanded.ast, expanded.display_names
+
     try:
         tree = PARSER.parse(src)
     except UnexpectedInput as e:

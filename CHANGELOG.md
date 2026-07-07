@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- fsl-db MVP (`dbsystem`) for database migration compatibility across schema
+  versions, artifacts, and environments. The dialect parses typed DB IR, expands
+  to the existing kernel via `Map<Column, Bool>` lifecycle state and generated
+  migration actions/invariants, and adds `fslc db check` for stable
+  AI-readable findings (`fsl-db-finding.v0`) such as
+  `column_removed_while_still_read`, `column_removed_while_still_written`, and
+  `not_null_before_backfill`. Includes golden fixtures in `examples/db/`,
+  docs in `docs/DESIGN-db.md`, and updated language/skill references. (#122,
+  #123, #124, #125, #126, #127, #128)
 - Issue #104 follow-ups: typed `relation A -> B` state with relation helpers
   (`.contains/.add/.remove`, `reachable`, `acyclic`, `functional`,
   `injective`, `domain`, `range`); `helpful action(args)` metadata for

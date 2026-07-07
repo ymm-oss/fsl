@@ -38,6 +38,7 @@
 | [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate` (applicability check for state machine → typestate + TS scaffold) |
 | [`DESIGN-analysis.md`](DESIGN-analysis.md) | `fslc analyze` (Typed Semantic Graph, graph projections, batch mode, refinement/project traceability graphs, DOT/Mermaid exports, schemas, AI-readable structural review findings) |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
+| [`DESIGN-db.md`](DESIGN-db.md) | fsl-db (`dbsystem`) database compatibility dialect: multi-environment schema/artifact checks, finding schema, rollout assumptions, and post-MVP preservation/runtime boundaries |
 
 ## Dogfooding records (DOGFOOD-*)
 

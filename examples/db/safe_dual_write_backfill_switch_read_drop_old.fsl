@@ -1,0 +1,58 @@
+dbsystem SafeDualWriteBackfillSwitchReadDropOld {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column legacy_name: Text present backfilled nullable;
+      column display_name: Text absent;
+    }
+  }
+
+  migration add_display_name from 0 to 1 {
+    add users.display_name nullable;
+  }
+
+  migration backfill_display_name from 1 to 2 {
+    backfill users.display_name;
+  }
+
+  migration require_display_name from 2 to 3 {
+    set_not_null users.display_name;
+  }
+
+  migration drop_legacy_name from 3 to 4 {
+    drop users.legacy_name;
+  }
+
+  artifact server_v1 {
+    reads users.id, users.legacy_name;
+    writes users.legacy_name;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.legacy_name, users.display_name;
+    writes users.legacy_name, users.display_name;
+  }
+
+  artifact server_v3 {
+    reads users.id, users.display_name;
+    writes users.display_name;
+  }
+
+  environment prod {
+    schema 0..4;
+    active server_v1 when schema 0..0;
+    supported server_v1 when schema 0..1;
+    active server_v2 when schema 1..2;
+    supported server_v2 when schema 1..3;
+    active server_v3 when schema 3..4;
+    supported server_v3 when schema 3..4;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}

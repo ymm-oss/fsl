@@ -30,6 +30,11 @@ re-verified as it changes (regression, drift, cross-layer change-impact via
 | [`fsl-from-code/`](fsl-from-code/) | reverse-engineering a design spec from existing code, anchored by conformance back to that code | kernel `spec` + conformance harness |
 | [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
 
+The shared `fsl/` reference also covers the `dbsystem` database compatibility
+dialect. Use it for schema migration / artifact read-write compatibility checks
+and `fslc db check` findings; SQL/ORM importers, runtime observation, and data
+preservation proofs are intentionally post-MVP.
+
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or
 repairing verifier output.
