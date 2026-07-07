@@ -691,6 +691,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
                 return ("set_val", state[n], ty[1])
             if ty[0] == "seq":
                 return ("seq_val", state[f"{n}__data"], state[f"{n}__len"], ty[1], ty[2])
+            if ty[0] == "relation":
+                return ("relation_val", state[n], ty[1], ty[2])
         if n in state:
             return state[n]
         _err(f"unknown identifier '{n}'")
@@ -770,6 +772,81 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         return _eval_count(e, state, binds, spec, old_state, in_ensures)
     if tag == "sum":
         return _eval_sum(e, state, binds, spec, old_state, in_ensures)
+    if tag == "rel_reachable":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("reachable() expects a relation as its first argument")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"reachable() requires a self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        src = eval_expr(e[2], state, binds, spec, old_state, in_ensures)
+        dst = eval_expr(e[3], state, binds, spec, old_state, in_ensures)
+        return _relation_reachable_expr(rel, src_ty, src, dst, spec)
+    if tag == "rel_acyclic":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("acyclic() expects a relation")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"acyclic() requires a binary self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        checks = [
+            z3.Not(_relation_reachable_expr(rel, src_ty, _z3_domain_value(src_ty, v),
+                                            _z3_domain_value(src_ty, v), spec))
+            for v in _relation_endpoint_values(src_ty, spec)
+        ]
+        return z3.And(*checks) if checks else z3.BoolVal(True)
+    if tag == "rel_functional":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("functional() expects a relation")
+        rel, src_ty, dst_ty = parts
+        checks = []
+        dst_values = _relation_endpoint_values(dst_ty, spec)
+        for src in _relation_endpoint_values(src_ty, spec):
+            zsrc = _z3_domain_value(src_ty, src)
+            for i, left in enumerate(dst_values):
+                for right in dst_values[i + 1:]:
+                    checks.append(z3.Not(z3.And(
+                        _relation_contains(rel, src_ty, dst_ty, zsrc, _z3_domain_value(dst_ty, left), spec),
+                        _relation_contains(rel, src_ty, dst_ty, zsrc, _z3_domain_value(dst_ty, right), spec),
+                    )))
+        return z3.And(*checks) if checks else z3.BoolVal(True)
+    if tag == "rel_injective":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("injective() expects a relation")
+        rel, src_ty, dst_ty = parts
+        checks = []
+        src_values = _relation_endpoint_values(src_ty, spec)
+        for dst in _relation_endpoint_values(dst_ty, spec):
+            zdst = _z3_domain_value(dst_ty, dst)
+            for i, left in enumerate(src_values):
+                for right in src_values[i + 1:]:
+                    checks.append(z3.Not(z3.And(
+                        _relation_contains(rel, src_ty, dst_ty, _z3_domain_value(src_ty, left), zdst, spec),
+                        _relation_contains(rel, src_ty, dst_ty, _z3_domain_value(src_ty, right), zdst, spec),
+                    )))
+        return z3.And(*checks) if checks else z3.BoolVal(True)
+    if tag == "rel_domain":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("domain() expects a relation")
+        return _relation_set_from_projection(parts[0], parts[1], parts[2], spec, "domain")
+    if tag == "rel_range":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("range() expects a relation")
+        return _relation_set_from_projection(parts[0], parts[1], parts[2], spec, "range")
     if tag == "min":
         a, b = eval_expr(e[1], state, binds, spec, old_state, in_ensures), \
                eval_expr(e[2], state, binds, spec, old_state, in_ensures)
@@ -1005,7 +1082,36 @@ def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spe
     return None
 
 
+def _eval_relation_method(rel, src_ty, dst_ty, method, args, state, binds, spec,
+                          old_state, in_ensures):
+    if method == "contains":
+        if len(args) != 2:
+            _err("relation.contains expects 2 arguments", kind="type")
+        src = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_expr(args[1], state, binds, spec, old_state, in_ensures)
+        return _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+    if method in ("add", "remove"):
+        if len(args) != 2:
+            _err(f"relation.{method} expects 2 arguments", kind="type")
+        src = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_expr(args[1], state, binds, spec, old_state, in_ensures)
+        key = _relation_key(src_ty, dst_ty, src, dst, spec)
+        val = z3.BoolVal(method == "add")
+        return ("relation_val", z3.Store(rel, key, val), src_ty, dst_ty)
+    return None
+
+
 def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
+    relation_parts = _relation_parts(base)
+    if relation_parts is not None:
+        res = _eval_relation_method(
+            relation_parts[0], relation_parts[1], relation_parts[2], method, args,
+            state, binds, spec, old_state, in_ensures,
+        )
+        if res is not None:
+            return res
+        _err(f"unknown method '{method}' on relation", kind="type")
+
     set_parts = _set_elem_ty(base, state, spec)
     if set_parts is not None:
         res = _eval_set_method(
@@ -1027,7 +1133,7 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
             return res
         _err(f"unknown method '{method}' on Seq")
 
-    _err("method call on value that is neither Set nor Seq")
+    _err("method call on value that is neither relation, Set, nor Seq")
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
@@ -1067,6 +1173,15 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
                 m = z3.Store(m, idx, z3.BoolVal(True))
             pend[n] = m
             return ("scalar", n)
+        if ty[0] == "relation" and rhs[0] == "set_lit":
+            if rhs[1]:
+                _err(
+                    "relation literals only support the empty initializer Set {}; "
+                    "use r = r.add(a, b) to add pairs",
+                    kind="type",
+                )
+            pend[n] = z3.K(z3.IntSort(), z3.BoolVal(False))
+            return ("scalar", n)
         if ty[0] == "seq" and rhs[0] == "seq_lit":
             elem_ty, cap = ty[1], ty[2]
             if len(rhs[1]) > cap:
@@ -1095,6 +1210,11 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
                 pend[n] = val[1]
             else:
                 pend[n] = val
+        elif ty[0] == "relation":
+            if isinstance(val, tuple) and val[0] == "relation_val":
+                pend[n] = val[1]
+            else:
+                _err("relation assignment requires Set {} or a relation operation expression")
         elif ty[0] == "seq":
             if isinstance(val, tuple) and val[0] == "seq_val":
                 pend[f"{n}__data"] = val[1]
@@ -1513,6 +1633,109 @@ def _z3_domain_value(kty, value):
     return z3.IntVal(value)
 
 
+def _relation_endpoint_values(ty, spec):
+    return list(_map_domain(ty, spec))
+
+
+def _relation_endpoint_size(ty, spec):
+    return len(_relation_endpoint_values(ty, spec))
+
+
+def _relation_endpoint_index(ty, value, spec):
+    if ty[0] == "bool":
+        if isinstance(value, bool):
+            return z3.IntVal(1 if value else 0)
+        if isinstance(value, z3.ExprRef) and value.sort().kind() == z3.Z3_BOOL_SORT:
+            return z3.If(value, z3.IntVal(1), z3.IntVal(0))
+        _err("relation Bool endpoint expects a Bool expression", kind="type")
+    lo, _hi = domain_range(ty, spec["types"])
+    if isinstance(value, bool):
+        value = z3.IntVal(1 if value else 0)
+    elif isinstance(value, int):
+        value = z3.IntVal(value)
+    return value - z3.IntVal(lo)
+
+
+def _relation_key(src_ty, dst_ty, src, dst, spec):
+    dst_size = _relation_endpoint_size(dst_ty, spec)
+    return _relation_endpoint_index(src_ty, src, spec) * z3.IntVal(dst_size) + \
+        _relation_endpoint_index(dst_ty, dst, spec)
+
+
+def _relation_contains(rel, src_ty, dst_ty, src, dst, spec):
+    return z3.Select(rel, _relation_key(src_ty, dst_ty, src, dst, spec))
+
+
+def _same_relation_endpoint_type(src_ty, dst_ty):
+    return src_ty == dst_ty
+
+
+def _relation_type_error(message):
+    _err(
+        message,
+        kind="type",
+        hint=(
+            "relation helpers operate on binary relation state. Use .contains(a, b), "
+            ".add(a, b), .remove(a, b), reachable(r, a, b), acyclic(r), "
+            "functional(r), injective(r), domain(r), or range(r)."
+        ),
+    )
+
+
+def _relation_parts(base):
+    if isinstance(base, tuple) and base[0] == "relation_val":
+        return base[1], base[2], base[3]
+    return None
+
+
+def _relation_reachable_expr(rel, ty, src, dst, spec):
+    values = _relation_endpoint_values(ty, spec)
+    if not values:
+        return z3.BoolVal(False)
+
+    def const(v):
+        return _z3_domain_value(ty, v)
+
+    def path_at_most(k, a, b):
+        direct = _relation_contains(rel, ty, ty, a, b, spec)
+        if k <= 1:
+            return direct
+        via = [
+            z3.And(
+                _relation_contains(rel, ty, ty, a, const(mid), spec),
+                path_at_most(k - 1, const(mid), b),
+            )
+            for mid in values
+        ]
+        return z3.Or(direct, *via)
+
+    return path_at_most(len(values), src, dst)
+
+
+def _relation_set_from_projection(rel, src_ty, dst_ty, spec, side):
+    elem_ty = src_ty if side == "domain" else dst_ty
+    arr = z3.K(z3_sort(elem_ty, spec["types"]), z3.BoolVal(False))
+    src_values = _relation_endpoint_values(src_ty, spec)
+    dst_values = _relation_endpoint_values(dst_ty, spec)
+    for src in src_values:
+        zsrc = _z3_domain_value(src_ty, src)
+        present = z3.Or(*[
+            _relation_contains(rel, src_ty, dst_ty, zsrc, _z3_domain_value(dst_ty, dst), spec)
+            for dst in dst_values
+        ]) if dst_values else z3.BoolVal(False)
+        if side == "domain":
+            arr = z3.Store(arr, zsrc, present)
+    if side == "range":
+        for dst in dst_values:
+            zdst = _z3_domain_value(dst_ty, dst)
+            present = z3.Or(*[
+                _relation_contains(rel, src_ty, dst_ty, _z3_domain_value(src_ty, src), zdst, spec)
+                for src in src_values
+            ]) if src_values else z3.BoolVal(False)
+            arr = z3.Store(arr, zdst, present)
+    return ("set_val", arr, elem_ty)
+
+
 def _symmetric_type_names(spec):
     symmetry = spec.get("symmetry") or {}
     return [name for name in symmetry if spec["types"].get(name, {}).get("symmetric")]
@@ -1712,6 +1935,21 @@ def _logical_val(model, state, name, ty, spec):
             else:
                 obj[fn] = _display_value(fty, _py_val(model, state[f"{name}__{fn}"]), spec)
         return obj
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        pairs = []
+        for src in _relation_endpoint_values(src_ty, spec):
+            for dst in _relation_endpoint_values(dst_ty, spec):
+                key = _relation_key(
+                    src_ty, dst_ty, _z3_domain_value(src_ty, src),
+                    _z3_domain_value(dst_ty, dst), spec,
+                )
+                if _py_val(model, z3.Select(state[name], key)):
+                    pairs.append([
+                        _display_value(src_ty, src, spec),
+                        _display_value(dst_ty, dst, spec),
+                    ])
+        return pairs
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
         mout = {}
@@ -1849,6 +2087,12 @@ def _expr_static_type(e, spec, env):
     if tag == "method":
         method = e[2]
         base_ty = _expr_static_type(e[1], spec, env)
+        if base_ty and base_ty[0] == "relation":
+            if method == "contains":
+                return ("bool",)
+            if method in ("add", "remove"):
+                return base_ty
+            _err(f"unknown method '{method}' on relation", kind="type")
         if method in ("contains",):
             return ("bool",)
         if method == "size":
@@ -1877,6 +2121,13 @@ def _expr_static_type(e, spec, env):
         return _merge_ite_static_types(a_ty, b_ty)
     if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
         return ("bool",)
+    if tag in ("rel_reachable", "rel_acyclic", "rel_functional", "rel_injective"):
+        return ("bool",)
+    if tag in ("rel_domain", "rel_range"):
+        rel_ty = _expr_static_type(e[1], spec, env)
+        if not rel_ty or rel_ty[0] != "relation":
+            _relation_type_error(f"{'domain' if tag == 'rel_domain' else 'range'}() expects a relation")
+        return ("set", rel_ty[1] if tag == "rel_domain" else rel_ty[2])
     if tag in ("count", "sum", "min", "max", "abs"):
         return ("int",)
     return None
@@ -2080,6 +2331,17 @@ def _logical_eq_var(spec, s1, s2, name, ty):
         for i in _map_domain(elem_ty, spec):
             key = _z3_domain_value(elem_ty, i)
             parts.append(z3.Select(m1, key) == z3.Select(m2, key))
+        return z3.And(*parts) if parts else z3.BoolVal(True)
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        parts = []
+        for src in _relation_endpoint_values(src_ty, spec):
+            for dst in _relation_endpoint_values(dst_ty, spec):
+                key = _relation_key(
+                    src_ty, dst_ty, _z3_domain_value(src_ty, src),
+                    _z3_domain_value(dst_ty, dst), spec,
+                )
+                parts.append(z3.Select(s1[name], key) == z3.Select(s2[name], key))
         return z3.And(*parts) if parts else z3.BoolVal(True)
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
@@ -2870,6 +3132,94 @@ _LEADSTO_RANK_PROGRESS_HINT = (
     "from every state where P holds and Q is false, each enabled action must "
     "either make Q true, or keep P true and strictly decrease the measure"
 )
+_LEADSTO_HELPFUL_PROGRESS_HINT = (
+    "helpful marks which action instance is responsible for progress. The "
+    "matching action must be declared `fair action`, must be enabled whenever "
+    "the obligation is pending, and must strictly decrease the rank when it fires; "
+    "other actions only need to keep the pending obligation true unless they make Q true"
+)
+
+
+def _model_bool(model, expr):
+    return z3.is_true(model.eval(expr, model_completion=True))
+
+
+def _helpful_arg_value(expr, extra_binds, spec, loc=None):
+    try:
+        val = eval_expr(expr, {}, extra_binds, spec)
+    except Exception as ex:
+        _err(
+            "helpful action arguments must be state-independent leadsto binders, "
+            "constants, enum members, or arithmetic over those values",
+            kind="type",
+            loc=loc,
+            hint="use `helpful actionName(c)` to bind the helpful action to the pending forall entity",
+        )
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, int):
+        return val
+    if isinstance(val, z3.ExprRef):
+        simplified = z3.simplify(val)
+        if z3.is_int_value(simplified):
+            return simplified.as_long()
+        if z3.is_true(simplified):
+            return True
+        if z3.is_false(simplified):
+            return False
+    _err(
+        "helpful action arguments must resolve to concrete bounded values",
+        kind="type",
+        loc=loc,
+        hint="helpful metadata is a per-binding action selector, not a state predicate",
+    )
+
+
+def _helpful_matches(leadsto, extra_binds, instances, spec):
+    out = []
+    for helper in leadsto.get("helpful") or []:
+        name = helper["action"]
+        action_def = next((a for a in spec["actions"] if a["name"] == name), None)
+        if action_def is None:
+            continue
+        params = [p[0] for p in action_def["params"]]
+        expected = [
+            _helpful_arg_value(arg, extra_binds, spec, helper.get("loc"))
+            for arg in helper.get("args") or []
+        ]
+        for idx, inst in enumerate(instances):
+            if inst["action"] != name:
+                continue
+            if all(inst["binds"].get(param) == value for param, value in zip(params, expected)):
+                out.append((idx, helper))
+    return out
+
+
+def _display_instance(inst, spec):
+    act = inst["action_def"]
+    return annotate_display_name({
+        "name": display_label(inst["action"], spec),
+        "params": {pk: _display_param(pk, pv, act, spec) for pk, pv in inst["binds"].items()},
+    }, inst["action"], spec)
+
+
+def _display_helpful_instances(matches, instances, spec):
+    seen = set()
+    out = []
+    for idx, _helper in matches:
+        if idx in seen:
+            continue
+        seen.add(idx)
+        out.append(_display_instance(instances[idx], spec))
+    return out
+
+
+def _helpful_labels(leadsto):
+    labels = []
+    for helper in leadsto.get("helpful") or []:
+        args = ", ".join(_leadsto_measure_label(arg) for arg in helper.get("args") or [])
+        labels.append(f"{helper['action']}({args})")
+    return labels
 
 
 def _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, detail):
@@ -2924,20 +3274,85 @@ def _prove_leadsto_rank_no_deadlock(spec, leadsto, extra_binds, binding_types, i
         solver.add(_inv_constraint(inv, state, spec, expr_cache))
     p = _eval_at_state(leadsto["P"], state, extra_binds, spec, expr_cache)
     q = _eval_at_state(leadsto["Q"], state, extra_binds, spec, expr_cache)
-    enabled = _action_enabled_exprs(state, instances, spec, expr_cache)
-    solver.add(p, z3.Not(q), _deadlock_from_enabled(enabled))
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if leadsto.get("helpful"):
+        enabled = [
+            _enabled_instance(instances[idx], state, spec, extra_binds, expr_cache)
+            for idx, _helper in helpful_matches
+        ]
+        no_helpful_enabled = z3.Not(z3.Or(*enabled)) if enabled else z3.BoolVal(True)
+        solver.add(p, z3.Not(q), no_helpful_enabled)
+        failure_kind = "helpful_action_not_enabled"
+        blocked_actions = _display_helpful_instances(helpful_matches, instances, spec)
+        message = (
+            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
+            "while no matching helpful action instance is enabled"
+        )
+        hint = _LEADSTO_HELPFUL_PROGRESS_HINT
+    else:
+        enabled = _action_enabled_exprs(state, instances, spec, expr_cache)
+        solver.add(p, z3.Not(q), _deadlock_from_enabled(enabled))
+        failure_kind = "deadlock"
+        blocked_actions = None
+        message = (
+            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
+            "in a state with no enabled action"
+        )
+        hint = _LEADSTO_RANK_DEADLOCK_HINT
     if solver.check() != z3.sat:
         return None
     model = solver.model()
     measure = _eval_int_measure(leadsto, state, extra_binds, spec, expr_cache)
-    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, {
-        "rank_failure": "deadlock",
+    detail = {
+        "rank_failure": failure_kind,
         "measure_value": _model_int(model, measure),
+        "message": message,
+        "hint": hint,
+    }
+    if blocked_actions is not None:
+        detail["helpful_actions"] = blocked_actions
+        detail["helpful"] = _helpful_labels(leadsto)
+    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, detail)
+
+
+def _prove_leadsto_rank_helpful_fairness(spec, leadsto, extra_binds, binding_types, invariants, instances):
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if not helpful_matches:
+        return None
+    nonfair = [
+        (idx, helper) for idx, helper in helpful_matches
+        if not instances[idx]["action_def"].get("fair")
+    ]
+    if not nonfair:
+        return None
+
+    expr_cache = {}
+    state = make_ind_state(spec, f"rank_{leadsto['name']}_fair")
+    solver = z3.Solver()
+    solver.add(*_enum_phys_constraints(spec, state))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, state, spec, expr_cache))
+    p = _eval_at_state(leadsto["P"], state, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], state, extra_binds, spec, expr_cache)
+    solver.add(p, z3.Not(q))
+    if solver.check() != z3.sat:
+        return None
+
+    model = solver.model()
+    measure = _eval_int_measure(leadsto, state, extra_binds, spec, expr_cache)
+    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, {
+        "rank_failure": "progress_action_not_fair",
+        "measure_value": _model_int(model, measure),
+        "helpful_actions": _display_helpful_instances(nonfair, instances, spec),
         "message": (
-            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
-            "in a state with no enabled action"
+            f"leadsTo '{display_label(leadsto['name'], spec)}' uses helpful action "
+            "metadata, but a matching progress action is not declared fair"
         ),
-        "hint": _LEADSTO_RANK_DEADLOCK_HINT,
+        "hint": (
+            "helpful only identifies the per-binding progress action. Add `fair` "
+            "to the lower-layer action instance that must eventually run; helpful "
+            "does not create a fairness assumption."
+        ),
     })
 
 
@@ -2961,19 +3376,35 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
     measure = _eval_int_measure(leadsto, cur, extra_binds, spec, expr_cache)
     measure_next = _eval_int_measure(leadsto, nxt, extra_binds, spec, expr_cache)
     progress = z3.Or(q_next, z3.And(p_next, measure_next < measure))
-    solver.add(p, z3.Not(q), z3.Not(progress))
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if helpful_matches:
+        helpful_choice = z3.Or(*[choice == idx for idx, _helper in helpful_matches])
+        pending_preserved = z3.Or(q_next, p_next)
+        allowed = z3.Or(
+            z3.And(helpful_choice, progress),
+            z3.And(z3.Not(helpful_choice), pending_preserved),
+        )
+        hint = _LEADSTO_HELPFUL_PROGRESS_HINT
+    else:
+        allowed = progress
+        hint = _LEADSTO_RANK_PROGRESS_HINT
+    solver.add(p, z3.Not(q), z3.Not(allowed))
     if solver.check() != z3.sat:
         return None
 
     model = solver.model()
     trace = _build_trace(model, [cur, nxt], [choice], instances, spec, 1)
-    q_next_holds = z3.is_true(model.eval(q_next, model_completion=True))
-    p_next_holds = z3.is_true(model.eval(p_next, model_completion=True))
-    decreases = z3.is_true(model.eval(measure_next < measure, model_completion=True))
+    q_next_holds = _model_bool(model, q_next)
+    p_next_holds = _model_bool(model, p_next)
+    decreases = _model_bool(model, measure_next < measure)
+    choice_idx = model.eval(choice, model_completion=True).as_long()
+    helpful_idx_set = {idx for idx, _helper in helpful_matches}
     rank_failure = "non_decreasing_action"
     if not q_next_holds and not p_next_holds:
         rank_failure = "pending_not_preserved"
-    return _attach_requirement({
+    elif helpful_matches and choice_idx in helpful_idx_set and not decreases:
+        rank_failure = "non_decreasing_helpful_action"
+    detail = {
         "result": "unknown_cti",
         "spec": spec["name"],
         "violation_kind": "leadsTo_rank",
@@ -2989,12 +3420,30 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
             "states": trace,
             "violated_at": 1,
         },
-        "message": (
+        "hint": hint,
+    }
+    if helpful_matches:
+        detail["helpful_actions"] = _display_helpful_instances(helpful_matches, instances, spec)
+    if rank_failure == "pending_not_preserved":
+        detail["message"] = (
+            f"enabled action '{trace[1]['action']['name']}' can make "
+            f"leadsTo '{display_label(leadsto['name'], spec)}' no longer pending "
+            "without making Q true"
+        )
+    elif rank_failure == "non_decreasing_helpful_action":
+        detail["message"] = (
+            f"helpful action '{trace[1]['action']['name']}' can leave "
+            f"leadsTo '{display_label(leadsto['name'], spec)}' pending without "
+            "strictly decreasing the measure"
+        )
+    else:
+        detail["message"] = (
             f"enabled action '{trace[1]['action']['name']}' can leave "
             f"leadsTo '{display_label(leadsto['name'], spec)}' pending without "
             "strictly decreasing the measure"
-        ),
-        "hint": _LEADSTO_RANK_PROGRESS_HINT,
+        )
+    return _attach_requirement({
+        **detail,
     }, leadsto)
 
 
@@ -3008,6 +3457,10 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
             for extra_binds in expand_leadsto_bindings(leadsto, spec):
                 failure = _prove_leadsto_rank_lower_bound(
                     spec, leadsto, extra_binds, binding_types, invariants)
+                if failure is not None:
+                    return failure, None
+                failure = _prove_leadsto_rank_helpful_fairness(
+                    spec, leadsto, extra_binds, binding_types, invariants, instances)
                 if failure is not None:
                     return failure, None
                 failure = _prove_leadsto_rank_no_deadlock(
@@ -3024,6 +3477,8 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 "proof": "ranking",
                 "decreases": _leadsto_measure_label(leadsto.get("decreases")),
             }
+            if leadsto.get("helpful"):
+                proved[leadsto["name"]]["helpful"] = _helpful_labels(leadsto)
             continue
 
         try:
@@ -3038,6 +3493,11 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 for extra_binds in expand_leadsto_bindings(candidate_leadsto, spec):
                     failure = _prove_leadsto_rank_lower_bound(
                         spec, candidate_leadsto, extra_binds, binding_types, invariants)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+                    failure = _prove_leadsto_rank_helpful_fairness(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
                     if failure is not None:
                         candidate_failed = True
                         break
@@ -3062,6 +3522,8 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 "decreases": _leadsto_measure_label(candidate),
                 "synthesized": True,
             }
+            if leadsto.get("helpful"):
+                proved[leadsto["name"]]["helpful"] = _helpful_labels(leadsto)
             break
     return None, proved
 
@@ -4749,6 +5211,15 @@ def prove(
         vacuity_mode=vacuity_mode,
     )
     if base["result"] in ("violated", "reachable_failed", "error"):
+        if base.get("result") == "violated" and base.get("violation_kind") == "leadsTo":
+            instances = build_instances(spec)
+            rank_failure, _ranked_leadstos = _prove_ranked_leadstos(
+                spec, leadstos, invariants, instances)
+            if rank_failure is not None:
+                rank_failure.setdefault("checked_to_depth", base_depth)
+                rank_failure.setdefault("completeness", "bounded")
+                return _finish_result(
+                    rank_failure, spec, base_depth, started, completeness="bounded")
         return _add_result_metadata(
             base,
             base.get("checked_to_depth", base_depth),

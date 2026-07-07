@@ -27,7 +27,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   invariant <Name> { <expr> }
   trans     <Name> { <expr> }            // two-state safety. old(expr) for the old state
   reachable <Name> { <expr> }
-  leadsTo   <Name> { <expr> ~> [within K] <expr> [decreases <int expr>] } // outer forall x: T { … } may wrap the response
+  leadsTo   <Name> { <expr> ~> [within K] <expr> [helpful act(args)] [decreases <int expr>] } // outer forall x: T { … } may wrap the response
   unless    <Name> { <expr> unless <expr> } // safety: preserve P until Q
   until     <Name> { <expr> until <expr> }  // unless safety + progress P ~> Q
   terminal  { <expr> }                     // intended terminal state (excluded from the deadlock check)
@@ -153,12 +153,14 @@ refinement <Name> {
 | Map<K, V> | `m: Map<ItemId, Qty>` | K is a bounded scalar (Int keys give a deprecation warning) |
 | Set<T> | `s: Set<OrderId>` | T is a bounded scalar |
 | Seq<T, N> | `q: Seq<JobId, CAP>` | T is a scalar, N is a positive constant. FIFO |
+| relation A -> B | `r: relation User -> Role` | Binary relation over bounded scalar endpoints |
 
 Scalar = Int / Bool / domain type / enum. In a `state` declaration,
 `x: lo..hi` is an anonymous domain type and is equivalent to declaring
 `type X = lo..hi` and writing `x: X`.
 **State-variable whitelist**: scalar | Option<scalar> | struct |
-Map<bounded scalar, scalar|Option|struct> | Set<bounded scalar> | Seq<scalar, N>.
+Map<bounded scalar, scalar|Option|struct> | Set<bounded scalar> | Seq<scalar, N> |
+relation bounded-scalar -> bounded-scalar.
 Anything else (nested structs, Set/Map/Seq as a Map value, etc.) is rejected by
 check as a type error.
 
@@ -183,6 +185,9 @@ check as a type error.
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`
 - Seq: `Seq {}` `Seq { 1, 2 }` (element count ≤ N), `.push(e) .pop() .head() .at(i)
   .contains(e) .size()`, `==` (length + all elements)
+- Relation: `.contains(a,b) .add(a,b) .remove(a,b)`,
+  `reachable(r,a,b) acyclic(r) functional(r) injective(r) domain(r) range(r)`.
+  `reachable`/`acyclic` require a self-relation (`relation T -> T`).
 - ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q`,
   `P ~> within K Q`, plus optional `decreases <int expr>` for induction ranking /
   mapping-expression only:
@@ -191,7 +196,8 @@ check as a type error.
 ## 4. Statements (init / action body)
 
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`
-- Set/Seq are re-assigned: `s = s.add(x)`, `q = q.pop().push(y)` (chaining allowed)
+- Set/Seq/relation are re-assigned: `s = s.add(x)`, `q = q.pop().push(y)`,
+  `r = r.add(a,b)` (chaining allowed)
 - `if expr { stmt... } [else { stmt... }]` is allowed in both `init` and action
   bodies (may nest with an if inside else)
 - `forall x: T { stmt... }` (bulk assignment)
@@ -226,24 +232,28 @@ check as a type error.
    counterexamples.
 7. `leadsTo ... decreases M` under `verify --engine induction` proves an
    unbounded response when, under the proved invariants and while P holds and Q is
-   false, M is non-negative, some action is enabled, and every enabled action
-   either makes Q true or keeps P true while strictly decreasing M. Without
+   false, M is non-negative and the ranked progress discipline holds. Without
+   `helpful`, every enabled action must either make Q true or keep P true while
+   strictly decreasing M. With `helpful act(args...)`, only the matching helpful
+   action instance must strictly decrease M when it fires; unrelated actions only
+   need to preserve the pending obligation unless they make Q true. `helpful`
+   does **not** create fairness: the matching action must still be declared
+   `fair action` and be enabled whenever the obligation is pending. Without
    `decreases`, leadsTo remains bounded to `--depth`.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
      Nesting it inside the forall body is a **parse error**
      (`fslc` reports `unexpected 'decreases' here` with a placement hint),
      not "ranking doesn't work under forall".
-   - **Per-entity measure trap**: `decreases level[c]` inside
-     `forall c: Case { level[c] > 0 ~> level[c] == 0 }` always fails —
-     every enabled action must decrease M, so an action advancing a
-     *different* entity (`step(c=1)` while `c=0` is pending) violates it.
-     Reported as `rank_failure: "non_decreasing_action"`. Working idiom:
-     a **global sum measure** with the built-in `sum()` aggregate, e.g.
-     `decreases sum(k: Case of level[k])` — instances-count independent,
-     works with `--instances` overrides too. Only covers designs where every
-     enabled action decreases the total; fairness-aware per-entity ranking
-     is future work (#72).
+   - **Per-entity measure under interleaving**: use
+     `helpful step(c) decreases level[c]`. Without `helpful`, an action advancing
+     a different entity still reports `rank_failure:"non_decreasing_action"`.
+     With `helpful`, diagnostics include `progress_action_not_fair`,
+     `helpful_action_not_enabled`, `non_decreasing_helpful_action`, and
+     `pending_not_preserved`.
+   - **Global sum idiom**: `decreases sum(k: Case of level[k])` is still the
+     simplest instances-count-independent measure when every enabled action
+     decreases the total; works with `--instances` overrides too.
 8. `symmetric type` / `symmetric enum` means those values are interchangeable
    entity identities. For leadsTo lasso/stall search, fslc symmetry-breaks the
    representative state using canonical rows from `Map<SymmetricType, V>` and
@@ -286,6 +296,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
                [--strict-tags] [--requirements ids.txt]
+fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
+                                                     # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
@@ -362,6 +374,12 @@ first failed layer and later layers are marked `skipped`.
   same world size on both sides — otherwise a shrunken impl vs a full-size
   abstract fails `map_out_of_bounds`; an impl-only carried number applies to
   the impl only.
+- `sweep` is opt-in bounded honesty for scope exploration. It calls normal
+  `verify` repeatedly over instance/value/depth ranges and returns
+  `result:"sweep_passed"` or `"sweep_failed"`, with every run under
+  `sweep.results` and the first failing scope under
+  `sweep.minimal_counterexample`. For `--values NAME=LO..HI`, it fixes `LO` and
+  expands `LO..LO`, `LO..LO+1`, ..., `LO..HI`.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -429,10 +447,12 @@ first failed layer and later layers are marked `skipped`.
 - leadsTo violation: `pending_since` + `loop_start` (lasso) or `stutter: true`.
 - progress-preserving refinement failure: `refinement_failed`,
   `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
+  `progress_failure:"lasso_blocks_progress"|"deadlock_or_stall_blocks_progress"`,
   `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
-  `pending_not_preserved`).
+  `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,
+  `helpful_action_not_enabled`, and `non_decreasing_helpful_action`).
 
 ### ⚠ Liveness scales differently from safety — verify it on a reduced model
 

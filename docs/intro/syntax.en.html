@@ -185,18 +185,20 @@ verify { instances Claim = 3 values Amount = 0..3 }</code></pre>
       <tr><td>Map</td><td><code>Map&lt;ItemId, Qty&gt;</code></td><td>Bounded key to scalar, Option, or struct value.</td></tr>
       <tr><td>Set</td><td><code>Set&lt;UserId&gt;</code></td><td>A set of bounded scalar values.</td></tr>
       <tr><td>Seq</td><td><code>Seq&lt;JobId, CAP&gt;</code></td><td>Capacity-bounded queue or log.</td></tr>
+      <tr><td>Relation</td><td><code>relation User -&gt; Role</code></td><td>Bounded binary link graph.</td></tr>
       <tr><td>Dialect kinds</td><td><code>entity Claim</code>, <code>number Amount</code></td><td>Business/requirements kinds bounded by <code>verify</code>.</td></tr>
     </table>
 
     <div class="panel reveal">
       <h3>Allowed state-variable shapes</h3>
-      <p>Use scalar, <code>Option&lt;scalar&gt;</code>, struct, map, set, or sequence. Avoid nested maps and containers inside containers.</p>
+      <p>Use scalar, <code>Option&lt;scalar&gt;</code>, struct, map, set, sequence, or relation. Avoid nested maps and containers inside containers.</p>
       <pre><code>state {
   status: St,
   cart: Option&lt;ItemId&gt;,
   orders: Map&lt;OrderId, Order&gt;,
   locked: Set&lt;UserId&gt;,
-  queue: Seq&lt;JobId, CAP&gt;
+  queue: Seq&lt;JobId, CAP&gt;,
+  delegates: relation User -&gt; User
 }</code></pre>
     </div>
   </div>
@@ -286,6 +288,7 @@ init {
       <tr><td>Option</td><td><code>none</code>, <code>some(e)</code>, <code>x is some(v)</code></td><td><code>cart[u] is some(i) and stock[i] &gt; 0</code></td></tr>
       <tr><td>Set</td><td><code>Set {}</code>, <code>.add</code>, <code>.remove</code>, <code>.contains</code>, <code>.size()</code></td><td><code>active.contains(u)</code></td></tr>
       <tr><td>Seq</td><td><code>Seq {}</code>, <code>.push</code>, <code>.pop</code>, <code>.head</code>, <code>.at</code>, <code>.size()</code></td><td><code>i &lt; q.size() =&gt; q.at(i) == j</code></td></tr>
+      <tr><td>Relation</td><td><code>relation A -&gt; B</code>, <code>.add</code>, <code>.remove</code>, <code>.contains</code>, <code>reachable</code>, <code>acyclic</code></td><td><code>acyclic(delegates)</code></td></tr>
       <tr><td>Special</td><td><code>old(expr)</code>, <code>stage(x)</code></td><td><code>total == old(total) + 1</code></td></tr>
     </table>
 
@@ -324,6 +327,7 @@ requires stock[i] &gt; 0</code></pre>
       <tr><td><code>reachable Name { P }</code></td><td>P can be reached.</td><td><code>stock[0] == 0</code></td></tr>
       <tr><td><code>leadsTo Name { P ~&gt; Q }</code></td><td>When P happens, Q eventually happens.</td><td><code>pending ~&gt; done</code></td></tr>
       <tr><td><code>leadsTo ... within K</code></td><td>Q within K steps.</td><td><code>pending ~&gt; within 3 done</code></td></tr>
+      <tr><td><code>helpful action(args)</code></td><td>Per-binding progress action for ranked induction.</td><td><code>helpful step(c)</code></td></tr>
       <tr><td><code>leadsTo ... decreases M</code></td><td>Ranking for induction proof of progress.</td><td><code>decreases remaining</code></td></tr>
       <tr><td><code>unless Name { P unless Q }</code></td><td>Safety: P holds until Q.</td><td>Safety of a held state.</td></tr>
       <tr><td><code>until Name { P until Q }</code></td><td>Combines <code>unless</code> safety with <code>leadsTo</code> liveness.</td><td>Hold the state, yet eventually complete.</td></tr>
@@ -336,9 +340,10 @@ requires stock[i] &gt; 0</code></pre>
   forall c: Claim {
     claims[c].st == Approved ~&gt; claims[c].st == Paid
   }
+  helpful pay(c)
   decreases unpaid_count
 }</code></pre>
-      <p style="margin-top:16px">The outer <code>forall</code> checks responsiveness per target. Add <code>fair</code> to the actions that drive progress, <code>within K</code> to bound the response in steps, and <code>decreases M</code> to supply a ranking for the induction proof. The <code>~&gt;</code> arrow is only valid inside <code>leadsTo</code>.</p>
+      <p style="margin-top:16px">The outer <code>forall</code> checks responsiveness per target. Add <code>fair</code> to the actions that drive progress, <code>within K</code> to bound the response in steps, <code>helpful action(args)</code> to identify the per-binding progress action, and <code>decreases M</code> to supply a ranking for the induction proof. <code>helpful</code> does not create fairness; the action still needs <code>fair action</code>. The <code>~&gt;</code> arrow is only valid inside <code>leadsTo</code>.</p>
     </div>
   </div>
 </section>
@@ -476,6 +481,14 @@ type Cell = 0..ROOMS*SLOTS-1
       <div class="syntax-card">
         <h3>Use <code>terminal</code> for intended stops</h3>
         <pre><code>terminal { status == Done or status == Failed }</code></pre>
+      </div>
+      <div class="syntax-card">
+        <h3>Sweep bounded scope</h3>
+        <pre><code>fslc sweep spec.fsl \
+  --instances Case=1..3 \
+  --depth 1..8 \
+  --property AtMostOne</code></pre>
+        <p><code>sweep.results</code> records each run; <code>sweep.minimal_counterexample</code> points at the first failing scope.</p>
       </div>
     </div>
   </div>

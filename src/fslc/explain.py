@@ -175,6 +175,15 @@ def _leadsto_body_text(item, display_names):
     )
     if item.get("within") is not None:
         text += f" within {item['within']}"
+    helpful = item.get("helpful") or []
+    if helpful:
+        helper_text = []
+        for helper in helpful:
+            args = ", ".join(_expr_to_text(arg, display_names) for arg in helper.get("args") or [])
+            helper_text.append(f"helpful {helper['action']}({args})")
+        text += "; " + "; ".join(helper_text)
+    if item.get("decreases") is not None:
+        text += f"; decreases {_expr_to_text(item['decreases'], display_names)}"
     return text
 
 
@@ -643,6 +652,21 @@ def _expr_to_text(expr, display_names=None):
         return f"{_type_ref_to_text(('name', expr[1]))} {{ {fields} }}"
     if tag in ("old", "abs"):
         return f"{tag}({_expr_to_text(expr[1], display_names)})"
+    if tag == "rel_reachable":
+        return (
+            f"reachable({_expr_to_text(expr[1], display_names)}, "
+            f"{_expr_to_text(expr[2], display_names)}, "
+            f"{_expr_to_text(expr[3], display_names)})"
+        )
+    if tag in ("rel_acyclic", "rel_functional", "rel_injective", "rel_domain", "rel_range"):
+        name = {
+            "rel_acyclic": "acyclic",
+            "rel_functional": "functional",
+            "rel_injective": "injective",
+            "rel_domain": "domain",
+            "rel_range": "range",
+        }[tag]
+        return f"{name}({_expr_to_text(expr[1], display_names)})"
     if tag in ("min", "max"):
         return (
             f"{tag}({_expr_to_text(expr[1], display_names)}, "

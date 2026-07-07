@@ -6,6 +6,7 @@ import sys
 import json
 import argparse
 import re
+import itertools
 
 from lark.exceptions import UnexpectedInput, VisitError
 
@@ -430,6 +431,40 @@ def _parse_values_override(raw):
     return name, (lo, hi)
 
 
+def _parse_sweep_int_range(raw, flag):
+    name, sep, rng = raw.partition("=")
+    name = name.strip()
+    lo_s, dots, hi_s = rng.partition("..")
+    if not sep or not name or not dots:
+        raise FslError(
+            f"invalid {flag} value '{raw}': expected NAME=LO..HI", kind="semantics")
+    try:
+        lo, hi = int(lo_s.strip()), int(hi_s.strip())
+    except ValueError:
+        raise FslError(
+            f"invalid {flag} value '{raw}': bounds must be integers", kind="semantics")
+    if lo > hi:
+        raise FslError(
+            f"invalid {flag} value '{raw}': lower bound must be <= upper bound",
+            kind="semantics",
+        )
+    return name, (lo, hi)
+
+
+def _parse_sweep_depth(raw):
+    lo_s, dots, hi_s = raw.partition("..")
+    if not dots:
+        raise FslError(f"invalid --depth value '{raw}': expected LO..HI", kind="semantics")
+    try:
+        lo, hi = int(lo_s.strip()), int(hi_s.strip())
+    except ValueError:
+        raise FslError("invalid --depth value: bounds must be integers", kind="semantics")
+    if lo < 0 or lo > hi:
+        raise FslError(
+            f"invalid --depth value '{raw}': expected 0 <= LO <= HI", kind="semantics")
+    return lo, hi
+
+
 def _build_bounds_overrides(instances, values):
     overrides = {"instances": {}, "values": {}}
     for raw in instances or []:
@@ -439,6 +474,131 @@ def _build_bounds_overrides(instances, values):
         name, bounds = _parse_values_override(raw)
         overrides["values"][name] = bounds
     return overrides
+
+
+def _build_sweep_ranges(instances, values):
+    instance_ranges = {}
+    for raw in instances or []:
+        name, bounds = _parse_sweep_int_range(raw, "--instances")
+        if bounds[0] < 1:
+            raise FslError(
+                f"invalid --instances value '{raw}': instance lower bound must be >= 1",
+                kind="semantics",
+            )
+        instance_ranges[name] = bounds
+    value_ranges = {}
+    for raw in values or []:
+        name, bounds = _parse_sweep_int_range(raw, "--values")
+        value_ranges[name] = bounds
+    return instance_ranges, value_ranges
+
+
+def _sweep_counterexample(result):
+    return result.get("result") in {
+        "violated",
+        "reachable_failed",
+        "unknown_cti",
+        "nonconformant",
+        "refinement_failed",
+    }
+
+
+def _sweep_summary(result):
+    out = {
+        "result": result.get("result"),
+        "checked_to_depth": result.get("checked_to_depth"),
+    }
+    for key in ("invariant", "trans", "violation_kind", "violated_at_step", "rank_failure"):
+        if key in result:
+            out[key] = result[key]
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def run_sweep(
+        file, depth_range, deadlock_mode, engine="bmc", k_ind=1,
+        vacuity_mode="warn", strict_tags=False, requirements=None,
+        property_name=None, instances=None, values=None):
+    try:
+        depth_lo, depth_hi = _parse_sweep_depth(depth_range)
+        instance_ranges, value_ranges = _build_sweep_ranges(instances, values)
+        instance_names = sorted(instance_ranges)
+        value_names = sorted(value_ranges)
+        instance_options = [
+            range(instance_ranges[name][0], instance_ranges[name][1] + 1)
+            for name in instance_names
+        ]
+        value_options = [
+            [(value_ranges[name][0], hi)
+             for hi in range(value_ranges[name][0], value_ranges[name][1] + 1)]
+            for name in value_names
+        ]
+
+        results = []
+        minimal = None
+        spec_name = None
+        instance_product = itertools.product(*instance_options) if instance_names else [()]
+        value_product_template = list(itertools.product(*value_options)) if value_names else [()]
+        for instance_combo in instance_product:
+            instance_scope = dict(zip(instance_names, instance_combo))
+            instance_args = [f"{name}={value}" for name, value in instance_scope.items()]
+            for value_combo in value_product_template:
+                value_scope = dict(zip(value_names, value_combo))
+                value_args = [f"{name}={lo}..{hi}" for name, (lo, hi) in value_scope.items()]
+                for depth in range(depth_lo, depth_hi + 1):
+                    verification = run_verify(
+                        file,
+                        depth,
+                        deadlock_mode,
+                        engine=engine,
+                        k_ind=k_ind,
+                        vacuity_mode=vacuity_mode,
+                        strict_tags=strict_tags,
+                        requirements=requirements,
+                        property_name=property_name,
+                        instances=instance_args,
+                        values=value_args,
+                    )
+                    spec_name = spec_name or verification.get("spec")
+                    entry = {
+                        "scope": {
+                            "instances": instance_scope,
+                            "values": {
+                                name: [bounds[0], bounds[1]]
+                                for name, bounds in value_scope.items()
+                            },
+                            "depth": depth,
+                        },
+                        "summary": _sweep_summary(verification),
+                        "verification": verification,
+                    }
+                    results.append(entry)
+                    if minimal is None and _sweep_counterexample(verification):
+                        minimal = entry
+
+        out = {
+            "result": "sweep_failed" if minimal else "sweep_passed",
+            "spec": spec_name,
+            "sweep": {
+                "minimality_order": ["instances", "values", "depth"],
+                "ranges": {
+                    "instances": {
+                        name: [lo, hi] for name, (lo, hi) in instance_ranges.items()
+                    },
+                    "values": {
+                        name: [lo, hi] for name, (lo, hi) in value_ranges.items()
+                    },
+                    "depth": [depth_lo, depth_hi],
+                },
+                "results": results,
+                "minimal_counterexample": minimal,
+            },
+        }
+        return _envelope(out)
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
 def run_verify(
@@ -835,7 +995,10 @@ def exit_code(result):
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed"):
         return 0
-    if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant", "refinement_failed"):
+    if r == "sweep_passed":
+        return 0
+    if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant",
+             "refinement_failed", "sweep_failed"):
         return 1
     if r == "error":
         kind = result.get("kind")
@@ -884,6 +1047,24 @@ def _build_arg_parser():
                         "(NAME=LO..HI; repeatable)")
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
+
+    sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
+    sw.add_argument("file")
+    sw.add_argument("--depth", default="0..8",
+                    help="depth range LO..HI to sweep (default: 0..8)")
+    sw.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    sw.add_argument("--k", type=int, default=1, dest="k_ind",
+                    help="max induction depth (induction engine only)")
+    sw.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    sw.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
+    sw.add_argument("--property", dest="property_name", default=None,
+                    help="check a single named property in isolation")
+    sw.add_argument("--instances", action="append", default=None,
+                    help="sweep an entity bound (NAME=LO..HI; repeatable)")
+    sw.add_argument("--values", action="append", default=None,
+                    help="sweep a number upper bound as LO..LO through LO..HI")
+    sw.add_argument("--strict-tags", action="store_true")
+    sw.add_argument("--requirements", default=None)
 
     sc = sub.add_parser("scenarios")
     sc.add_argument("file")
@@ -981,6 +1162,16 @@ def _dispatch(args):
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "scenarios":
         result = run_scenarios(args.file, args.depth, args.deadlock)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "sweep":
+        result = run_sweep(args.file, args.depth, args.deadlock,
+                           engine=args.engine, k_ind=args.k_ind,
+                           vacuity_mode=args.vacuity,
+                           strict_tags=args.strict_tags,
+                           requirements=args.requirements,
+                           property_name=args.property_name,
+                           instances=args.instances,
+                           values=args.values)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "replay":
         result = run_replay(args.file, args.trace)

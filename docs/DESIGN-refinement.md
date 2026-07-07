@@ -63,8 +63,12 @@ refinement CartImplRefinesCart {
   safety refinement. When present, fslc pulls the named abstract `leadsTo` P/Q
   through the state mapping and runs the same bounded lasso/stall search on impl
   executions. The `by` actions are validated impl action names and are returned
-  in JSON as review context; fairness still comes from the impl actions marked
-  `fair`.
+  in JSON as review context; they do not create fairness or implementation
+  conformance by themselves. Fairness still comes from the impl actions marked
+  `fair`. Failures report `kind:"progress_lost"` plus
+  `progress_failure:"lasso_blocks_progress"` or
+  `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
+  `progress:{leadsTo, actions}` so repair can target the lower-layer action.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).

@@ -239,6 +239,7 @@ the formalization memo.**
 | business-flow reachability / completion goal | `goal G "..." some Case can reach Target` or `goal G "..." all Case can be Target [or Target ...]` |
 | "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
 | "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
+| "A is linked to B" / graph reachability / acyclicity / functional relation | `state { r: relation A -> B }` plus `.contains/.add/.remove`, `reachable`, `acyclic`, `functional`, `injective`, `domain`, `range` |
 | "within K times / K ticks" (deadline) | kernel `leadsTo ... within K` for step deadlines, or requirements `time` + `deadline` for SLA/tick semantics (reference §11) |
 | upper/lower bound or non-negativity of a number | kernel: `type T = lo..hi`; business/requirements dialects: `number T` plus `verify { values T = lo..hi }` (do not hand-write boundary invariants) |
 | "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
@@ -284,6 +285,9 @@ the formalization memo.**
    contract**. If implementation conformance is also required, anchor to the
    implementation with `testgen` (pytest via an Adapter) / `replay` (matching
    against execution logs).
+   For scope-sensitive failures, use `fslc sweep file.fsl --instances Case=1..3
+   --depth 1..8 [--property Name]`; it reports each run under `sweep.results` and
+   the first failing scope under `sweep.minimal_counterexample`.
 
 ## Connected workflow (across layers — when alignment is the deliverable)
 
@@ -352,6 +356,7 @@ existing result/kind fields:
 | `violated` / `partial_op` | pop/head on an empty Seq, index out of range, or divisor 0 | Guard with `requires q.size() > 0` / `requires d != 0` or an `if` |
 | `violated` / `ensures` | Postcondition not satisfied | Decide whether the body or the ensures is correct, and fix accordingly |
 | `violated` / `leadsTo` | Response-property counterexample (lasso / stall) | Check the trace's `loop_start`. Either add `fair` to the action that drives progress, or fix the spec |
+| `unknown_cti` / `leadsTo_rank` | Ranked response proof failed | Read `rank_failure`: `progress_action_not_fair` means `helpful` named a non-fair action; `helpful_action_not_enabled` means the matching progress action is blocked while P is pending; `non_decreasing_helpful_action` means the helpful action fires without lowering the measure; otherwise repair the rank or pending preservation |
 | `reachable_failed` | A state you want to reach is unreachable | Read `action_coverage`'s `blocking_requires` (unsat core). Loosen a guard / add an action / increase `--depth` |
 | `unknown_cti` | The invariant is true but not inductive | **The CTI's starting state = a phantom state satisfying all invariants. Add an auxiliary invariant (one that is a domain truth) that excludes it, then re-run.** Check `suggested_invariants` first — for the monotone-counter idiom the result carries ready-made candidate expressions. Track record: converges in one round (e.g. "no duplicates in the queue," "refunds only from Captured") |
 | warning / `vacuous_implication` | The antecedent of an implication invariant is never reached within depth | Check whether an action / reachable witness that makes the antecedent hold is missing, or whether the antecedent expression is reversed or too strong relative to intent. Do not simply weaken the consequent |
@@ -364,7 +369,7 @@ existing result/kind fields:
 | `error` / `vacuous` | init is unsatisfiable (contradictory assignments, etc.) | Review init. Check that you are not giving one state variable contradictory values. A violation from an out-of-range value is different and becomes `violated`/`type_bound` |
 | `refinement_failed` / `abs_requires_failed` | A detailed-layer transition breaks an upper-layer guard (e.g. a shortcut skipping approval) | Read `impl_action` and `impl_trace`. Add a guard to the detailed layer, or review the interpretation of the correspondence (`maps` / mapping) |
 | `refinement_failed` / `abs_state_mismatch` / `stutter_changed_abs` / `map_out_of_bounds` | Mapping inconsistency (an update has no correspondence / a stutter nonetheless changes upper-layer state / a mapped value is out of the type's range) | Compare the `mismatch` path with `abs_before/after`. Fix the mapping expression or the action correspondence |
-| `refinement_failed` / `progress_lost` | A `preserve progress` mapping pulled an upper `leadsTo` into the lower layer and found a lasso/stall | Read `impl_trace`, `pending_since`, `loop_start`/`stutter`, and the `progress.actions`. Add/restore `fair` on the lower progress action, add a lower-layer ranked `leadsTo`, or revise the progress mapping |
+| `refinement_failed` / `progress_lost` | A `preserve progress` mapping pulled an upper `leadsTo` into the lower layer and found a lasso/stall | Read `progress_failure`, `impl_trace`, `pending_since`, `loop_start`/`stutter`, and the `progress.actions`. Add/restore lower-layer `fair action` on the progress action, add a lower-layer ranked `leadsTo`, or revise the progress mapping |
 | `implements.result: violated` within verify | The requirements layer deviates from the upper (business) layer | The contents of `implements.violation` have the same shape as refinement_failed. Same procedure as above + check the `requirement` on the requirements side |
 | `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
 | `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
@@ -388,8 +393,9 @@ preserve progress {
 
 This checks the upper `leadsTo` after pulling it through the state mapping. A
 failure is `refinement_failed / progress_lost`. The `by` actions are validated
-impl action names and review metadata; the actual lasso exclusion still comes
-from lower-layer `fair action` declarations.
+impl action names and review metadata; they do not create fairness or prove
+implementation conformance. The actual lasso exclusion still comes from
+lower-layer `fair action` declarations.
 
 When a counterexample makes you **change an interpretation** (added a guard,
 loosened an invariant, decided how to handle an exception), record that judgment in
