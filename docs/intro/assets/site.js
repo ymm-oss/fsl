@@ -366,6 +366,7 @@
     { id: "design-layer",       en: ["Design", "Design Layer", "Internal state, refinement, compose"],    ja: ["設計層", "設計層", "内部状態・詳細化・合成"] },
     { id: "syntax",             en: ["Syntax", "Syntax Guide", "Types, actions, properties"],             ja: ["文法", "文法・構文", "型・式・操作・性質"] },
     { id: "analysis",           en: ["Analyze", "Structural Analysis", "TSG, graph projections, findings"], ja: ["構造分析", "構造分析", "TSG・グラフ投影・所見"] },
+    { id: "db",                 en: ["fsl-db", "DB / Multi-env Compatibility", "Schema, artifacts, environments"], ja: ["fsl-db", "DB/複数環境互換性", "スキーマ・成果物・環境"] },
   ];
   const NAV_T = {
     en: { brand: "Manual", index: "English Manual", kicker: "FSL Manual", other: "日本語", otherRead: "日本語で読む",

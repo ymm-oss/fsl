@@ -50,6 +50,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   enveloped result tree reserves `kind` for the diagnostic discriminator.)
 
 ### Fixed
+- Restored `docs/index.html` to a language selector only and added bilingual
+  `docs/intro/db.{ja,en}.html` content pages for the fsl-db DB /
+  multi-environment compatibility manual entry.
 - `fslc html`/`fslc explain` now render a declaration's full logic instead of a
   truncated first source line: action `requires`/`ensures` and property bodies
   (`invariant`/`reachable`/`trans`/`leadsTo`) are rendered from the AST via the

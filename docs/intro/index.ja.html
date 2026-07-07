@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSL 日本語マニュアル — 概念・使い方・業務層・要件層・文法</title>
-<meta name="description" content="FSLの日本語マニュアル。形式手法の概念、使い方、検証の仕組み、業務層、要件層、文法・構文を目的別に読めます。" />
+<title>FSL 日本語マニュアル — 概念・使い方・業務層・要件層・fsl-db・文法</title>
+<meta name="description" content="FSLの日本語マニュアル。形式手法の概念、使い方、検証の仕組み、業務層、要件層、fsl-db、文法・構文を目的別に読めます。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="manual-home" data-page="index">
@@ -18,7 +18,7 @@
   <div class="wrap narrow center">
     <p class="kicker reveal">FSL Manual</p>
     <h1 class="reveal">FSL 日本語マニュアル</h1>
-    <p class="lead reveal">仕様を機械で確かめるために、FSL の考え方、使い方、業務層、要件層、設計層、文法を順に読める入口です。</p>
+    <p class="lead reveal">仕様を機械で確かめるために、FSL の考え方、使い方、業務層、要件層、設計層、fsl-db、文法を順に読める入口です。</p>
     <p class="reveal" style="margin-top:12px">FSL では<b>書いた仕様そのものがドキュメント</b>になります。人が読む説明と機械が検証する対象が同じ1つのテキストなので、両者がズレることはありません。</p>
     <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
       <span class="pill">概念</span>
@@ -29,6 +29,7 @@
       <span class="pill">設計層</span>
       <span class="pill">文法</span>
       <span class="pill">構造分析</span>
+      <span class="pill">fsl-db</span>
     </div>
   </div>
 </section>
@@ -49,6 +50,7 @@
         <a class="chapter-link" href="design-layer.ja.html"><span class="num">07</span><span><strong>設計層</strong><span>内部状態・詳細化・合成</span></span></a>
         <a class="chapter-link" href="syntax.ja.html"><span class="num">08</span><span><strong>文法・構文</strong><span>型・式・操作・性質</span></span></a>
         <a class="chapter-link" href="analysis.ja.html"><span class="num">09</span><span><strong>構造分析</strong><span>TSG・グラフ投影・所見</span></span></a>
+        <a class="chapter-link" href="db.ja.html"><span class="num">10</span><span><strong>fsl-db</strong><span>DB/複数環境互換性</span></span></a>
       </nav>
       <div class="manual-main">
         <article class="chapter-card">
@@ -95,6 +97,11 @@
           <span class="num">09</span>
           <div><h3>構造分析</h3><p><code>fslc analyze</code> で Typed Semantic Graph、グラフ投影、レビュー専用の構造所見を確認します。</p></div>
           <a class="btn" href="analysis.ja.html">読む</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">10</span>
+          <div><h3>fsl-db</h3><p><code>dbsystem</code> で、DBマイグレーション、アプリ成果物の読み書き互換性、複数環境の同居範囲、AIが読める所見を確認します。</p></div>
+          <a class="btn" href="db.ja.html">読む</a>
         </article>
       </div>
     </div>
@@ -150,6 +157,11 @@
         <h3>構造をレビューしたい</h3>
         <p><code>fslc analyze</code> でトレーサビリティ、グラフ投影、AIレビュー所見を見ます。検証失敗とは区別して扱います。</p>
         <p><a class="btn" href="analysis.ja.html">構造分析を読む</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>DB変更の互換性を見たい</h3>
+        <p><code>dbsystem</code> で、スキーマバージョン、マイグレーション、成果物の読み書き、prod/staging/worker/mobile などの同居期間を確認します。</p>
+        <p><a class="btn" href="db.ja.html">fsl-dbを読む</a></p>
       </div>
     </div>
   </div>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DB / Multi-Environment Compatibility with fsl-db — FSL Manual</title>
+<meta name="description" content="How to use fsl-db dbsystem to check database migrations, artifact read/write capabilities, multiple environment schema ranges, and rollout coexistence windows." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="db">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">DB / multi-environment compatibility</p>
+    <h1 class="reveal">Use <code>dbsystem</code> to check DB changes and environments as a spec</h1>
+    <p class="lead reveal">fsl-db is not just a DB-schema dialect. It models schema changes, migrations, application artifact read/write capabilities, and multi-environment rollout ranges in one machine-checkable specification.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="../DESIGN-db.md">DESIGN-db.md</a>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">What it prevents</p>
+    <h2 class="reveal">Find DB/application drift before release</h2>
+    <p class="lead narrow reveal">During rollout, old artifacts, new artifacts, workers, batch jobs, external clients, and intermediate schemas may coexist briefly. fsl-db models that coexistence as finite snapshots, then checks that every read/write target exists and that NOT NULL transitions happen after backfill.</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>Read compatibility</h3>
+        <p>Every <code>active</code> artifact must read only columns that exist in its environment and schema window.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Write compatibility</h3>
+        <p>Artifacts must not write columns that have already been removed during a coexistence window.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>NOT NULL ordering</h3>
+        <p>Column creation, backfill, and <code>set_not_null</code> are checked so a required column is not introduced before data exists.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Environment windows</h3>
+        <p><code>environment</code> schema ranges and <code>when schema</code> clauses make prod/staging coexistence explicit.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Multiple environments</p>
+    <h2 class="reveal">Write the artifacts present in each environment, not just the DB schema version</h2>
+    <p class="lead narrow reveal">The central idea is capability, not version numbers. Instead of saying "server_v3 is safe," say what each artifact in an environment reads, writes, and which schema window it may coexist with.</p>
+    <div class="panel reveal">
+      <pre><code>artifact server_v1 {
+  reads users.id, users.legacy_name;
+  writes users.legacy_name;
+}
+
+artifact server_v2 {
+  reads users.id, users.legacy_name, users.display_name;
+  writes users.legacy_name, users.display_name;
+}
+
+artifact worker_v1 {
+  reads users.legacy_name;
+}
+
+environment prod {
+  schema 0..4;
+  active server_v1 when schema 0..0;
+  supported server_v1 when schema 0..1;
+  active server_v2 when schema 1..3;
+  may_exist worker_v1 when schema 0..4;
+}</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Declaration</th><th>Meaning</th><th>Main use</th></tr>
+      <tr><td><code>active</code></td><td>An artifact definitely present in that environment and required to be compatible.</td><td>Running servers, workers, and batch jobs.</td></tr>
+      <tr><td><code>supported</code></td><td>An artifact kept inside the supported compatibility contract.</td><td>Rollback targets and supported older servers.</td></tr>
+      <tr><td><code>may_exist</code></td><td>An artifact that may still exist in reality.</td><td>Old workers, external clients, and approximated mobile/offline clients.</td></tr>
+      <tr><td><code>when schema lo..hi</code></td><td>The schema window where that artifact may coexist.</td><td>Finite modeling of percentage rollout, kill switches, and staged cutovers.</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">In the MVP, multiple environments are represented by multiple <code>environment</code> blocks. Each <code>schema lo..hi</code> range is the finite set of snapshots reachable through the declared migration plan. It is not an arbitrary Cartesian product of schemas and artifacts; each artifact's <code>when schema</code> window defines coexistence.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Model</p>
+    <h2 class="reveal">The MVP lowers to the existing kernel</h2>
+    <p class="lead narrow reveal"><code>dbsystem</code> is not a new verifier kernel. It parses DB declarations into a typed IR and lowers them to the existing state-machine kernel.</p>
+    <table class="matrix reveal">
+      <tr><th>dbsystem element</th><th>Meaning</th><th>Lowered shape</th></tr>
+      <tr><td><code>database</code></td><td>Initial schema, tables, and column lifecycle.</td><td>State such as <code>column_exists</code>, <code>column_backfilled</code>, and <code>column_not_null</code>.</td></tr>
+      <tr><td><code>migration</code></td><td>One schema-version transition.</td><td>One action guarded by <code>schema_version == from</code>.</td></tr>
+      <tr><td><code>artifact</code></td><td>Application, worker, API, or job read/write capabilities.</td><td>Generated invariants and metadata for compatibility rules.</td></tr>
+      <tr><td><code>environment</code></td><td>Which schemas and artifacts coexist.</td><td>Finite reachable rollout snapshots.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Shape</p>
+    <h2 class="reveal">Write schema, migrations, artifacts, and environments together</h2>
+    <div class="panel reveal">
+      <pre><code>dbsystem UserDb {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column display_name: Text absent;
+    }
+  }
+
+  migration add_display_name from 0 to 1 {
+    add users.display_name nullable;
+  }
+  migration backfill_display_name from 1 to 2 {
+    backfill users.display_name;
+  }
+  migration require_display_name from 2 to 3 {
+    set_not_null users.display_name;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.display_name;
+    writes users.display_name;
+  }
+
+  environment prod {
+    schema 0..3;
+    active server_v2 when schema 1..3;
+    supported server_v2 when schema 1..3;
+  }
+
+  environment staging {
+    schema 0..3;
+    active server_v2 when schema 1..3;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Run it</p>
+    <h2 class="reveal">Use ordinary check/verify and DB-specific findings</h2>
+    <div class="panel reveal">
+      <pre><code>fslc check examples/db/safe_add_nullable_column.fsl
+fslc verify examples/db/safe_add_nullable_column.fsl --depth 8
+fslc db check examples/db/safe_add_nullable_column.fsl
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Result</th><th>How to read it</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>Compatibility rules hold under finite rollout windows and complete capability declarations.</td></tr>
+      <tr><td><code>column_removed_while_still_read</code></td><td>An artifact still reads a column that has been removed in the coexistence window.</td></tr>
+      <tr><td><code>column_removed_while_still_written</code></td><td>An artifact still writes a column that has been removed in the coexistence window.</td></tr>
+      <tr><td><code>not_null_before_backfill</code></td><td>A column is made NOT NULL before the backfill step that justifies it.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Boundary</p>
+    <h2 class="reveal">Separate MVP multi-env checks from later phases</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Data preservation and rollback</h3>
+        <p>Row-level preservation and <code>up; down</code> equivalence are outside the MVP. The intended future model is refinement/simulation.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>API / offline / feature flags</h3>
+        <p>The proposal treats these as important compatibility dimensions, but the MVP formal rules primarily cover DB column read/write compatibility and NOT NULL ordering. API contracts, offline TTL, and feature-flag variants are later phases.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Runtime observation</h3>
+        <p>Logs can provide evidence that old artifacts or undeclared accesses still exist, but log absence is not a formal proof of unused behavior.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>SQL/ORM import</h3>
+        <p>Prisma, Rails, Drizzle, SQL DDL, and other importers are outside the MVP. Today, write <code>dbsystem</code> directly.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Time and probability</h3>
+        <p>Percentage rollout, TTL days, and offline clients are not proved as probability or wall-clock time. Model them as finite coexistence windows and ticks.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Next</p>
+    <h2 class="reveal">Read the design and examples</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Design decisions</h3>
+        <p>The lowering, finding schema, assumptions, and MVP boundary are described in the design document.</p>
+        <p><a class="btn" href="../DESIGN-db.md">DESIGN-db.md</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Working examples</h3>
+        <p>The fixtures cover safe column addition, unsafe drops, and NOT NULL ordering failures.</p>
+        <p><a class="btn" href="../../examples/db/README.md">examples/db</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Core syntax</h3>
+        <p><code>dbsystem</code> lowers to the existing FSL verifier. The syntax guide covers the core forms it expands into.</p>
+        <p><a class="btn" href="syntax.en.html">Syntax Guide</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

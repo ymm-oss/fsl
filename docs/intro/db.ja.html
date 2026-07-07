@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fsl-db によるDB/複数環境互換性チェック — FSL 日本語マニュアル</title>
+<meta name="description" content="fsl-dbのdbsystemで、DBマイグレーション、アプリ成果物の読み書き能力、複数環境のスキーマ範囲、ロールアウト同居期間を検証する方法。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="db">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">DB / multi-environment compatibility</p>
+    <h1 class="reveal"><code>dbsystem</code> でDB変更と複数環境を仕様として確認する</h1>
+    <p class="lead reveal">fsl-db は、DB単体ではなく、スキーマ変更、マイグレーション、アプリ成果物の読み書き能力、複数環境のロールアウト範囲を1つの仕様にまとめ、互換性違反を反例つきで返す dialect です。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="../DESIGN-db.md">DESIGN-db.md</a> にあります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">何を防ぐか</p>
+    <h2 class="reveal">DBとアプリのずれをリリース前に見つける</h2>
+    <p class="lead narrow reveal">本番では、古いアプリ、新しいアプリ、worker、batch、外部クライアント、途中のスキーマが短時間だけ同居します。fsl-db はその同居期間を有限のスナップショットとして扱い、読み書き先のカラムが存在するか、NOT NULL 化の順序が安全かを検査します。</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>読み取り互換性</h3>
+        <p><code>active</code> な成果物が読むカラムが、その環境・スキーマ範囲で存在することを確認します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>書き込み互換性</h3>
+        <p>成果物が書くカラムが先に削除されていないか、移行中の二重書き込みが成り立つかを確認します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>NOT NULL の順序</h3>
+        <p>追加、backfill、<code>set_not_null</code> の順序を確認し、未 backfill のカラムを必須化する失敗を検出します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>環境ごとの同居期間</h3>
+        <p><code>environment</code> の <code>schema lo..hi</code> と <code>when schema</code> で、prod/staging などの実際の同居範囲を明示します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">複数環境</p>
+    <h2 class="reveal">DB schema version だけではなく、環境にいる artifact を書く</h2>
+    <p class="lead narrow reveal">提案の中心は、バージョン番号ではなく capability です。「server_v3 だから安全」ではなく、「この環境にいる artifact が何を読み、何を書き、どの schema 範囲に存在しうるか」を書きます。</p>
+    <div class="panel reveal">
+      <pre><code>artifact server_v1 {
+  reads users.id, users.legacy_name;
+  writes users.legacy_name;
+}
+
+artifact server_v2 {
+  reads users.id, users.legacy_name, users.display_name;
+  writes users.legacy_name, users.display_name;
+}
+
+artifact worker_v1 {
+  reads users.legacy_name;
+}
+
+environment prod {
+  schema 0..4;
+  active server_v1 when schema 0..0;
+  supported server_v1 when schema 0..1;
+  active server_v2 when schema 1..3;
+  may_exist worker_v1 when schema 0..4;
+}</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>宣言</th><th>意味</th><th>主な使いどころ</th></tr>
+      <tr><td><code>active</code></td><td>その環境に確実に存在し、互換性を満たすべき artifact。</td><td>現在稼働中の server、worker、batch。</td></tr>
+      <tr><td><code>supported</code></td><td>互換性を保証する対象として残す artifact。</td><td>rollback 対象、サポート対象の旧 server。</td></tr>
+      <tr><td><code>may_exist</code></td><td>現実に残っている可能性がある artifact。</td><td>古い worker、外部クライアント、mobile/offline 系の近似。</td></tr>
+      <tr><td><code>when schema lo..hi</code></td><td>その artifact が同居しうる schema window。</td><td>割合 rollout、kill switch、段階的切替の有限近似。</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">MVPでは、複数環境は <code>environment</code> を複数書くことで表します。各環境の <code>schema lo..hi</code> は、宣言順の migration plan で到達可能な有限 snapshot 群です。任意の schema と artifact の直積ではなく、artifact ごとの <code>when schema</code> window が同居関係を決めます。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">モデル</p>
+    <h2 class="reveal">MVPは既存カーネルへ展開される</h2>
+    <p class="lead narrow reveal"><code>dbsystem</code> は新しい verifier kernel ではありません。DB向けの宣言を typed IR に読み込み、既存の状態機械へ展開します。</p>
+    <table class="matrix reveal">
+      <tr><th>dbsystem の要素</th><th>意味</th><th>展開後の考え方</th></tr>
+      <tr><td><code>database</code></td><td>初期スキーマ、テーブル、カラムのライフサイクル。</td><td><code>column_exists</code>、<code>column_backfilled</code>、<code>column_not_null</code> などの状態。</td></tr>
+      <tr><td><code>migration</code></td><td>スキーマバージョンを1つ進める操作。</td><td><code>schema_version == from</code> を guard に持つ1つの action。</td></tr>
+      <tr><td><code>artifact</code></td><td>アプリ/worker/API などの読み書き能力。</td><td>互換性 rule から生成される不変条件と metadata。</td></tr>
+      <tr><td><code>environment</code></td><td>どの schema と artifact が同居するか。</td><td>有限の到達可能スナップショット。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">基本形</p>
+    <h2 class="reveal">仕様には schema、migration、artifact、environment をまとめて書く</h2>
+    <div class="panel reveal">
+      <pre><code>dbsystem UserDb {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column display_name: Text absent;
+    }
+  }
+
+  migration add_display_name from 0 to 1 {
+    add users.display_name nullable;
+  }
+  migration backfill_display_name from 1 to 2 {
+    backfill users.display_name;
+  }
+  migration require_display_name from 2 to 3 {
+    set_not_null users.display_name;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.display_name;
+    writes users.display_name;
+  }
+
+  environment prod {
+    schema 0..3;
+    active server_v2 when schema 1..3;
+    supported server_v2 when schema 1..3;
+  }
+
+  environment staging {
+    schema 0..3;
+    active server_v2 when schema 1..3;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">実行</p>
+    <h2 class="reveal">通常の check/verify と DB専用所見を使う</h2>
+    <div class="panel reveal">
+      <pre><code>fslc check examples/db/safe_add_nullable_column.fsl
+fslc verify examples/db/safe_add_nullable_column.fsl --depth 8
+fslc db check examples/db/safe_add_nullable_column.fsl
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>結果</th><th>読み方</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>有限のロールアウト範囲と完全な capability 宣言を前提に、互換性 rule が通った状態。</td></tr>
+      <tr><td><code>column_removed_while_still_read</code></td><td>同居期間中の成果物が、すでに削除されたカラムを読んでいる。</td></tr>
+      <tr><td><code>column_removed_while_still_written</code></td><td>同居期間中の成果物が、すでに削除されたカラムへ書こうとしている。</td></tr>
+      <tr><td><code>not_null_before_backfill</code></td><td>backfill 前に NOT NULL 化する順序違反。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">境界</p>
+    <h2 class="reveal">MVPで書ける複数環境と、後続フェーズを分ける</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>データ保存性・rollback</h3>
+        <p>行データが観測上保存されるか、<code>up; down</code> が同値かはMVP外です。将来は refinement/simulation として扱います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>API / offline / feature flag</h3>
+        <p>提案書では重要な対象ですが、MVPの形式 rule は主にDBカラムの read/write と NOT NULL 順序です。API契約、offline TTL、feature flag variant は後続フェーズです。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>runtime observation</h3>
+        <p>ログからの「まだ古い成果物がいる」「未宣言の読み書きがある」は証拠であり、形式証明ではありません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>SQL/ORM import</h3>
+        <p>Prisma、Rails、Drizzle、SQL DDL などからの自動 import はMVP外です。現時点では <code>dbsystem</code> を直接書きます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>時間・確率</h3>
+        <p>割合 rollout、日数 TTL、offline client は確率や実時間としては証明しません。有限の同居 window と tick として近似します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">次に読む</p>
+    <h2 class="reveal">設計と例へ進む</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>設計判断</h3>
+        <p>lowering、所見 schema、MVP外の境界は design doc にまとまっています。</p>
+        <p><a class="btn" href="../DESIGN-db.md">DESIGN-db.md</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>動く例</h3>
+        <p>安全な追加、危険な drop、NOT NULL 順序違反などの fixture があります。</p>
+        <p><a class="btn" href="../../examples/db/README.md">examples/db</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>通常の文法</h3>
+        <p><code>dbsystem</code> は FSL の既存 verifier に展開されます。基本構文は文法ページで確認できます。</p>
+        <p><a class="btn" href="syntax.ja.html">文法・構文へ</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>
