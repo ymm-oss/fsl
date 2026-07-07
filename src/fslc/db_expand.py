@@ -28,8 +28,16 @@ DEFAULT_RULES = (
     "all_active_writes_exist",
     "removed_only_after_unused",
     "not_null_after_backfill",
+    "destructive_operations_annotated",
+    "preservation_transforms_annotated",
+    "api_calls_accepted",
+    "api_responses_expected",
+    "offline_payloads_accepted",
 )
-ALLOWED_RULES = frozenset(DEFAULT_RULES)
+ALLOWED_RULES = frozenset(DEFAULT_RULES + (
+    "data_preserved",
+    "rollback_equivalent",
+))
 
 
 @dataclass(frozen=True)
@@ -179,8 +187,10 @@ def validate_dbsystem(system):
                 hint="MVP dbsystem migrations are a single declared rollout sequence",
             )
         for op in migration.ops:
-            if op.column not in columns:
-                _err(f"unknown column '{op.column_label}'", loc=op.loc)
+            refs = [op.column] + list(op.columns)
+            for ref in refs:
+                if ref not in columns:
+                    _err(f"unknown column '{column_label(ref)}'", loc=op.loc)
         current = migration.to_schema
         reached_versions.add(current)
 
@@ -188,7 +198,7 @@ def validate_dbsystem(system):
     for artifact in system.artifacts:
         if artifact.name in artifacts:
             _err(f"duplicate artifact '{artifact.name}'", loc=artifact.loc)
-        for ref in _artifact_columns(artifact):
+        for ref in _artifact_db_columns(artifact):
             if ref not in columns:
                 _err(f"unknown column '{column_label(ref)}'", loc=artifact.loc)
         artifacts[artifact.name] = artifact
@@ -233,15 +243,8 @@ def _validate_window(window, label, loc=None):
         _err(f"{label} has an empty range {window[0]}..{window[1]}", loc=loc)
 
 
-def _artifact_columns(artifact: DbArtifact):
-    return (
-        list(artifact.reads)
-        + list(artifact.writes)
-        + list(artifact.calls)
-        + list(artifact.accepts)
-        + list(artifact.expects)
-        + list(artifact.emits_offline)
-    )
+def _artifact_db_columns(artifact: DbArtifact):
+    return list(artifact.reads) + list(artifact.writes)
 
 
 def _effective_window(env: DbEnvironment, entry: DbEnvironmentArtifact):
@@ -360,10 +363,51 @@ def expand_dbsystem(system):
                 body.append(_assign_index("column_exists", member, _bool(False), op.loc))
                 body.append(_assign_index("column_backfilled", member, _bool(False), op.loc))
                 body.append(_assign_index("column_not_null", member, _bool(False), op.loc))
+            elif op.op == "rename":
+                target = _var(col_member[op.columns[0]])
+                body.append(("requires", _idx("column_exists", member), op.loc))
+                body.append(_assign_index("column_exists", member, _bool(False), op.loc))
+                body.append(_assign_index("column_backfilled", member, _bool(False), op.loc))
+                body.append(_assign_index("column_not_null", member, _bool(False), op.loc))
+                body.append(_assign_index("column_exists", target, _bool(True), op.loc))
+                body.append(_assign_index("column_backfilled", target, _bool(True), op.loc))
+                body.append(_assign_index("column_not_null", target, _idx("column_not_null", member), op.loc))
+            elif op.op == "split":
+                body.append(("requires", _idx("column_exists", member), op.loc))
+                body.append(_assign_index("column_exists", member, _bool(False), op.loc))
+                body.append(_assign_index("column_backfilled", member, _bool(False), op.loc))
+                body.append(_assign_index("column_not_null", member, _bool(False), op.loc))
+                for target_key in op.columns:
+                    target = _var(col_member[target_key])
+                    body.append(_assign_index("column_exists", target, _bool(True), op.loc))
+                    body.append(_assign_index("column_backfilled", target, _bool(True), op.loc))
+                    body.append(_assign_index("column_not_null", target, _bool(False), op.loc))
+            elif op.op == "merge":
+                target = member
+                for source_key in op.columns:
+                    source = _var(col_member[source_key])
+                    body.append(("requires", _idx("column_exists", source), op.loc))
+                    body.append(_assign_index("column_exists", source, _bool(False), op.loc))
+                    body.append(_assign_index("column_backfilled", source, _bool(False), op.loc))
+                    body.append(_assign_index("column_not_null", source, _bool(False), op.loc))
+                body.append(_assign_index("column_exists", target, _bool(True), op.loc))
+                body.append(_assign_index("column_backfilled", target, _bool(True), op.loc))
+                body.append(_assign_index("column_not_null", target, _bool(False), op.loc))
         body.append(("assign", ("var", "schema_version"), _num(migration.to_schema), migration.loc))
         items.append(("action", action_name, [], body, migration.loc, False, _meta(
             "DB-MIGRATION",
             f"{migration.name}: schema {migration.from_schema} -> {migration.to_schema}",
+        )))
+
+    if not system.migrations:
+        action_name = "observe_schema_" + _safe(str(system.database.initial_schema))
+        generated_names.append(action_name)
+        items.append(("action", action_name, [], [
+            ("requires", _bin("==", _var("schema_version"), _num(system.database.initial_schema)), system.database.loc),
+            ("assign", ("var", "schema_version"), _num(system.database.initial_schema), system.database.loc),
+        ], system.database.loc, False, _meta(
+            "DB-SNAPSHOT",
+            f"{system.database.name}: schema {system.database.initial_schema} static compatibility snapshot",
         )))
 
     invariant_metadata = {}
@@ -432,9 +476,22 @@ def expand_dbsystem(system):
         },
         {
             "id": "DB-ASSUME-CAPABILITY-DECLARATIONS",
-            "text": "artifact reads/writes declarations are complete for the checked compatibility window",
+            "text": "artifact capability declarations are complete for the checked compatibility window",
         },
     ]
+    if any(artifact.emits_offline for artifact in system.artifacts):
+        assumptions.append({
+            "id": "DB-ASSUME-OFFLINE-TTL-FINITE",
+            "text": "offline TTL values are finite logical ticks, not wall-clock time or probability",
+        })
+    if "data_preserved" in rules or "rollback_equivalent" in rules:
+        assumptions.append({
+            "id": "DB-ASSUME-BOUNDED-ROW-MODEL",
+            "text": (
+                "preservation and rollback checks use a bounded abstract row model; "
+                "they are not a proof over all production rows"
+            ),
+        })
 
     display_names = {
         "schema_version": "schema.version",

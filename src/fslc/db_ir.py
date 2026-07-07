@@ -51,6 +51,8 @@ class DbMigrationOp:
     op: str
     column: ColumnKey
     nullability: Optional[str] = None
+    columns: Tuple[ColumnKey, ...] = ()
+    annotations: Tuple[str, ...] = ()
     loc: Optional[dict] = None
 
     @property
@@ -64,6 +66,7 @@ class DbMigration:
     from_schema: int
     to_schema: int
     ops: List[DbMigrationOp] = field(default_factory=list)
+    annotations: Tuple[str, ...] = ()
     loc: Optional[dict] = None
 
 
@@ -75,7 +78,9 @@ class DbArtifact:
     calls: List[ColumnKey] = field(default_factory=list)
     accepts: List[ColumnKey] = field(default_factory=list)
     expects: List[ColumnKey] = field(default_factory=list)
+    responds: List[ColumnKey] = field(default_factory=list)
     emits_offline: List[ColumnKey] = field(default_factory=list)
+    offline_ttls: Dict[ColumnKey, int] = field(default_factory=dict)
     loc: Optional[dict] = None
 
 

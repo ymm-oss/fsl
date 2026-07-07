@@ -1,0 +1,27 @@
+dbsystem UnsafeRollbackDrop {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column legacy_name: Text present backfilled nullable;
+    }
+  }
+
+  migration drop_legacy_name from 0 to 1 rollbackable {
+    drop users.legacy_name irreversible;
+  }
+
+  artifact server_v1 {
+    reads users.id;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v1 when schema 1..1;
+  }
+
+  check compatibility {
+    rule rollback_equivalent;
+    rule destructive_operations_annotated;
+  }
+}

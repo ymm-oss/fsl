@@ -84,7 +84,8 @@ governance <Name> {
 }
 ```
 
-Database compatibility dialect (MVP; expands to the same kernel):
+Database / multi-environment compatibility dialect (expands to the same kernel
+for DB lifecycle checks and reports stable fsl-db findings for the dialect layer):
 
 ```fsl
 dbsystem <Name> {
@@ -95,15 +96,23 @@ dbsystem <Name> {
       column <future_column>: <db_type> absent;
     }
   }
-  migration <name> from <v0> to <v1> {
+  migration <name> from <v0> to <v1> [rollbackable] {
     add <table>.<column> nullable;
     backfill <table>.<column>;
     set_not_null <table>.<column>;
-    drop <table>.<column>;
+    rename <table>.<old> to <table>.<new>;
+    split <table>.<source> into <table>.<a>, <table>.<b> lossless|lossy|irreversible;
+    merge <table>.<a>, <table>.<b> into <table>.<target> lossless|lossy|irreversible;
+    drop <table>.<column> destructive|irreversible;
   }
   artifact <version> {
     reads <table>.<column>, ...;
     writes <table>.<column>, ...;
+    calls api.<operation>, ...;
+    accepts api.<operation>, ...;
+    expects response.<field>, ...;
+    responds response.<field>, ...;
+    emits_offline api.<operation> ttl <finite_ticks>;
   }
   environment <env> {
     schema <lo>..<hi>;
@@ -116,14 +125,25 @@ dbsystem <Name> {
     rule all_active_writes_exist;
     rule removed_only_after_unused;
     rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule data_preserved;
+    rule rollback_equivalent;
   }
 }
 ```
 
-`dbsystem` checks database migration compatibility, not DB-engine behavior. Schema
-ranges are finite reachable rollout snapshots; percentages and wall-clock TTLs
-must be modeled as finite coexistence windows/ticks. Use `fslc db check` for
-stable fsl-db findings (`verified_under_assumptions` on success).
+`dbsystem` checks migration compatibility across DB schema, artifacts, API/offline
+payloads, and environments. It does not model DB-engine locks/optimizers,
+probability, wall-clock TTL, or full production-data completeness. Schema ranges
+are finite reachable rollout snapshots; percentages and offline TTLs must be
+modeled as finite coexistence windows/ticks. Use `fslc db check` for stable
+fsl-db findings (`verified_under_assumptions` on success). Use
+`fslc db observe` for runtime evidence only (`observed_mismatch`, not formal
+violation) and `fslc db import` for the minimal SQL DDL importer boundary.
 
 Composite spec (a separate top-level form):
 
@@ -351,6 +371,8 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
 fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
+fslc db observe <f> --trace events.json                 # runtime observation evidence
+fslc db import <sql> [--name Name] [-o out.fsl]         # minimal SQL DDL -> dbsystem
 ```
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`

@@ -85,7 +85,7 @@ environment prod {
       <tr><td><code>when schema lo..hi</code></td><td>The schema window where that artifact may coexist.</td><td>Finite modeling of percentage rollout, kill switches, and staged cutovers.</td></tr>
     </table>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">In the MVP, multiple environments are represented by multiple <code>environment</code> blocks. Each <code>schema lo..hi</code> range is the finite set of snapshots reachable through the declared migration plan. It is not an arbitrary Cartesian product of schemas and artifacts; each artifact's <code>when schema</code> window defines coexistence.</p>
+      <p style="margin:0">Multiple environments are represented by multiple <code>environment</code> blocks. Each <code>schema lo..hi</code> range is the finite set of snapshots reachable through the declared migration plan. It is not an arbitrary Cartesian product of schemas and artifacts; each artifact's <code>when schema</code> window defines coexistence.</p>
     </div>
   </div>
 </section>
@@ -93,7 +93,7 @@ environment prod {
 <section>
   <div class="wrap">
     <p class="kicker reveal">Model</p>
-    <h2 class="reveal">The MVP lowers to the existing kernel</h2>
+    <h2 class="reveal"><code>dbsystem</code> lowers to the existing kernel</h2>
     <p class="lead narrow reveal"><code>dbsystem</code> is not a new verifier kernel. It parses DB declarations into a typed IR and lowers them to the existing state-machine kernel.</p>
     <table class="matrix reveal">
       <tr><th>dbsystem element</th><th>Meaning</th><th>Lowered shape</th></tr>
@@ -132,12 +132,21 @@ environment prod {
   artifact server_v2 {
     reads users.id, users.display_name;
     writes users.display_name;
+    accepts api.CreateUserV1, api.CreateUserV2;
+    responds response.email;
+  }
+
+  artifact ios_v1 {
+    calls api.CreateUserV1;
+    emits_offline api.CreateUserV1 ttl 2;
+    expects response.email;
   }
 
   environment prod {
     schema 0..3;
     active server_v2 when schema 1..3;
     supported server_v2 when schema 1..3;
+    may_exist ios_v1 when schema 0..3;
   }
 
   environment staging {
@@ -150,6 +159,9 @@ environment prod {
     rule all_active_writes_exist;
     rule removed_only_after_unused;
     rule not_null_after_backfill;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
   }
 }</code></pre>
     </div>
@@ -164,7 +176,9 @@ environment prod {
       <pre><code>fslc check examples/db/safe_add_nullable_column.fsl
 fslc verify examples/db/safe_add_nullable_column.fsl --depth 8
 fslc db check examples/db/safe_add_nullable_column.fsl
-fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction</code></pre>
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
+fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>Result</th><th>How to read it</th></tr>
@@ -172,6 +186,9 @@ fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --en
       <tr><td><code>column_removed_while_still_read</code></td><td>An artifact still reads a column that has been removed in the coexistence window.</td></tr>
       <tr><td><code>column_removed_while_still_written</code></td><td>An artifact still writes a column that has been removed in the coexistence window.</td></tr>
       <tr><td><code>not_null_before_backfill</code></td><td>A column is made NOT NULL before the backfill step that justifies it.</td></tr>
+      <tr><td><code>api_response_field_missing</code></td><td>A coexisting provider no longer returns a response field expected by an old client.</td></tr>
+      <tr><td><code>offline_payload_not_accepted</code></td><td>A coexisting provider no longer accepts an offline payload inside its TTL window.</td></tr>
+      <tr><td><code>observed_mismatch</code></td><td>A runtime log disagrees with the declarations. This is observation evidence, not formal proof.</td></tr>
     </table>
   </div>
 </section>
@@ -179,23 +196,23 @@ fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --en
 <section>
   <div class="wrap">
     <p class="kicker reveal">Boundary</p>
-    <h2 class="reveal">Separate MVP multi-env checks from later phases</h2>
+    <h2 class="reveal">Separate the implemented finite model from remaining boundaries</h2>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>Data preservation and rollback</h3>
-        <p>Row-level preservation and <code>up; down</code> equivalence are outside the MVP. The intended future model is refinement/simulation.</p>
+        <p><code>data_preserved</code> and <code>rollback_equivalent</code> use a finite abstract row model. They are not full production-data proofs.</p>
       </div>
       <div class="syntax-card">
         <h3>API / offline / feature flags</h3>
-        <p>The proposal treats these as important compatibility dimensions, but the MVP formal rules primarily cover DB column read/write compatibility and NOT NULL ordering. API contracts, offline TTL, and feature-flag variants are later phases.</p>
+        <p>API operations, response fields, and offline payload TTLs can be written as finite capabilities/ticks. Feature flags are approximated as artifact/window variants.</p>
       </div>
       <div class="syntax-card">
         <h3>Runtime observation</h3>
-        <p>Logs can provide evidence that old artifacts or undeclared accesses still exist, but log absence is not a formal proof of unused behavior.</p>
+        <p><code>fslc db observe</code> returns <code>observed_mismatch</code> for old artifacts or undeclared accesses found in logs. Log absence is not proof of unused behavior.</p>
       </div>
       <div class="syntax-card">
         <h3>SQL/ORM import</h3>
-        <p>Prisma, Rails, Drizzle, SQL DDL, and other importers are outside the MVP. Today, write <code>dbsystem</code> directly.</p>
+        <p><code>fslc db import</code> converts a minimal SQL DDL subset to <code>dbsystem</code>. Prisma, Rails, Drizzle, and other ORM importers are extension points.</p>
       </div>
       <div class="syntax-card">
         <h3>Time and probability</h3>
@@ -212,12 +229,12 @@ fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --en
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>Design decisions</h3>
-        <p>The lowering, finding schema, assumptions, and MVP boundary are described in the design document.</p>
+        <p>The lowering, finding schema, assumptions, and remaining boundaries are described in the design document.</p>
         <p><a class="btn" href="../DESIGN-db.md">DESIGN-db.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>Working examples</h3>
-        <p>The fixtures cover safe column addition, unsafe drops, and NOT NULL ordering failures.</p>
+        <p>The fixtures cover safe column addition, unsafe drops, NOT NULL ordering failures, API/offline compatibility, observation, and import.</p>
         <p><a class="btn" href="../../examples/db/README.md">examples/db</a></p>
       </div>
       <div class="syntax-card">

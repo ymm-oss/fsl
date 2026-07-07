@@ -4104,6 +4104,7 @@ def _requires_clause_locally_implied(inst, req_idx, spec):
 def _requires_vacuity_candidates(instances, spec):
     pending = {}
     suppress = {}
+    generated = set(spec.get("generated_names") or [])
     for idx, inst in enumerate(instances):
         if inst["action_def"].get("sync"):
             # Synchronized compose actions are excluded: their clauses are
@@ -4115,6 +4116,8 @@ def _requires_vacuity_candidates(instances, spec):
             # by verifying the component spec on its own (no loss of detection).
             continue
         aname = inst["action"]
+        if aname in generated:
+            continue
         action_pending = pending.setdefault(aname, {})
         action_suppress = suppress.setdefault(aname, set())
         for req_idx, req in enumerate(inst["requires"]):

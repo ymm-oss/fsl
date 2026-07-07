@@ -98,16 +98,24 @@ dbsystem <Name> {
     }
   }
 
-  migration <name> from <v0> to <v1> {
+  migration <name> from <v0> to <v1> [rollbackable] {
     add <table>.<column> nullable;
     backfill <table>.<column>;
     set_not_null <table>.<column>;
-    drop <table>.<column>;
+    rename <table>.<old> to <table>.<new>;
+    split <table>.<source> into <table>.<a>, <table>.<b> lossless|lossy|irreversible;
+    merge <table>.<a>, <table>.<b> into <table>.<target> lossless|lossy|irreversible;
+    drop <table>.<column> destructive|irreversible;
   }
 
   artifact <version> {
     reads <table>.<column>, ...;
     writes <table>.<column>, ...;
+    calls api.<operation>, ...;
+    accepts api.<operation>, ...;
+    expects response.<field>, ...;
+    responds response.<field>, ...;
+    emits_offline api.<operation> ttl <finite_ticks>;
   }
 
   environment <env> {
@@ -122,6 +130,13 @@ dbsystem <Name> {
     rule all_active_writes_exist;
     rule removed_only_after_unused;
     rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule data_preserved;
+    rule rollback_equivalent;
   }
 }
 ```
@@ -131,8 +146,9 @@ column lifecycle maps. It never uses nested `Map<_, Set<_>>` state. `fslc check`
 and `fslc verify` work on it after expansion; `fslc db check` additionally emits
 stable fsl-db findings and returns `verified_under_assumptions` for successful
 formal checks. Environment schema ranges are finite reachable snapshots in the
-declared migration order; rollout percentages and wall-clock TTLs must be modeled
-as finite coexistence windows/ticks. See `docs/DESIGN-db.md`.
+declared migration order; rollout percentages and offline TTLs must be modeled as
+finite coexistence windows/ticks. API/offline and bounded preservation/rollback
+checks are dialect-level compatibility checks. See `docs/DESIGN-db.md`.
 
 `fslc verify` can override a `verify` block's `instances`/`values` bounds from
 the command line, without editing the spec:
@@ -462,6 +478,8 @@ fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|requirement
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
+fslc db observe <file.fsl> --trace events.json                  # runtime observation evidence
+fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DDL -> dbsystem
 ```
 
 In addition to `reachable` and action coverage, `scenarios` outputs, for each
@@ -1285,30 +1303,101 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
 
 ### 13.5 Database compatibility layer: `dbsystem` (fsl-db)
 
-`dbsystem` models schema migration compatibility across application artifacts and
-environments. It is a dialect expansion, not a DB engine model: SQL parsers,
-ORM importers, optimizer behavior, lock timing, and production-data completeness
-are outside the MVP.
+`dbsystem` models migration compatibility across databases, application
+artifacts, API/offline payloads, and environments. It is a dialect expansion, not
+a DB engine model: optimizer behavior, lock timing, wall-clock TTLs,
+probability, and full production-data completeness are outside the formal model.
 
-The MVP checks column lifecycle and read/write capabilities:
+Core shape:
+
+```fsl
+dbsystem <Name> {
+  database <db> {
+    schema <initial_version>
+    table <table> {
+      column <column>: <db_type> present backfilled not_null;
+      column <future_column>: <db_type> absent;
+    }
+  }
+
+  migration <name> from <v0> to <v1> [rollbackable] {
+    add <table>.<column> nullable;
+    backfill <table>.<column>;
+    set_not_null <table>.<column>;
+    rename <table>.<old> to <table>.<new>;
+    split <table>.<source> into <table>.<a>, <table>.<b> lossless|lossy|irreversible;
+    merge <table>.<a>, <table>.<b> into <table>.<target> lossless|lossy|irreversible;
+    drop <table>.<column> destructive|irreversible;
+  }
+
+  artifact <version> {
+    reads <table>.<column>, ...;
+    writes <table>.<column>, ...;
+    calls api.<operation>, ...;
+    accepts api.<operation>, ...;
+    expects response.<field>, ...;
+    responds response.<field>, ...;
+    emits_offline api.<operation> ttl <finite_ticks>;
+  }
+
+  environment <env> {
+    schema <lo>..<hi>;
+    active <version> when schema <lo>..<hi>;
+    supported <version> when schema <lo>..<hi>;
+    may_exist <version> when schema <lo>..<hi>;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule data_preserved;
+    rule rollback_equivalent;
+  }
+}
+```
+
+If `check compatibility` is omitted, default rules cover read/write lifecycle,
+destructive annotations, preservation-transform annotations, and API/offline
+compatibility. `data_preserved` and `rollback_equivalent` are opt-in bounded
+checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`.
+
+Current formal violation kinds include:
 
 - `column_removed_while_still_read`
 - `column_removed_while_still_written`
 - `not_null_before_backfill`
+- `destructive_migration_unannotated`
+- `preservation_transform_unannotated`
+- `data_preservation_loss`
+- `rollback_not_equivalent`
+- `api_call_not_accepted`
+- `api_response_field_missing`
+- `offline_payload_not_accepted`
 
 Use `fslc db check` when you want fsl-db vocabulary:
 
 ```bash
 fslc db check examples/db/safe_add_nullable_column.fsl
 fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
+fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql -o /tmp/imported.fsl
 ```
 
 Successful checks return `verified_under_assumptions` with the finite rollout and
 capability-completeness assumptions. Compatibility failures return
 `finding_schema_version: "fsl-db-finding.v0"` plus `findings[]` containing the
 environment, artifact, migration/schema element, minimal conflict set, and repair
-candidates. Use ordinary `fslc verify` when you want to inspect the generated
-kernel counterexample directly.
+candidates. Runtime observation returns `observed_mismatch` with
+`formal_result: "not_run"`; absence from logs is not proof of unused behavior.
+Use ordinary `fslc verify` when you want to inspect the generated kernel
+counterexample directly.
 
 ### 13.6 What is not handled (the boundary of the layers)
 

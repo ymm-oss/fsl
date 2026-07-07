@@ -85,7 +85,7 @@ environment prod {
       <tr><td><code>when schema lo..hi</code></td><td>その artifact が同居しうる schema window。</td><td>割合 rollout、kill switch、段階的切替の有限近似。</td></tr>
     </table>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">MVPでは、複数環境は <code>environment</code> を複数書くことで表します。各環境の <code>schema lo..hi</code> は、宣言順の migration plan で到達可能な有限 snapshot 群です。任意の schema と artifact の直積ではなく、artifact ごとの <code>when schema</code> window が同居関係を決めます。</p>
+      <p style="margin:0">複数環境は <code>environment</code> を複数書くことで表します。各環境の <code>schema lo..hi</code> は、宣言順の migration plan で到達可能な有限 snapshot 群です。任意の schema と artifact の直積ではなく、artifact ごとの <code>when schema</code> window が同居関係を決めます。</p>
     </div>
   </div>
 </section>
@@ -93,7 +93,7 @@ environment prod {
 <section>
   <div class="wrap">
     <p class="kicker reveal">モデル</p>
-    <h2 class="reveal">MVPは既存カーネルへ展開される</h2>
+    <h2 class="reveal"><code>dbsystem</code> は既存カーネルへ展開される</h2>
     <p class="lead narrow reveal"><code>dbsystem</code> は新しい verifier kernel ではありません。DB向けの宣言を typed IR に読み込み、既存の状態機械へ展開します。</p>
     <table class="matrix reveal">
       <tr><th>dbsystem の要素</th><th>意味</th><th>展開後の考え方</th></tr>
@@ -132,12 +132,21 @@ environment prod {
   artifact server_v2 {
     reads users.id, users.display_name;
     writes users.display_name;
+    accepts api.CreateUserV1, api.CreateUserV2;
+    responds response.email;
+  }
+
+  artifact ios_v1 {
+    calls api.CreateUserV1;
+    emits_offline api.CreateUserV1 ttl 2;
+    expects response.email;
   }
 
   environment prod {
     schema 0..3;
     active server_v2 when schema 1..3;
     supported server_v2 when schema 1..3;
+    may_exist ios_v1 when schema 0..3;
   }
 
   environment staging {
@@ -150,6 +159,9 @@ environment prod {
     rule all_active_writes_exist;
     rule removed_only_after_unused;
     rule not_null_after_backfill;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
   }
 }</code></pre>
     </div>
@@ -164,7 +176,9 @@ environment prod {
       <pre><code>fslc check examples/db/safe_add_nullable_column.fsl
 fslc verify examples/db/safe_add_nullable_column.fsl --depth 8
 fslc db check examples/db/safe_add_nullable_column.fsl
-fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction</code></pre>
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
+fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>結果</th><th>読み方</th></tr>
@@ -172,6 +186,9 @@ fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --en
       <tr><td><code>column_removed_while_still_read</code></td><td>同居期間中の成果物が、すでに削除されたカラムを読んでいる。</td></tr>
       <tr><td><code>column_removed_while_still_written</code></td><td>同居期間中の成果物が、すでに削除されたカラムへ書こうとしている。</td></tr>
       <tr><td><code>not_null_before_backfill</code></td><td>backfill 前に NOT NULL 化する順序違反。</td></tr>
+      <tr><td><code>api_response_field_missing</code></td><td>旧クライアントが期待する応答フィールドを、同居中の提供側が返していない。</td></tr>
+      <tr><td><code>offline_payload_not_accepted</code></td><td>TTL window 内に残る offline payload を、同居中の提供側が受け付けない。</td></tr>
+      <tr><td><code>observed_mismatch</code></td><td>runtime log が仕様宣言と食い違った。形式証明ではなく観測証拠。</td></tr>
     </table>
   </div>
 </section>
@@ -179,23 +196,23 @@ fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --en
 <section>
   <div class="wrap">
     <p class="kicker reveal">境界</p>
-    <h2 class="reveal">MVPで書ける複数環境と、後続フェーズを分ける</h2>
+    <h2 class="reveal">実装済みの有限モデルと、残る境界を分ける</h2>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>データ保存性・rollback</h3>
-        <p>行データが観測上保存されるか、<code>up; down</code> が同値かはMVP外です。将来は refinement/simulation として扱います。</p>
+        <p><code>data_preserved</code> と <code>rollback_equivalent</code> は有限の抽象行モデルで確認します。全本番データへの証明ではありません。</p>
       </div>
       <div class="syntax-card">
         <h3>API / offline / feature flag</h3>
-        <p>提案書では重要な対象ですが、MVPの形式 rule は主にDBカラムの read/write と NOT NULL 順序です。API契約、offline TTL、feature flag variant は後続フェーズです。</p>
+        <p>API operation、response field、offline payload TTL は有限の capability/tick として記述できます。feature flag は artifact/window として近似します。</p>
       </div>
       <div class="syntax-card">
         <h3>runtime observation</h3>
-        <p>ログからの「まだ古い成果物がいる」「未宣言の読み書きがある」は証拠であり、形式証明ではありません。</p>
+        <p><code>fslc db observe</code> は「まだ古い成果物がいる」「未宣言の読み書きがある」を <code>observed_mismatch</code> として返します。ログ不在は未使用の証明ではありません。</p>
       </div>
       <div class="syntax-card">
         <h3>SQL/ORM import</h3>
-        <p>Prisma、Rails、Drizzle、SQL DDL などからの自動 import はMVP外です。現時点では <code>dbsystem</code> を直接書きます。</p>
+        <p><code>fslc db import</code> は最小 SQL DDL を <code>dbsystem</code> に変換します。Prisma、Rails、Drizzle などの ORM 専用 importer は拡張点です。</p>
       </div>
       <div class="syntax-card">
         <h3>時間・確率</h3>
@@ -212,12 +229,12 @@ fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --en
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>設計判断</h3>
-        <p>lowering、所見 schema、MVP外の境界は design doc にまとまっています。</p>
+        <p>lowering、所見 schema、仮定、残る境界は design doc にまとまっています。</p>
         <p><a class="btn" href="../DESIGN-db.md">DESIGN-db.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>動く例</h3>
-        <p>安全な追加、危険な drop、NOT NULL 順序違反などの fixture があります。</p>
+        <p>安全な追加、危険な drop、NOT NULL 順序違反、API/offline、観測、importer の fixture があります。</p>
         <p><a class="btn" href="../../examples/db/README.md">examples/db</a></p>
       </div>
       <div class="syntax-card">

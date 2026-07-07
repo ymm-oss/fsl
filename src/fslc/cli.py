@@ -41,7 +41,8 @@ from .analysis import (
 )
 from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
-from .db_check import check_dbsystem, load_dbsystem
+from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
+from .db_import import import_sql_file
 
 FSL_VERSION = "1.0"
 
@@ -1223,6 +1224,52 @@ def run_db_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_db_observe(file, trace):
+    try:
+        system = load_dbsystem(file)
+        return _envelope(observe_dbsystem(system, trace))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_db_import(file, name="ImportedDb", output=None):
+    try:
+        imported = import_sql_file(file, name=name)
+        result = {
+            "result": "imported_with_warnings" if imported.warnings else "imported",
+            "dialect": "fsl-db-mvp.v0",
+            "source_format": "sql-ddl-minimal.v0",
+            "dbsystem": imported.system.name,
+            "warnings": imported.warnings,
+            "dbsystem_source": imported.source,
+        }
+        if output:
+            Path(output).write_text(imported.source, encoding="utf-8")
+            result["output"] = output
+            result.pop("dbsystem_source", None)
+        return _envelope(result)
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
@@ -1382,6 +1429,13 @@ def _build_arg_parser():
     dbc.add_argument("--depth", type=int, default=8)
     dbc.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
     dbc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    dbo = db_sub.add_parser("observe", help="compare runtime observation logs to dbsystem declarations")
+    dbo.add_argument("file")
+    dbo.add_argument("--trace", required=True)
+    dbi = db_sub.add_parser("import", help="import a minimal SQL DDL subset into dbsystem")
+    dbi.add_argument("file")
+    dbi.add_argument("--name", default="ImportedDb")
+    dbi.add_argument("-o", "--output")
 
     return ap
 
@@ -1484,6 +1538,15 @@ def _dispatch(args):
     elif args.cmd == "db":
         if args.db_cmd == "check":
             result = run_db_check(args.file, args.depth, args.engine, args.deadlock)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.db_cmd == "observe":
+            result = run_db_observe(args.file, args.trace)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.db_cmd == "import":
+            result = run_db_import(args.file, name=args.name, output=args.output)
+            if result.get("result") == "imported" and not args.output:
+                sys.stdout.write(result["dbsystem_source"])
+                sys.exit(0)
             print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
             result = _envelope({
