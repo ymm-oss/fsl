@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Documentation) Team-facing Japanese practical guide for `fslc analyze`
+  (`docs/GUIDE-analyze.ja.md`): a plain-language walkthrough of the structure
+  map, graph projections, `--profile ai-review` findings (with real command
+  outputs), DOT/Mermaid exports, batch mode, project traceability, and the
+  "not a verifier" boundary, plus review/PR/CI workflow integration. Linked from
+  the doc map in `docs/README.md`.
 - fsl-db MVP (`dbsystem`) for database migration compatibility across schema
   versions, artifacts, and environments. The dialect parses typed DB IR, expands
   to the existing kernel via `Map<Column, Bool>` lifecycle state and generated

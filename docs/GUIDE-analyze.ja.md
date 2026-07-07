@@ -1,0 +1,391 @@
+# `fslc analyze` 実践ガイド — 仕様の「構造」を見るレビュー入口
+
+`fslc verify` / `fslc refine` は「宣言した契約が成り立つか」を答える。
+`fslc analyze` はそれとは別の問いに答える —— **この仕様はどんな形をしていて、
+どこがレビューする価値があるほど結合が薄いか**。
+
+verify が「正しさ」を、analyze が「構造」を扱う。両者は置き換え関係ではなく、
+analyze はレビューや検証の**前段**で「どこを読むべきか」を機械的に先に絞るための
+コマンドである。
+
+> 実装設計の一次情報は [`DESIGN-analysis.md`](DESIGN-analysis.md)、
+> マニュアルページは [`intro/analysis.ja.html`](intro/analysis.ja.html) にある。
+> 本ガイドはチーム導入向けに、使い方・出力・findings・ワークフロー組み込みを
+> 実際の出力例つきで通しで説明する。
+
+---
+
+## 0. 3行まとめ
+
+- `fslc analyze spec.fsl` は仕様を**決定的な構造グラフ（JSON）**にする。要件・操作・状態・性質・シナリオが「何を読み・何を書き・何につながっているか」の地図。
+- `--profile ai-review` は、guard のない更新操作・一度も書かれない状態・根拠の薄い性質・孤立した要件などを **`review_required`（要確認）** として出す。**違反判定ではない。**
+- Z3 も到達可能性探索も走らない。だから速く、決定的で、CI・PR・エディタ・可視化ツールにそのまま渡せる。
+
+---
+
+## 1. 位置づけ —— なぜ analyze か
+
+レビューで時間を食うのは、正誤判断そのものより「どこを読むべきか」「この上位要求は
+下位設計のどこに落ちているか」を探す時間である。analyze はその探索を先に済ませる。
+
+| 手作業でかかること | analyze が先に出すもの | 効果 |
+|---|---|---|
+| 変更した操作がどの状態に影響するか探す | 操作↔状態の read/write グラフ（`action_state_graph`） | 影響範囲の探索を短縮、読む対象を絞れる |
+| 要件IDが実際の性質・設計操作に結びついているか追う | 要件・性質・シナリオ・refinement のグラフ | トレーサビリティ確認を再現可能にできる |
+| 全宣言を均等に読んで怪しい箇所を探す | `ai-review` findings | 最初に見るべき候補が並ぶ、レビュー順序を決めやすい |
+| PRコメント用に根拠を説明する | witness / candidate_repair / do_not_assume 付き JSON | 指摘の根拠と注意点をそのまま共有できる |
+
+**重要な境界**: analyze はレビューを置き換えない。仕様判断は人間が行う。効果は
+「レビュー前半の探索と根拠集め」を短縮する点にある。
+
+---
+
+## 2. 基本の使い方
+
+```bash
+# 既定 = TSG（Typed Semantic Graph）を JSON で出力
+fslc analyze specs/cart_v1.fsl
+
+# グラフ projection を選ぶ
+fslc analyze specs/cart_v1.fsl --projection action_state_graph
+fslc analyze specs/cart_v1.fsl --projection requirement_property_graph
+fslc analyze specs/cart_v1.fsl --projection property_state_graph
+
+# レビュー候補（findings）を出す
+fslc analyze specs/cart_v1.fsl --profile ai-review
+
+# ディレクトリ・複数ファイルを一括（バッチ）
+fslc analyze specs/ examples/e2e/ --profile ai-review
+
+# refinement マッピング単体 / プロジェクトマニフェスト
+fslc analyze specs/cart_refines.fsl --projection refinement_graph
+fslc analyze fsl-project.toml --projection traceability_graph
+
+# 可視化向けエクスポート
+fslc analyze specs/cart_v1.fsl --projection action_state_graph --format dot
+fslc analyze specs/cart_v1.fsl --projection action_state_graph --format mermaid
+```
+
+**引数の要点**
+
+- `--projection`: `tsg`（既定）/ `action_state_graph` / `requirement_property_graph` / `property_state_graph` / `refinement_graph` / `traceability_graph`。
+- `--profile ai-review`: findings モード。projection ではなく「所見の抽出」を行う。
+- `--format`: `json`（既定）/ `dot` / `mermaid`。DOT・Mermaid は**グラフ形状の projection のみ**（findings や非グラフには使えない）。Graphviz / Mermaid ランタイムには依存しない（文字列を生成するだけ）。
+
+**終了コードと result（他コマンドと同じ契約）**
+
+- 成功: `result: "analyzed"`、exit `0`。
+- parse / name / type / semantics / io / internal のエラーは通常の fslc エラーエンベロープを再利用。
+- バッチで1ファイルでも失敗すると exit `2`（成功分は `files[]` に残り、失敗分は `errors[]` に要約）。
+
+---
+
+## 3. 出力の全体像
+
+すべて `_envelope` でラップされ、先頭に `{"fsl": "1.0", "result": "analyzed", ...}` が付く。
+単一ファイル・TSG の例（`fslc analyze specs/cart_v1.fsl`）:
+
+```json
+{
+  "fsl": "1.0",
+  "result": "analyzed",
+  "spec": "ShoppingCart",
+  "analysis": "structure",
+  "projection": "tsg",
+  "schema_version": "tsg.v0",
+  "nodes": [ { "id": "action:checkout", "kind": "action", ... } ],
+  "edges": [ { "id": "edge:...", "kind": "writes", "from": "...", "to": "..." } ]
+}
+```
+
+`cart_v1.fsl` の TSG は実測で **19 ノード / 41 エッジ**。内訳:
+
+- ノード種別: `action`×3, `guard`×4, `effect`×4, `ensures`×1, `state`×2, `phys_state`×3, `reachable`×1, `spec`×1
+- エッジ種別: `declares`×9, `reads`×11, `writes`×8, `has_guard`×4, `has_effect`×4, `has_ensures`×1, `checks`×1, `expands_to`×3
+
+決定性が保証されている（ノード/エッジは安定ソート・重複排除済み）ので、
+差分（diff）やスナップショットに向く。
+
+---
+
+## 4. TSG（Typed Semantic Graph）—— すべての土台
+
+TSG は生の文法タプルではなく、**`build_spec` が返した検証済み spec dict**から構築する。
+つまり verify / scenarios / replay / explain と**同じ意味論ビュー**の上に立つ。
+すべての projection と findings はこの TSG から派生する。
+
+**安定ノード種別**: `spec`, `requirement`, `state`, `phys_state`, `action`, `guard`,
+`effect`, `ensures`, `invariant`, `trans`, `leadsTo`, `reachable`, `acceptance`,
+`forbidden`（spec がメタデータを持てば `kpi`, `control` も）。
+
+**安定エッジ種別**: `declares`, `covers`, `has_guard`, `has_effect`, `has_ensures`,
+`reads`, `writes`, `checks`, `starts_with`, `precedes`（物理変数展開の `expands_to` など）。
+
+読み取り（reads）の抽出は式を保守的に走査し、束縛変数（forall/exists/sum/count の
+ローカル束縛）を正しく除外する。書き込み（writes）は代入文の左辺ルートから取る。
+このため「どの操作がどの状態を実際に触るか」は grep より正確に出る。
+
+---
+
+## 5. グラフ projections
+
+各グラフ projection は `components`（連結成分）, `sccs`（強連結成分）, `cycles`
+（代表閉路）, `degree`（入次数/出次数）, `formal_status: "not_a_violation"` を含む。
+**孤立した成分や閉路があっても、それは証明の失敗ではない。下流レビューのための構造情報にすぎない。**
+
+| projection | 何をつなぐか | 主な用途 |
+|---|---|---|
+| `action_state_graph` | 操作 ↔ 読み書きする状態変数 | 変更の**影響範囲**を掴む |
+| `requirement_property_graph` | 要件 ↔ 被覆する操作・性質・シナリオ・KPI/control | 要件の**カバレッジ**を追う |
+| `property_state_graph` | 性質 ↔ 読む状態変数 | 性質が何に依存しているかを見る |
+| `refinement_graph` | refinement マッピング単体（impl/abs 名・state map・action map・stutter・progress） | マッピングの構造レビュー |
+| `traceability_graph` | プロジェクトマニフェスト（business/requirements/design ＋ refinement） | 層をまたぐ**トレーサビリティ** |
+
+`.toml` を直接渡すとプロジェクトマニフェストとして扱う（既定名 `fsl-project.toml`、
+レビュー用の別名コピーも可）。
+
+---
+
+## 6. `--profile ai-review` findings —— レビュー候補の抽出
+
+findings は**決定的なヒューリスティック**で、すべて `severity: "review_required"`、
+`formal_status: "not_a_violation"` を持つ。5種類（＋プロジェクト層で1種類）:
+
+| finding_type | 何を指すか | confidence |
+|---|---|---|
+| `disconnected_requirement` | 要件ノードが操作・性質・受入/禁止シナリオ・KPI/control・governanceメタのどれにもつながっていない | 0.80 |
+| `unanchored_property` | ユーザー性質（invariant/trans/leadsTo/reachable）が要件タグ・シナリオ・操作↔状態のどれにも錨づいていない | 0.70 |
+| `progressless_cycle` | 要件/シナリオに紐づく多操作の構造閉路に、明示的な進行（leadsTo/有界exit/terminal/fairness）が付いていない | 0.68 |
+| `unwritten_state` | 状態変数が初期化されるが、どの操作も書き込まない | 0.68–0.76 |
+| `unguarded_action` | 非生成の操作に `requires` が一つもない（構造上、常時実行可能に見える） | 0.72 |
+| `traceability_gap`（プロジェクト層のみ） | 上位層の要件/control ID に、下位層の構造的アンカーが見えない | 0.74 |
+
+各 finding は次のフィールドを持つ:
+`finding_id`, `analysis`, `finding_type`, `severity`, `confidence`, `formal_status`,
+`involved_nodes`, `witness`（根拠）, `why_it_matters`（なぜ気にするか）,
+`candidate_repairs`（直し方の候補）, `do_not_assume`（早合点してはいけないこと）,
+（可能なら）`loc`（ソース位置）。
+
+### 6.1 実例
+
+デモ仕様 `OrderReview`（`submit()` に guard なし、`audit_ready` を誰も書かない）を
+`--profile ai-review` にかけると 2 件出る:
+
+```
+STRUCT-UNGUARDED-ACTION-0001  unguarded_action  conf=0.72  nodes=[action:submit]
+STRUCT-UNWRITTEN-STATE-0001   unwritten_state   conf=0.76  nodes=[state:audit_ready]
+```
+
+`unwritten_state` の全文（`audit_ready` は invariant が読むだけで、どの操作も書かない）:
+
+```json
+{
+  "finding_id": "STRUCT-UNWRITTEN-STATE-0001",
+  "finding_type": "unwritten_state",
+  "severity": "review_required",
+  "confidence": 0.76,
+  "formal_status": "not_a_violation",
+  "involved_nodes": ["state:audit_ready"],
+  "witness": {
+    "kind": "state_has_no_action_writes",
+    "node": "state:audit_ready",
+    "read_by": ["invariant:AuditGate"]
+  },
+  "why_it_matters": "The state variable is initialized but no action writes it in the structural graph.",
+  "candidate_repairs": [
+    { "kind": "review_state_role",
+      "template": "Make the value a const/model parameter if it is intentionally fixed, or add the missing action/effect that changes it." }
+  ],
+  "do_not_assume": [
+    "The state variable is useless.",
+    "A verifier property is violated.",
+    "The variable is safe to delete without checking generated dialect state."
+  ]
+}
+```
+
+実運用の corpus に対しても findings は**過検出しない**設計で、`specs/` 23ファイルの
+バッチ走査では `rate_limiter.fsl` の `tick()`（refill 操作に guard なし）1件のみが挙がる。
+残りはすべて 0件。findings は「ノイズを浴びせる」のではなく「最初に見るべき数件」を出す。
+
+### 6.2 過度に断定しない設計
+
+- `progressless_cycle` は公開出力で `H1` / `Betti` / `homology` などの語を使わず、
+  `retry` / `pending` のような言語依存の単語にも依存しない。閉路は正当なリトライ・
+  レビュー・補償かもしれない。finding が言うのは「進行の物語が見えない」だけ。
+- すべての finding に `do_not_assume` が付き、「これは違反ではない」「名前が似ている
+  だけで意味的被覆の証明にはならない」といった早合点への歯止めを明示する。
+
+---
+
+## 7. 出力フォーマット（JSON / DOT / Mermaid）
+
+`--format dot` / `--format mermaid` は、グラフ形状の projection をそのまま可視化ツールへ
+渡すためのエクスポート。JSON 以外は生テキストを stdout に出す（エンベロープでは包まない）。
+
+`fslc analyze specs/cart_v1.fsl --projection action_state_graph --format mermaid` の実出力:
+
+```mermaid
+graph TD
+  action_add_to_cart((" add_to_cart "))
+  action_checkout((" checkout "))
+  action_remove_from_cart((" remove_from_cart "))
+  state_cart[/"cart"/]
+  state_stock[/"stock"/]
+  action_add_to_cart -->|writes| state_cart
+  action_checkout -->|writes| state_cart
+  action_checkout -->|writes| state_stock
+  action_remove_from_cart -->|writes| state_cart
+  state_cart -->|read_by| action_add_to_cart
+  state_cart -->|read_by| action_checkout
+  state_cart -->|read_by| action_remove_from_cart
+  state_stock -->|read_by| action_checkout
+```
+
+そのまま GitHub の PR 説明・Issue・Wiki に貼れば図としてレンダリングされる。
+DOT は Graphviz、Mermaid は各種ドキュメントツールへ。
+
+---
+
+## 8. バッチモード
+
+ファイルとディレクトリを混在で渡せる。ディレクトリは `*.fsl` を再帰展開し、正規化パスで
+ソートして、`mode: "batch"` の**1つの決定的な JSON エンベロープ**にまとめる。
+
+- 各ファイルの結果は `files[]` に、各エントリは `summary`（findings 件数など）と
+  `findings` を持つ。
+- 1つでも失敗すると全体 `result: "error"`、exit `2`。成功分は `files[]` に残り、
+  失敗分は `errors[]`（file / result / kind / message / loc）に要約される。
+- バッチは `--format json` のみ（DOT/Mermaid は単一グラフ向け）。
+
+CI で「リポジトリ全体の構造レビュー候補」を一括収集するのに向く。
+
+---
+
+## 9. プロジェクト・トレーサビリティ（`traceability_graph`）
+
+`fsl-project.toml`（business / requirements / design ＋ refinement マッピング）を渡すと、
+**層をまたいだ1枚のトレーサビリティグラフ**を作る。各層のノードは層名でプレフィックスされ、
+refinement の state map / action map / stutter / preserve-progress、および同一ID・
+refinement 経由の `lower_anchor` エッジで層が接続される。
+
+実測（`tests/fixtures/chain/fsl-project.toml`）: 33 ノード / 58 エッジ、3 連結成分、閉路 0。
+`business_spec` / `requirements_spec` / `design_spec`、`refinement`、`action_map`、
+`state_map`、`stutter_map` などが1つのグラフに乗る。
+
+上位層の要件/control ID に下位層の構造アンカーが見えないと `traceability_gap` finding が
+出る。ただしこれもレビュー専用 —— **検証済みの refinement 証拠は依然 `fslc chain` /
+`fslc refine` の仕事**であり、analyze はその穴の「候補」を示すだけ。
+
+---
+
+## 10. スキーマとバージョニング
+
+バージョン付きスキーマは `schemas/fslc/analysis/` にある:
+
+- `tsg.v0.schema.json`
+- `analysis-graph.v0.schema.json`
+- `analysis-findings.v0.schema.json`
+
+下流の消費者は形状を仮定する前に `schema_version`（`tsg.v0` / `analysis-graph.v0` /
+`analysis-findings.v0`）を確認すること。**追加の任意フィールドは同一バージョン内で
+増えうる**。必須フィールドの削除・意味変更は新バージョンで行う。
+
+---
+
+## 11. LSP 連携
+
+`fslc-lsp` は `FSLC_LSP_ANALYSIS_DIAGNOSTICS=1` を付けて起動すると、
+`--profile ai-review` の findings を**情報レベルの診断**としてエディタに出せる。
+診断は可能なら TSG ノードのソース位置を使い、なければ最良のインデックス済み宣言範囲に
+フォールバックする。**verifier のエラーではなく、`fslc analyze` の構造レビュー信号**である
+ことは明示される。
+
+---
+
+## 12. 境界 —— analyze は verify ではない
+
+- **Z3 を呼ばない / 到達可能性を解かない / replay しない / refinement 証明をしない。**
+  だから速く決定的だが、構造所見は「証拠」ではない。
+- 構造所見は `formal_status: "not_a_violation"` を持つ。**閉路があるだけ、guard がない
+  だけでバグとは言わない。**
+- 形式的な証拠や実装適合が必要なときは `verify` / `refine` / `replay` を使う。
+- 将来、証明ステータスを持つ finding を足すなら、既存の verifier / refinement / replay
+  の結果を明示的に呼び・消費し、その根拠を JSON に書くべき（設計方針）。
+
+---
+
+## 13. ワークフローへの組み込み（実践）
+
+**A. PR レビューの前段**
+変更した spec に `--projection action_state_graph --format mermaid` をかけ、影響範囲図を
+PR 説明に貼る。レビュアは「どの操作がどの状態に効くか」を全文読解せず把握できる。
+
+**B. レビュー優先順位づけ**
+`--profile ai-review` を先に回し、`unguarded_action` / `unwritten_state` /
+`unanchored_property` を「最初に確認する数件」として拾う。findings の `witness` と
+`candidate_repairs` をそのままレビューコメントの根拠にできる。
+
+**C. CI の構造ゲート（ソフト）**
+`fslc analyze specs/ --profile ai-review` をバッチで回し、findings 件数を PR にレポート。
+**exit code でブロックする用途ではない**（`analyzed` は成功）。「新規の
+`disconnected_requirement` が増えたら要確認」のような**軽い注意喚起**に使う。
+
+**D. トレーサビリティ点検**
+`fslc analyze fsl-project.toml --projection traceability_graph` で層間の `traceability_gap`
+を洗い出し、`fslc chain` の証明前に「拾い漏れた上位要求」を潰す。
+
+**E. LLM の write→verify→repair ループ**
+findings は機械可読で `candidate_repairs` / `do_not_assume` を持つため、エージェントが
+「どこを直すべきか／早合点してはいけない点」を構造化入力として受け取れる。
+
+---
+
+## 14. まとめ
+
+`fslc analyze` は verify の代わりではなく、**verify の前に立つレビューの地図**。
+
+- 仕様の構造を決定的な JSON グラフにし、影響範囲・カバレッジ・トレーサビリティを機械的に出す。
+- `--profile ai-review` は根拠つきのレビュー候補を出す（違反判定ではない）。
+- Z3 非依存で速く決定的、JSON/DOT/Mermaid/Schema で PR・CI・エディタ・可視化ツールに渡せる。
+
+「まず analyze で見るべき場所を絞り、verify / refine で正しさを証明する」——
+これが analyze の意図した使い方である。
+
+---
+
+### 付録: 本ガイドで使ったデモ仕様
+
+```fsl
+// findings を意図的に残したデモ仕様
+spec OrderReview {
+  enum Status { Draft, Submitted, Approved }
+
+  state {
+    status:      Status,
+    approvals:   Int,
+    audit_ready: Bool
+  }
+
+  init {
+    status = Draft
+    approvals = 0
+    audit_ready = false
+  }
+
+  // requires なし → 常時実行可能に見える（unguarded_action）
+  action submit() {
+    status = Submitted
+  }
+
+  action approve() {
+    requires status == Submitted
+    status = Approved
+    approvals = approvals + 1
+  }
+
+  // audit_ready は init されるが、どの action も書かない（unwritten_state）
+  invariant AuditGate { audit_ready == false or status == Approved }
+  invariant Counters { approvals >= 0 }
+}
+```
