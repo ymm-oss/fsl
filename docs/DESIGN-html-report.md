@@ -60,7 +60,11 @@ the verifier's verdict on it:
   dialect-generated (type-bound checks, partial-op checks, generated actions,
   deadline invariants)
 - verification status and warnings
-- counterexample or reachable trace timeline
+- counterexample or reachable trace timeline, including relation edge summaries
+  when trace state contains `relation A -> B` values
+- refinement evidence when `verify` reports an inline `implements` failure:
+  implementation-side action/state/trace next to the abstract-side mapped state
+  and mismatch payload
 - witness examples with state snapshots
 - counterfactual table
 - escaped source with line numbers
@@ -79,6 +83,11 @@ The report is a dense product-review surface rather than a marketing page. It
 uses restrained surfaces, fixed-radius panels, semantic status colors, tables for
 scanability, and SVG only for the model relationship view. All source, formulas,
 JSON, and requirement text are HTML-escaped before rendering.
+
+Relation and refinement evidence are display-only views over existing verifier
+JSON. `fslc html` does not invent graph semantics: relation graphs render the
+pair lists already emitted in traces, and refinement panels render
+`implements.violation` / `refinement_failed` payloads side by side.
 
 ## Non-goals
 

@@ -149,6 +149,7 @@ leadsTo <Name> {
   <expr> ~> <expr>                      // once P holds (including the same instant), Q eventually holds
   <expr> ~> within K <expr>             // Q must hold within K steps after P
   forall x: T { <expr> ~> <expr> }      // checked independently per binding (only an outer forall may nest)
+  helpful <action>(<binding expr>, ...)  // optional; per-binding progress action for ranked induction
   decreases <int expr>                  // optional; induction-only ranking measure
 }
 ```
@@ -159,10 +160,17 @@ constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under
 `fslc verify --engine induction`, the verifier proves the ranked response by
 checking, under the proved invariants, that whenever `P` is pending and `Q` is
-false: the measure is non-negative; some action is enabled; and every enabled
-action either makes `Q` true or keeps `P` true while strictly decreasing the
-measure. Ranked proof success is independent of `--depth`; `--depth` is still
-used for the base BMC check and reachable/coverage evidence.
+false: the measure is non-negative; progress is possible; and the enabled-action
+discipline is satisfied. Without `helpful`, every enabled action must either make
+`Q` true or keep `P` true while strictly decreasing the measure. With one or more
+`helpful action(args...)` lines, only the matching helpful action instance must
+strictly decrease the measure when it fires; unrelated action instances only need
+to keep the pending obligation true unless they make `Q` true. The matching
+helpful action must be a lower-layer `fair action` and must be enabled whenever
+the obligation is pending. `helpful` is metadata for the ranked proof: it does
+not create a fairness assumption. Ranked proof success is independent of
+`--depth`; `--depth` is still used for the base BMC check and
+reachable/coverage evidence.
 
 **Placement.** `decreases` is a sibling of the response body inside the
 `leadsTo` block, *outside* any `forall` wrapper — never nested inside the
@@ -182,19 +190,26 @@ leadsTo Responds {
 }
 ```
 
-**Per-entity measures fail under interleaving.** The ranking discipline
-above applies to *every* enabled action, not just the one that resolves the
-pending binding. A measure that mentions only the bound entity, e.g.
-`decreases level[c]` inside `forall c: Case { level[c] > 0 ~> level[c] == 0 }`,
-therefore always fails: an action that advances a *different* entity (say
-`step(c=1)` while the pending binding is `c=0`) leaves `level[c=0]`
-unchanged, and the discipline requires every enabled action to strictly
-decrease the measure. The verifier reports this as
-`rank_failure: "non_decreasing_action"`, with the CTI's `last_action`
-showing the other entity's binding — this is by design, not a bug. Proving
-per-entity liveness under interleaving needs a fairness-aware discipline
-(only the binding's own "helpful" action must decrease); that is not
-implemented and is tracked separately (issue #72).
+**Per-entity measures under interleaving need `helpful`.** A measure that
+mentions only the bound entity, e.g. `decreases level[c]` inside
+`forall c: Case { level[c] > 0 ~> level[c] == 0 }`, is not enough by itself:
+an action that advances a different entity can leave `level[c]` unchanged. Add
+the per-binding progress action:
+
+```fsl
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 }
+  helpful step(c)
+  decreases level[c]
+}
+```
+
+With this form, `step(c)` must be declared `fair action`, must be enabled in
+every pending state for that binding, and must strictly decrease `level[c]`
+when it fires. Other interleavings may preserve the pending obligation without
+decreasing this per-entity measure. Diagnostics distinguish
+`progress_action_not_fair`, `helpful_action_not_enabled`,
+`non_decreasing_helpful_action`, and `pending_not_preserved`.
 
 **Working idiom: a global sum measure.** Sum the tracked quantity across the
 domain with the built-in `sum()` aggregate (§3): `decreases sum(k: Case of
@@ -204,11 +219,10 @@ unchanged whether `Case` is sized via `verify { instances Case = N }` or
 shrunk with a CLI `--instances` override. Because every fair `step` decrements
 exactly one `level[k]`, every enabled action strictly decreases the total, so
 induction returns `"proved"` with `"completeness": "unbounded"`. This idiom
-only covers designs where *every* enabled action decreases the total; a
-design where some enabled action advances the domain without shrinking the
-sum is still an open case, needing the fairness-aware "helpful action"
-discipline from issue #72 above. (Conditional expressions can't substitute
-for a per-branch measure either: `if/then/else` is legal only in
+only covers designs where *every* enabled action decreases the total. For
+per-entity progress under interleaving, prefer the `helpful` form above.
+(Conditional expressions can't substitute for a per-branch measure either:
+`if/then/else` is legal only in
 refinement-mapping expressions (§10), not in the general expression grammar
 that `decreases` draws from.)
 
@@ -227,6 +241,7 @@ that `decreases` draws from.)
 | `Map<K, V>` | `stock: Map<ItemId, Qty>` | K is recommended to be a bounded scalar (domain type / enum / Bool) |
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
+| `relation A -> B` | `delegates: relation User -> User` | A bounded binary relation over bounded scalar endpoints |
 
 **Scalar** = Int / Bool / domain type / enum. In a `state` declaration,
 `x: lo..hi` is accepted as an anonymous domain type and is equivalent to
@@ -235,7 +250,7 @@ declaring `type X = lo..hi` and writing `x: X`.
 **Types legal as state variables** (anything else is rejected by `check` as a type error):
 scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 | `Map<bounded scalar, scalar | Option<scalar> | struct>`
-| `Set<bounded scalar>` | `Seq<scalar, N>`
+| `Set<bounded scalar>` | `Seq<scalar, N>` | `relation bounded-scalar -> bounded-scalar`
 
 - Nesting structs, Set/Map/Seq inside a struct field,
   `Option<Option<...>>`, and `Option<Set/Map/Seq/struct>` are not allowed
@@ -271,6 +286,10 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
 - Seq: `Seq {}` / `Seq { 1, 2 }`, `.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`, `==` is equality of length and all elements
+- Relation: `r.contains(a, b)`, `r.add(a, b)`, `r.remove(a, b)`,
+  `reachable(r, a, b)`, `acyclic(r)`, `functional(r)`, `injective(r)`,
+  `domain(r)`, `range(r)`. `reachable` and `acyclic` require a self-relation
+  (`relation T -> T`); endpoint type/arity errors include repair hints.
 - Inside ensures / trans only: read the pre-transition state with `old(expr)`
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
   optional `within K` before Q for a bounded deadline, and optional
@@ -290,7 +309,8 @@ variable.
 ## 4. Statements (init / action bodies)
 
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
-- Updating a Set/Seq uses the **reassignment idiom**: `s = s.add(x)`, `q = q.pop()`
+- Updating a Set/Seq/relation uses the **reassignment idiom**:
+  `s = s.add(x)`, `q = q.pop()`, `r = r.add(a, b)`
 - `if expr { stmt... } else { stmt... }` is allowed in both `init` and action bodies
   (can be nested with an if inside the else)
 - `forall x: T { stmt... }` (bulk initialization / bulk update)
@@ -381,6 +401,8 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                                                  #   invariant / trans / leadsTo / reachable (for probing)
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
+                                                 # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
@@ -408,9 +430,17 @@ from the run and from checked-property outputs (`invariants_checked`,
 `transitions_checked`, `leads_to`, and `reachables`). When `--property` and
 `--exclude-property` name the same property, exclusion wins.
 
+`sweep` is an opt-in wrapper around `verify`; it does not change normal
+verification. It evaluates a deterministic grid of `--instances NAME=lo..hi`,
+`--values NAME=lo..hi`, and `--depth lo..hi` overrides, records each underlying
+verification result under `sweep.results`, and returns the first failing scope
+under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
+bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
+passing sweep means "no counterexample in this grid", not an unbounded proof.
+
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / typestate,
-`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed,
+mutated / explained / analyzed / typestate / sweep_passed,
+`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed / sweep_failed,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error.
 
@@ -748,8 +778,11 @@ This pulls the named abstract `leadsTo` through the state mapping and checks
 `P(α(impl_state)) ~> Q(α(impl_state))` on impl executions. If the lower layer can
 spin forever or deadlock while the abstract response remains pending, the result
 is `refinement_failed` with `kind:"progress_lost"` and
-`violation_kind:"leadsTo"`. The `by` actions are review metadata and must name
-impl actions; fairness still comes from lower-layer `fair action` declarations.
+`violation_kind:"leadsTo"`. `progress_failure` distinguishes
+`lasso_blocks_progress` from `deadlock_or_stall_blocks_progress`. The `by`
+actions are review metadata and must name impl actions; they do not create
+fairness or prove implementation conformance. Fairness still comes from
+lower-layer `fair action` declarations.
 For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
 `verify --engine induction`.
 

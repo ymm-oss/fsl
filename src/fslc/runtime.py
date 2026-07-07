@@ -258,6 +258,8 @@ def _default_phys_value(entry, spec):
         return 0
     if ty[0] == "bool":
         return False
+    if ty[0] == "relation":
+        return {}
     if ty[0] == "set":
         elem_ty = ty[1]
         return {i: False for i in _map_domain(elem_ty, spec)}
@@ -331,6 +333,13 @@ def _empty_phys_state(spec):
         elif ty[0] == "set":
             elem_ty = ty[1]
             state[phys] = {i: False for i in _map_domain(elem_ty, spec)}
+        elif ty[0] == "relation":
+            src_ty, dst_ty = ty[1], ty[2]
+            state[phys] = {
+                _relation_key(src_ty, dst_ty, src, dst, spec): False
+                for src in _map_domain(src_ty, spec)
+                for dst in _map_domain(dst_ty, spec)
+            }
         elif ty[0] == "struct":
             if entry.get("option_part") == "present":
                 state[phys] = False
@@ -347,6 +356,84 @@ def _as_bool(v):
     if isinstance(v, bool):
         return v
     raise _EvalError(f"expected bool, got {v!r}")
+
+
+def _relation_endpoint_index(ty, value, spec):
+    if ty[0] == "bool":
+        if not isinstance(value, bool):
+            _err("relation Bool endpoint expects a Bool value", kind="type")
+        return 1 if value else 0
+    lo, _hi = domain_range(ty, spec["types"])
+    return int(value) - lo
+
+
+def _relation_key(src_ty, dst_ty, src, dst, spec):
+    dst_size = len(list(_map_domain(dst_ty, spec)))
+    return _relation_endpoint_index(src_ty, src, spec) * dst_size + \
+        _relation_endpoint_index(dst_ty, dst, spec)
+
+
+def _same_relation_endpoint_type(src_ty, dst_ty):
+    return src_ty == dst_ty
+
+
+def _relation_type_error(message):
+    _err(
+        message,
+        kind="type",
+        hint=(
+            "relation helpers operate on binary relation state. Use .contains(a, b), "
+            ".add(a, b), .remove(a, b), reachable(r, a, b), acyclic(r), "
+            "functional(r), injective(r), domain(r), or range(r)."
+        ),
+    )
+
+
+def _relation_parts(base):
+    if isinstance(base, tuple) and base[0] == "relation_val":
+        return base[1], base[2], base[3]
+    return None
+
+
+def _relation_contains(rel, src_ty, dst_ty, src, dst, spec):
+    return bool(rel.get(_relation_key(src_ty, dst_ty, src, dst, spec), False))
+
+
+def _relation_reachable(rel, ty, src, dst, spec):
+    values = list(_map_domain(ty, spec))
+    frontier = [
+        nxt for nxt in values
+        if _relation_contains(rel, ty, ty, src, nxt, spec)
+    ]
+    seen = set()
+    while frontier:
+        node = frontier.pop(0)
+        if node == dst:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        frontier.extend(
+            nxt for nxt in values
+            if nxt not in seen and _relation_contains(rel, ty, ty, node, nxt, spec)
+        )
+    return False
+
+
+def _relation_projection(rel, src_ty, dst_ty, spec, side):
+    elem_ty = src_ty if side == "domain" else dst_ty
+    out = {i: False for i in _map_domain(elem_ty, spec)}
+    src_values = list(_map_domain(src_ty, spec))
+    dst_values = list(_map_domain(dst_ty, spec))
+    for src in src_values:
+        for dst in dst_values:
+            if not _relation_contains(rel, src_ty, dst_ty, src, dst, spec):
+                continue
+            if side == "domain":
+                out[src] = True
+            else:
+                out[dst] = True
+    return ("set_val", out, elem_ty)
 
 
 def eval_concrete(e, state, binds, spec, old_state=None, in_ensures=False):
@@ -436,6 +523,71 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
     if tag == "method":
         base = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
         return _eval_method(base, e[2], e[3], state, binds, spec, old_state, in_ensures)
+    if tag == "rel_reachable":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("reachable() expects a relation as its first argument")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"reachable() requires a self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        src = eval_concrete(e[2], state, binds, spec, old_state, in_ensures)
+        dst = eval_concrete(e[3], state, binds, spec, old_state, in_ensures)
+        return _relation_reachable(rel, src_ty, src, dst, spec)
+    if tag == "rel_acyclic":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("acyclic() expects a relation")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"acyclic() requires a binary self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        return all(not _relation_reachable(rel, src_ty, v, v, spec)
+                   for v in _map_domain(src_ty, spec))
+    if tag == "rel_functional":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("functional() expects a relation")
+        rel, src_ty, dst_ty = parts
+        for src in _map_domain(src_ty, spec):
+            count = sum(
+                1 for dst in _map_domain(dst_ty, spec)
+                if _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+            )
+            if count > 1:
+                return False
+        return True
+    if tag == "rel_injective":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("injective() expects a relation")
+        rel, src_ty, dst_ty = parts
+        for dst in _map_domain(dst_ty, spec):
+            count = sum(
+                1 for src in _map_domain(src_ty, spec)
+                if _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+            )
+            if count > 1:
+                return False
+        return True
+    if tag == "rel_domain":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("domain() expects a relation")
+        return _relation_projection(parts[0], parts[1], parts[2], spec, "domain")
+    if tag == "rel_range":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("range() expects a relation")
+        return _relation_projection(parts[0], parts[1], parts[2], spec, "range")
     if tag == "is":
         return _eval_is(e[1], e[2], state, binds, spec, old_state, in_ensures)
     if tag == "not":
@@ -545,6 +697,8 @@ def _read_logical(name, ty, state, spec):
         return ("set_val", m, ty[1])
     if ty[0] == "seq":
         return ("seq_val", state[f"{name}__data"], state[f"{name}__len"], ty[1], ty[2])
+    if ty[0] == "relation":
+        return ("relation_val", state[name], ty[1], ty[2])
     return state[name]
 
 
@@ -588,6 +742,25 @@ def _eval_set_method(m, elem_ty, method, args, state, binds, spec, old_state, in
     return None
 
 
+def _eval_relation_method(rel, src_ty, dst_ty, method, args, state, binds, spec,
+                          old_state, in_ensures):
+    if method == "contains":
+        if len(args) != 2:
+            _err("relation.contains expects 2 arguments", kind="type")
+        src = eval_concrete(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_concrete(args[1], state, binds, spec, old_state, in_ensures)
+        return _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+    if method in ("add", "remove"):
+        if len(args) != 2:
+            _err(f"relation.{method} expects 2 arguments", kind="type")
+        src = eval_concrete(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_concrete(args[1], state, binds, spec, old_state, in_ensures)
+        nm = dict(rel)
+        nm[_relation_key(src_ty, dst_ty, src, dst, spec)] = method == "add"
+        return ("relation_val", nm, src_ty, dst_ty)
+    return None
+
+
 def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spec,
                        old_state, in_ensures, loc=None):
     if method == "push":
@@ -626,6 +799,16 @@ def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spe
 
 
 def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures, loc=None):
+    relation_parts = _relation_parts(base)
+    if relation_parts is not None:
+        res = _eval_relation_method(
+            relation_parts[0], relation_parts[1], relation_parts[2], method, args,
+            state, binds, spec, old_state, in_ensures,
+        )
+        if res is not None:
+            return res
+        _err(f"unknown method '{method}' on relation", kind="type")
+
     set_parts = _set_elem_ty(base)
     if set_parts is not None:
         res = _eval_set_method(set_parts[0], set_parts[1], method, args, state, binds, spec,
@@ -641,7 +824,7 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures, 
         if res is not None:
             return res
         _err(f"unknown method '{method}' on Seq")
-    _err("method call on value that is neither Set nor Seq")
+    _err("method call on value that is neither relation, Set, nor Seq")
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
@@ -799,6 +982,20 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
                 m[idx] = True
             pend[n] = m
             return ("scalar", n)
+        if ty[0] == "relation" and rhs[0] == "set_lit":
+            if rhs[1]:
+                _err(
+                    "relation literals only support the empty initializer Set {}; "
+                    "use r = r.add(a, b) to add pairs",
+                    kind="type",
+                )
+            src_ty, dst_ty = ty[1], ty[2]
+            pend[n] = {
+                _relation_key(src_ty, dst_ty, src, dst, spec): False
+                for src in _map_domain(src_ty, spec)
+                for dst in _map_domain(dst_ty, spec)
+            }
+            return ("scalar", n)
         if ty[0] == "seq" and rhs[0] == "seq_lit":
             elem_ty, cap = ty[1], ty[2]
             if len(rhs[1]) > cap:
@@ -820,6 +1017,11 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
                 pend[n] = val[1]
             else:
                 pend[n] = val
+        elif ty[0] == "relation":
+            if isinstance(val, tuple) and val[0] == "relation_val":
+                pend[n] = val[1]
+            else:
+                _err("relation assignment requires Set {} or a relation operation expression")
         elif ty[0] == "seq":
             if isinstance(val, tuple) and val[0] == "seq_val":
                 pend[f"{n}__data"] = val[1]
@@ -1015,6 +1217,18 @@ def _logical_val(state, name, ty, spec):
         m = state[name]
         elems = [_display_value(elem_ty, i, spec) for i in _map_domain(elem_ty, spec) if m.get(i)]
         return sorted(elems, key=str)
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        rel = state[name]
+        pairs = []
+        for src in _map_domain(src_ty, spec):
+            for dst in _map_domain(dst_ty, spec):
+                if rel.get(_relation_key(src_ty, dst_ty, src, dst, spec)):
+                    pairs.append([
+                        _display_value(src_ty, src, spec),
+                        _display_value(dst_ty, dst, spec),
+                    ])
+        return pairs
     if ty[0] == "seq":
         elem_ty, cap = ty[1], ty[2]
         data = state[f"{name}__data"]

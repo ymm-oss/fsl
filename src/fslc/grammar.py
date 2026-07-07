@@ -69,6 +69,7 @@ state_def: "state" "{" var_decl ("," var_decl)* ","? "}"
 var_decl: NAME ":" type
 ?type: "Int"  -> t_int
      | "Bool" -> t_bool
+     | "relation" type "->" type -> t_relation
      | expr ".." expr -> t_range
      | "Map" "<" type "," type ">" -> t_map
      | "Set" "<" type ">" -> t_set
@@ -112,8 +113,10 @@ terminal_def: "terminal" "{" expr "}"
 until_def: "until" NAME meta_tag? "{" expr _UNTIL expr "}"
 unless_def: "unless" NAME meta_tag? "{" expr _UNLESS expr "}"
 
-leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body leadsto_decreases? "}"
+leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body leadsto_item* "}"
+?leadsto_item: leadsto_helpful | leadsto_decreases
 leadsto_decreases: "decreases" expr
+leadsto_helpful: "helpful" NAME "(" [expr_list] ")"
 meta_tag: STRING
 ?lt_body: lt_forall | lt_implies
 lt_forall: "forall" binder [":"] "{" lt_body "}"
@@ -160,6 +163,12 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "stage" "(" expr ")" -> stage_e
      | "count" "(" NAME ":" qname "where" expr ")" -> count_e
      | "sum" "(" NAME ":" qname "of" expr ["where" expr] ")" -> sum_e
+     | "reachable" "(" expr "," expr "," expr ")" -> rel_reachable_e
+     | "acyclic" "(" expr ")" -> rel_acyclic_e
+     | "functional" "(" expr ")" -> rel_functional_e
+     | "injective" "(" expr ")" -> rel_injective_e
+     | "domain" "(" expr ")" -> rel_domain_e
+     | "range" "(" expr ")" -> rel_range_e
      | "min" "(" expr "," expr ")" -> min_e
      | "max" "(" expr "," expr ")" -> max_e
      | "abs" "(" expr ")" -> abs_e
@@ -458,6 +467,24 @@ class Ast(Transformer):
     def sum_e(self, meta, v, ty, body, cond=None):
         return ("sum", v, ty, body, cond)
 
+    def rel_reachable_e(self, meta, rel, src, dst):
+        return ("rel_reachable", rel, src, dst)
+
+    def rel_acyclic_e(self, meta, rel):
+        return ("rel_acyclic", rel)
+
+    def rel_functional_e(self, meta, rel):
+        return ("rel_functional", rel)
+
+    def rel_injective_e(self, meta, rel):
+        return ("rel_injective", rel)
+
+    def rel_domain_e(self, meta, rel):
+        return ("rel_domain", rel)
+
+    def rel_range_e(self, meta, rel):
+        return ("rel_range", rel)
+
     def min_e(self, meta, a, b):
         return ("min", a, b)
 
@@ -553,6 +580,9 @@ class Ast(Transformer):
 
     def t_map(self, meta, k, v):
         return ("map", k, v)
+
+    def t_relation(self, meta, src, dst):
+        return ("relation", src, dst)
 
     def t_set(self, meta, elem):
         return ("set", elem)
@@ -750,17 +780,22 @@ class Ast(Transformer):
     def leadsto_decreases(self, meta, measure):
         return ("decreases", measure)
 
+    def leadsto_helpful(self, meta, name, args=None):
+        return ("helpful", name, list(args or []), _loc(meta))
+
     def leadsto_def(self, meta, name, *rest):
-        req_meta, body, measure = None, None, None
+        req_meta, body, measure, helpful = None, None, None, []
         for r in rest:
             if isinstance(r, dict):
                 req_meta = r
             elif isinstance(r, tuple) and r[0] == "decreases":
                 measure = r[1]
+            elif isinstance(r, tuple) and r[0] == "helpful":
+                helpful.append({"action": r[1], "args": r[2], "loc": r[3]})
             else:
                 body = r
         binders, p, q, within = _flatten_leadsto(body)
-        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure, within)
+        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure, within, helpful)
 
     def top_def(self, meta, child):
         return child

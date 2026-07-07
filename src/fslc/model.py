@@ -73,7 +73,8 @@ _STATE_TYPE_HINT = (
     "v1 state variables may use: scalar (Int, Bool, domain, enum), "
     "Option<scalar>, struct (scalar or Option<scalar> fields only), "
     "Map<bounded-scalar (Bool/domain/enum), scalar | Option<scalar> | struct>, "
-    "Set<bounded-scalar (Bool/domain/enum)>, or Seq<scalar, N>"
+    "Set<bounded-scalar (Bool/domain/enum)>, Seq<scalar, N>, or "
+    "relation bounded-scalar -> bounded-scalar"
 )
 
 
@@ -120,6 +121,12 @@ def resolve_type(ty, types, consts=None):
         return _resolve_inline_range(ty, consts)
     if ty[0] == "map":
         return ("map", resolve_type(ty[1], types, consts), resolve_type(ty[2], types, consts))
+    if ty[0] == "relation":
+        return (
+            "relation",
+            resolve_type(ty[1], types, consts),
+            resolve_type(ty[2], types, consts),
+        )
     if ty[0] == "set":
         return ("set", resolve_type(ty[1], types, consts))
     if ty[0] == "seq":
@@ -141,6 +148,8 @@ def is_bounded(ty, types_meta):
         return True
     if ty[0] == "map":
         return is_bounded(ty[1], types_meta)
+    if ty[0] == "relation":
+        return is_bounded(ty[1], types_meta) and is_bounded(ty[2], types_meta)
     if ty[0] == "set":
         return is_bounded(ty[1], types_meta)
     return False
@@ -185,6 +194,12 @@ def resolve_type_ref(ty, types, consts=None):
     if ty[0] == "map":
         return (
             "map",
+            resolve_type_ref(ty[1], types, consts),
+            resolve_type_ref(ty[2], types, consts),
+        )
+    if ty[0] == "relation":
+        return (
+            "relation",
             resolve_type_ref(ty[1], types, consts),
             resolve_type_ref(ty[2], types, consts),
         )
@@ -292,6 +307,15 @@ def expand_phys_var(logical_name, ty, types_meta, out):
             "logical": logical_name,
             "ty": ("set", elem),
             "elem_ty": elem,
+        })
+        return
+    if ty[0] == "relation":
+        out.append({
+            "phys": logical_name,
+            "logical": logical_name,
+            "ty": ty,
+            "source_ty": ty[1],
+            "target_ty": ty[2],
         })
         return
     if ty[0] == "seq":
@@ -418,6 +442,8 @@ def z3_sort(ty, types_meta):
         return z3.BoolSort()
     if ty[0] == "map":
         return z3.ArraySort(z3_sort(ty[1], types_meta), z3_sort(ty[2], types_meta))
+    if ty[0] == "relation":
+        return z3.ArraySort(z3.IntSort(), z3.BoolSort())
     if ty[0] == "set":
         return z3.ArraySort(z3_sort(ty[1], types_meta), z3.BoolSort())
     if ty[0] == "option":
@@ -794,6 +820,35 @@ def check_seq_literal_sizes(state, init, actions, types_meta):
         _check_seq_literals_in_stmts(act["stmts"], state, types_meta)
 
 
+def validate_leadsto_helpful_actions(leadstos, actions):
+    """Check leadsTo-local helpful metadata names real action instances.
+
+    Full semantic obligations (fairness/enabledness/rank decrease) are verifier
+    facts. The model layer only rejects misspelled action names and arity
+    mismatches so authors get fast feedback from `fslc check`.
+    """
+    by_name = {act["name"]: act for act in actions}
+    for leadsto in leadstos:
+        for helper in leadsto.get("helpful") or []:
+            aname = helper["action"]
+            if aname not in by_name:
+                _err(
+                    f"leadsTo '{leadsto['name']}' helpful action '{aname}' is not declared",
+                    kind="type",
+                    loc=helper.get("loc"),
+                    hint="helpful metadata must name an existing action; it does not infer action names",
+                )
+            expected = len(by_name[aname].get("params") or [])
+            got = len(helper.get("args") or [])
+            if got != expected:
+                _err(
+                    f"leadsTo '{leadsto['name']}' helpful action '{aname}' expects "
+                    f"{expected} argument(s), got {got}",
+                    kind="type",
+                    loc=helper.get("loc"),
+                )
+
+
 def validate_state_var_type(ty, types_meta, path):
     """Whitelist validation for state variable types (DESIGN-seq §7)."""
     if is_scalar_type(ty):
@@ -829,6 +884,15 @@ def validate_state_var_type(ty, types_meta, path):
         if not is_bounded_scalar_type(ty[1]):
             _err(
                 f"{path}: Set element must be a bounded scalar (Bool, domain, or enum)",
+                kind="type",
+                hint=_STATE_TYPE_HINT,
+            )
+        return
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        if not is_bounded_scalar_type(src_ty) or not is_bounded_scalar_type(dst_ty):
+            _err(
+                f"{path}: relation endpoints must be bounded scalars (Bool, domain, or enum)",
                 kind="type",
                 hint=_STATE_TYPE_HINT,
             )
@@ -1120,6 +1184,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "loc": it[5],
                 "decreases": it[7] if len(it) > 7 else None,
                 "within": within,
+                "helpful": it[9] if len(it) > 9 else [],
             }, it[6] if len(it) > 6 else None))
         elif tag == "until":
             transitions.append(_with_meta({
@@ -1135,6 +1200,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "loc": it[4],
                 "decreases": None,
                 "within": None,
+                "helpful": [],
             }, it[5] if len(it) > 5 else None))
         elif tag == "unless":
             transitions.append(_with_meta({
@@ -1204,6 +1270,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         _err("spec has no actions", kind="semantics")
 
     check_seq_literal_sizes(state, init, actions, types_meta)
+    validate_leadsto_helpful_actions(leadstos, actions)
 
     all_display_names = dict(display_names or {})
     all_display_names.update(dialect_display_names)

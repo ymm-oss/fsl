@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from fslc.cli import exit_code, run_html
+from fslc.html_report import render_html_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +111,68 @@ spec TemporalSugar {
     assert "trans" in html
     assert "unless HeldUnlessReleased" in html
     assert "until HeldUntilReleased" in html
+
+
+def test_html_report_renders_relation_graph_from_trace(tmp_path):
+    path = tmp_path / "relation_html.fsl"
+    path.write_text(
+        r'''spec RelationHtml {
+  type User = 0..1
+  state { delegates: relation User -> User }
+  init { delegates = Set {} }
+  action delegate(a: User, b: User) {
+    requires a != b
+    delegates = delegates.add(a, b)
+  }
+  reachable CanDelegate { delegates.contains(0, 1) }
+}
+''',
+        encoding="utf-8",
+    )
+
+    result = run_html(str(path), depth=1, write_file=False)
+    assert result["result"] == "generated"
+    html = result["content"]
+    assert "relation 0..1 -&gt; 0..1" in html
+    assert "Relation Graphs" in html
+    assert "delegates" in html
+    assert "0 -&gt; 1" in html
+
+
+def test_html_report_renders_refinement_failure_side_by_side():
+    html = render_html_report(
+        "impl.fsl",
+        "spec Impl {}",
+        {"result": "explained", "spec": "Impl", "skeleton": {"state": {}, "actions": [], "properties": []}},
+        {
+            "result": "verified",
+            "spec": "Impl",
+            "implements": {
+                "abs": "Abs",
+                "result": "refinement_failed",
+                "violation": {
+                    "result": "refinement_failed",
+                    "impl": "Impl",
+                    "abs": "Abs",
+                    "kind": "abs_requires_failed",
+                    "impl_action": {"name": "fast_pay"},
+                    "abs_action": {"name": "pay"},
+                    "impl_state": {"paid": True},
+                    "alpha_before": {"done": False},
+                    "alpha_after_expected": {"done": True},
+                    "alpha_after_actual": {"done": False},
+                    "mismatch": [{"path": "done"}],
+                },
+            },
+        },
+    )
+
+    assert "Refinement Evidence" in html
+    assert "Implementation Side" in html
+    assert "Abstract Side" in html
+    assert "fast_pay" in html
+    assert "fast_pay -&gt;" not in html  # rendered inside escaped JSON, not as raw HTML
+    assert "<script" not in html
 
 
 def test_html_cli_stdout_and_output_file(tmp_path):

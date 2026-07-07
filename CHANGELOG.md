@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Issue #104 follow-ups: typed `relation A -> B` state with relation helpers
+  (`.contains/.add/.remove`, `reachable`, `acyclic`, `functional`,
+  `injective`, `domain`, `range`); `helpful action(args)` metadata for
+  per-binding ranked `leadsTo` induction under interleaving; opt-in
+  `fslc sweep` with `sweep.results` and `sweep.minimal_counterexample`; richer
+  `preserve progress` diagnostics (`progress_failure` classification and
+  lower-layer `fair action` repair hints); and `fslc html` relation/refinement
+  visual evidence.
 - `fslc analyze` structural observation JSON. `--projection tsg` emits a stable
   Typed Semantic Graph over requirements, actions, state variables, properties,
   acceptance/forbidden scenarios, and traceability metadata. Graph projections

@@ -54,6 +54,7 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
         _actions_section(actions, coverage),
         _properties_section(properties, auto_checks),
         _status_section(verification),
+        _refinement_section(verification),
         _trace_section(verification),
         _witness_section(witnesses),
         _counterfactual_section(counterfactuals),
@@ -394,6 +395,27 @@ pre {
   color: var(--muted);
   font: 12px/1.45 var(--mono);
 }
+.relation-graphs {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
+}
+.edge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.edge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: var(--teal-2);
+  color: var(--teal);
+  font: 700 12px/1.2 var(--mono);
+}
 .callout {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -613,6 +635,69 @@ def _status_section(verification: dict) -> str:
             </table>
           </div>
           {warning_html}
+        </div>
+      </section>
+"""
+
+
+def _refinement_violation(verification: dict):
+    if verification.get("result") == "refinement_failed":
+        return verification
+    impl = verification.get("implements")
+    if isinstance(impl, dict) and impl.get("result") == "refinement_failed":
+        return impl.get("violation") or impl
+    return None
+
+
+def _refinement_section(verification: dict) -> str:
+    violation = _refinement_violation(verification)
+    if not violation:
+        return ""
+    impl_action = violation.get("impl_action") or violation.get("action") or {}
+    abs_action = violation.get("abs_action") or violation.get("abstract_action") or {}
+    edge = ""
+    if impl_action or abs_action:
+        impl_name = impl_action.get("name") if isinstance(impl_action, dict) else impl_action
+        abs_name = abs_action.get("name") if isinstance(abs_action, dict) else abs_action
+        edge = (
+            '<div class="callout bad">'
+            f"<strong>Action correspondence</strong> "
+            f"<code>{escape(str(impl_name or 'impl step'))}</code> -&gt; "
+            f"<code>{escape(str(abs_name or 'abstract step'))}</code>"
+            "</div>"
+        )
+    impl_payload = _drop_empty({
+        "impl": violation.get("impl"),
+        "action": impl_action,
+        "state": violation.get("impl_state"),
+        "trace": violation.get("impl_trace"),
+    })
+    abs_payload = _drop_empty({
+        "abs": violation.get("abs"),
+        "action": abs_action,
+        "alpha_before": violation.get("alpha_before"),
+        "alpha_after_expected": violation.get("alpha_after_expected"),
+        "alpha_after_actual": violation.get("alpha_after_actual"),
+        "mismatch": violation.get("mismatch"),
+    })
+    return f"""
+      <section class="section" id="refinement">
+        <div class="section-head">
+          <div>
+            <h2>Refinement Evidence</h2>
+            <p>Side-by-side implementation and abstract states for the refinement failure.</p>
+          </div>
+        </div>
+        {edge}
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3>Implementation Side</h3>
+            {_json_pre(impl_payload)}
+          </div>
+          <div class="panel panel-pad">
+            <h3>Abstract Side</h3>
+            {_json_pre(abs_payload)}
+          </div>
         </div>
       </section>
 """
@@ -901,7 +986,7 @@ def _trace_section(verification: dict) -> str:
         content = '<p class="empty">No counterexample trace was emitted. Reachable witnesses may still appear below.</p>'
     else:
         violated_step = verification.get("violated_at_step") if is_counterexample else None
-        content = _trace_timeline(trace, violated_step)
+        content = _trace_timeline(trace, violated_step) + _relation_graphs(trace)
     return f"""
       <section class="section" id="traces">
         <div class="section-head">
@@ -1158,6 +1243,42 @@ def _trace_timeline(trace: list, violated_step=None) -> str:
     return f'<div class="timeline">{"".join(steps)}</div>'
 
 
+def _relation_graphs(trace: list) -> str:
+    panels = []
+    for entry in trace:
+        step = entry.get("step")
+        state = entry.get("state") or {}
+        for name, value in state.items():
+            if not _looks_like_relation(value):
+                continue
+            edges = "".join(
+                f'<span class="edge">{escape(str(src))} -&gt; {escape(str(dst))}</span>'
+                for src, dst in value
+            )
+            panels.append(
+                '<div class="mini-card">'
+                f'<h3><span>{escape(str(name))}</span><span class="badge info">step {escape(str(step))}</span></h3>'
+                f'<div class="edge-list">{edges}</div>'
+                '</div>'
+            )
+    if not panels:
+        return ""
+    return f"""
+      <div class="relation-graphs">
+        <h3>Relation Graphs</h3>
+        <div class="cards">{''.join(panels)}</div>
+      </div>
+"""
+
+
+def _looks_like_relation(value) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, list) and len(item) == 2 for item in value)
+    )
+
+
 def _first_reachable_witness(verification: dict):
     reachables = verification.get("reachables") or {}
     for item in reachables.values():
@@ -1186,6 +1307,8 @@ def _type_text(ty, enums=None) -> str:
         return f"Set<{_type_text(ty[1], enums)}>"
     if tag == "seq":
         return f"Seq<{_type_text(ty[1], enums)}, {ty[2]}>"
+    if tag == "relation":
+        return f"relation {_type_text(ty[1], enums)} -> {_type_text(ty[2], enums)}"
     if tag == "enum":
         name = str(ty[1])
         members = (enums or {}).get(name)
@@ -1257,6 +1380,10 @@ def _json_pre(data) -> str:
 
 def _json_code(data) -> str:
     return f"<code>{escape(json.dumps(data, ensure_ascii=False, sort_keys=True))}</code>"
+
+
+def _drop_empty(data: dict) -> dict:
+    return {k: v for k, v in data.items() if v is not None and v != {} and v != []}
 
 
 def _badge(value) -> str:
