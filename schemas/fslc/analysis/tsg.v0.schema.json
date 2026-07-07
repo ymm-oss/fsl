@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/analysis/tsg.v0.schema.json",
+  "title": "fslc analyze Typed Semantic Graph v0",
+  "type": "object",
+  "required": ["fsl", "result", "analysis", "projection", "schema_version", "nodes", "edges"],
+  "properties": {
+    "fsl": { "type": "string" },
+    "result": { "const": "analyzed" },
+    "analysis": { "const": "structure" },
+    "projection": { "const": "tsg" },
+    "schema_version": { "const": "tsg.v0" },
+    "spec": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "loc": {
+      "type": "object",
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "label": { "type": "string" },
+        "loc": { "$ref": "#/$defs/loc" },
+        "meta": { "type": "object" },
+        "fair": { "type": "boolean" },
+        "formal_status": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "kind", "from", "to"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "formal_status": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

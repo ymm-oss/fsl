@@ -54,6 +54,10 @@
 fslc analyze spec.fsl --projection action_state_graph --format json
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
+fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
+fslc analyze fsl-project.toml --projection traceability_graph --format json
+fslc analyze spec.fsl --projection action_state_graph --format dot
 fslc analyze spec.fsl --profile ai-review --format json</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
@@ -62,6 +66,8 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
       <tr><td><code>action_state_graph</code></td><td>Actions connected to state variables they read and write.</td></tr>
       <tr><td><code>requirement_property_graph</code></td><td>Requirement IDs connected to covered actions, properties, scenarios, KPI, and control nodes.</td></tr>
       <tr><td><code>property_state_graph</code></td><td>User properties connected to the state variables they read or check.</td></tr>
+      <tr><td><code>refinement_graph</code></td><td>Standalone mapping files: impl/abs names, state maps, action maps, stutters, and preserve-progress declarations.</td></tr>
+      <tr><td><code>traceability_graph</code></td><td>Project-manifest structure across business, requirements, design, and refinement mapping files.</td></tr>
     </table>
   </div>
 </section>
@@ -83,6 +89,14 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
         <h3><code>progressless_cycle</code></h3>
         <p>A requirement/scenario-linked multi-action cycle has no visible progress story such as <code>leadsTo</code>, <code>fair action</code>, or <code>terminal</code>.</p>
       </div>
+      <div class="card">
+        <h3><code>unwritten_state</code></h3>
+        <p>A state variable is initialized, but no action writes it. It may be intentional fixed model data, or it may point to missing behavior.</p>
+      </div>
+      <div class="card">
+        <h3><code>unguarded_action</code></h3>
+        <p>A non-generated action has no explicit <code>requires</code> clause, so it deserves review as an always-enabled transition.</p>
+      </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
       <p style="margin:0">The cycle finding does not inspect English keywords in names. It relies on structural anchors such as requirement tags and scenarios, so non-English requirement text is preserved without being interpreted by core fslc.</p>
@@ -96,9 +110,9 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
     <h2 class="reveal">Output families</h2>
     <table class="matrix reveal">
       <tr><th>Output</th><th>Schema version</th><th>Use</th></tr>
-      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>Stable graph data for downstream projections and tools.</td></tr>
-      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, and degree.</td></tr>
-      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>Structured review findings with witnesses, repairs, and caveats.</td></tr>
+      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>Stable graph data for downstream projections and tools. Schema: <code>schemas/fslc/analysis/tsg.v0.schema.json</code>.</td></tr>
+      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, and degree. DOT/Mermaid exports are views over this data.</td></tr>
+      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>Structured review findings with witnesses, repairs, caveats, and optional source locations for editor diagnostics.</td></tr>
     </table>
   </div>
 </section>
@@ -113,12 +127,12 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
         <p>Requirement text is carried through the graph, but the core analyzer does not interpret its meaning.</p>
       </div>
       <div class="syntax-card">
-        <h3>No refinement-file graph yet</h3>
-        <p>Standalone mapping-file analysis is tracked separately from the current single-spec projections.</p>
+        <h3>No proof evidence</h3>
+        <p>Project traceability and refinement graphs show structure only. Run <code>chain</code>, <code>refine</code>, or <code>verify</code> for proof results.</p>
       </div>
       <div class="syntax-card">
-        <h3>No visual graph export yet</h3>
-        <p>DOT, Mermaid, project-wide traceability, JSON Schema, and editor diagnostics are follow-up issues.</p>
+        <h3>Editor signals are opt-in</h3>
+        <p><code>fslc-lsp</code> surfaces analysis findings as informational diagnostics when <code>FSLC_LSP_ANALYSIS_DIAGNOSTICS=1</code> is set.</p>
       </div>
     </div>
   </div>

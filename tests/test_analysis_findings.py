@@ -148,3 +148,48 @@ spec Acyclic {
 
     assert _findings(out, "progressless_cycle") == []
     assert out == run_analyze(str(path), profile="ai-review")
+
+
+def test_unwritten_state_positive_and_negative(tmp_path):
+    path = _write(tmp_path, """
+spec StateWrites {
+  state { active: Bool, frozen: Bool }
+  init { active = false  frozen = false }
+  action activate() {
+    requires not active
+    active = true
+  }
+  invariant FrozenReadable { frozen == false }
+}
+""")
+
+    out = run_analyze(str(path), profile="ai-review")
+    unwritten = _findings(out, "unwritten_state")
+
+    assert any(f["involved_nodes"] == ["state:frozen"] for f in unwritten)
+    assert not any(f["involved_nodes"] == ["state:active"] for f in unwritten)
+    assert all(f["formal_status"] == "not_a_violation" for f in unwritten)
+
+
+def test_unguarded_action_positive_and_negative(tmp_path):
+    path = _write(tmp_path, """
+spec ActionGuards {
+  state { x: Int, y: Int }
+  init { x = 0  y = 0 }
+  action guarded() {
+    requires x == 0
+    x = x + 1
+  }
+  action broad() {
+    y = y + 1
+  }
+  invariant Any "MODEL: baseline" { true }
+}
+""")
+
+    out = run_analyze(str(path), profile="ai-review")
+    unguarded = _findings(out, "unguarded_action")
+
+    assert any(f["involved_nodes"] == ["action:broad"] for f in unguarded)
+    assert not any(f["involved_nodes"] == ["action:guarded"] for f in unguarded)
+    assert all(f["candidate_repairs"] and f["do_not_assume"] for f in unguarded)

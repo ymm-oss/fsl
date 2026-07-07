@@ -18,6 +18,8 @@ def analyze(spec, profile="ai-review"):
     findings.extend(_disconnected_requirements(tsg))
     findings.extend(_unanchored_properties(tsg))
     findings.extend(_progressless_cycles(spec, tsg))
+    findings.extend(_unwritten_state(tsg))
+    findings.extend(_unguarded_actions(tsg))
     findings = _renumber(findings)
     return {
         "analysis": "structure",
@@ -178,6 +180,95 @@ def _progressless_cycles(spec, tsg):
     return findings
 
 
+def _unwritten_state(tsg):
+    nodes = node_by_id(tsg)
+    written = set()
+    read = set()
+    for e in tsg["edges"]:
+        dst_node = nodes.get(e["to"]) or {}
+        if dst_node.get("kind") != "state":
+            continue
+        if e["kind"] == "writes":
+            written.add(e["to"])
+        elif e["kind"] in {"reads", "checks"}:
+            read.add(e["to"])
+
+    findings = []
+    for state in sorted((n for n in tsg["nodes"] if n["kind"] == "state"), key=lambda n: n["id"]):
+        if state["id"] in written:
+            continue
+        findings.append(_finding(
+            "unwritten_state",
+            [state["id"]],
+            {
+                "kind": "state_has_no_action_writes",
+                "node": state["id"],
+                "read_by": sorted(read_for_state(tsg, state["id"])),
+            },
+            "The state variable is initialized but no action writes it in the structural graph.",
+            [
+                {
+                    "kind": "review_state_role",
+                    "template": "Make the value a const/model parameter if it is intentionally fixed, or add the missing action/effect that changes it.",
+                }
+            ],
+            [
+                "The state variable is useless.",
+                "A verifier property is violated.",
+                "The variable is safe to delete without checking generated dialect state.",
+            ],
+            confidence=0.76 if state["id"] in read else 0.68,
+            loc=state.get("loc"),
+        ))
+    return findings
+
+
+def _unguarded_actions(tsg):
+    has_guard = set()
+    nodes = node_by_id(tsg)
+    for e in tsg["edges"]:
+        if e["kind"] == "has_guard":
+            has_guard.add(e["from"])
+
+    findings = []
+    for action in sorted((n for n in tsg["nodes"] if n["kind"] == "action"), key=lambda n: n["id"]):
+        if action.get("generated"):
+            continue
+        if action["id"] in has_guard:
+            continue
+        writes = sorted(
+            e["to"]
+            for e in tsg["edges"]
+            if e["from"] == action["id"]
+            and e["kind"] == "writes"
+            and (nodes.get(e["to"]) or {}).get("kind") == "state"
+        )
+        findings.append(_finding(
+            "unguarded_action",
+            [action["id"]],
+            {
+                "kind": "action_has_no_requires",
+                "node": action["id"],
+                "writes": writes,
+            },
+            "The action has no explicit requires clauses, so it is structurally enabled in every state unless generated lowering adds hidden constraints elsewhere.",
+            [
+                {
+                    "kind": "add_or_confirm_guard",
+                    "template": "Add a requires clause if the action should be state-dependent, or tag/document why it is intentionally always enabled.",
+                }
+            ],
+            [
+                "The action is wrong.",
+                "Always-enabled behavior is invalid.",
+                "The action is reachable in every semantic state without considering type bounds and invariants.",
+            ],
+            confidence=0.72,
+            loc=action.get("loc"),
+        ))
+    return findings
+
+
 def _action_dependency_graph(nodes, edges):
     action_nodes = sorted(n["id"] for n in nodes if n["kind"] == "action")
     state_writers = {}
@@ -267,8 +358,16 @@ def _scenario_actions(tsg):
     return out
 
 
-def _finding(finding_type, involved_nodes, witness, why, repairs, caveats, confidence):
-    return {
+def read_for_state(tsg, state_id):
+    readers = []
+    for e in tsg["edges"]:
+        if e["to"] == state_id and e["kind"] in {"reads", "checks"}:
+            readers.append(e["from"])
+    return readers
+
+
+def _finding(finding_type, involved_nodes, witness, why, repairs, caveats, confidence, loc=None):
+    out = {
         "finding_id": "",
         "analysis": "structure",
         "finding_type": finding_type,
@@ -281,6 +380,9 @@ def _finding(finding_type, involved_nodes, witness, why, repairs, caveats, confi
         "candidate_repairs": repairs,
         "do_not_assume": caveats,
     }
+    if loc:
+        out["loc"] = loc
+    return out
 
 
 def _renumber(findings):

@@ -31,8 +31,16 @@ from .ledger import (
     default_output_name as default_ledger_output_name,
     render_ledger,
 )
-from .analysis import analyze as analyze_structure, analyze_projection, build_tsg
+from .analysis import (
+    analyze as analyze_structure,
+    analyze_projection,
+    analyze_project_manifest,
+    analyze_refinement_ast,
+    build_tsg,
+    export_graph,
+)
 from .analysis.projections import SUPPORTED_PROJECTIONS
+from .analysis.schema import FINDINGS_SCHEMA_VERSION
 
 FSL_VERSION = "1.0"
 
@@ -348,31 +356,78 @@ def run_typestate(file):
                           "message": f"file not found: {file}"})
 
 
+ANALYZE_FORMATS = {"json", "dot", "mermaid"}
+ANALYZE_PROJECTIONS = [
+    "tsg",
+    *sorted(SUPPORTED_PROJECTIONS),
+    "refinement_graph",
+    "traceability_graph",
+]
+
+
 def run_analyze(file, projection="tsg", profile=None, output_format="json"):
+    paths = list(file) if isinstance(file, (list, tuple)) else [file]
+    if len(paths) != 1 or any(Path(p).is_dir() for p in paths):
+        return _run_analyze_batch(paths, projection, profile, output_format)
+    return _run_analyze_one_enveloped(paths[0], projection, profile, output_format)
+
+
+def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="json"):
     try:
         if output_format != "json":
-            raise FslError(f"unsupported analyze format: {output_format}", kind="semantics")
-        spec, _source_lines = _read_spec(file)
-        if profile:
-            out = {
-                "result": "analyzed",
-                "spec": spec["name"],
-                **analyze_structure(spec, profile=profile),
-            }
-        elif projection == "tsg":
-            out = {
-                "result": "analyzed",
-                "spec": spec["name"],
-                **build_tsg(spec),
-            }
-        elif projection in SUPPORTED_PROJECTIONS:
-            out = {
-                "result": "analyzed",
-                "spec": spec["name"],
-                **analyze_projection(spec, projection),
-            }
-        else:
-            raise FslError(f"unsupported analyze projection: {projection}", kind="semantics")
+            raise FslError("batch analyze supports only --format json", kind="semantics")
+        files = _expand_analyze_paths(paths)
+        entries = []
+        errors = []
+        for path in files:
+            result = _run_analyze_one_enveloped(str(path), projection, profile, output_format)
+            entry = _batch_file_entry(path, result)
+            entries.append(entry)
+            if result.get("result") != "analyzed":
+                errors.append({
+                    "file": _display_path(path),
+                    "result": result.get("result"),
+                    "kind": result.get("kind"),
+                    "message": result.get("message"),
+                    "loc": result.get("loc"),
+                })
+        out = {
+            "result": "analyzed" if not errors else "error",
+            "analysis": "structure",
+            "mode": "batch",
+            "projection": projection,
+            "profile": profile,
+            "files": entries,
+            "errors": errors,
+        }
+        if errors:
+            out["kind"] = "batch"
+            out["message"] = "one or more files failed structural analysis"
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {e.filename}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_format="json"):
+    try:
+        out = _run_analyze_one(file, projection, profile, output_format)
         return _envelope(out)
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -393,6 +448,153 @@ def run_analyze(file, projection="tsg", profile=None, output_format="json"):
                           "message": f"file not found: {file}"})
     except Exception as e:
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def _run_analyze_one(file, projection="tsg", profile=None, output_format="json"):
+    if output_format not in ANALYZE_FORMATS:
+        raise FslError(f"unsupported analyze format: {output_format}", kind="semantics")
+    if output_format != "json" and profile:
+        raise FslError("DOT/Mermaid export is supported for graph projections, not profiles", kind="semantics")
+
+    path = Path(file)
+    if _is_project_manifest(path):
+        if profile:
+            raise FslError("project traceability analysis does not support --profile", kind="semantics")
+        if projection != "traceability_graph":
+            raise FslError(
+                "project manifests support only --projection traceability_graph",
+                kind="semantics",
+            )
+        out = {
+            "result": "analyzed",
+            **analyze_project_manifest(str(path), projection),
+        }
+    else:
+        src = open(file, encoding="utf-8").read()
+        ast, display_names = _parse_file(file, src)
+        if ast[0] == "refinement":
+            if profile:
+                return {
+                    "result": "analyzed",
+                    "refinement": ast[1],
+                    "analysis": "structure",
+                    "profile": profile,
+                    "schema_version": FINDINGS_SCHEMA_VERSION,
+                    "findings": [],
+                }
+            if projection not in ("tsg", "refinement_graph"):
+                raise FslError(
+                    "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
+                    kind="semantics",
+                )
+            out = {
+                "result": "analyzed",
+                "refinement": ast[1],
+                **analyze_refinement_ast(ast, projection),
+            }
+        else:
+            spec = build_spec(ast, display_names)
+            if profile:
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **analyze_structure(spec, profile=profile),
+                }
+            elif projection == "tsg":
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **build_tsg(spec),
+                }
+            elif projection in SUPPORTED_PROJECTIONS:
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **analyze_projection(spec, projection),
+                }
+            else:
+                raise FslError(f"unsupported analyze projection: {projection}", kind="semantics")
+
+    if output_format == "json":
+        return out
+    if not out.get("nodes") or "edges" not in out:
+        raise FslError(f"--format {output_format} requires a graph projection", kind="semantics")
+    return {
+        "result": "analyzed",
+        "analysis": out.get("analysis", "structure"),
+        "projection": out.get("projection", projection),
+        "format": output_format,
+        "content": export_graph(out, output_format),
+    }
+
+
+def _expand_analyze_paths(paths):
+    files = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            files.extend(sorted((item for item in p.rglob("*.fsl") if item.is_file()), key=_display_path))
+        else:
+            if not p.exists():
+                raise FileNotFoundError(2, "No such file or directory", str(p))
+            files.append(p)
+    seen = set()
+    out = []
+    for p in files:
+        marker = p.resolve(strict=False)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        out.append(p)
+    return sorted(out, key=_display_path)
+
+
+def _batch_file_entry(path, result):
+    entry = {
+        "file": _display_path(path),
+        "result": result.get("result"),
+    }
+    for key in ("spec", "refinement", "projection", "profile", "schema_version", "formal_status"):
+        if key in result:
+            entry[key] = result[key]
+    if result.get("result") == "analyzed":
+        entry["summary"] = _analysis_summary(result)
+        if result.get("profile") == "ai-review":
+            entry["findings"] = result.get("findings", [])
+    else:
+        for key in ("kind", "message", "loc", "expected", "hint"):
+            if key in result:
+                entry[key] = result[key]
+    return entry
+
+
+def _analysis_summary(result):
+    summary = {}
+    if "nodes" in result:
+        summary["nodes"] = len(result.get("nodes") or [])
+    if "edges" in result:
+        summary["edges"] = len(result.get("edges") or [])
+    if "findings" in result:
+        summary["findings"] = len(result.get("findings") or [])
+    if "components" in result:
+        summary["components"] = len(result.get("components") or [])
+    if "cycles" in result:
+        summary["cycles"] = len(result.get("cycles") or [])
+    if "errors" in result:
+        summary["errors"] = len(result.get("errors") or [])
+    return summary
+
+
+def _is_project_manifest(path):
+    return path.suffix == ".toml"
+
+
+def _display_path(path):
+    p = Path(path)
+    try:
+        return p.resolve(strict=False).relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return p.as_posix()
 
 
 def _read_spec(file, bounds_overrides=None):
@@ -1131,14 +1333,14 @@ def _build_arg_parser():
 
     an = sub.add_parser("analyze",
                         help="emit structural analysis JSON for a spec")
-    an.add_argument("file")
+    an.add_argument("file", nargs="+")
     an.add_argument("--projection",
-                    choices=["tsg", *sorted(SUPPORTED_PROJECTIONS)],
+                    choices=ANALYZE_PROJECTIONS,
                     default="tsg",
                     help="structural projection to emit")
     an.add_argument("--profile", choices=["ai-review"], default=None,
                     help="emit AI-readable structural review findings")
-    an.add_argument("--format", choices=["json"], default="json",
+    an.add_argument("--format", choices=sorted(ANALYZE_FORMATS), default="json",
                     dest="output_format")
 
     return ap
@@ -1235,7 +1437,10 @@ def _dispatch(args):
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "analyze":
         result = run_analyze(args.file, args.projection, args.profile, args.output_format)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        if args.output_format != "json" and result.get("result") == "analyzed" and "content" in result:
+            sys.stdout.write(result["content"])
+        else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
                             engine=args.engine, k_ind=args.k_ind,

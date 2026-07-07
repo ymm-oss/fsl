@@ -54,6 +54,10 @@
 fslc analyze spec.fsl --projection action_state_graph --format json
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
+fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
+fslc analyze fsl-project.toml --projection traceability_graph --format json
+fslc analyze spec.fsl --projection action_state_graph --format dot
 fslc analyze spec.fsl --profile ai-review --format json</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
@@ -62,6 +66,8 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
       <tr><td><code>action_state_graph</code></td><td>操作と、その操作が読む・書く状態変数のつながり。</td></tr>
       <tr><td><code>requirement_property_graph</code></td><td>要件IDと、それが covers する操作、性質、シナリオ、KPI、control のつながり。</td></tr>
       <tr><td><code>property_state_graph</code></td><td>ユーザー定義の性質と、それが読む・検査する状態変数のつながり。</td></tr>
+      <tr><td><code>refinement_graph</code></td><td>単体の mapping file に含まれる impl/abs 名、state map、action map、stutter、preserve-progress 宣言。</td></tr>
+      <tr><td><code>traceability_graph</code></td><td>project manifest から business、requirements、design、refinement mapping を横断した構造。</td></tr>
     </table>
   </div>
 </section>
@@ -83,6 +89,14 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
         <h3><code>progressless_cycle</code></h3>
         <p>要件またはシナリオにつながる複数操作の循環に、<code>leadsTo</code>、<code>fair action</code>、<code>terminal</code> などの進捗ストーリーが見えません。</p>
       </div>
+      <div class="card">
+        <h3><code>unwritten_state</code></h3>
+        <p>状態変数が初期化されているのに、どの action からも書き込まれていません。意図した固定データか、欠けた振る舞いかをレビューします。</p>
+      </div>
+      <div class="card">
+        <h3><code>unguarded_action</code></h3>
+        <p>生成物ではない action に明示的な <code>requires</code> がありません。常時有効な遷移として妥当かをレビューします。</p>
+      </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
       <p style="margin:0">cycle 所見は、名前の英単語を見ていません。要件タグやシナリオなどの構造アンカーに基づきます。日本語の要件文は保持されますが、fslc core は意味解釈しません。</p>
@@ -96,9 +110,9 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
     <h2 class="reveal">出力の種類</h2>
     <table class="matrix reveal">
       <tr><th>出力</th><th>schema version</th><th>用途</th></tr>
-      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>下流の投影やツールが使う安定したグラフデータ。</td></tr>
-      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>components、SCC、cycles、degree を含むレビュー用グラフ要約。</td></tr>
-      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>witness、repair、caveat を含む構造化レビュー所見。</td></tr>
+      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>下流の投影やツールが使う安定したグラフデータ。Schema は <code>schemas/fslc/analysis/tsg.v0.schema.json</code>。</td></tr>
+      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>components、SCC、cycles、degree を含むレビュー用グラフ要約。DOT/Mermaid はこのデータの表示形式です。</td></tr>
+      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>witness、repair、caveat、editor diagnostics 用の任意 source location を含む構造化レビュー所見。</td></tr>
     </table>
   </div>
 </section>
@@ -113,12 +127,12 @@ fslc analyze spec.fsl --profile ai-review --format json</code></pre>
         <p>要件文はグラフに保持しますが、その意味を core analyzer が推論することはありません。</p>
       </div>
       <div class="syntax-card">
-        <h3>refinement file のグラフ化はまだ</h3>
-        <p>単体の mapping file 解析は、現在の単一 spec 投影とは別の follow-up です。</p>
+        <h3>証明の証拠ではない</h3>
+        <p>project traceability と refinement graph は構造だけを示します。証明結果が必要なら <code>chain</code>、<code>refine</code>、<code>verify</code> を実行します。</p>
       </div>
       <div class="syntax-card">
-        <h3>可視化出力はまだ</h3>
-        <p>DOT、Mermaid、プロジェクト横断 traceability、JSON Schema、editor diagnostics は follow-up issue です。</p>
+        <h3>editor signals は opt-in</h3>
+        <p><code>FSLC_LSP_ANALYSIS_DIAGNOSTICS=1</code> を設定すると、<code>fslc-lsp</code> が analysis findings を Information 診断として出します。</p>
       </div>
     </div>
   </div>
