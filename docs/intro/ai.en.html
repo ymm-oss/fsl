@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Hard Contracts with fsl-ai — FSL Manual</title>
+<meta name="description" content="How to use fsl-ai ai_component to check AI tool authority, human approval guards, forbidden tools, runtime replay, and AI-readable findings." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="ai">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">AI hard-contracts</p>
+    <h1 class="reveal">Use <code>ai_component</code> to guard AI tool execution</h1>
+    <p class="lead reveal">fsl-ai Phase 1 models the deterministic boundary of an AI component: declared tools, authority, human approval, forbidden tools, fallback, and runtime event replay.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Boundary</p>
+    <h2 class="reveal">Hard contracts are separate from evaluator and statistical evidence</h2>
+    <p class="lead narrow reveal">The MVP does not try to prove that natural-language answers are true. It checks the structural and guard-backed facts around execution: which tools may be suggested or executed, which need human approval, and which are forbidden.</p>
+    <table class="matrix reveal">
+      <tr><th>Contract</th><th>Examples</th><th>How fsl-ai reports it</th></tr>
+      <tr><td><code>syntactic_hard</code></td><td>Tool schema, approval token, forbidden tool, precondition evidence.</td><td>Kernel expansion and <code>ai_hard_contract_violation</code>.</td></tr>
+      <tr><td><code>runtime_observed</code></td><td>Undeclared tool or schema mismatch observed in logs.</td><td><code>observed_contract_violation</code>; not proof.</td></tr>
+      <tr><td><code>evaluator_supported</code></td><td>Groundedness, source support, prompt-injection judgment.</td><td>Future phase; never displayed as <code>proved</code>.</td></tr>
+      <tr><td><code>statistically_supported</code></td><td>Accuracy, recall, hallucination rate, slice metrics.</td><td>Future phase; confidence-bound evidence, not proof.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Syntax</p>
+    <h2 class="reveal">Declare tools and authority explicitly</h2>
+    <div class="panel reveal">
+      <pre><code>ai_component RefundAgentToolSafety {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+  }
+
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+  }
+
+  authority {
+    may_execute SearchOrder;
+    requires_human_approval RefundPayment;
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    when low_confidence require human_review;
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Lowering</p>
+    <h2 class="reveal"><code>ai_component</code> lowers to the existing kernel</h2>
+    <p class="lead narrow reveal">The AI dialect adds no probability or evaluator semantics to the verifier. The hard contract becomes finite state and ordinary invariants.</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Finite tool state</h3>
+        <p><code>Tool</code>, <code>human_approved</code>, <code>tool_executed</code>, and <code>tool_suggested</code> are ordinary kernel state.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Generated actions</h3>
+        <p><code>approve_*</code> and <code>execute_*</code> actions model approval tokens and guarded execution.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Generated invariants</h3>
+        <p>Forbidden tools never execute, and irreversible or approval-required tools execute only after approval.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Run it</p>
+    <h2 class="reveal">Use AI-specific findings for guard and replay failures</h2>
+    <div class="panel reveal">
+      <pre><code>fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Result</th><th>How to read it</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>The finite hard-contract expansion verifies under complete capability declarations and runtime guard assumptions.</td></tr>
+      <tr><td><code>replay_conformant</code></td><td>The observed event log matched the declared hard boundary; this is evidence, not proof.</td></tr>
+      <tr><td><code>ai_hard_contract_violation</code></td><td>A forbidden tool, approval bypass, schema invalidity, or business precondition mismatch was observed.</td></tr>
+      <tr><td><code>observed_contract_violation</code></td><td>Runtime used a capability outside the declared component boundary.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Next</p>
+    <h2 class="reveal">Read the design and examples</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Design decisions</h3>
+        <p>Guarantee boundaries, lowering, event schema, findings, and out-of-MVP items are described in the design document.</p>
+        <p><a class="btn" href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Working example</h3>
+        <p>The refund-agent example covers approval, forbidden tools, replay evidence, and observed mismatches.</p>
+        <p><a class="btn" href="../../examples/ai/README.md">examples/ai</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Core syntax</h3>
+        <p><code>ai_component</code> lowers to the existing verifier. The syntax guide covers the kernel forms it expands into.</p>
+        <p><a class="btn" href="syntax.en.html">Syntax Guide</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

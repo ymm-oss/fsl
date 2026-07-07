@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- fsl-ai Phase 1 hard-contract MVP (`ai_component`) for AI tool-boundary
+  safety. The dialect parses declared tools, authority, human approval,
+  forbidden tools, symbolic business preconditions, and fallback metadata,
+  lowers the deterministic hard-contract slice to the existing kernel, and adds
+  `fslc ai check` / `fslc ai replay` with stable AI-readable findings
+  (`fsl-ai-finding.v0`). Runtime replay is explicitly observation evidence
+  (`formal_result:"not_run"`), while evaluator-backed and statistical AI claims
+  remain out of the kernel. Includes fixtures in `examples/ai/`, schemas under
+  `schemas/fslc/ai/`, docs in `docs/DESIGN-ai-hard.md`, bilingual site pages,
+  and updated language/skill references. (#135, #136, #137, #138)
 - fsl-db MVP (`dbsystem`) for database migration compatibility across schema
   versions, artifacts, and environments. The dialect parses typed DB IR, expands
   to the existing kernel via `Map<Column, Bool>` lifecycle state and generated

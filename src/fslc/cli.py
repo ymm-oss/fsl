@@ -43,6 +43,7 @@ from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
 from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
 from .db_import import import_sql_file
+from .ai_check import check_ai_component, load_ai_component, replay_ai_events
 
 FSL_VERSION = "1.0"
 
@@ -1270,16 +1271,70 @@ def run_db_import(file, name="ImportedDb", output=None):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_ai_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
+    try:
+        component = load_ai_component(file)
+        return _envelope(check_ai_component(
+            component,
+            depth=depth,
+            engine=engine,
+            deadlock_mode=deadlock_mode,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_replay(file, logs):
+    try:
+        component = load_ai_component(file)
+        return _envelope(replay_ai_events(component, logs))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
-             "verified_under_assumptions"):
+             "verified_under_assumptions", "replay_conformant"):
         return 0
     if r == "sweep_passed":
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant",
-             "refinement_failed", "sweep_failed"):
+             "refinement_failed", "sweep_failed", "replay_nonconformant"):
         return 1
     if r == "error":
         kind = result.get("kind")
@@ -1437,6 +1492,17 @@ def _build_arg_parser():
     dbi.add_argument("--name", default="ImportedDb")
     dbi.add_argument("-o", "--output")
 
+    ai = sub.add_parser("ai", help="AI hard-contract dialect commands")
+    ai_sub = ai.add_subparsers(dest="ai_cmd", required=True)
+    aic = ai_sub.add_parser("check", help="check an ai_component hard contract and emit fsl-ai findings")
+    aic.add_argument("file")
+    aic.add_argument("--depth", type=int, default=8)
+    aic.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    aic.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    air = ai_sub.add_parser("replay", help="compare AI runtime JSONL events to ai_component declarations")
+    air.add_argument("file")
+    air.add_argument("--logs", required=True)
+
     return ap
 
 
@@ -1553,6 +1619,20 @@ def _dispatch(args):
                 "result": "error",
                 "kind": "parse",
                 "message": f"unknown db command: {args.db_cmd}",
+            })
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "ai":
+        if args.ai_cmd == "check":
+            result = run_ai_check(args.file, args.depth, args.engine, args.deadlock)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "replay":
+            result = run_ai_replay(args.file, args.logs)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown ai command: {args.ai_cmd}",
             })
             print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
