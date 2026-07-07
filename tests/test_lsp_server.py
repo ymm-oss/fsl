@@ -257,6 +257,54 @@ def test_workspace_references_finds_cross_file_alias_reference(tmp_path):
     assert {_loc_key(loc) for loc in result} == expected
 
 
+def test_workspace_references_includes_cross_file_declaration(tmp_path):
+    # Regression: cursor on a cross-file *reference* (main.fsl `lib.bump`) with
+    # include_declaration=True must still return the declaration in lib.fsl.
+    # references_at() only emits the declaration when it lives in the current
+    # document, and the workspace loop scans other files' references (never their
+    # declaration symbol), so the declaration used to be dropped for this case.
+    lib_path = tmp_path / "lib.fsl"
+    main_path = tmp_path / "main.fsl"
+    lib_path.write_text(LIB_SOURCE, encoding="utf-8")
+    main_path.write_text(MAIN_SOURCE, encoding="utf-8")
+
+    lib_index = build_index(LIB_SOURCE, str(lib_path))
+    bump = _symbol(lib_index, "bump", "action")
+    main_index = build_index(MAIN_SOURCE, str(main_path))
+    main_bump_refs = [ref for ref in main_index.references if ref.name == "bump"]
+    assert len(main_bump_refs) == 2
+
+    server = _create_server()
+    _initialize(server)
+    lib_uri = _path_to_uri(str(lib_path))
+    main_uri = _path_to_uri(str(main_path))
+
+    # Cursor on the first cross-file reference in main.fsl (the `= lib.bump(i)` target).
+    cursor = main_bump_refs[0]
+    references_handler = server.lsp.fm.features[types.TEXT_DOCUMENT_REFERENCES]
+    result = references_handler(
+        types.ReferenceParams(
+            text_document=types.TextDocumentIdentifier(uri=main_uri),
+            position=types.Position(
+                line=cursor.range.start.line,
+                character=cursor.range.start.character,
+            ),
+            context=types.ReferenceContext(include_declaration=True),
+        )
+    )
+
+    assert result is not None
+    declaration = types.Location(
+        uri=lib_uri, range=_to_lsp_range(types, bump.selection_range)
+    )
+    got = {_loc_key(loc) for loc in result}
+    assert _loc_key(declaration) in got  # the cross-file declaration must be present
+    for ref in main_bump_refs:
+        assert _loc_key(
+            types.Location(uri=main_uri, range=_to_lsp_range(types, ref.range))
+        ) in got
+
+
 def test_completion_handler_suggests_alias_members(tmp_path):
     lib_path = tmp_path / "lib.fsl"
     main_path = tmp_path / "main.fsl"

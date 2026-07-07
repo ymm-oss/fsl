@@ -116,6 +116,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `<actionname>: by <actor>` requirement caption on actions now that a
   business-dialect transition's actor has its own Actor column (real
   `REQ-n`/`POL-n` prose captions are unaffected).
+- (LSP) `textDocument/references` with `includeDeclaration=true` now returns the
+  declaration even when the cursor is on a *cross-file* reference (e.g. a
+  `use`-imported `alias.member` in another spec). Previously the declaration was
+  dropped in that case: `references_at()` only emits the declaration when it lives
+  in the current document, and the workspace loop in `_workspace_references`
+  (`src/fslc/lsp/server.py`) scans other files' references, never their
+  declaration symbol, so a symbol declared in a different workspace file was
+  omitted from the results. `go-to-definition` was unaffected.
 
 ### Changed
 - `skills/` reframed around the doc-substitution philosophy: a `.fsl` spec

@@ -539,6 +539,21 @@ def _workspace_references(
     target_name, target_loc = target
 
     this_norm = str(Path(this_path).resolve(strict=False)) if this_path else None
+
+    # LSP includeDeclaration: references_at() emits the declaration only when it
+    # lives in the current document (see index.py); the cross-file loop below scans
+    # other files' references, never their declaration symbol. So when the cursor is
+    # on a cross-file reference and the symbol is declared in a different workspace
+    # file, that declaration would be dropped -- add it explicitly here.
+    if include_declaration and target_loc.path is not None:
+        if str(Path(target_loc.path).resolve(strict=False)) != this_norm:
+            results.append(
+                types.Location(
+                    uri=_path_to_uri(target_loc.path),
+                    range=_to_lsp_range(types, target_loc.range),
+                )
+            )
+
     for root in _workspace_roots(server, this_path):
         for fsl_path in sorted(root.rglob("*.fsl")):
             if not fsl_path.is_file():
