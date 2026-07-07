@@ -1,0 +1,26 @@
+dbsystem SafeRollbackEquivalence {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column display_name: Text absent;
+    }
+  }
+
+  migration add_display_name from 0 to 1 rollbackable {
+    add users.display_name nullable;
+  }
+
+  artifact server_v1 {
+    reads users.id;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v1 when schema 0..1;
+  }
+
+  check compatibility {
+    rule rollback_equivalent;
+  }
+}

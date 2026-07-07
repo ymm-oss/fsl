@@ -1,0 +1,19 @@
+{
+  "schema_version": "fsl-db-observation.v0",
+  "events": [
+    {
+      "environment": "prod",
+      "schema_version": 0,
+      "artifact": "server_v2",
+      "capability": "reads",
+      "target": "users.legacy_name"
+    },
+    {
+      "environment": "prod",
+      "schema_version": 0,
+      "artifact": "old_mobile",
+      "capability": "calls",
+      "target": "api.CreateUserV1"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/db/observation.v0.schema.json",
+  "title": "fsl-db runtime observation v0",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["events"],
+      "properties": {
+        "schema_version": {
+          "const": "fsl-db-observation.v0"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        }
+      }
+    },
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    }
+  ],
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["environment", "schema_version", "artifact", "capability", "target"],
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "artifact": {
+          "type": "string"
+        },
+        "capability": {
+          "enum": ["reads", "writes", "calls"]
+        },
+        "target": {
+          "type": "string",
+          "description": "Schema identifier only, e.g. users.email or api.CreateUserV1"
+        }
+      }
+    }
+  }
+}

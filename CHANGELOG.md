@@ -15,6 +15,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `not_null_before_backfill`. Includes golden fixtures in `examples/db/`,
   docs in `docs/DESIGN-db.md`, and updated language/skill references. (#122,
   #123, #124, #125, #126, #127, #128)
+- fsl-db post-MVP compatibility extensions: destructive/irreversible migration
+  annotations, bounded data preservation and rollback-equivalence findings,
+  rename/split/merge transforms, API response and offline payload compatibility,
+  runtime observation evidence via `fslc db observe`, and a minimal SQL DDL
+  importer via `fslc db import`. The new checks stay under explicit assumptions
+  for finite rollout windows, offline TTL ticks, bounded row models, and
+  observability coverage. (#129, #130, #131, #132, #133, #134)
 - Issue #104 follow-ups: typed `relation A -> B` state with relation helpers
   (`.contains/.add/.remove`, `reachable`, `acyclic`, `functional`,
   `injective`, `domain`, `range`); `helpful action(args)` metadata for

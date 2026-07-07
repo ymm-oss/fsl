@@ -1,0 +1,25 @@
+dbsystem SafeApiOfflineCompat {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+    }
+  }
+
+  artifact server_v2 {
+    accepts api.CreateUserV1, api.CreateUserV2;
+    responds response.email;
+  }
+
+  artifact ios_v1 {
+    calls api.CreateUserV1;
+    emits_offline api.CreateUserV1 ttl 2;
+    expects response.email;
+  }
+
+  environment prod {
+    schema 0..0;
+    active server_v2 when schema 0..0;
+    may_exist ios_v1 when schema 0..0;
+  }
+}

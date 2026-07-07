@@ -1,0 +1,22 @@
+dbsystem UnsafeOfflinePayloadRejected {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+    }
+  }
+
+  artifact server_v2 {
+    accepts api.CreateUserV2;
+  }
+
+  artifact ios_v1 {
+    emits_offline api.CreateUserV1 ttl 2;
+  }
+
+  environment prod {
+    schema 0..0;
+    active server_v2 when schema 0..0;
+    may_exist ios_v1 when schema 0..0;
+  }
+}

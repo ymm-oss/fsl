@@ -36,6 +36,13 @@
         "column_removed_while_still_read",
         "column_removed_while_still_written",
         "not_null_before_backfill",
+        "destructive_migration_unannotated",
+        "preservation_transform_unannotated",
+        "data_preservation_loss",
+        "rollback_not_equivalent",
+        "api_call_not_accepted",
+        "api_response_field_missing",
+        "offline_payload_not_accepted",
         "declared_unused_but_observed",
         "unsupported_artifact_observed",
         "legacy_api_still_called"

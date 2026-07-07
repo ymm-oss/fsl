@@ -43,23 +43,33 @@ column_type: ":" NAME
             | "not_null" -> col_not_null
             | "nullable" -> col_nullable
 
-migration_def: "migration" NAME "from" INT "to" INT "{" migration_op* "}"
-?migration_op: add_op | drop_op | backfill_op | set_not_null_op
+migration_def: "migration" NAME "from" INT "to" INT annotation* "{" migration_op* "}"
+?migration_op: add_op | drop_op | backfill_op | set_not_null_op | rename_op | split_op | merge_op
 add_op: "add" col_ref add_nullability? ";"?
 add_nullability: "nullable" -> op_nullable
                | "not_null" -> op_not_null
-drop_op: "drop" col_ref ";"?
+drop_op: "drop" col_ref annotation* ";"?
 backfill_op: "backfill" col_ref ";"?
 set_not_null_op: ("set_not_null" | "not_null") col_ref ";"?
+rename_op: "rename" col_ref "to" col_ref annotation* ";"?
+split_op: "split" col_ref "into" col_ref_list annotation* ";"?
+merge_op: "merge" col_ref_list "into" col_ref annotation* ";"?
+annotation: "destructive" -> ann_destructive
+          | "irreversible" -> ann_irreversible
+          | "rollbackable" -> ann_rollbackable
+          | "lossy" -> ann_lossy
+          | "lossless" -> ann_lossless
 
 artifact_def: "artifact" NAME "{" artifact_item* "}"
-artifact_item: artifact_capability col_ref_list ";"?
+artifact_item: artifact_capability col_ref_list ttl_clause? ";"?
 artifact_capability: "reads" -> cap_reads
                    | "writes" -> cap_writes
                    | "calls" -> cap_calls
                    | "accepts" -> cap_accepts
                    | "expects" -> cap_expects
+                   | "responds" -> cap_responds
                    | "emits_offline" -> cap_emits_offline
+ttl_clause: "ttl" INT
 col_ref_list: col_ref ("," col_ref)*
 col_ref: NAME "." NAME
 
@@ -179,19 +189,50 @@ class DbAst(Transformer):
         return "not_null"
 
     def add_op(self, meta, column, nullability=None):
-        return DbMigrationOp("add", column, nullability or "nullable", _loc(meta))
+        return DbMigrationOp("add", column, nullability or "nullable", loc=_loc(meta))
 
-    def drop_op(self, meta, column):
-        return DbMigrationOp("drop", column, None, _loc(meta))
+    def drop_op(self, meta, column, *annotations):
+        return DbMigrationOp("drop", column, None, (), tuple(annotations), _loc(meta))
 
     def backfill_op(self, meta, column):
-        return DbMigrationOp("backfill", column, None, _loc(meta))
+        return DbMigrationOp("backfill", column, loc=_loc(meta))
 
     def set_not_null_op(self, meta, column):
-        return DbMigrationOp("set_not_null", column, None, _loc(meta))
+        return DbMigrationOp("set_not_null", column, loc=_loc(meta))
 
-    def migration_def(self, meta, name, from_schema, to_schema, *ops):
-        return DbMigration(name, from_schema, to_schema, list(ops), _loc(meta))
+    def ann_destructive(self, meta):
+        return "destructive"
+
+    def ann_irreversible(self, meta):
+        return "irreversible"
+
+    def ann_rollbackable(self, meta):
+        return "rollbackable"
+
+    def ann_lossy(self, meta):
+        return "lossy"
+
+    def ann_lossless(self, meta):
+        return "lossless"
+
+    def rename_op(self, meta, source, target, *annotations):
+        return DbMigrationOp("rename", source, None, (target,), tuple(annotations), _loc(meta))
+
+    def split_op(self, meta, source, targets, *annotations):
+        return DbMigrationOp("split", source, None, tuple(targets), tuple(annotations), _loc(meta))
+
+    def merge_op(self, meta, sources, target, *annotations):
+        return DbMigrationOp("merge", target, None, tuple(sources), tuple(annotations), _loc(meta))
+
+    def migration_def(self, meta, name, from_schema, to_schema, *parts):
+        annotations = []
+        ops = []
+        for part in parts:
+            if isinstance(part, DbMigrationOp):
+                ops.append(part)
+            else:
+                annotations.append(part)
+        return DbMigration(name, from_schema, to_schema, ops, tuple(annotations), _loc(meta))
 
     def cap_reads(self, meta):
         return "reads"
@@ -208,19 +249,29 @@ class DbAst(Transformer):
     def cap_expects(self, meta):
         return "expects"
 
+    def cap_responds(self, meta):
+        return "responds"
+
     def cap_emits_offline(self, meta):
         return "emits_offline"
+
+    def ttl_clause(self, meta, ttl):
+        return ttl
 
     def col_ref_list(self, meta, *refs):
         return list(refs)
 
-    def artifact_item(self, meta, capability, refs):
-        return capability, refs
+    def artifact_item(self, meta, capability, refs, ttl=None):
+        return capability, refs, ttl
 
     def artifact_def(self, meta, name, *items):
         caps = defaultdict(list)
-        for capability, refs in items:
+        offline_ttls = {}
+        for capability, refs, ttl in items:
             caps[capability].extend(refs)
+            if capability == "emits_offline" and ttl is not None:
+                for ref in refs:
+                    offline_ttls[ref] = ttl
         return DbArtifact(
             name=name,
             reads=caps["reads"],
@@ -228,7 +279,9 @@ class DbAst(Transformer):
             calls=caps["calls"],
             accepts=caps["accepts"],
             expects=caps["expects"],
+            responds=caps["responds"],
             emits_offline=caps["emits_offline"],
+            offline_ttls=offline_ttls,
             loc=_loc(meta),
         )
 

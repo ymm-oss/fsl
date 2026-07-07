@@ -21,7 +21,7 @@ dbsystem SafeDualWriteBackfillSwitchReadDropOld {
   }
 
   migration drop_legacy_name from 3 to 4 {
-    drop users.legacy_name;
+    drop users.legacy_name irreversible;
   }
 
   artifact server_v1 {

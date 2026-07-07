@@ -125,13 +125,63 @@
       "result": "error"
     }
   },
+  "examples/db/runtime_observation_target.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/db/safe_add_nullable_column.fsl": {
     "check": {
       "result": "ok",
       "warnings": []
     }
   },
+  "examples/db/safe_api_offline_compat.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_destructive_drop_with_annotation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_rename_preservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_rollback_equivalence.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_annotated_drop_with_old_server.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_api_response_field_removed.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_destructive_drop_without_annotation.fsl": {
     "check": {
       "result": "ok",
       "warnings": []
@@ -149,7 +199,43 @@
       "warnings": []
     }
   },
+  "examples/db/unsafe_lossy_merge_preservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_lossy_split_preservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
   "examples/db/unsafe_not_null_before_backfill.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_offline_payload_rejected.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_rollback_drop.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_split_without_annotation.fsl": {
     "check": {
       "result": "ok",
       "warnings": []

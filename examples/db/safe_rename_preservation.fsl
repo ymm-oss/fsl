@@ -1,0 +1,39 @@
+dbsystem SafeRenamePreservation {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column legacy_name: Text present backfilled nullable;
+      column display_name: Text absent;
+    }
+  }
+
+  migration rename_legacy_name from 0 to 1 rollbackable {
+    rename users.legacy_name to users.display_name;
+  }
+
+  artifact server_v1 {
+    reads users.id, users.legacy_name;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.display_name;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v1 when schema 0..0;
+    active server_v2 when schema 1..1;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule data_preserved;
+    rule rollback_equivalent;
+  }
+}

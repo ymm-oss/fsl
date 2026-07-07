@@ -1,0 +1,24 @@
+dbsystem RuntimeObservationTarget {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column legacy_name: Text present backfilled nullable;
+    }
+  }
+
+  artifact server_v2 {
+    reads users.id;
+    accepts api.CreateUserV2;
+  }
+
+  artifact old_mobile {
+    calls api.CreateUserV1;
+  }
+
+  environment prod {
+    schema 0..0;
+    active server_v2 when schema 0..0;
+    may_exist old_mobile when schema 0..0;
+  }
+}
