@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/analysis/analysis-graph.v0.schema.json",
+  "title": "fslc analyze structural graph projection v0",
+  "type": "object",
+  "required": [
+    "fsl",
+    "result",
+    "analysis",
+    "projection",
+    "schema_version",
+    "formal_status",
+    "nodes",
+    "edges",
+    "components",
+    "sccs",
+    "cycles",
+    "degree"
+  ],
+  "properties": {
+    "fsl": { "type": "string" },
+    "result": { "const": "analyzed" },
+    "analysis": { "const": "structure" },
+    "projection": { "type": "string" },
+    "schema_version": { "const": "analysis-graph.v0" },
+    "formal_status": { "const": "not_a_violation" },
+    "spec": { "type": "string" },
+    "refinement": { "type": "string" },
+    "manifest": { "type": "string" },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "components": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+    "sccs": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+    "cycles": { "type": "array", "items": { "$ref": "#/$defs/cycle" } },
+    "degree": { "type": "array", "items": { "$ref": "#/$defs/degree" } },
+    "findings": { "type": "array" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "loc": {
+      "type": "object",
+      "required": ["line", "column"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "label": { "type": "string" },
+        "loc": { "$ref": "#/$defs/loc" },
+        "meta": { "type": "object" },
+        "fair": { "type": "boolean" },
+        "formal_status": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "kind", "from", "to"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "formal_status": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "component": {
+      "type": "object",
+      "required": ["id", "nodes"],
+      "properties": {
+        "id": { "type": "string" },
+        "nodes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "cycle": {
+      "type": "object",
+      "required": ["id", "steps"],
+      "properties": {
+        "id": { "type": "string" },
+        "steps": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "degree": {
+      "type": "object",
+      "required": ["node", "in", "out", "total"],
+      "properties": {
+        "node": { "type": "string" },
+        "in": { "type": "integer", "minimum": 0 },
+        "out": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  }
+}

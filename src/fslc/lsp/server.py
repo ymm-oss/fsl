@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
@@ -39,6 +40,7 @@ def check_source(
     source: str,
     path: Optional[str],
     name_resolver: Optional[NameResolver] = None,
+    analysis_diagnostics: bool = False,
 ) -> Dict[str, Any]:
     """Run the same in-process check path as ``fslc check`` for editor text."""
 
@@ -52,6 +54,7 @@ def check_source(
         _loc_from_exc,
         _parse_error_result,
     )
+    from fslc.analysis import analyze as analyze_structure
     from fslc.model import FslError, build_spec
     from fslc.parser import parse_src
     from fslc.refine import build_refinement
@@ -98,6 +101,8 @@ def check_source(
             "spec": spec["name"],
             "warnings": spec["warnings"],
         }
+        if analysis_diagnostics:
+            out["analysis_findings"] = analyze_structure(spec, profile="ai-review").get("findings", [])
         impl = _implements_result(spec)
         if impl:
             out["implements"] = impl
@@ -174,6 +179,9 @@ def _create_server():
     server = LanguageServer(SERVER_NAME, SERVER_VERSION)
     server.fsl_index_cache = {}
     server.fsl_name_cache = None
+    server.fsl_analysis_diagnostics = os.environ.get(
+        "FSLC_LSP_ANALYSIS_DIAGNOSTICS", ""
+    ).lower() in {"1", "true", "yes", "on"}
 
     def publish(uri: str) -> None:
         source = _source_for_uri(server, uri)
@@ -181,7 +189,12 @@ def _create_server():
             return
         path = _uri_to_path(uri)
         index = _index_for_uri(server, uri)
-        result = check_source(source, path, _name_resolver_for_server(server, path))
+        result = check_source(
+            source,
+            path,
+            _name_resolver_for_server(server, path),
+            analysis_diagnostics=getattr(server, "fsl_analysis_diagnostics", False),
+        )
         diagnostics = _result_to_diagnostics(types, source, result, index)
         server.publish_diagnostics(uri, diagnostics)
 
@@ -571,7 +584,33 @@ def _result_to_diagnostics(types, source: str, result: Dict[str, Any], index: Op
                 index,
             )
         )
+    for finding in result.get("analysis_findings", []) or []:
+        diagnostics.append(_make_analysis_diagnostic(types, source, finding, index))
     return diagnostics
+
+
+def _make_analysis_diagnostic(types, source: str, finding: Dict[str, Any], index: Optional[DocumentIndex]):
+    loc = finding.get("loc") or {}
+    rng = _range_from_finding_nodes(finding, index)
+    if rng is None:
+        rng = _range_from_loc(source, loc, index) if loc else RangeLike(0, 0, 0, 1).to_range()
+    message = (
+        f"Structural review ({finding.get('finding_type', 'finding')}): "
+        f"{finding.get('why_it_matters', 'review the structural finding')}"
+    )
+    return types.Diagnostic(
+        range=_to_lsp_range(types, rng),
+        message=message,
+        severity=types.DiagnosticSeverity.Information,
+        source="fslc analyze",
+        code=finding.get("finding_type"),
+        data={
+            "finding_id": finding.get("finding_id"),
+            "formal_status": finding.get("formal_status"),
+            "candidate_repairs": finding.get("candidate_repairs", []),
+            "do_not_assume": finding.get("do_not_assume", []),
+        },
+    )
 
 
 def _make_diagnostic(types, source: str, item: Dict[str, Any], severity, index: Optional[DocumentIndex]):
@@ -587,6 +626,40 @@ def _make_diagnostic(types, source: str, item: Dict[str, Any], severity, index: 
         source="fslc",
         code=item.get("kind"),
     )
+
+
+def _range_from_finding_nodes(finding: Dict[str, Any], index: Optional[DocumentIndex]) -> Optional[Range]:
+    if index is not None:
+        for node_id in finding.get("involved_nodes", []) or []:
+            rng = _range_for_analysis_node(index, node_id)
+            if rng is not None:
+                return rng
+    return None
+
+
+def _range_for_analysis_node(index: DocumentIndex, node_id: str) -> Optional[Range]:
+    prefix, sep, name = node_id.partition(":")
+    if not sep or not name:
+        return None
+    role_by_prefix = {
+        "action": "action",
+        "state": "state_var",
+        "requirement": "requirement",
+        "control": "control",
+        "acceptance": "acceptance",
+        "forbidden": "forbidden",
+        "invariant": "property",
+        "trans": "property",
+        "reachable": "property",
+        "leadsTo": "property",
+    }
+    role = role_by_prefix.get(prefix)
+    if role is None:
+        return None
+    for sym in index.symbols:
+        if sym.name == name and sym.role == role:
+            return sym.selection_range
+    return None
 
 
 def _range_from_loc(source: str, loc: Dict[str, Any], index: Optional[DocumentIndex]) -> Range:

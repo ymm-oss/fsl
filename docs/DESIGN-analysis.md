@@ -1,6 +1,6 @@
 # FSL - `fslc analyze` structural observation layer
 
-Motivation: issues #103, #100, #102, and #101. `verify` and `refine` answer
+Motivation: issues #103, #100, #102, #101, and #110-#116. `verify` and `refine` answer
 whether declared contracts hold. `analyze` answers a different question: what
 shape does the spec have, and which parts look weakly connected enough to deserve
 review?
@@ -17,11 +17,24 @@ fslc analyze spec.fsl --projection action_state_graph --format json
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
 fslc analyze spec.fsl --profile ai-review --format json
+fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
+fslc analyze tests/fixtures/chain/fsl-project.toml --projection traceability_graph --format json
+fslc analyze spec.fsl --projection action_state_graph --format dot
+fslc analyze spec.fsl --projection requirement_property_graph --format mermaid
 ```
 
-`--format` currently accepts only `json`. Success is `result: "analyzed"` and
-exits 0. Parse, name, type, semantics, io, and internal failures reuse the
-normal fslc error envelope.
+`--format json` remains the default. `--format dot` and `--format mermaid` are
+review-aid graph exports for graph-shaped projections; they do not add a
+Graphviz or Mermaid runtime dependency.
+
+Single-file success is `result: "analyzed"` and exits 0. Parse, name, type,
+semantics, io, and internal failures reuse the normal fslc error envelope.
+Batch mode accepts files and directories. Directories are expanded recursively
+for `*.fsl`, sorted by normalized path, and emitted as one deterministic JSON
+envelope with `mode: "batch"`. If any file fails, successful entries remain in
+`files[]`, failed entries are also summarized in `errors[]`, and the command
+exits 2.
 
 ## 2. Typed Semantic Graph (TSG)
 
@@ -52,12 +65,21 @@ Stable edge kinds include `declares`, `covers`, `has_guard`, `has_effect`,
 
 ## 3. Graph projections
 
-Graph projections are deterministic summaries over the TSG:
+Graph projections are deterministic summaries over the TSG or over other
+structural sources:
 
 - `action_state_graph`: actions connected to state variables they read/write.
 - `requirement_property_graph`: requirements connected to covered actions,
   properties, scenarios, KPI/control nodes.
 - `property_state_graph`: user properties connected to state variables they read.
+- `refinement_graph`: standalone refinement mappings with impl/abs spec names,
+  state maps, action maps, stutters, and preserve-progress declarations.
+- `traceability_graph`: project-manifest graph over business/requirements/design
+  files and refinement mappings.
+
+Direct `.toml` inputs to `fslc analyze` are treated as project manifests; the
+default filename is `fsl-project.toml`, but review copies with other names are
+accepted.
 
 Each graph projection includes `components`, `sccs`, `cycles`, `degree`, and
 `formal_status: "not_a_violation"`. A disconnected component or cycle is not a
@@ -76,6 +98,9 @@ proof failure. It is only structure for downstream review.
   requirement tag or acceptance/forbidden scenario, and no explicit progress
   story is attached. The heuristic does not inspect English terms in action or
   state names.
+- `unwritten_state`: a state variable is initialized and may be read, but no
+  action writes it.
+- `unguarded_action`: a non-generated action has no explicit `requires` clause.
 
 Every finding has:
 
@@ -97,13 +122,41 @@ language-specific words such as "retry" or "pending". A cycle can be valid
 retry, review, or compensation behavior; the finding only says that a
 requirement/scenario-linked cycle has no visible progress story.
 
-## 5. Implementation notes
+Project-level `traceability_graph` can additionally emit
+`traceability_gap` findings when an upper-layer requirement/control ID has no
+visible lower-layer structural anchor. This is still review-only; verified
+refinement evidence remains the job of `fslc chain` and `fslc refine`.
+
+## 5. Schemas
+
+Versioned schema files live under `schemas/fslc/analysis/`:
+
+- `tsg.v0.schema.json`
+- `analysis-graph.v0.schema.json`
+- `analysis-findings.v0.schema.json`
+
+Downstream consumers should check `schema_version` before assuming shape.
+Additive optional fields can remain in the same schema version; removing or
+changing required field semantics should use a new version.
+
+## 6. LSP diagnostics
+
+`fslc-lsp` can surface `--profile ai-review` findings as informational
+diagnostics when started with `FSLC_LSP_ANALYSIS_DIAGNOSTICS=1`. These
+diagnostics use source locations from TSG nodes when available, fall back to the
+best indexed declaration range, and remain clearly marked as structural review
+signals from `fslc analyze`, not formal verifier errors.
+
+## 7. Implementation notes
 
 The analysis package is in `src/fslc/analysis/`:
 
 - `tsg.py`: spec dict to TSG, expression read extraction, assignment write extraction.
 - `graph.py`: deterministic connected components, SCCs, representative cycles.
 - `projections.py`: graph projections over TSG.
+- `refinement.py`: structural graph projection for standalone mapping files.
+- `project.py`: manifest-level traceability graph assembly.
+- `export.py`: DOT and Mermaid formatting.
 - `findings.py`: AI-readable review findings.
 
 The implementation does not call Z3 and does not perform bounded reachability.

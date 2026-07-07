@@ -15,6 +15,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (`disconnected_requirement`, `unanchored_property`, `progressless_cycle`) with
   `formal_status:"not_a_violation"` so structural observations are not confused
   with proof failures. See `docs/DESIGN-analysis.md`.
+- `fslc analyze` now supports batch file/directory analysis, DOT/Mermaid graph
+  exports, standalone `refinement_graph`, project-manifest
+  `traceability_graph`, versioned JSON Schema files under
+  `schemas/fslc/analysis/`, two additional AI-review findings
+  (`unwritten_state`, `unguarded_action`), and opt-in LSP informational
+  diagnostics for analysis findings via `FSLC_LSP_ANALYSIS_DIAGNOSTICS=1`.
 - Optional **spec-level tag** classifying a whole spec: an intent string right
   after the spec name, `spec ReturnUI "ui: screen flow" { … }`. Metadata only —
   it desugars to nothing and is never verified (corpus snapshot unchanged) — and

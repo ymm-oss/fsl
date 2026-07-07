@@ -267,9 +267,12 @@ the formalization memo.**
    adjudicate concrete traces rather than logical formulas),
    `fslc analyze file.fsl --profile ai-review`
    (emits structural review findings over the Typed Semantic Graph, such as
-   disconnected requirements, unanchored properties, and progressless cycles.
-   These are review signals with `formal_status:"not_a_violation"`, not proof
-   failures),
+   disconnected requirements, unanchored properties, progressless cycles,
+   unwritten state, and unguarded actions. `analyze` also supports batch
+   file/directory review, standalone `refinement_graph`, project
+   `traceability_graph`, DOT/Mermaid graph exports, and JSON schemas under
+   `schemas/fslc/analysis/`. These are review signals with
+   `formal_status:"not_a_violation"`, not proof failures),
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a

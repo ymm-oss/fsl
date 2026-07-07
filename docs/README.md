@@ -9,7 +9,7 @@
 | [`intro/concept.en.html`](intro/concept.en.html) / [`intro/when-to-use.en.html`](intro/when-to-use.en.html) / [`intro/guide.en.html`](intro/guide.en.html) / [`intro/mechanism.en.html`](intro/mechanism.en.html) / [`intro/business-layer.en.html`](intro/business-layer.en.html) / [`intro/requirements-layer.en.html`](intro/requirements-layer.en.html) / [`intro/design-layer.en.html`](intro/design-layer.en.html) / [`intro/syntax.en.html`](intro/syntax.en.html) / [`intro/analysis.en.html`](intro/analysis.en.html) | **English HTML manual**. Each article has persistent chapter navigation for concept, when to use, workflow, mechanisms, business layer, requirements layer, design layer, syntax, and structural analysis |
 | [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **Introduction to formal methods and FSL**. Background for non-specialists, the role of FSL in AI-driven development, and considerations for an introductory PoC |
 | [`LANGUAGE.md`](LANGUAGE.md) | **Language reference** (full syntax, semantics, CLI, idioms, the three-layer dialects, and NFRs). Read this if you are writing specifications |
-| [`intro/analysis.ja.html`](intro/analysis.ja.html) / [`intro/analysis.en.html`](intro/analysis.en.html) / [`DESIGN-analysis.md`](DESIGN-analysis.md) | **`fslc analyze` structural observation layer**. Site pages and implementation design for TSG, graph projections, and AI-review findings |
+| [`intro/analysis.ja.html`](intro/analysis.ja.html) / [`intro/analysis.en.html`](intro/analysis.en.html) / [`DESIGN-analysis.md`](DESIGN-analysis.md) | **`fslc analyze` structural observation layer**. Site pages and implementation design for TSG, graph projections, batch analysis, refinement/project traceability graphs, graph exports, schemas, and AI-review findings |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
 
 ## Implementation design by architecture and feature (DESIGN-*)
@@ -36,7 +36,7 @@
 | [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain --readable` (verification bounds, skeleton enumeration, counterfactuals, witness narration) |
 | [`DESIGN-html-report.md`](DESIGN-html-report.md) | `fslc html` (self-contained visual review report from explain + verify evidence) |
 | [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate` (applicability check for state machine → typestate + TS scaffold) |
-| [`DESIGN-analysis.md`](DESIGN-analysis.md) | `fslc analyze` (Typed Semantic Graph, graph projections, AI-readable structural review findings) |
+| [`DESIGN-analysis.md`](DESIGN-analysis.md) | `fslc analyze` (Typed Semantic Graph, graph projections, batch mode, refinement/project traceability graphs, DOT/Mermaid exports, schemas, AI-readable structural review findings) |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 
 ## Dogfooding records (DOGFOOD-*)

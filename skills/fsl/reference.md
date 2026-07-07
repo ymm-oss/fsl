@@ -293,7 +293,7 @@ fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
-fslc analyze <f> [--projection tsg|action_state_graph|requirement_property_graph|property_state_graph] [--profile ai-review]  # structural review JSON
+fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--profile ai-review] [--format json|dot|mermaid]  # structural review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
@@ -304,10 +304,17 @@ emits a stable Typed Semantic Graph over requirements, actions, state variables,
 properties, acceptance/forbidden scenarios, and traceability metadata.
 `--projection action_state_graph`, `requirement_property_graph`, and
 `property_state_graph` summarize deterministic components/SCCs/cycles over that
-graph. `--profile ai-review` emits AI-readable review findings such as
-`disconnected_requirement`, `unanchored_property`, and `progressless_cycle`.
-Treat these as review signals: they carry `formal_status:"not_a_violation"` unless
-a future finding explicitly cites `verify`/`refine`/`replay` evidence.
+graph. It accepts multiple files/directories in batch mode; directories expand
+recursively to sorted `*.fsl` files and partial failures stay visible in the batch
+JSON. Standalone refinement mappings use `--projection refinement_graph`, project
+manifests use `--projection traceability_graph`, and graph projections can export
+DOT or Mermaid with `--format dot|mermaid`. `--profile ai-review` emits
+AI-readable review findings such as `disconnected_requirement`,
+`unanchored_property`, `progressless_cycle`, `unwritten_state`, and
+`unguarded_action`. Treat these as review signals: they carry
+`formal_status:"not_a_violation"` unless a future finding explicitly cites
+`verify`/`refine`/`replay` evidence. Versioned schemas live under
+`schemas/fslc/analysis/`.
 
 `ledger` (issue #24) re-organizes `verify`/`scenarios`/`replay` findings **by
 requirement id** into a Markdown audit ledger a PM / governance / internal-audit

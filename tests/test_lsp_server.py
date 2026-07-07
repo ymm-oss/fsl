@@ -25,8 +25,10 @@ from fslc.lsp.server import (  # noqa: E402
     _create_server,
     _definition_target,
     _path_to_uri,
+    _result_to_diagnostics,
     _to_completion_item,
     _to_lsp_range,
+    check_source,
 )
 
 
@@ -284,3 +286,45 @@ def test_completion_handler_suggests_alias_members(tmp_path):
     assert labels["bump"].kind == types.CompletionItemKind.Function
     assert "Id" in labels
     assert labels["Id"].kind == types.CompletionItemKind.Class
+
+
+def test_analysis_findings_can_surface_as_information_diagnostics():
+    source = """spec LspAnalysis {
+  state { x: Int }
+  init { x = 0 }
+  action broad() {
+    x = x + 1
+  }
+  invariant Any "MODEL: baseline" { true }
+}
+"""
+    index = build_index(source, "lsp_analysis.fsl")
+
+    result = check_source(source, "lsp_analysis.fsl", analysis_diagnostics=True)
+    diagnostics = _result_to_diagnostics(types, source, result, index)
+
+    matches = [d for d in diagnostics if d.code == "unguarded_action"]
+    assert matches
+    diag = matches[0]
+    assert diag.severity == types.DiagnosticSeverity.Information
+    assert diag.source == "fslc analyze"
+    assert "Structural review" in diag.message
+    assert source.splitlines()[diag.range.start.line][diag.range.start.character:diag.range.end.character] == "broad"
+
+
+def test_analysis_diagnostics_no_findings_file_adds_no_information_diagnostics():
+    source = """spec LspNoFindings {
+  state { x: Int }
+  init { x = 0 }
+  action guarded() "REQ-1: guarded write" {
+    requires x == 0
+    x = x + 1
+  }
+}
+"""
+    index = build_index(source, "lsp_no_findings.fsl")
+
+    result = check_source(source, "lsp_no_findings.fsl", analysis_diagnostics=True)
+    diagnostics = _result_to_diagnostics(types, source, result, index)
+
+    assert not [d for d in diagnostics if d.source == "fslc analyze"]
