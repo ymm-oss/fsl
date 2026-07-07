@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fsl-ai によるAI hard contract — FSL 日本語マニュアル</title>
+<meta name="description" content="fsl-aiのai_componentで、AI tool authority、human approval guard、forbidden tool、runtime replay、AI-readable findingを確認する方法。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="ai">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">AI hard-contracts</p>
+    <h1 class="reveal"><code>ai_component</code> でAIのtool実行境界を守る</h1>
+    <p class="lead reveal">fsl-ai Phase 1 は、AIコンポーネントの決定的に検査できる境界だけを扱います。tool宣言、authority、human approval、forbidden tool、fallback、runtime event replayです。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> にあります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">境界</p>
+    <h2 class="reveal">hard contract と evaluator / statistical evidence を分ける</h2>
+    <p class="lead narrow reveal">MVPは、自然言語回答の真偽を証明しようとはしません。検査するのは、どのtoolを提案・実行できるか、どのtoolに人間承認が必要か、どのtoolが禁止か、という実行前guardの事実です。</p>
+    <table class="matrix reveal">
+      <tr><th>契約</th><th>例</th><th>fsl-aiでの扱い</th></tr>
+      <tr><td><code>syntactic_hard</code></td><td>tool schema、approval token、forbidden tool、precondition evidence。</td><td>kernel展開と <code>ai_hard_contract_violation</code>。</td></tr>
+      <tr><td><code>runtime_observed</code></td><td>未宣言toolやschema mismatchがログに出た。</td><td><code>observed_contract_violation</code>。証明ではなく観測。</td></tr>
+      <tr><td><code>evaluator_supported</code></td><td>groundedness、source support、prompt injection判定。</td><td>後続phase。<code>proved</code> とは表示しない。</td></tr>
+      <tr><td><code>statistically_supported</code></td><td>accuracy、recall、hallucination rate、slice指標。</td><td>後続phase。信頼区間つき証拠であり証明ではない。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">構文</p>
+    <h2 class="reveal">tool と authority を明示する</h2>
+    <div class="panel reveal">
+      <pre><code>ai_component RefundAgentToolSafety {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+  }
+
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+  }
+
+  authority {
+    may_execute SearchOrder;
+    requires_human_approval RefundPayment;
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    when low_confidence require human_review;
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">展開</p>
+    <h2 class="reveal"><code>ai_component</code> は既存kernelへ展開される</h2>
+    <p class="lead narrow reveal">AI dialect は verifier に確率や evaluator semantics を追加しません。hard contract は有限状態と通常の不変条件になります。</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>有限のtool状態</h3>
+        <p><code>Tool</code>、<code>human_approved</code>、<code>tool_executed</code>、<code>tool_suggested</code> は通常のkernel stateです。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>生成action</h3>
+        <p><code>approve_*</code> と <code>execute_*</code> が、approval token とguardされた実行を表します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>生成invariant</h3>
+        <p>forbidden tool は実行されず、irreversibleまたはapproval-requiredなtoolは承認後だけ実行できます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">実行</p>
+    <h2 class="reveal">guardとreplayの失敗はAI専用findingで読む</h2>
+    <div class="panel reveal">
+      <pre><code>fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>結果</th><th>読み方</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>有限のhard-contract展開が、完全なcapability宣言とruntime guardを前提に検証された状態。</td></tr>
+      <tr><td><code>replay_conformant</code></td><td>観測event logが宣言されたhard境界に合っていた。証明ではなく証拠。</td></tr>
+      <tr><td><code>ai_hard_contract_violation</code></td><td>forbidden tool、approval bypass、schema invalidity、business precondition mismatch が観測された。</td></tr>
+      <tr><td><code>observed_contract_violation</code></td><td>runtime が宣言外のcapabilityを使った。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">次に読む</p>
+    <h2 class="reveal">設計と例へ進む</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>設計判断</h3>
+        <p>保証境界、lowering、event schema、finding、MVP外の範囲は design doc にまとまっています。</p>
+        <p><a class="btn" href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>動く例</h3>
+        <p>refund agent の例で、approval、forbidden tool、replay evidence、observed mismatchを確認できます。</p>
+        <p><a class="btn" href="../../examples/ai/README.md">examples/ai</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>通常の文法</h3>
+        <p><code>ai_component</code> は既存 verifier に展開されます。展開先の基本構文は文法ページで確認できます。</p>
+        <p><a class="btn" href="syntax.ja.html">文法・構文へ</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

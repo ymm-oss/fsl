@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/ai/event.v0.schema.json",
+  "title": "fsl-ai event v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["event", "component"],
+  "properties": {
+    "event": {
+      "enum": ["tool_call", "human_approval", "fallback"]
+    },
+    "component": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": ["suggest", "execute"]
+    },
+    "tool_schema": {
+      "type": "string"
+    },
+    "schema_valid": {
+      "type": "boolean"
+    },
+    "preconditions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "args": {
+      "type": "object"
+    },
+    "approval_id": {
+      "type": "string"
+    }
+  }
+}

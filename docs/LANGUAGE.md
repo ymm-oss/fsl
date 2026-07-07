@@ -480,6 +480,8 @@ fslc typestate <file.fsl> [--ts]                 # decide applicability of state
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
 fslc db observe <file.fsl> --trace events.json                  # runtime observation evidence
 fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DDL -> dbsystem
+fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
+fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
 
 In addition to `reachable` and action coverage, `scenarios` outputs, for each
@@ -1399,13 +1401,87 @@ candidates. Runtime observation returns `observed_mismatch` with
 Use ordinary `fslc verify` when you want to inspect the generated kernel
 counterexample directly.
 
-### 13.6 What is not handled (the boundary of the layers)
+### 13.6 AI hard-contract layer: `ai_component` (fsl-ai)
+
+`ai_component` models the deterministic, guard-backed slice of an AI component:
+tool declarations, symbolic tool schemas, business precondition evidence,
+authority, human approval, forbidden tools, and fallback routing. It is a
+dialect expansion, not a stochastic kernel. Probability, evaluator scoring,
+groundedness judgments, prompt-injection semantic judgments, and confidence
+intervals remain outside this Phase 1 formal model.
+
+Core shape:
+
+```fsl
+ai_component RefundAgentToolSafety {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+  }
+
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+  }
+
+  authority {
+    may_execute SearchOrder;
+    requires_human_approval RefundPayment;
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    when low_confidence require human_review;
+  }
+}
+```
+
+`ai_component` lowers to a kernel spec with finite tool state:
+
+- `Tool` enum
+- `human_approved: Map<Tool, Bool>`
+- `tool_executed: Map<Tool, Bool>`
+- generated `approve_*` / `execute_*` actions
+- generated invariants for approval-before-execution and forbidden tools
+
+Use `fslc ai check` when you want fsl-ai vocabulary:
+
+```bash
+fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
+```
+
+Successful hard-contract checks return `verified_under_assumptions`.
+`fslc ai replay` accepts JSONL or `{ "events": [...] }` and returns
+`replay_conformant` / `replay_nonconformant` with
+`formal_result: "not_run"` because replay is observation evidence. Findings use
+`finding_schema_version: "fsl-ai-finding.v0"` and include
+`guarantee_kind`:
+
+- `syntactic_hard`: schema/authority/approval/forbidden/precondition guard facts.
+- `runtime_observed`: declared component capability differs from observed events.
+- `evaluator_supported` and `statistically_supported`: reserved for later phases;
+  they must not be displayed as `proved`.
+
+Design details: `docs/DESIGN-ai-hard.md`.
+
+### 13.7 What is not handled (the boundary of the layers)
 
 The majority of non-functional requirements (permissions, audit, capacity,
 reliability behavior, discrete-time SLA) can be handled (§13.4). What remains
 outside FSL is: **probability, percentiles (99.9% etc.), real time (wall-clock
-ms), usability, DB optimizer/lock timing, full production-data proof, and prose
-rationale** (write these in each layer's document).
+ms), usability, DB optimizer/lock timing, full production-data proof, evaluator
+truth judgments, and prose rationale** (write these in each layer's document).
 FSL is responsible for the **checkable skeleton** of each artifact.
 
 ## 14. Library API

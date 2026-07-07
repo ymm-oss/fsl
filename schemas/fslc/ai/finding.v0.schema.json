@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/ai/finding.v0.schema.json",
+  "title": "fsl-ai hard-contract finding v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "fsl",
+    "result",
+    "kind",
+    "severity",
+    "component",
+    "contract",
+    "tool",
+    "failed_rule",
+    "violation",
+    "guarantee_kind",
+    "evidence",
+    "witness",
+    "minimal_conflict_set",
+    "repair_candidates",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-ai-finding.v0"
+    },
+    "fsl": {
+      "const": "fsl-ai-hard-mvp.v0"
+    },
+    "result": {
+      "enum": ["violated", "observed_mismatch"]
+    },
+    "kind": {
+      "enum": [
+        "ai_hard_contract_violation",
+        "observed_contract_violation",
+        "evaluator_backed_contract_violation",
+        "statistical_contract_unsupported"
+      ]
+    },
+    "severity": {
+      "enum": ["info", "warning", "error"]
+    },
+    "component": {
+      "type": "string"
+    },
+    "contract": {
+      "type": "string"
+    },
+    "tool": {
+      "type": ["string", "null"]
+    },
+    "failed_rule": {
+      "type": "string"
+    },
+    "violation": {
+      "type": "string"
+    },
+    "guarantee_kind": {
+      "enum": [
+        "syntactic_hard",
+        "runtime_observed",
+        "evaluator_supported",
+        "statistically_supported"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "formal_proof"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "formal_proof": {
+          "type": "boolean"
+        }
+      }
+    },
+    "witness": {
+      "type": "object"
+    },
+    "minimal_conflict_set": {
+      "type": "object"
+    },
+    "repair_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "weakens_spec", "description"],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "weakens_spec": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "redaction": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"event":"tool_call","component":"RefundAgentToolSafety","tool":"RefundPayment","mode":"execute","tool_schema":"RefundPaymentV1","schema_valid":true,"args":{"order_id":"redacted","amount":"redacted"},"preconditions":{"order_paid":true,"amount_refundable":true}}

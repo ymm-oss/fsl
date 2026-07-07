@@ -1,0 +1,1 @@
+{"event":"tool_call","component":"RefundAgentToolSafety","tool":"ChargeBackCustomer","mode":"execute","tool_schema":"ChargeBackV1","schema_valid":true,"args":{"customer_id":"redacted"}}

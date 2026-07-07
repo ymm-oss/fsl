@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSL Manual — Concepts, Workflow, Business Layer, Requirements Layer, fsl-db, Syntax</title>
-<meta name="description" content="The English FSL manual. Read the concept, when to use FSL, workflow, verification mechanisms, business layer, requirements layer, fsl-db, and syntax guide." />
+<title>FSL Manual — Concepts, Workflow, Business Layer, Requirements Layer, fsl-db, fsl-ai, Syntax</title>
+<meta name="description" content="The English FSL manual. Read the concept, when to use FSL, workflow, verification mechanisms, business layer, requirements layer, fsl-db, fsl-ai, and syntax guide." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="manual-home" data-page="index">
@@ -18,7 +18,7 @@
   <div class="wrap narrow center">
     <p class="kicker reveal">FSL Manual</p>
     <h1 class="reveal">FSL Manual</h1>
-    <p class="lead reveal">A practical manual for machine-checked specifications, from concepts and workflow to business, requirements, design, fsl-db, and syntax.</p>
+    <p class="lead reveal">A practical manual for machine-checked specifications, from concepts and workflow to business, requirements, design, fsl-db, fsl-ai, and syntax.</p>
     <p class="reveal" style="margin-top:12px">In FSL, <b>the spec you write is the documentation</b> — the same text people read is the text the machine verifies, so the two can never drift apart.</p>
     <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
       <span class="pill">Concept</span>
@@ -30,6 +30,7 @@
       <span class="pill">Syntax</span>
       <span class="pill">Analyze</span>
       <span class="pill">fsl-db</span>
+      <span class="pill">fsl-ai</span>
     </div>
   </div>
 </section>
@@ -51,6 +52,7 @@
         <a class="chapter-link" href="syntax.en.html"><span class="num">08</span><span><strong>Syntax Guide</strong><span>Types, actions, properties</span></span></a>
         <a class="chapter-link" href="analysis.en.html"><span class="num">09</span><span><strong>Structural Analysis</strong><span>TSG, graph projections, findings</span></span></a>
         <a class="chapter-link" href="db.en.html"><span class="num">10</span><span><strong>fsl-db</strong><span>DB / multi-env compatibility</span></span></a>
+        <a class="chapter-link" href="ai.en.html"><span class="num">11</span><span><strong>fsl-ai</strong><span>AI hard contracts</span></span></a>
       </nav>
       <div class="manual-main">
         <article class="chapter-card">
@@ -102,6 +104,11 @@
           <span class="num">10</span>
           <div><h3>fsl-db</h3><p>Use <code>dbsystem</code> to check database migration compatibility across schema versions, artifact capabilities, multiple environments, and rollout windows.</p></div>
           <a class="btn" href="db.en.html">Read</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">11</span>
+          <div><h3>fsl-ai</h3><p>Use <code>ai_component</code> to check AI tool authority, human approval guards, forbidden tools, and runtime replay findings.</p></div>
+          <a class="btn" href="ai.en.html">Read</a>
         </article>
       </div>
     </div>
@@ -162,6 +169,11 @@
         <h3>Check DB compatibility</h3>
         <p>Use <code>dbsystem</code> to model schema versions, migrations, artifact read/write capabilities, and prod/staging/worker/mobile coexistence windows.</p>
         <p><a class="btn" href="db.en.html">Read fsl-db</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Guard AI tool calls</h3>
+        <p>Use <code>ai_component</code> to model tool authority, human approval, forbidden tools, and runtime replay evidence.</p>
+        <p><a class="btn" href="ai.en.html">Read fsl-ai</a></p>
       </div>
     </div>
   </div>
