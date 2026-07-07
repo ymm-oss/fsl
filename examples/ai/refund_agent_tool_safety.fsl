@@ -1,0 +1,50 @@
+ai_component RefundAgentToolSafety {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+    effect read_order;
+  }
+
+  tool CreateDraft {
+    schema CreateDraftV1;
+    precondition order_exists;
+    effect draft_reply;
+  }
+
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+    effect payment_refunded;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+    effect customer_data_deleted;
+  }
+
+  authority {
+    may_suggest CreateDraft;
+    may_execute SearchOrder;
+    requires_human_approval RefundPayment;
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    when low_confidence require human_review;
+    when missing_order_evidence require refuse_with_reason;
+  }
+
+  check hard {
+    rule tool_authority;
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
+  }
+}

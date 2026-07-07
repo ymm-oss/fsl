@@ -101,6 +101,12 @@
       "result": "error"
     }
   },
+  "examples/ai/refund_agent_tool_safety.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/consulting/asis_expense.fsl": {
     "check": {
       "result": "ok",

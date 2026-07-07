@@ -16,6 +16,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   PDG/slicing, Event-B/Rodin, proof-assistant dependency graphs, mCRL2 static
   LPS analysis) stating plainly which parts of `analyze` are borrowed ideas and
   which parts of the combination are uncommon.
+- fsl-ai Phase 1 hard-contract MVP (`ai_component`) for AI tool-boundary
+  safety. The dialect parses declared tools, authority, human approval,
+  forbidden tools, symbolic business preconditions, and fallback metadata,
+  lowers the deterministic hard-contract slice to the existing kernel, and adds
+  `fslc ai check` / `fslc ai replay` with stable AI-readable findings
+  (`fsl-ai-finding.v0`). Runtime replay is explicitly observation evidence
+  (`formal_result:"not_run"`), while evaluator-backed and statistical AI claims
+  remain out of the kernel. Includes fixtures in `examples/ai/`, schemas under
+  `schemas/fslc/ai/`, docs in `docs/DESIGN-ai-hard.md`, bilingual site pages,
+  and updated language/skill references. (#135, #136, #137, #138)
 - fsl-db MVP (`dbsystem`) for database migration compatibility across schema
   versions, artifacts, and environments. The dialect parses typed DB IR, expands
   to the existing kernel via `Map<Column, Bool>` lifecycle state and generated
@@ -116,6 +126,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `<actionname>: by <actor>` requirement caption on actions now that a
   business-dialect transition's actor has its own Actor column (real
   `REQ-n`/`POL-n` prose captions are unaffected).
+- (LSP) `textDocument/references` with `includeDeclaration=true` now returns the
+  declaration even when the cursor is on a *cross-file* reference (e.g. a
+  `use`-imported `alias.member` in another spec). Previously the declaration was
+  dropped in that case: `references_at()` only emits the declaration when it lives
+  in the current document, and the workspace loop in `_workspace_references`
+  (`src/fslc/lsp/server.py`) scans other files' references, never their
+  declaration symbol, so a symbol declared in a different workspace file was
+  omitted from the results. `go-to-definition` was unaffected.
 
 ### Changed
 - `skills/` reframed around the doc-substitution philosophy: a `.fsl` spec

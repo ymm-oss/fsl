@@ -1,0 +1,1 @@
+{"event":"tool_call","component":"RefundAgentToolSafety","tool":"DeleteCustomerData","mode":"execute","tool_schema":"DeleteCustomerDataV1","schema_valid":true,"args":{"customer_id":"redacted"},"preconditions":{}}

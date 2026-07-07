@@ -145,6 +145,45 @@ fsl-db findings (`verified_under_assumptions` on success). Use
 `fslc db observe` for runtime evidence only (`observed_mismatch`, not formal
 violation) and `fslc db import` for the minimal SQL DDL importer boundary.
 
+AI hard-contract dialect (Phase 1; expands to the same kernel for deterministic
+tool-boundary checks and reports stable fsl-ai findings for runtime replay):
+
+```fsl
+ai_component <Name> {
+  model <model_id>;
+  prompt <prompt_id>;
+  input <InputSchema>;
+  output <OutputSchema>;
+
+  tool <ToolName> [irreversible] {
+    schema <ToolSchema>;
+    precondition <symbolic_business_precondition>;
+  }
+
+  authority {
+    may_suggest <ToolName>, ...;
+    may_execute <ToolName>, ...;
+    requires_human_approval <ToolName>, ...;
+    forbidden <ToolName>, ...;
+  }
+
+  fallback {
+    when <condition_name> require <safe_target>;
+  }
+}
+```
+
+`ai_component` checks tool authority, human approval before irreversible or
+approval-required execution, forbidden tools, declared tool schemas, symbolic
+business precondition evidence, and fallback routing. It does not model LLM
+truth, groundedness, evaluator judgment, probability, confidence intervals, or
+prompt/model sampling distributions. Use `fslc ai check` for
+`verified_under_assumptions` hard-contract findings and `fslc ai replay --logs`
+for JSONL runtime evidence (`replay_conformant` / `replay_nonconformant`,
+`formal_result:"not_run"`). Findings include `guarantee_kind`:
+`syntactic_hard` or `runtime_observed` in Phase 1; future
+`evaluator_supported` / `statistically_supported` results are never formal proof.
+
 Composite spec (a separate top-level form):
 
 ```fsl
@@ -373,6 +412,8 @@ fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business aud
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
 fslc db observe <f> --trace events.json                 # runtime observation evidence
 fslc db import <sql> [--name Name] [-o out.fsl]         # minimal SQL DDL -> dbsystem
+fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
+fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
 ```
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
@@ -851,8 +892,9 @@ verify {
 ### Drawing the layer boundary
 
 The majority of NFRs are handled (§11). What stays outside FSL: probabilities,
-percentiles, real time (wall-clock ms), usability, and prose rationale (write those
-in each layer's documents).
+percentiles, real time (wall-clock ms), usability, evaluator truth judgments,
+statistical AI quality claims, and prose rationale (write those in each layer's
+documents).
 
 ## 11. Non-functional requirements (NFR)
 
