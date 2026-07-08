@@ -152,6 +152,58 @@ def test_refinement_action_param_type_annotation_mismatch_is_type_error(tmp_path
     assert exit_code(r) == 2
 
 
+_CONFLICTING_ENUM_ABS = """
+spec ConflEnumAbs {
+  type Id = 0..0
+  enum Status { Open, Closed }
+  state { st: Map<Id, Status> }
+  init { forall c: Id { st[c] = Open } }
+  fair action close(c: Id) { requires st[c] == Open  st[c] = Closed }
+}
+"""
+
+
+_CONFLICTING_ENUM_IMPL = """
+spec ConflEnumImpl {
+  type Id = 0..0
+  enum Status { Open, Stuck, Closed }
+  state { st: Map<Id, Status> }
+  init { forall c: Id { st[c] = Open } }
+  action close(c: Id) { requires st[c] == Open  st[c] = Stuck }
+}
+"""
+
+
+_CONFLICTING_ENUM_MAP = """
+refinement ConflEnumRefines {
+  impl ConflEnumImpl
+  abs ConflEnumAbs
+  map st[c: Id] = st[c]
+  action close(c) -> close(c)
+}
+"""
+
+
+def test_same_named_enum_with_different_members_is_rejected_not_merged(tmp_path):
+    # Regression: impl's `Stuck` (index 1) used to get silently reinterpreted
+    # as abs's `Closed` (also index 1) because _merge_types_meta merged same-
+    # named enums by name only. impl never truly reaches Closed here, so a
+    # "refines" verdict would be a false positive; it must be rejected instead.
+    abs_file = tmp_path / "abs.fsl"
+    impl_file = tmp_path / "impl.fsl"
+    map_file = tmp_path / "map.fsl"
+    abs_file.write_text(_CONFLICTING_ENUM_ABS, encoding="utf-8")
+    impl_file.write_text(_CONFLICTING_ENUM_IMPL, encoding="utf-8")
+    map_file.write_text(_CONFLICTING_ENUM_MAP, encoding="utf-8")
+
+    r = run_refine(str(impl_file), str(abs_file), str(map_file), depth=6)
+
+    assert r["result"] == "error"
+    assert r["kind"] == "type"
+    assert "Status" in r["message"]
+    assert exit_code(r) == 2
+
+
 def test_seat_conditional_map_refines_booking():
     r = run_refine(
         str(SPECS / "seat_booking_impl.fsl"),
