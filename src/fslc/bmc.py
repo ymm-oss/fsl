@@ -1696,20 +1696,45 @@ def _relation_reachable_expr(rel, ty, src, dst, spec):
     def const(v):
         return _z3_domain_value(ty, v)
 
-    def path_at_most(k, a, b):
-        direct = _relation_contains(rel, ty, ty, a, b, spec)
-        if k <= 1:
-            return direct
-        via = [
-            z3.And(
-                _relation_contains(rel, ty, ty, a, const(mid), spec),
-                path_at_most(k - 1, const(mid), b),
-            )
-            for mid in values
-        ]
-        return z3.Or(direct, *via)
+    # path_at_most(k, a, b): "a reaches b in <= k hops". Below the top level,
+    # `a` only ever ranges over the finite domain `values` (never an arbitrary
+    # symbolic expression), so those calls are memoized on (k, a) to turn the
+    # naive O(n^n) unrolled tree into an O(n^2)-node shared DAG.
+    memo = {}
 
-    return path_at_most(len(values), src, dst)
+    def path_from_value(k, v):
+        key = (k, v)
+        cached = memo.get(key)
+        if cached is not None:
+            return cached
+        a = const(v)
+        direct = _relation_contains(rel, ty, ty, a, dst, spec)
+        if k <= 1:
+            result = direct
+        else:
+            via = [
+                z3.And(
+                    _relation_contains(rel, ty, ty, a, const(mid), spec),
+                    path_from_value(k - 1, mid),
+                )
+                for mid in values
+            ]
+            result = z3.Or(direct, *via)
+        memo[key] = result
+        return result
+
+    n = len(values)
+    direct = _relation_contains(rel, ty, ty, src, dst, spec)
+    if n <= 1:
+        return direct
+    via = [
+        z3.And(
+            _relation_contains(rel, ty, ty, src, const(mid), spec),
+            path_from_value(n - 1, mid),
+        )
+        for mid in values
+    ]
+    return z3.Or(direct, *via)
 
 
 def _relation_set_from_projection(rel, src_ty, dst_ty, spec, side):

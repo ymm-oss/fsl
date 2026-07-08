@@ -3,6 +3,8 @@
 
 """Typed relation layer coverage (#108)."""
 
+import time
+
 from fslc.cli import run_verify
 from fslc.runtime import Monitor
 
@@ -119,3 +121,27 @@ def test_relation_trace_displays_counterexample_pairs(tmp_path):
     assert out["invariant"] == "DelegatesAcyclic"
     states = out["trace"]
     assert states[-1]["state"]["delegates"] == [[0, 1], [1, 0]]
+
+
+def test_reachable_and_acyclic_encoding_does_not_blow_up(tmp_path):
+    # Regression guard: _relation_reachable_expr used to unroll an
+    # unmemoized O(n^n) tree, which made a 7-node self-relation time out.
+    # With memoization this stays well under a second for 12 nodes.
+    src = '''spec RelPerf {
+  type Node = 0..11
+  state { r: relation Node -> Node }
+  init { r = Set {} }
+  action link(a: Node, b: Node) {
+    r = r.add(a, b)
+  }
+  invariant NoSelfReach {
+    (not acyclic(r)) or (not reachable(r, 0, 0))
+  }
+}
+'''
+    spec = _write(tmp_path, src, "rel_perf.fsl")
+    started = time.time()
+    out = run_verify(str(spec), 2, "warn")
+    elapsed = time.time() - started
+    assert out["result"] == "verified"
+    assert elapsed < 30
