@@ -527,10 +527,13 @@ bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / typestate / sweep_passed,
-`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed / sweep_failed,
+mutated / explained / analyzed / typestate / sweep_passed / observed_conformant /
+imported / imported_with_warnings,
+`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
+sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`), `3` = internal error.
+`--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
+result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 
 ### Kinds of result
 
@@ -1030,7 +1033,11 @@ fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # se
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
 explicitly in the output `note`). `Monitor` requires init to be deterministic
-(forall bulk assignment is allowed).
+(forall bulk assignment is allowed). For a Map/index target (`m[K] = ...`),
+"assign exactly once" is per concrete key, not per variable: separate flat
+`m[K1] = ...` / `m[K2] = ...` statements for two *different* keys are fine;
+the same key assigned twice, or a key that is itself a bound loop variable
+(where two iterations could alias), is still rejected.
 
 ## 13. The three-layer dialects (consulting / requirements / design) and traceability
 

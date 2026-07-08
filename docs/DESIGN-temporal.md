@@ -176,6 +176,19 @@ that persistence condition, a trigger could disappear before `Q` and the rank
 would no longer justify the original response property. Fairness annotations are
 not used by the ranking proof; every enabled action must make ranked progress.
 
+With one or more `helpful action(args)` lines, only the matching instance(s)
+must decrease `M`; other actions must instead keep the obligation pending
+(or resolve it) *without increasing* `M`. Two extra obligations then license
+using each matching instance's `fair` declaration: every matching instance
+must itself be `fair` (`helpful_fairness`), and -- when two or more distinct
+`helpful` actions are declared -- once an instance becomes enabled while
+pending, no other action may disable it again before it fires or `Q` holds
+(`helpful_sticky`). Without `helpful_sticky`, the weaker "some helpful match
+is enabled at every pending state" does not by itself prove any single
+instance continuously enabled (which instance is enabled can vary by state),
+so its `fair` declaration is never actually obligated to fire. See
+`DESIGN-induction.md` §2.3 for the full obligation set and rationale.
+
 ## 3. Positioning and Result of the Check
 
 - **violated (counterexample found) is a definite violation** (the lasso is a
@@ -240,7 +253,11 @@ For a ranked response proved by induction:
 
 If a ranking obligation fails, induction returns `unknown_cti` with
 `violation_kind: "leadsTo_rank"`, `rank_failure` (`unbounded_below`,
-`deadlock`, `non_decreasing_action`, or `pending_not_preserved`), the relevant
+`deadlock`, `non_decreasing_action`, or `pending_not_preserved`; with
+`helpful`, also `progress_action_not_fair`, `helpful_action_not_enabled`,
+`non_decreasing_helpful_action`, `non_helpful_action_increases_measure`, and
+-- with two or more distinct helpful actions --
+`helpful_action_enabledness_not_sticky`), the relevant
 binding, a logical-state CTI, and the selected action/measure values when the
 failure is a transition-progress failure.
 

@@ -15,7 +15,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   struct <Name> { <field>: <type>, ... }  // field: scalar | Option<scalar>
 
   state { <var>: <type>, ... }
-  init  { <stmt>... }                     // assign exactly once to every variable (deterministic)
+  init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                        // 0 or more. conjunction. enabled condition
