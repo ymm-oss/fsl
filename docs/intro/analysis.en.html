@@ -95,6 +95,8 @@
     <div class="panel reveal">
       <pre><code>fslc analyze spec.fsl --projection tsg --format json
 fslc analyze spec.fsl --projection action_state_graph --format json
+fslc analyze spec.fsl --projection action_dependency_graph --format json
+fslc analyze spec.fsl --projection impact_graph --focus state:stock --format json
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
 fslc analyze specs/ examples/e2e/ --profile ai-review --format json
@@ -107,6 +109,8 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       <tr><th>Output</th><th>What it shows</th><th>Main use</th></tr>
       <tr><td><code>tsg</code></td><td>The full Typed Semantic Graph over specs, state, actions, guards, effects, properties, requirements, and scenarios.</td><td>Get source graph data for custom tools or downstream projections.</td></tr>
       <tr><td><code>action_state_graph</code></td><td>Actions connected to state variables they read and write.</td><td>Review impact scope.</td></tr>
+      <tr><td><code>action_dependency_graph</code></td><td>Action-to-action <code>enables</code> edges through state bridges, plus write/write <code>conflicts_with</code> edges.</td><td>Review interleaving-sensitive dependencies without treating them as scheduler semantics.</td></tr>
+      <tr><td><code>impact_graph --focus NODE</code></td><td>The upstream and downstream TSG closure around a focus node, with hop distances.</td><td>Ask what feeds a changed node and what can be affected by it.</td></tr>
       <tr><td><code>requirement_property_graph</code></td><td>Requirement IDs connected to covered actions, properties, scenarios, KPI, and control nodes.</td><td>Review requirement anchoring and isolation.</td></tr>
       <tr><td><code>property_state_graph</code></td><td>User properties connected to the state variables they read or check.</td><td>Review what each property observes.</td></tr>
       <tr><td><code>refinement_graph</code></td><td>Standalone mapping files: impl/abs names, state maps, action maps, stutters, and preserve-progress declarations.</td><td>Review refinement correspondences.</td></tr>
@@ -138,8 +142,16 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
         <p>A state variable is initialized and read, but no action writes it. If it is fixed data, consider making that explicit; otherwise suspect missing behavior.</p>
       </div>
       <div class="card">
+        <h3><code>unread_state</code></h3>
+        <p>A state variable is written, but no transitive relevance chain reaches a guard, property, ensures clause, or scenario.</p>
+      </div>
+      <div class="card">
         <h3><code>unguarded_action</code></h3>
         <p>An action that writes state has no <code>requires</code> clause. Review whether it should really be always enabled or whether a guard was omitted.</p>
+      </div>
+      <div class="card">
+        <h3><code>conservation_candidate</code></h3>
+        <p>Counter-like effects structurally preserve a weighted sum. Treat it as a candidate invariant, then prove it with <code>verify</code>.</p>
       </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
@@ -155,7 +167,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
     <table class="matrix reveal">
       <tr><th>Output</th><th>Schema version</th><th>Use</th></tr>
       <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>Stable graph data for downstream projections and tools. Schema: <code>schemas/fslc/analysis/tsg.v0.schema.json</code>.</td></tr>
-      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, and degree. DOT/Mermaid exports are views over this data.</td></tr>
+      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, degree, and structural metrics such as cycle rank and fan-in/fan-out hubs. DOT/Mermaid exports are views over this data.</td></tr>
       <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>Structured review findings with witnesses, repairs, caveats, and optional source locations for editor diagnostics.</td></tr>
     </table>
   </div>

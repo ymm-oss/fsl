@@ -58,3 +58,4 @@ spec SchemaCase {
     _assert_required(_load_schema("tsg.v0.schema.json"), tsg)
     _assert_required(_load_schema("analysis-graph.v0.schema.json"), graph)
     _assert_required(_load_schema("analysis-findings.v0.schema.json"), findings)
+    assert set(_load_schema("analysis-graph.v0.schema.json")["$defs"]["metrics"]["required"]) <= set(graph["metrics"])

@@ -474,7 +474,7 @@ fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed 
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
-fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
+fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
@@ -1538,16 +1538,20 @@ DESIGN-*.md).
   [`DESIGN-explain.md`](DESIGN-explain.md)
 - **`fslc analyze`** — emits structural observation JSON. `--projection tsg`
   returns the Typed Semantic Graph of requirements, actions, state, properties,
-  and scenarios. Graph projections return connected components, SCCs, and
-  representative cycles. It accepts multiple files or directories in batch mode;
+  and scenarios. Graph projections return connected components, SCCs,
+  representative cycles, degree, and structural metrics such as cycle rank and
+  fan-in/fan-out hubs. `--projection action_dependency_graph` exposes structural
+  action enables/conflict edges; `--projection impact_graph --focus NODE` emits
+  the upstream/downstream slice around a TSG node. It accepts multiple files or
+  directories in batch mode;
   directories are expanded recursively for `*.fsl` and sorted deterministically.
   Standalone refinement mappings can be viewed with `--projection
   refinement_graph`; project manifests can be viewed with `--projection
   traceability_graph`. `--format dot` and `--format mermaid` export graph-shaped
   projections for review diagrams while keeping JSON as the default. `--profile
   ai-review` emits review findings such as `disconnected_requirement`,
-  `unanchored_property`, `progressless_cycle`, `unwritten_state`, and
-  `unguarded_action`.
+  `unanchored_property`, `progressless_cycle`, `unwritten_state`,
+  `unread_state`, `unguarded_action`, and `conservation_candidate`.
   These findings carry `formal_status: "not_a_violation"`; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under `schemas/fslc/analysis/`. →

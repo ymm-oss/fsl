@@ -5,6 +5,37 @@
 from __future__ import annotations
 
 
+def directed_adjacency(nodes, edges):
+    return _directed_adjacency(nodes, edges)
+
+
+def reverse_directed_adjacency(nodes, edges):
+    adjacency = {str(n): [] for n in nodes}
+    for src, dst in _edge_pairs(edges):
+        adjacency.setdefault(src, [])
+        adjacency.setdefault(dst, [])
+        adjacency[dst].append(src)
+    return {node: sorted(set(nbrs)) for node, nbrs in adjacency.items()}
+
+
+def bfs_distances(focus, adjacency):
+    focus = str(focus)
+    if focus not in adjacency:
+        return {}
+    distances = {focus: 0}
+    queue = [focus]
+    idx = 0
+    while idx < len(queue):
+        cur = queue[idx]
+        idx += 1
+        for nxt in adjacency.get(cur, []):
+            if nxt in distances:
+                continue
+            distances[nxt] = distances[cur] + 1
+            queue.append(nxt)
+    return distances
+
+
 def connected_components(nodes, edges):
     adjacency = _undirected_adjacency(nodes, edges)
     seen = set()
@@ -102,6 +133,46 @@ def degree_summary(nodes, edges):
         {"node": node, **counts}
         for node, counts in sorted(summary.items())
     ]
+
+
+def metrics_summary(nodes, edges, components=None, sccs=None, top_k=5):
+    pairs = list(_edge_pairs(edges))
+    node_ids = set(str(n) for n in nodes)
+    for src, dst in pairs:
+        node_ids.add(src)
+        node_ids.add(dst)
+    node_ids = sorted(node_ids)
+    components = components if components is not None else connected_components(node_ids, edges)
+    sccs = sccs if sccs is not None else strongly_connected_components(node_ids, edges)
+    degrees = degree_summary(node_ids, edges)
+    cycle_rank = max(0, len(pairs) - len(node_ids) + len(components))
+
+    def top(direction):
+        return [
+            {"node": item["node"], direction: item[direction]}
+            for item in sorted(degrees, key=lambda d: (-d[direction], d["node"]))[:top_k]
+        ]
+
+    def max_nodes(direction):
+        max_value = max((item[direction] for item in degrees), default=0)
+        nodes_at_max = sorted(item["node"] for item in degrees if item[direction] == max_value)
+        return {
+            "value": max_value,
+            "nodes": nodes_at_max[:top_k],
+            "truncated": len(nodes_at_max) > top_k,
+        }
+
+    return {
+        "node_count": len(node_ids),
+        "edge_count": len(pairs),
+        "component_count": len(components),
+        "scc_count": len(sccs),
+        "cycle_rank": cycle_rank,
+        "max_fan_in": max_nodes("in"),
+        "max_fan_out": max_nodes("out"),
+        "top_fan_in": top("in"),
+        "top_fan_out": top("out"),
+    }
 
 
 def _cycle_in_component(adjacency, allowed):

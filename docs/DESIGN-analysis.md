@@ -14,6 +14,8 @@ explicitly backed by existing `verify`, `refine`, or `replay` semantics.
 ```bash
 fslc analyze spec.fsl --projection tsg --format json
 fslc analyze spec.fsl --projection action_state_graph --format json
+fslc analyze spec.fsl --projection action_dependency_graph --format json
+fslc analyze spec.fsl --projection impact_graph --focus state:stock --format json
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
 fslc analyze spec.fsl --profile ai-review --format json
@@ -30,6 +32,10 @@ Graphviz or Mermaid runtime dependency.
 
 Single-file success is `result: "analyzed"` and exits 0. Parse, name, type,
 semantics, io, and internal failures reuse the normal fslc error envelope.
+`impact_graph` requires `--focus <node-id>` where the id comes from the TSG
+(`state:x`, `action:checkout`, `requirement:REQ-3`, etc.). Unknown focus ids
+use the normal `kind: "name"` error envelope. `--focus` is single-file only and
+is not accepted with `--profile`.
 Batch mode accepts files and directories. Directories are expanded recursively
 for `*.fsl`, sorted by normalized path, and emitted as one deterministic JSON
 envelope with `mode: "batch"`. If any file fails, successful entries remain in
@@ -69,6 +75,14 @@ Graph projections are deterministic summaries over the TSG or over other
 structural sources:
 
 - `action_state_graph`: actions connected to state variables they read/write.
+- `action_dependency_graph`: action-to-action structural `enables` edges through
+  read/write state bridges, plus write/write `conflicts_with` edges over shared
+  state. These are over-approximations, not scheduling semantics.
+- `impact_graph`: the induced TSG slice around `--focus`, with upstream and
+  downstream closure annotations (`direction`, `directions`, hop distances) for
+  review impact analysis. `direction` is one of `focus`, `upstream`, or
+  `downstream`; `directions` records both upstream/downstream when a node is in
+  both closures.
 - `requirement_property_graph`: requirements connected to covered actions,
   properties, scenarios, KPI/control nodes.
 - `property_state_graph`: user properties connected to state variables they read.
@@ -81,9 +95,12 @@ Direct `.toml` inputs to `fslc analyze` are treated as project manifests; the
 default filename is `fsl-project.toml`, but review copies with other names are
 accepted.
 
-Each graph projection includes `components`, `sccs`, `cycles`, `degree`, and
-`formal_status: "not_a_violation"`. A disconnected component or cycle is not a
-proof failure. It is only structure for downstream review.
+Each graph projection includes `components`, `sccs`, `cycles`, `degree`,
+`metrics`, and `formal_status: "not_a_violation"`. `metrics` reports
+deterministic structural numbers: node/edge/component/SCC counts, undirected
+multigraph `cycle_rank` (`E - N + C` over emitted edges), and fan-in/fan-out
+hubs. A disconnected component, high fan-out, or cycle is not a proof failure.
+These are trend and review-priority signals for downstream tooling.
 
 ## 4. AI-review findings
 
@@ -100,7 +117,15 @@ proof failure. It is only structure for downstream review.
   state names.
 - `unwritten_state`: a state variable is initialized and may be read, but no
   action writes it.
+- `unread_state`: a state variable is written, but no transitive relevance chain
+  reaches a guard, property, ensures clause, or acceptance/forbidden scenario.
+  Relevance propagates backward through effect reads only when the effect's
+  write target is already relevant, which catches dead state clusters without
+  treating every effect read as meaningful.
 - `unguarded_action`: a non-generated action has no explicit `requires` clause.
+- `conservation_candidate`: counter-like `Int` effects structurally preserve a
+  weighted sum. This is a candidate invariant only; proving the invariant is the
+  job of `fslc verify` / `--engine induction`.
 
 Every finding has:
 
@@ -154,6 +179,8 @@ The analysis package is in `src/fslc/analysis/`:
 - `tsg.py`: spec dict to TSG, expression read extraction, assignment write extraction.
 - `graph.py`: deterministic connected components, SCCs, representative cycles.
 - `projections.py`: graph projections over TSG.
+- `invariants.py`: structural invariant candidates from restricted counter
+  effect patterns.
 - `refinement.py`: structural graph projection for standalone mapping files.
 - `project.py`: manifest-level traceability graph assembly.
 - `export.py`: DOT and Mermaid formatting.

@@ -368,22 +368,24 @@ ANALYZE_PROJECTIONS = [
 ]
 
 
-def run_analyze(file, projection="tsg", profile=None, output_format="json"):
+def run_analyze(file, projection="tsg", profile=None, output_format="json", focus=None):
     paths = list(file) if isinstance(file, (list, tuple)) else [file]
     if len(paths) != 1 or any(Path(p).is_dir() for p in paths):
-        return _run_analyze_batch(paths, projection, profile, output_format)
-    return _run_analyze_one_enveloped(paths[0], projection, profile, output_format)
+        return _run_analyze_batch(paths, projection, profile, output_format, focus)
+    return _run_analyze_one_enveloped(paths[0], projection, profile, output_format, focus)
 
 
-def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="json"):
+def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="json", focus=None):
     try:
         if output_format != "json":
             raise FslError("batch analyze supports only --format json", kind="semantics")
+        if focus:
+            raise FslError("batch analyze does not support --focus; run impact_graph per file", kind="semantics")
         files = _expand_analyze_paths(paths)
         entries = []
         errors = []
         for path in files:
-            result = _run_analyze_one_enveloped(str(path), projection, profile, output_format)
+            result = _run_analyze_one_enveloped(str(path), projection, profile, output_format, focus)
             entry = _batch_file_entry(path, result)
             entries.append(entry)
             if result.get("result") != "analyzed":
@@ -428,9 +430,9 @@ def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="jso
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_format="json"):
+def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_format="json", focus=None):
     try:
-        out = _run_analyze_one(file, projection, profile, output_format)
+        out = _run_analyze_one(file, projection, profile, output_format, focus)
         return _envelope(out)
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -453,11 +455,17 @@ def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_form
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def _run_analyze_one(file, projection="tsg", profile=None, output_format="json"):
+def _run_analyze_one(file, projection="tsg", profile=None, output_format="json", focus=None):
     if output_format not in ANALYZE_FORMATS:
         raise FslError(f"unsupported analyze format: {output_format}", kind="semantics")
     if output_format != "json" and profile:
         raise FslError("DOT/Mermaid export is supported for graph projections, not profiles", kind="semantics")
+    if focus and profile:
+        raise FslError("--focus is supported only with graph projections, not profiles", kind="semantics")
+    if focus and projection != "impact_graph":
+        raise FslError("--focus is supported only with --projection impact_graph", kind="semantics")
+    if projection == "impact_graph" and not focus:
+        raise FslError("--projection impact_graph requires --focus <node-id>", kind="semantics")
 
     path = Path(file)
     if _is_project_manifest(path):
@@ -513,7 +521,7 @@ def _run_analyze_one(file, projection="tsg", profile=None, output_format="json")
                 out = {
                     "result": "analyzed",
                     "spec": spec["name"],
-                    **analyze_projection(spec, projection),
+                    **analyze_projection(spec, projection, focus=focus),
                 }
             else:
                 raise FslError(f"unsupported analyze projection: {projection}", kind="semantics")
@@ -1474,6 +1482,8 @@ def _build_arg_parser():
                     help="structural projection to emit")
     an.add_argument("--profile", choices=["ai-review"], default=None,
                     help="emit AI-readable structural review findings")
+    an.add_argument("--focus",
+                    help="node id for --projection impact_graph, e.g. state:stock or action:checkout")
     an.add_argument("--format", choices=sorted(ANALYZE_FORMATS), default="json",
                     dest="output_format")
 
@@ -1596,7 +1606,7 @@ def _dispatch(args):
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "analyze":
-        result = run_analyze(args.file, args.projection, args.profile, args.output_format)
+        result = run_analyze(args.file, args.projection, args.profile, args.output_format, args.focus)
         if args.output_format != "json" and result.get("result") == "analyzed" and "content" in result:
             sys.stdout.write(result["content"])
         else:

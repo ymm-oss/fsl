@@ -65,6 +65,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `schemas/fslc/analysis/`, two additional AI-review findings
   (`unwritten_state`, `unguarded_action`), and opt-in LSP informational
   diagnostics for analysis findings via `FSLC_LSP_ANALYSIS_DIAGNOSTICS=1`.
+- `fslc analyze` structural follow-ups for AI-assisted review: graph projections
+  now include additive `metrics` (cycle rank, fan-in/fan-out hubs, and graph
+  counts), `action_dependency_graph` exposes structural `enables` and
+  write/write `conflicts_with` action relations, and `impact_graph --focus
+  NODE` emits an upstream/downstream slice around a TSG node. The `ai-review`
+  profile adds `unread_state` using a transitive relevance closure over effect
+  reads, and `conservation_candidate` proposes weighted-sum invariants from
+  restricted counter-like `Int` effects without treating them as proof evidence.
+  (#149, #150, #151, #152, #153)
 - Optional **spec-level tag** classifying a whole spec: an intent string right
   after the spec name, `spec ReturnUI "ui: screen flow" { … }`. Metadata only —
   it desugars to nothing and is never verified (corpus snapshot unchanged) — and

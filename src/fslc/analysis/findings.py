@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 from .graph import representative_cycles
-from .projections import project_tsg
+from .invariants import conservation_candidates
+from .projections import build_action_dependency_graph, project_tsg
 from .schema import FINDINGS_SCHEMA_VERSION
 from .tsg import PROPERTY_NODE_KINDS, SCENARIO_NODE_KINDS, build_tsg, expr_reads, node_by_id
 
@@ -19,7 +20,9 @@ def analyze(spec, profile="ai-review"):
     findings.extend(_unanchored_properties(tsg))
     findings.extend(_progressless_cycles(spec, tsg))
     findings.extend(_unwritten_state(tsg))
+    findings.extend(_unread_state(tsg))
     findings.extend(_unguarded_actions(tsg))
+    findings.extend(_conservation_candidate_findings(spec))
     findings = _renumber(findings)
     return {
         "analysis": "structure",
@@ -123,7 +126,7 @@ def _unanchored_properties(tsg):
 
 def _progressless_cycles(spec, tsg):
     projection_nodes, projection_edges = project_tsg(tsg, "action_state_graph")
-    action_nodes, action_edges, bridges = _action_dependency_graph(projection_nodes, projection_edges)
+    action_nodes, action_edges, bridges = build_action_dependency_graph(projection_nodes, projection_edges)
     cycles = representative_cycles(action_nodes, action_edges)
     if not cycles:
         return []
@@ -180,6 +183,50 @@ def _progressless_cycles(spec, tsg):
     return findings
 
 
+def _unread_state(tsg):
+    nodes = node_by_id(tsg)
+    relevant = _transitively_relevant_state(tsg)
+    writers = _state_writers(tsg)
+    findings = []
+    for state in sorted((n for n in tsg["nodes"] if n["kind"] == "state"), key=lambda n: n["id"]):
+        state_id = state["id"]
+        state_writers = sorted(writers.get(state_id, set()))
+        if not state_writers or state_id in relevant:
+            continue
+        if any((nodes.get(writer) or {}).get("meta") for writer in state_writers):
+            continue
+        findings.append(_finding(
+            "unread_state",
+            [state_id],
+            {
+                "kind": "state_influences_no_check",
+                "node": state_id,
+                "writers": state_writers,
+                "relevance_seed_kinds": sorted(_RELEVANCE_SEED_KINDS),
+                "message": "No transitive relevance chain reaches a guard, property, ensures clause, or scenario.",
+            },
+            "The state variable is written, but its value does not transitively influence a guard, property, ensures clause, or acceptance/forbidden scenario in the structural graph.",
+            [
+                {
+                    "kind": "add_property_or_guard",
+                    "template": "Add the missing invariant/trans/leadsTo/reachable, scenario expectation, ensures clause, or guard that consumes this state if it is part of the contract.",
+                },
+                {
+                    "kind": "review_state_role",
+                    "template": "If this is intentional audit/history/ghost state, tag or document the writing action so reviewers know why the state is externally consumed.",
+                },
+            ],
+            [
+                "The state variable is safe to delete.",
+                "The value is semantically irrelevant to external tooling, runtime logs, audit requirements, or generated dialect behavior.",
+                "A verifier property is violated.",
+            ],
+            confidence=0.64,
+            loc=state.get("loc"),
+        ))
+    return findings
+
+
 def _unwritten_state(tsg):
     nodes = node_by_id(tsg)
     written = set()
@@ -219,6 +266,40 @@ def _unwritten_state(tsg):
             ],
             confidence=0.76 if state["id"] in read else 0.68,
             loc=state.get("loc"),
+        ))
+    return findings
+
+
+def _conservation_candidate_findings(spec):
+    findings = []
+    for candidate in conservation_candidates(spec):
+        actions = [item["action"] for item in candidate["actions"]]
+        findings.append(_finding(
+            "conservation_candidate",
+            sorted(set(candidate["states"] + actions)),
+            {
+                "kind": "weighted_sum_conservation_candidate",
+                "expression": candidate["expression"],
+                "weights": candidate["weights"],
+                "action_net_effects": candidate["actions"],
+                "excluded_counters": candidate["excluded_counters"],
+            },
+            "Counter-like effects structurally preserve this weighted sum, which may indicate an implicit invariant worth declaring and proving.",
+            [
+                {
+                    "kind": "add_invariant_then_verify",
+                    "template": (
+                        f"Declare `invariant Conservation {{ {candidate['expression']} == <initial value> }}` "
+                        "and run `fslc verify` plus `--engine induction` to prove it."
+                    ),
+                }
+            ],
+            [
+                "The weighted sum is actually invariant.",
+                "The absence of a candidate means no conservation law exists.",
+                "This finding is a proof; it is only structural evidence and must be checked by verify.",
+            ],
+            confidence=0.6,
         ))
     return findings
 
@@ -267,27 +348,6 @@ def _unguarded_actions(tsg):
             loc=action.get("loc"),
         ))
     return findings
-
-
-def _action_dependency_graph(nodes, edges):
-    action_nodes = sorted(n["id"] for n in nodes if n["kind"] == "action")
-    state_writers = {}
-    state_readers = {}
-    for e in edges:
-        if e["kind"] == "writes" and e["from"].startswith("action:") and e["to"].startswith("state:"):
-            state_writers.setdefault(e["to"], set()).add(e["from"])
-        elif e["kind"] == "read_by" and e["from"].startswith("state:") and e["to"].startswith("action:"):
-            state_readers.setdefault(e["from"], set()).add(e["to"])
-    dep_edges = []
-    bridges = {}
-    for state in sorted(set(state_writers) & set(state_readers)):
-        for writer in sorted(state_writers[state]):
-            for reader in sorted(state_readers[state]):
-                if writer == reader:
-                    continue
-                dep_edges.append({"from": writer, "to": reader, "kind": "enables"})
-                bridges.setdefault((writer, reader), state)
-    return action_nodes, dep_edges, bridges
 
 
 def _expand_action_cycle(cycle, bridges):
@@ -347,6 +407,57 @@ def _attached_progress(stories, cycle_states, cycle_actions):
         elif story.get("actions", set()).intersection(action_set):
             attached.append(story)
     return attached
+
+
+_RELEVANCE_SEED_KINDS = PROPERTY_NODE_KINDS | SCENARIO_NODE_KINDS | {"guard", "ensures"}
+
+
+def _transitively_relevant_state(tsg):
+    nodes = node_by_id(tsg)
+    relevant = set()
+    effect_reads = {}
+    effect_targets = {}
+    for n in tsg["nodes"]:
+        if n["kind"] == "effect" and n.get("target"):
+            effect_targets[n["id"]] = f"state:{n['target']}"
+    for e in tsg["edges"]:
+        dst_node = nodes.get(e["to"]) or {}
+        if dst_node.get("kind") != "state":
+            continue
+        src_node = nodes.get(e["from"]) or {}
+        if e["kind"] in {"reads", "checks"} and src_node.get("kind") in _RELEVANCE_SEED_KINDS:
+            relevant.add(e["to"])
+        if e["kind"] == "reads" and src_node.get("kind") == "effect":
+            effect_reads.setdefault(e["from"], set()).add(e["to"])
+
+    changed = True
+    while changed:
+        changed = False
+        for effect_id in sorted(effect_targets):
+            target = effect_targets[effect_id]
+            if target not in relevant:
+                continue
+            for read_state in sorted(effect_reads.get(effect_id, set())):
+                if read_state not in relevant:
+                    relevant.add(read_state)
+                    changed = True
+    return relevant
+
+
+def _state_writers(tsg):
+    nodes = node_by_id(tsg)
+    writers = {}
+    for e in tsg["edges"]:
+        if e["kind"] != "writes":
+            continue
+        dst_node = nodes.get(e["to"]) or {}
+        if dst_node.get("kind") != "state":
+            continue
+        src_node = nodes.get(e["from"]) or {}
+        writer = e["from"] if src_node.get("kind") == "action" else src_node.get("action")
+        if writer:
+            writers.setdefault(e["to"], set()).add(writer)
+    return writers
 
 
 def _scenario_actions(tsg):

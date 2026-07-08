@@ -71,6 +71,16 @@ refinement ImplRefinesAbs {
     assert mapping["findings"] == []
 
 
+def test_analyze_batch_rejects_focus(tmp_path):
+    _write(tmp_path / "case.fsl", VALID)
+
+    out = run_analyze(str(tmp_path), projection="impact_graph", focus="state:x")
+
+    assert out["result"] == "error"
+    assert out["kind"] == "semantics"
+    assert "batch analyze does not support --focus" in out["message"]
+
+
 def test_analyze_batch_cli_exits_two_for_partial_error(tmp_path):
     good = _write(tmp_path / "good.fsl", VALID)
     bad = _write(tmp_path / "bad.fsl", "spec Broken { state { x: Int } init { x = } }")
