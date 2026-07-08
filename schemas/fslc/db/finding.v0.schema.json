@@ -43,6 +43,7 @@
         "api_call_not_accepted",
         "api_response_field_missing",
         "offline_payload_not_accepted",
+        "required_capability_missing",
         "declared_unused_but_observed",
         "unsupported_artifact_observed",
         "legacy_api_still_called"

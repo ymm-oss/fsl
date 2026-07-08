@@ -143,6 +143,12 @@
       "warnings": []
     }
   },
+  "examples/db/safe_ai_artifact_compat.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/db/safe_api_offline_compat.fsl": {
     "check": {
       "result": "ok",
@@ -179,6 +185,12 @@
       "warnings": [
         "none"
       ]
+    }
+  },
+  "examples/db/unsafe_ai_artifact_provider_gap.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
     }
   },
   "examples/db/unsafe_annotated_drop_with_old_server.fsl": {

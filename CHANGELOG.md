@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- fsl-stochastic MVP design boundary and AI compatibility integration:
+  `docs/DESIGN-stochastic.md` fixes statistical evidence semantics as an
+  external layer over precomputed eval JSONL, Bernoulli/proportion metrics, and
+  Wilson intervals only (`formal_result:"not_run"`; no `fslc verify` semantics
+  change). `dbsystem artifact` now supports generic `requires` / `provides`
+  capability profiles so AI model/prompt/retriever/tool-schema/output-schema
+  compatibility is checked in the same environment/schema/flag snapshots as
+  DB/API/mobile/server artifacts, with `required_capability_missing` findings
+  and `DB-ASSUME-AI-CAPABILITY-PROFILES`. (#139, #140)
 - (Documentation) Team-facing Japanese practical guide for `fslc analyze`
   (`docs/GUIDE-analyze.ja.md`): a plain-language walkthrough of the structure
   map, graph projections, `--profile ai-review` findings (with real command

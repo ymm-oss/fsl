@@ -248,6 +248,28 @@ def test_db_feature_flag_references_are_validated(tmp_path):
     assert "unknown flag 'missing'" in out["message"]
 
 
+def test_db_ai_artifact_capabilities_share_environment_model():
+    safe = run_db_check(_example("safe_ai_artifact_compat.fsl"))
+    assert safe["result"] == "verified_under_assumptions"
+    assert "DB-ASSUME-AI-CAPABILITY-PROFILES" in _assumption_ids(safe)
+
+    unsafe = run_db_check(_example("unsafe_ai_artifact_provider_gap.fsl"))
+    assert unsafe["result"] == "violated"
+    assert _finding_kinds(unsafe) == {"required_capability_missing"}
+    assert "DB-ASSUME-AI-CAPABILITY-PROFILES" in _assumption_ids(unsafe)
+
+    by_target = {finding["schema_element"]: finding for finding in unsafe["findings"]}
+    tool_gap = by_target["tool.RefundPaymentV3"]
+    assert tool_gap["failed_rule"] == "artifact_capabilities_provided"
+    assert tool_gap["witness"]["declared_capability"] == "requires"
+    assert tool_gap["minimal_conflict_set"] == {
+        "environment": "prod",
+        "artifact": "support_agent_v9",
+        "schema_element": "tool.RefundPaymentV3",
+    }
+    assert "retriever.SupportDocsV15" in by_target
+
+
 def test_db_runtime_observation_reports_observed_mismatch_not_formal_violation():
     out = run_db_observe(
         _example("runtime_observation_target.fsl"),
