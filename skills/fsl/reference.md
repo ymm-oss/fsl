@@ -236,6 +236,14 @@ refinement <Name> {
 }
 ```
 
+Give impl and abs distinct enum/struct type names. Refinement merges type
+metadata by name; a same-named enum/struct with a different member list/field
+set on each side is rejected as `kind: "type"` (exit 2) rather than silently
+merged (merging would let an impl-only member get reinterpreted as whichever
+abs member sits at the same ordinal index). Same-named domain types
+(`lo..hi`) with different bounds are fine — an out-of-range value there is
+still caught as `map_out_of_bounds`/`abs_state_mismatch`.
+
 ## 2. Types
 
 | Type | How to write | Notes |

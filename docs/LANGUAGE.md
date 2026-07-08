@@ -796,6 +796,16 @@ with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs
 `abs_after_*`. A static error (a missing map, an unknown action, etc.) is
 `kind: "type"` (exit 2).
 
+Give impl and abs **distinct enum/struct type names**, even when a state
+variable pair is mapped 1:1. Type metadata is merged by name for refinement
+checking; a same-named enum (or struct) declared with a different member
+list (or field set) on each side is rejected as `kind: "type"` (exit 2)
+rather than merged — merging would let an impl-only member get silently
+reinterpreted as whichever abs member sits at the same ordinal index. Domain
+types (`type X = lo..hi`) may safely share a name with different bounds; an
+out-of-range value there is still caught as `map_out_of_bounds`/
+`abs_state_mismatch`.
+
 ### Chain checking (composition of mappings)
 
 The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)
