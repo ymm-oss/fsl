@@ -508,6 +508,18 @@ graph projections can export DOT or Mermaid with `--format dot|mermaid`.
 `verify`/`refine`/`replay` evidence. Versioned schemas live under
 `schemas/fslc/analysis/`.
 
+Natural-language interpretation on top of `analyze` is agent-side only. The core
+analyzer must not infer semantics from English, Japanese, or other free text.
+If an agent reviews requirement text, comments, or source excerpts together with
+the TSG, it must cite the exact text and graph node ids it used, keep
+`formal_status:"not_a_violation"`, and never convert that suggestion into an
+`fslc` violation, proof result, or CI failure. Non-English text should be handled
+by the agent's language capability or a user-approved reviewer, not by hard-coded
+keywords in this repository. External model calls are an agent privacy decision:
+do not send source text, requirement text, comments, or analysis JSON outside the
+local environment unless the user or execution environment has explicitly opted
+in.
+
 `ledger` (issue #24) re-organizes `verify`/`scenarios`/`replay` findings **by
 requirement id** into a Markdown audit ledger a PM / governance / internal-audit
 reader can decide approve/reject/risk-accept from. It is a presentation layer

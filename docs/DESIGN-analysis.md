@@ -9,6 +9,55 @@ review?
 signals and carry `formal_status: "not_a_violation"` unless a future finding is
 explicitly backed by existing `verify`, `refine`, or `replay` semantics.
 
+## Agent-side natural-language review boundary
+
+Natural-language interpretation is an AI-agent responsibility, not an `fslc`
+feature. `fslc analyze` may carry requirement text, comments, tags, and source
+locations through deterministic JSON, but it must not infer from English,
+Japanese, or any other language that a word or sentence means retry, approval,
+timeout, progress, or any other formal property.
+
+An AI agent may consume `analyze` JSON together with the source text and produce
+review suggestions, but those suggestions are outside fslc semantics:
+
+- Do not add a core `fslc-nl-review` command for this boundary unless a future
+  issue explicitly moves the responsibility back into this repository.
+- Do not fail CI, `check`, `verify`, `refine`, or `replay` from
+  natural-language suggestions.
+- Mark agent-side suggestions with `formal_status: "not_a_violation"` and never
+  present them as formal violations.
+- Cite the exact source text and graph node ids used as evidence, such as
+  `requirement:REQ-1` or `action:submit`.
+- Handle non-English text by using the agent's language capability, a
+  user-approved reviewer, or a pluggable reviewer; do not add hard-coded English
+  keyword rules to `fslc`.
+- Treat privacy and external model calls as agent-side policy. Do not send
+  source text, requirement text, comments, or analyze JSON to an external service
+  unless the user or execution environment has explicitly opted in.
+
+Suggested agent-owned output shape:
+
+```json
+{
+  "result": "reviewed",
+  "source": "analysis-findings.v0",
+  "reviewer": "agent-side-nl",
+  "suggestions": [
+    {
+      "kind": "possible_missing_progress_story",
+      "confidence": 0.42,
+      "evidence_nodes": ["action:retry", "requirement:REQ-1"],
+      "quoted_source": "...",
+      "formal_status": "not_a_violation",
+      "do_not_assume": [
+        "The suggestion is correct",
+        "The spec violates liveness"
+      ]
+    }
+  ]
+}
+```
+
 ## 1. CLI
 
 ```bash

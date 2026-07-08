@@ -274,6 +274,11 @@ the formalization memo.**
    `traceability_graph`, DOT/Mermaid graph exports, and JSON schemas under
    `schemas/fslc/analysis/`. These are review signals with
    `formal_status:"not_a_violation"`, not proof failures),
+   When you add natural-language judgment on top of `analyze` output, keep it
+   agent-side: cite exact source text and TSG node ids, keep
+   `formal_status:"not_a_violation"`, do not turn suggestions into fslc
+   violations or CI failures, and do not send source/requirement/comment text to
+   an external model unless the user or environment has explicitly opted in,
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a
