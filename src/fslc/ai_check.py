@@ -14,8 +14,9 @@ from .ai_expand import (
     expand_ai_component,
     static_policy_findings,
 )
-from .ai_ir import AiComponent, AiTool
-from .ai_parser import parse_ai_component
+from .ai_agent import analyze_ai_agent
+from .ai_ir import AiAgent, AiComponent, AiTool
+from .ai_parser import parse_ai_component, parse_ai_source
 from .bmc import prove, verify
 from .model import FslError, build_spec
 
@@ -25,6 +26,21 @@ AI_EVENT_SCHEMA_VERSION = "fsl-ai-event.v0"
 
 def load_ai_component(path):
     return parse_ai_component(Path(path).read_text(encoding="utf-8"))
+
+
+def load_ai_source(path):
+    return parse_ai_source(Path(path).read_text(encoding="utf-8"))
+
+
+def check_ai_source(source, depth=8, engine="bmc", deadlock_mode="warn"):
+    if isinstance(source, AiAgent):
+        return analyze_ai_agent(source)
+    return check_ai_component(
+        source,
+        depth=depth,
+        engine=engine,
+        deadlock_mode=deadlock_mode,
+    )
 
 
 def check_ai_component(component: AiComponent, depth=8, engine="bmc", deadlock_mode="warn"):

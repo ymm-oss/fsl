@@ -52,7 +52,7 @@
         <a class="chapter-link" href="syntax.ja.html"><span class="num">08</span><span><strong>文法・構文</strong><span>型・式・操作・性質</span></span></a>
         <a class="chapter-link" href="analysis.ja.html"><span class="num">09</span><span><strong>構造分析</strong><span>TSG・グラフ投影・所見</span></span></a>
         <a class="chapter-link" href="db.ja.html"><span class="num">10</span><span><strong>fsl-db</strong><span>DB/複数環境互換性</span></span></a>
-        <a class="chapter-link" href="ai.ja.html"><span class="num">11</span><span><strong>fsl-ai</strong><span>AI hard contract</span></span></a>
+        <a class="chapter-link" href="ai.ja.html"><span class="num">11</span><span><strong>fsl-ai</strong><span>AI contract / agent</span></span></a>
       </nav>
       <div class="manual-main">
         <article class="chapter-card">
@@ -107,7 +107,7 @@
         </article>
         <article class="chapter-card">
           <span class="num">11</span>
-          <div><h3>fsl-ai</h3><p><code>ai_component</code> で、AI tool authority、human approval guard、forbidden tool、runtime replay所見を確認します。</p></div>
+          <div><h3>fsl-ai</h3><p><code>ai_component</code> でAI tool authorityとreplayを、<code>agent</code> でrecursive scope、grant、visibility、orchestration、failure policyを確認します。</p></div>
           <a class="btn" href="ai.ja.html">読む</a>
         </article>
       </div>
@@ -172,7 +172,7 @@
       </div>
       <div class="syntax-card">
         <h3>AI tool callを守りたい</h3>
-        <p><code>ai_component</code> で、tool authority、人間承認、forbidden tool、runtime replay evidenceを記述します。</p>
+        <p><code>ai_component</code> でtool authority、人間承認、forbidden tool、replay evidenceを、<code>agent</code> でrecursive agent構造を記述します。</p>
         <p><a class="btn" href="ai.ja.html">fsl-aiを読む</a></p>
       </div>
     </div>

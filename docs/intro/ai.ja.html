@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>fsl-ai によるAI hard contract — FSL 日本語マニュアル</title>
-<meta name="description" content="fsl-aiのai_componentで、AI tool authority、human approval guard、forbidden tool、runtime replay、AI-readable findingを確認する方法。" />
+<title>fsl-ai によるAI hard contractとagent構造解析 — FSL 日本語マニュアル</title>
+<meta name="description" content="fsl-aiのai_componentとagentで、AI tool authority、human approval guard、recursive agent構造、runtime replay、AI-readable findingを確認する方法。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="ai">
@@ -17,8 +17,8 @@
 <section class="hero">
   <div class="wrap narrow center">
     <p class="kicker reveal">AI hard-contracts</p>
-    <h1 class="reveal"><code>ai_component</code> でAIのtool実行境界を守る</h1>
-    <p class="lead reveal">fsl-ai Phase 1 は、AIコンポーネントの決定的に検査できる境界だけを扱います。tool宣言、authority、human approval、forbidden tool、fallback、runtime event replayです。</p>
+    <h1 class="reveal">fsl-ai でAIのtool境界とagent構造を守る</h1>
+    <p class="lead reveal">fsl-ai は、決定的に検査できるAI境界を扱います。<code>ai_component</code> はtool宣言、authority、human approval、forbidden tool、fallback、runtime event replayを、<code>agent</code> はrecursive scope、grant、visibility、orchestration、failure policyを扱います。</p>
     <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> にあります。</p>
   </div>
 </section>
@@ -31,6 +31,7 @@
     <table class="matrix reveal">
       <tr><th>契約</th><th>例</th><th>fsl-aiでの扱い</th></tr>
       <tr><td><code>syntactic_hard</code></td><td>tool schema、approval token、forbidden tool、precondition evidence。</td><td>kernel展開と <code>ai_hard_contract_violation</code>。</td></tr>
+      <tr><td><code>agent_structural</code></td><td>nested agent grant、visibility、delegation、review gate、tool reachability。</td><td><code>agent_structural_violation</code>。構造証拠であり証明ではない。</td></tr>
       <tr><td><code>runtime_observed</code></td><td>未宣言toolやschema mismatchがログに出た。</td><td><code>observed_contract_violation</code>。証明ではなく観測。</td></tr>
       <tr><td><code>evaluator_supported</code></td><td>groundedness、source support、prompt injection判定。</td><td>後続phase。<code>proved</code> とは表示しない。</td></tr>
       <tr><td><code>statistically_supported</code></td><td>accuracy、recall、hallucination rate、slice指標。</td><td>後続phase。信頼区間つき証拠であり証明ではない。</td></tr>
@@ -80,6 +81,44 @@
 
 <section>
   <div class="wrap">
+    <p class="kicker reveal">Recursive agents</p>
+    <h2 class="reveal">入れ子agentは <code>sub_agent</code> ではなく、scope付きagent</h2>
+    <p class="lead narrow reveal"><code>agent Parent { agent Child { ... } }</code> は <code>Parent.Child</code> のようなlexical namespaceを作ります。親のauthority/contextは暗黙継承されず、子には明示grantが必要です。実行時の協調は別に <code>orchestration</code> で書きます。</p>
+    <div class="panel reveal">
+      <pre><code>agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy];
+  authority { may_execute [SearchDocs, CheckPolicy]; }
+
+  agent RetrievalAgent {
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <p class="kicker reveal">展開</p>
     <h2 class="reveal"><code>ai_component</code> は既存kernelへ展開される</h2>
     <p class="lead narrow reveal">AI dialect は verifier に確率や evaluator semantics を追加しません。hard contract は有限状態と通常の不変条件になります。</p>
@@ -106,6 +145,7 @@
     <h2 class="reveal">guardとreplayの失敗はAI専用findingで読む</h2>
     <div class="panel reveal">
       <pre><code>fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl</code></pre>
@@ -113,6 +153,7 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>結果</th><th>読み方</th></tr>
       <tr><td><code>verified_under_assumptions</code></td><td>有限のhard-contract展開が、完全なcapability宣言とruntime guardを前提に検証された状態。</td></tr>
+      <tr><td><code>agent_analyzed</code></td><td>recursive agent graph が構造的に整合している状態。<code>formal_result</code> は <code>not_run</code> のまま。</td></tr>
       <tr><td><code>replay_conformant</code></td><td>観測event logが宣言されたhard境界に合っていた。証明ではなく証拠。</td></tr>
       <tr><td><code>ai_hard_contract_violation</code></td><td>forbidden tool、approval bypass、schema invalidity、business precondition mismatch が観測された。</td></tr>
       <tr><td><code>observed_contract_violation</code></td><td>runtime が宣言外のcapabilityを使った。</td></tr>
@@ -132,12 +173,12 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
       </div>
       <div class="syntax-card">
         <h3>動く例</h3>
-        <p>refund agent の例で、approval、forbidden tool、replay evidence、observed mismatchを確認できます。</p>
+        <p>refund agent のapproval/replayと、recursive support agentの構造解析を確認できます。</p>
         <p><a class="btn" href="../../examples/ai/README.md">examples/ai</a></p>
       </div>
       <div class="syntax-card">
         <h3>通常の文法</h3>
-        <p><code>ai_component</code> は既存 verifier に展開されます。展開先の基本構文は文法ページで確認できます。</p>
+        <p><code>ai_component</code> は既存 verifier に展開され、<code>agent</code> は構造解析として扱われます。</p>
         <p><a class="btn" href="syntax.ja.html">文法・構文へ</a></p>
       </div>
     </div>

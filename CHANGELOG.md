@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- fsl-ai recursive `agent` composition: `fslc ai check` now parses nested
+  agents as ordinary scoped agents, emits deterministic AI-readable
+  `agent_ir`/graph summaries, validates explicit authority/context grant
+  boundaries, and reports structural findings for unsafe delegation,
+  visibility, review-gate, and tool-reachability patterns. Existing
+  `ai_component` hard-contract behavior remains backward-compatible. (#157)
 - fsl-stochastic MVP design boundary and AI compatibility integration:
   `docs/DESIGN-stochastic.md` fixes statistical evidence semantics as an
   external layer over precomputed eval JSONL, Bernoulli/proportion metrics, and

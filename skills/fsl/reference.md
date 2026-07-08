@@ -200,6 +200,45 @@ Statistical quality evidence uses the external stochastic evidence design in
 `docs/DESIGN-stochastic.md`: precomputed eval JSONL, Bernoulli/proportion
 metrics only, Wilson intervals only, and `formal_result:"not_run"`.
 
+Recursive fsl-ai `agent` composition is checked structurally by
+`fslc ai check` and returns `agent_analyzed` on success:
+
+```fsl
+agent <Parent> {
+  context [<ContextName>, ...];
+  tools [<ToolName>, ...];
+  authority { may_execute [<ToolName>, ...]; }
+
+  agent <Child> {
+    trust medium;
+    grant authority [<ToolName>, ...];
+    grant context [<ContextName>, ...];
+    tools [<ToolName>, ...];
+    authority { may_execute [<ToolName>, ...]; }
+    output <OutputName> visibility [parent, <SiblingAgent>];
+  }
+
+  orchestration {
+    <Child> -> <OtherChild>;
+  }
+
+  failure_policy {
+    when <Child>.failed -> retry up_to 2;
+    when <Child>.failed_after_retry -> <ParentState>;
+  }
+}
+```
+
+Nested agents are ordinary scoped agents (`Parent.Child`), not a separate
+`sub_agent` type. Nesting defines lexical scope and grant boundaries only;
+runtime collaboration is the separate `orchestration` graph. Parent authority
+and context are never implicitly inherited: child `grant authority` and
+`grant context` must stay inside the immediate parent boundary. Structural
+findings use `guarantee_kind:"agent_structural"` and cover child grant
+exceedance, low-trust paths to high-authority tools, irreversible tools without
+human approval, review-gate bypass, and sibling visibility leaks. This is not
+formal proof and does not model LLM truth or statistical/evaluator quality.
+
 Composite spec (a separate top-level form):
 
 ```fsl

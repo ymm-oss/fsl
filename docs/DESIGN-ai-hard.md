@@ -125,17 +125,97 @@ Every authority reference must name a declared `tool`.
 ## CLI
 
 `fslc check` and `fslc verify` accept `ai_component` because it expands to a
-kernel spec. Use `fslc ai check` for AI-specific assumptions and findings:
+kernel spec. `fslc check` also accepts recursive `agent` files for parse and
+structural validation, but `agent` does not lower to the kernel. Use
+`fslc ai check` for AI-specific assumptions and findings:
 
 ```bash
 fslc ai check examples/ai/refund_agent_tool_safety.fsl
 fslc ai check examples/ai/refund_agent_tool_safety.fsl --engine induction
+fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
 ```
 
-Successful `ai check` returns `verified_under_assumptions`; successful replay
-returns `replay_conformant` with `formal_result: "not_run"`.
+Successful `ai_component` checks return `verified_under_assumptions`;
+successful recursive `agent` checks return `agent_analyzed` with
+`formal_result: "not_run"`; successful replay returns `replay_conformant` with
+`formal_result: "not_run"`.
+
+## Recursive Agent Composition
+
+`agent` is the recursively composable fsl-ai structure. A nested agent is not a
+separate `sub_agent` entity type; it is a normal agent inside its parent's
+lexical namespace, for example `SupportOrchestrator.RetrievalAgent`.
+
+Implemented structural syntax:
+
+```fsl
+agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy, CreateDraft];
+  authority {
+    may_execute [SearchDocs, CheckPolicy, CreateDraft];
+  }
+
+  agent RetrievalAgent {
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+    output PolicyDecision visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+  }
+}
+```
+
+The analyzer separates these graphs:
+
+- lexical scope tree (`agent Parent { agent Child { ... } }`)
+- delegation graph (`orchestration { A -> B; }`)
+- authority/context grant graph (`grant authority`, `grant context`)
+- information-flow graph (`output X visibility ...`)
+- tool-reachability graph (`tools`, `tool ...`, `authority`)
+- failure propagation entries (`failure_policy`)
+
+Rules enforced as stable semantics:
+
+- top-level agents declare authority/context directly; nested agents receive
+  them through explicit grants.
+- child `grant authority` and `grant context` must be subsets of the immediate
+  parent boundary; exceeding grants are semantics errors.
+- child tool/authority/context use outside its grants reports
+  `child_authority_exceeds_parent_authority` or
+  `child_context_exceeds_parent_context`.
+- sibling visibility without a delegation path reports
+  `visibility_leak_across_sibling_agents`.
+- low-trust paths to high-authority tools report
+  `low_trust_agent_path_to_high_authority_tool`.
+- irreversible tools without `requires_human_approval` report
+  `irreversible_operation_without_human_approval_path`.
+- declared `review_gate` bypass on a path to high-authority tooling reports
+  `policy_review_bypass_in_orchestration`.
+
+Recursive `agent` analysis is structural evidence, not formal proof. It does
+not prove LLM semantic correctness, evaluator judgments, or statistical quality.
 
 ## Event Replay
 
@@ -161,7 +241,7 @@ Replay detects:
 The stable finding schema is `fsl-ai-finding.v0` (see
 `schemas/fslc/ai/finding.v0.schema.json`). Required fields:
 
-- `fsl`: `fsl-ai-hard-mvp.v0`
+- `fsl`: `fsl-ai-hard-mvp.v0` or `fsl-ai-agent-mvp.v0`
 - `result`
 - `kind`
 - `severity`
@@ -178,8 +258,9 @@ The stable finding schema is `fsl-ai-finding.v0` (see
 - `assumptions`
 
 `guarantee_kind` is the key boundary marker. Phase 1 emits
-`syntactic_hard` for hard-contract violations and `runtime_observed` for log
-mismatches. Future evaluator/statistical findings must use
+`syntactic_hard` for hard-contract violations, `runtime_observed` for log
+mismatches, and `agent_structural` for recursive-agent graph findings. Future
+evaluator/statistical findings must use
 `evaluator_supported` or `statistically_supported` and must not be reported as
 formal proof.
 
@@ -226,3 +307,5 @@ The following remain in later issues/phases:
 - evaluator calibration and evaluator-backed contract support
 - prompt/model/retriever/tool-schema migrations and no-regression checks
 - production drift aggregation beyond event replay
+- full agent contract-expression semantics beyond the structural
+  `rule <Name>` contract metadata accepted by the recursive-agent parser

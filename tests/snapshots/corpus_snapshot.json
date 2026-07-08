@@ -101,6 +101,12 @@
       "result": "error"
     }
   },
+  "examples/ai/recursive_support_agent.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/ai/refund_agent_tool_safety.fsl": {
     "check": {
       "result": "ok",
