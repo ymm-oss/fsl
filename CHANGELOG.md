@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- (Documentation) Team-facing Japanese practical guide for `fslc analyze`
+  (`docs/GUIDE-analyze.ja.md`): a plain-language walkthrough of the structure
+  map, graph projections, `--profile ai-review` findings (with real command
+  outputs), DOT/Mermaid exports, batch mode, project traceability, and the
+  "not a verifier" boundary, plus review/PR/CI workflow integration. Linked from
+  the doc map in `docs/README.md`. Includes a prior-art positioning section
+  (Petri net structural analysis, SPARK/GNATprove flow analysis, Frama-C
+  PDG/slicing, Event-B/Rodin, proof-assistant dependency graphs, mCRL2 static
+  LPS analysis) stating plainly which parts of `analyze` are borrowed ideas and
+  which parts of the combination are uncommon.
 - fsl-ai Phase 1 hard-contract MVP (`ai_component`) for AI tool-boundary
   safety. The dialect parses declared tools, authority, human approval,
   forbidden tools, symbolic business preconditions, and fallback metadata,
