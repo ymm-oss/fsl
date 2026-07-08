@@ -42,7 +42,7 @@
           "type": "string"
         },
         "capability": {
-          "enum": ["reads", "writes", "calls"]
+          "enum": ["reads", "writes", "calls", "requires", "provides"]
         },
         "target": {
           "type": "string",

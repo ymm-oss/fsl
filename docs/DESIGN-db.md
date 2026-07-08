@@ -55,6 +55,9 @@ Rules checked in snapshot mode:
 - `offline_payloads_accepted`: an offline payload that may be emitted by a
   client must still be accepted by an active or supported provider during the
   declared finite TTL window.
+- `artifact_capabilities_provided`: every generic `requires` capability must be
+  matched by an active or supported artifact that `provides` the same
+  capability in the same environment snapshot.
 
 ### 2. Rollout Plan
 
@@ -97,7 +100,72 @@ A kill switch is checkable by keeping or reintroducing the old artifact's
 `when flag ...=off` window. The result includes
 `DB-ASSUME-FINITE-FLAG-STATE` whenever any environment declares flags.
 
-### 4. Preservation and Rollback
+### 4. Generic Artifact Capabilities and AI Components
+
+AI components are compatibility artifacts, not a second compatibility model.
+Model, prompt, retriever, tool schema, output schema, mobile/server API, and DB
+schema expectations are represented as capability profiles in the same
+environment snapshot:
+
+```fsl
+artifact support_agent_v8 {
+  requires tool.RefundPaymentV2, retriever.SupportDocsV14;
+  provides output.AnswerSchemaV2;
+}
+
+artifact server_v3 {
+  provides tool.RefundPaymentV2;
+}
+
+artifact support_docs_index_v14 {
+  provides retriever.SupportDocsV14;
+}
+
+artifact ios_v2 {
+  requires output.AnswerSchemaV2;
+}
+```
+
+`fslc db check` enumerates the same `(environment, schema_version, flag
+variants)` snapshots used for DB/API/offline checks. In each snapshot, a
+consumer's `requires namespace.Name` must be matched by an active or supported
+provider's `provides namespace.Name`; otherwise the finding kind is
+`required_capability_missing` and the failed rule is
+`artifact_capabilities_provided`.
+
+The namespace is deliberately open but should stay capability-shaped, not
+version-label-shaped:
+
+- `tool.RefundPaymentV2`: server accepts this tool-call schema.
+- `output.AnswerSchemaV2`: mobile/server can consume this AI output schema.
+- `retriever.SupportDocsV14`: the index provides the cited document universe.
+- `prompt.SupportPromptV8`: a runtime or deploy artifact can require a prompt
+  profile when prompt compatibility matters.
+- `model.SafetyProfileRefundsV1`: a model profile declaration, not a proof of
+  sampling behavior or quality.
+
+Successful results still return `verified_under_assumptions`. When generic
+capabilities are present, results include `DB-ASSUME-AI-CAPABILITY-PROFILES` in
+addition to the finite rollout and capability-completeness assumptions. This
+assumption says only that the declared finite capability profiles are complete
+for the checked window; it is not statistical quality evidence.
+
+Responsibility split:
+
+- `fslc db check`: the implemented shared artifact/environment compatibility
+  checker. It is the source of truth for DB/API/mobile/server/AI coexistence.
+- `fslc compat check --include-ai`: reserved as a future alias or manifest-level
+  wrapper over the same compatibility IR. It must not define different
+  semantics.
+- `fslc ai compat`: reserved for producing or validating an AI component's
+  compatibility profile from AI-specific source files. It must feed the shared
+  artifact/environment model instead of creating a second checker.
+
+This does not change `ai_component` hard-contract checking. `fslc ai check`
+continues to handle tool authority, human approval, forbidden tools, and replay.
+The compatibility layer only checks finite declared capability coexistence.
+
+### 5. Preservation and Rollback
 
 `data_preserved` and `rollback_equivalent` are bounded abstract checks, not full
 production-data proofs. They model whether the migration preserves observable
@@ -126,7 +194,7 @@ counts, and aggregate mismatch counts only. Row values, SQL literals, secrets,
 payload bodies, and raw production records are outside the schema and must be
 redacted before storage.
 
-### 5. Runtime Observation
+### 6. Runtime Observation
 
 Runtime observation is evidence, not proof. `fslc db observe` compares an
 observation log to a `dbsystem` and emits `observed_mismatch` findings such as:
@@ -139,7 +207,7 @@ Absence from logs is not proof of unused behavior. Observation results include
 `DB-ASSUME-OBSERVABILITY-COVERAGE` and `formal_result: "not_run"` to keep them
 separate from formal compatibility verification.
 
-### 6. Importer Boundary
+### 7. Importer Boundary
 
 `fslc db import` provides a deliberately small SQL DDL importer to establish the
 typed IR boundary. It supports:
@@ -160,7 +228,7 @@ model-level constructs as `unsupported_prisma` warnings. Additional importers
 source-specific constructs either become fsl-db IR or explicit warnings; no DB
 engine runtime semantics are inferred without a separate evidence artifact.
 
-### 7. DB-Engine Evidence Boundary
+### 8. DB-Engine Evidence Boundary
 
 fsl-db formal compatibility is engine-agnostic by default. It does not model:
 
@@ -220,6 +288,8 @@ dbsystem UserDb {
   artifact server_v2 {
     reads users.id, users.display_name;
     writes users.display_name;
+    requires tool.NormalizeEmailV1;
+    provides output.UserProfileV2;
     accepts api.CreateUserV1, api.CreateUserV2;
     responds response.email;
   }
@@ -247,6 +317,7 @@ dbsystem UserDb {
     rule api_calls_accepted;
     rule api_responses_expected;
     rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
     rule data_preserved;
     rule rollback_equivalent;
   }
@@ -304,6 +375,7 @@ Violation kinds currently include:
 - `api_call_not_accepted`
 - `api_response_field_missing`
 - `offline_payload_not_accepted`
+- `required_capability_missing`
 
 Observation-only kinds currently include:
 
@@ -345,6 +417,9 @@ Assumptions reported by `fslc db check` may include:
   abstract row model
 - `DB-ASSUME-FINITE-FLAG-STATE`: feature flags are finite declared variants,
   not percentage/probability proofs
+- `DB-ASSUME-AI-CAPABILITY-PROFILES`: AI/generic model, prompt, retriever,
+  tool-schema, and output-schema capability declarations are complete finite
+  profiles for the checked compatibility window
 
 `fslc db observe` additionally reports:
 
@@ -357,3 +432,5 @@ Assumptions reported by `fslc db check` may include:
 - production-data evidence beyond aggregate/sample/audit artifacts
 - DB-engine behavior beyond explicit external evidence adapters
 - ORM/vendor importers beyond SQL and the first minimal Prisma schema importer
+- AI statistical quality, evaluator truth, and prompt/model sampling behavior
+  beyond explicit external evidence artifacts

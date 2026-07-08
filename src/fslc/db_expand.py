@@ -33,6 +33,7 @@ DEFAULT_RULES = (
     "api_calls_accepted",
     "api_responses_expected",
     "offline_payloads_accepted",
+    "artifact_capabilities_provided",
 )
 ALLOWED_RULES = frozenset(DEFAULT_RULES + (
     "data_preserved",
@@ -546,6 +547,14 @@ def expand_dbsystem(system):
         assumptions.append({
             "id": "DB-ASSUME-OFFLINE-TTL-FINITE",
             "text": "offline TTL values are finite logical ticks, not wall-clock time or probability",
+        })
+    if any(artifact.requires or artifact.provides for artifact in system.artifacts):
+        assumptions.append({
+            "id": "DB-ASSUME-AI-CAPABILITY-PROFILES",
+            "text": (
+                "generic artifact capabilities, including AI model/prompt/retriever/tool-schema "
+                "profiles, are complete finite declarations for the checked compatibility window"
+            ),
         })
     if any(env.flags for env in system.environments):
         assumptions.append({

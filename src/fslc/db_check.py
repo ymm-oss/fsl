@@ -566,6 +566,20 @@ def _api_offline_findings(system, env, entry, artifact, schema_version, flag_sta
                     assumptions,
                     extra_witness={"ttl_ticks": ttl} if ttl is not None else None,
                 ))
+    if "artifact_capabilities_provided" in rules:
+        for target in artifact.requires:
+            if not _providers_for(system, env, schema_version, "provides", target, flag_state):
+                findings.append(_capability_finding(
+                    "required_capability_missing",
+                    "artifact_capabilities_provided",
+                    env.name,
+                    entry,
+                    schema_version,
+                    flag_state,
+                    "requires",
+                    target,
+                    assumptions,
+                ))
     return findings
 
 
@@ -661,7 +675,7 @@ def _observation_findings(system, events, assumptions):
             continue
         artifact = artifacts[artifact_name]
         declared = getattr(artifact, capability, []) if isinstance(capability, str) else []
-        if capability in ("reads", "writes") and target not in declared:
+        if capability in ("reads", "writes", "requires", "provides") and target not in declared:
             findings.append(_observation_finding(
                 "declared_unused_but_observed",
                 event,
@@ -685,6 +699,22 @@ def _observation_findings(system, events, assumptions):
                 target,
                 assumptions,
                 "observed API call is not accepted by an active/supported artifact",
+            ))
+        elif capability == "requires" and not _providers_for(
+                system,
+                env,
+                int(schema_version),
+                "provides",
+                target,
+                flag_state,
+        ):
+            findings.append(_observation_finding(
+                "required_capability_missing",
+                event,
+                idx,
+                target,
+                assumptions,
+                "observed required capability is not provided by an active/supported artifact",
             ))
     return findings
 

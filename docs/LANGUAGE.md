@@ -111,6 +111,8 @@ dbsystem <Name> {
   artifact <version> {
     reads <table>.<column>, ...;
     writes <table>.<column>, ...;
+    requires <capability_namespace>.<capability>, ...;
+    provides <capability_namespace>.<capability>, ...;
     calls api.<operation>, ...;
     accepts api.<operation>, ...;
     expects response.<field>, ...;
@@ -136,6 +138,7 @@ dbsystem <Name> {
     rule api_calls_accepted;
     rule api_responses_expected;
     rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
     rule data_preserved;
     rule rollback_equivalent;
   }
@@ -151,7 +154,9 @@ declared migration order; rollout percentages and offline TTLs must be modeled a
 finite coexistence windows/ticks. API/offline and bounded preservation/rollback
 checks are dialect-level compatibility checks. Feature flags are finite declared
 variants inside an environment and add `DB-ASSUME-FINITE-FLAG-STATE`; they do
-not prove rollout percentages. See `docs/DESIGN-db.md`.
+not prove rollout percentages. Generic `requires` / `provides` capabilities
+cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
+other artifact profiles in the same snapshot model. See `docs/DESIGN-db.md`.
 
 `fslc verify` can override a `verify` block's `instances`/`values` bounds from
 the command line, without editing the spec:
@@ -1374,6 +1379,8 @@ dbsystem <Name> {
   artifact <version> {
     reads <table>.<column>, ...;
     writes <table>.<column>, ...;
+    requires <capability_namespace>.<capability>, ...;
+    provides <capability_namespace>.<capability>, ...;
     calls api.<operation>, ...;
     accepts api.<operation>, ...;
     expects response.<field>, ...;
@@ -1383,7 +1390,8 @@ dbsystem <Name> {
 
   environment <env> {
     schema <lo>..<hi>;
-    active <version> when schema <lo>..<hi>;
+    flag <flag_name> { <variant>, ... } default <variant>;
+    active <version> when schema <lo>..<hi> when flag <flag_name>=<variant>;
     supported <version> when schema <lo>..<hi>;
     may_exist <version> when schema <lo>..<hi>;
   }
@@ -1398,6 +1406,7 @@ dbsystem <Name> {
     rule api_calls_accepted;
     rule api_responses_expected;
     rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
     rule data_preserved;
     rule rollback_equivalent;
   }
@@ -1427,6 +1436,7 @@ Current formal violation kinds include:
 - `api_call_not_accepted`
 - `api_response_field_missing`
 - `offline_payload_not_accepted`
+- `required_capability_missing`
 
 Use `fslc db check` when you want fsl-db vocabulary:
 
@@ -1446,6 +1456,13 @@ candidates. Runtime observation returns `observed_mismatch` with
 `formal_result: "not_run"`; absence from logs is not proof of unused behavior.
 Use ordinary `fslc verify` when you want to inspect the generated kernel
 counterexample directly.
+
+Generic `requires` / `provides` capabilities let AI model/prompt/retriever/tool
+schema and output schema profiles share the same compatibility check as
+DB/API/mobile/server artifacts. A `requires tool.RefundPaymentV2` declaration is
+safe only when an active or supported artifact in the same environment snapshot
+`provides tool.RefundPaymentV2`. These profiles are finite coexistence facts,
+not evaluator or statistical quality claims.
 
 Importer boundary: SQL DDL import is `sql-ddl-minimal.v0`. The first
 source-specific ORM importer is `prisma-schema-minimal.v0`, which imports Prisma

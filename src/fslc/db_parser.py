@@ -66,6 +66,8 @@ artifact_def: "artifact" NAME "{" artifact_item* "}"
 artifact_item: artifact_capability col_ref_list ttl_clause? ";"?
 artifact_capability: "reads" -> cap_reads
                    | "writes" -> cap_writes
+                   | "requires" -> cap_requires
+                   | "provides" -> cap_provides
                    | "calls" -> cap_calls
                    | "accepts" -> cap_accepts
                    | "expects" -> cap_expects
@@ -246,6 +248,12 @@ class DbAst(Transformer):
     def cap_writes(self, meta):
         return "writes"
 
+    def cap_requires(self, meta):
+        return "requires"
+
+    def cap_provides(self, meta):
+        return "provides"
+
     def cap_calls(self, meta):
         return "calls"
 
@@ -282,6 +290,8 @@ class DbAst(Transformer):
             name=name,
             reads=caps["reads"],
             writes=caps["writes"],
+            requires=caps["requires"],
+            provides=caps["provides"],
             calls=caps["calls"],
             accepts=caps["accepts"],
             expects=caps["expects"],

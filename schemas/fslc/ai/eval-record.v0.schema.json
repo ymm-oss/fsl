@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/ai/eval-record.v0.schema.json",
+  "title": "fsl-ai precomputed eval JSONL record v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["case_id", "slice", "metric", "outcome", "evaluator"],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-ai-eval-record.v0"
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "component": {
+      "type": "string"
+    },
+    "dataset": {
+      "type": "string"
+    },
+    "slice": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Required finite slice label. Use 'all' for the global slice."
+    },
+    "metric": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Bernoulli/proportion metric name, e.g. accuracy, recall, hallucination_rate."
+    },
+    "outcome": {
+      "type": "boolean",
+      "description": "One Bernoulli trial for this case/metric/slice. true means the metric event occurred."
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calibration_status": {
+          "enum": ["trusted", "untrusted", "unknown"]
+        },
+        "calibration_evidence": {
+          "type": "string"
+        }
+      }
+    },
+    "redaction": {
+      "type": "object"
+    }
+  }
+}

@@ -47,8 +47,9 @@ the same generated action name.
 |---|---|---|---|
 | Syntactic / structural hard | declared tool schema, enum-like authority, forbidden tool, human approval token, symbolic precondition evidence | static check, kernel expansion, runtime guard/replay finding | `verified_under_assumptions`, `violated`, `ai_hard_contract_violation` |
 | Evaluator-backed hard-like | groundedness, source support, prompt-injection-following judgment, instruction hierarchy compliance | out of MVP; must be explicit external evidence | `evaluator_supported`, never `proved` |
-| Statistical | accuracy, recall, hallucination rate, slice metrics, confidence intervals | out of MVP | `statistically_supported` / `statistically_unsupported`, never `proved` |
+| Statistical | accuracy, recall, hallucination rate, slice metrics, confidence intervals | external stochastic evidence layer | `statistically_supported` / `statistically_unsupported`, never `proved` |
 | Observed | undeclared tool observed, schema drift in logs, production mismatch | `fslc ai replay` evidence only | `replay_conformant`, `replay_nonconformant`, `observed_contract_violation` |
+| Environment compatibility | model/prompt/retriever/tool-schema/output-schema coexistence with server/mobile/DB artifacts | shared `dbsystem` artifact capabilities | `verified_under_assumptions` / `required_capability_missing` |
 
 Prompt injection and RAG groundedness may be called `hard` only when the checked
 predicate is structural and guard-backed, for example "no tool call executes when
@@ -182,6 +183,29 @@ mismatches. Future evaluator/statistical findings must use
 `evaluator_supported` or `statistically_supported` and must not be reported as
 formal proof.
 
+## Relationship To Compatibility And Statistical Evidence
+
+`ai_component` is the hard-contract checker for tool authority, approval, and
+runtime replay. It is not the environment compatibility checker. AI model,
+prompt, retriever, tool schema, and output schema compatibility use the shared
+`dbsystem` artifact/environment model:
+
+```fsl
+artifact support_agent_v8 {
+  requires tool.RefundPaymentV2, retriever.SupportDocsV14;
+  provides output.AnswerSchemaV2;
+}
+```
+
+`fslc db check` evaluates those finite capability profiles in the same
+environment/schema/flag snapshots as DB/API/mobile/server artifacts and reports
+`required_capability_missing` for provider gaps.
+
+Statistical quality is also outside this hard-contract dialect. The MVP
+stochastic evidence layer reads precomputed eval JSONL, supports only
+Bernoulli/proportion metrics with Wilson intervals, and returns
+`formal_result: "not_run"`; see `docs/DESIGN-stochastic.md`.
+
 ## Assumptions
 
 Results carry explicit assumptions:
@@ -198,8 +222,7 @@ Results carry explicit assumptions:
 
 The following remain in later issues/phases:
 
-- datasets, slices, metrics, confidence intervals, and statistical properties
+- eval runner implementation beyond the external statistical result schema
 - evaluator calibration and evaluator-backed contract support
 - prompt/model/retriever/tool-schema migrations and no-regression checks
 - production drift aggregation beyond event replay
-- multi-environment AI artifact compatibility with server/mobile/DB artifacts

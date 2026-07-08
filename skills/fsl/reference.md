@@ -108,6 +108,8 @@ dbsystem <Name> {
   artifact <version> {
     reads <table>.<column>, ...;
     writes <table>.<column>, ...;
+    requires <capability_namespace>.<capability>, ...;
+    provides <capability_namespace>.<capability>, ...;
     calls api.<operation>, ...;
     accepts api.<operation>, ...;
     expects response.<field>, ...;
@@ -131,6 +133,7 @@ dbsystem <Name> {
     rule api_calls_accepted;
     rule api_responses_expected;
     rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
     rule data_preserved;
     rule rollback_equivalent;
   }
@@ -144,7 +147,11 @@ then reports `DB-ASSUME-FINITE-FLAG-STATE`. It does not model DB-engine
 locks/optimizers, probability, wall-clock TTL, or full production-data
 completeness. Schema ranges are finite reachable rollout snapshots; percentages,
 flag rollout, and offline TTLs must be modeled as finite coexistence
-windows/ticks. Use `fslc db check` for stable fsl-db findings
+windows/ticks. Generic `requires` / `provides` capabilities place AI
+model/prompt/retriever, tool schema, output schema, mobile/server, and other
+artifact profiles into the same snapshot model; missing providers report
+`required_capability_missing` under `artifact_capabilities_provided`. Use
+`fslc db check` for stable fsl-db findings
 (`verified_under_assumptions` on success). Use `fslc db observe` for runtime
 evidence only (`observed_mismatch`, not formal violation) and `fslc db import`
 for SQL DDL or minimal Prisma schema importers. Production-data preservation and
@@ -189,6 +196,9 @@ for JSONL runtime evidence (`replay_conformant` / `replay_nonconformant`,
 `formal_result:"not_run"`). Findings include `guarantee_kind`:
 `syntactic_hard` or `runtime_observed` in Phase 1; future
 `evaluator_supported` / `statistically_supported` results are never formal proof.
+Statistical quality evidence uses the external stochastic evidence design in
+`docs/DESIGN-stochastic.md`: precomputed eval JSONL, Bernoulli/proportion
+metrics only, Wilson intervals only, and `formal_result:"not_run"`.
 
 Composite spec (a separate top-level form):
 

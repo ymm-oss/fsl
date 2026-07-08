@@ -3,6 +3,7 @@
 
 """fsl-ai hard-contract MVP coverage."""
 
+import json
 from pathlib import Path
 
 from fslc.cli import run_ai_check, run_ai_replay, run_check, run_verify
@@ -10,6 +11,7 @@ from fslc.cli import run_ai_check, run_ai_replay, run_check, run_verify
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples" / "ai"
+AI_SCHEMAS = ROOT / "schemas" / "fslc" / "ai"
 
 
 def _example(name):
@@ -100,6 +102,22 @@ def test_ai_replay_declared_capability_mismatch_is_observed_contract_violation()
     assert _violations(out) == {"undeclared_tool_observed"}
     assert _guarantees(out) == {"runtime_observed"}
     assert out["formal_result"] == "not_run"
+
+
+def test_ai_statistical_evidence_schemas_are_non_formal():
+    result_schema = json.loads((AI_SCHEMAS / "statistical-result.v0.schema.json").read_text(encoding="utf-8"))
+    record_schema = json.loads((AI_SCHEMAS / "eval-record.v0.schema.json").read_text(encoding="utf-8"))
+
+    assert result_schema["$id"].endswith("statistical-result.v0.schema.json")
+    assert "formal_result" in result_schema["required"]
+    assert result_schema["properties"]["formal_result"]["const"] == "not_run"
+    assert result_schema["properties"]["interval"]["properties"]["method"]["const"] == "wilson"
+    assert {"case_id", "slice", "metric", "outcome", "evaluator"}.issubset(record_schema["required"])
+
+    fixture = json.loads((EXAMPLES / "statistical_result_supported.json").read_text(encoding="utf-8"))
+    assert fixture["result"] == "statistically_supported"
+    assert fixture["formal_result"] == "not_run"
+    assert fixture["interval"]["method"] == "wilson"
 
 
 def test_ai_static_check_flags_irreversible_tool_without_approval(tmp_path):

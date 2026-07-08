@@ -20,3 +20,14 @@ The first replay is `replay_conformant`. The others return AI-readable findings:
 Replay evidence is runtime observation, not formal proof. `fslc ai check` lowers
 the hard-contract authority model to the existing kernel and returns
 `verified_under_assumptions` when the finite hard-contract expansion verifies.
+
+Statistical evidence examples are external to `fslc ai check`:
+
+- `statistical_eval_precomputed.jsonl` shows the MVP precomputed eval JSONL
+  record shape.
+- `statistical_result_supported.json` shows a Wilson-bound result with
+  `formal_result: "not_run"`.
+
+AI environment compatibility examples live under `examples/db/` because
+model/prompt/retriever/tool-schema/output-schema coexistence is checked through
+the shared `dbsystem` artifact capability model.

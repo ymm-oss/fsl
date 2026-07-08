@@ -75,6 +75,8 @@ class DbArtifact:
     name: str
     reads: List[ColumnKey] = field(default_factory=list)
     writes: List[ColumnKey] = field(default_factory=list)
+    requires: List[ColumnKey] = field(default_factory=list)
+    provides: List[ColumnKey] = field(default_factory=list)
     calls: List[ColumnKey] = field(default_factory=list)
     accepts: List[ColumnKey] = field(default_factory=list)
     expects: List[ColumnKey] = field(default_factory=list)

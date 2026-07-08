@@ -1,0 +1,3 @@
+{"schema_version":"fsl-ai-eval-record.v0","case_id":"support-001","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"gold_labels_v3","calibration_status":"trusted"}}
+{"schema_version":"fsl-ai-eval-record.v0","case_id":"support-002","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"gold_labels_v3","calibration_status":"trusted"}}
+{"schema_version":"fsl-ai-eval-record.v0","case_id":"support-003","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":false,"evaluator":{"id":"gold_labels_v3","calibration_status":"trusted"}}
