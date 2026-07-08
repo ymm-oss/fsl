@@ -340,6 +340,17 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 6. **static checks**: missing map / unknown action / missing correspondence →
    kind: type, exit 2.
 7. **bounds**: the mapping value is out of the abs type range → map_out_of_bounds.
+8. **conflicting same-named type**: impl and abs both declare a type with the
+   same name but a different shape (an enum with different members, or a
+   struct with different fields) → kind: type, exit 2. Type metadata is
+   merged by name for refinement checking (`_merge_types_meta`); a same name
+   with a different member list would otherwise let an impl-only member get
+   silently reinterpreted as whichever abs member sits at the same ordinal
+   index, turning a real refinement violation into a false "refines". Domain
+   types with different bounds are still allowed to share a name — an
+   out-of-range impl value there is already caught downstream as
+   `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
+   layers distinct type names.
 8. No regression of existing features (refine is a completely independent CLI
    path).
 

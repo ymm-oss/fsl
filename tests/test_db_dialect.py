@@ -3,9 +3,17 @@
 
 """fsl-db MVP dialect coverage."""
 
+import json
 from pathlib import Path
 
-from fslc.cli import run_check, run_db_check, run_db_import, run_db_observe, run_verify
+from fslc.cli import (
+    exit_code,
+    run_check,
+    run_db_check,
+    run_db_import,
+    run_db_observe,
+    run_verify,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -214,6 +222,28 @@ def test_db_runtime_observation_reports_observed_mismatch_not_formal_violation()
     }
     assert {finding["result"] for finding in out["findings"]} == {"observed_mismatch"}
     assert "DB-ASSUME-OBSERVABILITY-COVERAGE" in _assumption_ids(out)
+    assert exit_code(out) == 1
+
+
+def test_db_runtime_observation_reports_observed_conformant_as_exit_0(tmp_path):
+    trace = tmp_path / "conformant.json"
+    trace.write_text(json.dumps({
+        "schema_version": "fsl-db-observation.v0",
+        "events": [
+            {
+                "environment": "prod",
+                "schema_version": 0,
+                "artifact": "server_v2",
+                "capability": "reads",
+                "target": "users.id",
+            },
+        ],
+    }))
+
+    out = run_db_observe(_example("runtime_observation_target.fsl"), str(trace))
+
+    assert out["result"] == "observed_conformant"
+    assert exit_code(out) == 0
 
 
 def test_db_sql_importer_emits_checkable_dbsystem(tmp_path):
@@ -226,6 +256,7 @@ def test_db_sql_importer_emits_checkable_dbsystem(tmp_path):
 
     assert imported["result"] == "imported"
     assert imported["output"] == str(output)
+    assert exit_code(imported) == 0
     checked = run_db_check(str(output))
     assert checked["result"] == "verified_under_assumptions"
 
@@ -236,3 +267,4 @@ def test_db_sql_importer_reports_unsupported_constructs():
     assert imported["result"] == "imported_with_warnings"
     assert imported["warnings"][0]["kind"] == "unsupported_sql"
     assert "CREATE INDEX" in imported["warnings"][0]["statement"]
+    assert exit_code(imported) == 0

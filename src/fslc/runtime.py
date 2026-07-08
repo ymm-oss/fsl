@@ -195,7 +195,29 @@ def _check_deterministic_init(spec):
             hint=_INIT_HINT,
         )
 
-    def walk(stmts, definitely_assigned, possibly_assigned, in_forall=False):
+    def dup_key(lv, bound_names):
+        # A Map/index target keyed by a concrete value -- an enum member or
+        # numeric literal, not a forall-bound variable -- is identified by
+        # (base, key) so separate flat `m[K1] = ...` / `m[K2] = ...`
+        # statements for distinct keys of the same map aren't flagged as
+        # duplicates (this is exactly how dialect-generated init code, e.g.
+        # fsl-db's per-column `column_exists[Col] = ...`, populates a map
+        # one key at a time). A symbolic/bound-variable key, or any other
+        # target shape, falls back to the base variable name alone, same as
+        # before -- unable to statically prove the keys differ.
+        if lv[0] == "index":
+            key_expr = lv[2]
+            if (
+                isinstance(key_expr, tuple)
+                and key_expr[0] == "var"
+                and key_expr[1] not in bound_names
+            ):
+                return (lv[1], key_expr)
+            if isinstance(key_expr, tuple) and key_expr[0] == "num":
+                return (lv[1], key_expr)
+        return _logical_var_from_lv(lv)
+
+    def walk(stmts, definitely_assigned, possibly_assigned, in_forall=False, bound_names=frozenset()):
         definitely_assigned = set(definitely_assigned)
         possibly_assigned = set(possibly_assigned)
         for st in stmts:
@@ -204,11 +226,12 @@ def _check_deterministic_init(spec):
                 logical = _logical_var_from_lv(st[1])
                 if logical is None:
                     _err("invalid init assignment target", kind="semantics", hint=_INIT_HINT)
-                if logical in possibly_assigned:
+                key = dup_key(st[1], bound_names)
+                if key in possibly_assigned:
                     duplicate_assignment(logical, in_forall)
                 check_expr(st[2], definitely_assigned)
                 definitely_assigned.add(logical)
-                possibly_assigned.add(logical)
+                possibly_assigned.add(key)
             elif tag == "forall_stmt":
                 if in_forall:
                     _err("nested forall in init is not supported", kind="semantics", hint=_INIT_HINT)
@@ -220,6 +243,7 @@ def _check_deterministic_init(spec):
                     definitely_assigned,
                     possibly_assigned,
                     in_forall=True,
+                    bound_names=bound_names | {binder[1]},
                 )
                 definitely_assigned = body_definite
                 possibly_assigned = body_possible
@@ -231,12 +255,14 @@ def _check_deterministic_init(spec):
                     definitely_assigned,
                     possibly_assigned,
                     in_forall=in_forall,
+                    bound_names=bound_names,
                 )
                 else_definite, else_possible = walk(
                     else_stmts,
                     definitely_assigned,
                     possibly_assigned,
                     in_forall=in_forall,
+                    bound_names=bound_names,
                 )
                 definitely_assigned = then_definite & else_definite
                 possibly_assigned = then_possible | else_possible

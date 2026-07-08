@@ -86,6 +86,92 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   enveloped result tree reserves `kind` for the diagnostic discriminator.)
 
 ### Fixed
+- **Soundness**: `fslc verify --engine induction` could report a `leadsTo
+  ... decreases ... helpful` property `"proved"` when it was genuinely false.
+  With two or more distinct `helpful` action declarations,
+  `_prove_leadsto_rank_no_deadlock` only checked that *some* helpful match is
+  enabled at every pending state (a disjunction); if which instance is
+  enabled alternates (e.g. two helpful actions gated on opposite parity of
+  some other variable), no single instance is ever *continuously* enabled,
+  so its `fair` declaration never actually obligates it to run under weak
+  fairness, and an unrelated action can stall the obligation forever. Added
+  `_prove_leadsto_rank_helpful_sticky` (`src/fslc/bmc.py`), a new induction
+  proof obligation requiring each helpful instance to stay enabled (or `Q`
+  resolve) until it fires, reported as `rank_failure:
+  "helpful_action_enabledness_not_sticky"` when it can't be shown. Wired into
+  both the explicit-`decreases` path and the auto-synthesized-measure path
+  in `_prove_ranked_leadstos` (the latter was missed in an earlier pass of
+  this fix and reached the same false "proved, synthesized: true" outcome
+  through a separate candidate loop). The common single-helpful-action idiom
+  is unaffected (`tests/test_helpful_leadsto.py`, `docs/LANGUAGE.md`,
+  `skills/fsl/reference.md`).
+- **Soundness**: a second, independent false-`"proved"` gap in the same
+  `helpful`/`decreases` ranking rule, reproducible even with a single
+  `helpful` action — `_prove_leadsto_rank_progress` only required a
+  non-helpful action to keep the leadsTo obligation pending
+  (`Or(q_next, p_next)`), not to avoid *increasing* the measure. A fair,
+  always-enabled helpful action decreasing the measure by a bounded amount
+  each time it fires does not guarantee eventual convergence if an unrelated
+  action can increase the measure by more than that in between — the
+  helpful action still fires under weak fairness, but the measure can
+  diverge instead of reaching zero. `pending_preserved` now additionally
+  requires `measure_next <= measure` for the non-helpful branch, reported as
+  `rank_failure: "non_helpful_action_increases_measure"` when it can't be
+  shown (`src/fslc/bmc.py`, `tests/test_helpful_leadsto.py`,
+  `docs/LANGUAGE.md`, `skills/fsl/reference.md`).
+- `runtime.py`'s concrete `Monitor` rejected every fsl-db-generated spec
+  (15/18 `examples/db/*.fsl`) with a spurious `state variable 'column_exists'
+  assigned more than once in init`, because the duplicate-init-assignment
+  check keyed on the base Map variable alone; `db_expand.py` legitimately
+  writes one flat `column_exists[Col] = ...` statement per column, each to a
+  different key of the same map. This silently disabled the dual-evaluator
+  agreement safety net (oracle/agreement/trace-soundness tests, `replay`,
+  `testgen`) for the whole dbsystem dialect, since BMC accepted these specs
+  fine. `_check_deterministic_init` now disambiguates a Map/index target by
+  `(base, key)` when the key is a concrete (non-forall-bound) value, so
+  distinct keys of the same map no longer collide; a genuine same-key
+  duplicate is still rejected, and a `forall`-keyed init is unaffected.
+- The FSL language server's raw-tree index (`src/fslc/lsp/index.py`) no
+  longer hard-codes the kernel-only grammar: `build_index` now picks
+  `ai_parser.AI_PARSER`/`db_parser.DB_PARSER` for `ai_component`/`dbsystem`
+  sources (same dialect-sniffing already used by `parser.parse_src`), so
+  go-to-definition/references/hover/semantic-tokens no longer go dark with an
+  uncaught `UnexpectedCharacters` for those files (`fslc check` diagnostics
+  were unaffected, since they go through a different path). Added indexing
+  for `tool`/`table`/`column`/`artifact`/`migration`/`environment`
+  declarations and their references (`authority` tool lists, `col_ref`,
+  `env_artifact`). Also fixed two kernel-grammar indexing gaps found in the
+  same audit: a `leadsTo ... helpful NAME(...)` action name was a bare Token
+  the generic child walk skipped, so it never resolved or showed up in
+  find-references; and `deadline NAME <= expr` registered `NAME` as a new
+  `property` symbol instead of a reference to the already-declared
+  `age NAME[...]` variable it targets. Added `helpful`/`relation`/`acyclic`/
+  `functional`/`injective`/`domain`/`range` to the completion keyword list.
+- `ai_component` rejects two `fallback` entries that share the same `reason`
+  (they would silently collide into one generated `fallback_<reason>`
+  action). `docs/DESIGN-ai-hard.md` now also documents explicitly that
+  `fallback` is structural-only in Phase 1 — no invariant is generated over
+  `fallback_required`, since `target` has no corresponding kernel action to
+  check it against yet (`src/fslc/ai_expand.py` `validate_ai_component`).
+- `fslc refine` no longer silently merges a same-named impl/abs enum (or
+  struct) that has a different member list (or field set): it now rejects
+  the pair as a `kind: "type"` static error instead of letting an impl-only
+  member get reinterpreted as whichever abs member sits at the same ordinal
+  index, which could previously turn a real refinement violation into a
+  false `"refines"`. Domain types (`lo..hi`) still may share a name with
+  different bounds (`src/fslc/refine.py` `_merge_types_meta`/
+  `_type_defs_conflict`; `docs/DESIGN-refinement.md`, `docs/LANGUAGE.md`,
+  `skills/fsl/reference.md`).
+- The `acyclic`/`reachable` relation helpers no longer unroll an unmemoized
+  O(n^n) Z3 expression tree, which made verification of a self-relation with
+  as few as 7 domain values effectively hang; `_relation_reachable_expr`
+  (`src/fslc/bmc.py`) now memoizes the bounded-path recursion into an
+  O(n^2)-node shared DAG.
+- `fslc db observe` and `fslc db import` no longer return exit code 3
+  (reserved for internal errors) for their normal result values
+  (`observed_conformant`/`observed_mismatch`/`imported`/
+  `imported_with_warnings`); `exit_code()` in `src/fslc/cli.py` now maps them
+  to the documented 0/1 contract.
 - Restored `docs/index.html` to a language selector only and added bilingual
   `docs/intro/db.{ja,en}.html` content pages for the fsl-db DB /
   multi-environment compatibility manual entry.

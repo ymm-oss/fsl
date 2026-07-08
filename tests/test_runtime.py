@@ -243,6 +243,70 @@ def test_monitor_missing_fsl_path_raises_io():
     assert str(exc.value) == "file not found: specs/nonexistent.fsl"
 
 
+def test_init_duplicate_assignment_check_is_per_key_not_per_map():
+    # Regression: the duplicate-init-assignment check used to key on the
+    # base map variable alone, so two flat (non-forall) `m[K1] = ...` /
+    # `m[K2] = ...` statements for two DIFFERENT keys of the same map were
+    # rejected as "assigned more than once" even though they don't collide
+    # -- exactly the shape fsl-db's per-column init generates
+    # (column_exists[Col1] = ..., column_exists[Col2] = ..., ...).
+    distinct_keys_src = """
+spec DistinctMapKeys {
+  enum Col { A, B }
+  state { m: Map<Col, Bool> }
+  init {
+    m[A] = true
+    m[B] = false
+  }
+  action noop() { }
+}
+"""
+    mon = Monitor(build_spec(parse(distinct_keys_src)))
+    assert mon.state["m"] == {"A": True, "B": False}
+
+    # A genuine duplicate -- the same key assigned twice -- must still be caught.
+    same_key_src = """
+spec DupMapKey {
+  enum Col { A, B }
+  state { m: Map<Col, Bool> }
+  init {
+    m[A] = true
+    m[A] = false
+  }
+  action noop() { }
+}
+"""
+    with pytest.raises(FslError) as exc:
+        Monitor(build_spec(parse(same_key_src)))
+    assert exc.value.kind == "semantics"
+    assert "assigned more than once" in str(exc.value)
+
+    # A forall over the map's own key type still works (unaffected by the fix).
+    forall_src = """
+spec ForallMapInit {
+  type Id = 0..2
+  state { m: Map<Id, Bool> }
+  init {
+    forall c: Id { m[c] = true }
+  }
+  action noop() { }
+}
+"""
+    mon2 = Monitor(build_spec(parse(forall_src)))
+    assert mon2.state["m"] == {"0": True, "1": True, "2": True}
+
+
+def test_db_dialect_examples_load_in_monitor():
+    # Regression: db_expand.py's per-column init (column_exists[Col] = ...,
+    # one flat assign per column) used to fail every fsl-db example in the
+    # concrete Monitor, silently disabling the dual-evaluator agreement
+    # safety net for the whole dialect (BMC accepted these specs fine).
+    db_examples = sorted((ROOT / "examples" / "db").glob("*.fsl"))
+    assert db_examples
+    for path in db_examples:
+        Monitor(str(path))
+
+
 def test_monitor_accepts_direct_fsl_source_string():
     src = """
 spec DirectSource {

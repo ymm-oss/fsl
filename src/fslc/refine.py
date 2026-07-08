@@ -104,10 +104,45 @@ def _types_compatible(abs_ty, impl_ty):
     return False
 
 
+def _type_defs_conflict(impl_info, abs_info):
+    """True if two same-named type declarations are unsafe to merge.
+
+    Domain types with different bounds are deliberately allowed to share a
+    name: an impl value outside the abs range is still caught downstream as
+    an `abs_state_mismatch` when the mapped value is checked against the abs
+    bounds. Enums (and structs) have no such downstream bounds check — an
+    impl-only member's ordinal position gets silently reinterpreted as
+    whichever abs member sits at that index, so a same name with a
+    different member list (or field set) must be rejected here instead,
+    otherwise a real refinement violation can come back as a false
+    "refines".
+    """
+    if impl_info["kind"] != abs_info["kind"]:
+        return True
+    if impl_info["kind"] == "enum":
+        return impl_info["members"] != abs_info["members"]
+    if impl_info["kind"] == "struct":
+        return impl_info["fields"] != abs_info["fields"]
+    return False
+
+
 def _merge_types_meta(impl_spec, abs_spec):
     """Merge type metadata; abs types take precedence on name clash."""
     merged = dict(impl_spec["types"])
     for name, info in abs_spec["types"].items():
+        impl_info = impl_spec["types"].get(name)
+        if impl_info is not None and _type_defs_conflict(impl_info, info):
+            _err(
+                f"type '{name}' is declared differently in the impl and abs specs "
+                f"(impl: {impl_info}, abs: {info})",
+                kind="type",
+                hint=(
+                    f"refinement merges type metadata by name, so a same-named type "
+                    f"with a different definition cannot be resolved safely; give the "
+                    f"impl and abs layers distinct type names (e.g. enum ImplStatus vs "
+                    f"enum AbsStatus) instead of reusing '{name}' for two different types"
+                ),
+            )
         merged[name] = info
     return merged
 

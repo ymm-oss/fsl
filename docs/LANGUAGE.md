@@ -228,13 +228,30 @@ false: the measure is non-negative; progress is possible; and the enabled-action
 discipline is satisfied. Without `helpful`, every enabled action must either make
 `Q` true or keep `P` true while strictly decreasing the measure. With one or more
 `helpful action(args...)` lines, only the matching helpful action instance must
-strictly decrease the measure when it fires; unrelated action instances only need
-to keep the pending obligation true unless they make `Q` true. The matching
+strictly decrease the measure when it fires; unrelated action instances must
+keep the pending obligation true (unless they make `Q` true) and must not
+increase the measure -- an unbounded increase between helpful firings could
+outpace the guaranteed decrease and prevent `Q` from ever being reached, even
+though the helpful action keeps firing under fairness. The matching
 helpful action must be a lower-layer `fair action` and must be enabled whenever
 the obligation is pending. `helpful` is metadata for the ranked proof: it does
 not create a fairness assumption. Ranked proof success is independent of
 `--depth`; `--depth` is still used for the base BMC check and
 reachable/coverage evidence.
+
+**With two or more distinct `helpful` action names**, each instance's
+enabledness must not flicker: once a helpful instance becomes enabled while
+the obligation is pending, it must stay enabled until it fires (or `Q` holds).
+"Some helpful match is enabled at every pending state" is not enough on its
+own -- if *which* instance is enabled keeps changing (e.g. two helpful
+actions enabled on alternating conditions), no single instance is ever
+*continuously* enabled, so its `fair` declaration never actually obligates it
+to run, and the leadsTo can be genuinely false even though the disjunctive
+enabledness check passes. This is reported as
+`rank_failure:"helpful_action_enabledness_not_sticky"`. The common single
+per-binding `helpful step(c)` idiom above is unaffected: with one helpful
+action, "always enabled while pending" already implies it is continuously
+enabled.
 
 **Placement.** `decreases` is a sibling of the response body inside the
 `leadsTo` block, *outside* any `forall` wrapper — never nested inside the
@@ -270,10 +287,12 @@ leadsTo Responds {
 
 With this form, `step(c)` must be declared `fair action`, must be enabled in
 every pending state for that binding, and must strictly decrease `level[c]`
-when it fires. Other interleavings may preserve the pending obligation without
-decreasing this per-entity measure. Diagnostics distinguish
-`progress_action_not_fair`, `helpful_action_not_enabled`,
-`non_decreasing_helpful_action`, and `pending_not_preserved`.
+when it fires. Other interleavings may preserve the pending obligation
+without decreasing this per-entity measure, but must not increase it.
+Diagnostics distinguish `progress_action_not_fair`,
+`helpful_action_not_enabled`, `non_decreasing_helpful_action`,
+`non_helpful_action_increases_measure`, `pending_not_preserved`, and (with
+two or more helpful actions) `helpful_action_enabledness_not_sticky`.
 
 **Working idiom: a global sum measure.** Sum the tracked quantity across the
 domain with the built-in `sum()` aggregate (§3): `decreases sum(k: Case of
@@ -508,10 +527,13 @@ bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / typestate / sweep_passed,
-`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed / sweep_failed,
+mutated / explained / analyzed / typestate / sweep_passed / observed_conformant /
+imported / imported_with_warnings,
+`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
+sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`), `3` = internal error.
+`--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
+result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 
 ### Kinds of result
 
@@ -796,6 +818,16 @@ with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs
 `abs_after_*`. A static error (a missing map, an unknown action, etc.) is
 `kind: "type"` (exit 2).
 
+Give impl and abs **distinct enum/struct type names**, even when a state
+variable pair is mapped 1:1. Type metadata is merged by name for refinement
+checking; a same-named enum (or struct) declared with a different member
+list (or field set) on each side is rejected as `kind: "type"` (exit 2)
+rather than merged — merging would let an impl-only member get silently
+reinterpreted as whichever abs member sits at the same ordinal index. Domain
+types (`type X = lo..hi`) may safely share a name with different bounds; an
+out-of-range value there is still caught as `map_out_of_bounds`/
+`abs_state_mismatch`.
+
 ### Chain checking (composition of mappings)
 
 The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)
@@ -1001,7 +1033,11 @@ fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # se
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
 explicitly in the output `note`). `Monitor` requires init to be deterministic
-(forall bulk assignment is allowed).
+(forall bulk assignment is allowed). For a Map/index target (`m[K] = ...`),
+"assign exactly once" is per concrete key, not per variable: separate flat
+`m[K1] = ...` / `m[K2] = ...` statements for two *different* keys are fine;
+the same key assigned twice, or a key that is itself a bound loop variable
+(where two iterations could alias), is still rejected.
 
 ## 13. The three-layer dialects (consulting / requirements / design) and traceability
 

@@ -29,6 +29,18 @@ No probability, percentile, evaluator scoring, model-distribution, or stochastic
 semantics are added to the kernel. Runtime replay is observation evidence, not
 formal proof.
 
+`fallback` declarations are structural only in Phase 1: each `when <reason>
+require <target>` lowers to a `fallback_<reason>` action that sets the ghost
+`fallback_required: Bool`, but — unlike forbidden tools and approval-before-
+execution — **no invariant is generated over it**, because `target` is a free
+label with no corresponding tool/action in the grammar, so "the target was
+actually taken" is not expressible in the kernel yet. `fallback_required` is
+kept as observable state for `fslc explain`/`fslc html` and as a hook for a
+future phase that ties `target` to a real action; it is not proof that any
+fallback routing happens. Each `reason` must be unique per component
+(`validate_ai_component`) since two entries sharing a reason would collide on
+the same generated action name.
+
 ## Guarantee Boundary
 
 | Contract class | Examples | Phase 1 handling | Result vocabulary |

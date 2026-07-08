@@ -15,7 +15,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   struct <Name> { <field>: <type>, ... }  // field: scalar | Option<scalar>
 
   state { <var>: <type>, ... }
-  init  { <stmt>... }                     // assign exactly once to every variable (deterministic)
+  init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                        // 0 or more. conjunction. enabled condition
@@ -236,6 +236,14 @@ refinement <Name> {
 }
 ```
 
+Give impl and abs distinct enum/struct type names. Refinement merges type
+metadata by name; a same-named enum/struct with a different member list/field
+set on each side is rejected as `kind: "type"` (exit 2) rather than silently
+merged (merging would let an impl-only member get reinterpreted as whichever
+abs member sits at the same ordinal index). Same-named domain types
+(`lo..hi`) with different bounds are fine — an out-of-range value there is
+still caught as `map_out_of_bounds`/`abs_state_mismatch`.
+
 ## 2. Types
 
 | Type | How to write | Notes |
@@ -349,8 +357,17 @@ check as a type error.
      `helpful step(c) decreases level[c]`. Without `helpful`, an action advancing
      a different entity still reports `rank_failure:"non_decreasing_action"`.
      With `helpful`, diagnostics include `progress_action_not_fair`,
-     `helpful_action_not_enabled`, `non_decreasing_helpful_action`, and
-     `pending_not_preserved`.
+     `helpful_action_not_enabled`, `non_decreasing_helpful_action`,
+     `pending_not_preserved`, and (two or more distinct helpful actions)
+     `helpful_action_enabledness_not_sticky` — each helpful instance's
+     enabledness must not flicker (once enabled while pending, it must stay
+     enabled until it fires or Q holds), otherwise none is ever
+     *continuously* enabled and weak fairness never obligates it to run even
+     though "some" helpful match is always enabled — and
+     `non_helpful_action_increases_measure`: a non-helpful action may
+     preserve the pending obligation without decreasing the measure, but not
+     increase it, or an unbounded pump could outpace the helpful action's
+     guaranteed decrease and Q would never be reached.
    - **Global sum idiom**: `decreases sum(k: Case of level[k])` is still the
      simplest instances-count-independent measure when every enabled action
      decreases the total; works with `--instances` overrides too.
@@ -566,7 +583,9 @@ first failed layer and later layers are marked `skipped`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,
-  `helpful_action_not_enabled`, and `non_decreasing_helpful_action`).
+  `helpful_action_not_enabled`, `non_decreasing_helpful_action`,
+  `non_helpful_action_increases_measure`, and — with two or more distinct
+  helpful actions — `helpful_action_enabledness_not_sticky`).
 
 ### ⚠ Liveness scales differently from safety — verify it on a reduced model
 

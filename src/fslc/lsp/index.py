@@ -6,7 +6,12 @@
 This module intentionally reads ``fslc.grammar.PARSER`` directly and does not
 touch the tuple AST transformer or verifier kernel. FSL keywords are mostly
 contextual, so declarations and references are classified by parse-tree
-position, not by spelling.
+position, not by spelling. The `ai_component`/`dbsystem` frontend dialects
+have their own Lark grammars (``fslc.ai_parser``/``fslc.db_parser``) that
+never reach the kernel grammar at all -- ``build_index`` picks the matching
+raw parser via ``is_ai_component_source``/``is_dbsystem_source`` before
+falling back to the kernel ``PARSER``, so those files no longer fail to
+parse here just because indexing hard-codes the kernel grammar.
 """
 from __future__ import annotations
 
@@ -18,6 +23,8 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from lark import Tree, Token
 
 from fslc.grammar import PARSER
+from fslc.ai_parser import AI_PARSER, is_ai_component_source
+from fslc.db_parser import DB_PARSER, is_dbsystem_source
 
 
 VALUE_ROLES = {
@@ -70,6 +77,11 @@ _ROLE_TO_TOKEN_TYPE = {
     # properties / obligations (declared-name highlighting)
     "property": "event", "requirement": "event", "acceptance": "event",
     "forbidden": "event", "control": "event", "policy": "event", "goal": "event",
+    # ai_component / dbsystem dialects
+    "ai_component": "namespace", "dbsystem": "namespace",
+    "tool": "function", "table": "struct", "column": "property",
+    "artifact": "class", "migration": "function", "environment": "class",
+    "fallback_reason": "variable", "fallback_target": "variable",
 }
 
 # Roles that are synthetic block markers whose selection_range is a keyword, not an
@@ -86,7 +98,8 @@ FSL_KEYWORDS = [
     "const", "type", "symmetric", "enum", "struct", "entity", "number",
     "state", "init", "action", "fair", "requires", "ensures", "let",
     "if", "else", "forall", "exists", "invariant", "trans", "reachable",
-    "terminal", "until", "unless", "leadsTo", "decreases", "within",
+    "terminal", "until", "unless", "leadsTo", "decreases", "within", "helpful",
+    "relation", "acyclic", "functional", "injective", "domain", "range",
     "map", "maps", "auto", "impl", "abs", "preserve", "progress", "respond", "by",
     "implements", "requirement", "acceptance", "forbidden", "expect", "rejected",
     "time", "urgent", "age", "while", "deadline",
@@ -543,10 +556,18 @@ class DocumentIndex:
         return None
 
 
+def _parser_for_source(source: str):
+    if is_dbsystem_source(source):
+        return DB_PARSER
+    if is_ai_component_source(source):
+        return AI_PARSER
+    return PARSER
+
+
 def build_index(source: str, path: Optional[str] = None) -> DocumentIndex:
     """Parse ``source`` and return a raw-tree symbol/reference index."""
 
-    tree = PARSER.parse(source)
+    tree = _parser_for_source(source).parse(source)
     builder = _IndexBuilder(source, path)
     builder.visit(tree, None, None)
     return DocumentIndex(
@@ -768,6 +789,93 @@ class _IndexBuilder:
         finally:
             self._refinement_impl_name = previous_impl
             self._refinement_abs_name = previous_abs
+
+    # -- ai_component / dbsystem dialects (own grammars, see _parser_for_source) --
+
+    def _visit_ai_component(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_named_container(node, "ai_component", None)
+
+    def _visit_dbsystem(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_named_container(node, "dbsystem", None)
+
+    def _visit_tool_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "tool", _tree_range(node), parent=parent, detail="tool")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_name_list(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # authority may_suggest/may_execute/requires_human_approval/forbidden
+        # each reference a tool declared elsewhere in the same ai_component.
+        for child in node.children:
+            if isinstance(child, Token) and child.type == "NAME":
+                self._add_ref(child, "tool")
+
+    def _visit_fallback_item(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `when <reason> require <target>`: both are free labels with no
+        # corresponding declaration elsewhere in the grammar (see
+        # docs/DESIGN-ai-hard.md); record them so they still show up in
+        # outline/hover instead of silently vanishing.
+        names = [c for c in node.children if isinstance(c, Token) and c.type == "NAME"]
+        if len(names) >= 1:
+            self._add_symbol(names[0], "fallback_reason", _tree_range(node), parent=parent,
+                              detail="fallback reason", exported=False)
+        if len(names) >= 2:
+            self._add_symbol(names[1], "fallback_target", _tree_range(node), parent=parent,
+                              detail="fallback target", exported=False)
+
+    def _visit_table_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "table", _tree_range(node), parent=parent, detail="table")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_column_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(
+                token, "column", _tree_range(node),
+                scope_range=local_scope, parent=parent, detail="column", exported=False,
+            )
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_artifact_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "artifact", _tree_range(node), parent=parent, detail="artifact")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_migration_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "migration", _tree_range(node), parent=parent, detail="migration")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_environment_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "environment", _tree_range(node), parent=parent, detail="environment")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_col_ref(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `qualifier` on Reference means an import alias (resolved via
+        # import_for_alias), not "table.column" -- col_ref is same-file, so
+        # both names are plain, unqualified references (like struct `field`,
+        # column lookup is by name only and not scoped to its table).
+        names = [c for c in node.children if isinstance(c, Token) and c.type == "NAME"]
+        if len(names) == 2:
+            self._add_ref(names[0], "table")
+            self._add_ref(names[1], "column")
+
+    def _visit_env_artifact(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        names = [c for c in node.children if isinstance(c, Token) and c.type == "NAME"]
+        if names:
+            self._add_ref(names[0], "artifact")
 
     def _visit_named_container(
         self,
@@ -1071,6 +1179,15 @@ class _IndexBuilder:
     def _visit_leadsto_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_property(node, parent, "leadsTo")
 
+    def _visit_leadsto_helpful(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `helpful NAME(args)`: NAME references an action declared elsewhere;
+        # it was previously a bare Token skipped by the generic child walk,
+        # so rename/find-references never saw it.
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "action")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
     def _visit_until_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_property(node, parent, "until")
 
@@ -1220,9 +1337,13 @@ class _IndexBuilder:
         self._visit_children_after_first_token(node, parent, _tree_range(node))
 
     def _visit_deadline_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `deadline NAME <= expr`: NAME is a reference to an already-declared
+        # `age NAME[...]` state variable (dialects.py rejects an undeclared
+        # one as "deadline references undeclared age"), not a new property
+        # name -- multiple `deadline` lines may even target the same age var.
         token = _first_token(node)
         if token is not None:
-            self._add_symbol(token, "property", _tree_range(node), parent=parent, detail="deadline")
+            self._add_ref(token, "state_var")
         self._visit_children_after_first_token(node, parent, local_scope)
 
     def _visit_actor_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
@@ -1590,6 +1711,14 @@ def _roles_for_reference(role: str) -> set:
         return {"alias"}
     if role == "field":
         return {"field"}
+    if role == "tool":
+        return {"tool"}
+    if role == "table":
+        return {"table"}
+    if role == "column":
+        return {"column"}
+    if role == "artifact":
+        return {"artifact"}
     return set(VALUE_ROLES)
 
 
