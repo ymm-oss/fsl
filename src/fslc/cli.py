@@ -1337,12 +1337,14 @@ def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
-             "verified_under_assumptions", "replay_conformant"):
+             "verified_under_assumptions", "replay_conformant",
+             "observed_conformant", "imported", "imported_with_warnings"):
         return 0
     if r == "sweep_passed":
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant",
-             "refinement_failed", "sweep_failed", "replay_nonconformant"):
+             "refinement_failed", "sweep_failed", "replay_nonconformant",
+             "observed_mismatch"):
         return 1
     if r == "error":
         kind = result.get("kind")
