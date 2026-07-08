@@ -171,6 +171,61 @@ spec StateWrites {
     assert all(f["formal_status"] == "not_a_violation" for f in unwritten)
 
 
+def test_unread_state_uses_transitive_relevance_closure(tmp_path):
+    path = _write(tmp_path, """
+spec StateRelevance {
+  state {
+    source: Int,
+    derived: Int,
+    observed: Int,
+    dead_source: Int,
+    dead_derived: Int,
+    audit: Int
+  }
+  init {
+    source = 0
+    derived = 0
+    observed = 0
+    dead_source = 0
+    dead_derived = 0
+    audit = 0
+  }
+  action update_source() {
+    source = source + 1
+  }
+  action derive() {
+    derived = source + 1
+  }
+  action observe() {
+    observed = derived + 1
+  }
+  action update_dead_source() {
+    dead_source = dead_source + 1
+  }
+  action derive_dead() {
+    dead_derived = dead_source + 1
+  }
+  action audit_event() "REQ-AUDIT: audit is externally consumed" {
+    audit = audit + 1
+  }
+  invariant ObservedMatters { observed >= 0 }
+}
+""")
+
+    out = run_analyze(str(path), profile="ai-review")
+    unread = _findings(out, "unread_state")
+    unread_nodes = {tuple(f["involved_nodes"]) for f in unread}
+
+    assert ("state:dead_source",) in unread_nodes
+    assert ("state:dead_derived",) in unread_nodes
+    assert ("state:source",) not in unread_nodes
+    assert ("state:derived",) not in unread_nodes
+    assert ("state:observed",) not in unread_nodes
+    assert ("state:audit",) not in unread_nodes
+    assert all(f["witness"]["kind"] == "state_influences_no_check" for f in unread)
+    assert all(f["formal_status"] == "not_a_violation" for f in unread)
+
+
 def test_unguarded_action_positive_and_negative(tmp_path):
     path = _write(tmp_path, """
 spec ActionGuards {
@@ -193,3 +248,39 @@ spec ActionGuards {
     assert any(f["involved_nodes"] == ["action:broad"] for f in unguarded)
     assert not any(f["involved_nodes"] == ["action:guarded"] for f in unguarded)
     assert all(f["candidate_repairs"] and f["do_not_assume"] for f in unguarded)
+
+
+def test_conservation_candidate_from_counter_effects(tmp_path):
+    path = _write(tmp_path, """
+spec ConservationCandidate {
+  state { stock: Int, reserved: Int, audit: Int }
+  init { stock = 2  reserved = 0  audit = 0 }
+  action reserve() {
+    stock = stock - 2
+    reserved = reserved + 1
+  }
+  action release() {
+    stock = stock + 2
+    reserved = reserved - 1
+  }
+  action audit_event() {
+    audit = audit + 1
+  }
+  invariant Any "MODEL: baseline" { true }
+}
+""")
+
+    out = run_analyze(str(path), profile="ai-review")
+    candidates = _findings(out, "conservation_candidate")
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["formal_status"] == "not_a_violation"
+    assert candidate["witness"]["kind"] == "weighted_sum_conservation_candidate"
+    assert candidate["witness"]["expression"] == "2*reserved + stock"
+    assert candidate["witness"]["weights"] == {"reserved": 2, "stock": 1}
+    assert {"state:reserved", "state:stock", "action:reserve", "action:release"}.issubset(
+        set(candidate["involved_nodes"])
+    )
+    assert all(item["weighted_sum_delta"] == 0 for item in candidate["witness"]["action_net_effects"])
+    assert "verify" in candidate["candidate_repairs"][0]["template"]

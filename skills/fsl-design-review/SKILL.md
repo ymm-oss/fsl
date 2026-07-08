@@ -155,10 +155,12 @@ code diverges from it — make this distinction explicit in the report.
 
 - **Structural review before repair**: for AI-authored or heavily patched specs,
   run `fslc analyze <file> --profile ai-review` alongside `check`/`verify`.
-  Findings such as `disconnected_requirement`, `unanchored_property`, and
-  `progressless_cycle` are review signals, not LSP/refinement failures. Use them
-  to ask whether the contract has traceability holes or missing progress intent
-  before changing the spec. Do not weaken a contract merely to remove an
+  Findings such as `disconnected_requirement`, `unanchored_property`,
+  `progressless_cycle`, `unread_state`, and `conservation_candidate` are review
+  signals, not LSP/refinement failures. Use them to ask whether the contract has
+  traceability holes, missing progress intent, dead state clusters, or implicit
+  invariants worth proving before changing the spec. Do not weaken a contract
+  merely to remove an
   `analyze` finding; the finding's `formal_status` is normally
   `not_a_violation`.
 - **Variant matrix**: when there are multiple variants, push the refine of all

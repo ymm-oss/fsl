@@ -11,7 +11,7 @@ try:
 except ImportError:  # pragma: no cover - Python 3.9/3.10
     import tomli as tomllib
 
-from .graph import connected_components, degree_summary, representative_cycles, strongly_connected_components
+from .graph import connected_components, degree_summary, metrics_summary, representative_cycles, strongly_connected_components
 from .schema import GRAPH_SCHEMA_VERSION, edge, node, stable_unique
 from .tsg import build_tsg, expr_reads, node_by_id
 from ..model import build_spec
@@ -86,6 +86,8 @@ class _ProjectTraceabilityBuilder:
         nodes = stable_unique(self.nodes, key=lambda n: n["id"])
         edges = stable_unique(self.edges, key=lambda e: e["id"])
         node_ids = [n["id"] for n in nodes]
+        components = connected_components(node_ids, edges)
+        sccs = strongly_connected_components(node_ids, edges)
         return {
             "analysis": "structure",
             "projection": "traceability_graph",
@@ -96,17 +98,18 @@ class _ProjectTraceabilityBuilder:
             "edges": edges,
             "components": [
                 {"id": f"component:{idx}", "nodes": comp}
-                for idx, comp in enumerate(connected_components(node_ids, edges))
+                for idx, comp in enumerate(components)
             ],
             "sccs": [
                 {"id": f"scc:{idx}", "nodes": comp}
-                for idx, comp in enumerate(strongly_connected_components(node_ids, edges))
+                for idx, comp in enumerate(sccs)
             ],
             "cycles": [
                 {"id": f"cycle:{idx}", "steps": cycle}
                 for idx, cycle in enumerate(representative_cycles(node_ids, edges))
             ],
             "degree": degree_summary(node_ids, edges),
+            "metrics": metrics_summary(node_ids, edges, components=components, sccs=sccs),
             "findings": self.findings,
         }
 

@@ -33,6 +33,7 @@
     "sccs": { "type": "array", "items": { "$ref": "#/$defs/component" } },
     "cycles": { "type": "array", "items": { "$ref": "#/$defs/cycle" } },
     "degree": { "type": "array", "items": { "$ref": "#/$defs/degree" } },
+    "metrics": { "$ref": "#/$defs/metrics" },
     "findings": { "type": "array" }
   },
   "additionalProperties": true,
@@ -99,6 +100,42 @@
         "in": { "type": "integer", "minimum": 0 },
         "out": { "type": "integer", "minimum": 0 },
         "total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "node_count",
+        "edge_count",
+        "component_count",
+        "scc_count",
+        "cycle_rank",
+        "max_fan_in",
+        "max_fan_out",
+        "top_fan_in",
+        "top_fan_out"
+      ],
+      "properties": {
+        "node_count": { "type": "integer", "minimum": 0 },
+        "edge_count": { "type": "integer", "minimum": 0 },
+        "component_count": { "type": "integer", "minimum": 0 },
+        "scc_count": { "type": "integer", "minimum": 0 },
+        "cycle_rank": { "type": "integer", "minimum": 0 },
+        "max_fan_in": { "$ref": "#/$defs/max_fan" },
+        "max_fan_out": { "$ref": "#/$defs/max_fan" },
+        "top_fan_in": { "type": "array", "items": { "type": "object" } },
+        "top_fan_out": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "max_fan": {
+      "type": "object",
+      "required": ["value", "nodes", "truncated"],
+      "properties": {
+        "value": { "type": "integer", "minimum": 0 },
+        "nodes": { "type": "array", "items": { "type": "string" } },
+        "truncated": { "type": "boolean" }
       },
       "additionalProperties": true
     }
