@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Documented the agent-side natural-language review boundary for
+  `fslc analyze`: `fslc` remains deterministic and language-agnostic, while AI
+  agents may add non-authoritative review suggestions only when they cite source
+  text and graph nodes, keep `formal_status:"not_a_violation"`, and respect
+  explicit privacy opt-in for external model calls. (#117)
 - fsl-ai recursive `agent` composition: `fslc ai check` now parses nested
   agents as ordinary scoped agents, emits deterministic AI-readable
   `agent_ir`/graph summaries, validates explicit authority/context grant
