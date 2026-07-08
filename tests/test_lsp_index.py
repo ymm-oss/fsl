@@ -621,3 +621,139 @@ def test_completion_member_after_alias_dot():
     exported_names = {sym.name for sym in cart_index.symbols if sym.exported}
     labels = {c.label for c in completions}
     assert labels == exported_names
+
+
+def test_leadsto_helpful_action_name_is_indexed_as_a_reference():
+    # Regression: `helpful NAME(...)` inside `leadsTo` used to be a bare
+    # Token skipped by the generic child walk, so go-to-definition and
+    # find-references never saw the helpful action name.
+    source = '''spec HelpfulRefDemo {
+  state { x: Int }
+  init { x = 0 }
+  fair action step() {
+    requires x < 3
+    x = x + 1
+  }
+  leadsTo Finishes {
+    x == 0 ~> x == 3
+    helpful step()
+  }
+}
+'''
+    index = build_index(source)
+    step_decl = _symbol(index, "step", "action")
+    helpful_ref = _reference(index, "step", "action")
+
+    loc = index.definition_at(helpful_ref.range.start.line, helpful_ref.range.start.character)
+    assert loc is not None
+    assert loc.range == step_decl.selection_range
+
+    refs = index.references_at(
+        step_decl.selection_range.start.line,
+        step_decl.selection_range.start.character,
+    )
+    assert helpful_ref.range in refs
+    assert step_decl.selection_range in refs
+
+
+def test_deadline_name_is_a_reference_to_the_declared_age_not_a_new_property():
+    # Regression: `deadline NAME <= expr` used to register NAME as a new
+    # "property" symbol instead of a reference to the already-declared
+    # `age NAME[...]` variable, so it neither resolved to nor showed up in
+    # find-references for the age declaration.
+    source = '''requirements DeadlineRefDemo {
+  type CaseId = 0..0
+  enum St { Waiting, Accepted, Responded }
+
+  state {
+    cases: Map<CaseId, St>
+  }
+  init {
+    forall c: CaseId { cases[c] = Waiting }
+  }
+
+  requirement REQ-1 "accept" {
+    fair action accept(c: CaseId) {
+      requires cases[c] == Waiting
+      cases[c] = Accepted
+    }
+  }
+
+  time {
+    age resp_age[c: CaseId] while cases[c] == Accepted
+  }
+
+  requirement REQ-2 "respond within deadline" {
+    fair action respond(c: CaseId) {
+      requires cases[c] == Accepted
+      cases[c] = Responded
+    }
+    deadline resp_age <= 3
+  }
+}
+'''
+    index = build_index(source)
+    age_decl = _symbol(index, "resp_age", "state_var")
+    assert not any(sym.name == "resp_age" and sym.role == "property" for sym in index.symbols)
+
+    deadline_ref = _reference(index, "resp_age", "state_var")
+    loc = index.definition_at(deadline_ref.range.start.line, deadline_ref.range.start.character)
+    assert loc is not None
+    assert loc.range == age_decl.selection_range
+
+    refs = index.references_at(age_decl.selection_range.start.line, age_decl.selection_range.start.character)
+    assert deadline_ref.range in refs
+
+
+def test_build_index_handles_ai_component_dialect_without_crashing():
+    # Regression: build_index hard-coded the kernel-only PARSER, so any
+    # ai_component/dbsystem file threw UnexpectedCharacters and every LSP
+    # feature (go-to-def, references, hover, semanticTokens) went dark for
+    # that file even though `fslc check` (parse_src) handled it fine.
+    source = '''ai_component RefDemo {
+  tool SearchOrder {
+    schema SearchOrderV1;
+  }
+  authority {
+    may_execute SearchOrder;
+  }
+}
+'''
+    index = build_index(source, "ref_demo.fsl")
+    component = _symbol(index, "RefDemo", "ai_component")
+    tool_decl = _symbol(index, "SearchOrder", "tool")
+    tool_ref = _reference(index, "SearchOrder", "tool")
+
+    loc = index.definition_at(tool_ref.range.start.line, tool_ref.range.start.character)
+    assert loc is not None
+    assert loc.range == tool_decl.selection_range
+    assert component.range.start.line == 0
+
+
+def test_build_index_handles_dbsystem_dialect_without_crashing():
+    source = '''dbsystem RefDbDemo {
+  database app {
+    schema 0
+    table users {
+      column id: Int present not_null;
+    }
+  }
+  artifact server {
+    reads users.id;
+  }
+}
+'''
+    index = build_index(source, "ref_db_demo.fsl")
+    _symbol(index, "RefDbDemo", "dbsystem")
+    table_decl = _symbol(index, "users", "table")
+    column_decl = _symbol(index, "id", "column")
+    table_ref = _reference(index, "users", "table")
+    column_ref = _reference(index, "id", "column")
+
+    table_loc = index.definition_at(table_ref.range.start.line, table_ref.range.start.character)
+    assert table_loc is not None
+    assert table_loc.range == table_decl.selection_range
+
+    column_loc = index.definition_at(column_ref.range.start.line, column_ref.range.start.character)
+    assert column_loc is not None
+    assert column_loc.range == column_decl.selection_range
