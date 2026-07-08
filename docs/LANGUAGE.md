@@ -228,13 +228,30 @@ false: the measure is non-negative; progress is possible; and the enabled-action
 discipline is satisfied. Without `helpful`, every enabled action must either make
 `Q` true or keep `P` true while strictly decreasing the measure. With one or more
 `helpful action(args...)` lines, only the matching helpful action instance must
-strictly decrease the measure when it fires; unrelated action instances only need
-to keep the pending obligation true unless they make `Q` true. The matching
+strictly decrease the measure when it fires; unrelated action instances must
+keep the pending obligation true (unless they make `Q` true) and must not
+increase the measure -- an unbounded increase between helpful firings could
+outpace the guaranteed decrease and prevent `Q` from ever being reached, even
+though the helpful action keeps firing under fairness. The matching
 helpful action must be a lower-layer `fair action` and must be enabled whenever
 the obligation is pending. `helpful` is metadata for the ranked proof: it does
 not create a fairness assumption. Ranked proof success is independent of
 `--depth`; `--depth` is still used for the base BMC check and
 reachable/coverage evidence.
+
+**With two or more distinct `helpful` action names**, each instance's
+enabledness must not flicker: once a helpful instance becomes enabled while
+the obligation is pending, it must stay enabled until it fires (or `Q` holds).
+"Some helpful match is enabled at every pending state" is not enough on its
+own -- if *which* instance is enabled keeps changing (e.g. two helpful
+actions enabled on alternating conditions), no single instance is ever
+*continuously* enabled, so its `fair` declaration never actually obligates it
+to run, and the leadsTo can be genuinely false even though the disjunctive
+enabledness check passes. This is reported as
+`rank_failure:"helpful_action_enabledness_not_sticky"`. The common single
+per-binding `helpful step(c)` idiom above is unaffected: with one helpful
+action, "always enabled while pending" already implies it is continuously
+enabled.
 
 **Placement.** `decreases` is a sibling of the response body inside the
 `leadsTo` block, *outside* any `forall` wrapper — never nested inside the
@@ -270,10 +287,12 @@ leadsTo Responds {
 
 With this form, `step(c)` must be declared `fair action`, must be enabled in
 every pending state for that binding, and must strictly decrease `level[c]`
-when it fires. Other interleavings may preserve the pending obligation without
-decreasing this per-entity measure. Diagnostics distinguish
-`progress_action_not_fair`, `helpful_action_not_enabled`,
-`non_decreasing_helpful_action`, and `pending_not_preserved`.
+when it fires. Other interleavings may preserve the pending obligation
+without decreasing this per-entity measure, but must not increase it.
+Diagnostics distinguish `progress_action_not_fair`,
+`helpful_action_not_enabled`, `non_decreasing_helpful_action`,
+`non_helpful_action_increases_measure`, `pending_not_preserved`, and (with
+two or more helpful actions) `helpful_action_enabledness_not_sticky`.
 
 **Working idiom: a global sum measure.** Sum the tracked quantity across the
 domain with the built-in `sum()` aggregate (§3): `decreases sum(k: Case of

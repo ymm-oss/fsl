@@ -3161,7 +3161,9 @@ _LEADSTO_HELPFUL_PROGRESS_HINT = (
     "helpful marks which action instance is responsible for progress. The "
     "matching action must be declared `fair action`, must be enabled whenever "
     "the obligation is pending, and must strictly decrease the rank when it fires; "
-    "other actions only need to keep the pending obligation true unless they make Q true"
+    "other actions must keep the pending obligation true (unless they make Q true) "
+    "and must not increase the measure -- an unbounded increase between helpful "
+    "firings can outpace the guaranteed decrease and prevent Q from ever being reached"
 )
 
 
@@ -3381,6 +3383,86 @@ def _prove_leadsto_rank_helpful_fairness(spec, leadsto, extra_binds, binding_typ
     })
 
 
+def _prove_leadsto_rank_helpful_sticky(spec, leadsto, extra_binds, binding_types, invariants, instances):
+    """Each helpful instance must stay enabled (or Q resolve) until it fires.
+
+    `_prove_leadsto_rank_no_deadlock` only proves that *some* helpful match is
+    enabled at every pending state -- a disjunction. With a single helpful
+    match that is enough (it is then the one enabled at every such state, so
+    it is continuously enabled while pending). With more than one, the
+    disjunction can be satisfied by a *different* instance at each step (e.g.
+    two helpful actions whose enabledness alternates), in which case no
+    single instance is ever continuously enabled and its `fair` declaration
+    is never obligated to fire -- the induction would then report "proved"
+    for a leadsTo that BMC can find a genuine fair counterexample to. This
+    check additionally requires that once a helpful instance becomes enabled
+    while pending, no other action can disable it again before it either
+    fires itself or Q becomes true, which is what actually licenses invoking
+    that instance's weak fairness.
+    """
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if len(helpful_matches) < 2:
+        return None
+
+    expr_cache = {}
+    cur = make_ind_state(spec, f"rank_{leadsto['name']}_sticky_cur")
+    nxt = make_ind_state(spec, f"rank_{leadsto['name']}_sticky_next")
+    choice = z3.Int(f"__rank_sticky_choice_{leadsto['name']}")
+    solver = z3.Solver()
+    solver.add(choice >= 0, choice < len(instances))
+    solver.add(*_enum_phys_constraints(spec, cur))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, cur, spec, expr_cache))
+    with _eval_cache_scope(expr_cache, id(cur)):
+        solver.add(transition(spec, instances, cur, nxt, choice, expr_cache))
+
+    p = _eval_at_state(leadsto["P"], cur, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], cur, extra_binds, spec, expr_cache)
+    q_next = _eval_at_state(leadsto["Q"], nxt, extra_binds, spec, expr_cache)
+
+    for idx, helper in helpful_matches:
+        enabled_cur = _enabled_instance(instances[idx], cur, spec, extra_binds, expr_cache)
+        enabled_next = _enabled_instance(instances[idx], nxt, spec, extra_binds, expr_cache)
+        solver.push()
+        solver.add(p, z3.Not(q), enabled_cur, choice != idx, z3.Not(q_next), z3.Not(enabled_next))
+        sat = solver.check()
+        if sat == z3.sat:
+            model = solver.model()
+            trace = _build_trace(model, [cur, nxt], [choice], instances, spec, 1)
+            solver.pop()
+            return _attach_requirement({
+                "result": "unknown_cti",
+                "spec": spec["name"],
+                "violation_kind": "leadsTo_rank",
+                "invariant": leadsto["name"],
+                "loc": leadsto.get("loc"),
+                "bindings": _display_leadsto_bindings(model, extra_binds, spec, binding_types),
+                "measure": _leadsto_measure_label(leadsto.get("decreases")),
+                "rank_failure": "helpful_action_enabledness_not_sticky",
+                "helpful_actions": _display_helpful_instances([(idx, helper)], instances, spec),
+                "last_action": _last_action(model, [choice], instances, 1, spec),
+                "cti": {
+                    "states": trace,
+                    "violated_at": 1,
+                },
+                "message": (
+                    f"helpful action '{_display_helpful_instances([(idx, helper)], instances, spec)[0]['name']}' "
+                    f"can become disabled again while leadsTo '{display_label(leadsto['name'], spec)}' is "
+                    "still pending, without itself having fired"
+                ),
+                "hint": (
+                    "with more than one `helpful` action, each instance's enabledness must not "
+                    "flicker: once a helpful instance becomes enabled while the obligation is "
+                    "pending, it must stay enabled until it fires (or Q holds) -- otherwise its "
+                    "weak fairness is never triggered, since it is never continuously enabled. "
+                    "Guard the other actions so they cannot disable a pending helpful instance, "
+                    "or split into a leadsTo per helpful action so each owns a stable region"
+                ),
+            }, leadsto)
+        solver.pop()
+    return None
+
+
 def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, invariants, instances):
     expr_cache = {}
     cur = make_ind_state(spec, f"rank_{leadsto['name']}_cur")
@@ -3404,7 +3486,12 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
     helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
     if helpful_matches:
         helpful_choice = z3.Or(*[choice == idx for idx, _helper in helpful_matches])
-        pending_preserved = z3.Or(q_next, p_next)
+        # A non-helpful action must not increase the measure either: an
+        # unbounded increase between successive (fairness-guaranteed, but
+        # not fairness-scheduled) helpful firings could outpace the bounded
+        # decrease each firing provides, so Q would never actually be
+        # reached even though the helpful action keeps firing.
+        pending_preserved = z3.Or(q_next, z3.And(p_next, measure_next <= measure))
         allowed = z3.Or(
             z3.And(helpful_choice, progress),
             z3.And(z3.Not(helpful_choice), pending_preserved),
@@ -3422,6 +3509,7 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
     q_next_holds = _model_bool(model, q_next)
     p_next_holds = _model_bool(model, p_next)
     decreases = _model_bool(model, measure_next < measure)
+    increases = _model_bool(model, measure_next > measure)
     choice_idx = model.eval(choice, model_completion=True).as_long()
     helpful_idx_set = {idx for idx, _helper in helpful_matches}
     rank_failure = "non_decreasing_action"
@@ -3429,6 +3517,8 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
         rank_failure = "pending_not_preserved"
     elif helpful_matches and choice_idx in helpful_idx_set and not decreases:
         rank_failure = "non_decreasing_helpful_action"
+    elif helpful_matches and choice_idx not in helpful_idx_set and increases:
+        rank_failure = "non_helpful_action_increases_measure"
     detail = {
         "result": "unknown_cti",
         "spec": spec["name"],
@@ -3461,6 +3551,12 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
             f"leadsTo '{display_label(leadsto['name'], spec)}' pending without "
             "strictly decreasing the measure"
         )
+    elif rank_failure == "non_helpful_action_increases_measure":
+        detail["message"] = (
+            f"non-helpful action '{trace[1]['action']['name']}' can increase the "
+            f"measure while leadsTo '{display_label(leadsto['name'], spec)}' is "
+            "still pending, which could outpace the helpful action's guaranteed decrease"
+        )
     else:
         detail["message"] = (
             f"enabled action '{trace[1]['action']['name']}' can leave "
@@ -3485,6 +3581,10 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 if failure is not None:
                     return failure, None
                 failure = _prove_leadsto_rank_helpful_fairness(
+                    spec, leadsto, extra_binds, binding_types, invariants, instances)
+                if failure is not None:
+                    return failure, None
+                failure = _prove_leadsto_rank_helpful_sticky(
                     spec, leadsto, extra_binds, binding_types, invariants, instances)
                 if failure is not None:
                     return failure, None
@@ -3522,6 +3622,11 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                         candidate_failed = True
                         break
                     failure = _prove_leadsto_rank_helpful_fairness(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+                    failure = _prove_leadsto_rank_helpful_sticky(
                         spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
                     if failure is not None:
                         candidate_failed = True
