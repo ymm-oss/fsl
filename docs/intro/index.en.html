@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSL Manual — Concepts, Workflow, Business Layer, Requirements Layer, fsl-db, fsl-ai, Syntax</title>
-<meta name="description" content="The English FSL manual. Read the concept, when to use FSL, workflow, verification mechanisms, business layer, requirements layer, fsl-db, fsl-ai, and syntax guide." />
+<title>FSL Manual — Concepts, Workflow, Business Layer, Requirements Layer, fsl-domain, fsl-db, fsl-ai, Syntax</title>
+<meta name="description" content="The English FSL manual. Read the concept, when to use FSL, workflow, verification mechanisms, business layer, requirements layer, fsl-domain, fsl-db, fsl-ai, and syntax guide." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="manual-home" data-page="index">
@@ -18,7 +18,7 @@
   <div class="wrap narrow center">
     <p class="kicker reveal">FSL Manual</p>
     <h1 class="reveal">FSL Manual</h1>
-    <p class="lead reveal">A practical manual for machine-checked specifications, from concepts and workflow to business, requirements, design, fsl-db, fsl-ai, and syntax.</p>
+    <p class="lead reveal">A practical manual for machine-checked specifications, from concepts and workflow to business, requirements, design, fsl-domain, fsl-db, fsl-ai, and syntax.</p>
     <p class="reveal" style="margin-top:12px">In FSL, <b>the spec you write is the documentation</b> — the same text people read is the text the machine verifies, so the two can never drift apart.</p>
     <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
       <span class="pill">Concept</span>
@@ -29,6 +29,7 @@
       <span class="pill">Design Layer</span>
       <span class="pill">Syntax</span>
       <span class="pill">Analyze</span>
+      <span class="pill">fsl-domain</span>
       <span class="pill">fsl-db</span>
       <span class="pill">fsl-ai</span>
     </div>
@@ -51,8 +52,9 @@
         <a class="chapter-link" href="design-layer.en.html"><span class="num">07</span><span><strong>Design Layer</strong><span>Internal state, refinement, compose</span></span></a>
         <a class="chapter-link" href="syntax.en.html"><span class="num">08</span><span><strong>Syntax Guide</strong><span>Types, actions, properties</span></span></a>
         <a class="chapter-link" href="analysis.en.html"><span class="num">09</span><span><strong>Structural Analysis</strong><span>TSG, graph projections, findings</span></span></a>
-        <a class="chapter-link" href="db.en.html"><span class="num">10</span><span><strong>fsl-db</strong><span>DB / multi-env compatibility</span></span></a>
-        <a class="chapter-link" href="ai.en.html"><span class="num">11</span><span><strong>fsl-ai</strong><span>AI contracts and agents</span></span></a>
+        <a class="chapter-link" href="domain.en.html"><span class="num">10</span><span><strong>fsl-domain</strong><span>DDD / async effects</span></span></a>
+        <a class="chapter-link" href="db.en.html"><span class="num">11</span><span><strong>fsl-db</strong><span>DB / multi-env compatibility</span></span></a>
+        <a class="chapter-link" href="ai.en.html"><span class="num">12</span><span><strong>fsl-ai</strong><span>AI contracts and agents</span></span></a>
       </nav>
       <div class="manual-main">
         <article class="chapter-card">
@@ -102,11 +104,16 @@
         </article>
         <article class="chapter-card">
           <span class="num">10</span>
+          <div><h3>fsl-domain</h3><p>Use <code>domain</code> to model Functional DDD aggregates, pure decide/evolve logic, async effects, and generated TypeScript scaffolds.</p></div>
+          <a class="btn" href="domain.en.html">Read</a>
+        </article>
+        <article class="chapter-card">
+          <span class="num">11</span>
           <div><h3>fsl-db</h3><p>Use <code>dbsystem</code> to check database migration compatibility across schema versions, artifact capabilities, multiple environments, and rollout windows.</p></div>
           <a class="btn" href="db.en.html">Read</a>
         </article>
         <article class="chapter-card">
-          <span class="num">11</span>
+          <span class="num">12</span>
           <div><h3>fsl-ai</h3><p>Use <code>ai_component</code> for AI tool authority and replay, and <code>agent</code> for recursive scope, grants, visibility, orchestration, and failure policy.</p></div>
           <a class="btn" href="ai.en.html">Read</a>
         </article>
@@ -164,6 +171,11 @@
         <h3>Review structure</h3>
         <p>Use <code>fslc analyze</code> to inspect traceability, graph projections, and AI-review findings without treating them as verifier failures.</p>
         <p><a class="btn" href="analysis.en.html">Read Analyze</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Generate domain scaffolds</h3>
+        <p>Use <code>domain</code> to make aggregate ownership, commands, events, async effects, and Functional DDD scaffolds explicit.</p>
+        <p><a class="btn" href="domain.en.html">Read fsl-domain</a></p>
       </div>
       <div class="syntax-card">
         <h3>Check DB compatibility</h3>

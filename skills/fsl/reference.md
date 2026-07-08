@@ -158,6 +158,77 @@ for SQL DDL or minimal Prisma schema importers. Production-data preservation and
 DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
 `formal_result: "not_run"`, not `verified`/`proved`.
 
+Functional DDD / async effect dialect (MVP; expands to the same kernel and
+reports stable fsl-domain findings):
+
+```fsl
+domain <Name> {
+  implementation_profile functional_ddd
+  type OrderStatus = Pending | Approved | Cancelled
+
+  aggregate Order {
+    id OrderId
+    state { status: OrderStatus = Pending; }
+    command ApproveOrder {}
+    event OrderApproved {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    error CannotApprove
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+    evolve OrderApproved { status = Approved }
+    evolve PaymentCaptureRequested { }
+    evolve PaymentCaptured { }
+    evolve PaymentFailed { }
+    evolve PaymentCaptureTimedOut { }
+    invariant noLateApprove { status == Cancelled -> not can(ApproveOrder) }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry { max_attempts 3 }
+    timeout after 10m emits PaymentCaptureTimedOut
+    compensation { emits PaymentFailed }
+  }
+
+  saga OrderFulfillment {
+    starts_on OrderApproved
+    outbox OrderOutbox
+    inbox FulfillmentInbox
+    step RequestPayment {
+      async
+      emits PaymentCaptureRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+      timeout after 10m emits PaymentCaptureTimedOut
+    }
+  }
+}
+```
+
+`domain` models aggregate ownership, command intent, accepted events, domain
+errors, pure `decide`/`evolve`, async effect lifecycles, and saga/process-manager
+coordination. It lowers to kernel actions/state/invariants plus finite effect
+status/attempt maps. Domain enum members are namespaced during lowering, so
+separate enums may reuse words like `Pending`. Domain expressions may use `X in
+[A, B]` and `can(Command)`.
+Use `fslc domain check` for `verified_under_assumptions` plus fsl-domain
+findings, `fslc domain expand` to inspect the generated kernel, and
+`fslc domain generate --target typescript|python|kotlin|swift|rust` /
+`fslc domain testgen` for Functional DDD and adapter scaffolds. Use
+`fslc domain replay --logs` for runtime command/event/effect evidence
+(`conformance_checked` / `nonconformant`, not proof). Saga history adds
+`DOMAIN-ASSUME-SAGA-HISTORY-MVP`. The MVP does not prove real gateway behavior,
+queue delivery, wall-clock timeouts, or production exactly-once semantics.
+
 AI hard-contract dialect (Phase 1; expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
 
@@ -481,6 +552,12 @@ fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_depend
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
+fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / effect findings
+fslc domain analyze <f>                                      # aggregate/effect ownership summary
+fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
+fslc domain generate <f> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain testgen <f> [--target vitest] [-o out]           # adapter/conformance scaffold
+fslc domain replay <f> --logs events.jsonl                  # runtime command/event/effect evidence
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
 fslc db observe <f> --trace events.json                 # runtime observation evidence
 fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o out.fsl]

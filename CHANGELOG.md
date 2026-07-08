@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- fsl-domain / fsl-effect MVP for Functional DDD and async lifecycle modeling:
+  `domain` files now parse aggregate state, command/event/error, pure
+  `decide`/`evolve`, projections, saga/process-manager steps, async effects
+  with correlation/idempotency/retry/timeout/compensation/outbox boundaries, and
+  lower the checkable slice to the existing kernel. Added
+  `fslc domain check|analyze|expand|generate|testgen|replay`, TypeScript
+  Functional DDD scaffolds with process-manager output, simple
+  Python/Kotlin/Swift/Rust scaffolds, domain adapter/conformance scaffolds,
+  stable `fsl-domain-finding.v0` findings, examples under `examples/domain/`,
+  and docs/skills/manual updates. Runtime replay is observation evidence; the
+  MVP keeps external API/queue/wall-clock and production exactly-once guarantees
+  outside formal proof.
 - Documented the agent-side natural-language review boundary for
   `fslc analyze`: `fslc` remains deterministic and language-agnostic, while AI
   agents may add non-authoritative review suggestions only when they cite source

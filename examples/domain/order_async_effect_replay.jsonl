@@ -1,0 +1,5 @@
+{"event":"command","aggregate":"Order","command":"ApproveOrder","params":{}}
+{"event":"command","aggregate":"Order","command":"RequestPaymentCapture","params":{"payment_request_id":"p1"}}
+{"event":"domain_event","aggregate":"Order","name":"PaymentCaptureRequested","params":{"payment_request_id":"p1"}}
+{"event":"effect_request","effect":"CapturePayment","correlation_id":"p1"}
+{"event":"effect_completion","effect":"CapturePayment","name":"PaymentCaptured","correlation_id":"p1","params":{"payment_request_id":"p1"}}

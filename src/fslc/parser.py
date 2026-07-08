@@ -25,6 +25,8 @@ from .db_expand import expand_dbsystem
 from .db_parser import is_dbsystem_source, parse_dbsystem
 from .ai_expand import expand_ai_component
 from .ai_parser import is_ai_component_source, parse_ai_component
+from .domain_expand import expand_domain
+from .domain_parser import is_domain_source, parse_domain
 
 
 def parse_src(src, base_dir=None, bounds_overrides=None):
@@ -62,6 +64,21 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
             )
         component = parse_ai_component(src)
         expanded = expand_ai_component(component)
+        return expanded.ast, expanded.display_names
+
+    if is_domain_source(src):
+        has_bounds_overrides = bool(
+            bounds_overrides
+            and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
+        )
+        if has_bounds_overrides:
+            from .model import FslError
+            raise FslError(
+                "--instances/--values do not apply to domain; declare finite ID/value ranges in the domain file",
+                kind="semantics",
+            )
+        domain = parse_domain(src)
+        expanded = expand_domain(domain)
         return expanded.ast, expanded.display_names
 
     try:

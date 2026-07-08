@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fsl-domain によるFunctional DDDと非同期Effect — FSL 日本語マニュアル</title>
+<meta name="description" content="fsl-domainでFunctional DDDのaggregate、command、event、純粋なdecide/evolve、saga、非同期effect、scaffold、runtime replay、conformance adapterを扱う方法。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="domain">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Functional DDD / async effects</p>
+    <h1 class="reveal"><code>domain</code> でドメイン遷移を明示する</h1>
+    <p class="lead reveal">fsl-domain は、aggregate の所有範囲、command の意図、受理された event、純粋な <code>decide/evolve</code>、saga/process-manager、非同期 effect lifecycle を、検証・replay・scaffold 生成に使える形で書く dialect です。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="../DESIGN-domain.md">DESIGN-domain.md</a> と <a href="../DESIGN-effect.md">DESIGN-effect.md</a> にあります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">モデル</p>
+    <h2 class="reveal">domain core を純粋に保つ</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Aggregate</h3>
+        <p>状態、command、event、error、不変条件、整合性境界を所有します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Decide</h3>
+        <p>state と command から、受理 event または reject を決めます。I/O は入りません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Evolve</h3>
+        <p>受理された event を state に適用する純粋な遷移です。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Effect</h3>
+        <p>外部非同期処理を correlation、retry、timeout、idempotency の境界として表します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Saga</h3>
+        <p>eventual な step、await、compensation を境界越しに調整します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">基本形</p>
+    <h2 class="reveal">command、event、effect outcome を同じ仕様に書く</h2>
+    <div class="panel reveal">
+      <pre><code>domain OrderAsyncEffect {
+  implementation_profile functional_ddd
+
+  type OrderStatus = Pending | Approved | Cancelled
+  type PaymentStatus = NotRequested | PaymentPending | Captured | Failed | TimedOut
+
+  aggregate Order {
+    id OrderId
+    state {
+      status: OrderStatus = Pending;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command RequestPaymentCapture { input payment_request_id: PaymentRequestId }
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    error CannotCaptureUnapprovedOrder
+
+    decide RequestPaymentCapture {
+      rejects CannotCaptureUnapprovedOrder when status != Approved
+      emits PaymentCaptureRequested
+    }
+
+    evolve PaymentCaptureRequested { payment_status = PaymentPending }
+    evolve PaymentCaptured {
+      requires status != Cancelled
+      payment_status = Captured
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry { max_attempts 3 }
+    timeout after 10m emits PaymentCaptureTimedOut
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">実行</p>
+    <h2 class="reveal">kernel 検証と domain 専用所見を使う</h2>
+    <div class="panel reveal">
+      <pre><code>fslc check examples/domain/order_async_effect.fsl
+fslc verify examples/domain/order_async_effect.fsl --depth 6
+fslc domain check examples/domain/order_async_effect.fsl
+fslc domain analyze examples/domain/order_async_effect.fsl
+fslc domain expand examples/domain/order_async_effect.fsl
+fslc domain generate examples/domain/order_functional_ddd.fsl --target typescript -o src/domain
+fslc domain generate examples/domain/order_functional_ddd.fsl --target python
+fslc domain testgen examples/domain/order_functional_ddd.fsl --target vitest -o order.domain.test.ts
+fslc domain replay examples/domain/order_async_effect.fsl --logs examples/domain/order_async_effect_replay.jsonl</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>結果</th><th>意味</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>生成された kernel model が検証され、有限モデルと scaffold の仮定が JSON に出ています。</td></tr>
+      <tr><td><code>violated</code></td><td>hard な domain finding が形式検証を止めた、または生成 kernel が実際の性質違反を見つけました。</td></tr>
+      <tr><td><code>warning</code> finding</td><td>timeout/fallback 不足や late completion policy 不足などの設計リスクです。それ単体では形式違反とは扱いません。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">境界</p>
+    <h2 class="reveal">MVP が証明すること</h2>
+    <p class="lead narrow reveal">検証対象は、モデル化された遷移系です。aggregate invariant、command/evolve、saga step guard、pending request がある completion、retry bound、success status の stickiness は確認できます。runtime replay は有限ログの観測証拠です。実 payment gateway、queue delivery、wall-clock timeout、本番の exactly-once は証明しません。</p>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+domain UnsafeIrreversibleEffect {
+  implementation_profile functional_ddd
+
+  type OrderStatus = Pending | Approved
+  type PaymentStatus = NotRequested | PaymentPending | Captured
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      status: OrderStatus = Pending;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command ApproveOrder {}
+    command RequestPaymentCapture {
+      input payment_request_id: PaymentRequestId
+    }
+
+    event OrderApproved {}
+    event PaymentCaptureRequested {
+      payment_request_id: PaymentRequestId
+    }
+    event PaymentCaptured {
+      payment_request_id: PaymentRequestId
+    }
+
+    error CannotCaptureUnapprovedOrder
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    decide RequestPaymentCapture {
+      rejects CannotCaptureUnapprovedOrder when status != Approved
+      emits PaymentCaptureRequested
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+
+    evolve PaymentCaptureRequested {
+      payment_status = PaymentPending
+    }
+
+    evolve PaymentCaptured {
+      payment_status = Captured
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured]
+  }
+}

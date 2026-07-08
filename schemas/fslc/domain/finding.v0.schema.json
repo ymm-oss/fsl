@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/domain/finding.v0.schema.json",
+  "title": "fsl-domain finding v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "fsl",
+    "result",
+    "kind",
+    "severity",
+    "domain",
+    "failed_rule",
+    "guarantee_kind",
+    "evidence",
+    "witness",
+    "repair_candidates",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-domain-finding.v0"
+    },
+    "fsl": {
+      "const": "fsl-domain-effect-mvp.v0"
+    },
+    "result": {
+      "const": "violated"
+    },
+    "kind": {
+      "enum": [
+        "unowned_domain_invariant",
+        "aggregate_boundary_violation",
+        "missing_decide_for_command",
+        "missing_evolve_for_event",
+        "event_breaks_aggregate_invariant",
+        "rejected_command_mutates_state",
+        "uncorrelated_async_completion",
+        "irreversible_effect_without_idempotency_key",
+        "non_idempotent_irreversible_effect",
+        "async_step_before_await_satisfied",
+        "pending_effect_without_timeout_or_fallback",
+        "late_completion_without_stale_policy",
+        "cross_aggregate_update_without_event",
+        "missing_compensation_for_irreversible_effect",
+        "reliable_effect_without_outbox_boundary",
+        "saga_dead_end",
+        "process_wait_cycle",
+        "command_rejected_by_model",
+        "unknown_domain_event",
+        "unknown_effect",
+        "effect_completion_event_not_declared",
+        "duplicate_irreversible_effect_commit",
+        "effect_completion_rejected_by_model",
+        "unknown_runtime_event_kind"
+      ]
+    },
+    "severity": {
+      "enum": ["info", "warning", "error"]
+    },
+    "domain": {
+      "type": "string"
+    },
+    "aggregate": {
+      "type": ["string", "null"]
+    },
+    "command": {
+      "type": ["string", "null"]
+    },
+    "event": {
+      "type": ["string", "null"]
+    },
+    "effect": {
+      "type": ["string", "null"]
+    },
+    "saga": {
+      "type": ["string", "null"]
+    },
+    "step": {
+      "type": ["string", "null"]
+    },
+    "failed_rule": {
+      "type": "string"
+    },
+    "guarantee_kind": {
+      "enum": ["kernel_safety", "structural", "assumption", "runtime_observed", "conformance_checked", "not_formally_proved"]
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "formal_proof"],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "formal_proof": {
+          "type": "boolean"
+        }
+      }
+    },
+    "witness": {
+      "type": "object"
+    },
+    "repair_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "weakens_spec", "description"],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "weakens_spec": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
