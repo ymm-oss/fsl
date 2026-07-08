@@ -74,6 +74,12 @@ Concrete execution requires a deterministic initial state. Static check at
 `Monitor` construction:
 
 - init assigns to every state variable **exactly once** (forall bulk assignment allowed).
+  For a Map/index target (`m[K] = ...`), "once" is per concrete key when the
+  key is a literal or enum member rather than a `forall`-bound variable: flat
+  `m[K1] = ...` / `m[K2] = ...` statements for two *different* keys are not a
+  duplicate (this is exactly how a dialect like fsl-db populates a map one
+  column at a time); the same key assigned twice, or a key that is itself a
+  bound loop variable (where two iterations could alias), still is.
 - The RHS of init may reference only const and **already-assigned** state
   variables (evaluated top to bottom). A violation is `FslError(kind="semantics")`
   + hint "runtime monitor requires a deterministic init".
