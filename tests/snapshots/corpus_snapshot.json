@@ -161,6 +161,12 @@
       "warnings": []
     }
   },
+  "examples/db/safe_feature_flag_kill_switch_compat.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/db/safe_rename_preservation.fsl": {
     "check": {
       "result": "ok",
@@ -200,6 +206,12 @@
     }
   },
   "examples/db/unsafe_drop_column_with_worker.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_feature_flag_provider_gap.fsl": {
     "check": {
       "result": "ok",
       "warnings": []

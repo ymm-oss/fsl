@@ -42,6 +42,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   importer via `fslc db import`. The new checks stay under explicit assumptions
   for finite rollout windows, offline TTL ticks, bounded row models, and
   observability coverage. (#129, #130, #131, #132, #133, #134)
+- fsl-db DB/multi-environment follow-ups: finite feature-flag variants in
+  `environment` blocks with `when flag name=value` artifact windows and
+  `DB-ASSUME-FINITE-FLAG-STATE`, a minimal Prisma schema importer
+  (`prisma-schema-minimal.v0`) alongside SQL DDL import, and external
+  preservation/engine evidence JSON schemas plus fixtures that keep sampled,
+  audited, and dry-run evidence separate from formal proof
+  (`formal_result:"not_run"`). (#144, #145, #146, #147)
 - Issue #104 follow-ups: typed `relation A -> B` state with relation helpers
   (`.contains/.add/.remove`, `reachable`, `acyclic`, `functional`,
   `injective`, `domain`, `range`); `helpful action(args)` metadata for

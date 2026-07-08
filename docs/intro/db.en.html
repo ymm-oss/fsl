@@ -144,7 +144,8 @@ environment prod {
 
   environment prod {
     schema 0..3;
-    active server_v2 when schema 1..3;
+    flag email_v2 { off, on } default off;
+    active server_v2 when schema 1..3 when flag email_v2=on;
     supported server_v2 when schema 1..3;
     may_exist ios_v1 when schema 0..3;
   }
@@ -178,7 +179,8 @@ fslc verify examples/db/safe_add_nullable_column.fsl --depth 8
 fslc db check examples/db/safe_add_nullable_column.fsl
 fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
 fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
-fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre>
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql
+fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrisma</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>Result</th><th>How to read it</th></tr>
@@ -204,7 +206,7 @@ fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre
       </div>
       <div class="syntax-card">
         <h3>API / offline / feature flags</h3>
-        <p>API operations, response fields, and offline payload TTLs can be written as finite capabilities/ticks. Feature flags are approximated as artifact/window variants.</p>
+        <p>API operations, response fields, offline payload TTLs, and feature flags are finite capabilities, ticks, and declared variants. They remain rollout snapshots, not probability proofs.</p>
       </div>
       <div class="syntax-card">
         <h3>Runtime observation</h3>
@@ -212,7 +214,11 @@ fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre
       </div>
       <div class="syntax-card">
         <h3>SQL/ORM import</h3>
-        <p><code>fslc db import</code> converts a minimal SQL DDL subset to <code>dbsystem</code>. Prisma, Rails, Drizzle, and other ORM importers are extension points.</p>
+        <p><code>fslc db import</code> converts minimal SQL DDL and Prisma schema scalar fields to <code>dbsystem</code>. Unsupported constructs are explicit warnings.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>External evidence</h3>
+        <p>Production-data diff/audit evidence and DB-engine dry-run evidence use separate JSON schemas with <code>formal_result: "not_run"</code>.</p>
       </div>
       <div class="syntax-card">
         <h3>Time and probability</h3>

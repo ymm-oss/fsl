@@ -1,0 +1,34 @@
+dbsystem UnsafeFeatureFlagProviderGap {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column email_normalized: Text absent;
+    }
+  }
+
+  migration add_email_normalized from 0 to 1 {
+    add users.email_normalized nullable;
+  }
+
+  artifact server_legacy {
+    responds response.email;
+  }
+
+  artifact server_new {
+    reads users.email_normalized;
+    responds response.email_normalized;
+  }
+
+  artifact ios_new {
+    expects response.email_normalized;
+  }
+
+  environment prod {
+    schema 0..1;
+    flag email_v2 { off, on } default off;
+    active server_legacy when schema 0..1 when flag email_v2=off;
+    active server_new when schema 1..1 when flag email_v2=on;
+    may_exist ios_new when schema 0..1 when flag email_v2=on;
+  }
+}

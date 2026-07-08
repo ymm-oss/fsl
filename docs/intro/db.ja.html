@@ -144,7 +144,8 @@ environment prod {
 
   environment prod {
     schema 0..3;
-    active server_v2 when schema 1..3;
+    flag email_v2 { off, on } default off;
+    active server_v2 when schema 1..3 when flag email_v2=on;
     supported server_v2 when schema 1..3;
     may_exist ios_v1 when schema 0..3;
   }
@@ -178,7 +179,8 @@ fslc verify examples/db/safe_add_nullable_column.fsl --depth 8
 fslc db check examples/db/safe_add_nullable_column.fsl
 fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
 fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
-fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre>
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql
+fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrisma</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>結果</th><th>読み方</th></tr>
@@ -204,7 +206,7 @@ fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre
       </div>
       <div class="syntax-card">
         <h3>API / offline / feature flag</h3>
-        <p>API operation、response field、offline payload TTL は有限の capability/tick として記述できます。feature flag は artifact/window として近似します。</p>
+        <p>API operation、response field、offline payload TTL、feature flag は有限の capability/tick/variant として記述できます。割合や確率の証明ではなく、有限 snapshot です。</p>
       </div>
       <div class="syntax-card">
         <h3>runtime observation</h3>
@@ -212,7 +214,11 @@ fslc db import examples/db/minimal_import.sql --name ImportedFromSql</code></pre
       </div>
       <div class="syntax-card">
         <h3>SQL/ORM import</h3>
-        <p><code>fslc db import</code> は最小 SQL DDL を <code>dbsystem</code> に変換します。Prisma、Rails、Drizzle などの ORM 専用 importer は拡張点です。</p>
+        <p><code>fslc db import</code> は最小 SQL DDL と Prisma schema の scalar field を <code>dbsystem</code> に変換します。未対応構文は明示 warning になります。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>外部 evidence</h3>
+        <p>本番データの diff/audit evidence と DB engine dry-run evidence は、<code>formal_result: "not_run"</code> の別JSON schemaで扱います。</p>
       </div>
       <div class="syntax-card">
         <h3>時間・確率</h3>

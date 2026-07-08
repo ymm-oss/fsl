@@ -116,7 +116,8 @@ dbsystem <Name> {
   }
   environment <env> {
     schema <lo>..<hi>;
-    active <version> when schema <lo>..<hi>;
+    flag <flag_name> { <variant>, ... } default <variant>;
+    active <version> when schema <lo>..<hi> when flag <flag_name>=<variant>;
     supported <version> when schema <lo>..<hi>;
     may_exist <version> when schema <lo>..<hi>;
   }
@@ -137,13 +138,18 @@ dbsystem <Name> {
 ```
 
 `dbsystem` checks migration compatibility across DB schema, artifacts, API/offline
-payloads, and environments. It does not model DB-engine locks/optimizers,
-probability, wall-clock TTL, or full production-data completeness. Schema ranges
-are finite reachable rollout snapshots; percentages and offline TTLs must be
-modeled as finite coexistence windows/ticks. Use `fslc db check` for stable
-fsl-db findings (`verified_under_assumptions` on success). Use
-`fslc db observe` for runtime evidence only (`observed_mismatch`, not formal
-violation) and `fslc db import` for the minimal SQL DDL importer boundary.
+payloads, and environments. Feature flags are finite declared variants inside an
+environment and may gate artifact windows with `when flag name=value`; success
+then reports `DB-ASSUME-FINITE-FLAG-STATE`. It does not model DB-engine
+locks/optimizers, probability, wall-clock TTL, or full production-data
+completeness. Schema ranges are finite reachable rollout snapshots; percentages,
+flag rollout, and offline TTLs must be modeled as finite coexistence
+windows/ticks. Use `fslc db check` for stable fsl-db findings
+(`verified_under_assumptions` on success). Use `fslc db observe` for runtime
+evidence only (`observed_mismatch`, not formal violation) and `fslc db import`
+for SQL DDL or minimal Prisma schema importers. Production-data preservation and
+DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
+`formal_result: "not_run"`, not `verified`/`proved`.
 
 AI hard-contract dialect (Phase 1; expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
@@ -428,7 +434,8 @@ fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review rep
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
 fslc db observe <f> --trace events.json                 # runtime observation evidence
-fslc db import <sql> [--name Name] [-o out.fsl]         # minimal SQL DDL -> dbsystem
+fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o out.fsl]
+                                                        # SQL DDL / minimal Prisma -> dbsystem
 fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
 fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
 ```

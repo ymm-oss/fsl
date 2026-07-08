@@ -42,7 +42,7 @@ from .analysis import (
 from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
 from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
-from .db_import import import_sql_file
+from .db_import import import_db_file
 from .ai_check import check_ai_component, load_ai_component, replay_ai_events
 
 FSL_VERSION = "1.0"
@@ -1257,13 +1257,13 @@ def run_db_observe(file, trace):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_db_import(file, name="ImportedDb", output=None):
+def run_db_import(file, name="ImportedDb", output=None, source_format="auto"):
     try:
-        imported = import_sql_file(file, name=name)
+        imported = import_db_file(file, name=name, source_format=source_format)
         result = {
             "result": "imported_with_warnings" if imported.warnings else "imported",
             "dialect": "fsl-db-mvp.v0",
-            "source_format": "sql-ddl-minimal.v0",
+            "source_format": imported.source_format,
             "dbsystem": imported.system.name,
             "warnings": imported.warnings,
             "dbsystem_source": imported.source,
@@ -1499,9 +1499,11 @@ def _build_arg_parser():
     dbo = db_sub.add_parser("observe", help="compare runtime observation logs to dbsystem declarations")
     dbo.add_argument("file")
     dbo.add_argument("--trace", required=True)
-    dbi = db_sub.add_parser("import", help="import a minimal SQL DDL subset into dbsystem")
+    dbi = db_sub.add_parser("import", help="import SQL DDL or a minimal ORM schema into dbsystem")
     dbi.add_argument("file")
     dbi.add_argument("--name", default="ImportedDb")
+    dbi.add_argument("--source", choices=["auto", "sql", "prisma"], default="auto",
+                     help="source format to import (default: auto by extension)")
     dbi.add_argument("-o", "--output")
 
     ai = sub.add_parser("ai", help="AI hard-contract dialect commands")
@@ -1621,7 +1623,12 @@ def _dispatch(args):
             result = run_db_observe(args.file, args.trace)
             print(json.dumps(result, indent=2, ensure_ascii=False))
         elif args.db_cmd == "import":
-            result = run_db_import(args.file, name=args.name, output=args.output)
+            result = run_db_import(
+                args.file,
+                name=args.name,
+                output=args.output,
+                source_format=args.source,
+            )
             if result.get("result") == "imported" and not args.output:
                 sys.stdout.write(result["dbsystem_source"])
                 sys.exit(0)

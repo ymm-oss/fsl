@@ -212,6 +212,26 @@ def validate_dbsystem(system):
             _err(f"duplicate environment '{env.name}'", loc=env.loc)
         env_names.add(env.name)
         _validate_window(env.schema_window, "environment schema", env.loc)
+        flags = {}
+        for flag in env.flags:
+            if flag.name in flags:
+                _err(f"duplicate flag '{flag.name}' in environment '{env.name}'", loc=flag.loc)
+            if not flag.variants:
+                _err(f"flag '{flag.name}' requires at least one variant", loc=flag.loc)
+            seen_variants = set()
+            for variant in flag.variants:
+                if variant in seen_variants:
+                    _err(
+                        f"duplicate variant '{variant}' on flag '{flag.name}'",
+                        loc=flag.loc,
+                    )
+                seen_variants.add(variant)
+            if flag.default not in seen_variants:
+                _err(
+                    f"flag '{flag.name}' default '{flag.default}' is not a declared variant",
+                    loc=flag.loc,
+                )
+            flags[flag.name] = flag
         for version in range(env.schema_window[0], env.schema_window[1] + 1):
             if version not in reached_versions:
                 _err(
@@ -231,6 +251,26 @@ def validate_dbsystem(system):
                     f"{env.schema_window[0]}..{env.schema_window[1]}",
                     loc=entry.loc,
                 )
+            seen_conditions = set()
+            for condition in entry.flag_conditions:
+                if condition.flag in seen_conditions:
+                    _err(
+                        f"artifact '{entry.artifact}' repeats flag condition '{condition.flag}'",
+                        loc=condition.loc,
+                    )
+                seen_conditions.add(condition.flag)
+                flag = flags.get(condition.flag)
+                if flag is None:
+                    _err(
+                        f"artifact '{entry.artifact}' references unknown flag '{condition.flag}'",
+                        loc=condition.loc,
+                    )
+                if condition.variant not in set(flag.variants):
+                    _err(
+                        f"artifact '{entry.artifact}' references unknown variant "
+                        f"'{condition.variant}' for flag '{condition.flag}'",
+                        loc=condition.loc,
+                    )
 
     if not system.environments:
         _err("dbsystem requires at least one environment", loc=system.loc)
@@ -303,6 +343,15 @@ def _rule_text(rule, env, role, artifact, column):
         f"column {column_label(column)} may be removed only after {artifact} "
         f"is outside the {env} compatibility window"
     )
+
+
+def _entry_name_parts(entry):
+    parts = []
+    if entry.schema_window:
+        parts.extend(["schema", str(entry.schema_window[0]), str(entry.schema_window[1])])
+    for condition in entry.flag_conditions:
+        parts.extend(["flag", condition.flag, condition.variant])
+    return parts or ["all"]
 
 
 def expand_dbsystem(system):
@@ -442,7 +491,14 @@ def expand_dbsystem(system):
             if "all_active_reads_exist" in rules or "removed_only_after_unused" in rules:
                 for key in artifact.reads:
                     name = _inv_name(
-                        "db_read", env.name, entry.role, entry.artifact, key[0], key[1])
+                        "db_read",
+                        env.name,
+                        entry.role,
+                        entry.artifact,
+                        *_entry_name_parts(entry),
+                        key[0],
+                        key[1],
+                    )
                     expr = _compat_expr(window, col_member[key])
                     rule = "all_active_reads_exist"
                     meta = _meta("DB-COMPAT-READ", _rule_text(rule, env.name, entry.role, entry.artifact, key))
@@ -453,7 +509,14 @@ def expand_dbsystem(system):
             if "all_active_writes_exist" in rules or "removed_only_after_unused" in rules:
                 for key in artifact.writes:
                     name = _inv_name(
-                        "db_write", env.name, entry.role, entry.artifact, key[0], key[1])
+                        "db_write",
+                        env.name,
+                        entry.role,
+                        entry.artifact,
+                        *_entry_name_parts(entry),
+                        key[0],
+                        key[1],
+                    )
                     expr = _compat_expr(window, col_member[key])
                     rule = "all_active_writes_exist"
                     meta = _meta("DB-COMPAT-WRITE", _rule_text(rule, env.name, entry.role, entry.artifact, key))
@@ -483,6 +546,15 @@ def expand_dbsystem(system):
         assumptions.append({
             "id": "DB-ASSUME-OFFLINE-TTL-FINITE",
             "text": "offline TTL values are finite logical ticks, not wall-clock time or probability",
+        })
+    if any(env.flags for env in system.environments):
+        assumptions.append({
+            "id": "DB-ASSUME-FINITE-FLAG-STATE",
+            "text": (
+                "feature flags are modeled as finite declared variants; rollout "
+                "percentages and experimentation populations are approximated as "
+                "compatibility snapshots, not probability proofs"
+            ),
         })
     if "data_preserved" in rules or "rollback_equivalent" in rules:
         assumptions.append({

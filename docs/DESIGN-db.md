@@ -1,7 +1,8 @@
 # FSL DB / Multi-Environment Compatibility Dialect Design
 
-Status: adopted. The first slice shipped issues #122-#128; the bounded
-post-MVP compatibility extensions cover issues #129-#134.
+Status: adopted. The first slice shipped issues #122-#128; bounded
+compatibility extensions cover issues #129-#134, and DB/multi-environment
+follow-ups cover issues #144-#147.
 
 ## Decision
 
@@ -71,7 +72,32 @@ Destructive operations must be explicit. A `drop` of an existing column requires
 metadata, not a spec weakening. An annotated drop can still fail read/write/API
 compatibility.
 
-### 3. Preservation and Rollback
+### 3. Feature-Flag Snapshots
+
+Feature flags are first-class finite environment dimensions. They are not
+probabilities, percentage-rollout proofs, or experimentation population models.
+An environment may declare finite variants:
+
+```fsl
+environment prod {
+  schema 0..1;
+  flag email_v2 { off, on } default off;
+  active server_legacy when schema 0..1 when flag email_v2=off;
+  active server_new when schema 1..1 when flag email_v2=on;
+  may_exist ios_new when schema 1..1 when flag email_v2=on;
+}
+```
+
+`fslc db check` enumerates `(environment, schema_version, flag variants)` and
+applies the same DB/API/offline compatibility rules inside each finite snapshot.
+Existing artifact/window modeling remains the simple form: omit `flag` and
+`when flag` when rollout variants are irrelevant.
+
+A kill switch is checkable by keeping or reintroducing the old artifact's
+`when flag ...=off` window. The result includes
+`DB-ASSUME-FINITE-FLAG-STATE` whenever any environment declares flags.
+
+### 4. Preservation and Rollback
 
 `data_preserved` and `rollback_equivalent` are bounded abstract checks, not full
 production-data proofs. They model whether the migration preserves observable
@@ -88,7 +114,19 @@ Supported preservation transforms:
 `irreversible`. A lossy transform can be operationally intentional, but it still
 violates `data_preserved`; the annotation prevents silent acceptance.
 
-### 4. Runtime Observation
+Production-data preservation evidence can be attached outside the formal result
+using `schemas/fslc/db/preservation-evidence.v0.schema.json`. Supported evidence
+families include sampled/offline diff jobs, shadow reads, dual-read comparisons,
+and post-migration audits. These results use `formal_result: "not_run"` and
+statuses such as `evidence_supported` or `evidence_failed`; they must not be
+reported as `verified` or `proved`.
+
+Evidence payloads must identify schemas, tables, columns, migration IDs, sample
+counts, and aggregate mismatch counts only. Row values, SQL literals, secrets,
+payload bodies, and raw production records are outside the schema and must be
+redacted before storage.
+
+### 5. Runtime Observation
 
 Runtime observation is evidence, not proof. `fslc db observe` compares an
 observation log to a `dbsystem` and emits `observed_mismatch` findings such as:
@@ -101,7 +139,7 @@ Absence from logs is not proof of unused behavior. Observation results include
 `DB-ASSUME-OBSERVABILITY-COVERAGE` and `formal_result: "not_run"` to keep them
 separate from formal compatibility verification.
 
-### 5. Importer Boundary
+### 6. Importer Boundary
 
 `fslc db import` provides a deliberately small SQL DDL importer to establish the
 typed IR boundary. It supports:
@@ -113,8 +151,48 @@ typed IR boundary. It supports:
 - `UPDATE ... SET ...` as a backfill signal
 
 Unsupported constructs are reported as `unsupported_sql` warnings and are not
-silently ignored. ORM-specific importers (Prisma, Rails, Drizzle, etc.) are
-extension points built on the same IR, not part of this first importer.
+silently ignored.
+
+The first ORM-specific importer is `prisma-schema-minimal.v0`. It imports
+Prisma `model` scalar fields into the same typed IR and reports relation/list or
+model-level constructs as `unsupported_prisma` warnings. Additional importers
+(Rails, Drizzle, Django, Alembic, vendor DSLs) must follow the same rule:
+source-specific constructs either become fsl-db IR or explicit warnings; no DB
+engine runtime semantics are inferred without a separate evidence artifact.
+
+### 7. DB-Engine Evidence Boundary
+
+fsl-db formal compatibility is engine-agnostic by default. It does not model:
+
+- lock acquisition order, lock wait timing, or online DDL blocking behavior
+- optimizer plans, index selection, query latency, or vacuum/analyze effects
+- transaction isolation anomalies or vendor-specific migration executor details
+- cloud-provider maintenance windows or wall-clock migration duration
+
+Operational engine evidence is represented separately with
+`schemas/fslc/db/engine-evidence.v0.schema.json`. A concrete adapter shape is:
+
+```json
+{
+  "schema_version": "fsl-db-engine-evidence.v0",
+  "formal_result": "not_run",
+  "engine": {"vendor": "postgresql", "version": "16"},
+  "adapter": {"kind": "migration_dry_run", "tool": "vendor-online-ddl-checker"},
+  "migration": "add_email_normalized",
+  "checks": [
+    {"kind": "lock_timeout", "status": "passed", "max_wait_ms": 5000},
+    {"kind": "online_ddl_validator", "status": "passed"}
+  ],
+  "assumptions": [
+    {"id": "DB-ENGINE-ASSUME-STAGING-LIKE-PROD", "text": "dry-run environment matches production engine settings relevant to this check"}
+  ],
+  "redaction": {"policy": "engine evidence contains identifiers and aggregate timings only"}
+}
+```
+
+Engine evidence may support or reject an operational rollout plan, but it is not
+a kernel proof and must not change `fslc db check` from
+`verified_under_assumptions` to `verified`/`proved`.
 
 ## Syntax
 
@@ -154,7 +232,8 @@ dbsystem UserDb {
 
   environment prod {
     schema 0..3;
-    active server_v2 when schema 1..3;
+    flag email_v2 { off, on } default off;
+    active server_v2 when schema 1..3 when flag email_v2=on;
     may_exist ios_v1 when schema 0..3;
   }
 
@@ -190,6 +269,7 @@ fslc db check examples/db/safe_add_nullable_column.fsl
 fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
 fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
 fslc db import examples/db/minimal_import.sql --name ImportedFromSql -o /tmp/imported.fsl
+fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrisma
 ```
 
 ## Finding Contract
@@ -263,6 +343,8 @@ Assumptions reported by `fslc db check` may include:
 - `DB-ASSUME-OFFLINE-TTL-FINITE`: offline TTL values are finite logical ticks
 - `DB-ASSUME-BOUNDED-ROW-MODEL`: preservation and rollback checks use a bounded
   abstract row model
+- `DB-ASSUME-FINITE-FLAG-STATE`: feature flags are finite declared variants,
+  not percentage/probability proofs
 
 `fslc db observe` additionally reports:
 
@@ -271,8 +353,7 @@ Assumptions reported by `fslc db check` may include:
 
 ## Remaining Boundaries
 
-- DB-engine-specific locking/optimizer semantics
-- full production-data preservation proof
 - probability, wall-clock time, and percentile reasoning
-- ORM-specific importers beyond the first minimal SQL DDL importer
-- feature-flag semantics beyond finite artifact/window modeling
+- production-data evidence beyond aggregate/sample/audit artifacts
+- DB-engine behavior beyond explicit external evidence adapters
+- ORM/vendor importers beyond SQL and the first minimal Prisma schema importer

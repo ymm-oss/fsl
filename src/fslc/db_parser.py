@@ -16,6 +16,8 @@ from .db_ir import (
     DbDatabase,
     DbEnvironment,
     DbEnvironmentArtifact,
+    DbFlag,
+    DbFlagCondition,
     DbMigration,
     DbMigrationOp,
     DbSystem,
@@ -74,13 +76,17 @@ col_ref_list: col_ref ("," col_ref)*
 col_ref: NAME "." NAME
 
 environment_def: "environment" NAME "{" environment_item* "}"
-?environment_item: env_schema | env_artifact
+?environment_item: env_schema | env_flag | env_artifact
 env_schema: "schema" INT ".." INT ";"?
-env_artifact: env_role NAME env_window? ";"?
+env_flag: "flag" NAME "{" flag_variant_list "}" flag_default? ";"?
+flag_variant_list: NAME ("," NAME)* ","?
+flag_default: "default" NAME
+env_artifact: env_role NAME env_window? env_flag_condition* ";"?
 env_role: "active" -> env_active
         | "supported" -> env_supported
         | "may_exist" -> env_may_exist
 env_window: "when" "schema" INT ".." INT
+env_flag_condition: "when" "flag" NAME "=" NAME
 
 check_def: "check" "compatibility" "{" check_item* "}"
 check_item: "rule" NAME ";"?
@@ -295,27 +301,51 @@ class DbAst(Transformer):
         return "may_exist"
 
     def env_window(self, meta, lo, hi):
-        return (lo, hi)
+        return ("schema_window", (lo, hi))
+
+    def flag_variant_list(self, meta, *variants):
+        return list(variants)
+
+    def flag_default(self, meta, default):
+        return default
+
+    def env_flag(self, meta, name, variants, default=None):
+        if not variants:
+            raise FslError(f"flag '{name}' requires at least one variant", loc=_loc(meta))
+        return DbFlag(name, tuple(variants), default or variants[0], _loc(meta))
 
     def env_schema(self, meta, lo, hi):
         return ("schema", (lo, hi), _loc(meta))
 
-    def env_artifact(self, meta, role, artifact, window=None):
-        return DbEnvironmentArtifact(role, artifact, window, _loc(meta))
+    def env_flag_condition(self, meta, flag, variant):
+        return DbFlagCondition(flag, variant, _loc(meta))
+
+    def env_artifact(self, meta, role, artifact, *parts):
+        window = None
+        conditions = []
+        for part in parts:
+            if isinstance(part, tuple) and part[0] == "schema_window":
+                window = part[1]
+            else:
+                conditions.append(part)
+        return DbEnvironmentArtifact(role, artifact, window, tuple(conditions), _loc(meta))
 
     def environment_def(self, meta, name, *items):
         schema_window = None
         artifacts = []
+        flags = []
         for item in items:
             if isinstance(item, tuple) and item[0] == "schema":
                 if schema_window is not None:
                     raise FslError("environment schema may be declared at most once", loc=item[2])
                 schema_window = item[1]
+            elif isinstance(item, DbFlag):
+                flags.append(item)
             else:
                 artifacts.append(item)
         if schema_window is None:
             raise FslError("environment requires `schema <lo>..<hi>`", loc=_loc(meta))
-        return DbEnvironment(name, schema_window, artifacts, _loc(meta))
+        return DbEnvironment(name, schema_window, artifacts, flags, _loc(meta))
 
     def check_item(self, meta, name):
         return name

@@ -1,0 +1,31 @@
+{
+  "schema_version": "fsl-db-preservation-evidence.v0",
+  "formal_result": "not_run",
+  "result": "evidence_supported",
+  "dbsystem": "SafeRenamePreservation",
+  "evidence_id": "prod-rename-display-name-audit-2026-07-08",
+  "evidence_kind": "offline_diff_job",
+  "target": {
+    "rule": "data_preserved",
+    "migration": "rename_legacy_name",
+    "schema_elements": ["users.legacy_name", "users.display_name"]
+  },
+  "scope": {
+    "environment": "prod",
+    "sample_count": 10000,
+    "mismatch_count": 0,
+    "source_snapshot": "pre_migration",
+    "target_snapshot": "post_migration"
+  },
+  "redaction": {
+    "policy": "schema identifiers and aggregate counts only",
+    "forbidden_fields": ["row_values", "sql_literals", "secrets", "payload_bodies"]
+  },
+  "assumptions": [
+    {
+      "id": "DB-EVIDENCE-ASSUME-SAMPLE-REPRESENTATIVE",
+      "text": "offline diff sample selection is owned by the deployment process"
+    }
+  ],
+  "findings": []
+}

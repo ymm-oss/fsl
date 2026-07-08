@@ -18,6 +18,7 @@ from fslc.cli import (
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples" / "db"
+DB_SCHEMAS = ROOT / "schemas" / "fslc" / "db"
 
 
 def _example(name):
@@ -207,6 +208,46 @@ def test_db_api_and_offline_compatibility_are_environment_scoped():
     assert "DB-ASSUME-OFFLINE-TTL-FINITE" in _assumption_ids(rejected_offline)
 
 
+def test_db_feature_flags_are_finite_snapshot_conditions():
+    safe = run_db_check(_example("safe_feature_flag_kill_switch_compat.fsl"))
+    assert safe["result"] == "verified_under_assumptions"
+    assert "DB-ASSUME-FINITE-FLAG-STATE" in _assumption_ids(safe)
+
+    unsafe = run_db_check(_example("unsafe_feature_flag_provider_gap.fsl"))
+    assert unsafe["result"] == "violated"
+    finding = unsafe["findings"][0]
+    assert finding["kind"] == "api_response_field_missing"
+    assert finding["witness"]["flags"] == {"email_v2": "on"}
+    assert finding["witness"]["schema_version"] == 0
+    assert finding["minimal_conflict_set"]["flags"] == {"email_v2": "on"}
+    assert "DB-ASSUME-FINITE-FLAG-STATE" in _assumption_ids(unsafe)
+
+
+def test_db_feature_flag_references_are_validated(tmp_path):
+    path = tmp_path / "bad_flag.fsl"
+    path.write_text(
+        """dbsystem BadFlag {
+  database app {
+    schema 0
+    table users { column id: Int present backfilled not_null; }
+  }
+  artifact server_v1 { reads users.id; }
+  environment prod {
+    schema 0..0;
+    active server_v1 when schema 0..0 when flag missing=on;
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    out = run_check(str(path))
+
+    assert out["result"] == "error"
+    assert out["kind"] == "semantics"
+    assert "unknown flag 'missing'" in out["message"]
+
+
 def test_db_runtime_observation_reports_observed_mismatch_not_formal_violation():
     out = run_db_observe(
         _example("runtime_observation_target.fsl"),
@@ -268,3 +309,45 @@ def test_db_sql_importer_reports_unsupported_constructs():
     assert imported["warnings"][0]["kind"] == "unsupported_sql"
     assert "CREATE INDEX" in imported["warnings"][0]["statement"]
     assert exit_code(imported) == 0
+
+
+def test_db_prisma_importer_emits_checkable_dbsystem(tmp_path):
+    output = tmp_path / "imported_prisma.fsl"
+    imported = run_db_import(
+        _example("minimal_prisma_schema.prisma"),
+        name="ImportedFromPrisma",
+        output=str(output),
+    )
+
+    assert imported["result"] == "imported"
+    assert imported["source_format"] == "prisma-schema-minimal.v0"
+    checked = run_db_check(str(output))
+    assert checked["result"] == "verified_under_assumptions"
+
+
+def test_db_prisma_importer_reports_unsupported_constructs():
+    imported = run_db_import(_example("unsupported_prisma_schema.prisma"), name="ImportedFromPrisma")
+
+    assert imported["result"] == "imported_with_warnings"
+    assert imported["source_format"] == "prisma-schema-minimal.v0"
+    assert {warning["kind"] for warning in imported["warnings"]} == {"unsupported_prisma"}
+
+
+def test_db_external_evidence_schemas_and_fixtures_are_non_formal():
+    for filename in [
+        "preservation-evidence.v0.schema.json",
+        "engine-evidence.v0.schema.json",
+    ]:
+        schema = json.loads((DB_SCHEMAS / filename).read_text(encoding="utf-8"))
+        assert schema["$id"].endswith(filename)
+        assert "formal_result" in schema["required"]
+
+    for filename in [
+        "preservation_evidence_pass.json",
+        "preservation_evidence_fail.json",
+        "engine_evidence_dry_run.json",
+    ]:
+        fixture = json.loads((EXAMPLES / filename).read_text(encoding="utf-8"))
+    assert fixture["formal_result"] == "not_run"
+    assert fixture["result"] not in {"verified", "proved", "verified_under_assumptions"}
+    assert "redaction" in fixture

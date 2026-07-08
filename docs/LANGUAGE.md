@@ -120,7 +120,8 @@ dbsystem <Name> {
 
   environment <env> {
     schema <lo>..<hi>;
-    active <version> when schema <lo>..<hi>;
+    flag <flag_name> { <variant>, ... } default <variant>;
+    active <version> when schema <lo>..<hi> when flag <flag_name>=<variant>;
     supported <version> when schema <lo>..<hi>;
     may_exist <version> when schema <lo>..<hi>;
   }
@@ -148,7 +149,9 @@ stable fsl-db findings and returns `verified_under_assumptions` for successful
 formal checks. Environment schema ranges are finite reachable snapshots in the
 declared migration order; rollout percentages and offline TTLs must be modeled as
 finite coexistence windows/ticks. API/offline and bounded preservation/rollback
-checks are dialect-level compatibility checks. See `docs/DESIGN-db.md`.
+checks are dialect-level compatibility checks. Feature flags are finite declared
+variants inside an environment and add `DB-ASSUME-FINITE-FLAG-STATE`; they do
+not prove rollout percentages. See `docs/DESIGN-db.md`.
 
 `fslc verify` can override a `verify` block's `instances`/`values` bounds from
 the command line, without editing the spec:
@@ -1406,6 +1409,12 @@ destructive annotations, preservation-transform annotations, and API/offline
 compatibility. `data_preserved` and `rollback_equivalent` are opt-in bounded
 checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`.
 
+Feature flags are finite environment dimensions. `fslc db check` enumerates the
+declared variants with schema snapshots and reports
+`DB-ASSUME-FINITE-FLAG-STATE`; this is a rollout/kill-switch compatibility
+check, not a percentage or probability proof. Omit `flag` / `when flag` to keep
+the existing artifact/window-only model.
+
 Current formal violation kinds include:
 
 - `column_removed_while_still_read`
@@ -1426,6 +1435,7 @@ fslc db check examples/db/safe_add_nullable_column.fsl
 fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
 fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
 fslc db import examples/db/minimal_import.sql --name ImportedFromSql -o /tmp/imported.fsl
+fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrisma
 ```
 
 Successful checks return `verified_under_assumptions` with the finite rollout and
@@ -1436,6 +1446,14 @@ candidates. Runtime observation returns `observed_mismatch` with
 `formal_result: "not_run"`; absence from logs is not proof of unused behavior.
 Use ordinary `fslc verify` when you want to inspect the generated kernel
 counterexample directly.
+
+Importer boundary: SQL DDL import is `sql-ddl-minimal.v0`. The first
+source-specific ORM importer is `prisma-schema-minimal.v0`, which imports Prisma
+`model` scalar fields and reports relation/list/model attributes as
+`unsupported_prisma` warnings. Production-data preservation evidence and
+DB-engine evidence live in separate JSON schemas under `schemas/fslc/db/` and
+use `formal_result: "not_run"`; they never upgrade sampled/audited evidence into
+`verified` or `proved`.
 
 ### 13.6 AI hard-contract layer: `ai_component` (fsl-ai)
 
