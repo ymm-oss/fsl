@@ -1,0 +1,78 @@
+agent SupportOrchestrator {
+  model support_orchestrator_v1;
+  prompt support_orchestrator_prompt_v1;
+  context [CustomerTicket, ApprovedSupportDocs, BillingHistory];
+  tools [SearchDocs, CheckPolicy, CreateDraft, SendEmail];
+
+  authority {
+    may_execute [SearchDocs, CheckPolicy, CreateDraft];
+    requires_human_approval [SendEmail];
+  }
+
+  agent RetrievalAgent {
+    model retrieval_v1;
+    prompt retrieval_prompt_v1;
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority {
+      may_execute [SearchDocs];
+    }
+    output RetrievedSources visibility [parent, PolicyCheckAgent, DraftAnswerAgent];
+  }
+
+  agent PolicyCheckAgent {
+    model policy_check_v1;
+    prompt policy_check_prompt_v1;
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority {
+      may_execute [CheckPolicy];
+    }
+    output PolicyDecision visibility [parent, DraftAnswerAgent];
+  }
+
+  agent DraftAnswerAgent {
+    model draft_answer_v1;
+    prompt draft_answer_prompt_v1;
+    trust medium;
+    grant authority [CreateDraft];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CreateDraft];
+    authority {
+      may_execute [CreateDraft];
+    }
+    output DraftAnswer visibility parent;
+  }
+
+  agent SendAgent {
+    model send_agent_v1;
+    prompt send_prompt_v1;
+    trust high;
+    grant authority [SendEmail];
+    grant context [CustomerTicket];
+    tool SendEmail irreversible {
+      schema SendEmailV1;
+    }
+    authority {
+      requires_human_approval [SendEmail];
+    }
+    output SendResult visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+    PolicyCheckAgent -> DraftAnswerAgent;
+    DraftAnswerAgent -> SendAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+    when PolicyCheckAgent.uncertain -> HumanReviewPending;
+    when SendAgent.rejected -> HumanReviewPending;
+  }
+}

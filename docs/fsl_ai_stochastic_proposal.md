@@ -18,7 +18,7 @@ FSLに、AIのような統計的・非決定的な出力を記述するための
 この提案では、AIを通常の決定的な関数として扱わない。AIを次の性質を持つコンポーネントとして扱う。
 
 ```text
-AI component
+AI agent / component
   = nondeterministic output producer
   + probabilistic / statistical behavior
   + hard safety contract
@@ -32,7 +32,7 @@ FSLの既存の中心は、state / action / invariant / trans / leadsTo / refine
 
 ```text
 fsl-ai
-  ai_component / ai_action / ai_contract / evaluator / dataset / failure_mode / ai_migration
+  agent / ai_component / ai_action / ai_contract / evaluator / dataset / failure_mode / ai_migration
       ↓
 fsl-stochastic
   statistical_property / observed_property / estimate / slice / confidence interval / drift
@@ -229,6 +229,33 @@ AIは単にテキストを返すだけではない。tool call、workflow transi
 
 したがって、AI出力はFSLのactionやtransitionと接続する必要がある。
 
+### 4.8 agentは再帰的に合成可能な単位にする
+
+実装済みの `agent` 構造解析では、`sub_agent` という別概念を作らない。入れ子に
+置かれたagentは、親agentのスコープ内に定義された通常のagentである。
+
+```text
+sub_agent = agent used inside another agent
+```
+
+入れ子構造は、構成、lexical scope、既定visibility、authority/context
+grant境界、lifecycle bindingを表す。一方、実行時の協調は木構造ではなく、
+`orchestration` / delegation graphとして別に記述する。
+
+この分離により、以下を独立に解析できる。
+
+```text
+nesting tree
+delegation graph
+authority graph
+information-flow graph
+tool-reachability graph
+```
+
+安全側の既定は、親のauthorityやcontextを子が自動継承しないことである。
+子agentは明示的にgrantされたauthority/contextだけを使え、grantは親の
+境界を超えられない。
+
 ---
 
 ## 5. 提案するdialect構成
@@ -240,10 +267,12 @@ AIアプリケーション向けの表層dialect。
 主な概念:
 
 ```text
+agent
 ai_component
 ai_action
 ai_contract
 ai_migration
+orchestration
 prompt
 model
 retriever
@@ -313,6 +342,8 @@ ai_component SupportAnswerAgent {
 ```
 
 `ai_component` は、モデル名だけでなく、prompt、retriever、tools、decoding parameters、input/output schemaを持つ。
+採用済みPhase 1の `ai_component` は単一のhard-contract境界であり、将来の
+`agent` 構文は複数のagent/ai_component境界をscope付きで合成する上位構文として扱う。
 
 ### 6.2 `ai_action`
 
@@ -516,6 +547,138 @@ ai_migration PromptV7ToV8 {
 ```
 
 DB schema migrationと同じ発想で、prompt、model、retriever、tool schema、evaluator rubricの変更を扱う。
+
+### 6.9 `agent` / recursive composition
+
+`agent` は再帰的に合成可能な責任境界である。`agent` の内部には別の
+`agent` を定義できるが、入れ子agentは特別な `sub_agent` 型ではない。
+親のlexical scopeに置かれた通常のagentとして扱う。
+
+```fsl
+agent SupportOrchestrator {
+  model gpt_5_5;
+  prompt support_orchestrator_prompt_v3;
+  context [CustomerTicket, ApprovedSupportDocs, BillingHistory];
+  tools [SearchDocs, CheckPolicy, CreateDraft, SendEmail];
+
+  authority {
+    may_execute [SearchDocs, CheckPolicy, CreateDraft];
+    requires_human_approval [SendEmail];
+  }
+
+  agent RetrievalAgent {
+    model gpt_5_5;
+    prompt retrieval_prompt_v2;
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+
+    output RetrievedSources visibility [parent, PolicyCheckAgent, DraftAnswerAgent];
+
+    contract {
+      hard {
+        rule SourcesFromApprovedDocs;
+        rule SourcesNotExpired;
+      }
+    }
+  }
+
+  agent PolicyCheckAgent {
+    model gpt_5_5;
+    prompt policy_check_prompt_v4;
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+
+    output PolicyDecision visibility [parent, DraftAnswerAgent];
+
+    contract {
+      hard {
+        rule PolicyBasisUsesRetrievedSources;
+        rule PolicyDecisionIsFinite;
+      }
+    }
+  }
+
+  agent DraftAnswerAgent {
+    model gpt_5_5;
+    prompt draft_answer_prompt_v5;
+    trust medium;
+    grant authority [CreateDraft];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CreateDraft];
+    authority { may_execute [CreateDraft]; }
+    output DraftAnswer visibility parent;
+
+    contract {
+      hard {
+        rule CitationsUseRetrievedSources;
+        rule ClaimsSupportedByRetrievedSources;
+      }
+    }
+  }
+
+  agent SendAgent {
+    model gpt_5_5;
+    prompt send_prompt_v1;
+    trust high;
+    grant authority [SendEmail];
+    grant context [CustomerTicket];
+    tool SendEmail irreversible {
+      schema SendEmailV1;
+    }
+    authority { requires_human_approval [SendEmail]; }
+    output SendResult visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+    PolicyCheckAgent -> DraftAnswerAgent;
+    DraftAnswerAgent -> SendAgent;
+  }
+
+  contract {
+    hard {
+      rule FinalAnswerUsesRetrievedSources;
+      rule PolicyDecisionGatesSend;
+    }
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+    when PolicyCheckAgent.uncertain -> HumanReviewPending;
+    when SendAgent.rejected -> HumanReviewPending;
+  }
+}
+```
+
+上の `contract { hard { rule ... } }` は現時点の構造解析で保持される
+メタデータである。任意の式を持つAI contract、statistical block、
+policy decision式の直接検証は後続phaseで扱う。
+
+意味論:
+
+- Lexical scope: `SupportOrchestrator.RetrievalAgent` のような名前空間を作る。
+- Authority inheritance: 暗黙継承しない。子は明示grantされた権限だけを持ち、親の権限境界を超えられない。
+- Context inheritance: 暗黙継承しない。子が読めるcontextは明示grantで制御する。
+- Output visibility: 子の出力を親や他の子が読める範囲を宣言する。
+- Delegation edge: 入れ子構造とは別に `orchestration` で実行時依存を表す。
+- Lifecycle binding: 親agentと子agentのmodel/prompt/tool/evaluator versionの互換性を扱う。
+- Contract composition: 子agent単体のcontractとは別に、親agentが横断contractを持つ。
+- Failure propagation: 子agentの失敗が親の状態へどう伝播するかを `failure_policy` で記述する。
+
+実装済みの構造解析は `fslc ai check` で `agent_analyzed` または
+`agent_structural` findingを返す。対象は、子agentの権限/contextが親agent
+境界を超えていないこと、低信頼agentから高権限toolへの経路がないこと、
+不可逆操作がHumanApprovalを通ること、レビューやpolicy checkを迂回する
+delegation pathがないこと、 sibling visibilityがdelegation pathと整合する
+ことである。これは構造解析であり、LLM意味正しさや統計的品質の形式証明
+ではない。
 
 ---
 
@@ -1125,14 +1288,21 @@ fslc ai compat support_agent.fsl --environment production
 追加ノード:
 
 ```text
+Agent
+AgentScope
 AIComponent
 AIAction
 AIContract
+DelegationGraph
 Evaluator
 Dataset
 Slice
 FailureMode
 Authority
+AuthorityGrant
+ContextGrant
+VisibilityPolicy
+FailurePolicy
 AIMigration
 StatisticalProperty
 ObservedProperty
@@ -1144,11 +1314,16 @@ Estimate
 
 | AI構文 | 展開先 |
 |---|---|
+| `agent` | namespaced component scope + scoped capability/context boundary |
 | `ai_component` | artifact state / capability metadata |
 | `ai_action` | nondeterministic action + output domain + workflow transition |
+| `orchestration` | delegation graph + ordering/dependency checks |
 | `hard` | invariant / ensures / requires / runtime guard |
 | `fallback` | transition rule / invariant |
 | `authority` | tool call precondition / forbidden action |
+| authority/context `grant` | capability subset check + information-flow boundary |
+| output `visibility` | readable edge set + information-flow constraint |
+| `failure_policy` | retry/fallback/terminal transition policy |
 | `ai_migration` | artifact transition + no-regression job |
 | `statistical` | external eval job definition |
 | `observed` | replay / telemetry aggregation job |
@@ -1289,7 +1464,25 @@ confidence interval
 - AI品質を定量的・slice別に管理できる。
 - 平均値で隠れる劣化を検出できる。
 
-### Phase 3: AI migration / no-regression
+### Phase 3: recursive agent composition / orchestration
+
+```text
+agent
+nested agent scope
+authority/context grant
+output visibility
+orchestration/delegation graph
+contract composition
+failure_policy
+```
+
+価値:
+
+- `sub_agent` という別概念を増やさず、agentを合成可能な責任境界として扱える。
+- 親子scope、delegation、authority、information flow、tool reachabilityを分けて解析できる。
+- 複数agent構成でのreview抜け、権限昇格、HumanApproval迂回を検出しやすい。
+
+### Phase 4: AI migration / no-regression
 
 ```text
 ai_migration
@@ -1303,7 +1496,7 @@ compare eval
 - AI変更をDB migrationのように安全に扱える。
 - prompt更新・model更新のリスクを明示できる。
 
-### Phase 4: observed property / drift
+### Phase 5: observed property / drift
 
 ```text
 production logs
@@ -1317,7 +1510,7 @@ runtime telemetry aggregation
 - 評価セット外の本番劣化を検出できる。
 - AI運用監視へ接続できる。
 
-### Phase 5: multi-environment compatibility統合
+### Phase 6: multi-environment compatibility統合
 
 ```text
 server/mobile/API/DB/tool schema compatibility
@@ -1434,7 +1627,8 @@ fsl-aiがFSL kernelを複雑化する
 | `trans` | AI出力前後の状態条件、migration preservation |
 | `leadsTo` | human reviewへ到達、escalation完了、safe refusal |
 | `refinement` | abstract business ruleとAI output behaviorの対応 |
-| `compose` | AI component + server + DB + mobile + tool API |
+| lexical scope / namespacing | nested agent scope、scoped visibility |
+| `compose` | recursive agent composition、AI component + server + DB + mobile + tool API |
 | `Monitor` | AI event log replay / runtime conformance |
 | `testgen` | AI eval scaffold / tool-call conformance tests |
 | JSON repair protocol | AI修復候補、prompt修正候補、fallback追加候補 |

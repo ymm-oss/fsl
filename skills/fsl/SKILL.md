@@ -285,9 +285,14 @@ the formalization memo.**
    of a detailed spec).
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
-   runtime event evidence. These check syntactic/structural hard facts such as
-   tool authority, forbidden tools, and human approval; evaluator-backed and
-   statistical AI claims are evidence, not formal proof, and are out of Phase 1.
+   runtime event evidence. For recursive fsl-ai agent composition, use
+   `fslc ai check file.fsl` on `agent` specs; it returns `agent_analyzed` and
+   deterministic `agent_ir` / graph summaries for lexical scope, explicit
+   authority/context grants, visibility, orchestration, tool reachability, and
+   failure policy. These check syntactic/structural hard facts such as tool
+   authority, forbidden tools, human approval, and agent graph boundaries;
+   evaluator-backed and statistical AI claims are evidence, not formal proof,
+   and are out of Phase 1.
    Note: what verify/induction guarantees is the **internal consistency of the
    spec**, which is separate from **whether the implementation honors the spec
    contract**. If implementation conformance is also required, anchor to the
@@ -641,6 +646,11 @@ the relevant role skill directs it.
   hard-contract findings and `fslc ai replay --logs` for runtime JSONL evidence;
   `replay_conformant` is not proof, and evaluator/statistical AI quality remains
   outside the kernel.
+- **Recursive AI agents**: `agent` specs are ordinary scoped agents nested inside
+  parents, not `sub_agent`s. Use `fslc ai check` to get `agent_analyzed`,
+  `agent_ir`, and graph summaries for explicit grants, visibility,
+  orchestration/delegation, tool reachability, review-gate bypass, and
+  failure_policy. This is structural evidence with `formal_result:"not_run"`.
 - **Ghost types (typestate)**: `fslc typestate file.fsl [--ts]` — determines how
   far a state machine (a struct field with enum values / a state variable /
   an `Option<_>` slot) can be mapped onto the host language's typestate (derivable /

@@ -1,27 +1,51 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Parser for the fsl-ai hard-contract MVP dialect."""
+"""Parser for the fsl-ai dialects."""
 from __future__ import annotations
 
 from lark import Lark, Transformer, v_args
 from lark.exceptions import UnexpectedInput
 
-from .ai_ir import AiAuthority, AiComponent, AiFallback, AiHardCheck, AiTool
+from .ai_ir import (
+    AiAgent,
+    AiAgentContract,
+    AiAgentGrant,
+    AiAgentOutput,
+    AiAuthority,
+    AiComponent,
+    AiDelegationEdge,
+    AiFailurePolicy,
+    AiFallback,
+    AiHardCheck,
+    AiTool,
+)
 from .model import FslError
 
 
 AI_GRAMMAR = r"""
-start: ai_component
+start: ai_source
+
+?ai_source: ai_component | agent_def
 
 ai_component: "ai_component" NAME "{" component_item* "}"
 ?component_item: model_def | prompt_def | input_def | output_def
                | tool_def | authority_def | fallback_def | check_def
 
+agent_def: "agent" NAME "{" agent_item* "}"
+?agent_item: model_def | prompt_def | context_def | tools_def | tool_def
+           | authority_def | grant_def | agent_output_def | orchestration_def
+           | failure_policy_def | contract_def | trust_def | review_gate_def
+           | agent_def
+
 model_def: "model" atom ";"?
 prompt_def: "prompt" atom ";"?
 input_def: "input" atom ";"?
 output_def: "output" atom ";"?
+context_def: "context" names ";"?
+tools_def: "tools" names ";"?
+trust_def: "trust" NAME ";"?
+review_gate_def: "review_gate" NAME ";"?
 
 tool_def: "tool" NAME tool_attr* "{" tool_item* "}"
 ?tool_attr: "irreversible" -> tool_irreversible
@@ -32,10 +56,31 @@ tool_effect: "effect" NAME ";"?
 
 authority_def: "authority" NAME? "{" authority_item* "}"
 ?authority_item: auth_may_suggest | auth_may_execute | auth_requires_human_approval | auth_forbidden
-auth_may_suggest: "may_suggest" name_list ";"?
-auth_may_execute: "may_execute" name_list ";"?
-auth_requires_human_approval: "requires_human_approval" name_list ";"?
-auth_forbidden: "forbidden" name_list ";"?
+auth_may_suggest: "may_suggest" names ";"?
+auth_may_execute: "may_execute" names ";"?
+auth_requires_human_approval: "requires_human_approval" names ";"?
+auth_forbidden: "forbidden" names ";"?
+
+grant_def: "grant" grant_kind names ";"?
+?grant_kind: "authority" -> grant_authority_kind
+           | "context" -> grant_context_kind
+
+agent_output_def: "output" NAME "visibility" names ";"?
+
+orchestration_def: "orchestration" "{" orchestration_item* "}"
+?orchestration_item: delegation_edge
+delegation_edge: NAME ARROW NAME ";"?
+
+failure_policy_def: "failure_policy" "{" failure_policy_item* "}"
+failure_policy_item: "when" agent_event ARROW failure_action ";"?
+agent_event: NAME "." NAME
+?failure_action: retry_action | NAME -> failure_target
+retry_action: "retry" "up_to" INT
+
+contract_def: "contract" "{" contract_item* "}"
+?contract_item: contract_hard | contract_rule
+contract_hard: "hard" "{" contract_rule* "}"
+contract_rule: "rule" NAME ";"?
 
 fallback_def: "fallback" "{" fallback_item* "}"
 fallback_item: "when" NAME "require" NAME ";"?
@@ -43,13 +88,17 @@ fallback_item: "when" NAME "require" NAME ";"?
 check_def: "check" "hard" "{" check_item* "}"
 check_item: "rule" NAME ";"?
 
+?names: name_list | bracket_name_list
 name_list: NAME ("," NAME)* ","?
+bracket_name_list: "[" name_list "]"
 ?atom: NAME -> atom_name
      | STRING -> atom_string
 
+ARROW: "->"
 NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 STRING: /"[^"]*"/
 COMMENT: /\/\/[^\n]*/
+%import common.INT
 %import common.WS
 %ignore WS
 %ignore COMMENT
@@ -135,6 +184,9 @@ class AiAst(Transformer):
     def name_list(self, meta, *names):
         return tuple(names)
 
+    def bracket_name_list(self, meta, names):
+        return tuple(names)
+
     def auth_may_suggest(self, meta, names):
         return ("may_suggest", names, _loc(meta))
 
@@ -166,6 +218,75 @@ class AiAst(Transformer):
             forbidden=tuple(buckets["forbidden"]),
             loc=loc,
         )
+
+    def context_def(self, meta, names):
+        return ("context", tuple(names), _loc(meta))
+
+    def tools_def(self, meta, names):
+        return ("tools", tuple(names), _loc(meta))
+
+    def trust_def(self, meta, name):
+        return ("trust", name, _loc(meta))
+
+    def review_gate_def(self, meta, name):
+        return ("review_gate", name, _loc(meta))
+
+    def grant_authority_kind(self, meta):
+        return "authority"
+
+    def grant_context_kind(self, meta):
+        return "context"
+
+    def grant_def(self, meta, kind, names):
+        return AiAgentGrant(kind=kind, names=tuple(names), loc=_loc(meta))
+
+    def agent_output_def(self, meta, name, visibility):
+        return AiAgentOutput(name=name, visibility=tuple(visibility), loc=_loc(meta))
+
+    def delegation_edge(self, meta, source, _arrow, target):
+        return AiDelegationEdge(source=source, target=target, loc=_loc(meta))
+
+    def orchestration_def(self, meta, *edges):
+        return ("orchestration", list(edges), _loc(meta))
+
+    def agent_event(self, meta, agent, condition):
+        return (agent, condition)
+
+    def retry_action(self, meta, limit):
+        return ("retry", int(limit), None)
+
+    def failure_target(self, meta, target):
+        return ("target", None, target)
+
+    def failure_policy_item(self, meta, event, _arrow, action):
+        agent, condition = event
+        action_kind, retry_limit, target = action
+        return AiFailurePolicy(
+            agent=agent,
+            condition=condition,
+            action=action_kind,
+            target=target,
+            retry_limit=retry_limit,
+            loc=_loc(meta),
+        )
+
+    def failure_policy_def(self, meta, *items):
+        return ("failure_policy", list(items), _loc(meta))
+
+    def contract_rule(self, meta, name):
+        return name
+
+    def contract_hard(self, meta, *rules):
+        return tuple(rules)
+
+    def contract_def(self, meta, *items):
+        rules = []
+        for item in items:
+            if isinstance(item, tuple):
+                rules.extend(item)
+            else:
+                rules.append(item)
+        return AiAgentContract(hard_rules=tuple(rules), loc=_loc(meta))
 
     def fallback_item(self, meta, reason, target):
         return AiFallback(reason=reason, target=target, loc=_loc(meta))
@@ -236,6 +357,101 @@ class AiAst(Transformer):
             loc=_loc(meta),
         )
 
+    def agent_def(self, meta, name, *items):
+        model = None
+        prompt = None
+        context = ()
+        tool_names = ()
+        tools = []
+        authority = AiAuthority()
+        grants = []
+        outputs = []
+        orchestration = []
+        failure_policy = []
+        contracts = []
+        children = []
+        trust = None
+        review_gates = []
+        seen_authority = False
+        seen_context = False
+        seen_tools = False
+        seen_orchestration = False
+        seen_failure_policy = False
+
+        for item in items:
+            if isinstance(item, AiAgent):
+                children.append(item)
+            elif isinstance(item, AiTool):
+                tools.append(item)
+            elif isinstance(item, AiAuthority):
+                if seen_authority:
+                    raise FslError("agent may declare authority at most once", loc=item.loc)
+                authority = item
+                seen_authority = True
+            elif isinstance(item, AiAgentGrant):
+                grants.append(item)
+            elif isinstance(item, AiAgentOutput):
+                outputs.append(item)
+            elif isinstance(item, AiDelegationEdge):
+                orchestration.append(item)
+            elif isinstance(item, AiFailurePolicy):
+                failure_policy.append(item)
+            elif isinstance(item, AiAgentContract):
+                contracts.append(item)
+            elif isinstance(item, tuple) and item[0] == "model":
+                if model is not None:
+                    raise FslError("agent may declare model at most once", loc=item[2])
+                model = item[1]
+            elif isinstance(item, tuple) and item[0] == "prompt":
+                if prompt is not None:
+                    raise FslError("agent may declare prompt at most once", loc=item[2])
+                prompt = item[1]
+            elif isinstance(item, tuple) and item[0] == "context":
+                if seen_context:
+                    raise FslError("agent may declare context at most once", loc=item[2])
+                context = item[1]
+                seen_context = True
+            elif isinstance(item, tuple) and item[0] == "tools":
+                if seen_tools:
+                    raise FslError("agent may declare tools at most once", loc=item[2])
+                tool_names = item[1]
+                seen_tools = True
+            elif isinstance(item, tuple) and item[0] == "orchestration":
+                if seen_orchestration:
+                    raise FslError("agent may declare orchestration at most once", loc=item[2])
+                orchestration.extend(item[1])
+                seen_orchestration = True
+            elif isinstance(item, tuple) and item[0] == "failure_policy":
+                if seen_failure_policy:
+                    raise FslError("agent may declare failure_policy at most once", loc=item[2])
+                failure_policy.extend(item[1])
+                seen_failure_policy = True
+            elif isinstance(item, tuple) and item[0] == "trust":
+                if trust is not None:
+                    raise FslError("agent may declare trust at most once", loc=item[2])
+                trust = item[1]
+            elif isinstance(item, tuple) and item[0] == "review_gate":
+                review_gates.append(item[1])
+
+        return AiAgent(
+            name=name,
+            model=model,
+            prompt=prompt,
+            context=tuple(context),
+            tool_names=tuple(tool_names),
+            tools=tools,
+            authority=authority,
+            grants=grants,
+            outputs=outputs,
+            orchestration=orchestration,
+            failure_policy=failure_policy,
+            contracts=contracts,
+            children=children,
+            trust=trust,
+            review_gates=tuple(review_gates),
+            loc=_loc(meta),
+        )
+
     def start(self, meta, child):
         return child
 
@@ -252,7 +468,23 @@ def is_ai_component_source(src):
     return src.lstrip().startswith("ai_component")
 
 
+def is_ai_agent_source(src):
+    return src.lstrip().startswith("agent")
+
+
+def is_ai_source(src):
+    stripped = src.lstrip()
+    return stripped.startswith("ai_component") or stripped.startswith("agent")
+
+
 def parse_ai_component(src):
+    parsed = parse_ai_source(src)
+    if not isinstance(parsed, AiComponent):
+        raise FslError("expected ai_component source", kind="semantics")
+    return parsed
+
+
+def parse_ai_source(src):
     try:
         tree = AI_PARSER.parse(src)
     except UnexpectedInput as e:

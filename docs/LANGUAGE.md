@@ -1529,20 +1529,72 @@ Use `fslc ai check` when you want fsl-ai vocabulary:
 
 ```bash
 fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
 ```
 
-Successful hard-contract checks return `verified_under_assumptions`.
-`fslc ai replay` accepts JSONL or `{ "events": [...] }` and returns
+Successful `ai_component` hard-contract checks return
+`verified_under_assumptions`. Recursive `agent` checks return
+`agent_analyzed` with `formal_result: "not_run"` because they are structural
+graph analysis, not kernel proof. `fslc ai replay` accepts JSONL or
+`{ "events": [...] }` and returns
 `replay_conformant` / `replay_nonconformant` with
 `formal_result: "not_run"` because replay is observation evidence. Findings use
 `finding_schema_version: "fsl-ai-finding.v0"` and include
 `guarantee_kind`:
 
 - `syntactic_hard`: schema/authority/approval/forbidden/precondition guard facts.
+- `agent_structural`: recursive-agent scope, grant, visibility, delegation, and
+  tool-reachability findings.
 - `runtime_observed`: declared component capability differs from observed events.
 - `evaluator_supported` and `statistically_supported`: reserved for later phases;
   they must not be displayed as `proved`.
+
+Recursive `agent` shape:
+
+```fsl
+agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy, CreateDraft];
+  authority {
+    may_execute [SearchDocs, CheckPolicy, CreateDraft];
+  }
+
+  agent RetrievalAgent {
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+    output PolicyDecision visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+  }
+}
+```
+
+Nested agents are ordinary agents scoped by their parent, not a distinct
+`sub_agent` type. Nesting creates lexical names such as
+`SupportOrchestrator.RetrievalAgent`; runtime collaboration is declared
+separately in `orchestration`. Parent authority/context is not inherited
+implicitly. A child must receive explicit `grant authority` and `grant context`,
+and each grant must stay inside the immediate parent boundary.
 
 Design details: `docs/DESIGN-ai-hard.md`.
 

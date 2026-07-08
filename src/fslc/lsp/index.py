@@ -6,10 +6,10 @@
 This module intentionally reads ``fslc.grammar.PARSER`` directly and does not
 touch the tuple AST transformer or verifier kernel. FSL keywords are mostly
 contextual, so declarations and references are classified by parse-tree
-position, not by spelling. The `ai_component`/`dbsystem` frontend dialects
+position, not by spelling. The `ai_component`/`agent`/`dbsystem` frontend dialects
 have their own Lark grammars (``fslc.ai_parser``/``fslc.db_parser``) that
 never reach the kernel grammar at all -- ``build_index`` picks the matching
-raw parser via ``is_ai_component_source``/``is_dbsystem_source`` before
+raw parser via ``is_ai_source``/``is_dbsystem_source`` before
 falling back to the kernel ``PARSER``, so those files no longer fail to
 parse here just because indexing hard-codes the kernel grammar.
 """
@@ -23,7 +23,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from lark import Tree, Token
 
 from fslc.grammar import PARSER
-from fslc.ai_parser import AI_PARSER, is_ai_component_source
+from fslc.ai_parser import AI_PARSER, is_ai_source
 from fslc.db_parser import DB_PARSER, is_dbsystem_source
 
 
@@ -559,7 +559,7 @@ class DocumentIndex:
 def _parser_for_source(source: str):
     if is_dbsystem_source(source):
         return DB_PARSER
-    if is_ai_component_source(source):
+    if is_ai_source(source):
         return AI_PARSER
     return PARSER
 
@@ -794,6 +794,9 @@ class _IndexBuilder:
 
     def _visit_ai_component(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_named_container(node, "ai_component", None)
+
+    def _visit_agent_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_named_container(node, "agent", None)
 
     def _visit_dbsystem(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_named_container(node, "dbsystem", None)

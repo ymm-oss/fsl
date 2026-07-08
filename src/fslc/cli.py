@@ -43,7 +43,8 @@ from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
 from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
 from .db_import import import_db_file
-from .ai_check import check_ai_component, load_ai_component, replay_ai_events
+from .ai_check import check_ai_source, load_ai_component, load_ai_source, replay_ai_events
+from .ai_parser import is_ai_agent_source
 
 FSL_VERSION = "1.0"
 
@@ -294,6 +295,15 @@ def _bounds_skip_warnings(ids, kind, bounds_overrides):
 def run_check(file, strict_tags=False, requirements=None):
     try:
         src = open(file, encoding="utf-8").read()
+        if is_ai_agent_source(src):
+            analysis = check_ai_source(load_ai_source(file))
+            return _envelope({
+                "result": "ok",
+                "spec": analysis["ai_agent"],
+                "dialect": analysis["dialect"],
+                "warnings": [],
+                "agent_analysis_result": analysis["result"],
+            })
         ast, display_names = _parse_file(file, src)
         spec = build_spec(ast, display_names, semantic_check=False)
         acc, _ = _acceptance_error(spec)
@@ -1281,9 +1291,9 @@ def run_db_import(file, name="ImportedDb", output=None, source_format="auto"):
 
 def run_ai_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
     try:
-        component = load_ai_component(file)
-        return _envelope(check_ai_component(
-            component,
+        source = load_ai_source(file)
+        return _envelope(check_ai_source(
+            source,
             depth=depth,
             engine=engine,
             deadlock_mode=deadlock_mode,
@@ -1337,7 +1347,7 @@ def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
-             "verified_under_assumptions", "replay_conformant",
+             "verified_under_assumptions", "agent_analyzed", "replay_conformant",
              "observed_conformant", "imported", "imported_with_warnings"):
         return 0
     if r == "sweep_passed":
@@ -1506,9 +1516,9 @@ def _build_arg_parser():
                      help="source format to import (default: auto by extension)")
     dbi.add_argument("-o", "--output")
 
-    ai = sub.add_parser("ai", help="AI hard-contract dialect commands")
+    ai = sub.add_parser("ai", help="AI dialect commands")
     ai_sub = ai.add_subparsers(dest="ai_cmd", required=True)
-    aic = ai_sub.add_parser("check", help="check an ai_component hard contract and emit fsl-ai findings")
+    aic = ai_sub.add_parser("check", help="check an ai_component hard contract or recursive agent structure")
     aic.add_argument("file")
     aic.add_argument("--depth", type=int, default=8)
     aic.add_argument("--engine", choices=["bmc", "induction"], default="bmc")

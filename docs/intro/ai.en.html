@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AI Hard Contracts with fsl-ai — FSL Manual</title>
-<meta name="description" content="How to use fsl-ai ai_component to check AI tool authority, human approval guards, forbidden tools, runtime replay, and AI-readable findings." />
+<title>AI Hard Contracts and Agent Structures with fsl-ai — FSL Manual</title>
+<meta name="description" content="How to use fsl-ai ai_component and agent to check AI tool authority, human approval guards, recursive agent structure, runtime replay, and AI-readable findings." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="ai">
@@ -17,8 +17,8 @@
 <section class="hero">
   <div class="wrap narrow center">
     <p class="kicker reveal">AI hard-contracts</p>
-    <h1 class="reveal">Use <code>ai_component</code> to guard AI tool execution</h1>
-    <p class="lead reveal">fsl-ai Phase 1 models the deterministic boundary of an AI component: declared tools, authority, human approval, forbidden tools, fallback, and runtime event replay.</p>
+    <h1 class="reveal">Guard AI tools and agent structure with fsl-ai</h1>
+    <p class="lead reveal">fsl-ai models deterministic AI boundaries: <code>ai_component</code> for declared tools, authority, approval, forbidden tools, fallback, and replay; <code>agent</code> for recursive scope, grants, visibility, orchestration, and failure policy.</p>
     <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a>.</p>
   </div>
 </section>
@@ -31,6 +31,7 @@
     <table class="matrix reveal">
       <tr><th>Contract</th><th>Examples</th><th>How fsl-ai reports it</th></tr>
       <tr><td><code>syntactic_hard</code></td><td>Tool schema, approval token, forbidden tool, precondition evidence.</td><td>Kernel expansion and <code>ai_hard_contract_violation</code>.</td></tr>
+      <tr><td><code>agent_structural</code></td><td>Nested agent grants, visibility, delegation, review gates, tool reachability.</td><td><code>agent_structural_violation</code>; structural evidence, not proof.</td></tr>
       <tr><td><code>runtime_observed</code></td><td>Undeclared tool or schema mismatch observed in logs.</td><td><code>observed_contract_violation</code>; not proof.</td></tr>
       <tr><td><code>evaluator_supported</code></td><td>Groundedness, source support, prompt-injection judgment.</td><td>Future phase; never displayed as <code>proved</code>.</td></tr>
       <tr><td><code>statistically_supported</code></td><td>Accuracy, recall, hallucination rate, slice metrics.</td><td>Future phase; confidence-bound evidence, not proof.</td></tr>
@@ -80,6 +81,44 @@
 
 <section>
   <div class="wrap">
+    <p class="kicker reveal">Recursive agents</p>
+    <h2 class="reveal">Nested agents are scoped agents, not <code>sub_agent</code>s</h2>
+    <p class="lead narrow reveal"><code>agent Parent { agent Child { ... } }</code> creates a lexical namespace such as <code>Parent.Child</code>. Parent authority and context are not inherited; children must receive explicit grants. Runtime collaboration stays separate in <code>orchestration</code>.</p>
+    <div class="panel reveal">
+      <pre><code>agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy];
+  authority { may_execute [SearchDocs, CheckPolicy]; }
+
+  agent RetrievalAgent {
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <p class="kicker reveal">Lowering</p>
     <h2 class="reveal"><code>ai_component</code> lowers to the existing kernel</h2>
     <p class="lead narrow reveal">The AI dialect adds no probability or evaluator semantics to the verifier. The hard contract becomes finite state and ordinary invariants.</p>
@@ -106,6 +145,7 @@
     <h2 class="reveal">Use AI-specific findings for guard and replay failures</h2>
     <div class="panel reveal">
       <pre><code>fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl</code></pre>
@@ -113,6 +153,7 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>Result</th><th>How to read it</th></tr>
       <tr><td><code>verified_under_assumptions</code></td><td>The finite hard-contract expansion verifies under complete capability declarations and runtime guard assumptions.</td></tr>
+      <tr><td><code>agent_analyzed</code></td><td>The recursive agent graph is structurally consistent; <code>formal_result</code> stays <code>not_run</code>.</td></tr>
       <tr><td><code>replay_conformant</code></td><td>The observed event log matched the declared hard boundary; this is evidence, not proof.</td></tr>
       <tr><td><code>ai_hard_contract_violation</code></td><td>A forbidden tool, approval bypass, schema invalidity, or business precondition mismatch was observed.</td></tr>
       <tr><td><code>observed_contract_violation</code></td><td>Runtime used a capability outside the declared component boundary.</td></tr>
@@ -132,12 +173,12 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
       </div>
       <div class="syntax-card">
         <h3>Working example</h3>
-        <p>The refund-agent example covers approval, forbidden tools, replay evidence, and observed mismatches.</p>
+        <p>The examples cover refund-agent approval/replay and recursive support-agent structure.</p>
         <p><a class="btn" href="../../examples/ai/README.md">examples/ai</a></p>
       </div>
       <div class="syntax-card">
         <h3>Core syntax</h3>
-        <p><code>ai_component</code> lowers to the existing verifier. The syntax guide covers the kernel forms it expands into.</p>
+        <p><code>ai_component</code> lowers to the existing verifier; <code>agent</code> is structural analysis.</p>
         <p><a class="btn" href="syntax.en.html">Syntax Guide</a></p>
       </div>
     </div>
