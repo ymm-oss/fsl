@@ -136,6 +136,12 @@ def validate_ai_component(component: AiComponent):
                     hint="declare the tool before referencing it in authority",
                 )
 
+    # Each fallback reason lowers to an action named `fallback_<reason>`
+    # (see expand_ai_component); two entries with the same reason would
+    # silently collide into one generated action, dropping the other.
+    _dedupe([fallback.reason for fallback in component.fallback],
+            "fallback reason", component.loc)
+
     _rule_set(component)
 
 

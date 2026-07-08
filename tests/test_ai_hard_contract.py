@@ -125,6 +125,33 @@ def test_ai_static_check_flags_irreversible_tool_without_approval(tmp_path):
     assert out["formal_result"] == "not_run"
 
 
+def test_ai_static_check_rejects_duplicate_fallback_reason(tmp_path):
+    # Two fallback entries sharing a reason would both lower to the same
+    # generated action name (fallback_<reason>), silently colliding.
+    path = tmp_path / "dup_fallback.fsl"
+    path.write_text(
+        """ai_component DupFallbackAgent {
+  tool SearchOrder {
+    schema SearchOrderV1;
+  }
+  authority {
+    may_execute SearchOrder;
+  }
+  fallback {
+    when low_confidence require human_review;
+    when low_confidence require refuse_with_reason;
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    out = run_ai_check(str(path))
+
+    assert out["result"] == "error"
+    assert "duplicate fallback reason" in out["message"]
+
+
 def test_ai_replay_distinguishes_schema_and_business_precondition_mismatch(tmp_path):
     log = tmp_path / "bad_tool_call.jsonl"
     log.write_text(
