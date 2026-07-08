@@ -1,0 +1,37 @@
+{
+  "schema_version": "fsl-db-engine-evidence.v0",
+  "formal_result": "not_run",
+  "result": "engine_evidence_supported",
+  "engine": {
+    "vendor": "postgresql",
+    "version": "16",
+    "configuration_fingerprint": "staging-like-prod-2026-07"
+  },
+  "adapter": {
+    "kind": "migration_dry_run",
+    "tool": "vendor-online-ddl-checker",
+    "tool_version": "1.0"
+  },
+  "migration": "add_email_normalized",
+  "checks": [
+    {
+      "kind": "lock_timeout",
+      "status": "passed",
+      "max_wait_ms": 5000
+    },
+    {
+      "kind": "online_ddl_validator",
+      "status": "passed"
+    }
+  ],
+  "redaction": {
+    "policy": "engine evidence contains identifiers and aggregate timings only",
+    "forbidden_fields": ["row_values", "query_text", "secrets", "payload_bodies"]
+  },
+  "assumptions": [
+    {
+      "id": "DB-ENGINE-ASSUME-STAGING-LIKE-PROD",
+      "text": "dry-run environment matches production engine settings relevant to this check"
+    }
+  ]
+}

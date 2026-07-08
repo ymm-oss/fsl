@@ -85,10 +85,26 @@ class DbArtifact:
 
 
 @dataclass(frozen=True)
+class DbFlag:
+    name: str
+    variants: Tuple[str, ...]
+    default: str
+    loc: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class DbFlagCondition:
+    flag: str
+    variant: str
+    loc: Optional[dict] = None
+
+
+@dataclass(frozen=True)
 class DbEnvironmentArtifact:
     role: str
     artifact: str
     schema_window: Optional[SchemaWindow] = None
+    flag_conditions: Tuple[DbFlagCondition, ...] = ()
     loc: Optional[dict] = None
 
 
@@ -97,6 +113,7 @@ class DbEnvironment:
     name: str
     schema_window: SchemaWindow
     artifacts: List[DbEnvironmentArtifact] = field(default_factory=list)
+    flags: List[DbFlag] = field(default_factory=list)
     loc: Optional[dict] = None
 
 

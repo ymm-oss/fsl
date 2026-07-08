@@ -28,7 +28,16 @@ from .db_ir import (
 class DbImportResult:
     system: DbSystem
     source: str
+    source_format: str
     warnings: List[dict] = field(default_factory=list)
+
+
+def import_db_file(path, name="ImportedDb", source_format="auto"):
+    text = Path(path).read_text(encoding="utf-8")
+    selected = _select_source_format(path, source_format)
+    if selected == "prisma":
+        return import_prisma(text, name=name)
+    return import_sql(text, name=name)
 
 
 def import_sql_file(path, name="ImportedDb"):
@@ -115,7 +124,145 @@ def import_sql(sql, name="ImportedDb"):
         environments=[environment],
         check=DbCheck(),
     )
-    return DbImportResult(system=system, source=dbsystem_to_source(system), warnings=warnings)
+    return DbImportResult(
+        system=system,
+        source=dbsystem_to_source(system),
+        source_format="sql-ddl-minimal.v0",
+        warnings=warnings,
+    )
+
+
+def import_prisma(schema, name="ImportedDb"):
+    warnings: List[dict] = []
+    models = _prisma_models(schema)
+    model_names = {model_name for model_name, _ in models}
+    columns: Dict[ColumnKey, DbColumn] = {}
+
+    for model_name, body in models:
+        for raw in body.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("//"):
+                continue
+            if line.startswith("@@"):
+                warnings.append(_unsupported_prisma(line, "model-level attributes are not imported"))
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                warnings.append(_unsupported_prisma(line, "Prisma importer expects '<field> <type>' field lines"))
+                continue
+            field, raw_type = parts[0], parts[1]
+            type_name = raw_type.rstrip("?")
+            if type_name.endswith("[]"):
+                warnings.append(_unsupported_prisma(line, "list/relation fields are not imported"))
+                continue
+            if type_name in model_names or "@relation" in line:
+                warnings.append(_unsupported_prisma(line, "relation fields are not imported"))
+                continue
+            db_type = _prisma_db_type(type_name)
+            if db_type is None:
+                warnings.append(_unsupported_prisma(line, f"unsupported Prisma scalar type '{type_name}'"))
+                continue
+            not_null = not raw_type.endswith("?")
+            columns[(model_name, field)] = DbColumn(
+                table=model_name,
+                name=field,
+                db_type=db_type,
+                present=True,
+                backfilled=True,
+                not_null=not_null,
+            )
+
+    if not columns:
+        columns[("imported", "id")] = DbColumn(
+            table="imported",
+            name="id",
+            db_type="Int",
+            present=True,
+            backfilled=True,
+            not_null=True,
+        )
+        warnings.append({
+            "kind": "empty_import",
+            "message": "no supported Prisma model fields were found; emitted a placeholder schema",
+        })
+
+    tables = []
+    for table in sorted({key[0] for key in columns}):
+        tables.append(DbTable(
+            name=table,
+            columns=[columns[key] for key in sorted(columns) if key[0] == table],
+        ))
+
+    final_columns = [key for key in sorted(columns)]
+    artifact = DbArtifact(
+        name="imported_artifact",
+        reads=final_columns,
+        writes=final_columns,
+    )
+    environment = DbEnvironment(
+        name="imported",
+        schema_window=(0, 0),
+        artifacts=[
+            DbEnvironmentArtifact("active", artifact.name, (0, 0)),
+            DbEnvironmentArtifact("supported", artifact.name, (0, 0)),
+        ],
+    )
+    system = DbSystem(
+        name=name,
+        database=DbDatabase(
+            name="imported",
+            initial_schema=0,
+            tables=tables,
+        ),
+        artifacts=[artifact],
+        environments=[environment],
+        check=DbCheck(),
+    )
+    return DbImportResult(
+        system=system,
+        source=dbsystem_to_source(system),
+        source_format="prisma-schema-minimal.v0",
+        warnings=warnings,
+    )
+
+
+def _select_source_format(path, source_format):
+    if source_format != "auto":
+        return source_format
+    suffix = Path(path).suffix.lower()
+    if suffix == ".prisma":
+        return "prisma"
+    return "sql"
+
+
+def _prisma_models(schema):
+    cleaned = re.sub(r"/\*.*?\*/", "", schema, flags=re.S)
+    return [
+        (match.group(1), match.group(2))
+        for match in re.finditer(r"\bmodel\s+(\w+)\s*\{(.*?)\}", cleaned, re.S)
+    ]
+
+
+def _prisma_db_type(type_name):
+    return {
+        "Int": "Int",
+        "BigInt": "Int",
+        "String": "Text",
+        "Boolean": "Bool",
+        "DateTime": "Text",
+        "Float": "Value",
+        "Decimal": "Value",
+        "Json": "Value",
+        "Bytes": "Value",
+    }.get(type_name)
+
+
+def _unsupported_prisma(statement, message):
+    return {
+        "kind": "unsupported_prisma",
+        "statement": statement,
+        "message": message,
+    }
 
 def _statements(sql):
     cleaned = re.sub(r"--[^\n]*", "", sql)
@@ -264,13 +411,21 @@ def dbsystem_to_source(system: DbSystem):
     for env in system.environments:
         lines.append(f"  environment {env.name} {{")
         lines.append(f"    schema {env.schema_window[0]}..{env.schema_window[1]};")
+        for flag in env.flags:
+            default = f" default {flag.default}" if flag.default else ""
+            lines.append(f"    flag {flag.name} {{ {', '.join(flag.variants)} }}{default};")
         for entry in env.artifacts:
+            conditions = "".join(
+                f" when flag {condition.flag}={condition.variant}"
+                for condition in entry.flag_conditions
+            )
             if entry.schema_window:
                 lines.append(
-                    f"    {entry.role} {entry.artifact} when schema {entry.schema_window[0]}..{entry.schema_window[1]};"
+                    f"    {entry.role} {entry.artifact} "
+                    f"when schema {entry.schema_window[0]}..{entry.schema_window[1]}{conditions};"
                 )
             else:
-                lines.append(f"    {entry.role} {entry.artifact};")
+                lines.append(f"    {entry.role} {entry.artifact}{conditions};")
         lines.append("  }")
         lines.append("")
     lines.append("  check compatibility {")

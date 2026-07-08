@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import itertools
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -171,67 +172,83 @@ def _static_findings(system, assumptions):
             lo = max(env.schema_window[0], window[0])
             hi = min(env.schema_window[1], window[1])
             for schema_version in range(lo, hi + 1):
+                flag_states = [
+                    state for state in _flag_snapshots(env)
+                    if _entry_active_at(env, entry, schema_version, state)
+                ]
+                if not flag_states:
+                    continue
                 state = states[schema_version]
                 source = sources.get(schema_version)
-                for column in artifact.reads:
-                    if not state[column]["exists"]:
-                        findings.append(_finding(
-                            kind="column_removed_while_still_read",
-                            severity="error",
-                            environment=env.name,
-                            migration=source.name if source else None,
-                            schema_element=column_label(column),
-                            artifact=entry.artifact,
-                            artifact_version=entry.artifact,
-                            failed_rule="all_active_reads_exist",
-                            witness={
+                for flag_state in flag_states:
+                    for column in artifact.reads:
+                        if not state[column]["exists"]:
+                            witness = {
                                 "schema_version": schema_version,
                                 "environment_role": entry.role,
                                 "declared_capability": "reads",
-                            },
-                            minimal_conflict_set={
+                            }
+                            witness.update(_flag_witness(flag_state))
+                            conflict = {
                                 "environment": env.name,
                                 "artifact": entry.artifact,
                                 "migration": source.name if source else None,
                                 "schema_element": column_label(column),
-                            },
-                            repair_candidates=_compat_repairs("reads", entry.artifact, column, env.name),
-                            assumptions=assumptions,
-                        ))
-                for column in artifact.writes:
-                    if not state[column]["exists"]:
-                        findings.append(_finding(
-                            kind="column_removed_while_still_written",
-                            severity="error",
-                            environment=env.name,
-                            migration=source.name if source else None,
-                            schema_element=column_label(column),
-                            artifact=entry.artifact,
-                            artifact_version=entry.artifact,
-                            failed_rule="all_active_writes_exist",
-                            witness={
+                            }
+                            conflict.update(_flag_witness(flag_state))
+                            findings.append(_finding(
+                                kind="column_removed_while_still_read",
+                                severity="error",
+                                environment=env.name,
+                                migration=source.name if source else None,
+                                schema_element=column_label(column),
+                                artifact=entry.artifact,
+                                artifact_version=entry.artifact,
+                                failed_rule="all_active_reads_exist",
+                                witness=witness,
+                                minimal_conflict_set=conflict,
+                                repair_candidates=_compat_repairs("reads", entry.artifact, column, env.name),
+                                assumptions=assumptions,
+                            ))
+                    for column in artifact.writes:
+                        if not state[column]["exists"]:
+                            witness = {
                                 "schema_version": schema_version,
                                 "environment_role": entry.role,
                                 "declared_capability": "writes",
-                            },
-                            minimal_conflict_set={
+                            }
+                            witness.update(_flag_witness(flag_state))
+                            conflict = {
                                 "environment": env.name,
                                 "artifact": entry.artifact,
                                 "migration": source.name if source else None,
                                 "schema_element": column_label(column),
-                            },
-                            repair_candidates=_compat_repairs("writes", entry.artifact, column, env.name),
-                            assumptions=assumptions,
-                        ))
-                findings.extend(_api_offline_findings(
-                    system,
-                    env,
-                    entry,
-                    artifact,
-                    schema_version,
-                    rules,
-                    assumptions,
-                ))
+                            }
+                            conflict.update(_flag_witness(flag_state))
+                            findings.append(_finding(
+                                kind="column_removed_while_still_written",
+                                severity="error",
+                                environment=env.name,
+                                migration=source.name if source else None,
+                                schema_element=column_label(column),
+                                artifact=entry.artifact,
+                                artifact_version=entry.artifact,
+                                failed_rule="all_active_writes_exist",
+                                witness=witness,
+                                minimal_conflict_set=conflict,
+                                repair_candidates=_compat_repairs("writes", entry.artifact, column, env.name),
+                                assumptions=assumptions,
+                            ))
+                    findings.extend(_api_offline_findings(
+                        system,
+                        env,
+                        entry,
+                        artifact,
+                        schema_version,
+                        flag_state,
+                        rules,
+                        assumptions,
+                    ))
     return findings
 
 
@@ -467,16 +484,35 @@ def _breaks_rollback_equivalence(op: DbMigrationOp, annotations, before_state):
     return False
 
 
-def _entry_active_at(env, entry, schema_version):
+def _flag_snapshots(env):
+    if not env.flags:
+        return [{}]
+    names = [flag.name for flag in env.flags]
+    domains = [flag.variants for flag in env.flags]
+    return [dict(zip(names, values)) for values in itertools.product(*domains)]
+
+
+def _flag_witness(flag_state):
+    return {"flags": dict(flag_state)} if flag_state else {}
+
+
+def _entry_active_at(env, entry, schema_version, flag_state=None):
     window = entry.schema_window or env.schema_window
-    return window[0] <= schema_version <= window[1]
+    if not (window[0] <= schema_version <= window[1]):
+        return False
+    if flag_state is None:
+        return True
+    return all(
+        flag_state.get(condition.flag) == condition.variant
+        for condition in entry.flag_conditions
+    )
 
 
-def _providers_for(system, env, schema_version, capability, target):
+def _providers_for(system, env, schema_version, capability, target, flag_state=None):
     providers = []
     artifacts = system.artifact_map()
     for entry in env.artifacts:
-        if entry.role == "may_exist" or not _entry_active_at(env, entry, schema_version):
+        if entry.role == "may_exist" or not _entry_active_at(env, entry, schema_version, flag_state):
             continue
         artifact = artifacts[entry.artifact]
         if target in getattr(artifact, capability):
@@ -484,37 +520,39 @@ def _providers_for(system, env, schema_version, capability, target):
     return providers
 
 
-def _api_offline_findings(system, env, entry, artifact, schema_version, rules, assumptions):
+def _api_offline_findings(system, env, entry, artifact, schema_version, flag_state, rules, assumptions):
     findings = []
     if "api_calls_accepted" in rules:
         for target in artifact.calls:
-            if not _providers_for(system, env, schema_version, "accepts", target):
+            if not _providers_for(system, env, schema_version, "accepts", target, flag_state):
                 findings.append(_capability_finding(
                     "api_call_not_accepted",
                     "api_calls_accepted",
                     env.name,
                     entry,
                     schema_version,
+                    flag_state,
                     "calls",
                     target,
                     assumptions,
                 ))
     if "api_responses_expected" in rules:
         for target in artifact.expects:
-            if not _providers_for(system, env, schema_version, "responds", target):
+            if not _providers_for(system, env, schema_version, "responds", target, flag_state):
                 findings.append(_capability_finding(
                     "api_response_field_missing",
                     "api_responses_expected",
                     env.name,
                     entry,
                     schema_version,
+                    flag_state,
                     "expects",
                     target,
                     assumptions,
                 ))
     if "offline_payloads_accepted" in rules:
         for target in artifact.emits_offline:
-            if not _providers_for(system, env, schema_version, "accepts", target):
+            if not _providers_for(system, env, schema_version, "accepts", target, flag_state):
                 ttl = artifact.offline_ttls.get(target)
                 findings.append(_capability_finding(
                     "offline_payload_not_accepted",
@@ -522,6 +560,7 @@ def _api_offline_findings(system, env, entry, artifact, schema_version, rules, a
                     env.name,
                     entry,
                     schema_version,
+                    flag_state,
                     "emits_offline",
                     target,
                     assumptions,
@@ -536,6 +575,7 @@ def _capability_finding(
         env_name,
         entry,
         schema_version,
+        flag_state,
         capability,
         target,
         assumptions,
@@ -546,8 +586,15 @@ def _capability_finding(
         "declared_capability": capability,
         "target": column_label(target),
     }
+    witness.update(_flag_witness(flag_state))
     if extra_witness:
         witness.update(extra_witness)
+    conflict = {
+        "environment": env_name,
+        "artifact": entry.artifact,
+        "schema_element": column_label(target),
+    }
+    conflict.update(_flag_witness(flag_state))
     return _finding(
         kind=kind,
         severity="error",
@@ -558,11 +605,7 @@ def _capability_finding(
         artifact_version=entry.artifact,
         failed_rule=failed_rule,
         witness=witness,
-        minimal_conflict_set={
-            "environment": env_name,
-            "artifact": entry.artifact,
-            "schema_element": column_label(target),
-        },
+        minimal_conflict_set=conflict,
         repair_candidates=_capability_repairs(capability, entry.artifact, target, env_name),
         assumptions=assumptions,
     )
@@ -600,7 +643,13 @@ def _observation_findings(system, events, assumptions):
         capability = event.get("capability")
         target = _target_key(event.get("target"))
         schema_version = event.get("schema_version")
-        if env is None or artifact_name not in artifacts or not _artifact_declared_in_env(env, artifact_name, schema_version):
+        flag_state = _event_flag_state(event)
+        if env is None or artifact_name not in artifacts or not _artifact_declared_in_env(
+                env,
+                artifact_name,
+                schema_version,
+                flag_state,
+        ):
             findings.append(_observation_finding(
                 "unsupported_artifact_observed",
                 event,
@@ -621,7 +670,14 @@ def _observation_findings(system, events, assumptions):
                 assumptions,
                 "observed DB access is not declared as an artifact capability",
             ))
-        elif capability == "calls" and not _providers_for(system, env, int(schema_version), "accepts", target):
+        elif capability == "calls" and not _providers_for(
+                system,
+                env,
+                int(schema_version),
+                "accepts",
+                target,
+                flag_state,
+        ):
             findings.append(_observation_finding(
                 "legacy_api_still_called",
                 event,
@@ -633,18 +689,29 @@ def _observation_findings(system, events, assumptions):
     return findings
 
 
-def _artifact_declared_in_env(env, artifact_name, schema_version):
+def _event_flag_state(event):
+    flags = event.get("flags")
+    return flags if isinstance(flags, dict) else None
+
+
+def _artifact_declared_in_env(env, artifact_name, schema_version, flag_state=None):
     try:
         version = int(schema_version)
     except (TypeError, ValueError):
         return False
     return any(
-        entry.artifact == artifact_name and _entry_active_at(env, entry, version)
+        entry.artifact == artifact_name and _entry_active_at(env, entry, version, flag_state)
         for entry in env.artifacts
     )
 
 
 def _observation_finding(kind, event, index, target, assumptions, reason):
+    conflict = {
+        "environment": event.get("environment"),
+        "artifact": event.get("artifact"),
+        "schema_element": column_label(target),
+    }
+    conflict.update(_flag_witness(_event_flag_state(event) or {}))
     return _finding(
         kind=kind,
         severity="error",
@@ -660,12 +727,9 @@ def _observation_finding(kind, event, index, target, assumptions, reason):
             "capability": event.get("capability"),
             "target": column_label(target),
             "reason": reason,
+            **_flag_witness(_event_flag_state(event) or {}),
         },
-        minimal_conflict_set={
-            "environment": event.get("environment"),
-            "artifact": event.get("artifact"),
-            "schema_element": column_label(target),
-        },
+        minimal_conflict_set=conflict,
         repair_candidates=_observation_repairs(event, target),
         assumptions=assumptions,
         result="observed_mismatch",

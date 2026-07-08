@@ -32,8 +32,9 @@ re-verified as it changes (regression, drift, cross-layer change-impact via
 
 The shared `fsl/` reference also covers the `dbsystem` database compatibility
 dialect. Use it for schema migration / artifact read-write compatibility checks
-and `fslc db check` findings; SQL/ORM importers, runtime observation, and data
-preservation proofs are intentionally post-MVP.
+and `fslc db check` findings; SQL/Prisma importers, runtime observation,
+bounded preservation checks, finite feature flags, and external DB evidence
+schemas are covered as explicit boundaries.
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or

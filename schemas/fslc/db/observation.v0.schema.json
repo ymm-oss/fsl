@@ -47,6 +47,13 @@
         "target": {
           "type": "string",
           "description": "Schema identifier only, e.g. users.email or api.CreateUserV1"
+        },
+        "flags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Optional finite feature-flag snapshot, e.g. {\"email_v2\":\"on\"}"
         }
       }
     }
