@@ -45,6 +45,16 @@ from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
 from .db_import import import_db_file
 from .ai_check import check_ai_source, load_ai_component, load_ai_source, replay_ai_events
 from .ai_parser import is_ai_agent_source
+from .domain_check import (
+    analyze_domain,
+    check_domain_source,
+    expand_domain_source,
+    generate_domain_scaffold,
+    generate_domain_tests,
+    load_domain,
+    replay_domain_logs,
+)
+from .domain_testgen import default_domain_testgen_output
 
 FSL_VERSION = "1.0"
 
@@ -1343,12 +1353,199 @@ def run_ai_replay(file, logs):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_domain_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
+    try:
+        domain = load_domain(file)
+        return _envelope(check_domain_source(
+            domain,
+            depth=depth,
+            engine=engine,
+            deadlock_mode=deadlock_mode,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_analyze(file):
+    try:
+        return _envelope(analyze_domain(load_domain(file)))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_expand(file, output=None, write_file=True):
+    try:
+        out = expand_domain_source(load_domain(file))
+        if output and write_file:
+            Path(output).write_text(out["kernel_source"], encoding="utf-8")
+            out = dict(out)
+            out["output"] = output
+            out.pop("kernel_source", None)
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_generate(file, target="typescript", output=None, write_file=True):
+    try:
+        out = generate_domain_scaffold(load_domain(file), target=target)
+        if output and write_file:
+            root = Path(output)
+            root.mkdir(parents=True, exist_ok=True)
+            for item in out["files"]:
+                path = root / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            out = dict(out)
+            out["output"] = output
+            out["files"] = [{"path": item["path"]} for item in out["files"]]
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_testgen(file, depth=8, output=None, deadlock_mode="warn",
+                       write_file=True, strict=False, target="vitest"):
+    try:
+        out = generate_domain_tests(
+            file,
+            depth=depth,
+            deadlock_mode=deadlock_mode,
+            target=target,
+            strict=strict,
+        )
+        out_path = output or default_domain_testgen_output(file, target=target)
+        out = dict(out)
+        out["output"] = out_path
+        if output and write_file:
+            Path(output).write_text(out["content"], encoding="utf-8")
+            out.pop("content", None)
+        return _envelope(out)
+    except TestgenScenarioError as e:
+        return _envelope(e.scenario_result)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_replay(file, logs):
+    try:
+        return _envelope(replay_domain_logs(file, logs))
+    except json.JSONDecodeError as e:
+        return _envelope({"result": "error", "kind": "io", "message": f"invalid JSON: {e}"})
+    except ValueError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
              "verified_under_assumptions", "agent_analyzed", "replay_conformant",
-             "observed_conformant", "imported", "imported_with_warnings"):
+             "observed_conformant", "imported", "imported_with_warnings",
+             "expanded", "conformance_checked"):
         return 0
     if r == "sweep_passed":
         return 0
@@ -1527,6 +1724,38 @@ def _build_arg_parser():
     air.add_argument("file")
     air.add_argument("--logs", required=True)
 
+    dom = sub.add_parser("domain", help="Functional DDD / async effect dialect commands")
+    dom_sub = dom.add_subparsers(dest="domain_cmd", required=True)
+    domc = dom_sub.add_parser("check", help="check domain/effect structure and verify generated kernel")
+    domc.add_argument("file")
+    domc.add_argument("--depth", type=int, default=8)
+    domc.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    domc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    doma = dom_sub.add_parser("analyze", help="emit aggregate/effect ownership findings")
+    doma.add_argument("file")
+    domx = dom_sub.add_parser("expand", help="expand domain/effect dialect to kernel FSL")
+    domx.add_argument("file")
+    domx.add_argument("-o", "--output")
+    domg = dom_sub.add_parser("generate", help="generate Functional DDD implementation scaffold")
+    domg.add_argument("file")
+    domg.add_argument("--profile", choices=["functional-ddd"], default="functional-ddd")
+    domg.add_argument(
+        "--target",
+        choices=["typescript", "kotlin", "swift", "python", "rust"],
+        default="typescript",
+    )
+    domg.add_argument("-o", "--output")
+    domr = dom_sub.add_parser("replay", help="replay runtime command/event/effect logs")
+    domr.add_argument("file")
+    domr.add_argument("--logs", required=True)
+    domt = dom_sub.add_parser("testgen", help="generate domain adapter/conformance scaffold")
+    domt.add_argument("file")
+    domt.add_argument("--depth", type=int, default=8)
+    domt.add_argument("--target", choices=["vitest", "pytest", "swift", "kotlin", "dart", "phpunit"], default="vitest")
+    domt.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    domt.add_argument("--strict", action="store_true")
+    domt.add_argument("-o", "--output")
+
     return ap
 
 
@@ -1662,6 +1891,51 @@ def _dispatch(args):
                 "result": "error",
                 "kind": "parse",
                 "message": f"unknown ai command: {args.ai_cmd}",
+            })
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "domain":
+        if args.domain_cmd == "check":
+            result = run_domain_check(args.file, args.depth, args.engine, args.deadlock)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "analyze":
+            result = run_domain_analyze(args.file)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "expand":
+            result = run_domain_expand(args.file, args.output, write_file=bool(args.output))
+            if result.get("result") == "expanded" and not args.output:
+                sys.stdout.write(result["kernel_source"])
+                sys.exit(0)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "generate":
+            result = run_domain_generate(
+                args.file,
+                target=args.target,
+                output=args.output,
+                write_file=bool(args.output),
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "replay":
+            result = run_domain_replay(args.file, args.logs)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "testgen":
+            result = run_domain_testgen(
+                args.file,
+                depth=args.depth,
+                output=args.output,
+                deadlock_mode=args.deadlock,
+                write_file=bool(args.output),
+                strict=args.strict,
+                target=args.target,
+            )
+            if result.get("result") == "generated" and not args.output:
+                sys.stdout.write(result["content"])
+                sys.exit(0)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown domain command: {args.domain_cmd}",
             })
             print(json.dumps(result, indent=2, ensure_ascii=False))
     else:

@@ -277,6 +277,32 @@
       "warnings": []
     }
   },
+  "examples/domain/order_async_effect.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/domain/order_fulfillment_saga.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/domain/order_functional_ddd.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/domain/unsafe_irreversible_effect_without_idempotency.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/e2e/1_business.fsl": {
     "check": {
       "result": "ok",

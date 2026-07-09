@@ -1,0 +1,107 @@
+domain OrderFulfillmentSaga {
+  implementation_profile functional_ddd
+
+  type OrderStatus = Pending | Approved | Cancelled
+  type InventoryStatus = NotRequested | ReservationPending | Reserved | Failed | ReleaseRequested
+  type PaymentStatus = NotRequested | PaymentPending | Captured | Failed | TimedOut
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      status: OrderStatus = Pending;
+      inventory_status: InventoryStatus = NotRequested;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command ApproveOrder {}
+
+    event OrderApproved {}
+    event InventoryReservationRequested {}
+    event InventoryReserved {}
+    event InventoryReservationFailed {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    event ShipmentRequested {}
+    event InventoryReleaseRequested {}
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+
+    evolve InventoryReservationRequested {
+      inventory_status = ReservationPending
+    }
+
+    evolve InventoryReserved {
+      inventory_status = Reserved
+    }
+
+    evolve InventoryReservationFailed {
+      inventory_status = Failed
+    }
+
+    evolve PaymentCaptureRequested {
+      payment_status = PaymentPending
+    }
+
+    evolve PaymentCaptured {
+      payment_status = Captured
+    }
+
+    evolve PaymentFailed {
+      payment_status = Failed
+    }
+
+    evolve PaymentCaptureTimedOut {
+      payment_status = TimedOut
+    }
+
+    evolve ShipmentRequested {
+      status = Approved
+    }
+
+    evolve InventoryReleaseRequested {
+      inventory_status = ReleaseRequested
+    }
+  }
+
+  saga OrderFulfillment {
+    starts_on OrderApproved
+    outbox OrderOutbox
+    inbox FulfillmentInbox
+
+    step ReserveInventory {
+      async
+      emits InventoryReservationRequested
+      awaits one_of [InventoryReserved, InventoryReservationFailed]
+      timeout after 5m emits InventoryReservationFailed
+    }
+
+    step CapturePayment {
+      async
+      requires InventoryReserved
+      emits PaymentCaptureRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+      timeout after 10m emits PaymentCaptureTimedOut
+    }
+
+    step ShipOrder {
+      requires PaymentCaptured
+      emits ShipmentRequested
+    }
+
+    compensation {
+      when PaymentFailed after InventoryReserved {
+        emits InventoryReleaseRequested
+      }
+    }
+  }
+}

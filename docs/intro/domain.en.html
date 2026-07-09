@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Functional DDD and Async Effects with fsl-domain — FSL Manual</title>
+<meta name="description" content="How to use fsl-domain to model Functional DDD aggregates, commands, events, pure decide/evolve logic, sagas, async effects, generated scaffolds, runtime replay, and conformance adapters." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="domain">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <p class="kicker reveal">Functional DDD / async effects</p>
+    <h1 class="reveal">Describe domain transitions with <code>domain</code></h1>
+    <p class="lead reveal">fsl-domain makes aggregate ownership, command intent, accepted events, pure <code>decide/evolve</code> logic, saga/process-manager coordination, and async effect lifecycles explicit enough to verify, replay, and generate implementation scaffolds.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="../DESIGN-domain.md">DESIGN-domain.md</a> and <a href="../DESIGN-effect.md">DESIGN-effect.md</a>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Model</p>
+    <h2 class="reveal">Keep the domain core pure</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Aggregate</h3>
+        <p>Owns state, commands, events, errors, invariants, and the consistency boundary.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Decide</h3>
+        <p>Maps state plus command to accepted events or rejected intent. No I/O belongs here.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Evolve</h3>
+        <p>Applies accepted events to state as pure transition logic.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Effect</h3>
+        <p>Models external async work with correlation, retry, timeout, and idempotency boundaries.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Saga</h3>
+        <p>Coordinates eventual steps, awaits outcomes, and declares compensation across boundaries.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Shape</p>
+    <h2 class="reveal">Write commands, events, and effect outcomes together</h2>
+    <div class="panel reveal">
+      <pre><code>domain OrderAsyncEffect {
+  implementation_profile functional_ddd
+
+  type OrderStatus = Pending | Approved | Cancelled
+  type PaymentStatus = NotRequested | PaymentPending | Captured | Failed | TimedOut
+
+  aggregate Order {
+    id OrderId
+    state {
+      status: OrderStatus = Pending;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command RequestPaymentCapture { input payment_request_id: PaymentRequestId }
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    error CannotCaptureUnapprovedOrder
+
+    decide RequestPaymentCapture {
+      rejects CannotCaptureUnapprovedOrder when status != Approved
+      emits PaymentCaptureRequested
+    }
+
+    evolve PaymentCaptureRequested { payment_status = PaymentPending }
+    evolve PaymentCaptured {
+      requires status != Cancelled
+      payment_status = Captured
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry { max_attempts 3 }
+    timeout after 10m emits PaymentCaptureTimedOut
+  }
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Run it</p>
+    <h2 class="reveal">Use kernel verification plus domain-specific findings</h2>
+    <div class="panel reveal">
+      <pre><code>fslc check examples/domain/order_async_effect.fsl
+fslc verify examples/domain/order_async_effect.fsl --depth 6
+fslc domain check examples/domain/order_async_effect.fsl
+fslc domain analyze examples/domain/order_async_effect.fsl
+fslc domain expand examples/domain/order_async_effect.fsl
+fslc domain generate examples/domain/order_functional_ddd.fsl --target typescript -o src/domain
+fslc domain generate examples/domain/order_functional_ddd.fsl --target python
+fslc domain testgen examples/domain/order_functional_ddd.fsl --target vitest -o order.domain.test.ts
+fslc domain replay examples/domain/order_async_effect.fsl --logs examples/domain/order_async_effect_replay.jsonl</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Result</th><th>Meaning</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>The generated kernel model verified, with finite-model and scaffold assumptions stated in JSON.</td></tr>
+      <tr><td><code>violated</code></td><td>A hard domain finding blocked formal verification, or the generated kernel found a real property violation.</td></tr>
+      <tr><td><code>warning</code> finding</td><td>A design risk such as missing timeout/fallback or late completion policy. It does not claim a formal violation by itself.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Boundary</p>
+    <h2 class="reveal">What the MVP proves</h2>
+    <p class="lead narrow reveal">The verifier checks the modeled transition system: aggregate invariants, command/evolve behavior, saga step guards, completion requiring a pending request, retry bounds, and sticky success. Runtime replay checks finite logs as observation evidence. Neither proves real gateway behavior, queue delivery, wall-clock timeouts, or production exactly-once semantics.</p>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

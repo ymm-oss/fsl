@@ -158,6 +158,94 @@ not prove rollout percentages. Generic `requires` / `provides` capabilities
 cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
 other artifact profiles in the same snapshot model. See `docs/DESIGN-db.md`.
 
+Functional DDD / async effect dialect (MVP; expands to the same kernel and
+reports stable fsl-domain findings):
+
+```fsl
+domain <Name> {
+  implementation_profile functional_ddd
+
+  type OrderStatus = Pending | Approved | Cancelled
+
+  aggregate Order {
+    id OrderId
+    state { status: OrderStatus = Pending; }
+
+    command ApproveOrder {}
+    event OrderApproved {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    error CannotApprove
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+    evolve PaymentCaptureRequested { }
+    evolve PaymentCaptured { }
+    evolve PaymentFailed { }
+    evolve PaymentCaptureTimedOut { }
+
+    invariant noLateApprove {
+      status == Cancelled -> not can(ApproveOrder)
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry { max_attempts 3 }
+    timeout after 10m emits PaymentCaptureTimedOut
+    compensation { emits PaymentFailed }
+  }
+
+  saga OrderFulfillment {
+    starts_on OrderApproved
+    outbox OrderOutbox
+    inbox FulfillmentInbox
+
+    step RequestPayment {
+      async
+      emits PaymentCaptureRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+      timeout after 10m emits PaymentCaptureTimedOut
+    }
+  }
+}
+```
+
+`domain` models aggregate consistency boundaries, command intent, accepted
+events, domain errors, pure `decide`/`evolve`, async effect lifecycles, and
+saga/process-manager coordination. It lowers each command+decide+evolve path to
+a kernel `action`, aggregate state to prefixed kernel state, saga steps to
+event-flag guarded actions, and effect lifecycle state to finite
+`Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Domain
+enum members are namespaced during lowering, so two domain enums may both contain
+`Pending`. Domain expressions may use `X in [A, B]` and `can(Command)`; these are
+rewritten to kernel expressions.
+
+Use `fslc domain check` for stable fsl-domain findings and the nested kernel
+result (`verified_under_assumptions` on success), `fslc domain analyze` for the
+aggregate/effect summary, `fslc domain expand` to inspect generated kernel FSL,
+`fslc domain generate --target typescript|python|kotlin|swift|rust` for
+Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
+scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
+event / effect evidence. The MVP proves the finite modeled lifecycle; replay is
+observation evidence and saga history adds `DOMAIN-ASSUME-SAGA-HISTORY-MVP`.
+It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
+production exactly-once semantics. See `docs/DESIGN-domain.md` and
+`docs/DESIGN-effect.md`.
+
 `fslc verify` can override a `verify` block's `instances`/`values` bounds from
 the command line, without editing the spec:
 
@@ -504,6 +592,12 @@ fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable t
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
+fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
+fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
+fslc domain expand <file.fsl> [-o out.fsl]                      # generated kernel FSL
+fslc domain generate <file.fsl> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain testgen <file.fsl> [--target vitest] [-o out]       # domain adapter/conformance scaffold
+fslc domain replay <file.fsl> --logs events.jsonl              # domain runtime replay evidence
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
 fslc db observe <file.fsl> --trace events.json                  # runtime observation evidence
 fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DDL -> dbsystem
