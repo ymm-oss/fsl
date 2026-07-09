@@ -8,8 +8,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ### Added
 - Rebuilt the `docs/intro/` manual site's information architecture around 4
   fixed categories (Get Started / Guides / Reference / Examples & Background),
-  designed with the Relational Design plugin (trace under `.relational-design/`,
-  decisions in `docs/DESIGN-docs-site.md`). Added a categorized sidebar with
+  designed with the Relational Design plugin (decisions in
+  `docs/DESIGN-docs-site.md`). Added a categorized sidebar with
   real `<h2>`/`aria-labelledby` groups, a breadcrumb, 4 category hub pages, and
   7 new chapters: `quickstart` (a 5-minute install-to-proof walkthrough),
   `examples` (a guide to `examples/`/`specs/`), `errors` (the JSON envelope,
