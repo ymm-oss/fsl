@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>fsl-ai によるAI hard contractとagent構造解析 — FSL 日本語マニュアル</title>
-<meta name="description" content="fsl-aiのai_componentとagentで、AI tool authority、human approval guard、recursive agent構造、runtime replay、AI-readable findingを確認する方法。" />
+<title>fsl-ai によるAI hard contract・agent構造・統計evidence — FSL 日本語マニュアル</title>
+<meta name="description" content="fsl-aiのai_component/agent/dataset/evaluator/statistical_property/ai_migration/observed_propertyで、AI tool境界、recursive agent構造、Wilson区間による統計evidence、migration regression、運用driftを確認する方法。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="ai">
@@ -17,33 +17,63 @@
 <section class="hero">
   <div class="wrap narrow center">
     <nav class="breadcrumb" data-nav></nav>
-    <p class="kicker reveal">AI hard-contracts</p>
-    <h1 class="reveal">fsl-ai でAIのtool境界とagent構造を守る</h1>
-    <p class="lead reveal">fsl-ai は、決定的に検査できるAI境界を扱います。<code>ai_component</code> はtool宣言、authority、human approval、forbidden tool、fallback、runtime event replayを、<code>agent</code> はrecursive scope、grant、visibility、orchestration、failure policyを扱います。</p>
-    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> にあります。</p>
+    <p class="kicker reveal">AI hard-contracts / statistical evidence</p>
+    <h1 class="reveal">fsl-ai でAIのtool境界・agent構造・統計品質を1つの規律で扱う</h1>
+    <p class="lead reveal">fsl-ai は3つの層でAIシステムを扱います。<code>ai_component</code> はtool authority・human approval・forbidden toolをkernel展開で検査するhard contract層、<code>agent</code> はrecursive agentのgrant・visibility・orchestrationを解析する構造層、そして <code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code> / <code>ai_migration</code> / <code>observed_property</code> は統計品質・migration regression・運用driftを <code>formal_result: "not_run"</code> の外部証拠として扱うevidence層です。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a> にあります。</p>
   </div>
 </section>
 
 <section>
   <div class="wrap">
-    <p class="kicker reveal">境界</p>
-    <h2 class="reveal">hard contract と evaluator / statistical evidence を分ける</h2>
-    <p class="lead narrow reveal">fsl-aiは、自然言語回答の真偽を証明しようとはしません。実行前guardの構造事実を検査し、統計品質・migration regression・driftは証明ではなく外部証拠として扱います。</p>
+    <p class="kicker reveal">何を防ぐか</p>
+    <h2 class="reveal">「動いているように見えるAI」の4種類の事故を検出する</h2>
+    <p class="lead narrow reveal">fsl-aiは、自然言語回答の真偽を証明しようとはしません。代わりに、実行前guardで決定的に検査できる境界と、統計・観測として正直に扱うべき証拠を分離し、それぞれの事故を専用findingで返します。</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>tool境界の突破</h3>
+        <p>forbidden toolの実行、human approvalなしのirreversible実行を、kernel invariantとruntime replayの両方で検出します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>agent権限の漏れ</h3>
+        <p>子agentのgrant超過、sibling間のvisibility leak、low-trust agentからhigh-authority toolへの到達、review-gate bypassを構造解析で検出します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>点推定だけのリリース判断</h3>
+        <p>「accuracyが0.92だった」だけの主張を拒否します。Wilson intervalの下限が閾値を支持しない限り <code>statistically_supported</code> にはなりません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>静かなregressionとdrift</h3>
+        <p>prompt/model/retriever移行によるmetric悪化を <code>fslc ai regress</code> で、本番telemetryの閾値超過とdriftを <code>fslc ai drift</code> で、閾値つき証拠として検出します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Guarantee boundary</p>
+    <h2 class="reveal">provedと言えるもの・言えないものを最初に固定する</h2>
+    <p class="lead narrow reveal">fsl-aiの中心は、契約の種類ごとに「どう扱い、どの語彙で報告するか」を固定したguarantee boundaryです。すべての結果とfindingがこの区分を運びます。</p>
     <table class="matrix reveal">
-      <tr><th>契約</th><th>例</th><th>fsl-aiでの扱い</th></tr>
-      <tr><td><code>syntactic_hard</code></td><td>tool schema、approval token、forbidden tool、precondition evidence。</td><td>kernel展開と <code>ai_hard_contract_violation</code>。</td></tr>
-      <tr><td><code>agent_structural</code></td><td>nested agent grant、visibility、delegation、review gate、tool reachability。</td><td><code>agent_structural_violation</code>。構造証拠であり証明ではない。</td></tr>
-      <tr><td><code>runtime_observed</code></td><td>未宣言toolやschema mismatchがログに出た。</td><td><code>observed_contract_violation</code>。証明ではなく観測。</td></tr>
-      <tr><td><code>evaluator_supported</code></td><td>groundedness、source support、prompt injection判定。</td><td>後続phase。<code>proved</code> とは表示しない。</td></tr>
-      <tr><td><code>statistically_supported</code></td><td>accuracy、recall、hallucination rate、slice指標。</td><td><code>fslc ai eval</code>。信頼区間つき証拠であり証明ではない。</td></tr>
+      <tr><th>Contract class</th><th>例</th><th>扱い</th><th>Result vocabulary</th></tr>
+      <tr><td>syntactic / structural hard</td><td>tool schema、authority、forbidden tool、human approval token、symbolic precondition evidence。</td><td>静的検査、kernel展開、runtime guard/replay finding。</td><td><code>verified_under_assumptions</code>、<code>violated</code>、finding kind <code>ai_hard_contract_violation</code>。</td></tr>
+      <tr><td>agent structural</td><td>nested agentのgrant、visibility、delegation、review gate、tool reachability。</td><td>graph解析による構造的証拠。証明ではない。</td><td><code>agent_analyzed</code>、finding kind <code>agent_structural_violation</code>。</td></tr>
+      <tr><td>evaluator-backed</td><td>groundedness、source support、prompt-injection判定。</td><td>external evaluator evidence。kernel proofではない。</td><td><code>evaluator_supported</code>。<code>proved</code> とは決して表示しない。</td></tr>
+      <tr><td>statistical</td><td>accuracy、recall、hallucination rate、sliceごとの指標。</td><td>external stochastic evidence layer（<code>fslc ai eval</code> / <code>regress</code>）。</td><td><code>statistically_supported</code> / <code>statistically_unsupported</code>。</td></tr>
+      <tr><td>observed</td><td>未宣言toolの実行、log上のschema mismatch、本番telemetryのdrift。</td><td><code>fslc ai replay</code> / <code>fslc ai drift</code> の観測証拠のみ。</td><td><code>replay_conformant</code> / <code>replay_nonconformant</code>、<code>observed_supported</code> / <code>observed_mismatch</code>、finding kind <code>observed_contract_violation</code>。</td></tr>
     </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">prompt injectionやRAG groundednessを「hard」と呼べるのは、検査される述語が構造的でguardに裏づけられている場合だけです。例えば「<code>schema_valid=false</code> のeventではtool callを実行しない」「citation IDが宣言済みの有限allow-listに含まれる」は hard です。「回答がsourceに支持されている」という意味論的主張はevaluatorが必要で、形式証明としては表示できません。</p>
+    </div>
   </div>
 </section>
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
-    <p class="kicker reveal">構文</p>
-    <h2 class="reveal">tool と authority を明示する</h2>
+    <p class="kicker reveal">Hard contract</p>
+    <h2 class="reveal"><code>ai_component</code> でtoolとauthorityを明示する</h2>
+    <p class="lead narrow reveal">hard contract層は、AI componentを観測可能なtool境界だけでモデル化します。model/prompt/input/outputのmetadata、tool宣言とschema名、symbolic precondition、authority、fallback、そして <code>check hard</code> のrule選択です。</p>
     <div class="panel reveal">
       <pre><code>ai_component RefundAgentToolSafety {
   model refund_model_v1;
@@ -54,16 +84,19 @@
   tool SearchOrder {
     schema SearchOrderV1;
     precondition order_exists;
+    effect read_order;
   }
 
   tool RefundPayment irreversible {
     schema RefundPaymentV1;
     precondition order_paid;
     precondition amount_refundable;
+    effect payment_refunded;
   }
 
   tool DeleteCustomerData irreversible {
     schema DeleteCustomerDataV1;
+    effect customer_data_deleted;
   }
 
   authority {
@@ -74,46 +107,28 @@
 
   fallback {
     when low_confidence require human_review;
+    when missing_order_evidence require refuse_with_reason;
+  }
+
+  check hard {
+    rule tool_authority;
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
   }
 }</code></pre>
     </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <p class="kicker reveal">Recursive agents</p>
-    <h2 class="reveal">入れ子agentは <code>sub_agent</code> ではなく、scope付きagent</h2>
-    <p class="lead narrow reveal"><code>agent Parent { agent Child { ... } }</code> は <code>Parent.Child</code> のようなlexical namespaceを作ります。親のauthority/contextは暗黙継承されず、子には明示grantが必要です。実行時の協調は別に <code>orchestration</code> で書きます。</p>
-    <div class="panel reveal">
-      <pre><code>agent SupportOrchestrator {
-  context [CustomerTicket, ApprovedSupportDocs];
-  tools [SearchDocs, CheckPolicy];
-  authority { may_execute [SearchDocs, CheckPolicy]; }
-
-  agent RetrievalAgent {
-    grant authority [SearchDocs];
-    grant context [ApprovedSupportDocs];
-    tools [SearchDocs];
-    authority { may_execute [SearchDocs]; }
-    output RetrievedSources visibility [parent, PolicyCheckAgent];
-  }
-
-  agent PolicyCheckAgent {
-    grant authority [CheckPolicy];
-    grant context [CustomerTicket, ApprovedSupportDocs];
-    tools [CheckPolicy];
-    authority { may_execute [CheckPolicy]; }
-  }
-
-  orchestration {
-    RetrievalAgent -> PolicyCheckAgent;
-  }
-
-  failure_policy {
-    when RetrievalAgent.failed -> retry up_to 2;
-  }
-}</code></pre>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>rule</th><th>検査内容</th></tr>
+      <tr><td><code>tool_authority</code></td><td>forbidden toolが同時にexecutableになっていないこと。</td></tr>
+      <tr><td><code>human_approval_required</code></td><td><code>irreversible</code> なexecutable toolが <code>requires_human_approval</code> に入っていること。</td></tr>
+      <tr><td><code>forbidden_tool_blocked</code></td><td>生成されたkernel状態機械に、forbidden toolの <code>tool_executed</code> をtrueにできる遷移が存在しないこと。</td></tr>
+      <tr><td><code>tool_schema_declared</code></td><td>executable toolがschema名を宣言していること。</td></tr>
+      <tr><td><code>tool_precondition_declared</code></td><td>宣言されたsymbolic preconditionが、replay時にbusiness precondition evidenceとして照合されること（tool schema適合とは別）。</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><code>check hard</code> を省略すると5 rule全部が検査されます（安全なdefault）。また、business/requirements dialectと違い、<code>ai_component</code> のどのフィールドも <code>"description text"</code> tagを受け付けません — すべてbareな識別子か数値です。</p>
     </div>
   </div>
 </section>
@@ -122,19 +137,23 @@
   <div class="wrap">
     <p class="kicker reveal">展開</p>
     <h2 class="reveal"><code>ai_component</code> は既存kernelへ展開される</h2>
-    <p class="lead narrow reveal">AI dialect は verifier に確率や evaluator semantics を追加しません。hard contract は有限状態と通常の不変条件になります。</p>
+    <p class="lead narrow reveal">AI dialectは、verifierに確率・percentile・evaluator semanticsを一切追加しません。hard contractは有限状態と通常の不変条件になり、<code>fslc ai check</code>（内部でBMCまたはk-induction）で検査されます。</p>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>有限のtool状態</h3>
-        <p><code>Tool</code>、<code>human_approved</code>、<code>tool_executed</code>、<code>tool_suggested</code> は通常のkernel stateです。</p>
+        <p><code>Tool</code> enumと、<code>human_approved</code>、<code>tool_executed</code>、<code>tool_suggested</code> の <code>Map&lt;Tool, Bool&gt;</code>、そして <code>fallback_required: Bool</code> が通常のkernel stateになります。</p>
       </div>
       <div class="syntax-card">
         <h3>生成action</h3>
-        <p><code>approve_*</code> と <code>execute_*</code> が、approval token とguardされた実行を表します。</p>
+        <p><code>suggest_*</code>、<code>approve_*</code>、<code>execute_*</code>、<code>fallback_*</code> actionが、approval tokenとguardされた実行を表します。</p>
       </div>
       <div class="syntax-card">
         <h3>生成invariant</h3>
-        <p>forbidden tool は実行されず、irreversibleまたはapproval-requiredなtoolは承認後だけ実行できます。</p>
+        <p>forbidden toolは決して実行されず、irreversible / approval-requiredなtoolはapproval後だけ実行できる、という不変条件が生成されます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>fallbackは構造のみ</h3>
+        <p><code>when &lt;reason&gt; require &lt;target&gt;</code> は <code>fallback_&lt;reason&gt;</code> actionとghost状態に展開されますが、<code>target</code> は自由ラベルなのでinvariantは生成されません。「fallback先が実際に実行された」ことの証明ではありません。reasonはcomponent内で一意である必要があります。</p>
       </div>
     </div>
   </div>
@@ -142,44 +161,314 @@
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
+    <p class="kicker reveal">Recursive agents</p>
+    <h2 class="reveal">入れ子agentは <code>sub_agent</code> ではなく、scope付きagent</h2>
+    <p class="lead narrow reveal"><code>agent Parent { agent Child { ... } }</code> は <code>Parent.Child</code> というlexical namespaceを作ります。親のauthority/contextは暗黙継承されず、子は明示的な <code>grant</code> で受け取ります。grantは直接の親の境界のsubsetでなければなりません。実行時の協調は別の <code>orchestration</code> graphです。</p>
+    <div class="panel reveal">
+      <pre><code>agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy, SendEmail];
+  authority {
+    may_execute [SearchDocs, CheckPolicy];
+    requires_human_approval [SendEmail];
+  }
+  review_gate PolicyCheckAgent;
+
+  agent RetrievalAgent {
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+    contract { hard { rule PolicyDecisionCited; } }
+    output PolicyDecision visibility parent;
+  }
+
+  agent SendAgent {
+    trust high;
+    grant authority [SendEmail];
+    grant context [CustomerTicket];
+    tool SendEmail irreversible {
+      schema SendEmailV1;
+    }
+    authority { requires_human_approval [SendEmail]; }
+    output SendResult visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+    PolicyCheckAgent -> SendAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+  }
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px"><code>fslc ai check</code> はこれを <code>agent_analyzed</code>（<code>formal_result: "not_run"</code>）として解析し、<code>graph_summary</code> に6つのgraph — <code>scope_tree</code>、<code>delegation_graph</code>、<code>authority_graph</code>、<code>information_flow_graph</code>、<code>tool_reachability_graph</code>、<code>failure_policy</code> — を分離して返します。構造違反はfinding kind <code>agent_structural_violation</code> で報告されます。</p>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>violation</th><th>意味</th></tr>
+      <tr><td><code>child_authority_exceeds_parent_authority</code></td><td>子のgrant/tool/authorityが直接の親の境界を超えている。</td></tr>
+      <tr><td><code>child_context_exceeds_parent_context</code></td><td>子のcontext使用がgrantされたcontextを超えている。</td></tr>
+      <tr><td><code>visibility_leak_across_sibling_agents</code></td><td>delegation pathのないsiblingへのoutput visibility。</td></tr>
+      <tr><td><code>low_trust_agent_path_to_high_authority_tool</code></td><td><code>trust low</code> のagentからhigh-authority toolへの経路。上のsnippetの <code>RetrievalAgent</code> を <code>trust low</code> に変えると実際にこのfindingが返ります。</td></tr>
+      <tr><td><code>irreversible_operation_without_human_approval_path</code></td><td>irreversible toolへの経路に <code>requires_human_approval</code> がない。</td></tr>
+      <tr><td><code>policy_review_bypass_in_orchestration</code></td><td>high-authority toolに到達するorchestration pathが、宣言された <code>review_gate</code> の子を全部すり抜けている。</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">正確な範囲に注意してください。<code>trust</code> は自由識別子で、文字列 <code>low</code> だけが専用チェック（<code>low_trust_agent_path_to_high_authority_tool</code>）を持ちます。<code>medium</code> / <code>high</code> は構文上通りますが専用チェックはまだありません。<code>contract { hard { rule &lt;Name&gt;; } }</code> はparseされて各agentの <code>agent_ir.contracts</code>（例: <code>{"hard_rules": ["PolicyDecisionCited"]}</code>）に載るだけで、まだ何とも相互検証されません — forward-declaredなmetadataです。<code>ai_component</code> と同様、<code>"description text"</code> tagはどのフィールドも受け付けません。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">統計evidence</p>
+    <h2 class="reveal"><code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code> で品質を証拠として縛る</h2>
+    <p class="lead narrow reveal"><code>fslc ai eval</code> はprecomputedなeval JSONLを読むdeterministic checkerです。AIモデルもevaluatorも実行せず、Bernoulli/proportion metric（accuracy、recall、hallucination_rate、wrong_tool_call_rate など0/1のもの）だけをWilson intervalで判定します。結果は常に <code>formal_result: "not_run"</code> です。</p>
+    <div class="panel reveal">
+      <pre><code>dataset SupportEvalV3 {
+  source "examples/ai/support_eval_v3.jsonl"
+
+  population {
+    language in ["ja", "en"]
+    ticket_type in ["refund", "bug", "urgent"]
+  }
+
+  slice JapaneseRefundTickets {
+    language == "ja"
+    ticket_type == "refund"
+  }
+}
+
+evaluator SupportAnswerJudge {
+  input question: Question
+  input answer: Answer
+  output grounded: Bool
+  output confidence: Float
+
+  calibration {
+    dataset HumanLabeledGroundednessV2
+    require agreement_with_human >= 0.90
+  }
+}
+
+statistical_property LooseQuality {
+  target SupportAnswerAgent
+  dataset SupportEvalV3
+  evaluator SupportAnswerJudge
+  confidence 0.95
+
+  require ci_lower(metric.accuracy, 0.95) >= 0.45
+
+  slice JapaneseRefundTickets {
+    require min_samples >= 5
+    require ci_lower(metric.accuracy, 0.95) >= 0.35
+  }
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px">eval recordは1行 = 1つのBernoulli観測です（schema <code>fsl-ai-eval-record.v0</code>。<code>case_id</code> / <code>slice</code> / <code>metric</code> / boolean <code>outcome</code> / <code>evaluator.id</code> が必須で、同一 <code>(case_id, slice, metric)</code> の重複は <code>dataset_invalid</code>）。</p>
+    <div class="panel reveal" style="margin-top:16px">
+      <pre><code>{"schema_version":"fsl-ai-eval-record.v0","case_id":"support-001","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px"><code>n</code> 個の観測中 <code>k</code> 個成功なら <code>estimate = k / n</code> で、confidence <code>c</code> のWilson intervalから <code>ci_lower</code> / <code>ci_upper</code> が出ます。requireは <code>ci_lower(metric.X, 0.95) &gt;= T</code> か <code>ci_upper(metric.X, 0.95) &lt;= T</code> の形だけです。実際にexampleを走らせた結果:</p>
+    <table class="matrix reveal" style="margin-top:16px">
+      <tr><th>property</th><th>slice</th><th>n</th><th>estimate</th><th>ci_lower (95%)</th><th>閾値</th><th>result</th></tr>
+      <tr><td><code>LooseQuality</code></td><td><code>all</code></td><td>10</td><td>0.80</td><td>≈ 0.490</td><td>≥ 0.45</td><td class="good"><code>statistically_supported</code></td></tr>
+      <tr><td><code>LooseQuality</code></td><td><code>JapaneseRefundTickets</code></td><td>5</td><td>1.00</td><td>≈ 0.566</td><td>≥ 0.35（+ <code>min_samples &gt;= 5</code>）</td><td class="good"><code>statistically_supported</code></td></tr>
+      <tr><td><code>StrictQuality</code></td><td><code>JapaneseRefundTickets</code></td><td>5</td><td>1.00</td><td>≈ 0.566</td><td>≥ 0.80</td><td class="bad"><code>statistically_unsupported</code></td></tr>
+    </table>
+    <p class="lead narrow reveal" style="margin-top:16px">3行目が要点です。sliceで5/5全問正解（estimate 1.00）でも、n=5ではWilson下限は約0.566にしかならず、0.80という主張は支持されません。「全部通ったからOK」をサンプル数ごと拒否するのがこの層の仕事です。</p>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>優先順位</th><th>status</th><th>意味</th></tr>
+      <tr><td>1</td><td><code>dataset_invalid</code></td><td>record schema違反、slice/metricの重複case、必須sliceフィールド欠落。</td></tr>
+      <tr><td>2</td><td><code>evaluator_untrusted</code></td><td>evaluatorのcalibration evidenceが欠落、または宣言されたtrust閾値未満。</td></tr>
+      <tr><td>3</td><td><code>insufficient_samples</code></td><td>必須sliceのどれかが <code>n &lt; min_samples</code>。</td></tr>
+      <tr><td>4</td><td><code>inconclusive</code></td><td>宣言されたmetricやinterval methodが計算できない。点推定のみのrequireもここで拒否。</td></tr>
+      <tr><td>5</td><td><code>statistically_unsupported</code></td><td>サンプルは足りているが、Wilson boundが閾値を支持しない。</td></tr>
+      <tr><td>6</td><td><code>statistically_supported</code></td><td>すべての必須gateとbound checkが通過。</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><code>require accuracy &gt;= 0.92</code> のような点推定のみの要求は、警告で通過するのではなく、eval時に <code>inconclusive</code>（exit 1）として拒否されます。また各sliceは独立したgateで、全sliceが自分の <code>min_samples</code> とbound checkを通ったときだけ全体が supported になります。family-wiseな多重検定補正はこの層では主張されません。</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Migration / drift / compat</p>
+    <h2 class="reveal">移行のregression、本番のdrift、環境互換性も同じ規律で扱う</h2>
+    <p class="lead narrow reveal"><code>ai_migration</code> はprompt/model/retriever移行の前後で「hard contractの維持」と「metricの非退行」を宣言し、<code>observed_property</code> は本番telemetryの閾値とdriftを宣言します。どちらも外部証拠で、<code>formal_result: "not_run"</code> です。</p>
+    <div class="panel reveal">
+      <pre><code>ai_migration PromptV7ToV8 {
+  from SupportAnswerAgent {
+    model gpt_5_5
+    prompt support_answer_prompt_v7
+    retriever support_docs_index_v12
+  }
+
+  to SupportAnswerAgent {
+    model gpt_5_5
+    prompt support_answer_prompt_v8
+    retriever support_docs_index_v14
+  }
+
+  preserve {
+    hard_contract SupportAnswerContract.hard
+
+    no_regression {
+      dataset SupportEvalV3
+      metric accuracy drop &lt;= 0.05
+      metric hallucination_rate increase &lt;= 0.02
+    }
+  }
+}
+
+observed_property SupportAgentOperationalQuality {
+  target SupportAnswerAgent
+  source production_logs
+  window last_7_days
+
+  require observed(metric.hallucination_rate) &lt;= 0.30
+  require drift(metric.refusal_rate) &lt;= 0.10 compared_to previous_7_days
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px">exampleのv7→v8（意図的にregressさせたデータ）を実際に走らせた結果:</p>
+    <table class="matrix reveal" style="margin-top:16px">
+      <tr><th>コマンド</th><th>検査</th><th>実測</th><th>判定</th></tr>
+      <tr><td><code>fslc ai regress</code></td><td><code>accuracy drop &lt;= 0.05</code></td><td>1.00 (10/10) → 0.80 (8/10)、<code>observed_delta</code> 0.20 &gt; <code>allowed_delta</code> 0.05</td><td class="bad"><code>passed: false</code> → finding <code>ai_migration_regression</code></td></tr>
+      <tr><td><code>fslc ai regress</code></td><td><code>hallucination_rate increase &lt;= 0.02</code></td><td>0.00 (0/5) → 0.20 (1/5)、<code>observed_delta</code> 0.20 &gt; <code>allowed_delta</code> 0.02</td><td class="bad"><code>passed: false</code>、全体は <code>statistically_unsupported</code></td></tr>
+      <tr><td><code>fslc ai compare</code></td><td>閾値判定なしのdelta報告</td><td>accuracy <code>delta</code> −0.20、hallucination_rate <code>delta</code> +0.20</td><td class="ok"><code>result: "compared"</code>（findingなし）</td></tr>
+      <tr><td><code>fslc ai drift</code></td><td><code>observed(metric.hallucination_rate) &lt;= 0.30</code></td><td>現在 0.25（n=4）</td><td class="good"><code>passed: true</code></td></tr>
+      <tr><td><code>fslc ai drift</code></td><td><code>drift(metric.refusal_rate) &lt;= 0.10</code></td><td>baseline 0.10 → 現在 ≈0.667、<code>drift</code> ≈ 0.567</td><td class="bad"><code>passed: false</code> → <code>observed_mismatch</code>、finding <code>ai_observed_drift</code>（<code>guarantee_kind: "runtime_observed"</code>）</td></tr>
+    </table>
+    <p class="lead narrow reveal" style="margin-top:24px">環境互換性はfsl-dbと共有です。<code>fslc ai compat --environment prod</code> は、componentのmodel/prompt/retriever/tool/output schemaを <code>dbsystem</code> のartifact capability profileとして生成します（<code>result: "compat_profile_generated"</code>）:</p>
+    <div class="panel reveal" style="margin-top:16px">
+      <pre><code>artifact support_answer_agent {
+  requires model.gpt_5_5, prompt.support_answer_prompt_v8,
+           retriever.support_docs_index_v14, tool.CreateTicket, tool.SearchDocs;
+  provides output.AnswerSchemaV2;
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:16px">この断片を <code>dbsystem</code> のenvironmentに組み込み、<code>fslc compat check --include-ai</code> で、server/mobile/DB artifactと同じ有限snapshot上のcapability互換性として検査します。provider側の欠落は <code>required_capability_missing</code> になります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <p class="kicker reveal">実行</p>
-    <h2 class="reveal">guardとreplayの失敗はAI専用findingで読む</h2>
+    <h2 class="reveal">層ごとのコマンドと結果語彙を対応づけて読む</h2>
     <div class="panel reveal">
       <pre><code>fslc ai check examples/ai/refund_agent_tool_safety.fsl
 fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
-fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl</code></pre>
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_forbidden_tool.jsonl
+fslc ai eval examples/ai/support_answer_quality.fsl --property LooseQuality
+fslc ai eval examples/ai/support_answer_quality.fsl --property StrictQuality
+fslc ai regress examples/ai/support_answer_quality.fsl --migration PromptV7ToV8 \
+  --before-records examples/ai/support_eval_v7.jsonl --after-records examples/ai/support_eval_v8_regressed.jsonl
+fslc ai compare --from examples/ai/support_eval_v7.jsonl --to examples/ai/support_eval_v8_regressed.jsonl --dataset SupportEvalV3
+fslc ai drift examples/ai/support_answer_quality.fsl --logs examples/ai/runtime_drift_current.jsonl \
+  --baseline-logs examples/ai/runtime_drift_baseline.jsonl
+fslc ai compat examples/ai/support_answer_quality.fsl --environment prod</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>結果</th><th>読み方</th></tr>
-      <tr><td><code>verified_under_assumptions</code></td><td>有限のhard-contract展開が、完全なcapability宣言とruntime guardを前提に検証された状態。</td></tr>
-      <tr><td><code>agent_analyzed</code></td><td>recursive agent graph が構造的に整合している状態。<code>formal_result</code> は <code>not_run</code> のまま。</td></tr>
-      <tr><td><code>replay_conformant</code></td><td>観測event logが宣言されたhard境界に合っていた。証明ではなく証拠。</td></tr>
-      <tr><td><code>ai_hard_contract_violation</code></td><td>forbidden tool、approval bypass、schema invalidity、business precondition mismatch が観測された。</td></tr>
-      <tr><td><code>observed_contract_violation</code></td><td>runtime が宣言外のcapabilityを使った。</td></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>有限のhard-contract展開が、完全なcapability宣言（<code>AI-ASSUME-CAPABILITY-DECLARATIONS</code>）とruntime guard（<code>AI-ASSUME-RUNTIME-GUARD</code>）を前提に検証された。<code>formal_result</code> にはkernelの <code>verified</code> が入ります。</td></tr>
+      <tr><td><code>agent_analyzed</code></td><td>recursive agent graphが構造的に整合。<code>formal_result</code> は <code>not_run</code>。</td></tr>
+      <tr><td><code>ai_project_analyzed</code></td><td><code>dataset</code> などのproject宣言を含むfileの <code>fslc ai check</code>。検証ではなく宣言の一覧です。</td></tr>
+      <tr><td><code>replay_conformant</code> / <code>replay_nonconformant</code></td><td>観測event logが宣言されたhard境界に合っていたか。nonconformant側はfinding kind <code>ai_hard_contract_violation</code>（approval bypass、forbidden tool実行、schema invalidity、precondition mismatch）や <code>observed_contract_violation</code>（宣言外のtool/capability）を運びます。証明ではなく観測です。</td></tr>
+      <tr><td><code>statistically_supported</code> / <code>statistically_unsupported</code></td><td>Wilson boundが閾値を支持したか（<code>ai eval</code> / <code>ai regress</code>）。</td></tr>
+      <tr><td><code>compared</code></td><td><code>ai compare</code> のdelta報告。閾値判定を含みません。</td></tr>
+      <tr><td><code>observed_supported</code> / <code>observed_mismatch</code></td><td><code>ai drift</code> のtelemetry閾値・drift判定。観測証拠です。</td></tr>
+      <tr><td><code>compat_profile_generated</code></td><td><code>ai compat</code> がdbsystem用capability profileを生成した。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Finding contract</p>
+    <h2 class="reveal">すべてのfindingは <code>fsl-ai-finding.v0</code> で同じ形をしている</h2>
+    <p class="lead narrow reveal">hard contract違反も、agent構造違反も、統計不支持も、driftも、全部同じfinding schemaで返ります。必須フィールドは <code>fsl</code>、<code>result</code>、<code>kind</code>、<code>severity</code>、<code>component</code>、<code>contract</code>、<code>tool</code>、<code>failed_rule</code>、<code>violation</code>、<code>guarantee_kind</code>、<code>evidence</code>、<code>witness</code>、<code>minimal_conflict_set</code>、<code>repair_candidates</code>、<code>assumptions</code> です。<code>repair_candidates</code> は各候補に <code>weakens_spec</code> flagを持ち、「specを弱めて通す」修理を明示的に区別します。</p>
+    <table class="matrix reveal">
+      <tr><th><code>guarantee_kind</code></th><th>発行元</th><th>意味</th></tr>
+      <tr><td><code>syntactic_hard</code></td><td><code>ai check</code> / <code>ai replay</code> のhard-contract violation</td><td>宣言境界とguard前提の上の決定的事実。</td></tr>
+      <tr><td><code>agent_structural</code></td><td>recursive agent解析</td><td>graph上の構造的証拠。証明ではない。</td></tr>
+      <tr><td><code>runtime_observed</code></td><td>replayのlog mismatch、<code>ai drift</code></td><td>観測証拠。logにないことは未使用の証明ではない。</td></tr>
+      <tr><td><code>evaluator_supported</code></td><td>将来のevaluator finding</td><td>evaluator証拠。<code>proved</code> とは表示しない。</td></tr>
+      <tr><td><code>statistically_supported</code> / <code>statistically_unsupported</code></td><td><code>ai eval</code> / <code>ai regress</code></td><td>Wilson boundつき統計証拠。<code>proved</code> とは表示しない。</td></tr>
     </table>
   </div>
 </section>
 
 <section>
   <div class="wrap">
+    <p class="kicker reveal">境界</p>
+    <h2 class="reveal">検査されるものと、認識されるだけのものを混同しない</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>検査されないblock境界</h3>
+        <p><code>ai_action</code>、単独の <code>retriever</code> block、<code>trust_boundary</code>、トップレベルの <code>authority { target ... }</code>（exampleの <code>ai_contract</code> も同様）は、block<em>境界</em>としてのみ認識されます。parserは本文に一切降りないため、中身がgarbageでも <code>check</code> を通ります。<code>raw_blocks</code> に <code>{kind, name}</code> として列挙されるだけで、何も制約しません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>検査される面はこれだけ</h3>
+        <p>kernel裏づけの <code>ai_component</code> / <code>agent</code> と、外部証拠の <code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code> / <code>ai_migration</code> / <code>observed_property</code>。この外にあるものに契約を書いても効きません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>forward-declaredなmetadata</h3>
+        <p>agentの <code>contract { hard { rule ...; } }</code> と <code>failure_mode</code> は、parseされて <code>agent_ir.contracts</code> / <code>failure_modes</code> に載りますが、まだevidenceと相互検証されません。追跡されるmetadataであって、検証済みの主張ではありません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>evaluatorを実行しない</h3>
+        <p><code>fslc ai eval</code> はprecomputed JSONLを読むだけです。LLM evaluatorの実行、provider sampling、promptの変異は行いません。boolean outcomeのみ対象で、連続scoreは対象外です。evaluatorの信頼はcalibration evidenceの問題として扱われます（欠落は <code>evaluator_untrusted</code>）。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>formal_result: "not_run"</code> の一貫</h3>
+        <p>replay、agent解析、eval、regress、compare、drift、compatの結果はすべて <code>formal_result: "not_run"</code> を運びます。これらを <code>proved</code> / <code>verified</code> として表示してはいけません。kernelの形式結果を持つのは <code>ai_component</code> のhard-contract展開だけです。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>時間・確率・LLM真偽</h3>
+        <p>「7日間window」はlog選別のラベルであって実時間の証明ではなく、driftは2つの観測窓の差です。LLM出力の真偽・groundednessそのものは、この dialect のどの層でも証明されません。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
     <p class="kicker reveal">次に読む</p>
     <h2 class="reveal">設計と例へ進む</h2>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>設計判断</h3>
-        <p>保証境界、lowering、event schema、finding、外部証拠として扱う境界は design doc にまとまっています。</p>
-        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
+        <p>guarantee boundary、lowering、event schema、findingはhard-contract設計文書に、Wilson区間・status優先順位・eval record schemaはstochastic設計文書にあります。</p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> <a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>動く例</h3>
-        <p>refund agent のapproval/replayと、recursive support agentの構造解析を確認できます。</p>
+        <p>refund agentのapproval/replay、recursive support agentの構造解析、eval/regress/drift/compatの全コマンドがexamplesで再現できます。</p>
         <p><a class="btn" href="../../examples/ai/README.md">examples/ai</a></p>
       </div>
       <div class="syntax-card">
+        <h3>環境互換性</h3>
+        <p><code>fslc ai compat</code> が生成するcapability profileは、fsl-dbの <code>dbsystem</code> artifact/environmentモデルに合流します。</p>
+        <p><a class="btn" href="db.ja.html">fsl-db のページへ</a></p>
+      </div>
+      <div class="syntax-card">
         <h3>通常の文法</h3>
-        <p><code>ai_component</code> は既存 verifier に展開され、<code>agent</code> は構造解析として扱われます。</p>
+        <p><code>ai_component</code> は既存verifierに展開されます。展開先の基本構文は文法ページで確認できます。</p>
         <p><a class="btn" href="syntax.ja.html">文法・構文へ</a></p>
       </div>
     </div>
