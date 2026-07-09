@@ -383,8 +383,18 @@ observed_property <Name> {
 
 `require` clauses here are threshold labels for external evidence jobs, not
 kernel formulas — they add no probability semantics to `fslc verify`.
-`ai_action`, `retriever`, `trust_boundary`, `ai_contract`, and `failure_mode`
-blocks are accepted alongside as project declarations. Commands: `fslc ai eval`
+`failure_mode <Name> { condition ...; severity ...; }` is parsed and listed by
+name under `ai_project_analyzed`'s `failure_modes`, but no command yet checks
+its content against evidence — it is tracked metadata, not a verified claim.
+**`ai_action`, `retriever` (as a standalone block), `trust_boundary`, and a
+top-level named `authority { target ... }` are recognized only as block
+*boundaries*: the parser does not descend into their body at all, so any text
+inside — even garbage — passes `check`. They are echoed as bare `{kind, name}`
+entries under `raw_blocks`, not validated.** Do not author one expecting it to
+constrain anything; the checked surface is exactly `ai_component`/`agent`
+(hard contract, kernel-backed) plus `dataset`/`evaluator`/
+`statistical_property`/`ai_migration`/`observed_property` (external evidence,
+above). Commands: `fslc ai eval`
 checks a `statistical_property` by Wilson bound over precomputed eval JSONL
 (the `dataset` `source` file, or `--records`); `fslc ai regress` checks
 aggregate `ai_migration.no_regression` metric deltas between
