@@ -313,6 +313,95 @@ exceedance, low-trust paths to high-authority tools, irreversible tools without
 human approval, review-gate bypass, and sibling visibility leaks. This is not
 formal proof and does not model LLM truth or statistical/evaluator quality.
 
+Stochastic / migration / drift evidence declarations (project-level fsl-ai;
+dialect tag `fsl-ai-project.v0`). These blocks are read by a deliberately
+lenient separate parser, not the kernel Lark grammar; they may sit alongside
+`ai_component` in one file, and `fslc ai check` (or `fslc check`) on such a
+file returns `ai_project_analyzed` — a declaration listing, not verification:
+
+```fsl
+dataset <Name> {
+  source "<path/to/eval.jsonl>"
+  population {
+    <field> in ["<a>", "<b>"]
+  }
+  slice <SliceName> {
+    <field> == "<a>"
+  }
+}
+
+evaluator <Name> {
+  input <name>: <Type>
+  output <name>: <Type>
+  calibration {
+    dataset <GoldLabelDataset>
+    require agreement_with_human >= 0.90
+  }
+}
+
+statistical_property <Name> {
+  target <AiComponentName>
+  dataset <DatasetName>
+  evaluator <EvaluatorName>
+  confidence 0.95
+  require ci_lower(metric.<metric>, 0.95) >= <T>   // or ci_upper(metric.<m>, 0.95) <= <T>
+  slice <SliceName> {
+    require min_samples >= <N>
+    require ci_lower(metric.<metric>, 0.95) >= <T>
+  }
+}
+
+ai_migration <Name> {
+  from <Component> {
+    model <id>
+    prompt <id>
+    retriever <id>
+  }
+  to <Component> {
+    model <id>
+    prompt <id>
+    retriever <id>
+  }
+  preserve {
+    hard_contract <Contract>.hard
+    no_regression {
+      dataset <DatasetName>
+      metric <metric> drop <= 0.05
+      metric <metric> increase <= 0.02
+    }
+  }
+}
+
+observed_property <Name> {
+  target <AiComponentName>
+  source production_logs
+  window last_7_days
+  require observed(metric.<metric>) <= <T>
+  require drift(metric.<metric>) <= <T> compared_to previous_7_days
+}
+```
+
+`require` clauses here are threshold labels for external evidence jobs, not
+kernel formulas — they add no probability semantics to `fslc verify`.
+`ai_action`, `retriever`, `trust_boundary`, `ai_contract`, and `failure_mode`
+blocks are accepted alongside as project declarations. Commands: `fslc ai eval`
+checks a `statistical_property` by Wilson bound over precomputed eval JSONL
+(the `dataset` `source` file, or `--records`); `fslc ai regress` checks
+aggregate `ai_migration.no_regression` metric deltas between
+`--before-records`/`--after-records`; `fslc ai compare` reports metric deltas
+with no threshold claim; `fslc ai drift` checks `observed_property` thresholds
+and drift over runtime telemetry (`observed_supported` / `observed_mismatch`);
+`fslc ai compat` emits a `dbsystem` `artifact` capability profile, which
+`fslc compat check --include-ai` folds into a dbsystem compatibility check.
+Hard boundary: every result carries `formal_result:"not_run"` and must never
+be displayed as `proved`/`verified`; a point-estimate-only requirement
+(`require accuracy >= 0.92` with no `ci_lower`/`ci_upper`) is rejected at eval
+time (`inconclusive`, exit 1), not warned past. Eval statuses are
+`dataset_invalid`, `evaluator_untrusted`, `insufficient_samples`,
+`inconclusive`, `statistically_unsupported`, `statistically_supported`; the
+priority order and the eval-record JSONL schema live in
+`docs/DESIGN-stochastic.md`.
+
 Composite spec (a separate top-level form):
 
 ```fsl
@@ -567,6 +656,16 @@ fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o 
                                                         # SQL DDL / minimal Prisma -> dbsystem
 fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
 fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
+fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
+                                                        # Wilson-bound check over precomputed eval JSONL
+fslc ai regress <f> [--migration <Name>] --before-records <p> --after-records <p> [--dataset <Name>]
+                                                        # ai_migration.no_regression metric drop/increase check
+fslc ai compare --from <records> --to <records> [--from-label L] [--to-label L] [--dataset <Name>]
+                                                        # metric deltas between two eval JSONL files, no threshold claim
+fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseline p] [--property <Name>]
+                                                        # observed_property threshold/drift check from runtime telemetry
+fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
+fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`

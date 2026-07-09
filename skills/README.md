@@ -30,11 +30,22 @@ re-verified as it changes (regression, drift, cross-layer change-impact via
 | [`fsl-from-code/`](fsl-from-code/) | reverse-engineering a design spec from existing code, anchored by conformance back to that code | kernel `spec` + conformance harness |
 | [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
 
-The shared `fsl/` reference also covers the `dbsystem` database compatibility
-dialect. Use it for schema migration / artifact read-write compatibility checks
-and `fslc db check` findings; SQL/Prisma importers, runtime observation,
-bounded preservation checks, finite feature flags, and external DB evidence
-schemas are covered as explicit boundaries.
+The shared `fsl/` reference also covers three cross-cutting dialects that sit
+outside the business/requirements/design progression:
+
+- `dbsystem` (fsl-db) — schema migration / artifact read-write compatibility
+  checks and `fslc db check` findings; SQL/Prisma importers, runtime
+  observation, bounded preservation checks, finite feature flags, and external
+  DB evidence schemas are covered as explicit boundaries.
+- `domain` (fsl-domain) — Functional DDD aggregate/command/event modeling and
+  async effect lifecycles via `fslc domain check`; scaffold generation,
+  runtime replay, and the production exactly-once/queue-delivery boundary are
+  covered as explicit limits.
+- `ai_component` and recursive `agent` composition (fsl-ai) — tool-authority
+  hard contracts and agent-graph structure via `fslc ai check`/`replay`, plus
+  the external statistical/migration/drift evidence commands
+  (`fslc ai eval`/`regress`/`compare`/`drift`/`compat`); LLM truth,
+  groundedness, and statistical quality claims stay outside formal proof.
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or

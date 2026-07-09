@@ -392,6 +392,7 @@ existing result/kind fields:
 | `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
 | `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
 | `error` / `forbidden_setup` | A precondition (non-final) step of the forbidden is not enabled (invalid trace) | Review the setup procedure. The non-final steps are there to reach that point and are not treated as success |
+| `statistically_unsupported` / `dataset_invalid` / `evaluator_untrusted` / `insufficient_samples` (fsl-ai evidence commands) | External statistical/migration/drift evidence failed a gate — there is no kernel counterexample to read | Route by the status priority list in `docs/DESIGN-stochastic.md`: fix the evidence (records, calibration, sample size) or the component/rollout — not the spec, and do not expect a trace |
 
 For an action whose coverage is `false`, `blocking_requires` pinpoints "which
 requires is blocking it" on a per-clause basis, and `hint` summarizes the
@@ -659,7 +660,11 @@ the relevant role skill directs it.
   approval / forbidden-tool guards to the kernel. Use `fslc ai check` for
   hard-contract findings and `fslc ai replay --logs` for runtime JSONL evidence;
   `replay_conformant` is not proof, and evaluator/statistical AI quality remains
-  outside the kernel.
+  outside the kernel. For statistical/migration/drift evidence over precomputed
+  eval JSONL (`dataset`/`evaluator`/`statistical_property`/`ai_migration`/
+  `observed_property` project-level blocks), use `fslc ai eval`/`regress`/
+  `compare`/`drift`/`compat` (syntax and flags in reference.md §1/§7); every
+  result is `formal_result:"not_run"`, never `proved`.
 - **Recursive AI agents**: `agent` specs are ordinary scoped agents nested inside
   parents, not `sub_agent`s. Use `fslc ai check` to get `agent_analyzed`,
   `agent_ir`, and graph summaries for explicit grants, visibility,
