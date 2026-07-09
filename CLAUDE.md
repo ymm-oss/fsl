@@ -112,6 +112,10 @@ error`); `3` = internal error. A few commands (`testgen`, `explain --readable`, 
 - **A language feature must move all of its files together**: grammar/model/bmc (and `runtime.py` if
   it affects concrete semantics), plus `docs/LANGUAGE.md`, `skills/fsl/reference.md`, and a
   `docs/DESIGN-<feature>.md`. Add a regression test for any behavior change. (See `CONTRIBUTING.md`.)
+- **Changing `docs/LANGUAGE.md` or the CLI surface (`src/fslc/cli.py`) also moves the site**: run
+  `python tools/build_site_reference.py` to regenerate `docs/intro/language.*.html` and
+  `docs/intro/cli.*.html` (committed generated output — `tests/test_site_reference_snapshot.py`
+  fails the build if you forget).
 - **Do not "hollow out" specs** to make them go green — weakening an invariant to dodge a
   counterexample defeats the point. When adding/changing a `.fsl`, confirm it stays non-vacuous
   (`fslc mutate` kill-rate, `--vacuity`).

@@ -38,171 +38,38 @@
 
 <section>
   <div class="wrap">
-    <p class="kicker reveal">章一覧</p>
-    <h2 class="reveal">章題からブラウズする</h2>
-    <div class="manual-shell reveal">
-      <nav class="manual-nav" aria-label="マニュアル章一覧">
-        <div class="label">Chapters</div>
-        <a class="chapter-link" href="concept.ja.html"><span class="num">01</span><span><strong>FSLって、なに？</strong><span>概念と反例の直感</span></span></a>
-        <a class="chapter-link" href="when-to-use.ja.html"><span class="num">02</span><span><strong>FSLを使うべきか</strong><span>効くドメインと判断ゲート</span></span></a>
-        <a class="chapter-link" href="guide.ja.html"><span class="num">03</span><span><strong>仕組みと使い方</strong><span>検証ループとコマンド</span></span></a>
-        <a class="chapter-link" href="mechanism.ja.html"><span class="num">04</span><span><strong>仕組み詳細</strong><span>BMC・帰納法・詳細化</span></span></a>
-        <a class="chapter-link" href="business-layer.ja.html"><span class="num">05</span><span><strong>業務層</strong><span>プロセス・統制・KPI</span></span></a>
-        <a class="chapter-link" href="requirements-layer.ja.html"><span class="num">06</span><span><strong>要件層</strong><span>要件ID・受け入れ・禁止</span></span></a>
-        <a class="chapter-link" href="design-layer.ja.html"><span class="num">07</span><span><strong>設計層</strong><span>内部状態・詳細化・合成</span></span></a>
-        <a class="chapter-link" href="syntax.ja.html"><span class="num">08</span><span><strong>文法・構文</strong><span>型・式・操作・性質</span></span></a>
-        <a class="chapter-link" href="analysis.ja.html"><span class="num">09</span><span><strong>構造分析</strong><span>TSG・グラフ投影・所見</span></span></a>
-        <a class="chapter-link" href="domain.ja.html"><span class="num">10</span><span><strong>fsl-domain</strong><span>DDD / 非同期Effect</span></span></a>
-        <a class="chapter-link" href="db.ja.html"><span class="num">11</span><span><strong>fsl-db</strong><span>DB/複数環境互換性</span></span></a>
-        <a class="chapter-link" href="ai.ja.html"><span class="num">12</span><span><strong>fsl-ai</strong><span>AI contract / agent</span></span></a>
-      </nav>
-      <div class="manual-main">
-        <article class="chapter-card">
-          <span class="num">01</span>
-          <div><h3>FSLって、なに？</h3><p>形式手法を知らない人向け。状態・操作・ルール、反例、総当たり検査の直感をつかみます。</p></div>
-          <a class="btn" href="concept.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">02</span>
-          <div><h3>FSLを使うべきか</h3><p>まず表現できるかを確かめ、あとはどんどん書くのが基本方針——FSLは、どのみち書いていた文書の代わりになります。判断ゲート、本当の対象外、層の選び方まで。</p></div>
-          <a class="btn" href="when-to-use.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">03</span>
-          <div><h3>仕組みと使い方</h3><p>検証の2段構え、反例候補、3層構成、コマンド、AIとの修復ループを理解します。</p></div>
-          <a class="btn" href="guide.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">04</span>
-          <div><h3>仕組み詳細</h3><p>状態空間、総当たり検査、k帰納法、応答性、詳細化チェック、実装接続を深く読みます。</p></div>
-          <a class="btn" href="mechanism.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">05</span>
-          <div><h3>業務層の書き方</h3><p>業務プロセス、統制、ゴール、KPIを、業務担当者が読める粒度で書く方法を学びます。</p></div>
-          <a class="btn" href="business-layer.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">06</span>
-          <div><h3>要件層の書き方</h3><p>要件ID、入力条件、受け入れ手順、禁止手順、非機能要件を設計へ渡せる形にします。</p></div>
-          <a class="btn" href="requirements-layer.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">07</span>
-          <div><h3>設計層の書き方</h3><p>内部の状態と操作を設計し、要件層への詳細化対応を証明し、部品を合成して、実装適合へ受け渡します。</p></div>
-          <a class="btn" href="design-layer.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">08</span>
-          <div><h3>文法・構文</h3><p>実際のFSLファイルを読むために、型、式、操作、性質、詳細化、合成をまとめて確認します。</p></div>
-          <a class="btn" href="syntax.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">09</span>
-          <div><h3>構造分析</h3><p><code>fslc analyze</code> で Typed Semantic Graph、グラフ投影、レビュー専用の構造所見を確認します。</p></div>
-          <a class="btn" href="analysis.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">10</span>
-          <div><h3>fsl-domain</h3><p><code>domain</code> で Functional DDD の aggregate、純粋な decide/evolve、非同期 effect、TypeScript scaffold を扱います。</p></div>
-          <a class="btn" href="domain.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">11</span>
-          <div><h3>fsl-db</h3><p><code>dbsystem</code> で、DBマイグレーション、アプリ成果物の読み書き互換性、複数環境の同居範囲、AIが読める所見を確認します。</p></div>
-          <a class="btn" href="db.ja.html">読む</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">12</span>
-          <div><h3>fsl-ai</h3><p><code>ai_component</code> でAI tool authorityとreplayを、<code>agent</code> でrecursive scope、grant、visibility、orchestration、failure policyを確認します。</p></div>
-          <a class="btn" href="ai.ja.html">読む</a>
-        </article>
-      </div>
-    </div>
+    <p class="kicker reveal">4つの入り口</p>
+    <h2 class="reveal">カテゴリからブラウズする</h2>
+    <p class="lead narrow reveal">章は「はじめる」「ガイド」「リファレンス」「実例と背景」の4カテゴリに分かれています。各カテゴリのページ一覧は、以下のカードから開けます。</p>
+    <div id="index-categories" class="cards reveal" style="margin-top:24px"></div>
   </div>
 </section>
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
-    <p class="kicker reveal">目的別</p>
-    <h2 class="reveal">いま知りたいことから読む</h2>
+    <p class="kicker reveal">最初の一歩</p>
+    <h2 class="reveal">一つだけ選ぶなら</h2>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
-        <h3>まず価値を知りたい</h3>
+        <h3>形式手法を知らない</h3>
         <p>テストとの違い、反例、AI時代に仕様を機械で確かめる意味から読みます。</p>
         <p><a class="btn" href="concept.ja.html">概念を読む</a></p>
       </div>
       <div class="syntax-card">
-        <h3>使うべきか見極めたい</h3>
-        <p>「状態の多さ」ではなく「壊れ方」、そして「どのみち文書化するか」で決める判断軸。効くドメインと本当の対象外を切り分けます。</p>
-        <p><a class="btn" href="when-to-use.ja.html">使いどころを読む</a></p>
+        <h3>とにかく動かしてみたい</h3>
+        <p>インストールから、反例を読み、直し、証明するところまでを5分で一本道に進みます。</p>
+        <p><a class="btn" href="quickstart.ja.html">クイックスタートを読む</a></p>
       </div>
       <div class="syntax-card">
-        <h3>プロジェクトで回したい</h3>
-        <p><code>fslc</code> のコマンド、検証結果の読み方、AIとの修復ループを確認します。</p>
-        <p><a class="btn" href="guide.ja.html">使い方を読む</a></p>
+        <h3>特定の構文・コマンドを引きたい</h3>
+        <p><code>LANGUAGE.md</code>・<code>cli.py</code>から生成される、検索用途の網羅リファレンス。</p>
+        <p><a class="btn" href="language.ja.html">言語リファレンス</a> <a class="btn" href="cli.ja.html">CLIリファレンス</a></p>
       </div>
       <div class="syntax-card">
-        <h3>業務ルールを書きたい</h3>
-        <p><code>business</code> で、担当者、業務対象、業務プロセス、統制、ゴールを書きます。</p>
-        <p><a class="btn" href="business-layer.ja.html">業務層を読む</a></p>
+        <h3>大きな実例を見たい</h3>
+        <p>3層を貫く旗艦例から、ダイアレクト別の実例まで、<code>examples/</code>の案内図。</p>
+        <p><a class="btn" href="examples.ja.html">実例ギャラリーを読む</a></p>
       </div>
-      <div class="syntax-card">
-        <h3>要件定義に使いたい</h3>
-        <p><code>requirements</code> で、要件ID、受け入れ条件、禁止手順、SLAを書きます。</p>
-        <p><a class="btn" href="requirements-layer.ja.html">要件層を読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>実装を設計したい</h3>
-        <p><code>spec</code> と <code>refinement</code> で、内部状態、<code>stutter</code>、合成、実装適合を書きます。</p>
-        <p><a class="btn" href="design-layer.ja.html">設計層を読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>検証の中身を知りたい</h3>
-        <p>BMC、k帰納法、応答性、詳細化チェック、実装接続の考え方を詳しく見ます。</p>
-        <p><a class="btn" href="mechanism.ja.html">仕組み詳細を読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>文法を確認したい</h3>
-        <p>コード例を読みながら、型、状態、操作、式、性質、合成、詳細化を調べます。</p>
-        <p><a class="btn" href="syntax.ja.html">文法を読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>構造をレビューしたい</h3>
-        <p><code>fslc analyze</code> でトレーサビリティ、グラフ投影、AIレビュー所見を見ます。検証失敗とは区別して扱います。</p>
-        <p><a class="btn" href="analysis.ja.html">構造分析を読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>ドメイン scaffold を作りたい</h3>
-        <p><code>domain</code> で aggregate の所有範囲、command、event、非同期 effect、Functional DDD scaffold を明示します。</p>
-        <p><a class="btn" href="domain.ja.html">fsl-domainを読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>DB変更の互換性を見たい</h3>
-        <p><code>dbsystem</code> で、スキーマバージョン、マイグレーション、成果物の読み書き、prod/staging/worker/mobile などの同居期間を確認します。</p>
-        <p><a class="btn" href="db.ja.html">fsl-dbを読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>AI tool callを守りたい</h3>
-        <p><code>ai_component</code> でtool authority、人間承認、forbidden tool、replay evidenceを、<code>agent</code> でrecursive agent構造を記述します。</p>
-        <p><a class="btn" href="ai.ja.html">fsl-aiを読む</a></p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <p class="kicker reveal">公開</p>
-    <h2 class="reveal">GitHub Pages で公開する場合</h2>
-    <div class="panel reveal">
-      <p>このマニュアルは静的HTMLなので、GitHub Pages の公開元を <code>main / docs</code> に設定すれば公開できます。</p>
-      <table class="matrix">
-        <tr><th>項目</th><th>値</th></tr>
-        <tr><td>公開元</td><td><code>main</code> ブランチの <code>/docs</code></td></tr>
-        <tr><td>入口</td><td><code>docs/index.html</code> → <code>docs/intro/index.ja.html</code></td></tr>
-        <tr><td>想定URL</td><td><code>https://ymm-oss.github.io/fsl/</code></td></tr>
-      </table>
     </div>
   </div>
 </section>

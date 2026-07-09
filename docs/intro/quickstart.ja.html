@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>5分クイックスタート — インストールから反例を読むまで</title>
+<meta name="description" content="git clone から fslc check / verify まで。反例JSONを実際に読み、直し、証明する5分の一本道。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="quickstart">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">はじめる</p>
+    <h1 class="reveal">5分で、<span class="hl">反例を読む</span>ところまで。</h1>
+    <p class="lead reveal">インストールしてから、壊れた仕様を検証し、反例JSONを読み、直し、最後に「証明」まで進む一本道です。すべて実際にコピペして動かせます。</p>
+    <p class="reveal dim" style="margin-top:18px">FSLをはじめて見る場合は、先に<a href="concept.ja.html">概念の入門ページ</a>を読むと直感がつかみやすくなります。</p>
+    <div class="scroll-hint reveal">▽ スクロール</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">0. 導入</p>
+    <h2 class="reveal">依存はlarkとz3-solverの2つだけ</h2>
+    <p class="lead narrow reveal">C++コンパイラや別途のZ3インストールは不要です。Mac/Windows/Linuxとも <code>pip install</code> だけで揃います（Python 3.9+）。</p>
+    <pre><code>git clone https://github.com/ymm-oss/fsl && cd fsl
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -e ".[dev]"   # lark, z3-solver, pytest + fslc を editable install</code></pre>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. check</p>
+    <h2 class="reveal">まず速いループ：構文と型だけを見る</h2>
+    <p class="lead narrow reveal"><code>fslc check</code> はZ3を呼ばず、構文・名前・型だけを検査します。編集のたびに叩く最速のループです。</p>
+    <pre><code>$ fslc check docs/intro/specs/order_buggy.fsl</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "ok",
+  "spec": "OrderWorkflow",
+  "warnings": []
+}</code></pre>
+    <p class="reveal">構文・型は正しい、という結果です。しかしこの仕様には<b>ルール違反</b>が仕込まれています——<code>check</code>はそこまでは見ません。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">2. verify — violated</p>
+    <h2 class="reveal">次に総当たり：反例を機械に探させる</h2>
+    <p class="lead narrow reveal"><code>fslc verify</code> は深さ8まで、あり得る全ての操作列をZ3で試します。ルール違反があれば、最短の反例を返します。</p>
+    <pre><code>$ fslc verify docs/intro/specs/order_buggy.fsl --depth 8</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "violated",
+  "spec": "OrderWorkflow",
+  "violation_kind": "invariant",
+  "invariant": "ShipOnlyAfterApproval",
+  "violated_at_step": 2,
+  "last_action": { "name": "ship", "params": {} },
+  "trace": [
+    { "step": 0, "state": { "status": "Draft", "approved": false } },
+    { "step": 1, "state": { "status": "Submitted", "approved": false },
+      "action": { "name": "submit" },
+      "changes": { "status": { "from": "Draft", "to": "Submitted" } } },
+    { "step": 2, "state": { "status": "Shipped", "approved": false },
+      "action": { "name": "ship" },
+      "changes": { "status": { "from": "Submitted", "to": "Shipped" } } }
+  ]
+}</code></pre>
+    <div class="callout reveal" style="margin-top:20px">
+      <p><b>この反例の読み方：</b><code>result: "violated"</code> なので <code>invariant</code> と <code>trace</code> だけ見れば十分です。<code>submit</code> → <code>ship</code> の2手で、<code>approved</code> が <code>false</code> のまま出荷（<code>ShipOnlyAfterApproval</code>違反）に到達しています——承認を飛ばして出荷できてしまう、というバグです。</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. 直す</p>
+    <h2 class="reveal">1行のガードを直す</h2>
+    <p class="lead narrow reveal"><code>ship</code> アクションの <code>requires</code> が間違った状態を許していました。</p>
+    <pre><code>  action ship() {
+<span class="r">-   requires status == Submitted   // BUG: should require Approved</span>
+<span class="k">+   requires status == Approved    // FIX: ship only after approval</span>
+    status = Shipped
+  }</code></pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">4. verify — verified</p>
+    <h2 class="reveal">直した仕様を、もう一度深さ8で検証する</h2>
+    <pre><code>$ fslc verify docs/intro/specs/order_fixed.fsl --depth 8</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "verified",
+  "spec": "OrderWorkflow",
+  "checked_to_depth": 8,
+  "completeness": "bounded",
+  "invariants_checked": ["_bounds_status", "ShipOnlyAfterApproval"],
+  "action_coverage": { "submit": true, "approve": true, "ship": true, "cancel": true },
+  "warnings": [
+    { "message": "deadlock reachable at step 3 (state: status=Shipped, approved=true)",
+      "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional" }
+  ]
+}</code></pre>
+    <div class="callout reveal" style="margin-top:20px">
+      <p><b>warningsも読む：</b><code>result: "verified"</code>になっても<code>warnings</code>は空とは限りません。ここでの<code>deadlock</code>警告は、<code>Shipped</code>が意図した終端状態であるという事実を検証器がまだ知らないだけです（<code>terminal { }</code>宣言で伝えられます）。バグではありません——ただし読まずに無視する癖はつけないでください。</p>
+    </div>
+    <p class="reveal" style="margin-top:14px"><code>verified</code>は「深さ8まで反例が無かった」という<b>有界</b>の結果です。無限の深さで確かめるには、次のステップに進みます。</p>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. verify --engine induction</p>
+    <h2 class="reveal">最後に証明：無限の深さへ</h2>
+    <p class="lead narrow reveal">補助不変条件を1本足した <code>order_proved.fsl</code> は、k帰納法で<b>無限の深さ</b>まで証明できます。</p>
+    <pre><code>$ fslc verify docs/intro/specs/order_proved.fsl --engine induction</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "proved",
+  "spec": "OrderWorkflow",
+  "engine": "induction",
+  "completeness": "unbounded",
+  "invariants_checked": ["_bounds_status", "ShipOnlyAfterApproval", "ApprovedImpliesFlag"],
+  "warnings": []
+}</code></pre>
+    <p class="reveal"><code>completeness: "unbounded"</code> — これでこの仕様は、どれだけ長い操作列を試しても<code>ShipOnlyAfterApproval</code>が破れないことが<b>証明</b>されています。<a href="guide.ja.html">仕組みと使い方</a>で、BMCからprovedへ進む考え方を詳しく読めます。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">次へ</p>
+    <h2 class="reveal">この先どこへ行くか</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>結果を読めなかった</h3>
+        <p>result/kindの種類、終了コード、CTI・空虚性・デッドロックの読み方は<a href="errors.ja.html">エラー・終了コード</a>にまとまっています。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>自分のプロジェクトで書きたい</h3>
+        <p>コマンド一覧、検証ループ、AIとの修復ループは<a href="guide.ja.html">仕組みと使い方</a>へ。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>コマンドを1つずつ確認したい</h3>
+        <p>全fslcサブコマンドのフラグと終了コードは<a href="cli.ja.html">CLIリファレンス</a>（生成物）にあります。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>もっと大きな実例を見たい</h3>
+        <p><code>examples/</code>・<code>specs/</code>の完成教材は<a href="examples.ja.html">実例ギャラリー</a>から辿れます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

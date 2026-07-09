@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Example Gallery — a guided map of examples/ and specs/</title>
+<meta name="description" content="A guide to the 17 directories under examples/ and the standalone specs under specs/, from small teaching material to the flagship cross-layer example." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="examples">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Examples &amp; Background</p>
+    <h1 class="reveal">Example <span class="hl">Gallery</span></h1>
+    <p class="lead reveal">The repository has 17 finished example directories under <code>examples/</code>, plus standalone specs under <code>specs/</code>. This page is the map — it does not duplicate the examples themselves. Links go to the source on GitHub.</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Start here</p>
+    <h2 class="reveal">gallery/ — "read FSL small, try it big" material</h2>
+    <p class="lead narrow reveal">Each <code>.fsl</code> file writes <code>expected-command</code> / <code>expected-result</code> / <code>expected-kind</code> in comments, and <code>tests/test_gallery.py</code> matches them against the actual <code>fslc</code> JSON.</p>
+    <table class="matrix reveal">
+      <tr><th>Size</th><th>File</th><th>Topic</th></tr>
+      <tr><td>tiny</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/tiny_turnstile.fsl">valid/tiny_turnstile.fsl</a></td><td>Minimal state machine of <code>coin</code> and <code>push</code></td></tr>
+      <tr><td>tiny</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/tiny_traffic_light.fsl">valid/tiny_traffic_light.fsl</a></td><td>Basics of <code>enum</code> and nested <code>if</code></td></tr>
+      <tr><td>tiny</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/tiny_bounded_counter.fsl">valid/tiny_bounded_counter.fsl</a></td><td>Keeping a bound with bounded types and <code>requires</code></td></tr>
+      <tr><td>small</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/small_vending_machine.fsl">valid/small_vending_machine.fsl</a></td><td><code>Map</code>, <code>Option</code>, stock decrement, <code>ensures</code></td></tr>
+      <tr><td>small</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/small_elevator.fsl">valid/small_elevator.fsl</a></td><td>Consistency of floor, door, and target floor</td></tr>
+      <tr><td>small</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/small_tcp_handshake.fsl">valid/small_tcp_handshake.fsl</a></td><td>An entry point to <code>fair action</code> and <code>leadsTo</code></td></tr>
+      <tr><td>medium</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/medium_dining_philosophers_deadlock_demo.fsl">valid/medium_dining_philosophers_deadlock_demo.fsl</a></td><td>Observing a deadlock-shaped state with <code>reachable</code></td></tr>
+      <tr><td>medium</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/medium_two_phase_commit.fsl">valid/medium_two_phase_commit.fsl</a></td><td>Voting and commit safety (2PC)</td></tr>
+      <tr><td>large</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/large_order_workflow.fsl">valid/large_order_workflow.fsl</a></td><td>Order, shipment, return, ledger invariant</td></tr>
+    </table>
+    <p class="reveal" style="margin-top:14px"><code>gallery/errors/</code> (learning diagnostics from broken specs) is indexed on <a href="errors.en.html">Errors &amp; Exit Codes</a>. <code>gallery/adversarial/</code> (examples that probe the verifier's boundaries) and <code>gallery/injected/</code> are described in <a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/README.md">gallery/README.md</a>.</p>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Flagship examples</p>
+    <h2 class="reveal">One domain, all three layers</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/e2e">e2e/</a></h3>
+        <p>The flagship example: a consultant, a PM, and an engineer write the same expense-reimbursement domain at different granularities, connected as <code>business ⊒ requirements ⊒ design ⊒ implementation</code>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/layers">layers/</a></h3>
+        <p>The final form of DESIGN-layers.md. The return domain is written in three dialects and chained by refinement.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/bank">bank/</a></h3>
+        <p>Wires a plain Python implementation (<code>bank.py</code>) with no knowledge of FSL to implementation-conformance checking via <code>replay</code>/<code>testgen</code>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/refinement_chain">refinement_chain/</a></h3>
+        <p>Confirms propagation through a layer chain (<code>business ⊒ requirements ⊒ design …</code>).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">By layer / dialect</p>
+    <h2 class="reveal">Browse by what you're trying to do</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/consulting">consulting/</a></h3><p>Writing business processes and internal policies as documents a machine can check.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/pm">pm/</a></h3><p>Writing product requirements as documents a machine can check.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/nfr">nfr/</a></h3><p>The SLA worker spike plus a worked cross-layer non-functional-requirements example.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/domain">domain/</a></h3><p><code>fsl-domain</code> Functional DDD / async-effect examples. See the <a href="domain.en.html">fsl-domain chapter</a>.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/db">db/</a></h3><p><code>dbsystem</code> DB / multi-environment compatibility examples. See the <a href="db.en.html">fsl-db chapter</a>.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/ai">ai/</a></h3><p><code>ai_component</code> hard-contract and recursive-agent examples. See the <a href="ai.en.html">fsl-ai chapter</a>.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/agentic_rag">agentic_rag/</a></h3><p>An agentic-RAG support flow modeled across all three layers.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/multi_agent_system">multi_agent_system/</a></h3><p>An AI multi-agent system modeled across all three layers.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/refinement_liveness">refinement_liveness/</a></h3><p>Shows at a glance what <code>fslc refine</code> (the fidelity check) actually looks at.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/ui_spike">ui_spike/</a></h3><p>A spike for issue #9: can screen flows be written in plain FSL?</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/structural">structural/</a></h3><p>Examples for <code>fslc analyze</code>'s structural projections and findings. See the <a href="analysis.en.html">Structural Analysis chapter</a>.</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/validation">validation/</a></h3><p>A worked demonstration of the suite that catches "a spec that's internally consistent but drifted from intent."</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/self">self/</a></h3><p>Self-specs modeling fslc's own design contract in FSL (meta-circular dogfooding).</p></div>
+    </div>
+    <p class="reveal" style="margin-top:14px">Standalone <code>.fsl</code> files also live under <a href="https://github.com/ymm-oss/fsl/tree/main/specs">specs/</a>. For the design reasoning behind these, see <a href="design-notes.en.html">Design Notes &amp; Dogfooding</a>.</p>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

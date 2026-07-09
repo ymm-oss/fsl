@@ -42,7 +42,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "markdown>=3"]
 lsp = ["pygls>=1.3,<2"]
 
 [project.urls]

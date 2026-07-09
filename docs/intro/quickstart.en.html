@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>5-Minute Quickstart — install to reading a counterexample</title>
+<meta name="description" content="From git clone to fslc check / verify. Read a real counterexample JSON, fix it, and prove it — a 5-minute straight line." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="quickstart">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Get Started</p>
+    <h1 class="reveal">Five minutes to <span class="hl">reading a counterexample</span>.</h1>
+    <p class="lead reveal">Install, verify a broken spec, read the counterexample JSON, fix it, and go all the way to a proof. Every command here is copy-pasteable.</p>
+    <p class="reveal dim" style="margin-top:18px">New to FSL? Read the <a href="concept.en.html">concept introduction</a> first for the intuition.</p>
+    <div class="scroll-hint reveal">▽ Scroll</div>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">0. Install</p>
+    <h2 class="reveal">Two dependencies: lark and z3-solver</h2>
+    <p class="lead narrow reveal">No C++ compiler or separate Z3 install needed. Mac/Windows/Linux all work with plain <code>pip install</code> (Python 3.9+).</p>
+    <pre><code>git clone https://github.com/ymm-oss/fsl && cd fsl
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"   # lark, z3-solver, pytest + an editable install of fslc</code></pre>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">1. check</p>
+    <h2 class="reveal">The fast loop first: syntax and types only</h2>
+    <p class="lead narrow reveal"><code>fslc check</code> never calls Z3 — it only checks syntax, names, and types. Run it on every edit.</p>
+    <pre><code>$ fslc check docs/intro/specs/order_buggy.fsl</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "ok",
+  "spec": "OrderWorkflow",
+  "warnings": []
+}</code></pre>
+    <p class="reveal">Syntax and types are fine. But this spec has a <b>rule violation</b> baked in — <code>check</code> doesn't look that far.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">2. verify — violated</p>
+    <h2 class="reveal">Now bounded model checking: let the machine find the counterexample</h2>
+    <p class="lead narrow reveal"><code>fslc verify</code> tries every possible sequence of actions up to depth 8 with Z3. If a rule breaks, it returns the shortest counterexample.</p>
+    <pre><code>$ fslc verify docs/intro/specs/order_buggy.fsl --depth 8</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "violated",
+  "spec": "OrderWorkflow",
+  "violation_kind": "invariant",
+  "invariant": "ShipOnlyAfterApproval",
+  "violated_at_step": 2,
+  "last_action": { "name": "ship", "params": {} },
+  "trace": [
+    { "step": 0, "state": { "status": "Draft", "approved": false } },
+    { "step": 1, "state": { "status": "Submitted", "approved": false },
+      "action": { "name": "submit" },
+      "changes": { "status": { "from": "Draft", "to": "Submitted" } } },
+    { "step": 2, "state": { "status": "Shipped", "approved": false },
+      "action": { "name": "ship" },
+      "changes": { "status": { "from": "Submitted", "to": "Shipped" } } }
+  ]
+}</code></pre>
+    <div class="callout reveal" style="margin-top:20px">
+      <p><b>Reading this counterexample:</b> since <code>result</code> is <code>"violated"</code>, <code>invariant</code> and <code>trace</code> are all you need. Two steps — <code>submit</code>, then <code>ship</code> — reach <code>Shipped</code> with <code>approved</code> still <code>false</code>, breaking <code>ShipOnlyAfterApproval</code>: the workflow can ship without ever being approved.</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3. Fix it</p>
+    <h2 class="reveal">A one-line guard</h2>
+    <p class="lead narrow reveal">The <code>ship</code> action's <code>requires</code> was guarding against the wrong state.</p>
+    <pre><code>  action ship() {
+<span class="r">-   requires status == Submitted   // BUG: should require Approved</span>
+<span class="k">+   requires status == Approved    // FIX: ship only after approval</span>
+    status = Shipped
+  }</code></pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">4. verify — verified</p>
+    <h2 class="reveal">Verify the fixed spec at depth 8 again</h2>
+    <pre><code>$ fslc verify docs/intro/specs/order_fixed.fsl --depth 8</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "verified",
+  "spec": "OrderWorkflow",
+  "checked_to_depth": 8,
+  "completeness": "bounded",
+  "invariants_checked": ["_bounds_status", "ShipOnlyAfterApproval"],
+  "action_coverage": { "submit": true, "approve": true, "ship": true, "cancel": true },
+  "warnings": [
+    { "message": "deadlock reachable at step 3 (state: status=Shipped, approved=true)",
+      "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional" }
+  ]
+}</code></pre>
+    <div class="callout reveal" style="margin-top:20px">
+      <p><b>Read the warnings too:</b> <code>result: "verified"</code> does not mean <code>warnings</code> is empty. The <code>deadlock</code> warning here just means the verifier doesn't yet know that <code>Shipped</code> is meant to be a terminal state (say so with a <code>terminal { }</code> block). It's not a bug — but don't get into the habit of skipping past warnings unread.</p>
+    </div>
+    <p class="reveal" style="margin-top:14px"><code>verified</code> is a <b>bounded</b> result: no counterexample up to depth 8. To check to infinite depth, the next step is induction.</p>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">5. verify --engine induction</p>
+    <h2 class="reveal">Finally, a proof: to infinite depth</h2>
+    <p class="lead narrow reveal"><code>order_proved.fsl</code> adds one auxiliary invariant, which lets k-induction prove the property at <b>infinite</b> depth.</p>
+    <pre><code>$ fslc verify docs/intro/specs/order_proved.fsl --engine induction</code></pre>
+    <pre><code>{
+  "fsl": "1.0",
+  "result": "proved",
+  "spec": "OrderWorkflow",
+  "engine": "induction",
+  "completeness": "unbounded",
+  "invariants_checked": ["_bounds_status", "ShipOnlyAfterApproval", "ApprovedImpliesFlag"],
+  "warnings": []
+}</code></pre>
+    <p class="reveal"><code>completeness: "unbounded"</code> means <code>ShipOnlyAfterApproval</code> is now <b>proved</b> to hold no matter how long a run gets. See <a href="guide.en.html">Workflow</a> for how to get from BMC to proved in your own specs.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Where next</p>
+    <h2 class="reveal">Pick your next stop</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Couldn't read a result</h3>
+        <p>Result/kind varieties, exit codes, and how to read CTI/vacuity/deadlock are in <a href="errors.en.html">Errors &amp; Exit Codes</a>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Want to run this on your own project</h3>
+        <p>The full command set, the verification loop, and the AI repair loop are in <a href="guide.en.html">Workflow</a>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Need one command's exact flags</h3>
+        <p>Every fslc subcommand's flags and exit codes live in the generated <a href="cli.en.html">CLI Reference</a>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Want a bigger worked example</h3>
+        <p>The finished material under <code>examples/</code> and <code>specs/</code> is indexed in the <a href="examples.en.html">Example Gallery</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

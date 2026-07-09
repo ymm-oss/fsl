@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glossary — FSL reserved words, Japanese terms, one-line definitions</title>
+<meta name="description" content="The main FSL reserved words and syntax keywords, with their Japanese-site term and a one-line definition." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="glossary">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Reference</p>
+    <h1 class="reveal">Glossary</h1>
+    <p class="lead reveal">Every FSL reserved word and syntax keyword is English. This page pairs each with the term used on the Japanese side of this site and a one-line definition. The exhaustive canonical source is the <a href="language.en.html">Language Reference</a> — this page is an index, not the canon.</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Kernel</p>
+    <h2 class="reveal">Core state/action syntax</h2>
+    <table class="matrix reveal">
+      <tr><th>Keyword</th><th>Japanese term</th><th>One-line definition</th></tr>
+      <tr><td><code>spec</code></td><td>スペック</td><td>The top-level declaration bundling state, init, actions, and properties</td></tr>
+      <tr><td><code>state</code></td><td>状態</td><td>The block declaring a spec's variables</td></tr>
+      <tr><td><code>init</code></td><td>初期状態</td><td>The block constraining state variables' initial values</td></tr>
+      <tr><td><code>action</code></td><td>アクション</td><td>An operation defining one state transition</td></tr>
+      <tr><td><code>fair action</code></td><td>公平アクション</td><td>An action with weak fairness — "enabled infinitely often implies fired infinitely often" (the precondition for <code>leadsTo</code>)</td></tr>
+      <tr><td><code>requires</code></td><td>事前条件</td><td>The guard condition under which an action is enabled</td></tr>
+      <tr><td><code>ensures</code></td><td>事後条件</td><td>The condition that must hold after the action fires</td></tr>
+      <tr><td><code>invariant</code></td><td>不変条件</td><td>A property that must hold in every reachable state</td></tr>
+      <tr><td><code>reachable</code></td><td>到達可能性</td><td>A property asking whether some condition is ever reachable</td></tr>
+      <tr><td><code>terminal</code></td><td>終端状態</td><td>Declares an intentional stopping state (not a deadlock)</td></tr>
+      <tr><td><code>leadsTo</code></td><td>応答性</td><td>A temporal property: "if A, then eventually B"</td></tr>
+      <tr><td><code>trans</code></td><td>遷移不変条件</td><td>A two-state (before/after) safety property</td></tr>
+      <tr><td><code>old(x)</code></td><td>変更前の値</td><td>Inside <code>ensures</code>, refers to the value before the action fired</td></tr>
+      <tr><td><code>ghost</code></td><td>ghost変数</td><td>A verification-only history variable with no counterpart in the implementation</td></tr>
+      <tr><td><code>stutter</code></td><td>スタッター遷移</td><td>In refinement, a concrete step that leaves the abstract side unchanged</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Types</p>
+    <h2 class="reveal">The type system</h2>
+    <table class="matrix reveal">
+      <tr><th>Keyword</th><th>Japanese term</th><th>One-line definition</th></tr>
+      <tr><td><code>type X = lo..hi</code></td><td>範囲型</td><td>A finite range type that also serves as a verification bound</td></tr>
+      <tr><td><code>enum</code></td><td>列挙型</td><td>A type with a finite set of named values</td></tr>
+      <tr><td><code>struct</code></td><td>構造体</td><td>A composite type with multiple fields</td></tr>
+      <tr><td><code>Option&lt;T&gt;</code></td><td>値がある/ない型</td><td>Presence-or-absence without a sentinel value</td></tr>
+      <tr><td><code>Seq&lt;T,N&gt;</code></td><td>有界シーケンス</td><td>A bounded array type with maximum length N</td></tr>
+      <tr><td><code>Map&lt;K,V&gt;</code></td><td>対応表</td><td>A finite mapping from keys to values</td></tr>
+      <tr><td><code>Set&lt;T&gt;</code></td><td>集合</td><td>A finite set type with no duplicates</td></tr>
+      <tr><td><code>entity</code></td><td>エンティティ型</td><td>An identity-only type with an unbounded domain, decoupled from the verification bound</td></tr>
+      <tr><td><code>number</code></td><td>数値型</td><td>An integer type decoupled from the verification bound (the numeric counterpart to <code>entity</code>)</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Refinement &amp; composition</p>
+    <h2 class="reveal">Connecting multiple specs</h2>
+    <table class="matrix reveal">
+      <tr><th>Keyword</th><th>Japanese term</th><th>One-line definition</th></tr>
+      <tr><td><code>refinement</code></td><td>詳細化マッピング</td><td>Declares that a detailed spec is faithful to an abstract one</td></tr>
+      <tr><td><code>checked_by refinement</code></td><td>詳細化による保証</td><td>Declares that a business-layer control is guaranteed by a design-layer refinement</td></tr>
+      <tr><td><code>compose</code></td><td>合成</td><td>Composes multiple specs into one via namespaces and synchronized actions</td></tr>
+      <tr><td><code>maps</code></td><td>要件対応</td><td>Declares which requirements-layer action a design-layer action corresponds to</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">The three-layer dialects</p>
+    <h2 class="reveal">business / requirements / dbsystem / ai_component</h2>
+    <table class="matrix reveal">
+      <tr><th>Keyword</th><th>Japanese term</th><th>One-line definition</th></tr>
+      <tr><td><code>business</code></td><td>業務層スペック</td><td>Top-level declaration for actors, business objects, processes, controls, and goals</td></tr>
+      <tr><td><code>requirements</code></td><td>要件層スペック</td><td>Top-level declaration for requirement IDs, acceptance criteria, and forbidden flows</td></tr>
+      <tr><td><code>forbidden</code></td><td>禁止手順</td><td>A negative acceptance criterion: "this flow must never be accepted"</td></tr>
+      <tr><td><code>expect rejected</code></td><td>拒否の期待</td><td>Ends a <code>forbidden</code> flow, asserting it is expected to be rejected</td></tr>
+      <tr><td><code>@req</code></td><td>要件タグ</td><td>A meta-tag linking a declaration to a requirement ID for cross-layer traceability</td></tr>
+      <tr><td><code>dbsystem</code></td><td>DBシステムスペック</td><td>Top-level declaration for the <code>fsl-db</code> dialect: schema, artifacts, multi-environment compatibility</td></tr>
+      <tr><td><code>ai_component</code></td><td>AIコンポーネント契約</td><td>Top-level declaration for the <code>fsl-ai</code> dialect: tool authority, human approval, forbidden tools</td></tr>
+      <tr><td><code>agent</code></td><td>エージェント構造</td><td>Declares a recursive agent's scope, grants, visibility, and orchestration</td></tr>
+      <tr><td><code>domain</code></td><td>ドメインスペック</td><td>Top-level declaration for the <code>fsl-domain</code> dialect: Functional DDD aggregates, command/event decide/evolve</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Reading results</p>
+    <h2 class="reveal">Vocabulary that shows up in JSON output</h2>
+    <p class="lead narrow reveal"><code>result</code>/<code>kind</code>/<code>violation_kind</code> and the other output vocabulary are indexed separately on <a href="errors.en.html">Errors &amp; Exit Codes</a>.</p>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,1039 @@
+trace_session:
+  id: RD-S-0001
+  title: "FSL docs site rebuild — IA / nav structure / page templates (content authoring out of scope)"
+  created_at: "2026-07-09T06:14:18Z"
+  updated_at: "2026-07-09T07:40:00Z"
+  mode: deep
+  status: questioned
+  task_summary: >
+    Rebuild the public static-HTML FSL/fslc manual's information architecture, navigation
+    structure, and page templates (docs/, published via GitHub Pages). Content authoring is a
+    separate, later task and is explicitly out of scope here. This session records phases
+    context-reader -> relation-mapper -> hypothesis-generator -> orchestrator synthesis ->
+    variant-designer -> design-critic -> revision, for repo /Users/ryoichi.a.izumita/Workspace/fsl.
+    Status is "questioned" (not "completed"): the chapter->category mapping (RD-A-004) is
+    explicitly low-confidence and flagged for maintainer review, one critique (RD-CR-004) was
+    acknowledged but not structurally fixed, and several open unknowns remain unresolved.
+    Reopened 2026-07-09 to trace downstream execution of DESIGN-docs-site.md §6's deferred
+    items: RD-O-003/RD-DD-007/RD-DD-008/RD-AR-003 record the syntax.html primer-redefinition
+    callout and analysis.html GUIDE-analyze link (literal execution of an external "fable
+    decision," no new hypotheses); RD-O-004/RD-R-020/RD-H-017 record the index.html homepage
+    restructure as a proposed (not yet accepted) hypothesis flagged for a nav-parity check, per
+    RD-U-006, since it is new IA ground beyond §6's explicit scope.
+
+observations:
+  - id: RD-O-001
+    kind: observation
+    source: user_brief
+    claim: >
+      Product is a public static-HTML manual for FSL/fslc, published via GitHub Pages from
+      docs/. This task's scope is site-wide visual design / navigation structure / page
+      templates only; content authoring is a separate, out-of-scope task.
+    confidence: high
+    status: active
+
+  - id: RD-O-002
+    kind: observation
+    source: user_brief
+    claim: >
+      Three actors are in scope: RD-ACT-001 first-time human reader; RD-ACT-002 AI-agent
+      reference-lookup consumer; RD-ACT-003 repo maintainer(s).
+    confidence: high
+    status: active
+
+  - id: RD-O-003
+    kind: observation
+    source: external_agent_decision
+    claim: >
+      A separate agent/session outside RD-S-0001 (referred to by the requester as "the fable
+      decision on the canonical-language problem") resolved 5 open policy questions and
+      established, among them: (1) syntax.html keeps its URL but is redefined as a ~30-minute
+      reading-path primer rather than a hand-maintained exhaustive grammar reference, now that
+      a generated language.html/language.ja.html page exists as the canonical/exhaustive
+      lookup surface; (5) GUIDE-analyze.ja.md stays a standalone Markdown deep-dive — the
+      analysis chapter page links out to it rather than absorbing its content, and since no
+      English translation of that guide exists, the English chapter page link carries a
+      "currently Japanese-only" note.
+      This decision was made and reported to the trace archivist directly by the requester; its
+      own reasoning trail lives outside RD-S-0001 and is not re-derived or second-guessed here.
+    confidence: high
+    status: active
+
+  - id: RD-O-004
+    kind: observation
+    source: user_brief
+    claim: >
+      Current docs/intro/index.{ja,en}.html renders the 12 existing chapters as a flat list
+      inside .manual-shell/.manual-nav plus a .chapter-card "browse by goal" grid, and also
+      contains a "GitHub Pagesで公開する場合" (publishing on GitHub Pages) section addressed to
+      site maintainers rather than readers. The CHAPTERS array has since grown to 19 entries
+      (12 original + language, cli, quickstart, examples, errors, glossary, design-notes) and 4
+      new category hub pages (get-started/guides/reference/examples-background) now exist per
+      RD-DD-006/D6, neither of which the current homepage markup reflects.
+    confidence: high
+    status: active
+
+assumptions:
+  - id: RD-A-002
+    kind: assumption
+    claim: "No page versioning scheme exists for the docs site."
+    reason_for_assumption: "No versioning artifacts observed in the reviewed structure."
+    confidence: medium
+    isolated: true
+    status: active
+
+  - id: RD-A-003
+    kind: assumption
+    claim: "No analytics are present on the docs site."
+    reason_for_assumption: "No analytics scripts/config observed in the reviewed structure."
+    confidence: medium
+    isolated: true
+    status: active
+
+  - id: RD-A-004
+    kind: assumption
+    claim: >
+      The chapter-to-Diátaxis-category mapping proposed in this session (see decisions section,
+      "Chapter->category mapping table") is a first cut only and has not been reviewed by the
+      repo maintainer.
+    reason_for_assumption: >
+      Mapping was authored during synthesis to satisfy RD-C-002 without a maintainer
+      consultation step in this session's process.
+    confidence: low
+    isolated: true
+    status: questioned
+
+  - id: RD-A-005
+    kind: assumption
+    claim: "A small maintainer team hand-authors HTML directly for this site (no CMS/build pipeline for content)."
+    reason_for_assumption: "Inferred from repo structure and lack of an observed content pipeline."
+    confidence: medium
+    isolated: true
+    status: active
+
+constraints:
+  - id: RD-C-001
+    kind: constraint
+    type: implementation
+    claim: "All 24 existing chapter URLs (12 chapters x ja/en) must keep resolving unchanged."
+    confidence: high
+    status: active
+
+  - id: RD-C-002
+    kind: constraint
+    type: business
+    claim: "IA is fixed to 4 Diátaxis categories: はじめる / ガイド / リファレンス / 実例と背景."
+    confidence: high
+    status: active
+
+  - id: RD-C-003
+    kind: constraint
+    type: implementation
+    claim: >
+      2 new generated reference pages (language from docs/LANGUAGE.md, cli from cli.py's
+      argparse tree) need a template suited to long/structured non-narrative content.
+    confidence: high
+    status: active
+
+  - id: RD-C-004
+    kind: constraint
+    type: content
+    claim: "ja/en twins are mandatory for every page."
+    confidence: high
+    status: active
+
+  - id: RD-C-005
+    kind: constraint
+    type: implementation
+    claim: >
+      site.js's CHAPTERS array is the single source of truth for topbar + sidebar + footer
+      navigation — must not be duplicated by a second nav-mapping source.
+    confidence: high
+    status: active
+
+relations:
+  - id: RD-R-001
+    kind: relation
+    relation_type: user_to_action
+    claim: "Human readers (RD-ACT-001) browse the four Diátaxis categories linearly via nav."
+    design_implication: "Sidebar/nav must support linear category browsing without added click-cost."
+    risk_if_ignored: "First-time readers lose an intuitive path through the manual."
+    depends_on: [RD-O-002, RD-C-002]
+    confidence: medium
+    status: active
+
+  - id: RD-R-002
+    kind: relation
+    relation_type: user_to_action
+    claim: >
+      AI agents (RD-ACT-002) skip nav entirely, arriving via direct URL or search-index fetch
+      straight into reference pages.
+    design_implication: >
+      Reference-page templates must be fully self-contained and correct without relying on
+      nav-mediated arrival (e.g. native HTML disclosure, not JS-only content).
+    risk_if_ignored: "Agent consumers get incomplete or broken content if templates assume nav context."
+    depends_on: [RD-O-002]
+    confidence: medium
+    status: active
+
+  - id: RD-R-003
+    kind: relation
+    relation_type: implementation_constraint_to_design_choice
+    claim: >
+      Current index.html's two browsing modes (ordered list + by-goal grid) must both survive
+      the reorg into 4 Diátaxis categories.
+    design_implication: >
+      New IA/nav must preserve both an ordered/sequential view and a goal-oriented view of
+      chapters.
+    risk_if_ignored: "Losing either mode regresses an existing discovery path for RD-ACT-001."
+    depends_on: [RD-C-002]
+    confidence: medium
+    status: active
+
+  - id: RD-R-006
+    kind: relation
+    relation_type: information_to_confidence
+    claim: >
+      Four distinct "confidence shapes" exist across templates: narrative/interactive,
+      dense-reference, mid-length layer-explainer, and now generated/machine-derived.
+    design_implication: "Each shape must stay visually distinguishable across the reorg."
+    risk_if_ignored: "Readers conflate hand-authored narrative content with generated reference content."
+    depends_on: [RD-C-003]
+    confidence: medium
+    status: active
+
+  - id: RD-R-007
+    kind: relation
+    relation_type: information_to_confidence
+    claim: >
+      The generated/machine-derived shape is new (introduced by RD-C-003) and has no
+      precedent template on the current site.
+    design_implication: "A new template must be designed for it rather than reusing an existing shape."
+    risk_if_ignored: "Forcing generated content into an existing shape misrepresents its provenance."
+    depends_on: [RD-R-006, RD-C-003]
+    confidence: medium
+    status: active
+
+  - id: RD-R-008
+    kind: relation
+    relation_type: information_to_confidence
+    claim: >
+      The mid-length layer-explainer shape (business/requirements/design layer chapters) is
+      distinct from both narrative and dense-reference shapes and must not be collapsed into
+      either during the reorg.
+    design_implication: "Preserve its current template distinctly through the reorg."
+    risk_if_ignored: "Layer-explainer chapters lose their current presentation."
+    depends_on: [RD-R-006]
+    confidence: medium
+    status: active
+
+  - id: RD-R-009
+    kind: relation
+    relation_type: information_to_confidence
+    claim: >
+      Staleness in the generated shape (generated content silently drifting from its source)
+      is a silent correctness bug, not a content-authoring issue.
+    design_implication: "The generated-page template needs a provenance signal distinct from ordinary content-freshness concerns."
+    risk_if_ignored: "Readers and agents trust stale generated reference pages as if hand-verified."
+    depends_on: [RD-R-006, RD-R-007]
+    confidence: high
+    status: active
+
+  - id: RD-R-010
+    kind: relation
+    relation_type: visual_hierarchy_to_behavior
+    claim: >
+      A 2-level category hierarchy trades one-glance scanning of all chapters for either
+      added click-cost (if collapsed) or vertical growth (if expanded).
+    design_implication: "Sidebar rendering choice (expanded vs collapsed) directly trades scan speed against vertical space."
+    risk_if_ignored: "Wrong tradeoff choice degrades either fast lookup or overview scanning."
+    depends_on: [RD-C-002]
+    confidence: medium
+    status: active
+
+  - id: RD-R-011
+    kind: relation
+    relation_type: visual_hierarchy_to_behavior
+    claim: "The RD-R-010 tradeoff must resolve in favor of not penalizing fast reference lookup, per RD-ACT-002's needs."
+    design_implication: "Prefer an always-visible structure over one requiring extra interaction to reach reference pages."
+    risk_if_ignored: "AI-agent and expert-human reference lookups become slower than the current flat structure."
+    depends_on: [RD-R-010, RD-R-002]
+    confidence: medium
+    status: active
+
+  - id: RD-R-012
+    kind: relation
+    relation_type: visual_hierarchy_to_behavior
+    claim: >
+      Fast reference lookup (RD-R-011) and first-glance category overview (RD-R-010) are in
+      tension and both must be satisfied by the same sidebar.
+    design_implication: "A single navigation component must serve both goals simultaneously."
+    risk_if_ignored: "Optimizing for one goal alone regresses the other actor's primary use case."
+    depends_on: [RD-R-010, RD-R-011]
+    confidence: medium
+    status: active
+
+  - id: RD-R-013
+    kind: relation
+    relation_type: interaction_to_reversibility
+    claim: "The ja/en toggle must stay a safe in-place swap (same page, same scroll position, no navigation loss)."
+    design_implication: "Any reorg must not change how the language toggle behaves relative to current page state."
+    risk_if_ignored: "Readers lose place or context when switching languages."
+    depends_on: [RD-C-004]
+    confidence: high
+    status: active
+
+  - id: RD-R-014
+    kind: relation
+    relation_type: interaction_to_reversibility
+    claim: >
+      Deep-linked readers (arriving directly at a chapter/reference page, bypassing nav) need
+      a visible breadcrumb to orient themselves.
+    design_implication: "Every page needs a breadcrumb showing its category ancestry, not just chapter title."
+    risk_if_ignored: "Deep-linked readers cannot tell where they are in the IA."
+    depends_on: [RD-R-002]
+    confidence: medium
+    status: active
+
+  - id: RD-R-015
+    kind: relation
+    relation_type: interaction_to_reversibility
+    claim: >
+      Deep-linked readers additionally need a genuine return path back to a broader view;
+      today's hub-and-spoke navigation is one-way (spoke pages don't route back to the hub).
+    design_implication: "Breadcrumb or equivalent affordance must be a functioning return link, not just a label."
+    risk_if_ignored: "Readers get stranded on spoke pages with no way back except browser-back."
+    depends_on: [RD-R-014]
+    confidence: medium
+    status: active
+
+  - id: RD-R-016
+    kind: relation
+    relation_type: implementation_constraint_to_design_choice
+    claim: >
+      Frozen URLs (RD-C-001) force an additive-only hub-and-spoke IA — existing chapter
+      URLs/pages cannot be restructured, only added around.
+    design_implication: "New category hub pages and reference pages must be added around the existing 24 URLs, not replace them."
+    risk_if_ignored: "Reorg breaks RD-C-001's URL-stability constraint."
+    depends_on: [RD-C-001]
+    confidence: high
+    status: active
+
+  - id: RD-R-017
+    kind: relation
+    relation_type: implementation_constraint_to_design_choice
+    claim: "site.js's CHAPTERS array must stay the single nav-mapping source (RD-C-005) even as category metadata is added."
+    design_implication: "Any new category-hierarchy data must extend, not duplicate, CHAPTERS."
+    risk_if_ignored: "Two nav-mapping sources drift out of sync over time."
+    depends_on: [RD-C-005]
+    confidence: high
+    status: active
+
+  - id: RD-R-018
+    kind: relation
+    relation_type: implementation_constraint_to_design_choice
+    claim: "cli.py's nested subcommand tree needs a template that isn't a flat TOC — its structure is inherently 2+ levels deep."
+    design_implication: "The reference-page template must support nested disclosure, not a flat list."
+    risk_if_ignored: "A flat TOC would misrepresent or bury cli.py's actual subcommand nesting."
+    depends_on: [RD-C-003]
+    confidence: medium
+    status: active
+
+  - id: RD-R-019
+    kind: relation
+    relation_type: implementation_constraint_to_design_choice
+    claim: >
+      Generated pages are English-sourced (from docs/LANGUAGE.md and cli.py, both English),
+      which raises an open question about how ja twins get produced for them — not resolved
+      by this session.
+    design_implication: "RD-C-004 (ja/en twins mandatory) has an unresolved production mechanism gap for generated pages specifically."
+    risk_if_ignored: >
+      Either ja twins for generated pages get skipped (breaking RD-C-004) or get
+      hand-translated with no defined process (undermining RD-C-003's generation premise).
+    depends_on: [RD-C-003, RD-C-004]
+    confidence: medium
+    status: questioned
+
+  - id: RD-R-020
+    kind: relation
+    relation_type: implementation_constraint_to_design_choice
+    claim: >
+      RD-DD-006/D6 established the 4 category hub pages as the category-level navigation
+      surface for the site, but neither RD-DD-006 nor DESIGN-docs-site.md's §6 "out of scope"
+      list specified how (or whether) the site-root homepage (index.html) itself integrates or
+      defers to those hub pages, or how the homepage's pre-existing "browse by goal" grid should
+      track the now-19-entry CHAPTERS array as it grows.
+    design_implication: >
+      A homepage restructure that surfaces the hub pages and refreshes the goal-grid is a
+      plausible, low-risk extension of D6 — but it is new ground D6 did not itself decide, and
+      should be nav-parity-checked (do the hub pages and homepage agree on what belongs where)
+      rather than assumed correct by extension.
+    risk_if_ignored: >
+      Homepage and hub-page navigation could silently diverge (e.g. a chapter present in a hub
+      page's category list but omitted from the homepage's goal-grid, or vice versa), which is
+      exactly the kind of nav-mapping drift RD-C-005/RD-R-017 were meant to prevent.
+    depends_on: [RD-DD-006, RD-O-004]
+    confidence: medium
+    status: active
+
+hypotheses:
+  - id: RD-H-001
+    kind: hypothesis
+    name: always-expanded-2-level-sidebar
+    claim: "Always-expanded 2-level categorized sidebar shown on every page."
+    expected_effect: "Satisfies RD-R-003's scan-all-chapters-in-order behavior while adding category grouping."
+    risk: "Vertical growth as categories/chapters increase (see RD-CR-004)."
+    depends_on: [RD-R-003, RD-R-010, RD-R-011, RD-R-012]
+    confidence: medium
+    if_false_retract: [RD-DD-001]
+    status: active
+
+  - id: RD-H-002
+    kind: hypothesis
+    name: accordion-sidebar
+    claim: "Collapsible/accordion categorized sidebar, collapsed by default."
+    expected_effect: "Reduces vertical space consumed per category."
+    risk: "Breaks RD-R-003's 'scan all chapters in order' behavior — chapters outside the open category are hidden."
+    depends_on: [RD-R-010]
+    confidence: low
+    if_false_retract: []
+    status: retracted
+
+  - id: RD-H-003
+    kind: hypothesis
+    name: dual-mode-toggle-sidebar
+    claim: "User-toggleable dual-mode sidebar (switch between expanded and accordion)."
+    expected_effect: "Lets readers choose their preferred density."
+    risk: "Needless complexity once everything is already visible by default under RD-H-001."
+    depends_on: [RD-H-001, RD-H-002]
+    confidence: low
+    if_false_retract: []
+    status: retracted
+
+  - id: RD-H-004
+    kind: hypothesis
+    name: separate-sticky-back-button
+    claim: "A separate sticky 'back to category' button, independent of breadcrumb."
+    expected_effect: "Gives a persistent, always-visible return affordance."
+    risk: "Stacks with the site's already-sticky topbar, adding visual clutter."
+    depends_on: [RD-R-015]
+    confidence: low
+    if_false_retract: []
+    status: retracted
+
+  - id: RD-H-005
+    kind: hypothesis
+    name: sidebar-every-page-every-breakpoint
+    claim: "Render the same categorized sidebar on every page at every breakpoint."
+    expected_effect: "Consistent orientation affordance everywhere, avoiding the need for RD-H-004."
+    risk: "At narrow breakpoints, sidebar may lose its sticky rail (see RD-CR-001)."
+    depends_on: [RD-R-014]
+    confidence: medium
+    if_false_retract: [RD-DD-002]
+    status: active
+
+  - id: RD-H-006
+    kind: hypothesis
+    name: breadcrumb-category-segment-as-return-link
+    claim: "Breadcrumb whose category segment doubles as the 'back to category' link."
+    expected_effect: >
+      A single affordance serves both orientation (RD-R-014) and return path (RD-R-015)
+      without adding a new UI element (avoiding RD-H-004).
+    risk: "Relies on readers recognizing the breadcrumb segment as clickable."
+    depends_on: [RD-R-014, RD-R-015]
+    confidence: medium
+    if_false_retract: [RD-DD-002]
+    status: active
+
+  - id: RD-H-007
+    kind: hypothesis
+    name: native-details-summary-disclosure-tree
+    claim: "Reference-page template built from native <details>/<summary> disclosure elements, not a JS widget."
+    expected_effect: >
+      Long/structured non-narrative content (RD-C-003) becomes navigable via native browser
+      affordances; content stays in the DOM/a11y tree for non-JS/AI-agent HTML fetchers
+      (RD-R-002).
+    risk: "Flagged risk: could feel less polished/interactive than a custom JS tree widget."
+    depends_on: [RD-C-003, RD-R-002, RD-R-018]
+    confidence: medium
+    if_false_retract: [RD-DD-003]
+    status: active
+
+  - id: RD-H-008
+    kind: hypothesis
+    name: long-scroll-deep-toc
+    claim: "Single long-scroll reference page with a deep/expanded table of contents, no collapse elements."
+    expected_effect: "Guarantees full content is visible to any fetcher (human scrolling or AI agent), satisfying RD-R-002."
+    risk: "No progressive disclosure — dense for human scanning of long pages like cli.html."
+    depends_on: [RD-C-003, RD-R-002]
+    confidence: medium
+    if_false_retract: []
+    status: superseded
+
+  - id: RD-H-009
+    kind: hypothesis
+    name: multi-file-split-reference
+    claim: "Split each generated reference page across multiple files (e.g. one per top-level section)."
+    expected_effect: "Smaller individual page sizes."
+    risk: >
+      Lowest-confidence option; adds N-times generation/ja-twin/provenance-badge complexity
+      for one generated artifact.
+    depends_on: [RD-C-003, RD-C-004]
+    confidence: low
+    if_false_retract: []
+    status: retracted
+
+  - id: RD-H-010
+    kind: hypothesis
+    name: neutral-provenance-badge
+    claim: "A neutral, non-warning-colored badge signaling generated/machine-derived provenance."
+    expected_effect: "Signals the generated-content shape (RD-R-009) without implying a status/warning."
+    risk: "Could be visually confused with the site's existing verify-verdict pill/badge grammar (see RD-CR-003)."
+    depends_on: [RD-R-009]
+    confidence: medium
+    if_false_retract: [RD-DD-004]
+    status: active
+
+  - id: RD-H-012
+    kind: hypothesis
+    name: badge-plus-ci-staleness-detection
+    claim: >
+      Provenance signal for generated pages should combine a visible badge with CI-enforced
+      staleness detection to catch source/output drift automatically.
+    expected_effect: "Visible badge informs readers; CI enforcement prevents silent staleness (RD-R-009's correctness-bug risk)."
+    risk: "CI-enforcement half requires a generation pipeline that does not yet exist in this session's scope."
+    depends_on: [RD-R-009, RD-H-010]
+    confidence: medium
+    if_false_retract: [RD-DD-004]
+    status: active
+
+  - id: RD-H-013
+    kind: hypothesis
+    name: extend-existing-token-system
+    claim: "Extend the existing design-token system rather than introducing a parallel one."
+    expected_effect: "New visual needs (provenance badge, tree accent) stay consistent with the rest of the site."
+    risk: "Existing tokens may not cleanly express the new provenance concept."
+    depends_on: [RD-R-009]
+    confidence: high
+    if_false_retract: [RD-DD-005]
+    status: active
+
+  - id: RD-H-014
+    kind: hypothesis
+    name: new-scoped-semantic-token-pair
+    claim: >
+      Add a new scoped semantic token pair for generated-reference-page chrome, narrower in
+      scope than an initial broader proposal.
+    expected_effect: "Gives the generated shape a distinct accent without a sitewide visual change."
+    risk: "Any new semantic color must be checked against the site's existing reserved-color convention (see RD-CR-003, RD-CR-007)."
+    depends_on: [RD-H-013, RD-R-009]
+    confidence: medium
+    if_false_retract: [RD-DD-005]
+    status: active
+
+  - id: RD-H-015
+    kind: hypothesis
+    name: chapters-gains-category-id
+    claim: "CHAPTERS array gains a categoryId field per entry as the single source of truth for chapter-to-category membership."
+    expected_effect: "Satisfies RD-R-017 without a second nav-mapping source."
+    risk: "Provides no per-category ordering field (see RD-CR-005)."
+    depends_on: [RD-C-005, RD-R-017]
+    confidence: medium
+    if_false_retract: [RD-DD-006]
+    status: active
+
+  - id: RD-H-016
+    kind: hypothesis
+    name: separate-categories-metadata-array
+    claim: >
+      Introduce a separate, small, non-growing CATEGORIES array (4 fixed entries: id/order/
+      en/ja label+description) for category-level metadata, synthesized alongside RD-H-015
+      rather than competing with it.
+    expected_effect: "Hub pages can render category label/description/order without per-chapter duplication."
+    risk: "Could become a second nav-mapping source if scope creeps beyond 4 fixed records."
+    depends_on: [RD-H-015, RD-C-005]
+    confidence: medium
+    if_false_retract: [RD-DD-006]
+    status: active
+
+  - id: RD-H-017
+    kind: hypothesis
+    name: homepage-hub-primary-goal-grid-refresh-ops-relocation
+    claim: >
+      Restructure index.{ja,en}.html as: (a) surface the 4 category hub pages as primary entry
+      points above/instead-of the flat 12-chapter list; (b) refresh the "目的別に読む"
+      browse-by-goal card grid to include the 7 chapters added since the original grid was
+      authored (quickstart, examples, language, cli, errors, glossary, design-notes); (c) remove
+      the maintainer-facing "GitHub Pagesで公開する場合" section from the reader-facing homepage,
+      relocating that content to docs/README.md rather than deleting it.
+    expected_effect: >
+      Homepage becomes consistent with D6's hub-page IA and the current 19-entry CHAPTERS array;
+      reader-facing homepage no longer carries operator-facing content (consistent with the
+      reader-vs-maintainer separation already established for RD-ACT-001 vs RD-ACT-003).
+    risk: >
+      (a)/(b) are additive/reversible and follow D6's already-decided hub-page concept, but the
+      requester specifically flagged this as new ground beyond DESIGN-docs-site.md §6's explicit
+      scope — no nav-parity check (hub-page category membership vs. homepage goal-grid contents)
+      has been run yet. (c) is a relocation, not a deletion, but its target (docs/README.md) is
+      itself one of the "once they exist" deferred cross-links named in §6, so its landing spot
+      is not yet a settled artifact either.
+    depends_on: [RD-R-020, RD-DD-006, RD-O-004]
+    confidence: medium
+    if_false_retract: []
+    status: proposed
+    note: >
+      Recorded as PROPOSED, not folded into an accepted decision — see RD-U-006 open question
+      and the trace-archivist's direct recommendation in its final report on whether to run a
+      lightweight design-critic check before executing.
+
+decisions:
+  - id: RD-DD-001
+    kind: decision
+    claim: "Navigation model: always-expanded 2-level categorized sidebar."
+    decision_area: information_architecture
+    depends_on: [RD-H-001, RD-R-003, RD-R-010, RD-R-011, RD-R-012]
+    reversibility: costly
+    artifact_target: RD-AR-001
+    rejects:
+      - hypothesis: RD-H-002
+        reason: "Breaks RD-R-003's 'scan all chapters in order' requirement."
+      - hypothesis: RD-H-003
+        reason: "Needless complexity once everything is already visible by default."
+    status: active
+
+  - id: RD-DD-002
+    kind: decision
+    claim: >
+      Orientation affordance: same categorized sidebar rendered on every page at every
+      breakpoint (RD-H-005), plus a breadcrumb whose category segment is the sole "back to
+      category" link (RD-H-006). Revised after critique (RD-CR-001) to add: language.html and
+      cli.html additionally get a small fixed bottom-right "back to top" anchor link, because
+      those two pages are long single pages (per RD-DD-003) and lose the sidebar's sticky rail
+      below the site's existing 1180px breakpoint, leaving no return path there otherwise. The
+      12 existing chapter pages do not get this control (short enough today).
+    decision_area: interaction
+    depends_on: [RD-H-005, RD-H-006, RD-R-014, RD-R-015]
+    reversibility: reversible
+    artifact_target: RD-AR-001
+    rejects:
+      - hypothesis: RD-H-004
+        reason: "A separate sticky button would stack with the already-sticky topbar."
+    revised_by: [RD-REV-001]
+    status: active
+
+  - id: RD-DD-003
+    kind: decision
+    claim: >
+      Reference-page template: native <details>/<summary> disclosure tree (RD-H-007), NOT a
+      JS widget — chosen specifically because native elements keep content in the DOM/a11y
+      tree for non-JS/AI-agent HTML fetchers, which was RD-H-007's own flagged risk and
+      RD-H-008's (long-scroll+deep-TOC) whole rationale. cli.html stays ONE page (2 levels of
+      nesting), language.html is 1 level. One "Expand all/Collapse all" progressive-enhancement
+      control added.
+    decision_area: component
+    depends_on: [RD-H-007, RD-C-003, RD-R-002, RD-R-018]
+    reversibility: costly
+    artifact_target: RD-AR-001
+    rejects:
+      - hypothesis: RD-H-009
+        reason: "Lowest confidence; adds N-times generation/ja-twin/provenance-badge complexity for one generated artifact."
+    supersedes: [RD-H-008]
+    status: active
+
+  - id: RD-DD-004
+    kind: decision
+    claim: >
+      Provenance signal: a neutral, non-warning-colored badge (visible half of RD-H-010/
+      RD-H-012). CI-enforced staleness detection (the other half of RD-H-012) is explicitly
+      deferred/recommended to the separate generation-pipeline task (project task #3), not
+      decided in this session.
+    decision_area: component
+    depends_on: [RD-H-010, RD-H-012, RD-R-009]
+    reversibility: reversible
+    artifact_target: RD-AR-001
+    deferred:
+      - item: "CI-enforced staleness detection for generated reference pages"
+        to: "separate generation-pipeline task (project task #3)"
+    status: active
+
+  - id: RD-DD-005
+    kind: decision
+    claim: >
+      Visual system: extend the existing token system (RD-H-013), plus exactly one new scoped
+      semantic token pair --ref/--ref-soft (synthesis folding in RD-H-014's narrower proposal)
+      applied ONLY to generated-reference-page chrome (badge + tree-summary accent), not
+      sitewide. Revised after critique (RD-CR-003, RD-CR-007): dropped a bordered header-band
+      around badge+H1 and a mono-heading H1/H2 treatment — both collided with this site's
+      existing visual grammar (pill+tinted-box already means "verify verdict" elsewhere;
+      --mono already exclusively means "literal code" sitewide). Replaced with: a plain badge
+      (no wrapping band) + a small mono-set KICKER label above an ordinary sans-serif H1.
+    decision_area: token
+    depends_on: [RD-H-013, RD-H-014, RD-R-009]
+    reversibility: reversible
+    artifact_target: RD-AR-001
+    revised_by: [RD-REV-003, RD-REV-006]
+    status: active
+
+  - id: RD-DD-006
+    kind: decision
+    claim: >
+      Data model: CHAPTERS array gains a categoryId field per entry (+2 new entries: language,
+      cli) as single source of truth for chapter->category membership (RD-H-015); a new,
+      small, non-growing CATEGORIES array (4 fixed entries: id/order/en/ja label+description)
+      added alongside it for category-level metadata that hub pages render from (synthesis
+      with RD-H-016, resolved as NOT a competing nav-mapping source since it only holds 4
+      fixed records, never per-chapter data). Revised after critique (RD-CR-005): explicitly
+      scoped down the doc's original "one-line edit" claim — moving a chapter's categoryId is
+      one line, but re-ordering it within its new category's rendered list is NOT (no
+      per-category order field exists; render order = CHAPTERS array order filtered by
+      categoryId), flagged as a known gap to revisit only if/when a reassignment actually
+      happens.
+      Chapter->category mapping table (confidence MEDIUM-LOW, see RD-A-004 — the single most
+      important open item to route back to the maintainer before task #5 content work treats
+      it as settled):
+        get-started = {concept, when-to-use}
+        guides = {guide, business-layer, requirements-layer, design-layer}
+        reference = {syntax, analysis, language[new], cli[new]}
+        examples-background = {mechanism, domain, db, ai}
+    decision_area: information_architecture
+    depends_on: [RD-H-015, RD-H-016, RD-C-005, RD-A-004]
+    reversibility: costly
+    artifact_target: RD-AR-001
+    revised_by: [RD-REV-004]
+    status: questioned
+
+  - id: RD-DD-007
+    kind: decision
+    claim: >
+      syntax.{ja,en}.html hero section: add one <div class="callout"> immediately after the
+      existing "goal" paragraph in both language variants, pointing readers to the new generated
+      language.{ja,en}.html page for exhaustive/canonical grammar lookup. Reuses the existing
+      .callout component verbatim — no new visual pattern introduced.
+    decision_area: content
+    depends_on: [RD-O-003]
+    reversibility: reversible
+    artifact_target: RD-AR-003
+    note: >
+      Literal, direct execution of the external fable decision recorded at RD-O-003 (policy
+      question 1, canonical-language problem) and of DESIGN-docs-site.md §6's deferral of
+      chapter-page rewrites to downstream implementation. No hypothesis generated — copy/content
+      addition only, per explicit instruction from the requester that this is execution, not new
+      design work.
+    status: active
+
+  - id: RD-DD-008
+    kind: decision
+    claim: >
+      analysis.{ja,en}.html: add a visible link to
+      https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md, placed near the top
+      intro alongside the page's existing link to DESIGN-analysis.md. The English variant
+      carries the same link plus a one-line note that the guide is currently Japanese-only
+      (no English translation exists).
+    decision_area: content
+    depends_on: [RD-O-003]
+    reversibility: reversible
+    artifact_target: RD-AR-003
+    note: >
+      Literal, direct execution of the external fable decision recorded at RD-O-003 (policy
+      question 5). Link text/placement is the only actual copy decision made here; content of
+      GUIDE-analyze.ja.md itself is untouched and stays a standalone Markdown deep-dive per that
+      external decision.
+    status: active
+
+artifacts:
+  - id: RD-AR-001
+    kind: artifact
+    artifact_type: spec
+    path: docs/DESIGN-docs-site.md
+    based_on: [RD-DD-001, RD-DD-002, RD-DD-003, RD-DD-004, RD-DD-005, RD-DD-006]
+    note: >
+      Committed to the repo, following its own DESIGN-*.md convention. Contains the original
+      6 decisions plus inline "Revision after critique" amendments for D1/D2/D5/D6 (note: brief
+      text says D1/D2/D5/D6 were amended; per the decision claims recorded above, the concrete
+      textual revisions are on D2, D3, D5, D6 — carried forward as given without reconciling
+      this discrepancy, see unresolved issues in final report).
+    status: active
+
+  - id: RD-AR-002
+    kind: artifact
+    artifact_type: wireframe
+    path: "/private/tmp/claude-501/-Users-ryoichi-a-izumita-Workspace-fsl/92df9489-b37c-4326-8620-0c49ca2b741b/scratchpad/docs-site-wireframe.html"
+    based_on: [RD-DD-001, RD-DD-002, RD-DD-003, RD-DD-004, RD-DD-005, RD-DD-006]
+    note: >
+      Self-contained wireframe demonstrating 3 page states (category hub, existing chapter
+      page + breadcrumb, new cli reference page). Revised after critique. Published as a
+      Claude Artifact for human visual review — scratch/review material, NOT committed to the
+      repo, not a source file to copy into docs/intro/.
+    status: active
+
+  - id: RD-AR-003
+    kind: artifact
+    artifact_type: content-edit
+    path: >
+      docs/intro/syntax.ja.html, docs/intro/syntax.en.html, docs/intro/analysis.ja.html,
+      docs/intro/analysis.en.html
+    based_on: [RD-DD-007, RD-DD-008]
+    note: >
+      Downstream execution of DESIGN-docs-site.md §6's deferred "rewriting the 12 existing
+      chapter pages ... none of docs/intro/*.html is edited by this document" item, scoped here
+      to two low-information-density copy additions only (a reused-.callout pointer on syntax
+      pages, a GUIDE-analyze.ja.md link on analysis pages). Not a rewrite of either page's
+      substantive content.
+    status: active
+
+critiques:
+  - id: RD-CR-001
+    kind: critique
+    target: RD-AR-002
+    severity: high
+    claim: >
+      No return path on long single-page reference trees below the 1180px breakpoint, where
+      the sidebar loses its sticky rail.
+    violated_relation: RD-R-015
+    affected_decision: RD-DD-002
+    recommendation: "Add a back-to-top exception for the two long single-page reference templates."
+    resolution: "Fixed via the RD-DD-002 back-to-top exception (RD-REV-001)."
+    status: active
+
+  - id: RD-CR-002
+    kind: critique
+    target: RD-AR-002
+    severity: high
+    claim: >
+      Category group labels were plain unlabeled <p> tags with 4 anonymous <nav> landmarks,
+      invisible to screen-reader heading/landmark rotors.
+    violated_relation: RD-R-001
+    affected_decision: RD-DD-001
+    recommendation: "Use real <h2 id> headings with aria-labelledby wiring on every category nav."
+    resolution: "Fixed: 12 occurrences across the 3 wireframe panels (RD-REV-002)."
+    status: active
+
+  - id: RD-CR-003
+    kind: critique
+    target: RD-AR-002
+    severity: high
+    claim: >
+      The provenance badge's bordered/tinted "header-band" box, combined with the pill badge,
+      reused this site's live verify-verdict visual grammar (colored pill + tinted callout box)
+      closely enough that a reader could misread it as page status rather than provenance.
+    violated_relation: RD-R-009
+    affected_decision: RD-DD-005
+    recommendation: "Drop the header-band; keep a plain badge only."
+    resolution: "Fixed (RD-REV-003)."
+    status: active
+
+  - id: RD-CR-004
+    kind: critique
+    target: RD-AR-002
+    severity: medium
+    claim: >
+      Hand-computed sidebar height (4 category labels + up to 14 chapter rows) likely exceeds
+      common laptop viewport heights (~768-900px), triggering the sidebar's own pre-existing
+      overflow:auto behavior.
+    violated_relation: RD-R-010
+    affected_decision: RD-DD-001
+    recommendation: "Consider an accordion or other density control if sidebar height becomes a real problem."
+    resolution: >
+      NOT structurally changed. Accepted explicitly in the design doc as a known, pre-existing
+      pattern trade-off rather than reversing RD-DD-001's rejection of RD-H-002 (accordion).
+      Remains a live, accepted risk.
+    status: active
+
+  - id: RD-CR-005
+    kind: critique
+    target: RD-AR-001
+    severity: medium
+    claim: >
+      RD-DD-006's "one-line edit" claim for re-categorizing a chapter didn't account for
+      intra-category render ordering (no per-category order field exists).
+    violated_relation: RD-R-017
+    affected_decision: RD-DD-006
+    recommendation: "Correct the doc text to scope the claim accurately, or add a per-category order field."
+    resolution: "Fixed by correcting doc text scope, not by changing the data model (RD-REV-004)."
+    status: active
+
+  - id: RD-CR-006
+    kind: critique
+    target: RD-AR-002
+    severity: medium
+    claim: >
+      Wireframe's own topbar was missing position:sticky (undermining RD-DD-002's stated
+      rationale that the topbar is already sticky), and its review-only view-switcher had a
+      colliding z-index/stickiness with the sidebar.
+    violated_relation: RD-R-015
+    affected_decision: RD-DD-002
+    recommendation: "Make the wireframe topbar sticky to match the real site; de-sticky the review-only view-switcher."
+    resolution: "Both fixed in the wireframe CSS (RD-REV-005)."
+    status: active
+
+  - id: RD-CR-007
+    kind: critique
+    target: RD-AR-001
+    severity: medium
+    claim: >
+      Monospace H1/H2 on generated pages collided with this site's sitewide "monospace =
+      literal code" convention.
+    violated_relation: RD-R-009
+    affected_decision: RD-DD-005
+    recommendation: "Replace monospace H1/H2 with a small mono-set kicker label above an ordinary sans H1."
+    resolution: "Fixed (RD-REV-006), same fix as RD-CR-003's badge change, described together under RD-DD-005."
+    status: active
+
+  - id: RD-CR-008
+    kind: critique
+    target: RD-DD-005
+    severity: low
+    claim: >
+      Checked, not padded: --ref/--ref-soft contrast ratios were verified to meet/exceed the
+      existing --ok/--warn/--danger soft-badge pairs in both light and dark mode.
+    violated_relation: null
+    affected_decision: RD-DD-005
+    recommendation: "None — no issue found."
+    resolution: "No change needed."
+    status: active
+
+  - id: RD-CR-009
+    kind: critique
+    target: RD-DD-006
+    severity: low
+    claim: >
+      Checked, not padded: the CHAPTERS+CATEGORIES split was confirmed to genuinely satisfy the
+      "single source of truth" hard constraint (RD-C-005) — only intra-category ordering had a
+      gap, per RD-CR-005.
+    violated_relation: RD-C-005
+    affected_decision: RD-DD-006
+    recommendation: "None — no issue found beyond RD-CR-005's scoped gap."
+    resolution: "No change needed."
+    status: active
+
+revisions:
+  - id: RD-REV-001
+    kind: revision
+    addresses: RD-CR-001
+    target: [RD-DD-002, RD-AR-002]
+    change: >
+      Added the RD-DD-002 back-to-top exception for language.html/cli.html below the 1180px
+      breakpoint.
+    status: active
+
+  - id: RD-REV-002
+    kind: revision
+    addresses: RD-CR-002
+    target: [RD-AR-002]
+    change: >
+      Added real <h2 id> + aria-labelledby wiring to all 4 category navs (12 occurrences
+      across the 3 wireframe panels).
+    status: active
+
+  - id: RD-REV-003
+    kind: revision
+    addresses: RD-CR-003
+    target: [RD-DD-005, RD-AR-001, RD-AR-002]
+    change: "Dropped bordered header-band around badge+H1; replaced with a plain badge only."
+    status: active
+
+  - id: RD-REV-004
+    kind: revision
+    addresses: RD-CR-005
+    target: [RD-DD-006, RD-AR-001]
+    change: >
+      Corrected doc text scoping RD-DD-006's "one-line edit" claim to categoryId reassignment
+      only, excluding intra-category ordering (no per-category order field exists).
+    status: active
+
+  - id: RD-REV-005
+    kind: revision
+    addresses: RD-CR-006
+    target: [RD-AR-002]
+    change: >
+      Made the wireframe topbar position:sticky to match the real site; de-stickied the
+      review-only view-switcher to remove its z-index/stickiness collision with the sidebar.
+    status: active
+
+  - id: RD-REV-006
+    kind: revision
+    addresses: RD-CR-007
+    target: [RD-DD-005, RD-AR-001, RD-AR-002]
+    change: >
+      Replaced monospace H1/H2 on generated pages with a small mono-set kicker label above an
+      ordinary sans-serif H1.
+    status: active
+
+retractions:
+  - id: RD-RET-001
+    kind: retraction
+    retracted_node: RD-H-002
+    reason: "Breaks RD-R-003's 'scan all chapters in order' requirement."
+    status: final
+
+  - id: RD-RET-002
+    kind: retraction
+    retracted_node: RD-H-003
+    reason: "Needless complexity once everything is already visible by default (RD-H-001 chosen)."
+    status: final
+
+  - id: RD-RET-003
+    kind: retraction
+    retracted_node: RD-H-004
+    reason: "Stacks with the already-sticky topbar; RD-H-005/RD-H-006 chosen instead."
+    status: final
+
+  - id: RD-RET-004
+    kind: retraction
+    retracted_node: RD-H-009
+    reason: >
+      Lowest confidence; adds N-times generation/ja-twin/provenance-badge complexity for one
+      generated artifact.
+    status: final
+
+backflow:
+  - id: RD-BF-001
+    kind: backflow
+    claim: >
+      The --ref/--ref-soft token pair and its scoping rule ("one new semantic token, applied
+      only to N named places, never sitewide") is a reusable pattern worth generalizing into
+      design-token governance notes, given the site already has 4 reserved semantic colors
+      with a documented meaning-per-color convention this new pair had to fit alongside.
+    source_artifacts: [RD-AR-001]
+    depends_on: [RD-DD-005]
+    status: proposed
+
+  - id: RD-BF-002
+    kind: backflow
+    claim: >
+      "Native <details>/<summary> over custom JS widget, because AI-agent HTML fetchers must
+      see full content" is a reusable interaction-pattern rule specific to this project's dual
+      human/agent-consumed documentation model — worth recording as a component/pattern rule
+      for any future disclosure UI on this site.
+    source_artifacts: [RD-AR-001, RD-AR-002]
+    depends_on: [RD-DD-003, RD-H-007]
+    status: proposed
+
+  - id: RD-BF-003
+    kind: backflow
+    claim: >
+      The categorized-sidebar accessibility fix (<h2> + aria-labelledby per group) is a
+      reusable a11y pattern for any future grouped-nav component.
+    source_artifacts: [RD-AR-002]
+    depends_on: [RD-CR-002, RD-REV-002]
+    status: proposed
+
+open_questions:
+  - "RD-U-001: whether docs/index.bleve/ (a Bleve search index found in the repo) is wired to a live search UI or is an offline/tooling artifact — assumed the latter, unconfirmed."
+  - "RD-U-003: whether any page-versioning scheme exists for the docs site (tension noted against RD-A-002, which assumes none, at only medium confidence)."
+  - "RD-U-004: whether any analytics are present (tension noted against RD-A-003, which assumes none, at only medium confidence)."
+  - "RD-U-005: who regenerates the Bleve index and on what trigger — not established."
+  - "RD-A-004: chapter->category mapping table is MEDIUM-LOW confidence and needs maintainer review before project task #5 (content work) treats it as settled — the single most important open item from this session."
+  - "RD-R-019: how ja twins get produced for the two English-sourced generated pages (language, cli) is unresolved — blocks nothing in this session, but will block the generation-pipeline task."
+  - "RD-H-012 (CI-enforced staleness detection half) is deferred to the separate generation-pipeline task (project task #3); only the visible-badge half was decided here (RD-DD-004)."
+  - "RD-CR-004 (sidebar height overflow risk on common laptop heights) was acknowledged, not structurally fixed — remains a live, accepted trade-off."
+  - >
+    RD-U-006: index.{ja,en}.html homepage restructure (RD-H-017: surface the 4 category hub
+    pages as primary entry points, refresh the browse-by-goal grid to the 19-entry CHAPTERS
+    array, relocate the maintainer-facing GitHub Pages section to docs/README.md) is genuine new
+    IA ground that DESIGN-docs-site.md §6 did not decide (§6 named "docs/README.md cross-links
+    once they exist" as the closest adjacent deferred item, not the homepage restructure itself).
+    Recorded as a proposed hypothesis (RD-H-017), not an accepted decision — no nav-parity check
+    (hub-page category contents vs. homepage goal-grid contents) has been run. See the trace
+    archivist's final-report recommendation on whether a lightweight design-critic pass is
+    warranted before this is executed.

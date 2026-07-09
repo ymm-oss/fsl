@@ -1,0 +1,41 @@
+current_session:
+  id: RD-S-0001
+  title: "FSL docs site rebuild — IA / nav structure / page templates (content authoring out of scope)"
+  mode: deep
+  status: questioned
+  created_at: "2026-07-09T06:14:18Z"
+  updated_at: "2026-07-09T07:40:00Z"
+  session_file: .relational-design/sessions/RD-S-0001-fsl-docs-site-rebuild.yaml
+  task_summary: >
+    Rebuild the FSL/fslc public docs site's IA, navigation structure, and page templates
+    (docs/, GitHub Pages). Content authoring is a separate, out-of-scope task. First
+    Relational Design pass in this repo (no prior session existed). Reopened to trace
+    downstream execution of DESIGN-docs-site.md §6 deferred items (syntax.html primer
+    redefinition, analysis.html GUIDE-analyze link, index.html homepage restructure).
+  node_counts:
+    observations: 4
+    assumptions: 4
+    constraints: 5
+    relations: 16
+    hypotheses: 15
+    decisions: 8
+    artifacts: 3
+    critiques: 9
+    revisions: 6
+    retractions: 4
+    backflow: 3
+    open_questions: 9
+  top_unresolved:
+    - "RD-A-004: chapter->category mapping table is MEDIUM-LOW confidence, needs maintainer review before task #5."
+    - "RD-CR-004: sidebar-height overflow on common laptop viewports acknowledged, not fixed."
+    - "RD-R-019 / RD-H-012: ja-twin generation mechanism for generated pages, and CI staleness enforcement, both deferred/open."
+    - "RD-U-006: index.html homepage restructure (RD-H-017) is new ground beyond DESIGN-docs-site.md §6 scope, not yet nav-parity-checked — recommend a lightweight design-critic pass before treating it as an executed decision."
+  known_gaps_in_source_material:
+    - >
+      Relation-mapper reportedly produced 19 relations; only 15 (RD-R-001/002/003/006-019,
+      excluding RD-R-004/RD-R-005) arrived with enough detail to archive. RD-R-004 and
+      RD-R-005 are not recorded — not fabricated to fill the gap.
+    - >
+      Hypothesis-generator reportedly produced "~18 hypotheses"; ids given span
+      RD-H-001..016 (16 ids, with RD-H-011 an unfilled numbering gap). Discrepancy carried
+      forward as-is, not reconciled by invention.

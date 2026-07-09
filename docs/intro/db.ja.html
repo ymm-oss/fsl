@@ -16,10 +16,11 @@
 <main>
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">DB / multi-environment compatibility</p>
     <h1 class="reveal"><code>dbsystem</code> でDB変更と複数環境を仕様として確認する</h1>
     <p class="lead reveal">fsl-db は、DB単体ではなく、スキーマ変更、マイグレーション、アプリ成果物の読み書き能力、複数環境のロールアウト範囲を1つの仕様にまとめ、互換性違反を反例つきで返す dialect です。</p>
-    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="../DESIGN-db.md">DESIGN-db.md</a> にあります。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-db.md">DESIGN-db.md</a> にあります。</p>
   </div>
 </section>
 
@@ -236,7 +237,7 @@ fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrism
       <div class="syntax-card">
         <h3>設計判断</h3>
         <p>lowering、所見 schema、仮定、残る境界は design doc にまとまっています。</p>
-        <p><a class="btn" href="../DESIGN-db.md">DESIGN-db.md</a></p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-db.md">DESIGN-db.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>動く例</h3>

@@ -16,10 +16,11 @@
 <main>
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">DB / multi-environment compatibility</p>
     <h1 class="reveal">Use <code>dbsystem</code> to check DB changes and environments as a spec</h1>
     <p class="lead reveal">fsl-db is not just a DB-schema dialect. It models schema changes, migrations, application artifact read/write capabilities, and multi-environment rollout ranges in one machine-checkable specification.</p>
-    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="../DESIGN-db.md">DESIGN-db.md</a>.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-db.md">DESIGN-db.md</a>.</p>
   </div>
 </section>
 
@@ -236,7 +237,7 @@ fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrism
       <div class="syntax-card">
         <h3>Design decisions</h3>
         <p>The lowering, finding schema, assumptions, and remaining boundaries are described in the design document.</p>
-        <p><a class="btn" href="../DESIGN-db.md">DESIGN-db.md</a></p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-db.md">DESIGN-db.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>Working examples</h3>

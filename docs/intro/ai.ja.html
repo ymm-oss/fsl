@@ -16,10 +16,11 @@
 <main>
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">AI hard-contracts</p>
     <h1 class="reveal">fsl-ai でAIのtool境界とagent構造を守る</h1>
     <p class="lead reveal">fsl-ai は、決定的に検査できるAI境界を扱います。<code>ai_component</code> はtool宣言、authority、human approval、forbidden tool、fallback、runtime event replayを、<code>agent</code> はrecursive scope、grant、visibility、orchestration、failure policyを扱います。</p>
-    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> にあります。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> にあります。</p>
   </div>
 </section>
 
@@ -169,7 +170,7 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
       <div class="syntax-card">
         <h3>設計判断</h3>
         <p>保証境界、lowering、event schema、finding、外部証拠として扱う境界は design doc にまとまっています。</p>
-        <p><a class="btn" href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>動く例</h3>

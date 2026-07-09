@@ -1,0 +1,1880 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FSL 言語リファレンス — LANGUAGE.md から生成</title>
+<meta name="description" content="docs/LANGUAGE.md から生成される、FSLの網羅的な言語リファレンス。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="language">
+<!-- GENERATED — do not edit by hand. Regenerate with:
+     python tools/build_site_reference.py
+     Source: docs/LANGUAGE.md -->
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section id="language-top">
+  <div class="wrap">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker mono reveal">Generated Reference</p>
+    <span class="badge ref reveal">Generated from LANGUAGE.md</span>
+    <h1 class="reveal" style="margin-top:14px">言語リファレンス</h1>
+    <p class="lead narrow reveal">これは <code>docs/LANGUAGE.md</code> からの生成物です。正典は英語の本文で、翻訳は行いません — FSLの予約語・エラーメッセージ・JSON出力はすべて英語であり、訳を作ると <code>LANGUAGE.md</code> / このページ / <code>skills/fsl/reference.md</code> の三重管理に戻ってしまうためです。各節の日本語1行説明は目次として付けています。</p>
+    <div class="tree-controls reveal">
+      <button class="btn op-expand" type="button">すべて展開</button>
+      <button class="btn op-collapse" type="button">すべて折りたたむ</button>
+    </div>
+    <div class="disclosure-tree"><details id="design-principles"><summary>Design principles<span class="tree-blurb"> — 設計原則 G1〜G5 と、型システムの立場。</span></summary><div class="tree-body"><table>
+<thead>
+<tr>
+<th>Principle</th>
+<th>Existing languages (TLA+/Alloy)</th>
+<th>FSL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Syntax</td>
+<td>Mathematical notation (∀, □, ◇)</td>
+<td>TypeScript/Python-like. Stays close to the LLM training distribution</td>
+</tr>
+<tr>
+<td>Counterexamples</td>
+<td>Human-oriented text</td>
+<td><strong>Structured JSON</strong> (with state diffs and the violated bound variables)</td>
+</tr>
+<tr>
+<td>Errors</td>
+<td>Human-oriented messages</td>
+<td>Machine-readable (line, column, classification, repair hint)</td>
+</tr>
+<tr>
+<td>Verification</td>
+<td>Full verification assumed</td>
+<td>Bounded and fast by default. <strong>Unbounded-depth proofs via k-induction</strong> are also possible</td>
+</tr>
+<tr>
+<td>Vacuity</td>
+<td>Found by an expert's intuition</td>
+<td>Action reachability + <strong>unsat-core diagnosis of blocking requires</strong></td>
+</tr>
+<tr>
+<td>Pitfalls</td>
+<td>Avoided by discipline</td>
+<td><strong>Structurally eliminated</strong> (automatic bounds checks, implicit checking of partial operations)</td>
+</tr>
+</tbody>
+</table></div></details>
+<details id="1-structure-of-a-specification"><summary>1. Structure of a specification<span class="tree-blurb"> — spec 宣言・状態・初期状態・アクションの基本構造。</span></summary><div class="tree-body"><pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
+  const &lt;NAME&gt; = &lt;constant expr&gt;
+  type  &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;            // domain type (bounded integer)
+  symmetric type &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;   // domain whose values are interchangeable identities
+  enum  &lt;Name&gt; { &lt;Member&gt;, ... }
+  symmetric enum &lt;Name&gt; { &lt;Member&gt;, ... }
+  struct &lt;Name&gt; { &lt;field&gt;: &lt;scalar type | Option&lt;scalar type&gt;&gt;, ... }
+
+  state { &lt;var&gt;: &lt;type&gt;, ... }
+  init  { &lt;stmt&gt;... }
+
+  [fair] action &lt;name&gt;(&lt;p&gt;: &lt;type name&gt;, ...) {
+    requires &lt;expr&gt;                     // guard. multiple allowed (conjunction)
+    let &lt;x&gt; = &lt;expr&gt;                    // local binding
+    &lt;stmt&gt;...                           // assignment / if-else / forall
+    ensures &lt;expr&gt;                      // postcondition. reference the old state with old(expr)
+  }
+
+  invariant &lt;Name&gt; { &lt;expr&gt; }           // holds in all reachable states (safety)
+  trans &lt;Name&gt; { &lt;expr&gt; }               // holds across all reachable transitions (two-state safety)
+  reachable &lt;Name&gt; { &lt;expr&gt; }           // is reachable (returns a witness)
+  leadsTo &lt;Name&gt; { &lt;response property&gt; }// bounded response, or ranked induction with decreases (see §1)
+  terminal { &lt;expr&gt; }                   // intended terminal states (excluded from deadlock checking)
+}
+</code></pre>
+<p>The optional string after the spec name is a <strong>spec-level tag</strong>
+(<code>"&lt;kind&gt;: &lt;intent&gt;"</code>, e.g. <code>spec ReturnUI "ui: screen flow" { … }</code>). Like the
+per-declaration tags, it is <strong>metadata only</strong> — never verified — and is surfaced by
+<code>fslc explain</code> / <code>fslc html</code> as a classification badge next to the spec name (JSON:
+<code>skeleton.spec_kind = {id, text}</code>). Use it to record what kind of thing the whole
+spec is (e.g. <code>ui</code> for a screen-flow spec that models only the behavioral slice);
+it carries no kernel semantics and desugars to nothing. See <code>docs/DESIGN-ui.md</code>.</p>
+<p>Any layer — including a kernel <code>spec</code> — may declare identity/number sorts whose
+finite sizes come from a sibling top-level <code>verify</code> block instead of an inline
+<code>type X = lo..hi</code> range. This keeps the domain declaration (what exists) separate
+from the verification world size (how much is checked):</p>
+<pre><code class="language-fsl">spec &lt;Name&gt; {
+  entity &lt;Entity&gt;          // identity sort; size from verify { instances &lt;Entity&gt; = N }
+  number &lt;Number&gt;          // numeric sort; range from verify { values &lt;Number&gt; = lo..hi }
+}
+business &lt;Name&gt; {
+  entity &lt;Entity&gt;
+}
+requirements &lt;Name&gt; {
+  entity &lt;Entity&gt;          // optional explicit identity sort
+  number &lt;Number&gt;
+  process &lt;Entity&gt; with f: &lt;Number&gt;, g: Bool = &lt;bool&gt;, h: &lt;Enum&gt; = &lt;Member&gt; { ... }
+                            // process also declares the entity kind; Bool/enum
+                            // carried fields require an explicit `= ...` initializer
+}
+verify {
+  instances &lt;Entity&gt; = &lt;N&gt;
+  values &lt;Number&gt; = &lt;lo&gt;..&lt;hi&gt;
+}
+</code></pre>
+<p><code>entity</code>/<code>number</code> desugar to <code>type &lt;Name&gt; = lo..hi</code> before verification, so they
+are exactly equivalent to writing the bounded type directly — the difference is
+only readability (a design spec reads as documentation instead of asserting a
+domain size that is really a model bound). See <code>docs/DESIGN-spec-domains.md</code>.</p>
+<p>The database compatibility dialect is another frontend over the same kernel:</p>
+<pre><code class="language-fsl">dbsystem &lt;Name&gt; {
+  database &lt;db&gt; {
+    schema &lt;initial_version&gt;
+    table &lt;table&gt; {
+      column &lt;column&gt;: &lt;db_type&gt; present backfilled not_null;
+      column &lt;future_column&gt;: &lt;db_type&gt; absent;
+    }
+  }
+
+  migration &lt;name&gt; from &lt;v0&gt; to &lt;v1&gt; [rollbackable] {
+    add &lt;table&gt;.&lt;column&gt; nullable;
+    backfill &lt;table&gt;.&lt;column&gt;;
+    set_not_null &lt;table&gt;.&lt;column&gt;;
+    rename &lt;table&gt;.&lt;old&gt; to &lt;table&gt;.&lt;new&gt;;
+    split &lt;table&gt;.&lt;source&gt; into &lt;table&gt;.&lt;a&gt;, &lt;table&gt;.&lt;b&gt; lossless|lossy|irreversible;
+    merge &lt;table&gt;.&lt;a&gt;, &lt;table&gt;.&lt;b&gt; into &lt;table&gt;.&lt;target&gt; lossless|lossy|irreversible;
+    drop &lt;table&gt;.&lt;column&gt; destructive|irreversible;
+  }
+
+  artifact &lt;version&gt; {
+    reads &lt;table&gt;.&lt;column&gt;, ...;
+    writes &lt;table&gt;.&lt;column&gt;, ...;
+    requires &lt;capability_namespace&gt;.&lt;capability&gt;, ...;
+    provides &lt;capability_namespace&gt;.&lt;capability&gt;, ...;
+    calls api.&lt;operation&gt;, ...;
+    accepts api.&lt;operation&gt;, ...;
+    expects response.&lt;field&gt;, ...;
+    responds response.&lt;field&gt;, ...;
+    emits_offline api.&lt;operation&gt; ttl &lt;finite_ticks&gt;;
+  }
+
+  environment &lt;env&gt; {
+    schema &lt;lo&gt;..&lt;hi&gt;;
+    flag &lt;flag_name&gt; { &lt;variant&gt;, ... } default &lt;variant&gt;;
+    active &lt;version&gt; when schema &lt;lo&gt;..&lt;hi&gt; when flag &lt;flag_name&gt;=&lt;variant&gt;;
+    supported &lt;version&gt; when schema &lt;lo&gt;..&lt;hi&gt;;
+    may_exist &lt;version&gt; when schema &lt;lo&gt;..&lt;hi&gt;;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
+    rule data_preserved;
+    rule rollback_equivalent;
+  }
+}
+</code></pre>
+<p><code>dbsystem</code> expands to a kernel spec with scalar state and <code>Map&lt;Column, Bool&gt;</code>
+column lifecycle maps. It never uses nested <code>Map&lt;_, Set&lt;_&gt;&gt;</code> state. <code>fslc check</code>
+and <code>fslc verify</code> work on it after expansion; <code>fslc db check</code> additionally emits
+stable fsl-db findings and returns <code>verified_under_assumptions</code> for successful
+formal checks. Environment schema ranges are finite reachable snapshots in the
+declared migration order; rollout percentages and offline TTLs must be modeled as
+finite coexistence windows/ticks. API/offline and bounded preservation/rollback
+checks are dialect-level compatibility checks. Feature flags are finite declared
+variants inside an environment and add <code>DB-ASSUME-FINITE-FLAG-STATE</code>; they do
+not prove rollout percentages. Generic <code>requires</code> / <code>provides</code> capabilities
+cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
+other artifact profiles in the same snapshot model. See <code>docs/DESIGN-db.md</code>.</p>
+<p>Functional DDD / async effect dialect (v0; expands to the same kernel and
+reports stable fsl-domain findings):</p>
+<pre><code class="language-fsl">domain &lt;Name&gt; {
+  implementation_profile functional_ddd
+
+  type OrderStatus = Pending | Approved | Cancelled
+
+  aggregate Order {
+    id OrderId
+    state { status: OrderStatus = Pending; }
+
+    command ApproveOrder {}
+    event OrderApproved {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    error CannotApprove
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+    evolve PaymentCaptureRequested { }
+    evolve PaymentCaptured { }
+    evolve PaymentFailed { }
+    evolve PaymentCaptureTimedOut { }
+
+    invariant noLateApprove {
+      status == Cancelled -&gt; not can(ApproveOrder)
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry { max_attempts 3 }
+    timeout after 10m emits PaymentCaptureTimedOut
+    compensation { emits PaymentFailed }
+  }
+
+  saga OrderFulfillment {
+    starts_on OrderApproved
+    outbox OrderOutbox
+    inbox FulfillmentInbox
+
+    step RequestPayment {
+      async
+      emits PaymentCaptureRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+      timeout after 10m emits PaymentCaptureTimedOut
+    }
+  }
+}
+</code></pre>
+<p><code>domain</code> models aggregate consistency boundaries, command intent, accepted
+events, domain errors, pure <code>decide</code>/<code>evolve</code>, async effect lifecycles, and
+saga/process-manager coordination. It lowers each command+decide+evolve path to
+a kernel <code>action</code>, aggregate state to prefixed kernel state, saga steps to
+event-flag guarded actions, and effect lifecycle state to finite
+<code>Map&lt;CorrelationId, EffectStatus&gt;</code> / <code>Map&lt;CorrelationId, Attempt&gt;</code> maps. Domain
+enum members are namespaced during lowering, so two domain enums may both contain
+<code>Pending</code>. Domain expressions may use <code>X in [A, B]</code> and <code>can(Command)</code>; these are
+rewritten to kernel expressions.</p>
+<p>Use <code>fslc domain check</code> for stable fsl-domain findings and the nested kernel
+result (<code>verified_under_assumptions</code> on success), <code>fslc domain analyze</code> for the
+aggregate/effect summary, <code>fslc domain expand</code> to inspect generated kernel FSL,
+<code>fslc domain generate --target typescript|python|kotlin|swift|rust</code> for
+Functional DDD scaffolds, <code>fslc domain testgen</code> for adapter/conformance
+scaffolds, and <code>fslc domain replay --logs events.jsonl</code> for runtime command /
+event / effect evidence. The v0 implementation proves the finite modeled
+lifecycle; replay is observation evidence and saga history adds
+<code>DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY</code>.
+It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
+production exactly-once semantics. See <code>docs/DESIGN-domain.md</code> and
+<code>docs/DESIGN-effect.md</code>.</p>
+<p><code>fslc verify</code> can override a <code>verify</code> block's <code>instances</code>/<code>values</code> bounds from
+the command line, without editing the spec:</p>
+<pre><code class="language-bash">fslc verify spec.fsl --instances Case=1 --property EventuallyLeavesInProgress
+fslc verify spec.fsl --values Amount=0..3
+</code></pre>
+<p>Both flags are repeatable (<code>--instances A=1 --instances B=2</code>) and replace the
+bound of the matching <code>entity</code>/<code>number</code> name — handy for shrinking to a
+1-entity model for liveness/induction runs (see §7) without touching the file.
+A <code>NAME</code> with no matching <code>entity</code>/<code>number</code> declaration, or a spec whose bounds
+are not <code>entity</code>/<code>number</code>-backed (a kernel <code>type X = lo..hi</code> literal), is a spec
+error (exit code 2), as is a malformed value (<code>Case=abc</code>, <code>N=5..1</code>). The
+effective overridden bounds are echoed back in the JSON envelope's
+<code>bounds_overrides</code> field.</p>
+<p>When the spec has an inline <code>implements</code>, the override also propagates into the
+abstract spec — restricted to the entity/number names the abstract itself
+declares — so the refinement check runs at the same world size on both sides
+(refinement is a same-size forward simulation; without this, a shrunken impl
+and a full-size abstract would fail with <code>map_out_of_bounds</code>). An impl-only
+carried number (e.g. <code>Amount</code>, absent from a business abstract) applies to the
+impl only.</p>
+<p><code>acceptance</code>/<code>forbidden</code> scenarios often hardcode ids/numbers from the spec's
+original world (<code>accept(2)</code>), which can fall outside a shrunken override
+(<code>--instances Case=1</code>). When overrides are active, a scenario whose replay
+fails <em>purely</em> because it references a value outside the overridden bounds
+(an out-of-range action argument, or an out-of-range index inside its
+<code>expect</code>) is downgraded per-scenario from a hard error to a skip, reported in
+the envelope's <code>warnings</code> (<code>{"kind": "acceptance_skipped"/"forbidden_skipped",
+"id": ..., "message": ...}</code>); the rest of the scenarios still run. Without
+overrides — or for any other failure (a false <code>expect</code>, an unmet <code>requires</code>)
+— behavior is unchanged: hard error. This is what makes <code>--instances Case=1
+--property &lt;Liveness&gt;</code> usable even when the spec's acceptance scenarios were
+written against the original <code>verify { instances Case = N }</code> bound.</p>
+<p><code>fair</code> is a weak-fairness annotation: if that action instance remains
+continuously enabled, the assumption is that it will eventually be executed.</p>
+<p><strong>Action parameter types</strong> (<code>&lt;p&gt;: &lt;type name&gt;</code>): a domain type, enum, or the
+builtin <code>Bool</code> — anything BMC can enumerate. <code>Bool</code> behaves exactly like a
+<code>Bool</code> state variable: use it bare as a boolean guard (<code>requires b</code>,
+<code>requires not b</code>) or assign it into <code>Bool</code>-typed state
+(<code>flag[i] = b</code>). The builtin <code>Int</code> is rejected (an unbounded parameter can't
+be enumerated); use a range parameter instead: <code>p in &lt;lo&gt;..&lt;hi&gt;</code> (an inline
+alternative to <code>&lt;p&gt;: &lt;type name&gt;</code> that doesn't require declaring a named
+domain type).</p>
+<p>The hierarchy of properties: <code>invariant</code> is one-state safety, <code>trans</code> is
+two-state safety (the pre-transition state can be referenced with <code>old()</code>), and
+<code>leadsTo</code> is response liveness. Without a ranking function, <code>leadsTo</code> is checked
+boundedly. With <code>--engine induction</code> and <code>decreases &lt;int expr&gt;</code>, a <code>leadsTo</code> can
+be proved unbounded by a well-founded ranking argument.</p>
+<p>Response properties inside a <code>leadsTo</code> block:</p>
+<pre><code class="language-fsl">leadsTo &lt;Name&gt; {
+  &lt;expr&gt; ~&gt; &lt;expr&gt;                      // once P holds (including the same instant), Q eventually holds
+  &lt;expr&gt; ~&gt; within K &lt;expr&gt;             // Q must hold within K steps after P
+  forall x: T { &lt;expr&gt; ~&gt; &lt;expr&gt; }      // checked independently per binding (only an outer forall may nest)
+  helpful &lt;action&gt;(&lt;binding expr&gt;, ...)  // optional; per-binding progress action for ranked induction
+  decreases &lt;int expr&gt;                  // optional; induction-only ranking measure
+}
+</code></pre>
+<p><code>~&gt;</code> is <strong>exclusive to leadsTo blocks</strong> — it cannot be used in general expressions.
+<code>within K</code> is a bounded deadline on a response; <code>K</code> must be a non-negative
+constant expression. It is checked by BMC, not by the ranked induction proof.
+<code>decreases</code> is optional and must be an integer-valued expression. Under
+<code>fslc verify --engine induction</code>, the verifier proves the ranked response by
+checking, under the proved invariants, that whenever <code>P</code> is pending and <code>Q</code> is
+false: the measure is non-negative; progress is possible; and the enabled-action
+discipline is satisfied. Without <code>helpful</code>, every enabled action must either make
+<code>Q</code> true or keep <code>P</code> true while strictly decreasing the measure. With one or more
+<code>helpful action(args...)</code> lines, only the matching helpful action instance must
+strictly decrease the measure when it fires; unrelated action instances must
+keep the pending obligation true (unless they make <code>Q</code> true) and must not
+increase the measure -- an unbounded increase between helpful firings could
+outpace the guaranteed decrease and prevent <code>Q</code> from ever being reached, even
+though the helpful action keeps firing under fairness. The matching
+helpful action must be a lower-layer <code>fair action</code> and must be enabled whenever
+the obligation is pending. <code>helpful</code> is metadata for the ranked proof: it does
+not create a fairness assumption. Ranked proof success is independent of
+<code>--depth</code>; <code>--depth</code> is still used for the base BMC check and
+reachable/coverage evidence.</p>
+<p><strong>With two or more distinct <code>helpful</code> action names</strong>, each instance's
+enabledness must not flicker: once a helpful instance becomes enabled while
+the obligation is pending, it must stay enabled until it fires (or <code>Q</code> holds).
+"Some helpful match is enabled at every pending state" is not enough on its
+own -- if <em>which</em> instance is enabled keeps changing (e.g. two helpful
+actions enabled on alternating conditions), no single instance is ever
+<em>continuously</em> enabled, so its <code>fair</code> declaration never actually obligates it
+to run, and the leadsTo can be genuinely false even though the disjunctive
+enabledness check passes. This is reported as
+<code>rank_failure:"helpful_action_enabledness_not_sticky"</code>. The common single
+per-binding <code>helpful step(c)</code> idiom above is unaffected: with one helpful
+action, "always enabled while pending" already implies it is continuously
+enabled.</p>
+<p><strong>Placement.</strong> <code>decreases</code> is a sibling of the response body inside the
+<code>leadsTo</code> block, <em>outside</em> any <code>forall</code> wrapper — never nested inside the
+forall's braces. Nesting it inside <code>forall</code> is a parse error, not a
+limitation of ranking under <code>forall</code>:</p>
+<pre><code class="language-fsl">// valid: decreases after the forall's closing }
+leadsTo Responds {
+  forall c: Case { level[c] &gt; 0 ~&gt; level[c] == 0 }
+  decreases level[0] + level[1]
+}
+
+// parse error: decreases nested inside the forall body
+leadsTo Responds {
+  forall c: Case { level[c] &gt; 0 ~&gt; level[c] == 0 decreases level[0] + level[1] }
+}
+</code></pre>
+<p><strong>Per-entity measures under interleaving need <code>helpful</code>.</strong> A measure that
+mentions only the bound entity, e.g. <code>decreases level[c]</code> inside
+<code>forall c: Case { level[c] &gt; 0 ~&gt; level[c] == 0 }</code>, is not enough by itself:
+an action that advances a different entity can leave <code>level[c]</code> unchanged. Add
+the per-binding progress action:</p>
+<pre><code class="language-fsl">leadsTo Responds {
+  forall c: Case { level[c] &gt; 0 ~&gt; level[c] == 0 }
+  helpful step(c)
+  decreases level[c]
+}
+</code></pre>
+<p>With this form, <code>step(c)</code> must be declared <code>fair action</code>, must be enabled in
+every pending state for that binding, and must strictly decrease <code>level[c]</code>
+when it fires. Other interleavings may preserve the pending obligation
+without decreasing this per-entity measure, but must not increase it.
+Diagnostics distinguish <code>progress_action_not_fair</code>,
+<code>helpful_action_not_enabled</code>, <code>non_decreasing_helpful_action</code>,
+<code>non_helpful_action_increases_measure</code>, <code>pending_not_preserved</code>, and (with
+two or more helpful actions) <code>helpful_action_enabledness_not_sticky</code>.</p>
+<p><strong>Working idiom: a global sum measure.</strong> Sum the tracked quantity across the
+domain with the built-in <code>sum()</code> aggregate (§3): <code>decreases sum(k: Case of
+level[k])</code>. <code>sum()</code> enumerates the bounded <code>Case</code> domain itself, so the
+measure is instances-count independent — the same <code>decreases</code> clause works
+unchanged whether <code>Case</code> is sized via <code>verify { instances Case = N }</code> or
+shrunk with a CLI <code>--instances</code> override. Because every fair <code>step</code> decrements
+exactly one <code>level[k]</code>, every enabled action strictly decreases the total, so
+induction returns <code>"proved"</code> with <code>"completeness": "unbounded"</code>. This idiom
+only covers designs where <em>every</em> enabled action decreases the total. For
+per-entity progress under interleaving, prefer the <code>helpful</code> form above.
+(Conditional expressions can't substitute for a per-branch measure either:
+<code>if/then/else</code> is legal only in
+refinement-mapping expressions (§10), not in the general expression grammar
+that <code>decreases</code> draws from.)</p></div></details>
+<details id="2-types"><summary>2. Types<span class="tree-blurb"> — 基本型、列挙、構造体、Seq、Option などの型システム。</span></summary><div class="tree-body"><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Example</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Int</code> / <code>Bool</code></td>
+<td><code>count: Int</code></td>
+<td>Unbounded integer / boolean</td>
+</tr>
+<tr>
+<td>Domain type</td>
+<td><code>type Qty = 0..5</code></td>
+<td>Bounded integer. <strong>The range is checked automatically</strong> (§6)</td>
+</tr>
+<tr>
+<td>Inline state domain</td>
+<td><code>state { qty: 0..5 }</code></td>
+<td>Shorthand for a named domain type in a state-variable declaration</td>
+</tr>
+<tr>
+<td>Entity kind</td>
+<td><code>entity Claim</code> / <code>process Claim ...</code></td>
+<td>Finite identity sort. Allowed in any layer incl. kernel <code>spec</code>; size set by <code>verify { instances Claim = N }</code>; desugars to <code>type Claim = 0..N-1</code></td>
+</tr>
+<tr>
+<td>Number kind</td>
+<td><code>number Amount</code></td>
+<td>Finite numeric sort. Allowed in any layer incl. kernel <code>spec</code>; range set by <code>verify { values Amount = lo..hi }</code>; desugars to <code>type</code></td>
+</tr>
+<tr>
+<td>enum</td>
+<td><code>enum St { Open, Closed }</code></td>
+<td>Members are referenced by their bare name in expressions</td>
+</tr>
+<tr>
+<td>struct</td>
+<td><code>struct Order { st: St, item: Option&lt;ItemId&gt;, qty: Qty }</code></td>
+<td>Fields are scalars or <code>Option&lt;scalar&gt;</code></td>
+</tr>
+<tr>
+<td><code>Option&lt;T&gt;</code></td>
+<td><code>cart: Option&lt;ItemId&gt;</code></td>
+<td><code>none</code> / <code>some(e)</code>. Used instead of a sentinel value</td>
+</tr>
+<tr>
+<td><code>Map&lt;K, V&gt;</code></td>
+<td><code>stock: Map&lt;ItemId, Qty&gt;</code></td>
+<td>K is recommended to be a bounded scalar (domain type / enum / Bool)</td>
+</tr>
+<tr>
+<td><code>Set&lt;T&gt;</code></td>
+<td><code>shipped: Set&lt;OrderId&gt;</code></td>
+<td>T is a bounded scalar</td>
+</tr>
+<tr>
+<td><code>Seq&lt;T, N&gt;</code></td>
+<td><code>queue: Seq&lt;JobId, 3&gt;</code></td>
+<td>A sequence (FIFO) of capacity N. T is a scalar, N is a constant</td>
+</tr>
+<tr>
+<td><code>relation A -&gt; B</code></td>
+<td><code>delegates: relation User -&gt; User</code></td>
+<td>A bounded binary relation over bounded scalar endpoints</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scalar</strong> = Int / Bool / domain type / enum. In a <code>state</code> declaration,
+<code>x: lo..hi</code> is accepted as an anonymous domain type and is equivalent to
+declaring <code>type X = lo..hi</code> and writing <code>x: X</code>.</p>
+<p><strong>Types legal as state variables</strong> (anything else is rejected by <code>check</code> as a type error):
+scalar | <code>Option&lt;scalar&gt;</code> | struct (scalar / <code>Option&lt;scalar&gt;</code> fields)
+| <code>Map&lt;bounded scalar, scalar | Option&lt;scalar&gt; | struct&gt;</code>
+| <code>Set&lt;bounded scalar&gt;</code> | <code>Seq&lt;scalar, N&gt;</code> | <code>relation bounded-scalar -&gt; bounded-scalar</code></p>
+<ul>
+<li>Nesting structs, Set/Map/Seq inside a struct field,
+  <code>Option&lt;Option&lt;...&gt;&gt;</code>, and <code>Option&lt;Set/Map/Seq/struct&gt;</code> are not allowed
+  (rejected at check time with a hint). Optional scalar fields can be written
+  directly inside a struct as of v2.1.</li>
+<li><code>Map&lt;Int, V&gt;</code> works but emits a deprecation warning. Use a domain-type key.</li>
+<li><code>symmetric type</code> and <code>symmetric enum</code> mark values as interchangeable entity
+  identities for liveness symmetry reduction. During <code>leadsTo</code> lasso/stall
+  search, fslc uses one canonical representative for per-entity rows built from
+  <code>Map&lt;SymmetricType, V&gt;</code> and <code>Set&lt;SymmetricType&gt;</code> state; <code>V</code> is used only when
+  it contains no symmetric identity type. This is intended for models such as
+  <code>Map&lt;TaskId, Status&gt;</code> where no task identity is special.</li>
+</ul></div></details>
+<details id="3-expressions"><summary>3. Expressions<span class="tree-blurb"> — 式の文法 — 演算子、量化子、関数呼び出しなど。</span></summary><div class="tree-body"><ul>
+<li>Arithmetic: <code>+ - * / %</code>, unary <code>-</code>, <code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
+  (since <code>a//b</code> would turn everything after <code>//</code> into a comment, write division
+  as <code>a / b</code> with whitespace)</li>
+<li>Comparison: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
+<li>Logical: <code>and or not =&gt;</code></li>
+<li>Quantification (bounded): <code>forall x: T { expr }</code> / <code>exists x: T { expr }</code> (can be filtered with <code>where expr</code>),
+  the v0 form <code>forall i in lo..hi: expr</code> is also allowed. Expression quantifiers
+  can also range over a Set or Seq value: <code>forall x in active { ... }</code> /
+  <code>exists x in queue { ... }</code>; for Seq this ranges over the live prefix values.</li>
+<li>Aggregation: <code>count(x: T where expr)</code>, <code>sum(x: T of expr [where expr])</code></li>
+<li>Cardinality predicates: <code>unique(x: T where expr)</code> / <code>exactlyOne(x: T where expr)</code>;
+  <code>x in set_or_seq [where expr]</code> is also allowed. <code>unique</code> means at most one
+  matching binding, while <code>exactlyOne</code> means exactly one.</li>
+<li>Option: <code>x == none</code> / <code>x != none</code> / <code>x is some(v)</code> (v is bound within that expression).
+  <strong><code>x == some(e)</code> is a type error</strong> — extract with <code>x is some(v)</code> and compare</li>
+<li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
+  <code>==</code> is field-by-field equality</li>
+<li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code></li>
+<li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
+  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements</li>
+<li>Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
+  <code>reachable(r, a, b)</code>, <code>acyclic(r)</code>, <code>functional(r)</code>, <code>injective(r)</code>,
+  <code>domain(r)</code>, <code>range(r)</code>. <code>reachable</code> and <code>acyclic</code> require a self-relation
+  (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.</li>
+<li>Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code></li>
+<li>Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
+  optional <code>within K</code> before Q for a bounded deadline, and optional
+  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</li>
+</ul>
+<p>Top-level temporal sugar:</p>
+<pre><code class="language-fsl">unless Name { P unless Q }   // while P holds and Q is false, the next state must keep P or make Q true
+until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress obligation
+</code></pre>
+<p>Use this sugar for persistent workflow states such as "held until released" or
+"pending until completed". For arbitrary history facts, use an explicit ghost
+variable.</p></div></details>
+<details id="4-statements-init-action-bodies"><summary>4. Statements (init / action bodies)<span class="tree-blurb"> — init と action の本体で使える文。</span></summary><div class="tree-body"><ul>
+<li>Assignment: <code>x = expr</code>, <code>m[k] = expr</code>, <code>m[k].field = expr</code>, <code>o.field = expr</code></li>
+<li>Updating a Set/Seq/relation uses the <strong>reassignment idiom</strong>:
+  <code>s = s.add(x)</code>, <code>q = q.pop()</code>, <code>r = r.add(a, b)</code></li>
+<li><code>if expr { stmt... } else { stmt... }</code> is allowed in both <code>init</code> and action bodies
+  (can be nested with an if inside the else)</li>
+<li><code>forall x: T { stmt... }</code> (bulk initialization / bulk update)</li>
+</ul></div></details>
+<details id="5-semantics"><summary>5. Semantics<span class="tree-blurb"> — 状態遷移の意味論 — 有効化・実行・stutter。</span></summary><div class="tree-body"><ul>
+<li><strong>Transition system</strong>: one step = exactly one action instance
+  (action name × parameter values) is executed atomically.</li>
+<li><strong>Simultaneous assignment</strong>: all right-hand sides in an action body read the
+  <strong>old state</strong>. Variables that are not assigned do not change (the frame
+  condition is automatic).</li>
+<li><strong>Double assignment is a semantics error</strong>: assigning to the same variable (or
+  field) twice on the same execution path is a semantics error. The then/else
+  of an if are separate paths, so you may assign in both. Assigning to the same
+  variable <strong>after</strong> an if is also an error (to prevent the writes inside the
+  branches from being lost).</li>
+<li>For <code>Map&lt;K, Struct&gt;</code> values, field writes are tracked per field. Updating two
+  different fields of the same element in one action, such as <code>m[k].f1 = 1</code>
+  followed by <code>m[k].f2 = 2</code>, is allowed. Repeating the same field on the same
+  path is a semantics error.</li>
+</ul>
+<p><code>fsl
+  type K = 0..1
+  type V = 0..3
+  struct Pair { f1: V, f2: V }
+  state { m: Map&lt;K, Pair&gt; }
+  action update(k: K) {
+    m[k].f1 = 1
+    m[k].f2 = 2
+  }</code></p>
+<p>Observed result: <code>fslc check struct_fields_ok.fsl</code> returned <code>result:"ok"</code>,
+  and <code>fslc verify struct_fields_ok.fsl --depth 1</code> returned
+  <code>result:"verified"</code>. Changing the action to assign <code>m[k].f1</code> twice returned
+  <code>result:"error"</code>, <code>kind:"semantics"</code> from <code>fslc verify</code>, with message
+  <code>double assignment to 'm' field 'f1' on the same path</code>.
+- <strong>requires</strong>: enabled only when all hold.
+- <strong>ensures</strong>: checked in the post-transition state. A violation is
+  <code>violation_kind: "ensures"</code>.
+- <strong>trans</strong>: checked in the post-transition state of each execution step, with
+  <code>old(expr)</code> evaluated in the pre-transition state. A violation is
+  <code>violation_kind: "trans"</code>.</p></div></details>
+<details id="6-automatic-checks-things-checked-even-without-being-written"><summary>6. Automatic checks (things checked even without being written)<span class="tree-blurb"> — 書かなくても検証器が自動で行う検査。</span></summary><div class="tree-body"><table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Content</th>
+<th>On violation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Type bounds</td>
+<td>Every bounded-type state variable (including Map values, struct fields, and Seq elements) is within range</td>
+<td><code>violated</code> / <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code></td>
+</tr>
+<tr>
+<td>Partial operations</td>
+<td>At the time of <code>pop()</code>/<code>head()</code>/<code>at(i)</code>, the sequence is non-empty and the index is in range, and the divisor of <code>/</code> <code>%</code> is non-zero</td>
+<td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code></td>
+</tr>
+<tr>
+<td>action coverage</td>
+<td>Each action is enabled at least once within depth K</td>
+<td>diagnosis of the blocking requires in <code>action_coverage</code></td>
+</tr>
+<tr>
+<td>Deadlock</td>
+<td>Reaching a state where all actions become disabled</td>
+<td>warning (<code>violated</code> with <code>--deadlock error</code>)</td>
+</tr>
+<tr>
+<td>trans</td>
+<td>Whether the two-state predicate holds across all reachable transitions</td>
+<td><code>violated</code> / <code>trans</code> / <code>trans</code> + trace</td>
+</tr>
+<tr>
+<td>leadsTo</td>
+<td>A P ~&gt; Q violation via a lasso up to depth K or via deadlock stagnation</td>
+<td><code>violated</code> / <code>leadsTo</code> / <code>bindings</code> + trace</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A deadlock warning includes which state you got stuck in (e.g. <code>deadlock reachable at
+  step 1 (state: status=ToolFault, ...)</code>). The full trace is also in the JSON <code>deadlock.trace</code>.</li>
+<li><strong>Intended terminal states</strong> (states where stopping is correct, such as
+  processing complete or a final result) are declared in a
+  <code>terminal { &lt;predicate&gt; }</code> block. Stopping states satisfying the predicate are
+  excluded from deadlock checking, while other unexpected deadlocks continue to
+  be detected. Whereas <code>--deadlock ignore</code> uniformly ignores <strong>all stopping
+  states</strong>, <code>terminal</code> lets you select <strong>which stops are intentional</strong>.
+  Example: <code>terminal { status == Done or status == Failed }</code>.</li>
+<li><strong>requirements</strong>: <code>terminal { }</code> is a <code>requirements_item</code> and passes
+    through unchanged to the kernel spec (§13.2). Inside a spec that uses
+    <code>process E { ... }</code>, write the predicate against the synthesized stage
+    map — the lowercased process/entity name + <code>_stage</code> (e.g. <code>process Claim</code>
+    → <code>claim_stage</code>), so <code>terminal { forall c: Claim { claim_stage[c] ==
+    Approved or claim_stage[c] == Rejected } }</code>.</li>
+<li><strong>business</strong>: no <code>terminal</code> syntax exists at all — it is derived
+    automatically from each process's sink stages (stages with no outgoing
+    <code>transition</code>); see §13.3.</li>
+<li><strong>Do not write</strong> an invariant like "inventory is at least 0" — make it
+  <code>type Qty = 0..N</code> and it is detected automatically.</li>
+<li>A full <code>push</code> into a Seq is also detected automatically as <code>type_bound</code>
+  (to guard it, write <code>requires q.size() &lt; N</code>).</li>
+</ul></div></details>
+<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
+               [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--deadlock warn|error|ignore]
+               [--vacuity warn|error|ignore]     # vacuity check (§15)
+               [--property &lt;Name&gt;]               # check one named property in isolation —
+                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
+               [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
+                                                 # opt-in scope sweep over bounded verification
+fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
+fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # conformance check of an event log (§12)
+fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
+fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
+fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]  # spec mutation (§15)
+fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
+fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
+fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
+fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
+fslc domain check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
+fslc domain analyze &lt;file.fsl&gt;                                  # aggregate/effect ownership summary
+fslc domain expand &lt;file.fsl&gt; [-o out.fsl]                      # generated kernel FSL
+fslc domain generate &lt;file.fsl&gt; --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain testgen &lt;file.fsl&gt; [--target vitest] [-o out]       # domain adapter/conformance scaffold
+fslc domain replay &lt;file.fsl&gt; --logs events.jsonl              # domain runtime replay evidence
+fslc db check  &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
+fslc db observe &lt;file.fsl&gt; --trace events.json                  # runtime observation evidence
+fslc db import &lt;file.sql&gt; [--name Name] [-o out.fsl]            # minimal SQL DDL -&gt; dbsystem
+fslc ai check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
+fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runtime event replay evidence
+</code></pre>
+<p>In addition to <code>reachable</code> and action coverage, <code>scenarios</code> outputs, for each
+<code>leadsTo P ~&gt; Q</code>, a <code>respond_&lt;Name&gt;[_&lt;binding&gt;]</code> scenario. Each scenario has
+<code>kind: "leadsTo"</code>, <code>pending_at</code>, <code>satisfied_at</code>, <code>bindings</code>, <code>steps</code>,
+<code>initial_state</code>, and <code>expected_states</code>, representing the shortest trace from P
+holding to Q holding within depth K. Bindings for which P never holds are not
+turned into scenarios and appear in <code>warnings</code>.</p>
+<p><code>verify --property Name</code> resolves across invariant, <code>trans</code>, <code>leadsTo</code>, and
+<code>reachable</code> declarations and checks only the named property kind in isolation.
+<code>--exclude-property Name</code> is repeatable and acts as the cross-kind inverse:
+it removes named invariants, <code>trans</code>, <code>leadsTo</code>, and <code>reachable</code> properties
+from the run and from checked-property outputs (<code>invariants_checked</code>,
+<code>transitions_checked</code>, <code>leads_to</code>, and <code>reachables</code>). When <code>--property</code> and
+<code>--exclude-property</code> name the same property, exclusion wins.</p>
+<p><code>sweep</code> is an opt-in wrapper around <code>verify</code>; it does not change normal
+verification. It evaluates a deterministic grid of <code>--instances NAME=lo..hi</code>,
+<code>--values NAME=lo..hi</code>, and <code>--depth lo..hi</code> overrides, records each underlying
+verification result under <code>sweep.results</code>, and returns the first failing scope
+under <code>sweep.minimal_counterexample</code>. For <code>--values</code>, the sweep fixes the lower
+bound and expands the upper bound (<code>lo..lo</code>, <code>lo..lo+1</code>, ..., <code>lo..hi</code>). A
+passing sweep means "no counterexample in this grid", not an unbounded proof.</p>
+<p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
+mutated / explained / analyzed / typestate / sweep_passed / observed_conformant /
+imported / imported_with_warnings,
+<code>1</code> = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
+sweep_failed / observed_mismatch,
+<code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
+<code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
+result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s.</p>
+<h3 id="kinds-of-result">Kinds of result</h3>
+<table>
+<thead>
+<tr>
+<th>result</th>
+<th>Meaning</th>
+<th>Next move</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>verified</code></td>
+<td>No violation up to depth K (+ all reachable satisfied); <code>completeness:"bounded"</code></td>
+<td>To raise confidence, use <code>--engine induction</code></td>
+</tr>
+<tr>
+<td><code>proved</code></td>
+<td><strong>The invariant holds in all executions</strong> (unbounded depth); <code>completeness:"unbounded"</code></td>
+<td>Done</td>
+</tr>
+<tr>
+<td><code>violated</code></td>
+<td>A counterexample exists. Comes with <code>violation_kind</code> and the shortest trace</td>
+<td>Read the trace and fix the spec</td>
+</tr>
+<tr>
+<td><code>reachable_failed</code></td>
+<td>reachable not reached within depth K</td>
+<td>Read each <code>unreached[].classification</code>: raise <code>--depth</code> for <code>insufficient_depth</code>, or fix the blocking constraint for <code>over_constrained</code></td>
+</tr>
+<tr>
+<td><code>unknown_cti</code></td>
+<td>The invariant is not violated but is not inductive</td>
+<td><strong>Read the CTI and add an auxiliary invariant</strong> (§8)</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>parse / type / semantics / io</td>
+<td>Fix per <code>loc</code> / <code>expected</code> / <code>hint</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>.</p>
+<p>Diagnostics that identify a faithfulness/intent gap may also carry
+<code>faithfulness_class</code> plus <code>recommended_action</code>. Current classes are:
+<code>partial_op_unguarded</code>, <code>frozen_only_invariant</code>, <code>intent_unexercised</code>, and
+<code>liveness_not_refined</code>. The tag is derived from existing <code>result</code> / <code>kind</code> /
+<code>violation_kind</code> fields and is additive; consumers should keep reading the
+original classification fields for detail.</p>
+<p>Progress-preserving refinement failures are reported as <code>refinement_failed</code> with
+<code>kind:"progress_lost"</code>, <code>violation_kind:"leadsTo"</code>, <code>impl_trace</code>,
+<code>progress:{leadsTo, actions}</code>, and <code>faithfulness_class:"liveness_not_refined"</code>.</p>
+<p><code>verify</code> / <code>verify --engine induction</code> results include <code>checked_to_depth</code> and
+<code>cost: {"elapsed_s": ...}</code>. BMC <code>verified</code> is explicitly bounded; when the final
+depth first witnesses a reachable/vacuity/coverage fact during normal
+exploration, <code>verified</code> also includes a <code>hint</code> that the state space is not
+obviously saturated at that depth and suggests a larger <code>--depth</code> or induction.</p>
+<p>When a leadsTo is declared and the result is <code>verified</code> / <code>proved</code>,
+<code>leads_to: { "&lt;Name&gt;": { "checked_to_depth": K } }</code> is attached
+(no counterexample is a bounded guarantee up to depth K, the same standing as a
+<code>verified</code> invariant). If induction discharges a ranked <code>leadsTo</code>, that entry is
+upgraded with <code>proved: true</code>, <code>completeness: "unbounded"</code>, <code>proof: "ranking"</code>,
+and <code>decreases</code>. When a <code>trans</code> is declared, the success output carries
+<code>transitions_checked: ["Name", ...]</code>.</p>
+<h3 id="coverage-diagnosis-actions-that-never-become-enabled">Coverage diagnosis (actions that never become enabled)</h3>
+<pre><code class="language-json">&quot;action_coverage&quot;: {
+  &quot;checkout&quot;: {
+    &quot;covered&quot;: false,
+    &quot;name&quot;: &quot;checkout&quot;,
+    &quot;blocking_requires&quot;: [ {&quot;loc&quot;: {&quot;line&quot;: 27}, &quot;text&quot;: &quot;requires stock[i] &gt; 0&quot;} ],
+    &quot;hint&quot;: &quot;never enabled within depth 8; blocking requires: requires stock[i] &gt; 0; ...&quot;,
+    &quot;faithfulness_class&quot;: &quot;intent_unexercised&quot;,
+    &quot;recommended_action&quot;: &quot;add a single-shot reachable for the action / raise --depth&quot;
+  }
+}
+</code></pre>
+<p>The blocking requires clause is identified by a minimized unsat core when that is
+cheap. For requirements <code>branches</code>, a false coverage diagnostic keeps the
+internal split-action <code>name</code> and adds <code>display_name</code>.</p>
+<p>For <code>reachable_failed</code>, each <code>unreached</code> entry carries:</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;SoldOut&quot;,
+  &quot;classification&quot;: &quot;insufficient_depth&quot;,
+  &quot;hint&quot;: &quot;not witnessed within depth 3; try a larger --depth&quot;
+}
+</code></pre>
+<p>or, when the target predicate is unsatisfiable under type bounds/invariants:</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;TooHigh&quot;,
+  &quot;classification&quot;: &quot;over_constrained&quot;,
+  &quot;blocking_requires&quot;: [{&quot;kind&quot;: &quot;type_bound&quot;, &quot;name&quot;: &quot;_bounds_x&quot;}],
+  &quot;hint&quot;: &quot;target predicate is unsatisfiable under type bounds/invariants (_bounds_x); ...&quot;
+}
+</code></pre></div></details>
+<details id="8-recommended-workflow-make-proved-the-standard"><summary>8. Recommended workflow: make proved the standard<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
+<li>Write the spec → <code>fslc check</code> (the fast syntax/type loop)</li>
+<li><code>fslc verify --depth 8</code> → if violated, fix using the trace.
+   Confirm that the intended scenarios are witnessed by reachable</li>
+<li><code>fslc verify --engine induction</code> → if <code>proved</code>, done</li>
+<li>If <code>unknown_cti</code>, read the CTI (the k+1-state trace). The starting state of
+   the CTI is a <strong>ghost state</strong> that "satisfies all invariants but is actually
+   unreachable." Add an <strong>auxiliary invariant</strong> that excludes it (one that is
+   itself a truth of the domain) and return to step 3</li>
+</ol>
+<p>In practice, auxiliary invariants often converge in a single round
+(real examples in <code>DOGFOOD-1.md</code> / <code>DOGFOOD-2.md</code>: "if attempts == 3, locked,"
+"only Captured has a refund," "no duplicates in the queue").</p></div></details>
+<details id="9-idiom-collection"><summary>9. Idiom collection<span class="tree-blurb"> — よく使うイディオム集 — Option、Seq集約、ghost変数など。</span></summary><div class="tree-body"><h3 id="option-instead-of-a-sentinel-value">Option instead of a sentinel value</h3>
+<pre><code class="language-fsl">cart: Map&lt;UserId, Option&lt;ItemId&gt;&gt;      // do not use a sentinel like -1
+struct Reservation { item: Option&lt;ItemId&gt;, qty: Qty }  // optional fields can be written directly too
+action checkout(u: UserId) {
+  requires cart[u] is some(i)          // i is bound here
+  requires stock[i] &gt; 0
+  stock[i] = stock[i] - 1
+  cart[u] = none
+}
+</code></pre>
+<h3 id="a-domain-type-instead-of-a-hand-written-bounds-invariant">A domain type instead of a hand-written bounds invariant</h3>
+<pre><code class="language-fsl">type Qty = 0..5
+state { stock: Map&lt;ItemId, Qty&gt; }      // do not write NoNegativeStock (automatic)
+</code></pre>
+<h3 id="guarding-partial-operations-either-the-requires-form-or-the-if-form">Guarding partial operations (either the requires form or the if form)</h3>
+<pre><code class="language-fsl">action take()  { requires q.size() &gt; 0  x = q.head()  q = q.pop() }
+action drain() { if q.size() &gt; 0 { x = q.head()  q = q.pop() } }
+</code></pre>
+<p>Forgetting the guard is detected as a <code>partial_op</code> violation (it does not break silently).</p>
+<h3 id="talking-about-a-seq-in-an-invariant-forall-with-an-index-guard">Talking about a Seq in an invariant: forall with an index guard</h3>
+<pre><code class="language-fsl">invariant QueuedAreQueued {
+  forall i in 0..2 {                   // 0..capacity-1
+    i &lt; queue.size() =&gt; jobs[queue.at(i)].st == Queued
+  }
+}
+</code></pre>
+<p><code>at()</code> is total in property contexts (out-of-range yields an unspecified value),
+so always guard it with <code>i &lt; q.size()</code>.</p>
+<h3 id="aggregating-over-a-seq-the-index-domain-type-idiom">Aggregating over a Seq: the index / domain-type idiom</h3>
+<pre><code class="language-fsl">type Idx = 0..3                        // a domain type covering up to capacity-1
+invariant BalanceMatchesLog {
+  balance == sum(i: Idx of log.at(i) where i &lt; log.size())
+}
+</code></pre>
+<p><code>sum</code>/<code>count</code> range over a domain type, but restricting to the live prefix with
+<code>where i &lt; size</code> turns it into a <strong>fold over the Seq</strong>.</p>
+<h3 id="two-dimensional-data-rooms-slots-etc-flatten-to-a-single-key">Two-dimensional data (rooms × slots, etc.): flatten to a single key</h3>
+<p><strong>Nesting Maps</strong> like <code>Map&lt;RoomId, Map&lt;SlotId, …&gt;&gt;</code> is not allowed (§2).
+Flatten the two axes into a single product domain type, and recover the axes
+with <code>/</code> and <code>%</code>:</p>
+<pre><code class="language-fsl">const SLOTS = 4
+type RoomId = 0..2
+type Cell   = 0..11                       // ROOMS*SLOTS - 1
+state { holder: Map&lt;Cell, Option&lt;UserId&gt;&gt; }
+// c / SLOTS = room, c % SLOTS = slot
+reachable Room1Full {
+  forall c: Cell { c / SLOTS == 1 =&gt; holder[c] != none }
+}
+</code></pre>
+<p>When the axes are few and have names (e.g. a fixed 5-period weekday), there is
+also the option of decomposing into struct fields, but if quantification is
+needed, flattening is the default.</p>
+<h3 id="use-a-ghost-variable-to-talk-about-history-the-past">Use a ghost variable to talk about history (the past)</h3>
+<pre><code class="language-fsl">state { ever_locked: Map&lt;UserId, Bool&gt; }   // &quot;was locked at least once&quot;
+// in the locking branch, ever_locked[u] = true
+reachable RecoveredAfterLock {
+  exists u: UserId { ever_locked[u] and session[u] }
+}
+</code></pre>
+<p>Since reachable / invariant look only at state, to talk about "Y after X" as a
+<strong>fact of the state</strong>, push the history into the state (a ghost variable).</p>
+<h3 id="when-to-use-a-history-ghost-variable-vs-leadsto">When to use a history ghost variable vs. leadsTo</h3>
+<table>
+<thead>
+<tr>
+<th>What you want to write</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Was X at least once" (a fact of the state)</td>
+<td>Ghost variable + invariant / reachable</td>
+</tr>
+<tr>
+<td>"Keep X true until Y, and Y may or may not happen"</td>
+<td><code>unless Name { X unless Y }</code></td>
+</tr>
+<tr>
+<td>"Once it becomes X, eventually Y" (a response property)</td>
+<td><code>leadsTo</code> + <code>fair action</code> if needed</td>
+</tr>
+<tr>
+<td>"Keep X true until Y, and Y must eventually happen"</td>
+<td><code>until Name { X until Y }</code></td>
+</tr>
+</tbody>
+</table>
+<p>Example: in a FIFO mutex, "a process that has entered the wait queue eventually
+obtains the lock" is
+<code>leadsTo WaiterGetsLock { forall p: ProcId { waiters.contains(p) ~&gt; ... } }</code>.
+If progress depends on a specific action such as <code>release_handoff</code>, add <code>fair</code>
+(see <code>specs/mutex_queue.fsl</code>).</p>
+<h3 id="auxiliary-invariants-from-a-cti-strengthening-induction">Auxiliary invariants from a CTI (strengthening induction)</h3>
+<p>Look at the starting state of the <code>unknown_cti</code> CTI and turn "a combination that
+does not occur in reality" into an invariant:</p>
+<pre><code class="language-fsl">// CTI: queue = [0, 0, 0] (the same job tripled) → state that there are no duplicates
+invariant NoDupQueue {
+  forall i in 0..2 { forall j in 0..2 {
+    (i &lt; j and j &lt; queue.size()) =&gt; not (queue.at(i) == queue.at(j))
+  } }
+}
+</code></pre>
+<p>For the common "monotone counter" idiom — an <code>Int</code> or <code>Map&lt;K, Int&gt;</code> state
+variable that only ever moves in one direction — <code>unknown_cti</code> results carry
+an additive <code>suggested_invariants: [&lt;expr&gt;, ...]</code> field (and the matching
+sentence appended to <code>hint</code>) whenever the CTI's counter starts on the
+unreachable side of its concrete initial value (e.g. a huge or negative
+"ghost" start a real execution could never produce). This is a heuristic
+computed by diffing the CTI trace against the concrete init (not a proof of
+global monotonicity), so treat it as a starting point:</p>
+<pre><code class="language-fsl">// CTI: audit = -101 (only increases in this trace, but starts below its
+// init value 0) → suggested_invariants: [&quot;audit &gt;= 0&quot;]
+invariant AuditNonNeg { audit &gt;= 0 }
+</code></pre>
+<p>A <code>Map&lt;K, Int&gt;</code> counter suggests the <code>forall</code>-quantified form
+(<code>forall k: K { audit[k] &gt;= 0 }</code>) when every key shares the same initial
+value. If no monotone counter is detected, or the CTI start does not violate
+the would-be bound, no suggestion is added and <code>hint</code> is unchanged.</p></div></details>
+<details id="10-refinement-fidelity-of-a-detailed-spec"><summary>10. Refinement (fidelity of a detailed spec)<span class="tree-blurb"> — 詳細化 — 実装が抽象仕様に忠実かどうかの検査。</span></summary><div class="tree-body"><p>After first <code>verify</code>-ing / <code>prove</code>-ing the abstract spec (abs), check with
+<strong><code>fslc refine</code></strong> that a detailed spec (impl) close to the implementation does
+not depart from the behavior of abs (see <code>DESIGN-refinement.md</code>).</p>
+<p>Write the mapping in a <strong>separate file</strong> (do not pollute the impl/abs <code>.fsl</code>):</p>
+<pre><code class="language-fsl">refinement CartImplRefinesCart {
+  impl CartImpl
+  abs  ShoppingCart
+
+  maps auto
+  map stock[i: ItemId] = impl_stock[i] - reserved[i]
+  map cart[u: UserId]  = impl_cart[u]
+
+  action add_to_cart(u: UserId, i: ItemId) -&gt; add_to_cart(u, i)
+  action impl_checkout(u: UserId)          -&gt; checkout(u)
+  action reserve(i: ItemId)                -&gt; stutter
+}
+</code></pre>
+<ul>
+<li><code>map &lt;abs var&gt; = &lt;impl expr&gt;</code> — a scalar abstract variable.</li>
+<li><code>map &lt;abs var&gt;[&lt;binder&gt;] = &lt;expr&gt;</code> — element-wise mapping of a Map (enumerate the key type, which is bounded).</li>
+<li><code>maps auto</code> — optional identity defaults. For same-named compatible state
+  variables with no explicit <code>map</code>, it synthesizes <code>map x = x</code>; for same-named
+  compatible actions with no explicit correspondence, it synthesizes
+  <code>action f(params...) -&gt; f(params...)</code>. Explicit entries override the defaults.
+  Incompatible same-name candidates are reported as <code>kind: "type"</code> errors.</li>
+<li><code>action &lt;impl&gt;(&lt;formal params&gt;) -&gt; &lt;abs&gt;(&lt;expr&gt;) | stutter</code> — required for every impl action.
+  Formal params may be bare names or <code>name: Type</code> annotations matching the impl action declaration.
+  <code>stutter</code> is an internal step in which the abstract state does not change.</li>
+</ul>
+<p>Only in the expressions of a refinement mapping file may you use
+<code>if &lt;expr&gt; then &lt;expr&gt; else &lt;expr&gt;</code>. This is valid only in the right-hand side
+of <code>map</code> and in the argument expressions of <code>action ... -&gt; abs(&lt;expr list&gt;)</code>,
+and is not part of the expression grammar of an ordinary <code>.fsl</code> spec file. The
+two arms of then/else must have the same logical type
+(Bool, Int/domain/enum, Option, struct).</p>
+<pre><code class="language-bash">fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
+</code></pre>
+<p>Success: <code>result: "refines"</code> (exit 0). Violation: <code>refinement_failed</code> (exit 1)
+with <code>kind</code> (<code>abs_requires_failed</code> / <code>abs_state_mismatch</code> / <code>stutter_changed_abs</code> /
+<code>map_out_of_bounds</code>), <code>impl_trace</code>, and the post-mapping <code>abs_before</code> /
+<code>abs_after_*</code>. A static error (a missing map, an unknown action, etc.) is
+<code>kind: "type"</code> (exit 2).</p>
+<p>Give impl and abs <strong>distinct enum/struct type names</strong>, even when a state
+variable pair is mapped 1:1. Type metadata is merged by name for refinement
+checking; a same-named enum (or struct) declared with a different member
+list (or field set) on each side is rejected as <code>kind: "type"</code> (exit 2)
+rather than merged — merging would let an impl-only member get silently
+reinterpreted as whichever abs member sits at the same ordinal index. Domain
+types (<code>type X = lo..hi</code>) may safely share a name with different bounds; an
+out-of-range value there is still caught as <code>map_out_of_bounds</code>/
+<code>abs_state_mismatch</code>.</p>
+<h3 id="chain-checking-composition-of-mappings">Chain checking (composition of mappings)</h3>
+<p>The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)
+can be checked <strong>directly by composition</strong> when you line up <code>(spec mapping)</code> in
+sequence:</p>
+<pre><code class="language-bash">fslc refine bot.fsl  mid.fsl bot_refines_mid.fsl  top.fsl mid_refines_top.fsl --depth 6
+#            ^impl    ^abs1   ^map(impl→abs1)      ^abs2   ^map(abs1→abs2)
+</code></pre>
+<p>It composes the adjacent mappings (state α_AC = α_BC ∘ α_AB, actions a→b→c /
+stutter) and checks bottom ⊒ top. On success it returns the composed
+<code>action_map</code> and the layer ordering <code>chain</code>; on failure it returns the first
+broken link <code>failed_link: {from, to, kind}</code>. Bounded refinement is transitive at
+the same depth, so a composition check is equivalent to all adjacent links
+holding (<code>docs/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>).
+Only the case where an argument expression reads the state of an intermediate
+layer is unsupported.</p>
+<p>Recommended workflow: <strong>a human/LLM reviews abs → the LLM elaborates impl →
+<code>refine</code> guarantees fidelity</strong>. The <code>ensures</code> / invariants of abs are not
+re-checked in refine; it is assumed that they have been separately verified on
+the abs side.</p>
+<p>What <code>refine</code> guarantees is <strong>inclusion of safety</strong> (impl does not break the
+guards/invariants of abs). <strong>Liveness (<code>leadsTo</code>) does not propagate</strong> — since
+refine allows stutter, even if impl drops the progress that abs guaranteed with
+<code>fair</code>, the result can still be <code>refines</code> (the mapping does not require fair
+annotations). To opt into checking the abstract response on the lower layer,
+write <code>preserve progress</code> in the refinement mapping:</p>
+<pre><code class="language-fsl">refinement DesignRefinesReq {
+  impl Design
+  abs  Req
+  map st = ...
+  action enqueue(c) -&gt; stutter
+  action answer(c)  -&gt; answer(c)
+  action refuse(c)  -&gt; refuse(c)
+
+  preserve progress {
+    respond EveryRequestHandled by answer, refuse
+  }
+}
+</code></pre>
+<p>This pulls the named abstract <code>leadsTo</code> through the state mapping and checks
+<code>P(α(impl_state)) ~&gt; Q(α(impl_state))</code> on impl executions. If the lower layer can
+spin forever or deadlock while the abstract response remains pending, the result
+is <code>refinement_failed</code> with <code>kind:"progress_lost"</code> and
+<code>violation_kind:"leadsTo"</code>. <code>progress_failure</code> distinguishes
+<code>lasso_blocks_progress</code> from <code>deadlock_or_stall_blocks_progress</code>. The <code>by</code>
+actions are review metadata and must name impl actions; they do not create
+fairness or prove implementation conformance. Fairness still comes from
+lower-layer <code>fair action</code> declarations.
+For unbounded proof, keep using a lower-layer <code>leadsTo ... decreases ...</code> and
+<code>verify --engine induction</code>.</p></div></details>
+<details id="11-composition-compose"><summary>11. Composition (compose)<span class="tree-blurb"> — 名前空間と同期アクションによるスペックの合成。</span></summary><div class="tree-body"><p><strong>Merge with namespaces</strong> several verified component specs into a single system
+specification. After expansion it becomes an ordinary single spec, so <code>verify</code> /
+<code>prove</code> / <code>scenarios</code> / <code>Monitor</code> / <code>replay</code> / <code>testgen</code> / <code>refine</code> can be used
+as-is (design: <code>DESIGN-compose.md</code>).</p>
+<pre><code class="language-fsl">compose OrderSystem {
+  use ShoppingCart as cart from &quot;cart_v1.fsl&quot;
+  use Payment      as pay  from &quot;payment.fsl&quot;
+
+  state { orders_linked: Int }
+  init  { orders_linked = 0 }
+
+  // synchronized action: execute the actions of several components in the same step
+  action checkout_and_pay(u: cart.UserId, p: pay.PayId) =
+      cart.checkout(u) || pay.capture(p) {
+    requires pay.payments[p].st == Authorized
+    orders_linked = orders_linked + 1
+  }
+
+  // excluded from standalone execution (fires only via synchronization)
+  internal cart.checkout
+  internal pay.capture
+
+  invariant LinkedNonNeg { orders_linked &gt;= 0 }
+  reachable PaidOrder {
+    exists p: pay.PayId { pay.payments[p].st == Captured }
+  }
+}
+</code></pre>
+<ul>
+<li><code>use &lt;SpecName&gt; as &lt;alias&gt; from "&lt;relative path&gt;"</code> — the path is relative to
+  the compose file. The spec name must match the in-file name. The alias must be
+  unique within the compose. Nested compose is not allowed.</li>
+<li>A component's types/state/actions are referenced as <code>alias.Name</code>.</li>
+<li><strong>Synchronized action</strong> <code>action &lt;name&gt;(...) = &lt;a&gt;.&lt;act&gt;(...) || &lt;b&gt;.&lt;act2&gt;(...) { ... }</code>:
+  merges the requires / body / ensures of each component action, and the
+  additional statements may only assign to the composition-side state
+  (synchronizing two actions of the same component is not allowed).</li>
+<li>Fairness is not inherited through synchronization. If a fair component action
+  is referenced by a non-fair synchronized action, <code>check</code> / <code>verify</code> emits a
+  <code>fair_not_inherited</code> warning in JSON <code>warnings</code>; write
+  <code>fair action &lt;name&gt;(...) = ...</code> when the synchronized action must be fair.</li>
+<li>Synchronized action arguments are structurally compatible by bounded integer
+  domain, not by declared type name. Passing a <code>core.TaskId</code> value to an action
+  parameter declared as <code>NoteId</code> is valid when the underlying value range fits
+  the target type. This is the intended compose behavior, not an incidental
+  naming accident. Repro: with <code>TaskId = 0..2</code> and <code>NoteId = 0..2</code>,
+  <code>action sync(t: core.TaskId) = core.choose(t) || note.attach(t) { }</code>
+  produced <code>result:"ok"</code> from <code>fslc check</code> and <code>result:"verified"</code> from
+  <code>fslc verify --depth 1</code>. With <code>NoteId = 0..1</code>, the same compose still passed
+  <code>check</code> but <code>verify --depth 1</code> returned <code>result:"violated"</code>,
+  <code>violation_kind:"type_bound"</code>, invariant <code>"_bounds_note.last"</code>, for
+  <code>sync(t: 2)</code>. Recommended idiom: use same-range component-local domain types
+  for intentionally shared IDs; if a target domain is narrower, add an explicit
+  <code>requires</code> guard on the synchronized action or model a conversion in one
+  component.</li>
+<li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — excludes that action from interleaving.</li>
+<li>An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).</li>
+<li>JSON display: the physical name <code>alias__x</code> is output as <code>alias.x</code> (state keys,
+  action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).</li>
+</ul>
+<pre><code class="language-bash">fslc check  specs/order_system.fsl
+fslc verify specs/order_system.fsl --depth 8
+fslc scenarios specs/order_system.fsl
+</code></pre></div></details>
+<details id="12-the-bridge-to-implementation"><summary>12. The bridge to implementation<span class="tree-blurb"> — 実装への接続 — replay、testgen、具体インタプリタ。</span></summary><div class="tree-body"><p>After proving a specification, there are three entry points for wiring it to the
+implementation (see <code>DESIGN-bridge.md</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Means</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fslc.runtime.Monitor</code></td>
+<td>A concrete interpreter of the spec (no Z3 needed). Embed it in the implementation for runtime checking</td>
+</tr>
+<tr>
+<td><code>fslc replay</code></td>
+<td>Check a real system's event-log JSON against the spec</td>
+</tr>
+<tr>
+<td><code>fslc testgen</code></td>
+<td>Generate a conformance-test scaffold — pytest (default), Vitest (<code>--target vitest</code>), Swift Testing (<code>--target swift</code>), kotlin.test (<code>--target kotlin</code>), Dart <code>package:test</code> (<code>--target dart</code>), or PHPUnit (<code>--target phpunit</code>) (wire the implementation into the Adapter)</td>
+</tr>
+</tbody>
+</table>
+<p>Recommended workflow: <strong><code>verify</code> / <code>prove</code> the spec → generate the scaffold with
+<code>testgen</code> → wire the implementation into the <code>Adapter</code> → run the tests</strong>. <code>Monitor</code>
+is used as an oracle in random-walk testing.</p>
+<p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
+from per-target emitters, so the same scenarios render to multiple harnesses:</p>
+<ul>
+<li><code>--target pytest</code> (default): emits Python tests that import <code>fslc.runtime.Monitor</code>
+  and drive the random walk live as the oracle.</li>
+<li><code>--target vitest</code>: emits a self-contained TypeScript (Vitest) file. Deterministic
+  scenarios and forbidden-rejection assertions translate directly; the random walk
+  is <strong>baked at generation time</strong> — the Python <code>Monitor</code> runs the fixed-seed walk and
+  the <code>(action, params, expected_state)</code> trace is embedded as a static fixture, so the
+  generated tests need <strong>no <code>fslc</code>/Python at runtime</strong>. The output extension defaults
+  to <code>&lt;spec&gt;.test.ts</code>.</li>
+<li><code>--target swift</code>: emits a self-contained Swift Testing file (<code>import Testing</code>,
+  <code>@Test</code>, <code>#expect</code>; <strong>not XCTest</strong>). Same baked-walk design as Vitest. Dynamic
+  state is <code>[String: Any]</code> with a bundled deep-equality/partial-match helper; an
+  Option <code>None</code> bakes as the self-contained <code>FSLNull.instance</code> sentinel (no
+  Foundation). Until <code>makeAdapter()</code> is wired every test is disabled via
+  <code>@Test(.enabled(if:))</code>. Output defaults to <code>&lt;SpecName&gt;ConformanceTests.swift</code>.</li>
+<li><code>--target kotlin</code>: emits a self-contained kotlin.test file (multiplatform; the
+  JVM delegates to JUnit). Same baked-walk design. Dynamic state is
+  <code>Map&lt;String, Any?&gt;</code>, where Kotlin's structural <code>==</code> is deep on <code>List</code>/<code>Map</code> and
+  distinguishes <code>Int</code> from <code>Double</code>, so the partial-match helper is a plain
+  recursion. kotlin.test has no portable runtime skip, so until <code>makeAdapter()</code>
+  is wired (it returns <code>null</code>) each test returns early. Output defaults to
+  <code>&lt;SpecName&gt;ConformanceTest.kt</code>.</li>
+<li><code>--target dart</code>: emits a self-contained <code>package:test</code> file (also runs under
+  <code>flutter test</code>). Same baked-walk design. Dynamic state is <code>Map&lt;String, dynamic&gt;</code>;
+  Dart's <code>==</code> is reference-based on collections, so the bundled <code>assertPartial</code>
+  recurses by the expected keys and compares leaves/sequences with the <code>equals</code>
+  matcher (re-exported by <code>package:test</code>, so the only dependency is <code>package:test</code>).
+  A top-level probe sets <code>skip:</code> on each <code>test()</code> until <code>makeAdapter()</code> is wired.
+  Output defaults to <code>&lt;spec_name&gt;_conformance_test.dart</code> (snake_case, the
+  <code>_test.dart</code> suffix the runner expects).</li>
+<li><code>--target phpunit</code>: emits a self-contained PHPUnit file (PHP 8.1+ / PHPUnit 10+,
+  <code>declare(strict_types=1)</code>). Same baked-walk design. Dynamic state is an
+  associative <code>array</code>; leaves are compared with <code>assertSame</code> (<code>===</code>), which keeps
+  <code>int</code>/<code>float</code>, <code>bool</code> and <code>null</code> from coercing (PHP's loose <code>==</code> would conflate
+  <code>0 == "0"</code> etc.). <code>assertPartial</code> recurses by the expected keys (maps match
+  order-independently; list-shaped values also pin length). <code>setUp()</code> skips every
+  test until <code>makeAdapter()</code> is wired. Output defaults to
+  <code>&lt;SpecName&gt;ConformanceTest.php</code> (PSR-4 class = file name).</li>
+</ul>
+<pre><code class="language-python">from fslc import Monitor
+
+mon = Monitor(&quot;specs/cart_v1.fsl&quot;)
+mon.reset()
+r = mon.step(&quot;add_to_cart&quot;, {&quot;u&quot;: 0, &quot;i&quot;: 0})   # ok / kind / state / changes
+</code></pre>
+<pre><code class="language-bash">fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
+fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
+fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
+fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
+fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
+fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+</code></pre>
+<p>Since <code>replay</code> checks only finite logs, <strong><code>leadsTo</code> is out of scope</strong> (stated
+explicitly in the output <code>note</code>). <code>Monitor</code> requires init to be deterministic
+(forall bulk assignment is allowed). For a Map/index target (<code>m[K] = ...</code>),
+"assign exactly once" is per concrete key, not per variable: separate flat
+<code>m[K1] = ...</code> / <code>m[K2] = ...</code> statements for two <em>different</em> keys are fine;
+the same key assigned twice, or a key that is itself a bound loop variable
+(where two iterations could alias), is still rejected.</p></div></details>
+<details id="13-the-three-layer-dialects-consulting-requirements-design-and-traceability"><summary>13. The three-layer dialects (consulting / requirements / design) and traceability<span class="tree-blurb"> — 業務・要件・設計の3層ダイアレクトとトレーサビリティ。</span></summary><div class="tree-body"><p>The background of the design is in <code>DESIGN-layers.md</code>, and the implementation
+spec in <code>DESIGN-dialects.md</code>. There is a single kernel (§1–12 of this document),
+and the per-layer dialects are a front-end that expands into the AST. The layers
+are connected by refinement: <strong>business ⊒ requirements ⊒ design ⊒ implementation
+(testgen/replay)</strong>.</p>
+<h3 id="131-declaration-tags-traceability-common-to-all-layers">13.1 Declaration tags (traceability common to all layers)</h3>
+<p>If you write <code>"ID: original text"</code> just before the <code>{</code> of an invariant /
+reachable / leadsTo / action, then violations, CTIs, coverage diagnoses, and
+scenarios carry <code>requirement: {id, text}</code>:</p>
+<pre><code class="language-fsl">invariant PaidLedger &quot;REQ-3: the ledger matches the number of payments&quot; { ... }
+action submit(c: Case, a: Amount) &quot;REQ-1: amounts at or below the threshold are auto-approved&quot; { ... }
+</code></pre>
+<h3 id="132-requirements-layer-requirements-the-fsl-req-dialect">13.2 Requirements layer: <code>requirements</code> (the fsl-req dialect)</h3>
+<pre><code class="language-fsl">requirements ExpenseRequirements {
+  implements ExpenseToBe from &quot;1_business.fsl&quot; { }
+
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit       Draft     -&gt; Submitted by Employee with a: Amount when a &gt; 0 set amount = a covers REQ-1 &quot;The applicant submits an expense claim by entering an amount&quot;
+    transition auto_approve Submitted -&gt; Approved  by System  when amount &lt;= AUTO_LIMIT covers REQ-2 &quot;Claims at or below AUTO_LIMIT are auto-approved by the system&quot;
+    transition mgr_approve  Submitted -&gt; Approved  by Manager when amount &gt;  AUTO_LIMIT covers REQ-3 &quot;Claims above AUTO_LIMIT are approved by a manager&quot;
+    transition reject       Submitted -&gt; Rejected  by Manager when amount &gt;  AUTO_LIMIT covers REQ-3 &quot;Claims above AUTO_LIMIT may be rejected by a manager&quot;
+    transition pay          Approved  -&gt; Paid      by Finance covers REQ-4 &quot;Only approved claims are paid&quot;
+  }
+
+  kpi paid_claims = count Claim in Paid
+
+  acceptance AC-1 &quot;Approval flow: a low-amount claim is auto-approved and paid&quot; {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
+  }
+  acceptance AC-2 &quot;Rejection flow: a high-amount claim ends in manager rejection&quot; {
+    submit(1, 2) reject(1)
+    expect Claim 1 in Rejected
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}
+</code></pre>
+<ul>
+<li>The process+data profile is the primary requirements form for a single-entity
+  lifecycle. <code>process E with f: T { ... }</code> creates the entity stage map and
+  carried fields; transitions can add an input (<code>with a: T</code>), guard (<code>when</code>),
+  field update (<code>set f = expr</code>), and traceability (<code>covers REQ-n "text"</code>). A
+  carried field's type <code>T</code> is a <code>number</code>, <code>Bool</code>, or an enum declared in the
+  same requirements spec:</li>
+<li><code>number</code> fields default to the domain's <code>lo</code> bound; <code>f: T = &lt;expr&gt;</code> is an
+    optional explicit initializer (a compile-time constant expression).</li>
+<li><code>Bool</code> and enum fields have no invented default — <code>f: Bool = true/false</code>
+    and <code>f: T = Member</code> are <strong>required</strong>; omitting the initializer is a
+    check-time error (no silently-chosen <code>false</code> or first enum member).</li>
+<li><code>number Amount</code> declares a value kind; the finite verifier range lives in
+  <code>verify { values Amount = lo..hi }</code>. Entity sizes live in
+  <code>verify { instances Entity = N }</code>.</li>
+<li><code>kpi NAME = count ENTITY in STAGE</code> is a declarative projection in both
+  business and requirements. It does not create a ghost counter or an automatic
+  <code>_kpi_*</code> invariant.</li>
+<li>With <code>implements</code>, <code>fslc verify</code> <strong>also runs the refine to the upper layer
+  simultaneously</strong>, and the result carries <code>implements: {abs, result}</code>. An empty
+  body (<code>implements X from "..." { }</code>) auto-generates identity refinement when
+  process/action/stage names match. Inside the <code>implements { }</code> block you write
+  state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
+  <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code>, the same
+  correspondence syntax as a separate refinement file's <code>refinement_action</code>
+  (<code>docs/DESIGN-refinement.md</code> §1), including an arity change between the impl
+  and abs action. Action↔action correspondence can also still be written as the
+  <code>maps &lt;abs_act&gt;(...)</code> clause on the requirement-level action; <code>maps auto</code>
+  covers same-name kernel-wrapper state/actions, and explicit maps override it.
+  An impl action with both a <code>maps</code> clause and a matching inline <code>action ...</code>
+  item is a duplicate-correspondence, <code>kind: "type"</code> check-time error (same as
+  a mapping file that lists the same action twice). Auto-mapped process
+  transitions are actor-checked; a transition whose actor differs from the
+  business action's actor is a check-time error.</li>
+<li><code>acceptance</code> is replay-verified at check time by the concrete Monitor (a
+  failure is <code>kind: "acceptance"</code>). It supports <code>expect &lt;Entity&gt; &lt;id&gt; in
+  &lt;Stage&gt;</code> alongside <code>expect &lt;expr&gt;</code> and flows directly into scenarios / testgen
+  (= the acceptance criteria become conformance tests for the implementation).
+  Action arguments in <code>acceptance</code>/<code>forbidden</code> steps accept enum member names
+  and const names in addition to numeric literals (e.g. <code>answer(0, Triggered)</code>
+  is equivalent to <code>answer(0, 1)</code> when <code>Triggered</code> is <code>Trigger</code>'s second
+  member) — an undefined name is a check-time error.</li>
+<li>Use the kernel-wrapper form only for hard cases: multi-entity requirements,
+  conservation rules, SLA/time, history not expressible as a carried field, or
+  behavior that needs explicit kernel state. That fallback still supports
+  <code>struct</code> / <code>state</code> / <code>init</code>, <code>fair action</code>, <code>branches</code>, and explicit <code>maps</code>.
+  <code>branches</code> automatically splits an action by each when condition (displayed as
+  <code>submit[a &lt;= AUTO_LIMIT]</code>), and the <code>maps</code> clause provides the action
+  correspondence to the upper layer.</li>
+<li><code>terminal { &lt;expr&gt; }</code> is allowed at the top level of a <code>requirements</code> spec
+  and passes through to the kernel unchanged (§6) — there is exactly one
+  <code>terminal</code> block per spec, same as the kernel. If the spec uses
+  <code>process E { ... }</code>, the predicate must reference the synthesized stage map
+  (<code>&lt;entity-lowercased&gt;_stage</code>, e.g. <code>claim_stage</code> for <code>process Claim</code>), not
+  <code>stage(c)</code> (that natural-language form is business-only, §13.3).</li>
+</ul>
+<h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
+<p>Write business processes, policies, and KPIs with zero implementation
+vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). A process expands into
+enum+Map+transition actions, a policy into invariant / leadsTo, and a kpi into a
+declarative count projection recorded as metadata. A contradiction in the regulations =
+an invariant violation, a dead process step = a coverage diagnosis, an
+unreachable business goal = reachable_failed, and a case left unattended = a
+leadsTo counterexample — all can be detected mechanically.</p>
+<p>For PM/consulting-facing files, use the readable stage syntax for common
+response policies and goals:</p>
+<pre><code class="language-fsl">business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -&gt; Approved by Manager
+    transition reject Requested -&gt; Rejected by Manager
+    transition refund Approved -&gt; Refunded by Manager
+  }
+
+  kpi refunded = count Return in Refunded
+
+  control CTRL-DECISION
+    &quot;Every return must preserve an adjudication control&quot;
+    owner Manager
+    severity high
+    applies_to Return
+
+  policy PAY-2 &quot;every request is eventually decided&quot;
+    satisfies CTRL-DECISION
+    every Return in Requested must eventually be Approved or Rejected or Refunded
+  goal AllSettled &quot;all cases can be completed&quot;
+    all Return can be Refunded or Rejected
+}
+
+verify {
+  instances Return = 3
+}
+</code></pre>
+<p>The explicit forms remain available when the rule is not just stage progression:
+<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code> and
+<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>.</p>
+<p>For a <strong>no-bypass</strong> control — a target stage that must never be reached
+without first passing through a required waypoint — use the precedence form
+(#75; design rationale in <code>DESIGN-precedence-policy.md</code>):</p>
+<pre><code class="language-fsl">policy CTRL-APPROVAL &quot;承認を経ずに完了しない&quot;
+  every Return reaching Refunded must have passed through Approved
+</code></pre>
+<p>This synthesizes an invisible <code>Map&lt;Return, Bool&gt;</code> history flag (named
+<code>return_stage_via_Approved</code>, so it is legible in traces), sets it <code>true</code> on
+any transition landing on <code>Approved</code>, and compiles the policy to
+<code>forall c: Return { stage(c) == Refunded =&gt; return_stage_via_Approved[c] }</code>.
+A <code>Requested -&gt; Refunded</code> transition that skips <code>Approved</code> is then a genuine
+invariant violation, with the trace showing exactly which bypass transition
+fired. Both sides accept a disjunction —
+<code>every Return reaching Refunded or Closed must have passed through Approved
+or Rejected</code> — and two policies over the same <code>(process, waypoint-set)</code> share
+one synthesized history flag.</p>
+<p>Alongside the history flag, a second invariant, <code>&lt;PolicyId&gt;_stability</code>, is
+auto-synthesized from the process's stage graph (#85; design rationale in
+<code>DESIGN-precedence-policy.md</code>) so that a <strong>compliant</strong> precedence policy
+proves under <code>--engine induction</code> out of the box, with no manual invariant
+needed — no ghost counterexample-to-induction from the history flag being
+"true but not yet provably so" at an arbitrary induction step.</p>
+<pre><code class="language-json">{&quot;result&quot;: &quot;proved&quot;, &quot;k_used&quot;: {&quot;CTRL-APPROVAL&quot;: 1, &quot;CTRL-APPROVAL_stability&quot;: 1}}
+</code></pre>
+<p>Business has no <code>terminal</code> syntax of its own. Instead, each process's <strong>sink
+stages</strong> (stages with no outgoing <code>transition</code>) are collected automatically:
+if every process has at least one sink, a kernel <code>terminal { }</code> is generated
+as the conjunction, over processes, of <code>forall c: &lt;Entity&gt; { stage(c) in
+{Sink1, Sink2, ...} }</code> — so a deadlock is "intended" only once every entity of
+every process is simultaneously parked at one of its own sinks. <code>ReturnHandling</code>
+above therefore verifies clean at <code>Rejected</code>/<code>Refunded</code> without
+<code>--deadlock ignore</code>. If any process is cyclic (every stage has an outgoing
+transition, so it has no sink), no terminal is generated at all and deadlock
+checking is unaffected — cyclic processes never deadlock in the first place,
+since some transition is always enabled.</p>
+<p>Governance/control metadata can be kept inside <code>business</code> or lifted into a
+standalone catalog. <code>control ID "text" owner NAME severity NAME applies_to Entity</code>
+does not generate a property by itself; it is a catalog entry. A <code>policy</code> or
+<code>goal</code> can declare <code>satisfies CTRL-ID</code>, and violations then carry both the
+policy/goal requirement and the satisfied controls in JSON:</p>
+<pre><code class="language-fsl">policy PAY-2 &quot;every request is eventually decided&quot;
+  satisfies CTRL-DECISION
+  every Return in Requested must eventually be Approved or Rejected or Refunded
+</code></pre>
+<p>For controls reused across business specs, use a <code>governance</code> catalog:</p>
+<pre><code class="language-fsl">governance EnterpriseReturnControls {
+  authority Operations owns CTRL-DECISION
+  control CTRL-DECISION &quot;Every return must preserve an adjudication control&quot;
+
+  delegates ReturnHandling from &quot;return_policy.fsl&quot; {
+    require CTRL-DECISION
+    // optional if the business policy already says `satisfies CTRL-DECISION`
+    CTRL-DECISION is satisfied_by policy PAY-2
+  }
+
+  preservation ReturnReform {
+    before AsIsReturn from &quot;asis_return.fsl&quot;
+    after  ToBeReturn from &quot;tobe_return.fsl&quot;
+    preserve CTRL-DECISION
+    checked_by refinement &quot;tobe_refines_asis.fsl&quot;
+  }
+}
+</code></pre>
+<p><code>fslc check governance.fsl</code> validates all referenced controls, business files,
+policies/goals, and preservation files. Preservation blocks also run the declared
+refinement at depth 8 and report results under <code>governance.preservations</code>.</p>
+<h3 id="134-how-to-write-non-functional-requirements-nfrs">13.4 How to write non-functional requirements (NFRs)</h3>
+<p>The majority of NFRs can be written with the same machinery as functional
+requirements (details and demonstration in <code>DESIGN-nfr.md</code>):</p>
+<table>
+<thead>
+<tr>
+<th>NFR</th>
+<th>How to write it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Permission (only an admin does X)</td>
+<td><code>requires role[u] == Admin</code> + an invariant over the ghost <code>done_by_admin</code></td>
+</tr>
+<tr>
+<td>Audit completeness</td>
+<td>A cross-cutting invariant (e.g. <code>audit.balance == cleared + pending + withdrawn</code>)</td>
+</tr>
+<tr>
+<td>Capacity / upper bound</td>
+<td>A bounded type / Seq capacity / a <code>count(...) &lt;= N</code> invariant</td>
+</tr>
+<tr>
+<td>Reliability behavior</td>
+<td>A fault-injection action (<code>crash</code>) + a mode state + <code>fair recover</code> + a recovery leadsTo</td>
+</tr>
+<tr>
+<td><strong>SLA / timeout</strong></td>
+<td>A <code>time</code> block + <code>deadline</code> (below)</td>
+</tr>
+<tr>
+<td>Probability, percentiles, real time in ms</td>
+<td><strong>Out of scope</strong> (write it in prose)</td>
+</tr>
+</tbody>
+</table>
+<p>An SLA is checked as safety in discrete time (inside <code>requirements</code>):</p>
+<pre><code class="language-fsl">time {
+  urgent start, finish                    // while enabled, time (tick) does not advance
+  age waitAge[r: Req] while pending[r]    // +1 per tick, 0 if the condition is false
+}
+requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
+  deadline waitAge &lt;= 4
+}
+</code></pre>
+<ul>
+<li>The tick is auto-generated, and the urgency discipline ("the system does not
+  procrastinate work when idle") is its guard. If you do not specify urgent,
+  most deadlines become violated by a starvation trace — which is a correct
+  indication that "there is no scheduling assumption."</li>
+<li>Placement: at most one <code>time</code> directly under requirements, and <code>deadline</code>
+  inside a requirement (the requirement ID is tied to the violation). An age is
+  +1 per tick (reset to 0 if while is false) and can be read from guards as an
+  ordinary state variable.</li>
+<li><code>tick</code> is generated — do not declare your own <code>action tick</code> (it is a check
+  error). It advances age counters only and auto-maps to <code>stutter</code> under
+  refinement; reference it as <code>tick()</code> (e.g. in an <code>acceptance</code> scenario).
+  Tick-side work (service time, etc.) needs the kernel-wrapper form.</li>
+<li><strong>Across layers, a <code>deadline</code> refines only over a shared clock.</strong> A <code>deadline</code>
+  is a safety property of the clock that declares it, so a design refines a
+  <em>timed</em> requirements spec only when its <code>tick</code> mirrors the generated one; a
+  design with a finer clock (a <code>tick</code> that also consumes service time) has no
+  abstract image for those steps and fails <code>fslc refine</code> with
+  <code>abs_requires_failed</code> — the same non-propagation as liveness. Verify a timed
+  property at the clock-owning layer, or keep the upper contract time-less and put
+  the clock in the design kernel (<code>tick → stutter</code>). See <code>docs/DESIGN-nfr.md</code> §6
+  and <code>examples/nfr/sla_worker_design.fsl</code>.</li>
+<li><strong>⚠ The vacuous-SLA trap</strong>: making an action that can always be enabled urgent
+  freezes time, and any K satisfies the deadline vacuously (even <code>&lt;= 0</code> is
+  green). The correct form is <strong>to make urgent only the guarded action that
+  becomes enabled at deadline arrival (the respond_due form with
+  <code>requires age &gt;= K</code>)</strong>. To confirm non-vacuity, lower it to <code>K-1</code> and check
+  that it becomes violated. <code>fslc verify --vacuity</code> emits
+  <code>kind:"urgency_freeze"</code> for the provable form of this trap (the urgent
+  condition is initial and inductive); absence of the warning is not a proof of
+  non-vacuity.</li>
+<li>The BMC check works immediately. An inductive proof often needs a time-budget
+  auxiliary invariant (the <code>age + remaining work &lt;= K</code> form) (derived from the
+  CTI; real examples in <code>examples/nfr/</code>).</li>
+</ul>
+<h3 id="135-database-compatibility-layer-dbsystem-fsl-db">13.5 Database compatibility layer: <code>dbsystem</code> (fsl-db)</h3>
+<p><code>dbsystem</code> models migration compatibility across databases, application
+artifacts, API/offline payloads, and environments. It is a dialect expansion, not
+a DB engine model: optimizer behavior, lock timing, wall-clock TTLs,
+probability, and full production-data completeness are outside the formal model.</p>
+<p>Core shape:</p>
+<pre><code class="language-fsl">dbsystem &lt;Name&gt; {
+  database &lt;db&gt; {
+    schema &lt;initial_version&gt;
+    table &lt;table&gt; {
+      column &lt;column&gt;: &lt;db_type&gt; present backfilled not_null;
+      column &lt;future_column&gt;: &lt;db_type&gt; absent;
+    }
+  }
+
+  migration &lt;name&gt; from &lt;v0&gt; to &lt;v1&gt; [rollbackable] {
+    add &lt;table&gt;.&lt;column&gt; nullable;
+    backfill &lt;table&gt;.&lt;column&gt;;
+    set_not_null &lt;table&gt;.&lt;column&gt;;
+    rename &lt;table&gt;.&lt;old&gt; to &lt;table&gt;.&lt;new&gt;;
+    split &lt;table&gt;.&lt;source&gt; into &lt;table&gt;.&lt;a&gt;, &lt;table&gt;.&lt;b&gt; lossless|lossy|irreversible;
+    merge &lt;table&gt;.&lt;a&gt;, &lt;table&gt;.&lt;b&gt; into &lt;table&gt;.&lt;target&gt; lossless|lossy|irreversible;
+    drop &lt;table&gt;.&lt;column&gt; destructive|irreversible;
+  }
+
+  artifact &lt;version&gt; {
+    reads &lt;table&gt;.&lt;column&gt;, ...;
+    writes &lt;table&gt;.&lt;column&gt;, ...;
+    requires &lt;capability_namespace&gt;.&lt;capability&gt;, ...;
+    provides &lt;capability_namespace&gt;.&lt;capability&gt;, ...;
+    calls api.&lt;operation&gt;, ...;
+    accepts api.&lt;operation&gt;, ...;
+    expects response.&lt;field&gt;, ...;
+    responds response.&lt;field&gt;, ...;
+    emits_offline api.&lt;operation&gt; ttl &lt;finite_ticks&gt;;
+  }
+
+  environment &lt;env&gt; {
+    schema &lt;lo&gt;..&lt;hi&gt;;
+    flag &lt;flag_name&gt; { &lt;variant&gt;, ... } default &lt;variant&gt;;
+    active &lt;version&gt; when schema &lt;lo&gt;..&lt;hi&gt; when flag &lt;flag_name&gt;=&lt;variant&gt;;
+    supported &lt;version&gt; when schema &lt;lo&gt;..&lt;hi&gt;;
+    may_exist &lt;version&gt; when schema &lt;lo&gt;..&lt;hi&gt;;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
+    rule data_preserved;
+    rule rollback_equivalent;
+  }
+}
+</code></pre>
+<p>If <code>check compatibility</code> is omitted, default rules cover read/write lifecycle,
+destructive annotations, preservation-transform annotations, and API/offline
+compatibility. <code>data_preserved</code> and <code>rollback_equivalent</code> are opt-in bounded
+checks and report <code>DB-ASSUME-BOUNDED-ROW-MODEL</code>.</p>
+<p>Feature flags are finite environment dimensions. <code>fslc db check</code> enumerates the
+declared variants with schema snapshots and reports
+<code>DB-ASSUME-FINITE-FLAG-STATE</code>; this is a rollout/kill-switch compatibility
+check, not a percentage or probability proof. Omit <code>flag</code> / <code>when flag</code> to keep
+the existing artifact/window-only model.</p>
+<p>Current formal violation kinds include:</p>
+<ul>
+<li><code>column_removed_while_still_read</code></li>
+<li><code>column_removed_while_still_written</code></li>
+<li><code>not_null_before_backfill</code></li>
+<li><code>destructive_migration_unannotated</code></li>
+<li><code>preservation_transform_unannotated</code></li>
+<li><code>data_preservation_loss</code></li>
+<li><code>rollback_not_equivalent</code></li>
+<li><code>api_call_not_accepted</code></li>
+<li><code>api_response_field_missing</code></li>
+<li><code>offline_payload_not_accepted</code></li>
+<li><code>required_capability_missing</code></li>
+</ul>
+<p>Use <code>fslc db check</code> when you want fsl-db vocabulary:</p>
+<pre><code class="language-bash">fslc db check examples/db/safe_add_nullable_column.fsl
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
+fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql -o /tmp/imported.fsl
+fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrisma
+</code></pre>
+<p>Successful checks return <code>verified_under_assumptions</code> with the finite rollout and
+capability-completeness assumptions. Compatibility failures return
+<code>finding_schema_version: "fsl-db-finding.v0"</code> plus <code>findings[]</code> containing the
+environment, artifact, migration/schema element, minimal conflict set, and repair
+candidates. Runtime observation returns <code>observed_mismatch</code> with
+<code>formal_result: "not_run"</code>; absence from logs is not proof of unused behavior.
+Use ordinary <code>fslc verify</code> when you want to inspect the generated kernel
+counterexample directly.</p>
+<p>Generic <code>requires</code> / <code>provides</code> capabilities let AI model/prompt/retriever/tool
+schema and output schema profiles share the same compatibility check as
+DB/API/mobile/server artifacts. A <code>requires tool.RefundPaymentV2</code> declaration is
+safe only when an active or supported artifact in the same environment snapshot
+<code>provides tool.RefundPaymentV2</code>. These profiles are finite coexistence facts,
+not evaluator or statistical quality claims.</p>
+<p>Importer boundary: SQL DDL import is <code>sql-ddl-minimal.v0</code>. The first
+source-specific ORM importer is <code>prisma-schema-minimal.v0</code>, which imports Prisma
+<code>model</code> scalar fields and reports relation/list/model attributes as
+<code>unsupported_prisma</code> warnings. Production-data preservation evidence and
+DB-engine evidence live in separate JSON schemas under <code>schemas/fslc/db/</code> and
+use <code>formal_result: "not_run"</code>; they never upgrade sampled/audited evidence into
+<code>verified</code> or <code>proved</code>.</p>
+<h3 id="136-ai-hard-contract-layer-ai_component-fsl-ai">13.6 AI hard-contract layer: <code>ai_component</code> (fsl-ai)</h3>
+<p><code>ai_component</code> models the deterministic, guard-backed slice of an AI component:
+tool declarations, symbolic tool schemas, business precondition evidence,
+authority, human approval, forbidden tools, and fallback routing. It is a
+dialect expansion, not a stochastic kernel. Probability, evaluator scoring,
+groundedness judgments, prompt-injection semantic judgments, and confidence
+intervals remain outside this formal kernel model and are handled as external
+evidence.</p>
+<p>Core shape:</p>
+<pre><code class="language-fsl">ai_component RefundAgentToolSafety {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+  }
+
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+  }
+
+  authority {
+    may_execute SearchOrder;
+    requires_human_approval RefundPayment;
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    when low_confidence require human_review;
+  }
+}
+</code></pre>
+<p><code>model</code>/<code>prompt</code>/<code>input</code>/<code>output</code>/<code>tool</code>/<code>authority</code>/<code>fallback</code> are the fields
+most specs need. Three more are optional, each at most once: <code>retriever
+&lt;id&gt;;</code>, <code>temperature &lt;number&gt;;</code>, and a <code>tools [Name, ...]</code> shorthand that
+declares bare tools with no schema/precondition/effect. A <code>tool</code> block's
+<code>precondition &lt;name&gt;;</code> line is repeatable (0 or more) and it may also declare
+one <code>effect &lt;name&gt;;</code>. None of these fields — nor <code>authority</code>, <code>fallback</code>, or
+the <code>check hard { }</code> block below — accept a <code>"description text"</code> tag; every
+field here is a bare identifier or number, unlike the declaration-tag
+convention in §10.</p>
+<p>An <code>ai_component</code> may also declare which hard rules get an explicit,
+separately-reported invariant:</p>
+<pre><code class="language-fsl">  check hard {
+    rule tool_authority;
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
+  }
+</code></pre>
+<p>Omitting <code>check hard { }</code> checks all five rules (the default); naming an
+unknown rule is a check-time error. Narrowing the set only removes an
+explicit, separately-reported invariant for <code>forbidden_tool_blocked</code> /
+<code>human_approval_required</code> — the structural guards themselves (no
+execute-action is ever generated for a forbidden tool; an approval-required
+tool's execute action always carries a <code>requires human_approved</code> guard) are
+generated unconditionally either way. <code>tool_authority</code>,
+<code>tool_schema_declared</code>, and <code>tool_precondition_declared</code> are checked
+unconditionally regardless of this block.</p>
+<p><code>ai_component</code> lowers to a kernel spec with finite tool state:</p>
+<ul>
+<li><code>Tool</code> enum</li>
+<li><code>human_approved: Map&lt;Tool, Bool&gt;</code></li>
+<li><code>tool_executed: Map&lt;Tool, Bool&gt;</code></li>
+<li>generated <code>approve_*</code> / <code>execute_*</code> actions</li>
+<li>generated invariants for approval-before-execution and forbidden tools</li>
+</ul>
+<p>Use <code>fslc ai check</code> when you want fsl-ai vocabulary:</p>
+<pre><code class="language-bash">fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai check examples/ai/recursive_support_agent.fsl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
+fslc ai eval examples/ai/support_answer_quality.fsl --property LooseQuality
+fslc ai regress examples/ai/support_answer_quality.fsl --migration PromptV7ToV8 --before-records examples/ai/support_eval_v7.jsonl --after-records examples/ai/support_eval_v8_regressed.jsonl
+fslc ai drift examples/ai/support_answer_quality.fsl --logs examples/ai/runtime_drift_current.jsonl --baseline-logs examples/ai/runtime_drift_baseline.jsonl
+fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
+</code></pre>
+<p>Successful <code>ai_component</code> hard-contract checks return
+<code>verified_under_assumptions</code>. Recursive <code>agent</code> checks return
+<code>agent_analyzed</code> with <code>formal_result: "not_run"</code> because they are structural
+graph analysis, not kernel proof. <code>fslc ai replay</code> accepts JSONL or
+<code>{ "events": [...] }</code> and returns
+<code>replay_conformant</code> / <code>replay_nonconformant</code> with
+<code>formal_result: "not_run"</code> because replay is observation evidence. Findings use
+<code>finding_schema_version: "fsl-ai-finding.v0"</code> and include
+<code>guarantee_kind</code>:</p>
+<ul>
+<li><code>syntactic_hard</code>: schema/authority/approval/forbidden/precondition guard facts.</li>
+<li><code>agent_structural</code>: recursive-agent scope, grant, visibility, delegation, and
+  tool-reachability findings.</li>
+<li><code>runtime_observed</code>: declared component capability differs from observed events.</li>
+<li><code>statistically_supported</code> / <code>statistically_unsupported</code>: precomputed eval JSONL
+  and Wilson confidence-bound evidence from <code>fslc ai eval</code>; never displayed as
+  <code>proved</code>.</li>
+<li><code>evaluator_supported</code>: reserved for external evaluator-backed evidence and must
+  not be displayed as <code>proved</code>.</li>
+</ul>
+<p>Project-level fsl-ai evidence declarations can combine <code>ai_component</code>,
+<code>dataset</code>, <code>evaluator</code>, <code>failure_mode</code>, <code>statistical_property</code>,
+<code>ai_migration</code>, and <code>observed_property</code>. <code>fslc ai check</code> parses these files and
+returns <code>ai_project_analyzed</code>; <code>fslc ai eval</code> checks Bernoulli/proportion
+metrics from precomputed JSONL with Wilson intervals; <code>fslc ai regress</code> checks
+aggregate <code>no_regression</code> metric drop/increase clauses; <code>fslc ai compare</code>
+reports metric deltas without a threshold claim; <code>fslc ai drift</code> checks runtime
+telemetry thresholds and drift; and <code>fslc ai compat</code> emits a finite
+<code>dbsystem artifact</code> capability profile. All of these use
+<code>formal_result:"not_run"</code>.</p>
+<p>Recursive <code>agent</code> shape:</p>
+<pre><code class="language-fsl">agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy, CreateDraft];
+  authority {
+    may_execute [SearchDocs, CheckPolicy, CreateDraft];
+  }
+  review_gate PolicyCheckAgent;
+
+  agent RetrievalAgent {
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+    contract { hard { rule PolicyMustCiteSource; } }
+    output PolicyDecision visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -&gt; PolicyCheckAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -&gt; retry up_to 2;
+    when RetrievalAgent.failed_after_retry -&gt; HumanReviewPending;
+  }
+}
+</code></pre>
+<p>Nested agents are ordinary agents scoped by their parent, not a distinct
+<code>sub_agent</code> type. Nesting creates lexical names such as
+<code>SupportOrchestrator.RetrievalAgent</code>; runtime collaboration is declared
+separately in <code>orchestration</code>. Parent authority/context is not inherited
+implicitly. A child must receive explicit <code>grant authority</code> and <code>grant context</code>,
+and each grant must stay inside the immediate parent boundary. <code>model</code>/
+<code>prompt</code> are also valid at any agent level (root or child), and a direct
+<code>tool { }</code> block works inside an agent the same way it does inside
+<code>ai_component</code>. <code>review_gate &lt;Child&gt;;</code> names a <strong>direct child</strong> agent through
+which every orchestration path to a high-authority-tool descendant must pass;
+a path that skips all declared review gates is flagged
+<code>policy_review_bypass_in_orchestration</code>. <code>trust</code> is a free identifier, not a
+validated enum — only the literal <code>low</code> currently drives a dedicated check
+(a low-trust agent's path to a high-authority tool); other values parse but
+have no distinct check yet. <code>contract { hard { rule &lt;Name&gt;; } }</code> is parsed
+and listed per agent, but — unlike <code>ai_component</code>'s <code>check hard { }</code> — its
+rule names are not validated against a known set and are not yet
+cross-checked against anything; treat it as forward-declared metadata.</p>
+<p>Design details: <code>docs/DESIGN-ai-hard.md</code>.</p>
+<h3 id="137-what-is-not-handled-the-boundary-of-the-layers">13.7 What is not handled (the boundary of the layers)</h3>
+<p>The majority of non-functional requirements (permissions, audit, capacity,
+reliability behavior, discrete-time SLA) can be handled (§13.4). What remains
+outside FSL is: <strong>probability, percentiles (99.9% etc.), real time (wall-clock
+ms), usability, DB optimizer/lock timing, full production-data proof, evaluator
+truth judgments, and prose rationale</strong> (write these in each layer's document).
+FSL is responsible for the <strong>checkable skeleton</strong> of each artifact.</p></div></details>
+<details id="14-library-api"><summary>14. Library API<span class="tree-blurb"> — Python ライブラリとして呼び出す API。</span></summary><div class="tree-body"><pre><code class="language-python">from fslc import parse, build_spec, verify, prove, Monitor
+
+spec   = build_spec(parse(src))
+result = verify(spec, depth=8)            # BMC
+result = prove(spec, k_ind=1, base_depth=8)   # k-induction
+</code></pre>
+<p>Returns a dict with the same structure as the CLI (the CLI wraps it with a
+<code>"fsl": "1.0"</code> envelope).</p></div></details>
+<details id="15-validation-suite-the-spec-intent-gap"><summary>15. Validation suite (the spec ≠ intent gap)<span class="tree-blurb"> — 仕様が意図から外れていないかを検査する一式 — mutate/explain/analyze。</span></summary><div class="tree-body"><p>What <code>fslc</code> guarantees is "the internal consistency of the written spec," not
+"whether the spec is faithful to the original intent." When you have AI write a
+spec, errors concentrate in this validation layer. The following is the set of
+checks that <strong>surface those errors as mechanical mismatches</strong> (the overall
+picture of the design is roadmap issue #1; each feature has a corresponding
+DESIGN-*.md).</p>
+<ul>
+<li><strong><code>forbidden</code> (negative acceptance criteria)</strong> — a requirements-dialect
+  construct. Write an "operation sequence that should be rejected," and at check
+  time it is replay-verified that the last step is rejected (not-enabled or a
+  violation). If it is accepted, <code>kind:"forbidden"</code> (detection of
+  under-constraint = a missing guard, which a safety invariant stays silent
+  about). The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
+<li><strong>Vacuity check (<code>--vacuity</code>)</strong> — on the verified/proved path, warns about
+  <code>vacuous_implication</code> (the antecedent of an implication is unreachable),
+  <code>vacuous_leadsto</code> (the trigger is unreachable), <code>always_true_requires</code>
+  (a guard that is always true under the context of preceding clauses),
+  <code>tautology_over_frozen</code> (a dynamically tautological invariant over state no
+  action changes), and <code>urgency_freeze</code> (a generated deadline <code>tick</code> proven dead
+  because urgency freezes time). <code>error</code> exits 2. →
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
+<li><strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
+  (fabrication candidates) and unreferenced requirements (omission candidates,
+  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
+<li><strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
+  mutant is killed by the existing net of checks. A surviving mutant = behavior
+  constrained by no property = a place where an invariant is missing.
+  <code>--by-requirement</code> flags "a requirement that kills no behavior mutant" as an
+  <code>empty_formalization</code> warning (the semantic-level extension of
+  <code>--strict-tags</code>). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
+<li><strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
+  action who/when/what-changes, verification bounds, fairness, KPI projections,
+  branch lowering, synthesized refinement mappings, automatic checks, tags) +
+  counterfactuals ("without this rule, this procedure could break it") + witness
+  narration. Moves human review from reading logical formulas to adjudicating
+  concrete examples. JSON mode remains available without <code>--readable</code>. →
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a></li>
+<li><strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
+  returns the Typed Semantic Graph of requirements, actions, state, properties,
+  and scenarios. Graph projections return connected components, SCCs,
+  representative cycles, degree, and structural metrics such as cycle rank and
+  fan-in/fan-out hubs. <code>--projection action_dependency_graph</code> exposes structural
+  action enables/conflict edges; <code>--projection impact_graph --focus NODE</code> emits
+  the upstream/downstream slice around a TSG node. It accepts multiple files or
+  directories in batch mode;
+  directories are expanded recursively for <code>*.fsl</code> and sorted deterministically.
+  Standalone refinement mappings can be viewed with <code>--projection
+  refinement_graph</code>; project manifests can be viewed with <code>--projection
+  traceability_graph</code>. <code>--format dot</code> and <code>--format mermaid</code> export graph-shaped
+  projections for review diagrams while keeping JSON as the default. <code>--profile
+  ai-review</code> emits review findings such as <code>disconnected_requirement</code>,
+  <code>unanchored_property</code>, <code>progressless_cycle</code>, <code>unwritten_state</code>,
+  <code>unread_state</code>, <code>unguarded_action</code>, and <code>conservation_candidate</code>.
+  These findings carry <code>formal_status: "not_a_violation"</code>; a structural cycle or
+  disconnected component is not a proof failure. Versioned schemas for the TSG,
+  graph projections, and findings are published under <code>schemas/fslc/analysis/</code>. →
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a></li>
+<li><strong><code>fslc html</code></strong> — a self-contained HTML report over the same explain/verify
+  evidence: status summary, state/action/property tables, an action-to-state
+  write graph, trace timelines, witness examples, counterfactuals, source, and
+  raw JSON. It is meant for PRs, design reviews, and non-specialist project
+  review without requiring the reader to run the CLI. →
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></li>
+</ul>
+<p>The discipline before writing (the formalization memo, the NL→syntax reverse
+lookup, recommended practices) is in the AI-agent skills under <code>skills/</code>, with
+the shared language reference in <code>skills/fsl/SKILL.md</code>; the real-run record is in
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-9.md"><code>DOGFOOD-9.md</code></a>.</p></div></details>
+<details id="16-promotion-judgment-to-ghost-types-typestate"><summary>16. Promotion judgment to ghost types (typestate)<span class="tree-blurb"> — 状態機械を ghost 型 / typestate へ昇格させる判断。</span></summary><div class="tree-body"><p><code>fslc typestate &lt;file.fsl&gt; [--ts]</code> decides how soundly the state machine of a
+design spec (enum-valued struct fields / state variables / <code>Option&lt;_&gt;</code> slots)
+can be mapped to the host language's typestate (ghost types). It classifies each
+<code>(entity, action)</code> as <code>derivable</code> (the from-state is the entity's own local
+guard) / <code>branching</code> (data-dependent inside an <code>if</code>) / <code>relational</code> (no local
+guard, and the precondition lives in an external structure — cannot be expressed
+in the type and remains as a runtime/verification obligation). An entity's
+<code>applicability</code> is <code>full</code> only when all transitions are derivable/branching.
+With <code>--ts</code>, it outputs a TypeScript scaffold for the derivable portion.
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details></div>
+  </div>
+</section>
+
+</main>
+
+<a class="back-to-top" href="#language-top">↑ 先頭へ</a>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

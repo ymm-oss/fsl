@@ -15,6 +15,8 @@
   --ok-soft: #e7f6ee;
   --warn: #b7791f;
   --warn-soft: #fdf3e0;  /* CTI / counterexample-to-induction */
+  --ref: #0f7d82;        /* generated-reference zone (language.html / cli.html only) */
+  --ref-soft: #e4f4f4;
   --shadow: 0 1px 2px rgba(20,22,30,.06), 0 8px 30px rgba(20,22,30,.06);
   --radius: 16px;
   --maxw: 1120px;
@@ -34,6 +36,7 @@
     --danger: #ff6b7d; --danger-soft: #361a22;
     --ok: #4cd081; --ok-soft: #15291f;
     --warn: #e0a64b; --warn-soft: #2c2410;
+    --ref: #4dd2d6; --ref-soft: #133335;
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
   }
 }
@@ -121,6 +124,20 @@ body {
   text-decoration: none;
   font-weight: 700;
 }
+/* Real heading + aria-labelledby per category group, not a styled <p> +
+   anonymous <nav> — a screen-reader landmark/heading rotor needs a named
+   group per category (DESIGN-docs-site.md D1/§4 accessibility revision). */
+.docs-category-label {
+  margin: 16px 4px 6px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.docs-sidebar .docs-chapters:first-of-type,
+.docs-category-label:first-of-type { margin-top: 10px; }
 .chapter-link[aria-current="page"] {
   border-color: color-mix(in srgb, var(--brand) 35%, var(--line));
   background: var(--brand-soft);
@@ -203,6 +220,22 @@ section { padding: 88px 20px; }
 .narrow { max-width: 680px; }
 
 .kicker { color: var(--brand); font-weight: 700; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 14px; }
+/* "Generated Reference" kicker on language.html/cli.html: the mono
+   typeface carries the technical/tool signal at kicker scale, where it
+   cannot be mistaken for a code span or read as the H1 itself being a
+   literal command (DESIGN-docs-site.md D5 revision — var(--mono) is this
+   site's sitewide, exclusive signifier for literal code/syntax, so it
+   must not land on the <h1>/<h2> tone itself). */
+.kicker.mono { font-family: var(--mono); color: var(--ref); letter-spacing: .08em; }
+
+/* Breadcrumb: a quieter sibling of .kicker, not a new visual register.
+   Chapter/reference pages only — hub pages have no "chapter" segment
+   (DESIGN-docs-site.md D2/§4). The category link is the only "back to
+   category" affordance on chapter pages. */
+.breadcrumb { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+.breadcrumb a { color: var(--muted); text-decoration: none; font-weight: 700; }
+.breadcrumb a:hover { color: var(--brand); }
+.breadcrumb [aria-current="page"] { color: var(--ink); }
 h1 { font-size: clamp(30px, 6vw, 56px); line-height: 1.15; letter-spacing: -.02em; margin: 0 0 20px; font-weight: 850; }
 h2 { font-size: clamp(24px, 4.4vw, 38px); line-height: 1.2; letter-spacing: -.015em; margin: 0 0 18px; font-weight: 800; }
 h3 { font-size: 19px; margin: 0 0 8px; font-weight: 750; }
@@ -275,6 +308,14 @@ p { margin: 0 0 16px; }
 .badge.violated { background: var(--danger-soft); color: var(--danger); }
 .badge.verified, .badge.proved { background: var(--ok-soft); color: var(--ok); }
 .badge.cti { background: var(--warn-soft); color: var(--warn); }
+/* Provenance disclosure ("this text has a machine source of truth"), not
+   a caution — deliberately NOT --danger/--warn, and deliberately a plain
+   badge with no wrapping band/box around it or the <h1> (this site
+   already uses a bordered/tinted-box + pill combination sitewide for
+   live verify-verdict state; reusing that combination for provenance
+   risks misreading it as a status about the page — DESIGN-docs-site.md
+   D4/D5 revision). */
+.badge.ref { background: var(--ref-soft); color: var(--ref); font-size: 13px; font-weight: 700; padding: 6px 14px; }
 .banner { margin-top: 16px; padding: 14px 18px; border-radius: 12px; font-weight: 600; display: none; }
 .banner.show { display: block; }
 .banner.violated { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); }
@@ -364,33 +405,6 @@ code { font-family: var(--mono); }
 }
 .toc a:hover { border-color: var(--brand); }
 
-.manual-shell {
-  display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
-  margin-top: 26px;
-}
-.manual-nav {
-  position: sticky;
-  top: 76px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-.manual-nav .label {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  margin: 2px 4px 6px;
-}
 .chapter-link {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
@@ -474,15 +488,6 @@ code { font-family: var(--mono); }
 .chapter-card .btn {
   white-space: nowrap;
   align-self: center;
-}
-@media (max-width: 900px) {
-  .manual-shell { grid-template-columns: 1fr; }
-  .manual-nav {
-    position: static;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  }
-  .manual-nav .label { grid-column: 1 / -1; }
 }
 @media (max-width: 640px) {
   .chapter-card {
@@ -651,3 +656,81 @@ body.manual-home .hero .lead {
 body.manual-home main > section:nth-of-type(2) {
   padding-top: 56px;
 }
+
+/* ---- generated-reference template: language.html / cli.html ----
+   DESIGN-docs-site.md D3/D5/§4-§5. --ref is scoped to exactly this zone
+   (the provenance badge above, the tree accent below, and nowhere else —
+   never .chapter-link, .docs-sidebar, or a bordered band around a
+   heading) so it cannot be misread as --brand/--danger/--ok/--warn's
+   existing meanings elsewhere on the site. */
+.disclosure-tree { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.disclosure-tree details {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 2px 4px;
+}
+.disclosure-tree details[open] { padding-bottom: 8px; }
+.disclosure-tree details > .disclosure-tree { margin: 0 8px 8px 22px; }
+.disclosure-tree summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  color: var(--ink);
+  list-style: none;
+}
+.disclosure-tree summary::-webkit-details-marker { display: none; }
+.disclosure-tree summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  margin-right: 6px;
+  color: var(--ref);
+  transition: transform .15s ease;
+}
+.disclosure-tree details[open] > summary::before { transform: rotate(90deg); }
+.disclosure-tree summary:hover { background: var(--ref-soft); color: var(--ref); }
+.disclosure-tree .tree-body { padding: 4px 14px 10px 34px; }
+.disclosure-tree pre {
+  margin: 8px 0 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.disclosure-tree code { font-family: var(--mono); }
+.disclosure-tree table.matrix { margin-top: 10px; }
+
+.tree-controls { display: flex; gap: 8px; margin-top: 18px; }
+
+/* Back-to-top: language.html/cli.html only. These two pages grow by
+   nesting rather than pagination (D3), and the sidebar's sticky rail is
+   itself position:static below the 1180px breakpoint, so a reader deep
+   in the tree on a narrow viewport needs a return path that isn't the
+   browser's native Back button (DESIGN-docs-site.md D2 revision). The 12
+   existing chapter pages are a few screens long and do not get this. */
+.back-to-top {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: var(--shadow);
+}
+.back-to-top:hover { color: var(--ref); border-color: var(--ref); }
+
+/* ---- category hub pages (get-started/guides/reference/examples-background) ---- */
+body.hub-page .manual-main { margin-top: 8px; }

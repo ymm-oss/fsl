@@ -592,6 +592,7 @@ fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation 
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
+fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary

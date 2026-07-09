@@ -6,6 +6,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Rebuilt the `docs/intro/` manual site's information architecture around 4
+  fixed categories (Get Started / Guides / Reference / Examples & Background),
+  designed with the Relational Design plugin (trace under `.relational-design/`,
+  decisions in `docs/DESIGN-docs-site.md`). Added a categorized sidebar with
+  real `<h2>`/`aria-labelledby` groups, a breadcrumb, 4 category hub pages, and
+  7 new chapters: `quickstart` (a 5-minute install-to-proof walkthrough),
+  `examples` (a guide to `examples/`/`specs/`), `errors` (the JSON envelope,
+  exit-code contract, and a failure-mode index), `glossary`, and `design-notes`
+  (an index of `DESIGN-*.md`/`DOGFOOD-*.md`). Added `tools/build_site_reference.py`,
+  which generates `intro/language.*.html` and `intro/cli.*.html` — exhaustive,
+  disclosure-tree references reproduced verbatim from `docs/LANGUAGE.md` and
+  introspected from `src/fslc/cli.py` — plus `tests/test_site_reference_snapshot.py`
+  to catch a forgotten regeneration. `syntax.*.html` is now a 30-minute reading
+  primer that points to the generated language reference rather than a second
+  hand-maintained grammar table. Fixed `docs/LANGUAGE.md` §7 missing the
+  `fslc ledger` command and `docs/README.md` missing 5 `DESIGN-*.md` entries.
 - fsl-ai stochastic/migration/drift evidence commands: `fslc ai eval` now checks
   precomputed eval JSONL against `statistical_property` Wilson-bound thresholds,
   `fslc ai regress` checks aggregate `ai_migration.no_regression` metric

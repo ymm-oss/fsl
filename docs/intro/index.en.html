@@ -38,171 +38,38 @@
 
 <section>
   <div class="wrap">
-    <p class="kicker reveal">Chapters</p>
-    <h2 class="reveal">Browse by chapter title</h2>
-    <div class="manual-shell reveal">
-      <nav class="manual-nav" aria-label="Manual chapters">
-        <div class="label">Chapters</div>
-        <a class="chapter-link" href="concept.en.html"><span class="num">01</span><span><strong>What is FSL?</strong><span>Concepts and counterexamples</span></span></a>
-        <a class="chapter-link" href="when-to-use.en.html"><span class="num">02</span><span><strong>When to Use FSL</strong><span>Fit, gates, and scope</span></span></a>
-        <a class="chapter-link" href="guide.en.html"><span class="num">03</span><span><strong>Workflow</strong><span>Commands and repair loop</span></span></a>
-        <a class="chapter-link" href="mechanism.en.html"><span class="num">04</span><span><strong>Mechanisms</strong><span>BMC, induction, refinement</span></span></a>
-        <a class="chapter-link" href="business-layer.en.html"><span class="num">05</span><span><strong>Business Layer</strong><span>Processes, controls, KPIs</span></span></a>
-        <a class="chapter-link" href="requirements-layer.en.html"><span class="num">06</span><span><strong>Requirements Layer</strong><span>IDs, acceptance, forbidden</span></span></a>
-        <a class="chapter-link" href="design-layer.en.html"><span class="num">07</span><span><strong>Design Layer</strong><span>Internal state, refinement, compose</span></span></a>
-        <a class="chapter-link" href="syntax.en.html"><span class="num">08</span><span><strong>Syntax Guide</strong><span>Types, actions, properties</span></span></a>
-        <a class="chapter-link" href="analysis.en.html"><span class="num">09</span><span><strong>Structural Analysis</strong><span>TSG, graph projections, findings</span></span></a>
-        <a class="chapter-link" href="domain.en.html"><span class="num">10</span><span><strong>fsl-domain</strong><span>DDD / async effects</span></span></a>
-        <a class="chapter-link" href="db.en.html"><span class="num">11</span><span><strong>fsl-db</strong><span>DB / multi-env compatibility</span></span></a>
-        <a class="chapter-link" href="ai.en.html"><span class="num">12</span><span><strong>fsl-ai</strong><span>AI contracts and agents</span></span></a>
-      </nav>
-      <div class="manual-main">
-        <article class="chapter-card">
-          <span class="num">01</span>
-          <div><h3>What is FSL?</h3><p>Understand states, operations, rules, counterexamples, and brute-force checking without formal-methods background.</p></div>
-          <a class="btn" href="concept.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">02</span>
-          <div><h3>When to Use FSL</h3><p>Confirm it's expressible, then default to writing it — FSL replaces the doc you'd write anyway. Gates, what's genuinely out of scope, and which layer to write.</p></div>
-          <a class="btn" href="when-to-use.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">03</span>
-          <div><h3>How FSL Works and How to Use It</h3><p>Learn verification modes, CTIs, layer chains, commands, and the AI-assisted repair loop.</p></div>
-          <a class="btn" href="guide.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">04</span>
-          <div><h3>Verification Mechanisms</h3><p>Go deeper into finite state spaces, BMC, k-induction, liveness, refinement, and implementation connection.</p></div>
-          <a class="btn" href="mechanism.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">05</span>
-          <div><h3>Writing the Business Layer</h3><p>Write business processes, controls, goals, and KPIs in a vocabulary business readers can validate.</p></div>
-          <a class="btn" href="business-layer.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">06</span>
-          <div><h3>Writing the Requirements Layer</h3><p>Turn business intent into requirement IDs, inputs, guards, acceptance flows, forbidden flows, and NFRs.</p></div>
-          <a class="btn" href="requirements-layer.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">07</span>
-          <div><h3>Writing the Design Layer</h3><p>Design internal state and actions, prove a refinement mapping up to requirements, compose components, and hand off to conformance.</p></div>
-          <a class="btn" href="design-layer.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">08</span>
-          <div><h3>Syntax Guide</h3><p>Read actual FSL files: types, state, actions, expressions, properties, refinement, and composition.</p></div>
-          <a class="btn" href="syntax.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">09</span>
-          <div><h3>Structural Analysis</h3><p>Use <code>fslc analyze</code> to inspect Typed Semantic Graphs, graph projections, and review-only structural findings.</p></div>
-          <a class="btn" href="analysis.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">10</span>
-          <div><h3>fsl-domain</h3><p>Use <code>domain</code> to model Functional DDD aggregates, pure decide/evolve logic, async effects, and generated TypeScript scaffolds.</p></div>
-          <a class="btn" href="domain.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">11</span>
-          <div><h3>fsl-db</h3><p>Use <code>dbsystem</code> to check database migration compatibility across schema versions, artifact capabilities, multiple environments, and rollout windows.</p></div>
-          <a class="btn" href="db.en.html">Read</a>
-        </article>
-        <article class="chapter-card">
-          <span class="num">12</span>
-          <div><h3>fsl-ai</h3><p>Use <code>ai_component</code> for AI tool authority and replay, and <code>agent</code> for recursive scope, grants, visibility, orchestration, and failure policy.</p></div>
-          <a class="btn" href="ai.en.html">Read</a>
-        </article>
-      </div>
-    </div>
+    <p class="kicker reveal">4 Entry Points</p>
+    <h2 class="reveal">Browse by category</h2>
+    <p class="lead narrow reveal">Chapters are grouped into 4 categories: Get Started, Guides, Reference, and Examples &amp; Background. Each card below opens that category's full chapter list.</p>
+    <div id="index-categories" class="cards reveal" style="margin-top:24px"></div>
   </div>
 </section>
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
-    <p class="kicker reveal">By Goal</p>
-    <h2 class="reveal">Jump to what you need</h2>
+    <p class="kicker reveal">First Step</p>
+    <h2 class="reveal">If you only pick one</h2>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
-        <h3>Understand the value</h3>
-        <p>Read why machine-checked specs matter and how counterexamples differ from ordinary tests.</p>
+        <h3>New to formal methods</h3>
+        <p>Start with why machine-checked specs matter and how counterexamples differ from ordinary tests.</p>
         <p><a class="btn" href="concept.en.html">Read Concept</a></p>
       </div>
       <div class="syntax-card">
-        <h3>Decide whether to use it</h3>
-        <p>Judge by how it breaks, and by whether you'd document it anyway. Tell apart where FSL fits from what's genuinely out of scope.</p>
-        <p><a class="btn" href="when-to-use.en.html">Read When to Use</a></p>
+        <h3>Just want to run something</h3>
+        <p>Install, then go straight to reading, fixing, and proving a counterexample in 5 minutes.</p>
+        <p><a class="btn" href="quickstart.en.html">Read Quickstart</a></p>
       </div>
       <div class="syntax-card">
-        <h3>Run it in a project</h3>
-        <p>Learn <code>fslc</code> commands, JSON results, and the write -> verify -> repair loop.</p>
-        <p><a class="btn" href="guide.en.html">Read Workflow</a></p>
+        <h3>Need to look up a command or construct</h3>
+        <p>The exhaustive, lookup-oriented references generated from <code>LANGUAGE.md</code> and <code>cli.py</code>.</p>
+        <p><a class="btn" href="language.en.html">Language Reference</a> <a class="btn" href="cli.en.html">CLI Reference</a></p>
       </div>
       <div class="syntax-card">
-        <h3>Write business rules</h3>
-        <p>Use <code>business</code> to model actors, entities, processes, policies, goals, and KPIs.</p>
-        <p><a class="btn" href="business-layer.en.html">Read Business Layer</a></p>
+        <h3>Want a bigger worked example</h3>
+        <p>From the flagship cross-layer example to per-dialect examples — a map of <code>examples/</code>.</p>
+        <p><a class="btn" href="examples.en.html">Read Example Gallery</a></p>
       </div>
-      <div class="syntax-card">
-        <h3>Write requirements</h3>
-        <p>Use <code>requirements</code> for traceability, acceptance criteria, forbidden flows, and NFRs.</p>
-        <p><a class="btn" href="requirements-layer.en.html">Read Requirements Layer</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Design the implementation</h3>
-        <p>Use <code>spec</code> and <code>refinement</code> for internal state, <code>stutter</code>, compose, and conformance.</p>
-        <p><a class="btn" href="design-layer.en.html">Read Design Layer</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Understand the verifier</h3>
-        <p>Learn how BMC, induction, liveness, refinement, and runtime conformance fit together.</p>
-        <p><a class="btn" href="mechanism.en.html">Read Mechanisms</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Check syntax</h3>
-        <p>Use the syntax guide when reading or repairing concrete FSL specs.</p>
-        <p><a class="btn" href="syntax.en.html">Read Syntax</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Review structure</h3>
-        <p>Use <code>fslc analyze</code> to inspect traceability, graph projections, and AI-review findings without treating them as verifier failures.</p>
-        <p><a class="btn" href="analysis.en.html">Read Analyze</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Generate domain scaffolds</h3>
-        <p>Use <code>domain</code> to make aggregate ownership, commands, events, async effects, and Functional DDD scaffolds explicit.</p>
-        <p><a class="btn" href="domain.en.html">Read fsl-domain</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Check DB compatibility</h3>
-        <p>Use <code>dbsystem</code> to model schema versions, migrations, artifact read/write capabilities, and prod/staging/worker/mobile coexistence windows.</p>
-        <p><a class="btn" href="db.en.html">Read fsl-db</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Guard AI tool calls</h3>
-        <p>Use <code>ai_component</code> for tool authority, human approval, forbidden tools, and replay evidence; use <code>agent</code> for recursive agent structure.</p>
-        <p><a class="btn" href="ai.en.html">Read fsl-ai</a></p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <p class="kicker reveal">GitHub Pages</p>
-    <h2 class="reveal">Publishing this manual</h2>
-    <div class="panel reveal">
-      <p>This manual is static HTML. In GitHub Pages, set the source to <code>main / docs</code>.</p>
-      <table class="matrix">
-        <tr><th>Item</th><th>Value</th></tr>
-        <tr><td>Source</td><td><code>main</code> branch, <code>/docs</code> folder</td></tr>
-        <tr><td>Root</td><td><code>docs/index.html</code></td></tr>
-        <tr><td>Expected URL</td><td><code>https://ymm-oss.github.io/fsl/</code></td></tr>
-      </table>
     </div>
   </div>
 </section>
