@@ -2,6 +2,7 @@
 # Copyright 2026 Ryoichi Izumita
 
 """Issue #24: the business audit ledger (`fslc ledger`)."""
+import json
 from pathlib import Path
 
 from fslc.cli import run_ledger
@@ -105,3 +106,60 @@ def test_ledger_impl_log_nonconformance(tmp_path):
                    ' {"action": "submit", "params": {"r": 0}}]', encoding="utf-8")
     md = _ledger(NFR / "sla_worker.fsl", depth=8, impl_log=str(log))
     assert "実装ログ適合" in md
+
+
+# --------------------------------------------------------------------------
+# issue #171: assurance classes (proved/bounded/replay-observed/statistical/not_run)
+# --------------------------------------------------------------------------
+def test_ledger_risk_table_has_assurance_column():
+    md = _ledger(NFR / "support_sla.fsl", depth=8)
+    assert "保証クラス" in md
+    assert "bounded(BMC depth 8)" in md
+    assert "docs/DESIGN-assurance-classes.md" in md
+
+
+def test_ledger_induction_engine_shows_proved(tmp_path):
+    src = """
+requirements CounterReq {
+  state { x: Int }
+  init { x = 0 }
+  requirement REQ-1 "counter stays non-negative and bounded" {
+    action inc() { requires x < 5  x = x + 1 }
+    invariant XRange { x >= 0 and x <= 5 }
+  }
+}
+"""
+    p = _write(tmp_path, "counter_req.fsl", src)
+    md = _ledger(p, depth=8, engine="induction")
+    assert "proved(induction)" in md
+    assert "REQ-1" in md
+
+
+def test_ledger_bmc_engine_never_shows_proved():
+    md = _ledger(NFR / "support_sla.fsl", depth=8)
+    risk_table = md.split("## リスク一覧")[1].split("## 要件ID別詳細")[0]
+    assert "proved(induction)" not in risk_table
+
+
+def test_ledger_evidence_maps_to_assurance_class(tmp_path):
+    evidence = tmp_path / "db_observe.json"
+    evidence.write_text(json.dumps({
+        "result": "observed_mismatch",
+        "formal_result": "not_run",
+        "requirements": ["REQ-1"],
+    }), encoding="utf-8")
+    src = """
+requirements CounterReq {
+  state { x: Int }
+  init { x = 0 }
+  requirement REQ-1 "counter stays non-negative" {
+    action inc() { requires x < 5  x = x + 1 }
+    invariant XRange { x >= 0 and x <= 5 }
+  }
+}
+"""
+    p = _write(tmp_path, "counter_req.fsl", src)
+    md = _ledger(p, depth=8, evidence=[str(evidence)])
+    assert "外部エビデンス" in md
+    assert "replay-observed" in md
+    assert "REQ-1" in md.split("## 外部エビデンス")[1]

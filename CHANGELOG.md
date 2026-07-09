@@ -6,6 +6,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
+  every command's result dict (BMC `verify`, k-induction `prove`, and the
+  fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,
+  observe, eval/regress/compare/drift, compat, agent/project analysis) into
+  one of `proved(induction)` / `bounded(BMC depth k)` / `replay-observed` /
+  `statistical(Wilson c%)` / `not_run`. `fslc ledger` gains a 保証クラス
+  column (per requirement id, from the weakest of its tagged elements) plus a
+  new `--engine bmc|induction` flag and a repeatable `--evidence
+  <result.json>` flag to fold external evidence into the classification; a
+  `## 外部エビデンス` section lists evidence not tied to a requirement id.
+  `fslc html` gains an Assurance row/column and the same `--engine` flag.
+  Presentation-only: no change to verification semantics, the JSON envelope,
+  or exit codes. See `docs/DESIGN-assurance-classes.md`.
 - Rebuilt the `docs/intro/` manual site's information architecture around 4
   fixed categories (Get Started / Guides / Reference / Examples & Background),
   designed with the Relational Design plugin (decisions in

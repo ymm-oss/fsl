@@ -206,7 +206,7 @@ options:
   --readable
 </pre></div></details>
 <details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT]
-                 [--deadlock {warn,error,ignore}]
+                 [--deadlock {warn,error,ignore}] [--engine {bmc,induction}]
                  file
 
 positional arguments:
@@ -217,9 +217,13 @@ options:
   --depth DEPTH
   -o OUTPUT, --output OUTPUT
   --deadlock {warn,error,ignore}
+  --engine {bmc,induction}
+                        use k-induction so a proved report can show assurance
+                        class &#x27;proved&#x27;
 </pre></div></details>
 <details><summary>fslc ledger</summary><div class="tree-body"><pre>usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT]
                    [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG]
+                   [--engine {bmc,induction}] [--evidence EVIDENCE]
                    file
 
 positional arguments:
@@ -232,6 +236,12 @@ options:
   --deadlock {warn,error,ignore}
   --impl-log IMPL_LOG   optional implementation trace JSON to score
                         conformance (fslc replay)
+  --engine {bmc,induction}
+                        use k-induction so a requirement&#x27;s assurance class can
+                        reach &#x27;proved&#x27; (#171)
+  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an
+                        external-evidence producer (fslc ai eval/replay/drift,
+                        fslc db observe, fslc domain replay, ...); repeatable
 </pre></div></details>
 <details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
 

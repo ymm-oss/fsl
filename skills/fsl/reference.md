@@ -693,8 +693,9 @@ fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
-fslc html <f> [--depth K] [-o report.html]      # self-contained HTML review report (dev audience)
-fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md]  # business audit ledger by requirement id (PM/audit)
+fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
+fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]...
+                                                        # business audit ledger by requirement id (PM/audit)
 fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / effect findings
 fslc domain analyze <f>                                      # aggregate/effect ownership summary
 fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
@@ -758,6 +759,18 @@ business translation, governance columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
 positive form. Raw JSON is demoted to a collapsed appendix. See
 `docs/DESIGN-ledger.md`.
+
+Every requirement id in the ledger (and every property row in `fslc html`)
+carries an **assurance class** (issue #171): `proved(induction)` (k-induction,
+all depths) / `bounded(BMC depth k)` (BMC, depth k) / `replay-observed`
+(concrete log/trace checked, not a universal claim) / `statistical(Wilson c%)`
+(precomputed eval JSONL, aggregate not per-case) / `not_run` (no formal
+evidence — structural analysis, profiles, comparisons). `--engine induction`
+is required for a requirement to ever show `proved`; `--evidence
+<result.json>` folds a saved fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"`
+producer's output (tagged via a top-level `requirements: [...]` list) into the
+per-requirement classification. Class is method coverage, not verdict — a
+`violated` BMC run is still `bounded`. See `docs/DESIGN-assurance-classes.md`.
 
 `chain` reads `fsl-project.toml` by default. Each `[business]`,
 `[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`

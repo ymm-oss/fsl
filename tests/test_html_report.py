@@ -41,6 +41,29 @@ def test_run_html_generates_self_contained_report():
     assert "<script src=" not in html
 
 
+def test_html_report_shows_assurance_vocabulary():
+    result = run_html(str(SPECS / "cart_v1.fsl"), depth=4, write_file=False)
+    html = result["content"]
+    assert ">Assurance<" in html
+    assert "bounded(BMC depth 4)" in html
+
+
+def test_html_report_induction_engine_shows_proved(tmp_path):
+    src = """
+spec CounterLatch {
+  state { x: Int }
+  init { x = 0 }
+  action inc() { requires x < 5  x = x + 1 }
+  invariant XRange { x >= 0 and x <= 5 }
+}
+"""
+    p = tmp_path / "counter_latch.fsl"
+    p.write_text(src, encoding="utf-8")
+    result = run_html(str(p), depth=8, write_file=False, engine="induction")
+    assert result["result"] == "generated"
+    assert "proved(induction)" in result["content"]
+
+
 def test_html_report_escapes_source_and_payload_text(tmp_path):
     path = tmp_path / "escape.fsl"
     path.write_text(

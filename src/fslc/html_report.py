@@ -8,6 +8,8 @@ import json
 from html import escape
 from pathlib import Path
 
+from .assurance import assurance_label, classify_element, classify_result
+
 
 def default_output_name(file: str) -> str:
     return str(Path(file).with_suffix(".html"))
@@ -52,7 +54,7 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
         _hero(spec, file, depth, status, len(state), len(actions), len(properties), coverage_label, warnings, subtitle, kind),
         _model_section(state, actions, enums, domains, kpis, stage_flows),
         _actions_section(actions, coverage),
-        _properties_section(properties, auto_checks),
+        _properties_section(properties, auto_checks, verification),
         _status_section(verification),
         _refinement_section(verification),
         _trace_section(verification),
@@ -607,8 +609,13 @@ def _metric(label, value) -> str:
 
 
 def _status_section(verification: dict) -> str:
+    assurance = assurance_label(
+        classify_result(verification),
+        depth=verification.get("checked_to_depth", verification.get("depth")),
+    )
     rows = [
         ("Result", _badge(verification.get("result", "unknown"))),
+        ("Assurance", escape(assurance)),
         ("Completeness", escape(str(verification.get("completeness", "n/a")))),
         ("Checked depth", escape(str(verification.get("checked_to_depth", verification.get("depth", "n/a"))))),
         ("Note", escape(str(verification.get("note", "")))),
@@ -922,7 +929,15 @@ def _actions_section(actions: list, coverage: dict) -> str:
 """
 
 
-def _properties_section(properties: list, auto_checks: list) -> str:
+_PROPERTY_KIND_TO_GROUP = {
+    "invariant": "invariants",
+    "trans": "transitions",
+    "leadsTo": "leadstos",
+    "reachable": "reachables",
+}
+
+
+def _properties_section(properties: list, auto_checks: list, verification: dict | None = None) -> str:
     has_deadline = any(p.get("within") is not None for p in properties)
     prop_rows = []
     for prop in properties:
@@ -932,16 +947,23 @@ def _properties_section(properties: list, auto_checks: list) -> str:
             if within is not None else "<td></td>"
         ) if has_deadline else ""
         name_cell = f"<code>{escape(str(prop.get('name', '')))}</code>{_requirement_caption(prop.get('requirement'))}"
+        group = _PROPERTY_KIND_TO_GROUP.get(prop.get("kind"))
+        assurance_cell = (
+            f"<td>{escape(assurance_label(classify_element(group, prop.get('name'), verification), depth=verification.get('checked_to_depth', verification.get('depth'))))}</td>"
+            if verification is not None and group else "<td></td>"
+        )
         prop_rows.append(
             "<tr>"
             f"<td>{escape(str(prop.get('kind', '')))}</td>"
             f"<td>{name_cell}</td>"
             f"{within_cell}"
+            f"{assurance_cell}"
             f"<td>{escape(str(prop.get('body_text', '')))}</td>"
             "</tr>"
         )
     deadline_header = "<th>Deadline</th>" if has_deadline else ""
-    prop_colspan = 4 if has_deadline else 3
+    assurance_header = "<th>Assurance</th>" if verification is not None else ""
+    prop_colspan = 3 + (1 if has_deadline else 0) + (1 if verification is not None else 0)
     check_rows = []
     for check in auto_checks:
         label = check.get("target") or check.get("action") or check.get("name")
@@ -963,7 +985,7 @@ def _properties_section(properties: list, auto_checks: list) -> str:
         <div class="stack">
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Kind</th><th>Name</th>{deadline_header}<th>Body</th></tr></thead>
+              <thead><tr><th>Kind</th><th>Name</th>{deadline_header}{assurance_header}<th>Body</th></tr></thead>
               <tbody>{''.join(prop_rows) or f'<tr><td colspan="{prop_colspan}">No user properties.</td></tr>'}</tbody>
             </table>
           </div>
