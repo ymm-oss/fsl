@@ -237,15 +237,20 @@ tool-boundary checks and reports stable fsl-ai findings for runtime replay):
 ai_component <Name> {
   model <model_id>;
   prompt <prompt_id>;
+  retriever <retriever_id>;              // optional, at most once
+  temperature <number>;                  // optional, at most once
   input <InputSchema>;
   output <OutputSchema>;
 
+  tools [<BareToolName>, ...];           // shorthand: declares tools with no schema/precondition/effect
+
   tool <ToolName> [irreversible] {
-    schema <ToolSchema>;
-    precondition <symbolic_business_precondition>;
+    schema <ToolSchema>;                 // at most once
+    precondition <symbolic_business_precondition>;  // repeatable, 0 or more
+    effect <EffectName>;                 // optional, at most once
   }
 
-  authority {
+  authority {                            // an optional NAME after `authority` is accepted and ignored here
     may_suggest <ToolName>, ...;
     may_execute <ToolName>, ...;
     requires_human_approval <ToolName>, ...;
@@ -255,6 +260,11 @@ ai_component <Name> {
   fallback {
     when <condition_name> require <safe_target>;
   }
+
+  check hard {                           // optional, at most once; omit for the default (all 5 rules)
+    rule <RuleName>;                     // tool_authority | human_approval_required | forbidden_tool_blocked
+                                          // | tool_schema_declared | tool_precondition_declared
+  }
 }
 ```
 
@@ -262,7 +272,21 @@ ai_component <Name> {
 approval-required execution, forbidden tools, declared tool schemas, symbolic
 business precondition evidence, and fallback routing. It does not model LLM
 truth, groundedness, evaluator judgment, probability, confidence intervals, or
-prompt/model sampling distributions in the kernel. Use `fslc ai check` for
+prompt/model sampling distributions in the kernel. No field on `ai_component`,
+`tool`, `authority`, `fallback`, or `check` accepts a `"description text"` /
+`"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
+convention (§10), every field here is a bare identifier or number.
+`check hard { rule <Name>; ... }` selects which of the 5 named rules above get
+an explicit, separately-reported invariant/finding in `fslc ai check`; an
+unlisted name is a check-time error (`kind:"semantics"`, hint lists the 5).
+Omitting the block checks all 5 (the safe default). Verified nuance: today
+only `forbidden_tool_blocked`/`human_approval_required` change what the kernel
+expansion generates (dropping the block drops one *redundant, explicit*
+certifying invariant — the underlying structural guards, no execute-action for
+a forbidden tool and the `requires human_approved` clause on an
+approval-required tool's execute action, are generated unconditionally
+either way); `tool_authority`/`tool_schema_declared`/`tool_precondition_declared`
+are checked unconditionally regardless of this block. Use `fslc ai check` for
 `verified_under_assumptions` hard-contract findings and `fslc ai replay --logs`
 for JSONL runtime evidence (`replay_conformant` / `replay_nonconformant`,
 `formal_result:"not_run"`). Statistical quality evidence uses the external
@@ -279,17 +303,22 @@ Recursive fsl-ai `agent` composition is checked structurally by
 
 ```fsl
 agent <Parent> {
+  model <model_id>;                      // optional at any agent level (root or child), at most once
+  prompt <prompt_id>;                    // optional at any agent level, at most once
   context [<ContextName>, ...];
   tools [<ToolName>, ...];
+  tool <ToolName> [irreversible] { schema <ToolSchema>; }  // a detailed `tool` block also works here
   authority { may_execute [<ToolName>, ...]; }
+  review_gate <Child>;                   // Child must be a direct child agent (see below)
 
   agent <Child> {
-    trust medium;
+    trust medium;                        // free NAME; only "low" has a distinct check today
     grant authority [<ToolName>, ...];
     grant context [<ContextName>, ...];
     tools [<ToolName>, ...];
     authority { may_execute [<ToolName>, ...]; }
-    output <OutputName> visibility [parent, <SiblingAgent>];
+    contract { hard { rule <Name>; } }   // parsed and echoed in agent_ir; not yet cross-checked
+    output <OutputName> visibility [parent, <SiblingAgent>];  // or bare `visibility parent;` for one name
   }
 
   orchestration {
@@ -307,11 +336,122 @@ Nested agents are ordinary scoped agents (`Parent.Child`), not a separate
 `sub_agent` type. Nesting defines lexical scope and grant boundaries only;
 runtime collaboration is the separate `orchestration` graph. Parent authority
 and context are never implicitly inherited: child `grant authority` and
-`grant context` must stay inside the immediate parent boundary. Structural
+`grant context` must stay inside the immediate parent boundary.
+`review_gate <Child>;` declares that any orchestration path reaching a
+descendant with high-authority tools must pass through one of the named
+review-gate children; a path that skips them all is the "review-gate bypass"
+finding below. `trust` is a free identifier, not a validated enum — only the
+literal `low` currently triggers a distinct check
+(`low_trust_agent_path_to_high_authority_tool`); other values (`medium`,
+`high`, or anything else) parse but have no dedicated check yet.
+`contract { hard { rule <Name>; } }` is parsed and listed under each agent's
+`agent_ir.contracts`, but — unlike `ai_component`'s `check hard { }` — its
+rule names are not validated against a known set and are not yet cross-checked
+against anything; treat it as forward-declared metadata. As with
+`ai_component`, no field here accepts a `"description text"` tag. Structural
 findings use `guarantee_kind:"agent_structural"` and cover child grant
 exceedance, low-trust paths to high-authority tools, irreversible tools without
 human approval, review-gate bypass, and sibling visibility leaks. This is not
 formal proof and does not model LLM truth or statistical/evaluator quality.
+
+Stochastic / migration / drift evidence declarations (project-level fsl-ai;
+dialect tag `fsl-ai-project.v0`). These blocks are read by a deliberately
+lenient separate parser, not the kernel Lark grammar; they may sit alongside
+`ai_component` in one file, and `fslc ai check` (or `fslc check`) on such a
+file returns `ai_project_analyzed` — a declaration listing, not verification:
+
+```fsl
+dataset <Name> {
+  source "<path/to/eval.jsonl>"
+  population {
+    <field> in ["<a>", "<b>"]
+  }
+  slice <SliceName> {
+    <field> == "<a>"
+  }
+}
+
+evaluator <Name> {
+  input <name>: <Type>
+  output <name>: <Type>
+  calibration {
+    dataset <GoldLabelDataset>
+    require agreement_with_human >= 0.90
+  }
+}
+
+statistical_property <Name> {
+  target <AiComponentName>
+  dataset <DatasetName>
+  evaluator <EvaluatorName>
+  confidence 0.95
+  require ci_lower(metric.<metric>, 0.95) >= <T>   // or ci_upper(metric.<m>, 0.95) <= <T>
+  slice <SliceName> {
+    require min_samples >= <N>
+    require ci_lower(metric.<metric>, 0.95) >= <T>
+  }
+}
+
+ai_migration <Name> {
+  from <Component> {
+    model <id>
+    prompt <id>
+    retriever <id>
+  }
+  to <Component> {
+    model <id>
+    prompt <id>
+    retriever <id>
+  }
+  preserve {
+    hard_contract <Contract>.hard
+    no_regression {
+      dataset <DatasetName>
+      metric <metric> drop <= 0.05
+      metric <metric> increase <= 0.02
+    }
+  }
+}
+
+observed_property <Name> {
+  target <AiComponentName>
+  source production_logs
+  window last_7_days
+  require observed(metric.<metric>) <= <T>
+  require drift(metric.<metric>) <= <T> compared_to previous_7_days
+}
+```
+
+`require` clauses here are threshold labels for external evidence jobs, not
+kernel formulas — they add no probability semantics to `fslc verify`.
+`failure_mode <Name> { condition ...; severity ...; }` is parsed and listed by
+name under `ai_project_analyzed`'s `failure_modes`, but no command yet checks
+its content against evidence — it is tracked metadata, not a verified claim.
+**`ai_action`, `retriever` (as a standalone block), `trust_boundary`, and a
+top-level named `authority { target ... }` are recognized only as block
+*boundaries*: the parser does not descend into their body at all, so any text
+inside — even garbage — passes `check`. They are echoed as bare `{kind, name}`
+entries under `raw_blocks`, not validated.** Do not author one expecting it to
+constrain anything; the checked surface is exactly `ai_component`/`agent`
+(hard contract, kernel-backed) plus `dataset`/`evaluator`/
+`statistical_property`/`ai_migration`/`observed_property` (external evidence,
+above). Commands: `fslc ai eval`
+checks a `statistical_property` by Wilson bound over precomputed eval JSONL
+(the `dataset` `source` file, or `--records`); `fslc ai regress` checks
+aggregate `ai_migration.no_regression` metric deltas between
+`--before-records`/`--after-records`; `fslc ai compare` reports metric deltas
+with no threshold claim; `fslc ai drift` checks `observed_property` thresholds
+and drift over runtime telemetry (`observed_supported` / `observed_mismatch`);
+`fslc ai compat` emits a `dbsystem` `artifact` capability profile, which
+`fslc compat check --include-ai` folds into a dbsystem compatibility check.
+Hard boundary: every result carries `formal_result:"not_run"` and must never
+be displayed as `proved`/`verified`; a point-estimate-only requirement
+(`require accuracy >= 0.92` with no `ci_lower`/`ci_upper`) is rejected at eval
+time (`inconclusive`, exit 1), not warned past. Eval statuses are
+`dataset_invalid`, `evaluator_untrusted`, `insufficient_samples`,
+`inconclusive`, `statistically_unsupported`, `statistically_supported`; the
+priority order and the eval-record JSONL schema live in
+`docs/DESIGN-stochastic.md`.
 
 Composite spec (a separate top-level form):
 
@@ -567,6 +707,16 @@ fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o 
                                                         # SQL DDL / minimal Prisma -> dbsystem
 fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
 fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
+fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
+                                                        # Wilson-bound check over precomputed eval JSONL
+fslc ai regress <f> [--migration <Name>] --before-records <p> --after-records <p> [--dataset <Name>]
+                                                        # ai_migration.no_regression metric drop/increase check
+fslc ai compare --from <records> --to <records> [--from-label L] [--to-label L] [--dataset <Name>]
+                                                        # metric deltas between two eval JSONL files, no threshold claim
+fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseline p] [--property <Name>]
+                                                        # observed_property threshold/drift check from runtime telemetry
+fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
+fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`

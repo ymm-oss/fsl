@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>実例ギャラリー — examples/ と specs/ の案内</title>
+<meta name="description" content="examples/配下17ディレクトリとspecs/の案内。小さな教材から旗艦の3層連携例まで。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="examples">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">実例と背景</p>
+    <h1 class="reveal">実例<span class="hl">ギャラリー</span></h1>
+    <p class="lead reveal">リポジトリには完成した実例が<code>examples/</code>配下に17ディレクトリ、<code>specs/</code>に単独スペックがあります。このページはその案内図です——このマニュアルは実例そのものを複製しません。リンク先はGitHub上のソースです。</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">最初に読む</p>
+    <h2 class="reveal">gallery/ — 「小さく読んで、大きく試す」教材</h2>
+    <p class="lead narrow reveal">各<code>.fsl</code>ファイルはコメントに<code>expected-command</code>/<code>expected-result</code>/<code>expected-kind</code>を書いており、<code>tests/test_gallery.py</code>が実際の<code>fslc</code>出力と照合しています。</p>
+    <table class="matrix reveal">
+      <tr><th>規模</th><th>ファイル</th><th>トピック</th></tr>
+      <tr><td>tiny</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/tiny_turnstile.fsl">valid/tiny_turnstile.fsl</a></td><td>coinとpushの最小の状態機械</td></tr>
+      <tr><td>tiny</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/tiny_traffic_light.fsl">valid/tiny_traffic_light.fsl</a></td><td>enumとネストしたifの基本</td></tr>
+      <tr><td>tiny</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/tiny_bounded_counter.fsl">valid/tiny_bounded_counter.fsl</a></td><td>境界型と<code>requires</code>で上限を守る</td></tr>
+      <tr><td>small</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/small_vending_machine.fsl">valid/small_vending_machine.fsl</a></td><td>Map、Option、在庫の減算、<code>ensures</code></td></tr>
+      <tr><td>small</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/small_elevator.fsl">valid/small_elevator.fsl</a></td><td>階、ドア、目標階の一貫性</td></tr>
+      <tr><td>small</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/small_tcp_handshake.fsl">valid/small_tcp_handshake.fsl</a></td><td><code>fair action</code>と<code>leadsTo</code>の入り口</td></tr>
+      <tr><td>medium</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/medium_dining_philosophers_deadlock_demo.fsl">valid/medium_dining_philosophers_deadlock_demo.fsl</a></td><td>デッドロック形の状態を<code>reachable</code>で観測</td></tr>
+      <tr><td>medium</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/medium_two_phase_commit.fsl">valid/medium_two_phase_commit.fsl</a></td><td>投票とコミットの安全性（2PC）</td></tr>
+      <tr><td>large</td><td><a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/valid/large_order_workflow.fsl">valid/large_order_workflow.fsl</a></td><td>注文・出荷・返品・台帳不変条件</td></tr>
+    </table>
+    <p class="reveal" style="margin-top:14px"><code>gallery/errors/</code>（壊れた仕様で診断を学ぶ）は<a href="errors.ja.html">エラー・終了コード</a>に索引があります。<code>gallery/adversarial/</code>（検証器の境界を突く例）と<code>gallery/injected/</code>は<a href="https://github.com/ymm-oss/fsl/blob/main/examples/gallery/README.md">gallery/README.md</a>から。</p>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">旗艦例</p>
+    <h2 class="reveal">3層を貫く一本のドメイン</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/e2e">e2e/</a></h3>
+        <p>コンサルタント・PM・エンジニアが同じ経費精算ドメインを異なる粒度で書き、<code>business ⊒ requirements ⊒ design ⊒ implementation</code>としてFSLが繋ぐ旗艦例。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/layers">layers/</a></h3>
+        <p>DESIGN-layers.mdの最終形。returnドメインを3ダイアレクトで書き、詳細化チェーンで繋ぐ。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/bank">bank/</a></h3>
+        <p>FSLを一切知らない素のPython実装(<code>bank.py</code>)と、<code>replay</code>/<code>testgen</code>で実装適合を繋ぐ例。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/refinement_chain">refinement_chain/</a></h3>
+        <p>層チェーンを通した伝播（<code>business ⊒ requirements ⊒ design …</code>）を確認する例。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">層・ダイアレクト別</p>
+    <h2 class="reveal">目的から探す</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/consulting">consulting/</a></h3><p>業務プロセスと内部ポリシーを「機械が確認できる文書」として書く例。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/pm">pm/</a></h3><p>プロダクト要件を「機械が確認できる文書」として書く例。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/nfr">nfr/</a></h3><p>SLAワーカーのスパイクと、層をまたぐ非機能要件の実例。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/domain">domain/</a></h3><p><code>fsl-domain</code>のFunctional DDD／非同期effectの実例。<a href="domain.ja.html">fsl-domainの章</a>から。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/db">db/</a></h3><p><code>dbsystem</code>のDB／複数環境互換性の実例。<a href="db.ja.html">fsl-dbの章</a>から。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/ai">ai/</a></h3><p><code>ai_component</code>のhard-contractとrecursive agentの実例。<a href="ai.ja.html">fsl-aiの章</a>から。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/agentic_rag">agentic_rag/</a></h3><p>Agentic RAGのサポートフローを3層で書いた例。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/multi_agent_system">multi_agent_system/</a></h3><p>AIマルチエージェントシステムを3層で書いた例。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/refinement_liveness">refinement_liveness/</a></h3><p><code>fslc refine</code>（詳細化の忠実性チェック）が何を見ているかを一目で示す例。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/ui_spike">ui_spike/</a></h3><p>画面遷移を素のFSLで書けるかを試したスパイク（issue #9）。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/structural">structural/</a></h3><p><code>fslc analyze</code>の構造投影・所見のための実例。<a href="analysis.ja.html">構造分析の章</a>から。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/validation">validation/</a></h3><p>「内部一貫性は通るが意図とズレた仕様」を捕まえる検証一式の実演。</p></div>
+      <div class="syntax-card"><h3><a href="https://github.com/ymm-oss/fsl/tree/main/examples/self">self/</a></h3><p>fslcの設計契約そのものをFSLでモデル化する自己スペック（メタ循環的なドッグフーディング）。</p></div>
+    </div>
+    <p class="reveal" style="margin-top:14px">単独の<code>.fsl</code>ファイルは<a href="https://github.com/ymm-oss/fsl/tree/main/specs">specs/</a>にもあります。設計判断の背景は<a href="design-notes.ja.html">設計ノート・実戦記録</a>へ。</p>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

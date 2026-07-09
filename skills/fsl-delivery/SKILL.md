@@ -35,6 +35,12 @@ Before authoring a layer, read and follow the corresponding skill:
   handoff: `../fsl-design/SKILL.md`
 - Design review, variants, substitutability, SOLID/LSP/OCP judgment:
   `../fsl-design-review/SKILL.md`
+- Cross-cutting dialect concerns — DB migration compatibility (`dbsystem`,
+  `fslc db`), Functional DDD / async effects (`domain`, `fslc domain`), AI
+  tool-boundary and agent contracts plus statistical evidence (`ai_component`/
+  `agent`, `fslc ai`): `../fsl/SKILL.md` → "Advanced features". These sit
+  outside the business→requirements→design progression and are not stage-gated
+  by this skill.
 - Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md` and
   `../fsl/reference.md`
 

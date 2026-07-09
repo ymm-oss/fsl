@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>用語集 — FSL予約語・和訳・英語・一行定義</title>
+<meta name="description" content="FSLの主な予約語・構文キーワードを、和訳・英語・一行定義・出典章の対応表でまとめる。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="glossary">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">リファレンス</p>
+    <h1 class="reveal">用語集</h1>
+    <p class="lead reveal">FSLの予約語・構文キーワードはすべて英語です。ここでは和訳と一行定義を対応させます。網羅的な正典は<a href="language.ja.html">言語リファレンス</a>（英語本文）です——このページは索引であり、正典ではありません。</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">カーネル</p>
+    <h2 class="reveal">状態・操作の基本構文</h2>
+    <table class="matrix reveal">
+      <tr><th>キーワード</th><th>和訳</th><th>一行定義</th></tr>
+      <tr><td><code>spec</code></td><td>スペック</td><td>状態・初期状態・操作・性質をまとめた最上位の宣言</td></tr>
+      <tr><td><code>state</code></td><td>状態</td><td>スペックが持つ変数の宣言ブロック</td></tr>
+      <tr><td><code>init</code></td><td>初期状態</td><td>状態変数の初期値を制約するブロック</td></tr>
+      <tr><td><code>action</code></td><td>アクション</td><td>状態遷移を1つ定義する操作</td></tr>
+      <tr><td><code>fair action</code></td><td>公平アクション</td><td>「無限に有効なら無限に実行される」弱公平性を持つアクション（<code>leadsTo</code>の前提）</td></tr>
+      <tr><td><code>requires</code></td><td>事前条件</td><td>アクションが有効化される条件（ガード）</td></tr>
+      <tr><td><code>ensures</code></td><td>事後条件</td><td>アクション実行後に成り立つべき条件</td></tr>
+      <tr><td><code>invariant</code></td><td>不変条件</td><td>到達可能な全ての状態で常に成り立つべき性質</td></tr>
+      <tr><td><code>reachable</code></td><td>到達可能性</td><td>ある条件を満たす状態に到達できるかを問う性質</td></tr>
+      <tr><td><code>terminal</code></td><td>終端状態</td><td>意図して操作が無くなる（デッドロックではない）状態を宣言</td></tr>
+      <tr><td><code>leadsTo</code></td><td>応答性</td><td>「Aが起きればいずれBが起きる」という時相性質</td></tr>
+      <tr><td><code>trans</code></td><td>遷移不変条件</td><td>2状態間（遷移前後）にわたる安全性</td></tr>
+      <tr><td><code>old(x)</code></td><td>変更前の値</td><td><code>ensures</code>内で、アクション実行前の値を指す</td></tr>
+      <tr><td><code>ghost</code></td><td>ghost変数</td><td>検証専用の履歴変数。実装には存在しない</td></tr>
+      <tr><td><code>stutter</code></td><td>スタッター遷移</td><td>詳細化で、抽象側が変化しない具体側のステップを許す仕組み</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">型</p>
+    <h2 class="reveal">型システム</h2>
+    <table class="matrix reveal">
+      <tr><th>キーワード</th><th>和訳</th><th>一行定義</th></tr>
+      <tr><td><code>type X = lo..hi</code></td><td>範囲型</td><td>検証境界としての有限範囲型</td></tr>
+      <tr><td><code>enum</code></td><td>列挙型</td><td>有限個の名前付き値からなる型</td></tr>
+      <tr><td><code>struct</code></td><td>構造体</td><td>複数フィールドを持つ複合型</td></tr>
+      <tr><td><code>Option&lt;T&gt;</code></td><td>値がある/ない型</td><td>センチネル値を使わずに「値の有無」を表す型</td></tr>
+      <tr><td><code>Seq&lt;T,N&gt;</code></td><td>有界シーケンス</td><td>最大長Nの有界配列型</td></tr>
+      <tr><td><code>Map&lt;K,V&gt;</code></td><td>対応表</td><td>キーから値への有限写像</td></tr>
+      <tr><td><code>Set&lt;T&gt;</code></td><td>集合</td><td>重複の無い有限集合型</td></tr>
+      <tr><td><code>entity</code></td><td>エンティティ型</td><td>検証境界と切り離された、識別子だけを持つ無限台の型</td></tr>
+      <tr><td><code>number</code></td><td>数値型</td><td>検証境界と切り離された整数型（<code>entity</code>の数値版）</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">詳細化・合成</p>
+    <h2 class="reveal">複数スペックをつなぐ</h2>
+    <table class="matrix reveal">
+      <tr><th>キーワード</th><th>和訳</th><th>一行定義</th></tr>
+      <tr><td><code>refinement</code></td><td>詳細化マッピング</td><td>詳細スペックが抽象スペックに忠実であることを結びつける宣言</td></tr>
+      <tr><td><code>checked_by refinement</code></td><td>詳細化による保証</td><td>業務層の制御が設計層の詳細化で保証されることの宣言</td></tr>
+      <tr><td><code>compose</code></td><td>合成</td><td>名前空間と同期アクションで複数スペックを1つに合成する宣言</td></tr>
+      <tr><td><code>maps</code></td><td>要件対応</td><td>設計層のアクションが要件層のどのアクションに対応するかの宣言</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3層ダイアレクト</p>
+    <h2 class="reveal">business / requirements / dbsystem / ai_component</h2>
+    <table class="matrix reveal">
+      <tr><th>キーワード</th><th>和訳</th><th>一行定義</th></tr>
+      <tr><td><code>business</code></td><td>業務層スペック</td><td>担当者・業務対象・プロセス・統制・ゴールを書く業務層の最上位宣言</td></tr>
+      <tr><td><code>requirements</code></td><td>要件層スペック</td><td>要件ID・受け入れ条件・禁止手順を書く要件層の最上位宣言</td></tr>
+      <tr><td><code>forbidden</code></td><td>禁止手順</td><td>「この手順は絶対に受理されてはならない」という否定的受け入れ基準</td></tr>
+      <tr><td><code>expect rejected</code></td><td>拒否の期待</td><td><code>forbidden</code>の手順の末尾で、拒否されることを期待する宣言</td></tr>
+      <tr><td><code>@req</code></td><td>要件タグ</td><td>宣言に要件IDを紐づけ、層を横断したトレーサビリティを作るメタタグ</td></tr>
+      <tr><td><code>dbsystem</code></td><td>DBシステムスペック</td><td>スキーマ・成果物・複数環境の互換性を書く<code>fsl-db</code>ダイアレクトの最上位宣言</td></tr>
+      <tr><td><code>ai_component</code></td><td>AIコンポーネント契約</td><td>tool authority・人間承認・forbidden toolを書く<code>fsl-ai</code>ダイアレクトの最上位宣言</td></tr>
+      <tr><td><code>agent</code></td><td>エージェント構造</td><td>recursive agentのscope・grant・visibility・orchestrationを書く宣言</td></tr>
+      <tr><td><code>domain</code></td><td>ドメインスペック</td><td>Functional DDDのaggregate・command/event decide/evolveを書く<code>fsl-domain</code>ダイアレクトの最上位宣言</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">結果を読む</p>
+    <h2 class="reveal">JSON出力に出てくる語</h2>
+    <p class="lead narrow reveal"><code>result</code>/<code>kind</code>/<code>violation_kind</code>などの出力語は<a href="errors.ja.html">エラー・終了コード</a>に別途まとめています。</p>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

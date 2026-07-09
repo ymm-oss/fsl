@@ -352,23 +352,51 @@
   }
 
   /* ---------- shared navigation (single source of truth) ----------
-     Chapter order, titles, and the three nav surfaces (top bar, docs
-     sidebar, footer) are generated here so pages cannot drift out of
-     sync. Each page only declares data-page="<stem>" + <html lang>.
-     Format per chapter: [shortLabel, sidebarTitle, sidebarDescription]. */
+     Chapter order, titles, and the nav surfaces (top bar, docs sidebar,
+     breadcrumb, footer, category hubs) are generated here so pages cannot
+     drift out of sync. Each page only declares data-page="<stem>" +
+     <html lang> (hub pages additionally declare data-hub="true").
+     Format per chapter: [shortLabel, sidebarTitle, sidebarDescription].
+     categoryId is a foreign key into CATEGORIES — the only place category
+     label/order/description lives, so there is exactly one nav-mapping
+     source per concern. */
+  const CATEGORIES = [
+    { id: "get-started", order: 1,
+      en: ["Get Started", "Orientation and fit before you write anything"],
+      ja: ["はじめる", "書く前に方向感と適合を確認する"] },
+    { id: "guides", order: 2,
+      en: ["Guides", "Task-oriented walkthroughs, one per layer"],
+      ja: ["ガイド", "各層のタスク志向の手順"] },
+    { id: "reference", order: 3,
+      en: ["Reference", "Lookup-oriented syntax and tool surface"],
+      ja: ["リファレンス", "検索用途の構文・ツール仕様"] },
+    { id: "examples-background", order: 4,
+      en: ["Examples & Background", "Worked mechanisms and dialect deep-dives"],
+      ja: ["実例と背景", "仕組みの実例とダイアレクト詳細"] },
+  ];
   const CHAPTERS = [
-    { id: "concept",            en: ["Concept", "What is FSL?", "Concepts and counterexamples"],          ja: ["概念", "FSLって、なに？", "概念と反例の直感"] },
-    { id: "when-to-use",        en: ["When to use", "When to Use FSL", "Fit, gates, and scope"],          ja: ["使いどころ", "FSLを使うべきか", "効くドメインと判断ゲート"] },
-    { id: "guide",              en: ["Workflow", "Workflow", "Commands and repair loop"],                 ja: ["使い方", "仕組みと使い方", "検証ループとコマンド"] },
-    { id: "mechanism",          en: ["Mechanisms", "Mechanisms", "BMC, induction, refinement"],           ja: ["仕組み", "仕組み詳細", "BMC・帰納法・詳細化"] },
-    { id: "business-layer",     en: ["Business", "Business Layer", "Processes, controls, KPIs"],           ja: ["業務層", "業務層", "プロセス・統制・KPI"] },
-    { id: "requirements-layer", en: ["Requirements", "Requirements Layer", "IDs, acceptance, forbidden"], ja: ["要件層", "要件層", "要件ID・受け入れ・禁止"] },
-    { id: "design-layer",       en: ["Design", "Design Layer", "Internal state, refinement, compose"],    ja: ["設計層", "設計層", "内部状態・詳細化・合成"] },
-    { id: "syntax",             en: ["Syntax", "Syntax Guide", "Types, actions, properties"],             ja: ["文法", "文法・構文", "型・式・操作・性質"] },
-    { id: "analysis",           en: ["Analyze", "Structural Analysis", "TSG, graph projections, findings"], ja: ["構造分析", "構造分析", "TSG・グラフ投影・所見"] },
-    { id: "domain",             en: ["fsl-domain", "Domain / Async Effects", "DDD, effects, scaffolds"], ja: ["fsl-domain", "DDD / 非同期Effect", "DDD・effect・scaffold"] },
-    { id: "db",                 en: ["fsl-db", "DB / Multi-env Compatibility", "Schema, artifacts, environments"], ja: ["fsl-db", "DB/複数環境互換性", "スキーマ・成果物・環境"] },
-    { id: "ai",                 en: ["fsl-ai", "AI Contracts & Agents", "Tool authority, agents, replay"], ja: ["fsl-ai", "AI contract / agent", "tool権限・agent構造・replay"] },
+    { id: "concept",            categoryId: "get-started", en: ["Concept", "What is FSL?", "Concepts and counterexamples"],          ja: ["概念", "FSLって、なに？", "概念と反例の直感"] },
+    { id: "when-to-use",        categoryId: "get-started", en: ["When to use", "When to Use FSL", "Fit, gates, and scope"],          ja: ["使いどころ", "FSLを使うべきか", "効くドメインと判断ゲート"] },
+    { id: "quickstart",         categoryId: "get-started", en: ["Quickstart", "5-Minute Quickstart", "Install, verify, read a counterexample"], ja: ["クイックスタート", "5分クイックスタート", "導入・検証・反例の読み方"] },
+
+    { id: "guide",              categoryId: "guides", en: ["Workflow", "Workflow", "Commands and repair loop"],                 ja: ["使い方", "仕組みと使い方", "検証ループとコマンド"] },
+    { id: "business-layer",     categoryId: "guides", en: ["Business", "Business Layer", "Processes, controls, KPIs"],           ja: ["業務層", "業務層", "プロセス・統制・KPI"] },
+    { id: "requirements-layer", categoryId: "guides", en: ["Requirements", "Requirements Layer", "IDs, acceptance, forbidden"], ja: ["要件層", "要件層", "要件ID・受け入れ・禁止"] },
+    { id: "design-layer",       categoryId: "guides", en: ["Design", "Design Layer", "Internal state, refinement, compose"],    ja: ["設計層", "設計層", "内部状態・詳細化・合成"] },
+
+    { id: "syntax",             categoryId: "reference", en: ["Syntax", "Syntax Primer", "A 30-minute reading path into FSL source"],  ja: ["文法", "文法入門", "FSLを読むための30分ガイド"] },
+    { id: "analysis",           categoryId: "reference", en: ["Analyze", "Structural Analysis", "TSG, graph projections, findings"], ja: ["構造分析", "構造分析", "TSG・グラフ投影・所見"] },
+    { id: "language",           categoryId: "reference", en: ["Language", "Language Reference", "Generated, exhaustive map of LANGUAGE.md"], ja: ["言語仕様", "言語リファレンス", "LANGUAGE.mdから生成される網羅リファレンス"] },
+    { id: "cli",                categoryId: "reference", en: ["CLI", "CLI Reference", "Generated map of every fslc subcommand"], ja: ["CLI", "CLIリファレンス", "全fslcサブコマンドを生成"] },
+    { id: "errors",             categoryId: "reference", en: ["Errors", "Errors & Exit Codes", "JSON envelope, exit codes, violation/CTI/vacuity readouts"], ja: ["エラー", "エラー・終了コード", "JSONエンベロープ・終了コード・違反/CTI/空虚性の読み方"] },
+    { id: "glossary",           categoryId: "reference", en: ["Glossary", "Glossary", "Reserved words, ja/en, one-line definitions"], ja: ["用語集", "用語集", "予約語・和訳・英語・一行定義"] },
+
+    { id: "mechanism",          categoryId: "examples-background", en: ["Mechanisms", "Mechanisms", "BMC, induction, refinement"],           ja: ["仕組み", "仕組み詳細", "BMC・帰納法・詳細化"] },
+    { id: "domain",             categoryId: "examples-background", en: ["fsl-domain", "Domain / Async Effects", "DDD, effects, scaffolds"], ja: ["fsl-domain", "DDD / 非同期Effect", "DDD・effect・scaffold"] },
+    { id: "db",                 categoryId: "examples-background", en: ["fsl-db", "DB / Multi-env Compatibility", "Schema, artifacts, environments"], ja: ["fsl-db", "DB/複数環境互換性", "スキーマ・成果物・環境"] },
+    { id: "ai",                 categoryId: "examples-background", en: ["fsl-ai", "AI Contracts & Agents", "Tool authority, agents, replay"], ja: ["fsl-ai", "AI contract / agent", "tool権限・agent構造・replay"] },
+    { id: "examples",           categoryId: "examples-background", en: ["Examples", "Example Gallery", "A guided map of examples/ and specs/"], ja: ["実例", "実例ギャラリー", "examples/・specs/ の案内"] },
+    { id: "design-notes",       categoryId: "examples-background", en: ["Design Notes", "Design Notes & Dogfooding", "Why it's built this way — DESIGN-*.md, DOGFOOD-*.md"], ja: ["設計ノート", "設計ノート・実戦記録", "なぜこの設計か — DESIGN-*.md・DOGFOOD-*.md"] },
   ];
   const NAV_T = {
     en: { brand: "Manual", index: "English Manual", kicker: "FSL Manual", other: "日本語", otherRead: "日本語で読む",
@@ -383,7 +411,9 @@
     const t = NAV_T[lang];
     const href = (stem, l) => `${stem}.${l}.html`;
     const meta = (c) => (lang === "ja" ? c.ja : c.en);
+    const catMeta = (cat) => (lang === "ja" ? cat.ja : cat.en);
     const cur = (id) => (id === page ? ' aria-current="page"' : "");
+    const chapter = CHAPTERS.find((c) => c.id === page);
     const langToggle =
       `<span class="lang">` +
       (lang === "ja"
@@ -401,17 +431,46 @@
         `<span class="spacer"></span>` + langToggle;
     }
 
+    // Sidebar: 4 fixed categories, always expanded (no accordion — the
+    // sidebar's one job is "scan every chapter, in order, in one glance").
+    // Each category is a real <h2> + aria-labelledby <nav>, so a screen
+    // reader's landmark/heading rotor sees 4 distinctly named groups
+    // instead of 4 anonymous "navigation" regions.
     const side = $("aside.docs-sidebar[data-nav]");
     if (side) {
-      const items = CHAPTERS.map((c, i) => {
-        const m = meta(c);
-        const num = String(i + 1).padStart(2, "0");
-        return `<a class="chapter-link" href="${href(c.id, lang)}"${cur(c.id)}><span class="num">${num}</span><span><strong>${m[1]}</strong><span>${m[2]}</span></span></a>`;
+      const groups = CATEGORIES.slice().sort((a, b) => a.order - b.order).map((cat) => {
+        const cm = catMeta(cat);
+        const items = CHAPTERS.filter((c) => c.categoryId === cat.id).map((c, i) => {
+          const m = meta(c);
+          const num = String(i + 1).padStart(2, "0");
+          return `<a class="chapter-link" href="${href(c.id, lang)}"${cur(c.id)}><span class="num">${num}</span><span><strong>${m[1]}</strong><span>${m[2]}</span></span></a>`;
+        }).join("");
+        return (
+          `<h2 id="${cat.id}-label" class="docs-category-label">${cm[0]}</h2>` +
+          `<nav class="docs-chapters" aria-labelledby="${cat.id}-label">${items}</nav>`
+        );
       }).join("");
       side.innerHTML =
         `<a class="docs-sidebar-title" href="${href("index", lang)}"><span>${t.kicker}</span><strong>${t.index}</strong></a>` +
-        `<nav class="docs-chapters">${items}</nav>` +
+        groups +
         `<p class="docs-note"><a href="${href(page, other)}">${t.otherRead}</a></p>`;
+    }
+
+    // Breadcrumb: chapter/reference pages only (hub pages have no
+    // "chapter" segment; the category link doubles as the only
+    // "back to category" affordance — see DESIGN-docs-site.md D2).
+    const crumb = $("nav.breadcrumb[data-nav]");
+    if (crumb) {
+      if (chapter) {
+        const cat = CATEGORIES.find((c) => c.id === chapter.categoryId);
+        const cm = catMeta(cat);
+        const m = meta(chapter);
+        crumb.innerHTML =
+          `<a href="${href(cat.id, lang)}">${cm[0]}</a><span> / </span>` +
+          `<span aria-current="page">${m[1]}</span>`;
+      } else {
+        crumb.remove();
+      }
     }
 
     const foot = $("footer[data-nav]");
@@ -425,11 +484,93 @@
     }
   }
 
+  /* ---------- category hub pages ----------
+     A hub page (data-hub="true", data-page="<categoryId>") has no content
+     of its own: it renders CATEGORIES metadata + a CHAPTERS filter into
+     #hub-content, reusing the existing .chapter-card component (already
+     used on index.html) so there is no second per-chapter nav-mapping
+     source to keep in sync with CHAPTERS/CATEGORIES. */
+  function initHub() {
+    const mount = $("#hub-content");
+    if (!mount) return;
+    const lang = (document.documentElement.lang || "en").slice(0, 2) === "ja" ? "ja" : "en";
+    const page = document.body.dataset.page;
+    const cat = CATEGORIES.find((c) => c.id === page);
+    if (!cat) return;
+    const cm = lang === "ja" ? cat.ja : cat.en;
+    const items = CHAPTERS.filter((c) => c.categoryId === cat.id);
+    const cards = items.map((c, i) => {
+      const m = lang === "ja" ? c.ja : c.en;
+      const num = String(i + 1).padStart(2, "0");
+      return (
+        `<article class="chapter-card">` +
+        `<span class="num">${num}</span>` +
+        `<div><h3>${m[1]}</h3><p>${m[2]}</p></div>` +
+        `<a class="btn" href="${c.id}.${lang}.html">${lang === "ja" ? "読む" : "Read"}</a>` +
+        `</article>`
+      );
+    }).join("");
+    mount.innerHTML =
+      `<section class="hero"><div class="wrap narrow center">` +
+      `<p class="kicker reveal">${lang === "ja" ? "カテゴリ" : "Category"}</p>` +
+      `<h1 class="reveal">${cm[0]}</h1>` +
+      `<p class="lead reveal">${cm[1]}</p>` +
+      `</div></section>` +
+      `<section><div class="wrap"><div class="manual-main">${cards}</div></div></section>`;
+    initChrome(); // re-scan newly injected .reveal nodes
+  }
+
+  /* ---------- index.html category cards ----------
+     The homepage's 4 entry cards are rendered from CATEGORIES (never grows
+     past 4 — see DESIGN-docs-site.md D6) plus a chapter count derived from
+     CHAPTERS, instead of being hand-authored per index.*.html. This is the
+     same "read the data, don't duplicate the list" rule that keeps the hub
+     pages (initHub) from drifting relative to CHAPTERS/CATEGORIES. */
+  function initIndexCategories() {
+    const mount = $("#index-categories");
+    if (!mount) return;
+    const lang = (document.documentElement.lang || "en").slice(0, 2) === "ja" ? "ja" : "en";
+    const countLabel = lang === "ja" ? (n) => `${n}章` : (n) => `${n} chapter${n === 1 ? "" : "s"}`;
+    mount.innerHTML = CATEGORIES.slice().sort((a, b) => a.order - b.order).map((cat) => {
+      const cm = lang === "ja" ? cat.ja : cat.en;
+      const n = CHAPTERS.filter((c) => c.categoryId === cat.id).length;
+      return (
+        `<a class="card" href="${cat.id}.${lang}.html" style="display:block;text-decoration:none;color:inherit">` +
+        `<p class="kicker" style="margin-bottom:8px">${countLabel(n)}</p>` +
+        `<h3>${cm[0]}</h3><p>${cm[1]}</p>` +
+        `</a>`
+      );
+    }).join("");
+  }
+
+  /* ---------- disclosure-tree controls (language.html / cli.html) ----------
+     Progressive enhancement only: native <details>/<summary> already work
+     with JS disabled. This just toggles `open` on every node inside the
+     nearest .disclosure-tree so a reader isn't forced to click one at a
+     time in a page that's deep by design (see DESIGN-docs-site.md D3). */
+  function initTreeControls() {
+    $$(".tree-controls").forEach((ctl) => {
+      const tree = ctl.nextElementSibling;
+      if (!tree || !tree.classList.contains("disclosure-tree")) return;
+      const expand = $(".op-expand", ctl);
+      const collapse = $(".op-collapse", ctl);
+      if (expand) expand.addEventListener("click", () => {
+        $$("details", tree).forEach((d) => { d.open = true; });
+      });
+      if (collapse) collapse.addEventListener("click", () => {
+        $$("details", tree).forEach((d) => { d.open = false; });
+      });
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     initNav();
     T = Object.assign({}, DEFAULT_T, readJSON("i18n") || {});
     initChrome();
     if ($("#diagram-hero") || $("#diagram-board")) initConcept();
     if ($("#diagram-cti")) initGuide();
+    if (document.body.dataset.hub === "true") initHub();
+    initIndexCategories();
+    initTreeControls();
   });
 })();
