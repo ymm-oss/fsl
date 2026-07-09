@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AI Hard Contracts and Agent Structures with fsl-ai — FSL Manual</title>
-<meta name="description" content="How to use fsl-ai ai_component and agent to check AI tool authority, human approval guards, recursive agent structure, runtime replay, and AI-readable findings." />
+<title>AI Hard Contracts, Agent Structure, and Statistical Evidence with fsl-ai — FSL Manual</title>
+<meta name="description" content="How to use fsl-ai ai_component, agent, dataset, evaluator, statistical_property, ai_migration, and observed_property to check AI tool boundaries, recursive agent structure, Wilson-interval statistical evidence, migration regression, and operational drift." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="ai">
@@ -17,33 +17,63 @@
 <section class="hero">
   <div class="wrap narrow center">
     <nav class="breadcrumb" data-nav></nav>
-    <p class="kicker reveal">AI hard-contracts</p>
-    <h1 class="reveal">Guard AI tools and agent structure with fsl-ai</h1>
-    <p class="lead reveal">fsl-ai models deterministic AI boundaries: <code>ai_component</code> for declared tools, authority, approval, forbidden tools, fallback, and replay; <code>agent</code> for recursive scope, grants, visibility, orchestration, and failure policy.</p>
-    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a>.</p>
+    <p class="kicker reveal">AI hard-contracts / statistical evidence</p>
+    <h1 class="reveal">One discipline for AI tool boundaries, agent structure, and statistical quality</h1>
+    <p class="lead reveal">fsl-ai covers AI systems in three layers. <code>ai_component</code> is the hard-contract layer: tool authority, human approval, and forbidden tools checked through kernel expansion. <code>agent</code> is the structural layer: recursive agent grants, visibility, and orchestration. And <code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code> / <code>ai_migration</code> / <code>observed_property</code> form the evidence layer, which treats statistical quality, migration regression, and operational drift as external evidence with <code>formal_result: "not_run"</code>.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> and <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a>.</p>
   </div>
 </section>
 
 <section>
   <div class="wrap">
-    <p class="kicker reveal">Boundary</p>
-    <h2 class="reveal">Hard contracts are separate from evaluator and statistical evidence</h2>
-    <p class="lead narrow reveal">fsl-ai does not try to prove that natural-language answers are true. It checks structural and guard-backed execution facts, and treats statistical quality, migration regression, and drift as external evidence rather than proof.</p>
+    <p class="kicker reveal">What it prevents</p>
+    <h2 class="reveal">Catch four kinds of "it looks fine" AI failures</h2>
+    <p class="lead narrow reveal">fsl-ai does not try to prove that natural-language answers are true. Instead, it separates boundaries that can be checked deterministically by pre-execution guards from claims that must be handled honestly as statistics or observation, and reports each failure with a dedicated finding.</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>Tool-boundary breaches</h3>
+        <p>Forbidden tool execution and irreversible execution without human approval are detected both by kernel invariants and by runtime replay.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Agent authority leaks</h3>
+        <p>Structural analysis detects child grants exceeding the parent boundary, visibility leaks across siblings, low-trust paths reaching high-authority tools, and review-gate bypass.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Point-estimate release decisions</h3>
+        <p>A bare "accuracy was 0.92" claim is rejected. Nothing becomes <code>statistically_supported</code> unless the Wilson interval's lower bound supports the threshold.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Silent regression and drift</h3>
+        <p>Metric regressions from prompt/model/retriever migrations are caught by <code>fslc ai regress</code>; production telemetry threshold breaches and drift by <code>fslc ai drift</code> — both as threshold-bearing evidence.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Guarantee boundary</p>
+    <h2 class="reveal">Fix upfront what may be called proved — and what may not</h2>
+    <p class="lead narrow reveal">The core of fsl-ai is a guarantee boundary that fixes, per contract class, how the claim is handled and which vocabulary reports it. Every result and finding carries this classification.</p>
     <table class="matrix reveal">
-      <tr><th>Contract</th><th>Examples</th><th>How fsl-ai reports it</th></tr>
-      <tr><td><code>syntactic_hard</code></td><td>Tool schema, approval token, forbidden tool, precondition evidence.</td><td>Kernel expansion and <code>ai_hard_contract_violation</code>.</td></tr>
-      <tr><td><code>agent_structural</code></td><td>Nested agent grants, visibility, delegation, review gates, tool reachability.</td><td><code>agent_structural_violation</code>; structural evidence, not proof.</td></tr>
-      <tr><td><code>runtime_observed</code></td><td>Undeclared tool or schema mismatch observed in logs.</td><td><code>observed_contract_violation</code>; not proof.</td></tr>
-      <tr><td><code>evaluator_supported</code></td><td>Groundedness, source support, prompt-injection judgment.</td><td>Future phase; never displayed as <code>proved</code>.</td></tr>
-      <tr><td><code>statistically_supported</code></td><td>Accuracy, recall, hallucination rate, slice metrics.</td><td><code>fslc ai eval</code>; confidence-bound evidence, not proof.</td></tr>
+      <tr><th>Contract class</th><th>Examples</th><th>Handling</th><th>Result vocabulary</th></tr>
+      <tr><td>syntactic / structural hard</td><td>Tool schema, authority, forbidden tool, human approval token, symbolic precondition evidence.</td><td>Static check, kernel expansion, runtime guard/replay finding.</td><td><code>verified_under_assumptions</code>, <code>violated</code>, finding kind <code>ai_hard_contract_violation</code>.</td></tr>
+      <tr><td>agent structural</td><td>Nested agent grants, visibility, delegation, review gates, tool reachability.</td><td>Structural evidence from graph analysis; not proof.</td><td><code>agent_analyzed</code>, finding kind <code>agent_structural_violation</code>.</td></tr>
+      <tr><td>evaluator-backed</td><td>Groundedness, source support, prompt-injection judgment.</td><td>External evaluator evidence; not kernel proof.</td><td><code>evaluator_supported</code>; never displayed as <code>proved</code>.</td></tr>
+      <tr><td>statistical</td><td>Accuracy, recall, hallucination rate, per-slice metrics.</td><td>External stochastic evidence layer (<code>fslc ai eval</code> / <code>regress</code>).</td><td><code>statistically_supported</code> / <code>statistically_unsupported</code>.</td></tr>
+      <tr><td>observed</td><td>Undeclared tool execution, schema mismatch in logs, production telemetry drift.</td><td><code>fslc ai replay</code> / <code>fslc ai drift</code> observation evidence only.</td><td><code>replay_conformant</code> / <code>replay_nonconformant</code>, <code>observed_supported</code> / <code>observed_mismatch</code>, finding kind <code>observed_contract_violation</code>.</td></tr>
     </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">Prompt injection and RAG groundedness may be called "hard" only when the checked predicate is structural and guard-backed — for example "no tool call executes when the event marks <code>schema_valid=false</code>" or "a citation ID is in a declared finite allow-list." A semantic claim such as "the answer is supported by the source" requires an evaluator and cannot be displayed as formal proof.</p>
+    </div>
   </div>
 </section>
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
-    <p class="kicker reveal">Syntax</p>
-    <h2 class="reveal">Declare tools and authority explicitly</h2>
+    <p class="kicker reveal">Hard contract</p>
+    <h2 class="reveal">Declare tools and authority explicitly with <code>ai_component</code></h2>
+    <p class="lead narrow reveal">The hard-contract layer models an AI component only at its observable tool boundary: model/prompt/input/output metadata, tool declarations with schema names, symbolic preconditions, authority, fallback, and rule selection via <code>check hard</code>.</p>
     <div class="panel reveal">
       <pre><code>ai_component RefundAgentToolSafety {
   model refund_model_v1;
@@ -54,16 +84,19 @@
   tool SearchOrder {
     schema SearchOrderV1;
     precondition order_exists;
+    effect read_order;
   }
 
   tool RefundPayment irreversible {
     schema RefundPaymentV1;
     precondition order_paid;
     precondition amount_refundable;
+    effect payment_refunded;
   }
 
   tool DeleteCustomerData irreversible {
     schema DeleteCustomerDataV1;
+    effect customer_data_deleted;
   }
 
   authority {
@@ -74,46 +107,28 @@
 
   fallback {
     when low_confidence require human_review;
+    when missing_order_evidence require refuse_with_reason;
+  }
+
+  check hard {
+    rule tool_authority;
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
   }
 }</code></pre>
     </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <p class="kicker reveal">Recursive agents</p>
-    <h2 class="reveal">Nested agents are scoped agents, not <code>sub_agent</code>s</h2>
-    <p class="lead narrow reveal"><code>agent Parent { agent Child { ... } }</code> creates a lexical namespace such as <code>Parent.Child</code>. Parent authority and context are not inherited; children must receive explicit grants. Runtime collaboration stays separate in <code>orchestration</code>.</p>
-    <div class="panel reveal">
-      <pre><code>agent SupportOrchestrator {
-  context [CustomerTicket, ApprovedSupportDocs];
-  tools [SearchDocs, CheckPolicy];
-  authority { may_execute [SearchDocs, CheckPolicy]; }
-
-  agent RetrievalAgent {
-    grant authority [SearchDocs];
-    grant context [ApprovedSupportDocs];
-    tools [SearchDocs];
-    authority { may_execute [SearchDocs]; }
-    output RetrievedSources visibility [parent, PolicyCheckAgent];
-  }
-
-  agent PolicyCheckAgent {
-    grant authority [CheckPolicy];
-    grant context [CustomerTicket, ApprovedSupportDocs];
-    tools [CheckPolicy];
-    authority { may_execute [CheckPolicy]; }
-  }
-
-  orchestration {
-    RetrievalAgent -> PolicyCheckAgent;
-  }
-
-  failure_policy {
-    when RetrievalAgent.failed -> retry up_to 2;
-  }
-}</code></pre>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Rule</th><th>What it checks</th></tr>
+      <tr><td><code>tool_authority</code></td><td>A forbidden tool cannot also be executable.</td></tr>
+      <tr><td><code>human_approval_required</code></td><td>An <code>irreversible</code> executable tool must be in <code>requires_human_approval</code>.</td></tr>
+      <tr><td><code>forbidden_tool_blocked</code></td><td>The generated kernel state machine has no transition that can make a forbidden tool's <code>tool_executed</code> entry true.</td></tr>
+      <tr><td><code>tool_schema_declared</code></td><td>Executable tools must declare a schema name.</td></tr>
+      <tr><td><code>tool_precondition_declared</code></td><td>Declared symbolic preconditions are checked during replay as business precondition evidence, distinct from tool-schema conformance.</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">Omitting <code>check hard</code> checks all five rules — the safe default. Also, unlike the business/requirements dialects, no field on <code>ai_component</code> accepts a <code>"description text"</code> tag: everything here is a bare identifier or number.</p>
     </div>
   </div>
 </section>
@@ -122,19 +137,23 @@
   <div class="wrap">
     <p class="kicker reveal">Lowering</p>
     <h2 class="reveal"><code>ai_component</code> lowers to the existing kernel</h2>
-    <p class="lead narrow reveal">The AI dialect adds no probability or evaluator semantics to the verifier. The hard contract becomes finite state and ordinary invariants.</p>
+    <p class="lead narrow reveal">The AI dialect adds no probability, percentile, or evaluator semantics to the verifier. The hard contract becomes finite state and ordinary invariants, checked by <code>fslc ai check</code> (BMC or k-induction underneath).</p>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>Finite tool state</h3>
-        <p><code>Tool</code>, <code>human_approved</code>, <code>tool_executed</code>, and <code>tool_suggested</code> are ordinary kernel state.</p>
+        <p>A <code>Tool</code> enum, <code>Map&lt;Tool, Bool&gt;</code> state for <code>human_approved</code>, <code>tool_executed</code>, and <code>tool_suggested</code>, plus <code>fallback_required: Bool</code> become ordinary kernel state.</p>
       </div>
       <div class="syntax-card">
         <h3>Generated actions</h3>
-        <p><code>approve_*</code> and <code>execute_*</code> actions model approval tokens and guarded execution.</p>
+        <p><code>suggest_*</code>, <code>approve_*</code>, <code>execute_*</code>, and <code>fallback_*</code> actions model approval tokens and guarded execution.</p>
       </div>
       <div class="syntax-card">
         <h3>Generated invariants</h3>
         <p>Forbidden tools never execute, and irreversible or approval-required tools execute only after approval.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Fallback is structural only</h3>
+        <p><code>when &lt;reason&gt; require &lt;target&gt;</code> lowers to a <code>fallback_&lt;reason&gt;</code> action and ghost state, but <code>target</code> is a free label, so no invariant is generated — this is not proof that the fallback route was actually taken. Each reason must be unique per component.</p>
       </div>
     </div>
   </div>
@@ -142,44 +161,314 @@
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
+    <p class="kicker reveal">Recursive agents</p>
+    <h2 class="reveal">Nested agents are scoped agents, not <code>sub_agent</code>s</h2>
+    <p class="lead narrow reveal"><code>agent Parent { agent Child { ... } }</code> creates a lexical namespace such as <code>Parent.Child</code>. Parent authority and context are never implicitly inherited; children receive them through explicit <code>grant</code> declarations, which must stay inside the immediate parent's boundary. Runtime collaboration is the separate <code>orchestration</code> graph.</p>
+    <div class="panel reveal">
+      <pre><code>agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy, SendEmail];
+  authority {
+    may_execute [SearchDocs, CheckPolicy];
+    requires_human_approval [SendEmail];
+  }
+  review_gate PolicyCheckAgent;
+
+  agent RetrievalAgent {
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+    contract { hard { rule PolicyDecisionCited; } }
+    output PolicyDecision visibility parent;
+  }
+
+  agent SendAgent {
+    trust high;
+    grant authority [SendEmail];
+    grant context [CustomerTicket];
+    tool SendEmail irreversible {
+      schema SendEmailV1;
+    }
+    authority { requires_human_approval [SendEmail]; }
+    output SendResult visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+    PolicyCheckAgent -> SendAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+  }
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px"><code>fslc ai check</code> analyzes this as <code>agent_analyzed</code> (<code>formal_result: "not_run"</code>) and returns six separated graphs in <code>graph_summary</code> — <code>scope_tree</code>, <code>delegation_graph</code>, <code>authority_graph</code>, <code>information_flow_graph</code>, <code>tool_reachability_graph</code>, and <code>failure_policy</code>. Structural violations are reported as finding kind <code>agent_structural_violation</code>.</p>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Violation</th><th>Meaning</th></tr>
+      <tr><td><code>child_authority_exceeds_parent_authority</code></td><td>A child's grants/tools/authority exceed the immediate parent boundary.</td></tr>
+      <tr><td><code>child_context_exceeds_parent_context</code></td><td>A child uses context beyond its granted context.</td></tr>
+      <tr><td><code>visibility_leak_across_sibling_agents</code></td><td>Output visibility to a sibling with no delegation path.</td></tr>
+      <tr><td><code>low_trust_agent_path_to_high_authority_tool</code></td><td>A path from a <code>trust low</code> agent to a high-authority tool. Changing <code>RetrievalAgent</code> in the snippet above to <code>trust low</code> really does return this finding.</td></tr>
+      <tr><td><code>irreversible_operation_without_human_approval_path</code></td><td>A path to an irreversible tool without <code>requires_human_approval</code>.</td></tr>
+      <tr><td><code>policy_review_bypass_in_orchestration</code></td><td>An orchestration path reaching high-authority tooling that skips all declared <code>review_gate</code> children.</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">Mind the exact scope. <code>trust</code> is a free identifier; only the literal <code>low</code> has a dedicated check (<code>low_trust_agent_path_to_high_authority_tool</code>) — <code>medium</code> and <code>high</code> parse but have no dedicated check yet. <code>contract { hard { rule &lt;Name&gt;; } }</code> is parsed and echoed under each agent's <code>agent_ir.contracts</code> (e.g. <code>{"hard_rules": ["PolicyDecisionCited"]}</code>) but is not yet cross-checked against anything — it is forward-declared metadata. As with <code>ai_component</code>, no field here accepts a <code>"description text"</code> tag.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Statistical evidence</p>
+    <h2 class="reveal">Bind quality to evidence with <code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code></h2>
+    <p class="lead narrow reveal"><code>fslc ai eval</code> is a deterministic checker over precomputed eval JSONL. It runs no AI model and no evaluator; it supports only Bernoulli/proportion metrics (accuracy, recall, hallucination_rate, wrong_tool_call_rate, and other 0/1 metrics), judged with Wilson intervals. Results always carry <code>formal_result: "not_run"</code>.</p>
+    <div class="panel reveal">
+      <pre><code>dataset SupportEvalV3 {
+  source "examples/ai/support_eval_v3.jsonl"
+
+  population {
+    language in ["ja", "en"]
+    ticket_type in ["refund", "bug", "urgent"]
+  }
+
+  slice JapaneseRefundTickets {
+    language == "ja"
+    ticket_type == "refund"
+  }
+}
+
+evaluator SupportAnswerJudge {
+  input question: Question
+  input answer: Answer
+  output grounded: Bool
+  output confidence: Float
+
+  calibration {
+    dataset HumanLabeledGroundednessV2
+    require agreement_with_human >= 0.90
+  }
+}
+
+statistical_property LooseQuality {
+  target SupportAnswerAgent
+  dataset SupportEvalV3
+  evaluator SupportAnswerJudge
+  confidence 0.95
+
+  require ci_lower(metric.accuracy, 0.95) >= 0.45
+
+  slice JapaneseRefundTickets {
+    require min_samples >= 5
+    require ci_lower(metric.accuracy, 0.95) >= 0.35
+  }
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px">One eval record is one Bernoulli observation (schema <code>fsl-ai-eval-record.v0</code>; <code>case_id</code>, <code>slice</code>, <code>metric</code>, boolean <code>outcome</code>, and <code>evaluator.id</code> are required, and duplicate <code>(case_id, slice, metric)</code> records are <code>dataset_invalid</code>):</p>
+    <div class="panel reveal" style="margin-top:16px">
+      <pre><code>{"schema_version":"fsl-ai-eval-record.v0","case_id":"support-001","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px">With <code>k</code> successes out of <code>n</code> observations, <code>estimate = k / n</code>, and the Wilson interval at confidence <code>c</code> yields <code>ci_lower</code> / <code>ci_upper</code>. Requirements must take the form <code>ci_lower(metric.X, 0.95) &gt;= T</code> or <code>ci_upper(metric.X, 0.95) &lt;= T</code>. Actually running the examples gives:</p>
+    <table class="matrix reveal" style="margin-top:16px">
+      <tr><th>Property</th><th>Slice</th><th>n</th><th>Estimate</th><th>ci_lower (95%)</th><th>Threshold</th><th>Result</th></tr>
+      <tr><td><code>LooseQuality</code></td><td><code>all</code></td><td>10</td><td>0.80</td><td>≈ 0.490</td><td>≥ 0.45</td><td class="good"><code>statistically_supported</code></td></tr>
+      <tr><td><code>LooseQuality</code></td><td><code>JapaneseRefundTickets</code></td><td>5</td><td>1.00</td><td>≈ 0.566</td><td>≥ 0.35 (+ <code>min_samples &gt;= 5</code>)</td><td class="good"><code>statistically_supported</code></td></tr>
+      <tr><td><code>StrictQuality</code></td><td><code>JapaneseRefundTickets</code></td><td>5</td><td>1.00</td><td>≈ 0.566</td><td>≥ 0.80</td><td class="bad"><code>statistically_unsupported</code></td></tr>
+    </table>
+    <p class="lead narrow reveal" style="margin-top:16px">The third row is the point. Even a perfect 5/5 on the slice (estimate 1.00) gives a Wilson lower bound of only about 0.566 at n=5, so a 0.80 claim is not supported. Rejecting "it all passed, so we're fine" — sample size included — is this layer's job.</p>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Priority</th><th>Status</th><th>Meaning</th></tr>
+      <tr><td>1</td><td><code>dataset_invalid</code></td><td>Record schema violation, duplicate case for a slice/metric, or a required slice field is missing.</td></tr>
+      <tr><td>2</td><td><code>evaluator_untrusted</code></td><td>Evaluator calibration evidence is missing or below the declared trust threshold.</td></tr>
+      <tr><td>3</td><td><code>insufficient_samples</code></td><td>Some required slice has <code>n &lt; min_samples</code>.</td></tr>
+      <tr><td>4</td><td><code>inconclusive</code></td><td>The declared metric or interval method cannot be computed. Point-estimate-only requirements are rejected here too.</td></tr>
+      <tr><td>5</td><td><code>statistically_unsupported</code></td><td>Enough samples, but the Wilson bound does not support the threshold.</td></tr>
+      <tr><td>6</td><td><code>statistically_supported</code></td><td>Every required gate and bound check passes.</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">A point-estimate-only requirement such as <code>require accuracy &gt;= 0.92</code> is rejected at eval time as <code>inconclusive</code> (exit 1) — it does not pass with a warning. Each slice is an independent gate: the overall result is supported only when every slice passes its own <code>min_samples</code> and bound check. No family-wise multiple-testing correction is claimed by this layer.</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Migration / drift / compat</p>
+    <h2 class="reveal">Migration regression, production drift, and environment compatibility under the same discipline</h2>
+    <p class="lead narrow reveal"><code>ai_migration</code> declares, across a prompt/model/retriever migration, that the hard contract is preserved and metrics do not regress; <code>observed_property</code> declares production telemetry thresholds and drift. Both are external evidence with <code>formal_result: "not_run"</code>.</p>
+    <div class="panel reveal">
+      <pre><code>ai_migration PromptV7ToV8 {
+  from SupportAnswerAgent {
+    model gpt_5_5
+    prompt support_answer_prompt_v7
+    retriever support_docs_index_v12
+  }
+
+  to SupportAnswerAgent {
+    model gpt_5_5
+    prompt support_answer_prompt_v8
+    retriever support_docs_index_v14
+  }
+
+  preserve {
+    hard_contract SupportAnswerContract.hard
+
+    no_regression {
+      dataset SupportEvalV3
+      metric accuracy drop &lt;= 0.05
+      metric hallucination_rate increase &lt;= 0.02
+    }
+  }
+}
+
+observed_property SupportAgentOperationalQuality {
+  target SupportAnswerAgent
+  source production_logs
+  window last_7_days
+
+  require observed(metric.hallucination_rate) &lt;= 0.30
+  require drift(metric.refusal_rate) &lt;= 0.10 compared_to previous_7_days
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:24px">Actually running the example v7→v8 comparison (with deliberately regressed data):</p>
+    <table class="matrix reveal" style="margin-top:16px">
+      <tr><th>Command</th><th>Check</th><th>Measured</th><th>Verdict</th></tr>
+      <tr><td><code>fslc ai regress</code></td><td><code>accuracy drop &lt;= 0.05</code></td><td>1.00 (10/10) → 0.80 (8/10), <code>observed_delta</code> 0.20 &gt; <code>allowed_delta</code> 0.05</td><td class="bad"><code>passed: false</code> → finding <code>ai_migration_regression</code></td></tr>
+      <tr><td><code>fslc ai regress</code></td><td><code>hallucination_rate increase &lt;= 0.02</code></td><td>0.00 (0/5) → 0.20 (1/5), <code>observed_delta</code> 0.20 &gt; <code>allowed_delta</code> 0.02</td><td class="bad"><code>passed: false</code>; overall result <code>statistically_unsupported</code></td></tr>
+      <tr><td><code>fslc ai compare</code></td><td>Delta report, no threshold claim</td><td>accuracy <code>delta</code> −0.20, hallucination_rate <code>delta</code> +0.20</td><td class="ok"><code>result: "compared"</code> (no findings)</td></tr>
+      <tr><td><code>fslc ai drift</code></td><td><code>observed(metric.hallucination_rate) &lt;= 0.30</code></td><td>Current 0.25 (n=4)</td><td class="good"><code>passed: true</code></td></tr>
+      <tr><td><code>fslc ai drift</code></td><td><code>drift(metric.refusal_rate) &lt;= 0.10</code></td><td>Baseline 0.10 → current ≈0.667, <code>drift</code> ≈ 0.567</td><td class="bad"><code>passed: false</code> → <code>observed_mismatch</code>, finding <code>ai_observed_drift</code> (<code>guarantee_kind: "runtime_observed"</code>)</td></tr>
+    </table>
+    <p class="lead narrow reveal" style="margin-top:24px">Environment compatibility is shared with fsl-db. <code>fslc ai compat --environment prod</code> generates the component's model/prompt/retriever/tool/output-schema needs as a <code>dbsystem</code> artifact capability profile (<code>result: "compat_profile_generated"</code>):</p>
+    <div class="panel reveal" style="margin-top:16px">
+      <pre><code>artifact support_answer_agent {
+  requires model.gpt_5_5, prompt.support_answer_prompt_v8,
+           retriever.support_docs_index_v14, tool.CreateTicket, tool.SearchDocs;
+  provides output.AnswerSchemaV2;
+}</code></pre>
+    </div>
+    <p class="lead narrow reveal" style="margin-top:16px">Fold this fragment into a <code>dbsystem</code> environment and check it with <code>fslc compat check --include-ai</code> — AI capabilities join server/mobile/DB artifacts in the same finite snapshot compatibility model. A provider gap is reported as <code>required_capability_missing</code>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <p class="kicker reveal">Run it</p>
-    <h2 class="reveal">Use AI-specific findings for guard and replay failures</h2>
+    <h2 class="reveal">Map each layer's commands to its result vocabulary</h2>
     <div class="panel reveal">
       <pre><code>fslc ai check examples/ai/refund_agent_tool_safety.fsl
 fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_conformant.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
-fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl</code></pre>
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_forbidden_tool.jsonl
+fslc ai eval examples/ai/support_answer_quality.fsl --property LooseQuality
+fslc ai eval examples/ai/support_answer_quality.fsl --property StrictQuality
+fslc ai regress examples/ai/support_answer_quality.fsl --migration PromptV7ToV8 \
+  --before-records examples/ai/support_eval_v7.jsonl --after-records examples/ai/support_eval_v8_regressed.jsonl
+fslc ai compare --from examples/ai/support_eval_v7.jsonl --to examples/ai/support_eval_v8_regressed.jsonl --dataset SupportEvalV3
+fslc ai drift examples/ai/support_answer_quality.fsl --logs examples/ai/runtime_drift_current.jsonl \
+  --baseline-logs examples/ai/runtime_drift_baseline.jsonl
+fslc ai compat examples/ai/support_answer_quality.fsl --environment prod</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>Result</th><th>How to read it</th></tr>
-      <tr><td><code>verified_under_assumptions</code></td><td>The finite hard-contract expansion verifies under complete capability declarations and runtime guard assumptions.</td></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>The finite hard-contract expansion verifies under complete capability declarations (<code>AI-ASSUME-CAPABILITY-DECLARATIONS</code>) and runtime guards (<code>AI-ASSUME-RUNTIME-GUARD</code>). <code>formal_result</code> carries the kernel's <code>verified</code>.</td></tr>
       <tr><td><code>agent_analyzed</code></td><td>The recursive agent graph is structurally consistent; <code>formal_result</code> stays <code>not_run</code>.</td></tr>
-      <tr><td><code>replay_conformant</code></td><td>The observed event log matched the declared hard boundary; this is evidence, not proof.</td></tr>
-      <tr><td><code>ai_hard_contract_violation</code></td><td>A forbidden tool, approval bypass, schema invalidity, or business precondition mismatch was observed.</td></tr>
-      <tr><td><code>observed_contract_violation</code></td><td>Runtime used a capability outside the declared component boundary.</td></tr>
+      <tr><td><code>ai_project_analyzed</code></td><td><code>fslc ai check</code> on a file containing <code>dataset</code> and other project declarations — a declaration listing, not verification.</td></tr>
+      <tr><td><code>replay_conformant</code> / <code>replay_nonconformant</code></td><td>Whether the observed event log matched the declared hard boundary. The nonconformant side carries finding kinds <code>ai_hard_contract_violation</code> (approval bypass, forbidden tool execution, schema invalidity, precondition mismatch) and <code>observed_contract_violation</code> (undeclared tool/capability). Observation, not proof.</td></tr>
+      <tr><td><code>statistically_supported</code> / <code>statistically_unsupported</code></td><td>Whether the Wilson bound supports the threshold (<code>ai eval</code> / <code>ai regress</code>).</td></tr>
+      <tr><td><code>compared</code></td><td>The <code>ai compare</code> delta report. No threshold judgment included.</td></tr>
+      <tr><td><code>observed_supported</code> / <code>observed_mismatch</code></td><td>The <code>ai drift</code> telemetry threshold/drift verdict. Observation evidence.</td></tr>
+      <tr><td><code>compat_profile_generated</code></td><td><code>ai compat</code> generated a dbsystem capability profile.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Finding contract</p>
+    <h2 class="reveal">Every finding has the same shape: <code>fsl-ai-finding.v0</code></h2>
+    <p class="lead narrow reveal">Hard-contract violations, agent structural violations, unsupported statistics, and drift all come back through one finding schema. The required fields are <code>fsl</code>, <code>result</code>, <code>kind</code>, <code>severity</code>, <code>component</code>, <code>contract</code>, <code>tool</code>, <code>failed_rule</code>, <code>violation</code>, <code>guarantee_kind</code>, <code>evidence</code>, <code>witness</code>, <code>minimal_conflict_set</code>, <code>repair_candidates</code>, and <code>assumptions</code>. Each repair candidate carries a <code>weakens_spec</code> flag, so "make it pass by weakening the spec" repairs are explicitly marked.</p>
+    <table class="matrix reveal">
+      <tr><th><code>guarantee_kind</code></th><th>Emitted by</th><th>Meaning</th></tr>
+      <tr><td><code>syntactic_hard</code></td><td>Hard-contract violations from <code>ai check</code> / <code>ai replay</code></td><td>Deterministic facts over declared boundaries and guard assumptions.</td></tr>
+      <tr><td><code>agent_structural</code></td><td>Recursive agent analysis</td><td>Structural evidence over graphs; not proof.</td></tr>
+      <tr><td><code>runtime_observed</code></td><td>Log mismatches in replay, <code>ai drift</code></td><td>Observation evidence; absence from logs is not proof of unused behavior.</td></tr>
+      <tr><td><code>evaluator_supported</code></td><td>Future evaluator findings</td><td>Evaluator evidence; never displayed as <code>proved</code>.</td></tr>
+      <tr><td><code>statistically_supported</code> / <code>statistically_unsupported</code></td><td><code>ai eval</code> / <code>ai regress</code></td><td>Wilson-bound statistical evidence; never displayed as <code>proved</code>.</td></tr>
     </table>
   </div>
 </section>
 
 <section>
   <div class="wrap">
+    <p class="kicker reveal">Boundary</p>
+    <h2 class="reveal">Do not confuse what is checked with what is merely recognized</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Unchecked block boundaries</h3>
+        <p><code>ai_action</code>, a standalone <code>retriever</code> block, <code>trust_boundary</code>, and a top-level <code>authority { target ... }</code> (the example's <code>ai_contract</code> behaves the same way) are recognized only as block <em>boundaries</em>. The parser never descends into their bodies, so even garbage inside passes <code>check</code>. They are echoed as bare <code>{kind, name}</code> entries under <code>raw_blocks</code> and constrain nothing.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>The checked surface, exactly</h3>
+        <p>Kernel-backed <code>ai_component</code> / <code>agent</code>, plus external-evidence <code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code> / <code>ai_migration</code> / <code>observed_property</code>. Writing a contract anywhere else has no effect.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Forward-declared metadata</h3>
+        <p>An agent's <code>contract { hard { rule ...; } }</code> and <code>failure_mode</code> blocks are parsed and listed under <code>agent_ir.contracts</code> / <code>failure_modes</code>, but not yet cross-checked against evidence. Tracked metadata, not verified claims.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>No evaluator execution</h3>
+        <p><code>fslc ai eval</code> only reads precomputed JSONL. It does not run LLM evaluators, sample providers, or mutate prompts. Only boolean outcomes are supported; continuous scores are out of scope. Evaluator trust is a calibration-evidence question (missing evidence means <code>evaluator_untrusted</code>).</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>formal_result: "not_run"</code>, consistently</h3>
+        <p>Replay, agent analysis, eval, regress, compare, drift, and compat results all carry <code>formal_result: "not_run"</code>. None of them may be displayed as <code>proved</code> or <code>verified</code>. Only the <code>ai_component</code> hard-contract expansion carries a kernel formal result.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Time, probability, LLM truth</h3>
+        <p>A "last 7 days" window is a log-selection label, not a wall-clock proof, and drift is the difference between two observation windows. The truth or groundedness of LLM output itself is proved by no layer of this dialect.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
     <p class="kicker reveal">Next</p>
     <h2 class="reveal">Read the design and examples</h2>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>Design decisions</h3>
-        <p>Guarantee boundaries, lowering, event schema, findings, and external-evidence boundaries are described in the design document.</p>
-        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
+        <p>The guarantee boundary, lowering, event schema, and findings live in the hard-contract design doc; Wilson intervals, status priority, and the eval-record schema in the stochastic design doc.</p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> <a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></p>
       </div>
       <div class="syntax-card">
-        <h3>Working example</h3>
-        <p>The examples cover refund-agent approval/replay and recursive support-agent structure.</p>
+        <h3>Working examples</h3>
+        <p>Refund-agent approval/replay, recursive support-agent analysis, and every eval/regress/drift/compat command are reproducible from the examples.</p>
         <p><a class="btn" href="../../examples/ai/README.md">examples/ai</a></p>
       </div>
       <div class="syntax-card">
+        <h3>Environment compatibility</h3>
+        <p>The capability profile generated by <code>fslc ai compat</code> flows into fsl-db's <code>dbsystem</code> artifact/environment model.</p>
+        <p><a class="btn" href="db.en.html">fsl-db page</a></p>
+      </div>
+      <div class="syntax-card">
         <h3>Core syntax</h3>
-        <p><code>ai_component</code> lowers to the existing verifier; <code>agent</code> is structural analysis.</p>
+        <p><code>ai_component</code> lowers to the existing verifier. The syntax guide covers the core forms it expands into.</p>
         <p><a class="btn" href="syntax.en.html">Syntax Guide</a></p>
       </div>
     </div>

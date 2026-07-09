@@ -18,36 +18,33 @@
   <div class="wrap narrow center">
     <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">Functional DDD / async effects</p>
-    <h1 class="reveal">Describe domain transitions with <code>domain</code></h1>
-    <p class="lead reveal">fsl-domain makes aggregate ownership, command intent, accepted events, pure <code>decide/evolve</code> logic, saga/process-manager coordination, and async effect lifecycles explicit enough to verify, replay, and generate implementation scaffolds.</p>
+    <h1 class="reveal">Check domain transitions and async effects as a spec with <code>domain</code></h1>
+    <p class="lead reveal">fsl-domain puts aggregate ownership, command intent, accepted events, pure <code>decide/evolve</code> logic, async effect lifecycles, and saga/process-manager coordination into one specification. The spec lowers to the existing kernel for formal verification, structural risks come back as stable JSON findings, and real runtime behavior is checked as replay observation evidence.</p>
     <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a> and <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-effect.md">DESIGN-effect.md</a>.</p>
   </div>
 </section>
 
 <section>
   <div class="wrap">
-    <p class="kicker reveal">Model</p>
-    <h2 class="reveal">Keep the domain core pure</h2>
-    <div class="syntax-grid reveal">
+    <p class="kicker reveal">What it prevents</p>
+    <h2 class="reveal">Find domain-boundary and async breakage before release</h2>
+    <p class="lead narrow reveal">In real implementations, I/O leaks into command acceptance logic, a completion event arrives with no way to tell which request it completes, and an irreversible operation such as a payment capture runs twice after a retry. fsl-domain lowers the domain to a finite transition system and reports these risks mechanically, as verification results and findings.</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
       <div class="syntax-card">
-        <h3>Aggregate</h3>
-        <p>Owns state, commands, events, errors, invariants, and the consistency boundary.</p>
+        <h3>Pure-core completeness</h3>
+        <p>Every command must have a <code>decide</code>, every event must have an <code>evolve</code>, and no <code>evolve</code> may write state outside its aggregate.</p>
       </div>
       <div class="syntax-card">
-        <h3>Decide</h3>
-        <p>Maps state plus command to accepted events or rejected intent. No I/O belongs here.</p>
+        <h3>Correlation</h3>
+        <p>An async effect completion requires a prior pending request tied by <code>correlation_id</code>. A missing declaration is <code>uncorrelated_async_completion</code>.</p>
       </div>
       <div class="syntax-card">
-        <h3>Evolve</h3>
-        <p>Applies accepted events to state as pure transition logic.</p>
+        <h3>Idempotency</h3>
+        <p>An irreversible effect must declare an <code>idempotency_key</code>. If it is missing, an error finding stops formal verification itself.</p>
       </div>
       <div class="syntax-card">
-        <h3>Effect</h3>
-        <p>Models external async work with correlation, retry, timeout, and idempotency boundaries.</p>
-      </div>
-      <div class="syntax-card">
-        <h3>Saga</h3>
-        <p>Coordinates eventual steps, awaits outcomes, and declares compensation across boundaries.</p>
+        <h3>Stuck processes</h3>
+        <p>Effects left pending with no exit, saga steps that never observe completion, and cyclic waits are reported as warning or error findings.</p>
       </div>
     </div>
   </div>
@@ -55,8 +52,30 @@
 
 <section style="background:var(--surface-2)">
   <div class="wrap">
+    <p class="kicker reveal">Model</p>
+    <h2 class="reveal"><code>domain</code> lowers to the existing kernel</h2>
+    <p class="lead narrow reveal"><code>domain</code> is not a new verifier kernel. Declarations are parsed into a typed IR and lowered to the existing state-machine kernel. You can inspect the generated kernel spec directly with <code>fslc domain expand</code>.</p>
+    <table class="matrix reveal">
+      <tr><th>domain element</th><th>Lowered shape</th><th>Real example (from <code>fslc domain expand</code>)</th></tr>
+      <tr><td>Aggregate state field</td><td>A snake_case kernel state variable.</td><td><code>Order.status</code> → <code>order_status: OrderStatus</code></td></tr>
+      <tr><td>Command + <code>decide</code> + <code>evolve</code></td><td>One kernel action. <code>requires</code> becomes a guard; <code>rejects E when C</code> becomes <code>requires not (C)</code>.</td><td><code>RequestPaymentCapture</code> → <code>order_request_payment_capture(payment_request_id)</code></td></tr>
+      <tr><td>Event occurrence</td><td>A per-step Bool flag recording which event just happened.</td><td><code>event_PaymentCaptured: Bool</code></td></tr>
+      <tr><td>Enum member</td><td>A namespaced member, so separate enums can reuse the same word without collision.</td><td><code>Pending</code> → <code>OrderStatus_Pending</code></td></tr>
+      <tr><td>Aggregate invariant / <code>can(Command)</code></td><td>A kernel invariant. <code>can(C)</code> expands to C's decide preconditions: all <code>requires</code> clauses plus the negation of every <code>rejects ... when</code> condition.</td><td><code>noDuplicateCapture</code> → <code>Order_noDuplicateCapture</code></td></tr>
+      <tr><td>Effect lifecycle</td><td>Finite per-correlation maps plus completion and retry kernel actions.</td><td><code>capture_payment_status: Map&lt;PaymentRequestId, CapturePaymentEffectStatus&gt;</code>, <code>capture_payment_attempts</code> (<code>0..3</code>)</td></tr>
+      <tr><td>Saga step / compensation</td><td>Kernel actions guarded by event flags, plus observe actions for completions.</td><td><code>saga_order_fulfillment_capture_payment</code>, <code>saga_order_fulfillment_observe_payment_captured</code></td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">The effect lifecycle is a finite state machine keyed by <code>correlation_id</code>: <code>NotStarted -&gt; Pending -&gt; Succeeded | Failed | TimedOut | Cancelled | Compensated</code>. Completion actions require that correlation to be <code>Pending</code>, retry actions require a <code>Failed / TimedOut</code> status with <code>attempts &lt; max_attempts</code>, and <code>Succeeded</code> is sticky — enforced by the generated transition check <code>CapturePayment_SuccessSticky</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <p class="kicker reveal">Shape</p>
-    <h2 class="reveal">Write commands, events, and effect outcomes together</h2>
+    <h2 class="reveal">Write the aggregate and its effects in one spec</h2>
+    <p class="lead narrow reveal"><code>decide</code> is a pure function from state and command to either accepted events or a named rejection; <code>evolve</code> is a pure function applying an accepted event to state. I/O lives only on the effect side.</p>
     <div class="panel reveal">
       <pre><code>domain OrderAsyncEffect {
   implementation_profile functional_ddd
@@ -71,22 +90,50 @@
       payment_status: PaymentStatus = NotRequested;
     }
 
+    command ApproveOrder {}
+    command CancelOrder {}
     command RequestPaymentCapture { input payment_request_id: PaymentRequestId }
+
+    event OrderApproved {}
+    event OrderCancelled {}
     event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
     event PaymentCaptured { payment_request_id: PaymentRequestId }
     event PaymentFailed { payment_request_id: PaymentRequestId }
     event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+
+    error CannotCancelCapturedOrder
     error CannotCaptureUnapprovedOrder
+    error DuplicatePaymentCapture
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    decide CancelOrder {
+      rejects CannotCancelCapturedOrder when payment_status == Captured
+      requires status in [Pending, Approved]
+      emits OrderCancelled
+    }
 
     decide RequestPaymentCapture {
       rejects CannotCaptureUnapprovedOrder when status != Approved
+      rejects DuplicatePaymentCapture when payment_status in [PaymentPending, Captured]
       emits PaymentCaptureRequested
     }
 
+    evolve OrderApproved { status = Approved }
+    evolve OrderCancelled { status = Cancelled }
     evolve PaymentCaptureRequested { payment_status = PaymentPending }
     evolve PaymentCaptured {
       requires status != Cancelled
       payment_status = Captured
+    }
+    evolve PaymentFailed { payment_status = Failed }
+    evolve PaymentCaptureTimedOut { payment_status = TimedOut }
+
+    invariant noDuplicateCapture {
+      payment_status == Captured -> not can(RequestPaymentCapture)
     }
   }
 
@@ -97,10 +144,71 @@
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
-    retry { max_attempts 3 }
+    retry {
+      max_attempts 3
+      backoff exponential
+    }
     timeout after 10m emits PaymentCaptureTimedOut
+    compensation {
+      emits PaymentFailed
+    }
   }
 }</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Effect declaration</th><th>Meaning</th></tr>
+      <tr><td><code>async</code></td><td>An effect whose completion arrives in a later step. It makes <code>correlation_id</code> mandatory.</td></tr>
+      <tr><td><code>irreversible</code></td><td>A side effect that cannot be undone, such as a payment. It requires an <code>idempotency_key</code>, and missing compensation is a warning.</td></tr>
+      <tr><td><code>correlation_id Event.field</code></td><td>The key tying a request to its completion; it indexes the lifecycle maps.</td></tr>
+      <tr><td><code>idempotency_key Order.id</code></td><td>A declared stable key that guards against double commits.</td></tr>
+      <tr><td><code>handles</code> / <code>emits one_of [...]</code></td><td>The request event it consumes and the set of completion events it may produce.</td></tr>
+      <tr><td><code>retry { max_attempts 3 }</code></td><td>The retry bound after failure or timeout. In the kernel it becomes an <code>attempts &lt; 3</code> guard.</td></tr>
+      <tr><td><code>timeout after 10m emits ...</code></td><td>The exit from pending. <code>10m</code> is a modeled event, not wall-clock time.</td></tr>
+      <tr><td><code>reliable</code> + <code>outbox</code></td><td>An effect claiming delivery guarantees must be paired with an outbox boundary; otherwise <code>reliable_effect_without_outbox_boundary</code> is reported.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Saga</p>
+    <h2 class="reveal">Coordinate cross-boundary processes with a saga</h2>
+    <p class="lead narrow reveal">Multi-step eventual processes are written as a <code>saga</code>. It starts on a <code>starts_on</code> event; each step sends a request with <code>emits</code>, waits with <code>awaits one_of [...]</code>, and exits with <code>timeout after</code>. A <code>compensation</code> block declares "if X happens after Y, emit Z".</p>
+    <div class="panel reveal">
+      <pre><code>saga OrderFulfillment {
+  starts_on OrderApproved
+  outbox OrderOutbox
+  inbox FulfillmentInbox
+
+  step ReserveInventory {
+    async
+    emits InventoryReservationRequested
+    awaits one_of [InventoryReserved, InventoryReservationFailed]
+    timeout after 5m emits InventoryReservationFailed
+  }
+
+  step CapturePayment {
+    async
+    requires InventoryReserved
+    emits PaymentCaptureRequested
+    awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    timeout after 10m emits PaymentCaptureTimedOut
+  }
+
+  step ShipOrder {
+    requires PaymentCaptured
+    emits ShipmentRequested
+  }
+
+  compensation {
+    when PaymentFailed after InventoryReserved {
+      emits InventoryReleaseRequested
+    }
+  }
+}</code></pre>
+    </div>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">Saga <code>awaits</code> / <code>after</code> clauses enter the kernel as per-step event observation actions (generated actions such as <code>saga_order_fulfillment_observe_payment_captured</code>), and the result JSON carries the <code>DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY</code> assumption. Durable process history is not treated as an unbounded kernel proof — it is the boundary checked through finite-log observation with <code>fslc domain replay</code>.</p>
     </div>
   </div>
 </section>
@@ -108,23 +216,87 @@
 <section>
   <div class="wrap">
     <p class="kicker reveal">Run it</p>
-    <h2 class="reveal">Use kernel verification plus domain-specific findings</h2>
+    <h2 class="reveal">Use kernel verification plus the domain subcommands</h2>
+    <p class="lead narrow reveal">Because <code>domain</code> files lower to the kernel, plain <code>fslc check</code> / <code>fslc verify</code> accept them as-is. The dialect boundary — findings, scaffolds, replay — is exposed by the <code>fslc domain</code> subcommands.</p>
     <div class="panel reveal">
-      <pre><code>fslc check examples/domain/order_async_effect.fsl
-fslc verify examples/domain/order_async_effect.fsl --depth 6
-fslc domain check examples/domain/order_async_effect.fsl
-fslc domain analyze examples/domain/order_async_effect.fsl
-fslc domain expand examples/domain/order_async_effect.fsl
+      <pre><code>fslc check  examples/domain/order_async_effect.fsl
+fslc verify examples/domain/order_async_effect.fsl --depth 8
+fslc domain check   examples/domain/order_async_effect.fsl
+fslc domain analyze examples/domain/order_fulfillment_saga.fsl
+fslc domain expand  examples/domain/order_async_effect.fsl
 fslc domain generate examples/domain/order_functional_ddd.fsl --target typescript -o src/domain
-fslc domain generate examples/domain/order_functional_ddd.fsl --target python
-fslc domain testgen examples/domain/order_functional_ddd.fsl --target vitest -o order.domain.test.ts
-fslc domain replay examples/domain/order_async_effect.fsl --logs examples/domain/order_async_effect_replay.jsonl</code></pre>
+fslc domain testgen  examples/domain/order_functional_ddd.fsl --target vitest -o order.domain.test.ts
+fslc domain replay   examples/domain/order_async_effect.fsl --logs examples/domain/order_async_effect_replay.jsonl</code></pre>
     </div>
     <table class="matrix reveal" style="margin-top:24px">
-      <tr><th>Result</th><th>Meaning</th></tr>
-      <tr><td><code>verified_under_assumptions</code></td><td>The generated kernel model verified, with finite-model and scaffold assumptions stated in JSON.</td></tr>
-      <tr><td><code>violated</code></td><td>A hard domain finding blocked formal verification, or the generated kernel found a real property violation.</td></tr>
-      <tr><td><code>warning</code> finding</td><td>A design risk such as missing timeout/fallback or late completion policy. It does not claim a formal violation by itself.</td></tr>
+      <tr><th>Result</th><th>How to read it</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td>A successful <code>domain check</code>: <code>formal_result: "verified"</code>, with the kernel details (<code>invariants_checked</code>, <code>action_coverage</code>, …) nested under <code>kernel</code>, alongside <code>generated_actions</code> and the assumption list.</td></tr>
+      <tr><td><code>violated</code> + <code>formal_result: "not_run"</code></td><td>A severity-<code>error</code> finding stopped formal verification before it ran. Exit code 1.</td></tr>
+      <tr><td><code>analyzed</code></td><td><code>domain analyze</code>: a JSON summary of aggregate / effect / saga ownership (state, commands, events, steps, compensations, outbox/inbox).</td></tr>
+      <tr><td><code>generated</code></td><td><code>domain generate</code> / <code>domain testgen</code>: returns the generated <code>files</code> list and the output location.</td></tr>
+      <tr><td><code>conformance_checked</code> / <code>nonconformant</code></td><td><code>domain replay</code>: a finite-log observation result with <code>guarantee_kind: "runtime_observed"</code>. Not a formal proof.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Findings</p>
+    <h2 class="reveal">Errors block verification; warnings flag design risk</h2>
+    <p class="lead narrow reveal">Findings are stable JSON under the <code>fsl-domain-finding.v0</code> schema. Severity <code>error</code> marks a structural defect that would make the kernel run overstate its guarantee, so the check returns <code>violated</code> without running the kernel. Severity <code>warning</code> is a design-review risk and does not block the kernel run by itself.</p>
+    <table class="matrix reveal">
+      <tr><th>Finding</th><th>Severity</th><th>Meaning</th></tr>
+      <tr><td><code>missing_decide_for_command</code></td><td>error</td><td>A command has no corresponding <code>decide</code>.</td></tr>
+      <tr><td><code>missing_evolve_for_event</code></td><td>error</td><td>An event has no corresponding <code>evolve</code>.</td></tr>
+      <tr><td><code>aggregate_boundary_violation</code></td><td>error</td><td>An <code>evolve</code> writes state outside its aggregate.</td></tr>
+      <tr><td><code>uncorrelated_async_completion</code></td><td>error</td><td>An async effect has no <code>correlation_id</code>. In replay, a completion with no prior request reports the same kind.</td></tr>
+      <tr><td><code>irreversible_effect_without_idempotency_key</code></td><td>error</td><td>An irreversible effect declares no <code>idempotency_key</code>.</td></tr>
+      <tr><td><code>process_wait_cycle</code></td><td>error</td><td>The saga wait graph is cyclic, so no progress is possible without external completion.</td></tr>
+      <tr><td><code>pending_effect_without_timeout_or_fallback</code></td><td>warning</td><td>No exit from pending: neither <code>timeout</code> nor <code>retry</code> is declared.</td></tr>
+      <tr><td><code>late_completion_without_stale_policy</code></td><td>warning</td><td>No stale policy for a success completion arriving late, e.g. after cancellation.</td></tr>
+      <tr><td><code>missing_compensation_for_irreversible_effect</code></td><td>warning</td><td>An irreversible effect has no compensation, either on the effect or in a saga.</td></tr>
+      <tr><td><code>reliable_effect_without_outbox_boundary</code></td><td>warning</td><td>A <code>reliable</code> claim without an outbox boundary overstates runtime delivery evidence.</td></tr>
+      <tr><td><code>saga_dead_end</code></td><td>warning</td><td>A saga with no steps, or an async step with no completion observation (<code>awaits</code> / <code>timeout</code>).</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">Real example: running <code>fslc domain check</code> on <code>examples/domain/unsafe_irreversible_effect_without_idempotency.fsl</code> returns one error (<code>irreversible_effect_without_idempotency_key</code>) and two warnings (<code>pending_effect_without_timeout_or_fallback</code>, <code>missing_compensation_for_irreversible_effect</code>). Because of the error, the result is <code>violated</code> with <code>formal_result: "not_run"</code>. Every finding carries <code>repair_candidates</code> (e.g. <code>add idempotency_key &lt;stable key&gt; to irreversible effect CapturePayment</code>) that feed straight into an LLM write→verify→repair loop.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Scaffold and replay</p>
+    <h2 class="reveal">Connect to implementation scaffolds and runtime observation</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><code>domain generate</code></h3>
+        <p><code>--target typescript</code> is the richest target: <code>types.ts</code>, <code>&lt;aggregate&gt;/decide.ts</code>, <code>&lt;aggregate&gt;/evolve.ts</code>, <code>&lt;aggregate&gt;/adapter.ts</code>, plus <code>effects.ts</code> when effects are declared and <code>process-manager.ts</code> when sagas are declared. <code>python | kotlin | swift | rust</code> are simple pure-domain scaffolds (python emits a single <code>domain_scaffold.py</code>).</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>domain testgen</code></h3>
+        <p>Generates a vitest conformance test scaffold. It replays a trace baked at generation time by the Monitor (the concrete evaluator) under a fixed seed; every test is skipped until you wire <code>makeAdapter()</code> to your implementation. This is the same adapter boundary as the existing <code>testgen</code> conformance tests.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>domain replay</code></h3>
+        <p>Feeds a JSONL / JSON runtime log through the model. The four event kinds are <code>command</code> / <code>domain_event</code> / <code>effect_request</code> / <code>effect_completion</code>.</p>
+      </div>
+    </div>
+    <div class="panel reveal" style="margin-top:24px">
+      <div class="panel-head">examples/domain/order_async_effect_replay.jsonl → conformance_checked</div>
+      <pre><code>{"event":"command","aggregate":"Order","command":"ApproveOrder","params":{}}
+{"event":"command","aggregate":"Order","command":"RequestPaymentCapture","params":{"payment_request_id":"p1"}}
+{"event":"domain_event","aggregate":"Order","name":"PaymentCaptureRequested","params":{"payment_request_id":"p1"}}
+{"event":"effect_request","effect":"CapturePayment","correlation_id":"p1"}
+{"event":"effect_completion","effect":"CapturePayment","name":"PaymentCaptured","correlation_id":"p1","params":{"payment_request_id":"p1"}}</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Replay result key</th><th>Actual value (running the log above)</th></tr>
+      <tr><td><code>result</code></td><td><code>conformance_checked</code>; a log that disagrees with the model returns <code>nonconformant</code>.</td></tr>
+      <tr><td><code>events_observed</code></td><td><code>["PaymentCaptureRequested", "PaymentCaptured"]</code></td></tr>
+      <tr><td><code>pending_effects</code></td><td><code>[]</code> — the correlations left incomplete.</td></tr>
+      <tr><td><code>final_state</code></td><td>The model state after replay: <code>Order.payment_status: "PaymentStatus_Captured"</code>, correlation <code>0</code> of <code>effect.CapturePayment.status</code> at <code>Succeeded</code> with <code>attempts</code> at <code>1</code>.</td></tr>
+      <tr><td>Findings on <code>nonconformant</code></td><td><code>command_rejected_by_model</code>, <code>uncorrelated_async_completion</code>, <code>duplicate_irreversible_effect_commit</code>, <code>effect_completion_rejected_by_model</code>, and similar kinds.</td></tr>
     </table>
   </div>
 </section>
@@ -132,8 +304,57 @@ fslc domain replay examples/domain/order_async_effect.fsl --logs examples/domain
 <section style="background:var(--surface-2)">
   <div class="wrap">
     <p class="kicker reveal">Boundary</p>
-    <h2 class="reveal">What v0 proves</h2>
-    <p class="lead narrow reveal">The verifier checks the modeled transition system: aggregate invariants, command/evolve behavior, saga step guards, completion requiring a pending request, retry bounds, and sticky success. Runtime replay checks finite logs as observation evidence. Neither proves real gateway behavior, queue delivery, wall-clock timeouts, or production exactly-once semantics.</p>
+    <h2 class="reveal">Separate what is proved from what is not</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>What the kernel proves</h3>
+        <p>Bounded aggregate invariants, rejected commands being no-ops by construction (rejection conditions lower to guards, so no state changes), completion-requires-request, retry bounds, and sticky success status.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Finite-model assumption</h3>
+        <p><code>DOMAIN-ASSUME-FINITE-DOMAIN-MODEL</code>: IDs and undeclared scalar input types are modeled as finite <code>0..1</code> ranges. This is not a proof over unbounded id spaces.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Saga history</h3>
+        <p><code>DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY</code>: <code>awaits</code> / <code>after</code> are per-step observation flags. Durable process history is checked through replay evidence.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>The outside world</h3>
+        <p>Real payment gateways, queue delivery, wall-clock time (<code>10m</code> is a modeled event), and production idempotency across unbounded keys are not proved.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Generated code</h3>
+        <p><code>DOMAIN-ASSUME-GENERATED-SCAFFOLD</code>: the output is a scaffold, not production architecture proof. Runtime conformance still needs the adapter / replay evidence boundary.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Replay is observation</h3>
+        <p><code>conformance_checked</code> means this finite log matched the model — observation evidence, not formal proof. Log absence is not proof of non-occurrence.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Next</p>
+    <h2 class="reveal">Read the design and examples</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>Design decisions</h3>
+        <p>The lowering, finding schema, effect lifecycle semantics, and remaining boundaries are described in the design documents.</p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a> <a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-effect.md">DESIGN-effect.md</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Working examples</h3>
+        <p>The fixtures cover an async effect, a saga with compensation, the Functional DDD baseline, an unsafe missing-idempotency example, and a replay log.</p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/tree/main/examples/domain">examples/domain</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>Core syntax</h3>
+        <p><code>domain</code> lowers to the existing FSL verifier. The syntax guide covers the core forms it expands into.</p>
+        <p><a class="btn" href="syntax.en.html">Syntax Guide</a></p>
+      </div>
+    </div>
   </div>
 </section>
 </main>
