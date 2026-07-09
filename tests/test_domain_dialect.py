@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""fsl-domain / fsl-effect MVP coverage."""
+"""fsl-domain / fsl-effect v0 coverage."""
 
 import json
 from pathlib import Path
@@ -43,7 +43,7 @@ def test_domain_functional_core_checks_and_verifies():
 
     domain = run_domain_check(path, depth=6)
     assert domain["result"] == "verified_under_assumptions"
-    assert domain["dialect"] == "fsl-domain-effect-mvp.v0"
+    assert domain["dialect"] == "fsl-domain-effect.v0"
     assert domain["finding_schema_version"] == "fsl-domain-finding.v0"
     assert domain["formal_result"] == "verified"
     assert domain["findings"] == []
@@ -57,7 +57,7 @@ def test_domain_async_effect_lowers_to_kernel_and_checks_cleanly():
     assert out["result"] == "verified_under_assumptions"
     assert out["formal_result"] == "verified"
     assert out["findings"] == []
-    assert "DOMAIN-ASSUME-BOUNDED-MVP-MODEL" in {a["id"] for a in out["assumptions"]}
+    assert "DOMAIN-ASSUME-FINITE-DOMAIN-MODEL" in {a["id"] for a in out["assumptions"]}
     assert {
         "order_request_payment_capture",
         "capture_payment_complete_payment_captured",

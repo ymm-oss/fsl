@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Parser for the fsl-domain / fsl-effect MVP dialect."""
+"""Parser for the fsl-domain / fsl-effect v0 dialect."""
 from __future__ import annotations
 
 from lark import Lark, Transformer, v_args

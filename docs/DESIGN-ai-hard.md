@@ -1,11 +1,11 @@
 # FSL AI Hard-Contract Dialect Design
 
-Status: adopted for Phase 1 MVP. This document cuts the deterministic
-hard-contract slice out of `docs/fsl_ai_stochastic_proposal.md`.
+Status: adopted and implemented. This document defines the deterministic
+hard-contract slice of the fsl-ai dialect.
 
 ## Decision
 
-`ai_component` is a frontend dialect, not a new verifier kernel. Phase 1 models
+`ai_component` is a frontend dialect, not a new verifier kernel. The hard-contract layer models
 AI components only at the observable tool-boundary:
 
 - declared model/prompt/input/output metadata
@@ -29,24 +29,24 @@ No probability, percentile, evaluator scoring, model-distribution, or stochastic
 semantics are added to the kernel. Runtime replay is observation evidence, not
 formal proof.
 
-`fallback` declarations are structural only in Phase 1: each `when <reason>
+`fallback` declarations are structural in this layer: each `when <reason>
 require <target>` lowers to a `fallback_<reason>` action that sets the ghost
 `fallback_required: Bool`, but — unlike forbidden tools and approval-before-
 execution — **no invariant is generated over it**, because `target` is a free
 label with no corresponding tool/action in the grammar, so "the target was
 actually taken" is not expressible in the kernel yet. `fallback_required` is
 kept as observable state for `fslc explain`/`fslc html` and as a hook for a
-future phase that ties `target` to a real action; it is not proof that any
+typed workflow extension that ties `target` to a real action; it is not proof that any
 fallback routing happens. Each `reason` must be unique per component
 (`validate_ai_component`) since two entries sharing a reason would collide on
 the same generated action name.
 
 ## Guarantee Boundary
 
-| Contract class | Examples | Phase 1 handling | Result vocabulary |
+| Contract class | Examples | Handling | Result vocabulary |
 |---|---|---|---|
 | Syntactic / structural hard | declared tool schema, enum-like authority, forbidden tool, human approval token, symbolic precondition evidence | static check, kernel expansion, runtime guard/replay finding | `verified_under_assumptions`, `violated`, `ai_hard_contract_violation` |
-| Evaluator-backed hard-like | groundedness, source support, prompt-injection-following judgment, instruction hierarchy compliance | out of MVP; must be explicit external evidence | `evaluator_supported`, never `proved` |
+| Evaluator-backed hard-like | groundedness, source support, prompt-injection-following judgment, instruction hierarchy compliance | external evaluator evidence; not kernel proof | `evaluator_supported`, never `proved` |
 | Statistical | accuracy, recall, hallucination rate, slice metrics, confidence intervals | external stochastic evidence layer | `statistically_supported` / `statistically_unsupported`, never `proved` |
 | Observed | undeclared tool observed, schema drift in logs, production mismatch | `fslc ai replay` evidence only | `replay_conformant`, `replay_nonconformant`, `observed_contract_violation` |
 | Environment compatibility | model/prompt/retriever/tool-schema/output-schema coexistence with server/mobile/DB artifacts | shared `dbsystem` artifact capabilities | `verified_under_assumptions` / `required_capability_missing` |
@@ -219,7 +219,7 @@ not prove LLM semantic correctness, evaluator judgments, or statistical quality.
 
 ## Event Replay
 
-The MVP event stream is JSONL, or JSON `{ "events": [...] }`.
+The event stream is JSONL, or JSON `{ "events": [...] }`.
 
 ```json
 {"event":"human_approval","component":"RefundAgentToolSafety","tool":"RefundPayment","approval_id":"redacted"}
@@ -241,7 +241,7 @@ Replay detects:
 The stable finding schema is `fsl-ai-finding.v0` (see
 `schemas/fslc/ai/finding.v0.schema.json`). Required fields:
 
-- `fsl`: `fsl-ai-hard-mvp.v0` or `fsl-ai-agent-mvp.v0`
+- `fsl`: `fsl-ai-hard.v0` or `fsl-ai-agent.v0`
 - `result`
 - `kind`
 - `severity`
@@ -257,12 +257,12 @@ The stable finding schema is `fsl-ai-finding.v0` (see
 - `repair_candidates`
 - `assumptions`
 
-`guarantee_kind` is the key boundary marker. Phase 1 emits
+`guarantee_kind` is the key boundary marker. The AI dialect emits
 `syntactic_hard` for hard-contract violations, `runtime_observed` for log
 mismatches, and `agent_structural` for recursive-agent graph findings. Future
-evaluator/statistical findings must use
-`evaluator_supported` or `statistically_supported` and must not be reported as
-formal proof.
+evaluator findings must use `evaluator_supported`; statistical findings use
+`statistically_supported` / `statistically_unsupported`. Neither category may
+be reported as formal proof.
 
 ## Relationship To Compatibility And Statistical Evidence
 
@@ -282,10 +282,12 @@ artifact support_agent_v8 {
 environment/schema/flag snapshots as DB/API/mobile/server artifacts and reports
 `required_capability_missing` for provider gaps.
 
-Statistical quality is also outside this hard-contract dialect. The MVP
-stochastic evidence layer reads precomputed eval JSONL, supports only
-Bernoulli/proportion metrics with Wilson intervals, and returns
-`formal_result: "not_run"`; see `docs/DESIGN-stochastic.md`.
+Statistical quality is also outside this hard-contract dialect. The implemented
+stochastic evidence layer reads precomputed eval JSONL with `fslc ai eval`,
+supports only Bernoulli/proportion metrics with Wilson intervals, and returns
+`formal_result: "not_run"`; see `docs/DESIGN-stochastic.md`. `fslc ai regress`
+checks aggregate `ai_migration.no_regression` metrics, and `fslc ai drift`
+checks runtime telemetry thresholds/drift as observed evidence.
 
 ## Assumptions
 
@@ -294,18 +296,17 @@ Results carry explicit assumptions:
 - `AI-ASSUME-CAPABILITY-DECLARATIONS`: declared tools and authority are complete.
 - `AI-ASSUME-RUNTIME-GUARD`: hard contracts are enforced before external side
   effects occur.
-- `AI-ASSUME-NO-PROBABILITY-IN-KERNEL`: Phase 1 adds no probability, percentile,
+- `AI-ASSUME-NO-PROBABILITY-IN-KERNEL`: this dialect adds no probability, percentile,
   or evaluator semantics to the kernel.
 - `AI-ASSUME-OBSERVABILITY-COVERAGE`: replay logs are evidence only; absence
   from logs is not proof of unused behavior.
 
-## Out of MVP
+## Outside This Layer
 
-The following remain in later issues/phases:
+The following are intentionally handled by adjacent external-evidence or
+workflow layers rather than by the hard-contract kernel lowering:
 
-- eval runner implementation beyond the external statistical result schema
 - evaluator calibration and evaluator-backed contract support
-- prompt/model/retriever/tool-schema migrations and no-regression checks
-- production drift aggregation beyond event replay
+- prompt/model/retriever/tool-schema execution or automatic migration
 - full agent contract-expression semantics beyond the structural
   `rule <Name>` contract metadata accepted by the recursive-agent parser

@@ -158,7 +158,7 @@ for SQL DDL or minimal Prisma schema importers. Production-data preservation and
 DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
 `formal_result: "not_run"`, not `verified`/`proved`.
 
-Functional DDD / async effect dialect (MVP; expands to the same kernel and
+Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
 
 ```fsl
@@ -226,10 +226,11 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `fslc domain testgen` for Functional DDD and adapter scaffolds. Use
 `fslc domain replay --logs` for runtime command/event/effect evidence
 (`conformance_checked` / `nonconformant`, not proof). Saga history adds
-`DOMAIN-ASSUME-SAGA-HISTORY-MVP`. The MVP does not prove real gateway behavior,
-queue delivery, wall-clock timeouts, or production exactly-once semantics.
+`DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
+real gateway behavior, queue delivery, wall-clock timeouts, or production
+exactly-once semantics.
 
-AI hard-contract dialect (Phase 1; expands to the same kernel for deterministic
+AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
 
 ```fsl
@@ -261,15 +262,17 @@ ai_component <Name> {
 approval-required execution, forbidden tools, declared tool schemas, symbolic
 business precondition evidence, and fallback routing. It does not model LLM
 truth, groundedness, evaluator judgment, probability, confidence intervals, or
-prompt/model sampling distributions. Use `fslc ai check` for
+prompt/model sampling distributions in the kernel. Use `fslc ai check` for
 `verified_under_assumptions` hard-contract findings and `fslc ai replay --logs`
 for JSONL runtime evidence (`replay_conformant` / `replay_nonconformant`,
-`formal_result:"not_run"`). Findings include `guarantee_kind`:
-`syntactic_hard` or `runtime_observed` in Phase 1; future
-`evaluator_supported` / `statistically_supported` results are never formal proof.
-Statistical quality evidence uses the external stochastic evidence design in
-`docs/DESIGN-stochastic.md`: precomputed eval JSONL, Bernoulli/proportion
-metrics only, Wilson intervals only, and `formal_result:"not_run"`.
+`formal_result:"not_run"`). Statistical quality evidence uses the external
+stochastic checker: `fslc ai eval` over precomputed eval JSONL,
+Bernoulli/proportion metrics, Wilson intervals, and
+`formal_result:"not_run"`. `fslc ai regress` checks aggregate
+`ai_migration.no_regression`, `fslc ai compare` reports metric deltas,
+`fslc ai drift` checks runtime telemetry thresholds/drift, and
+`fslc ai compat` emits DB artifact capability profiles. These results are never
+formal proof.
 
 Recursive fsl-ai `agent` composition is checked structurally by
 `fslc ai check` and returns `agent_analyzed` on success:

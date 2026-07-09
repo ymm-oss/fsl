@@ -27,7 +27,7 @@ def test_recursive_agent_example_produces_deterministic_ir():
     out = run_ai_check(str(EXAMPLES / "recursive_support_agent.fsl"))
 
     assert out["result"] == "agent_analyzed"
-    assert out["dialect"] == "fsl-ai-agent-mvp.v0"
+    assert out["dialect"] == "fsl-ai-agent.v0"
     assert out["formal_result"] == "not_run"
     assert out["findings"] == []
 
@@ -70,7 +70,7 @@ def test_recursive_agent_is_parseable_by_regular_check_for_corpus_sweeps():
 
     assert out["result"] == "ok"
     assert out["spec"] == "SupportOrchestrator"
-    assert out["dialect"] == "fsl-ai-agent-mvp.v0"
+    assert out["dialect"] == "fsl-ai-agent.v0"
     assert out["agent_analysis_result"] == "agent_analyzed"
 
 

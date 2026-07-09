@@ -12,7 +12,7 @@ from .ai_ir import AiComponent, AiTool
 from .model import FslError
 
 
-AI_DIALECT_VERSION = "fsl-ai-hard-mvp.v0"
+AI_DIALECT_VERSION = "fsl-ai-hard.v0"
 AI_FINDING_SCHEMA_VERSION = "fsl-ai-finding.v0"
 
 DEFAULT_HARD_RULES = (
@@ -111,7 +111,7 @@ def _dedupe(values, label, loc=None):
 
 def validate_ai_component(component: AiComponent):
     if not component.tools:
-        _err("ai_component requires at least one tool in the hard-contract MVP", loc=component.loc)
+        _err("ai_component requires at least one tool in the hard-contract dialect", loc=component.loc)
 
     names = set()
     for tool in component.tools:
@@ -291,7 +291,7 @@ def expand_ai_component(component: AiComponent):
         },
         {
             "id": "AI-ASSUME-NO-PROBABILITY-IN-KERNEL",
-            "text": "Phase 1 hard-contract checks add no probability, percentile, or evaluator semantics to the kernel",
+            "text": "hard-contract checks add no probability, percentile, or evaluator semantics to the kernel",
         },
     ]
 

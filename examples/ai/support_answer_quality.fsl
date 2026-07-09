@@ -1,0 +1,160 @@
+ai_component SupportAnswerAgent {
+  model gpt_5_5
+  prompt support_answer_prompt_v8
+  retriever support_docs_index_v14
+  tools [SearchDocs, CreateTicket]
+  temperature 0.2
+  input SupportTicket
+  output AnswerSchemaV2
+}
+
+ai_action ClassifyTicket {
+  input ticket: SupportTicket
+  output category: TicketCategory
+  output confidence: Float
+
+  transitions {
+    if category == Urgent -> Escalated
+    if confidence < 0.7 -> HumanReviewPending
+    otherwise -> AutoAnswerCandidate
+  }
+}
+
+retriever SupportDocsRetriever {
+  index support_docs_index_v14
+  input Query
+  output RetrievedSources
+
+  hard {
+    rule SourcesFromApprovedDocs
+    rule SourcesNotExpired
+  }
+
+  statistical {
+    dataset SupportEvalV3
+    require ci_lower(metric.recall_at_5, 0.95) >= 0.92
+  }
+}
+
+trust_boundary SupportAnswerAgentBoundary {
+  trusted [system_instruction, developer_prompt, approved_docs]
+  untrusted [user_message, ticket_description]
+}
+
+authority SupportAgentAuthority {
+  target SupportAnswerAgent
+  may_suggest [ReplyDraft, TicketCategory, HelpArticle]
+  may_execute [SearchDocs, CreateTicket]
+  requires_human_approval [SendEmail]
+  forbidden [DeleteCustomerData, ChangeBillingPlan]
+}
+
+ai_contract SupportAnswerContract {
+  target SupportAnswerAgent
+
+  hard {
+    rule OutputLanguageMatchesInput
+    rule CitationsUseRetrievedSources
+  }
+
+  statistical {
+    dataset SupportEvalV3
+    evaluator SupportAnswerJudge
+    confidence 0.95
+    require ci_lower(metric.accuracy, 0.95) >= 0.45
+  }
+
+  fallback {
+    when output.confidence < 0.7 require HumanReview
+    when retrieved.sources.count == 0 require RefuseWithReason
+  }
+}
+
+dataset SupportEvalV3 {
+  source "examples/ai/support_eval_v3.jsonl"
+
+  population {
+    language in ["ja", "en"]
+    ticket_type in ["refund", "bug", "urgent"]
+  }
+
+  slice JapaneseRefundTickets {
+    language == "ja"
+    ticket_type == "refund"
+  }
+}
+
+evaluator SupportAnswerJudge {
+  input question: Question
+  input answer: Answer
+  output grounded: Bool
+  output confidence: Float
+
+  calibration {
+    dataset HumanLabeledGroundednessV2
+    require agreement_with_human >= 0.90
+  }
+}
+
+failure_mode Hallucination {
+  condition output.claims not_supported_by retrieved.sources
+  severity high
+}
+
+statistical_property LooseQuality {
+  target SupportAnswerAgent
+  dataset SupportEvalV3
+  evaluator SupportAnswerJudge
+  confidence 0.95
+
+  require ci_lower(metric.accuracy, 0.95) >= 0.45
+
+  slice JapaneseRefundTickets {
+    require min_samples >= 5
+    require ci_lower(metric.accuracy, 0.95) >= 0.35
+  }
+}
+
+statistical_property StrictQuality {
+  target SupportAnswerAgent
+  dataset SupportEvalV3
+  evaluator SupportAnswerJudge
+  confidence 0.95
+
+  slice JapaneseRefundTickets {
+    require ci_lower(metric.accuracy, 0.95) >= 0.80
+  }
+}
+
+ai_migration PromptV7ToV8 {
+  from SupportAnswerAgent {
+    model gpt_5_5
+    prompt support_answer_prompt_v7
+    retriever support_docs_index_v12
+  }
+
+  to SupportAnswerAgent {
+    model gpt_5_5
+    prompt support_answer_prompt_v8
+    retriever support_docs_index_v14
+  }
+
+  preserve {
+    hard_contract SupportAnswerContract.hard
+
+    no_regression {
+      dataset SupportEvalV3
+      metric accuracy drop <= 0.05
+      metric hallucination_rate increase <= 0.02
+    }
+  }
+}
+
+observed_property SupportAgentOperationalQuality {
+  target SupportAnswerAgent
+  source production_logs
+  window last_7_days
+
+  require observed(metric.hallucination_rate) <= 0.30
+  require drift(metric.refusal_rate) <= 0.10 compared_to previous_7_days
+}

@@ -1,16 +1,17 @@
 # FSL Stochastic Evidence Layer Design
 
-Status: adopted design for the MVP boundary. This document fixes issue #139
-before any eval runner implementation.
+Status: adopted and implemented. This document fixes issue #139 and defines
+the implemented `fslc ai eval` precomputed-evidence checker.
 
 ## Decision
 
 `fsl-stochastic` is an external statistical evidence layer, not a kernel
-dialect. It does not change `fslc verify`, `proved`, or `verified`. The MVP
-starts with a deterministic checker over precomputed eval JSONL and produces a
-JSON result whose `formal_result` is always `"not_run"`.
+dialect. It does not change `fslc verify`, `proved`, or `verified`. The
+implemented layer runs a deterministic checker over precomputed eval JSONL via
+`fslc ai eval` and produces JSON results whose `formal_result` is always
+`"not_run"`.
 
-The MVP only supports Bernoulli/proportion metrics:
+The implemented statistical checker supports Bernoulli/proportion metrics:
 
 - accuracy
 - recall
@@ -18,8 +19,8 @@ The MVP only supports Bernoulli/proportion metrics:
 - wrong_tool_call_rate
 - equivalent 0/1 pass/fail metrics
 
-The only confidence interval method in the MVP is Wilson. A statistical result
-may be `statistically_supported`, but it is never a formal proof and must not be
+The confidence interval method is Wilson. A statistical result may be
+`statistically_supported`, but it is never a formal proof and must not be
 displayed as `proved` or `verified`.
 
 ## Guarantee Boundary
@@ -35,11 +36,11 @@ Successful statistical results include assumptions such as fixed dataset,
 sample-independence not proved by fslc, and evaluator calibration supplied by
 separate evidence.
 
-## MVP Input: Precomputed Eval JSONL
+## Input: Precomputed Eval JSONL
 
-The MVP reads precomputed JSONL. It does not run an AI model, call an evaluator,
-sample providers, or mutate prompts. Each JSONL line is one Bernoulli
-observation for one metric/slice/case. The schema is
+The checker reads precomputed JSONL. It does not run an AI model, call an
+evaluator, sample providers, or mutate prompts. Each JSONL line is one
+Bernoulli observation for one metric/slice/case. The schema is
 `schemas/fslc/ai/eval-record.v0.schema.json`.
 
 Minimal line shape:
@@ -48,13 +49,13 @@ Minimal line shape:
 {"schema_version":"fsl-ai-eval-record.v0","case_id":"support-001","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"gold_labels_v3","calibration_status":"trusted"}}
 ```
 
-MVP dataset validity rules:
+Dataset validity rules:
 
 - `case_id`, `slice`, `metric`, `outcome`, and `evaluator.id` are required.
 - A missing required slice field is `dataset_invalid`.
 - Duplicate `(case_id, slice, metric)` records are `dataset_invalid`.
 - `outcome` is boolean. Continuous scores and free-form evaluator rationales are
-  out of MVP.
+  intentionally outside this checker.
 - Raw prompts, answers, documents, secrets, and production payloads are not
   required result fields; evidence artifacts should keep identifiers and
   aggregate counts only.
@@ -73,7 +74,7 @@ An implementation must decide status in this order:
    does not support the threshold.
 6. `statistically_supported`: every required gate and bound check passes.
 
-`result` and `status` use the same vocabulary in the MVP result schema
+`result` and `status` use the same vocabulary in the result schema
 (`schemas/fslc/ai/statistical-result.v0.schema.json`) so consumers can route
 without interpreting a separate proof status.
 
@@ -89,7 +90,7 @@ lower = center - margin
 upper = center + margin
 ```
 
-MVP properties must use one of these bound forms:
+Properties must use one of these bound forms:
 
 - `ci_lower(metric, 0.95) >= T`
 - `ci_upper(metric, 0.95) <= T`
@@ -110,10 +111,10 @@ Each declared slice is an independent gate. A result is
 `statistically_supported` only when every required slice passes its own
 `min_samples` and bound check.
 
-The MVP does not provide a family-wise guarantee and does not automatically
+The checker does not provide a family-wise guarantee and does not automatically
 apply multiple-testing correction. When a job declares more than one slice,
 results should include an assumption or warning stating that family-wise error
-control is out of MVP.
+control is not claimed by this layer.
 
 ## Required Result Fields
 
@@ -145,17 +146,19 @@ AI model, prompt, retriever, tool schema, and output schema compatibility belong
 to the `dbsystem` artifact/environment model as finite capability profiles
 (`requires` / `provides`). See `docs/DESIGN-db.md`.
 
-`ai_migration.no_regression` is not part of this MVP because it needs paired
-comparison semantics. This design records that requirement and leaves the
-implementation to a later issue.
+`ai_migration.no_regression` is implemented as aggregate precomputed-metric
+comparison via `fslc ai regress`; paired case-level comparison can be supplied
+as stricter external evidence but is not required by this layer.
 
-## Out Of MVP
+Runtime telemetry drift is implemented separately via `fslc ai drift` over
+JSON/JSONL records. It emits observed evidence, not statistical proof.
+
+## Outside This Layer
 
 - bootstrap or arbitrary-metric intervals
-- paired migration regression implementation
+- mandatory paired migration regression semantics
 - automatic multiple-testing correction
 - LLM evaluator execution
-- production drift detection
 - provider sampling distribution estimation
 - stochastic semantics inside `fslc verify`
 - automatic prompt/model/retriever migration execution

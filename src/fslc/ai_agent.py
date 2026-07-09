@@ -12,7 +12,7 @@ from .ai_ir import AiAgent, AiDelegationEdge, AiFailurePolicy
 from .model import FslError
 
 
-AI_AGENT_DIALECT_VERSION = "fsl-ai-agent-mvp.v0"
+AI_AGENT_DIALECT_VERSION = "fsl-ai-agent.v0"
 
 
 @dataclass(frozen=True)

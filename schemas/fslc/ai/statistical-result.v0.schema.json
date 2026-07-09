@@ -25,12 +25,13 @@
       "const": "fsl-ai-statistical-result.v0"
     },
     "fsl": {
-      "const": "fsl-stochastic-mvp.v0"
+      "const": "fsl-stochastic.v0"
     },
     "result": {
       "enum": [
         "dataset_invalid",
         "evaluator_untrusted",
+        "slice_missing",
         "insufficient_samples",
         "inconclusive",
         "statistically_unsupported",
@@ -41,6 +42,7 @@
       "enum": [
         "dataset_invalid",
         "evaluator_untrusted",
+        "slice_missing",
         "insufficient_samples",
         "inconclusive",
         "statistically_unsupported",
@@ -97,7 +99,7 @@
       "required": ["operator", "value"],
       "properties": {
         "operator": {
-          "enum": ["ci_lower_gte", "ci_upper_lte"]
+          "enum": ["ci_lower_gte", "ci_upper_lte", "min_samples_>=", "min_samples_>", "min_samples_==", "min_samples_<=", "min_samples_<", "none"]
         },
         "value": {
           "type": "number",

@@ -13,7 +13,7 @@
 | [`intro/domain.ja.html`](intro/domain.ja.html) / [`intro/domain.en.html`](intro/domain.en.html) / [`DESIGN-domain.md`](DESIGN-domain.md) / [`DESIGN-effect.md`](DESIGN-effect.md) | **fsl-domain Functional DDD / async effect dialect**. Site pages and implementation design for `domain`, aggregate command/event ownership, pure decide/evolve lowering, saga/process-manager coordination, async effect lifecycle checks, multi-target scaffolds, runtime replay, and domain-specific findings |
 | [`intro/db.ja.html`](intro/db.ja.html) / [`intro/db.en.html`](intro/db.en.html) / [`DESIGN-db.md`](DESIGN-db.md) | **fsl-db DB / multi-environment compatibility dialect**. Site pages and implementation design for `dbsystem`, schema/artifact/environment compatibility, rollout windows, and DB-specific findings |
 | [`intro/ai.ja.html`](intro/ai.ja.html) / [`intro/ai.en.html`](intro/ai.en.html) / [`DESIGN-ai-hard.md`](DESIGN-ai-hard.md) | **fsl-ai hard-contract and agent-structure dialect**. Site pages and implementation design for `ai_component`, recursive `agent` composition, tool authority, human approval guards, runtime replay, and AI-specific findings |
-| [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | **fsl-stochastic external evidence layer**. MVP semantics for precomputed eval JSONL, Bernoulli/proportion metrics, Wilson intervals, result statuses, and the boundary between statistical support and formal proof |
+| [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | **fsl-stochastic external evidence layer**. Implemented semantics for precomputed eval JSONL, Bernoulli/proportion metrics, Wilson intervals, result statuses, and the boundary between statistical support and formal proof |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
 
 ## Implementation design by architecture and feature (DESIGN-*)
@@ -46,7 +46,7 @@
 | [`DESIGN-effect.md`](DESIGN-effect.md) | fsl-effect lifecycle semantics used by fsl-domain: correlation, retry, timeout, idempotency, and guarantee boundary |
 | [`DESIGN-db.md`](DESIGN-db.md) | fsl-db (`dbsystem`) database compatibility dialect: multi-environment schema/artifact/feature-flag checks, finding schema, rollout assumptions, SQL/Prisma importers, and external preservation/engine evidence boundaries |
 | [`DESIGN-ai-hard.md`](DESIGN-ai-hard.md) | fsl-ai (`ai_component` / recursive `agent`) dialect: tool authority, human approval, forbidden tools, fallback, event replay, agent scope/grant/orchestration/visibility analysis, finding schema, and guarantee boundaries |
-| [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and out-of-MVP stochastic semantics |
+| [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
 
 ## Dogfooding records (DOGFOOD-*)
 

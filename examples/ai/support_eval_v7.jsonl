@@ -1,0 +1,15 @@
+{"case_id":"support-001","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-002","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-003","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-004","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-005","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-006","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-007","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-008","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-009","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"support-010","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"accuracy","outcome":true,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"hall-001","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"hallucination_rate","outcome":false,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"hall-002","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"hallucination_rate","outcome":false,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"hall-003","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"hallucination_rate","outcome":false,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"hall-004","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"hallucination_rate","outcome":false,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
+{"case_id":"hall-005","component":"SupportAnswerAgent","dataset":"SupportEvalV3","slice":"all","metric":"hallucination_rate","outcome":false,"evaluator":{"id":"SupportAnswerJudge","calibration_status":"trusted"}}
