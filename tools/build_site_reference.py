@@ -193,6 +193,17 @@ def get_subparsers_action(parser: argparse.ArgumentParser):
     return None
 
 
+# argparse's own group heading changed from "optional arguments:" to
+# "options:" in Python 3.10 (bpo-9694) — purely cosmetic, but it makes
+# format_help() output depend on which Python generated this page. CI runs
+# the full suite (and this generator) on multiple Python versions
+# (pyproject: requires-python >=3.9), so normalize to the modern spelling
+# rather than letting the committed page's exact bytes depend on which
+# interpreter happened to regenerate it last.
+def _normalize_argparse_help(text: str) -> str:
+    return text.replace("optional arguments:", "options:")
+
+
 def render_cli_tree() -> str:
     from fslc.cli import _build_arg_parser, exit_code, _envelope, _error_envelope  # noqa: PLC0415
 
@@ -206,7 +217,7 @@ def render_cli_tree() -> str:
         if nested:
             children = []
             for name2, sub2 in nested.choices.items():
-                help_text = html.escape(sub2.format_help())
+                help_text = html.escape(_normalize_argparse_help(sub2.format_help()))
                 children.append(
                     f'<details><summary>fslc {html.escape(name)} {html.escape(name2)}</summary>'
                     f'<div class="tree-body"><pre>{help_text}</pre></div></details>'
@@ -218,7 +229,7 @@ def render_cli_tree() -> str:
                 f'<div class="tree-body">{body}</div></details>'
             )
         else:
-            help_text = html.escape(sub.format_help())
+            help_text = html.escape(_normalize_argparse_help(sub.format_help()))
             nodes.append(
                 f'<details><summary>fslc {html.escape(name)}</summary>'
                 f'<div class="tree-body"><pre>{help_text}</pre></div></details>'
