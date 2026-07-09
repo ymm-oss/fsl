@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""fsl-ai hard-contract MVP coverage."""
+"""fsl-ai hard-contract coverage."""
 
 import json
 from pathlib import Path
@@ -41,7 +41,7 @@ def test_ai_check_verifies_hard_contract_without_kernel_semantics_change():
     out = run_ai_check(_example("refund_agent_tool_safety.fsl"))
 
     assert out["result"] == "verified_under_assumptions"
-    assert out["dialect"] == "fsl-ai-hard-mvp.v0"
+    assert out["dialect"] == "fsl-ai-hard.v0"
     assert out["finding_schema_version"] == "fsl-ai-finding.v0"
     assert out["findings"] == []
     assert out["formal_result"] == "verified"
@@ -197,3 +197,21 @@ def test_ai_replay_distinguishes_schema_and_business_precondition_mismatch(tmp_p
     assert by_violation["tool_schema_invalid"]["failed_rule"] == "tool_schema_declared"
     assert by_violation["tool_schema_mismatch"]["failed_rule"] == "runtime_observation"
     assert by_violation["business_precondition_mismatch"]["failed_rule"] == "tool_precondition_declared"
+
+
+def test_ai_replay_accepts_completion_event_tool_calls_array(tmp_path):
+    log = tmp_path / "completion_tool_calls.jsonl"
+    log.write_text(
+        '{"component":"RefundAgentToolSafety","model":"refund_model_v1",'
+        '"prompt":"refund_prompt_v1","output_schema":"RefundDecisionV1",'
+        '"tool_calls":[{"name":"SearchOrder","mode":"execute",'
+        '"tool_schema":"SearchOrderV1","schema_valid":true,'
+        '"preconditions":{"order_exists":true},'
+        '"args":{"order_id":"redacted"}}]}\n',
+        encoding="utf-8",
+    )
+
+    out = run_ai_replay(_example("refund_agent_tool_safety.fsl"), str(log))
+
+    assert out["result"] == "replay_conformant"
+    assert out["findings"] == []

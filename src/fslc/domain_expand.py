@@ -25,7 +25,7 @@ from .model import FslError
 
 
 DOMAIN_FINDING_SCHEMA_VERSION = "fsl-domain-finding.v0"
-DOMAIN_DIALECT_VERSION = "fsl-domain-effect-mvp.v0"
+DOMAIN_DIALECT_VERSION = "fsl-domain-effect.v0"
 
 
 @dataclass(frozen=True)
@@ -71,7 +71,7 @@ def _type_names_in(type_ref: str) -> List[str]:
 
 
 def _kernel_type(type_ref: str) -> str:
-    # The domain MVP keeps type names intact. Enum member names are namespaced,
+    # The domain dialect keeps type names intact. Enum member names are namespaced,
     # but enum type names, domain ranges, and value-object struct names are not.
     return type_ref
 
@@ -98,7 +98,7 @@ class _ExpansionContext:
         self.generated_actions: List[str] = []
         self.assumptions = [
             {
-                "id": "DOMAIN-ASSUME-BOUNDED-MVP-MODEL",
+                "id": "DOMAIN-ASSUME-FINITE-DOMAIN-MODEL",
                 "text": (
                     "domain IDs and undeclared scalar input types are modeled as "
                     "finite 0..1 ranges unless declared explicitly"
@@ -303,7 +303,7 @@ def validate_domain(domain: DomainSpec):
         _err(
             f"unsupported implementation_profile '{domain.implementation_profile}'",
             loc=domain.loc,
-            hint="the MVP supports implementation_profile functional_ddd",
+            hint="supported implementation_profile: functional_ddd",
         )
 
     names = set()
@@ -414,7 +414,7 @@ def expand_domain(domain: DomainSpec) -> DomainKernelExpansion:
         })
     if domain.sagas:
         assumptions.append({
-            "id": "DOMAIN-ASSUME-SAGA-HISTORY-MVP",
+            "id": "DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY",
             "text": (
                 "saga awaits and compensation 'after' clauses are lowered with "
                 "per-step event observations; durable process history requires runtime replay evidence"

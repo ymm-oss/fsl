@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Typed IR for the fsl-domain / fsl-effect MVP dialect."""
+"""Typed IR for the fsl-domain / fsl-effect v0 dialect."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

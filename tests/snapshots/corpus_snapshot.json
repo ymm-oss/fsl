@@ -113,6 +113,12 @@
       "warnings": []
     }
   },
+  "examples/ai/support_answer_quality.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/consulting/asis_expense.fsl": {
     "check": {
       "result": "ok",

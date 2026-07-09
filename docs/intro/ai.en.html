@@ -27,14 +27,14 @@
   <div class="wrap">
     <p class="kicker reveal">Boundary</p>
     <h2 class="reveal">Hard contracts are separate from evaluator and statistical evidence</h2>
-    <p class="lead narrow reveal">The MVP does not try to prove that natural-language answers are true. It checks the structural and guard-backed facts around execution: which tools may be suggested or executed, which need human approval, and which are forbidden.</p>
+    <p class="lead narrow reveal">fsl-ai does not try to prove that natural-language answers are true. It checks structural and guard-backed execution facts, and treats statistical quality, migration regression, and drift as external evidence rather than proof.</p>
     <table class="matrix reveal">
       <tr><th>Contract</th><th>Examples</th><th>How fsl-ai reports it</th></tr>
       <tr><td><code>syntactic_hard</code></td><td>Tool schema, approval token, forbidden tool, precondition evidence.</td><td>Kernel expansion and <code>ai_hard_contract_violation</code>.</td></tr>
       <tr><td><code>agent_structural</code></td><td>Nested agent grants, visibility, delegation, review gates, tool reachability.</td><td><code>agent_structural_violation</code>; structural evidence, not proof.</td></tr>
       <tr><td><code>runtime_observed</code></td><td>Undeclared tool or schema mismatch observed in logs.</td><td><code>observed_contract_violation</code>; not proof.</td></tr>
       <tr><td><code>evaluator_supported</code></td><td>Groundedness, source support, prompt-injection judgment.</td><td>Future phase; never displayed as <code>proved</code>.</td></tr>
-      <tr><td><code>statistically_supported</code></td><td>Accuracy, recall, hallucination rate, slice metrics.</td><td>Future phase; confidence-bound evidence, not proof.</td></tr>
+      <tr><td><code>statistically_supported</code></td><td>Accuracy, recall, hallucination rate, slice metrics.</td><td><code>fslc ai eval</code>; confidence-bound evidence, not proof.</td></tr>
     </table>
   </div>
 </section>
@@ -168,7 +168,7 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>Design decisions</h3>
-        <p>Guarantee boundaries, lowering, event schema, findings, and out-of-MVP items are described in the design document.</p>
+        <p>Guarantee boundaries, lowering, event schema, findings, and external-evidence boundaries are described in the design document.</p>
         <p><a class="btn" href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
       </div>
       <div class="syntax-card">

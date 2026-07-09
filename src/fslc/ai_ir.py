@@ -45,6 +45,8 @@ class AiComponent:
     name: str
     model: Optional[str] = None
     prompt: Optional[str] = None
+    retriever: Optional[str] = None
+    temperature: Optional[float] = None
     input_schema: Optional[str] = None
     output_schema: Optional[str] = None
     tools: List[AiTool] = field(default_factory=list)

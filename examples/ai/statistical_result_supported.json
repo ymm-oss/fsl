@@ -1,6 +1,6 @@
 {
   "schema_version": "fsl-ai-statistical-result.v0",
-  "fsl": "fsl-stochastic-mvp.v0",
+  "fsl": "fsl-stochastic.v0",
   "result": "statistically_supported",
   "status": "statistically_supported",
   "formal_result": "not_run",

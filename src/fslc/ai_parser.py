@@ -29,7 +29,8 @@ start: ai_source
 ?ai_source: ai_component | agent_def
 
 ai_component: "ai_component" NAME "{" component_item* "}"
-?component_item: model_def | prompt_def | input_def | output_def
+?component_item: model_def | prompt_def | retriever_def | temperature_def
+               | input_def | output_def | tools_def
                | tool_def | authority_def | fallback_def | check_def
 
 agent_def: "agent" NAME "{" agent_item* "}"
@@ -40,6 +41,8 @@ agent_def: "agent" NAME "{" agent_item* "}"
 
 model_def: "model" atom ";"?
 prompt_def: "prompt" atom ";"?
+retriever_def: "retriever" atom ";"?
+temperature_def: "temperature" NUMBER ";"?
 input_def: "input" atom ";"?
 output_def: "output" atom ";"?
 context_def: "context" names ";"?
@@ -99,6 +102,7 @@ NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 STRING: /"[^"]*"/
 COMMENT: /\/\/[^\n]*/
 %import common.INT
+%import common.NUMBER
 %import common.WS
 %ignore WS
 %ignore COMMENT
@@ -135,6 +139,12 @@ class AiAst(Transformer):
 
     def prompt_def(self, meta, value):
         return ("prompt", value, _loc(meta))
+
+    def retriever_def(self, meta, value):
+        return ("retriever", value, _loc(meta))
+
+    def temperature_def(self, meta, value):
+        return ("temperature", float(value), _loc(meta))
 
     def input_def(self, meta, value):
         return ("input", value, _loc(meta))
@@ -303,6 +313,8 @@ class AiAst(Transformer):
     def ai_component(self, meta, name, *items):
         model = None
         prompt = None
+        retriever = None
+        temperature = None
         input_schema = None
         output_schema = None
         tools = []
@@ -335,6 +347,16 @@ class AiAst(Transformer):
                 if prompt is not None:
                     raise FslError("ai_component may declare prompt at most once", loc=item[2])
                 prompt = item[1]
+            elif isinstance(item, tuple) and item[0] == "retriever":
+                if retriever is not None:
+                    raise FslError("ai_component may declare retriever at most once", loc=item[2])
+                retriever = item[1]
+            elif isinstance(item, tuple) and item[0] == "temperature":
+                if temperature is not None:
+                    raise FslError("ai_component may declare temperature at most once", loc=item[2])
+                temperature = item[1]
+            elif isinstance(item, tuple) and item[0] == "tools":
+                tools.extend(AiTool(name=name) for name in item[1])
             elif isinstance(item, tuple) and item[0] == "input":
                 if input_schema is not None:
                     raise FslError("ai_component may declare input at most once", loc=item[2])
@@ -348,6 +370,8 @@ class AiAst(Transformer):
             name=name,
             model=model,
             prompt=prompt,
+            retriever=retriever,
+            temperature=temperature,
             input_schema=input_schema,
             output_schema=output_schema,
             tools=tools,

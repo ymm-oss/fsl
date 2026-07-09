@@ -158,7 +158,7 @@ not prove rollout percentages. Generic `requires` / `provides` capabilities
 cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
 other artifact profiles in the same snapshot model. See `docs/DESIGN-db.md`.
 
-Functional DDD / async effect dialect (MVP; expands to the same kernel and
+Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
 
 ```fsl
@@ -240,8 +240,9 @@ aggregate/effect summary, `fslc domain expand` to inspect generated kernel FSL,
 `fslc domain generate --target typescript|python|kotlin|swift|rust` for
 Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
 scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
-event / effect evidence. The MVP proves the finite modeled lifecycle; replay is
-observation evidence and saga history adds `DOMAIN-ASSUME-SAGA-HISTORY-MVP`.
+event / effect evidence. The v0 implementation proves the finite modeled
+lifecycle; replay is observation evidence and saga history adds
+`DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`.
 It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
 production exactly-once semantics. See `docs/DESIGN-domain.md` and
 `docs/DESIGN-effect.md`.
@@ -1573,7 +1574,8 @@ tool declarations, symbolic tool schemas, business precondition evidence,
 authority, human approval, forbidden tools, and fallback routing. It is a
 dialect expansion, not a stochastic kernel. Probability, evaluator scoring,
 groundedness judgments, prompt-injection semantic judgments, and confidence
-intervals remain outside this Phase 1 formal model.
+intervals remain outside this formal kernel model and are handled as external
+evidence.
 
 Core shape:
 
@@ -1625,6 +1627,10 @@ Use `fslc ai check` when you want fsl-ai vocabulary:
 fslc ai check examples/ai/refund_agent_tool_safety.fsl
 fslc ai check examples/ai/recursive_support_agent.fsl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
+fslc ai eval examples/ai/support_answer_quality.fsl --property LooseQuality
+fslc ai regress examples/ai/support_answer_quality.fsl --migration PromptV7ToV8 --before-records examples/ai/support_eval_v7.jsonl --after-records examples/ai/support_eval_v8_regressed.jsonl
+fslc ai drift examples/ai/support_answer_quality.fsl --logs examples/ai/runtime_drift_current.jsonl --baseline-logs examples/ai/runtime_drift_baseline.jsonl
+fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 ```
 
 Successful `ai_component` hard-contract checks return
@@ -1641,8 +1647,22 @@ graph analysis, not kernel proof. `fslc ai replay` accepts JSONL or
 - `agent_structural`: recursive-agent scope, grant, visibility, delegation, and
   tool-reachability findings.
 - `runtime_observed`: declared component capability differs from observed events.
-- `evaluator_supported` and `statistically_supported`: reserved for later phases;
-  they must not be displayed as `proved`.
+- `statistically_supported` / `statistically_unsupported`: precomputed eval JSONL
+  and Wilson confidence-bound evidence from `fslc ai eval`; never displayed as
+  `proved`.
+- `evaluator_supported`: reserved for external evaluator-backed evidence and must
+  not be displayed as `proved`.
+
+Project-level fsl-ai evidence declarations can combine `ai_component`,
+`dataset`, `evaluator`, `failure_mode`, `statistical_property`,
+`ai_migration`, and `observed_property`. `fslc ai check` parses these files and
+returns `ai_project_analyzed`; `fslc ai eval` checks Bernoulli/proportion
+metrics from precomputed JSONL with Wilson intervals; `fslc ai regress` checks
+aggregate `no_regression` metric drop/increase clauses; `fslc ai compare`
+reports metric deltas without a threshold claim; `fslc ai drift` checks runtime
+telemetry thresholds and drift; and `fslc ai compat` emits a finite
+`dbsystem artifact` capability profile. All of these use
+`formal_result:"not_run"`.
 
 Recursive `agent` shape:
 

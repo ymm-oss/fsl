@@ -23,7 +23,7 @@
       "const": "fsl-domain-finding.v0"
     },
     "fsl": {
-      "const": "fsl-domain-effect-mvp.v0"
+      "const": "fsl-domain-effect.v0"
     },
     "result": {
       "const": "violated"

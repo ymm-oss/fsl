@@ -1,7 +1,8 @@
-# fsl-ai hard-contract MVP examples
+# fsl-ai examples
 
-This directory exercises the Phase 1 `ai_component` hard-contract dialect and
-the recursive `agent` structural analyzer.
+This directory exercises the `ai_component` hard-contract dialect and the
+recursive `agent` structural analyzer, plus the external stochastic,
+migration-regression, drift, and compatibility-profile evidence commands.
 
 Run:
 
@@ -12,6 +13,11 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_forbidden_tool.jsonl
 fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_observed_mismatch.jsonl
+fslc ai eval examples/ai/support_answer_quality.fsl --property LooseQuality
+fslc ai regress examples/ai/support_answer_quality.fsl --migration PromptV7ToV8 --before-records examples/ai/support_eval_v7.jsonl --after-records examples/ai/support_eval_v8_regressed.jsonl
+fslc ai compare --from examples/ai/support_eval_v7.jsonl --to examples/ai/support_eval_v8_regressed.jsonl --dataset SupportEvalV3
+fslc ai drift examples/ai/support_answer_quality.fsl --logs examples/ai/runtime_drift_current.jsonl --baseline-logs examples/ai/runtime_drift_baseline.jsonl
+fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 ```
 
 The first replay is `replay_conformant`. The others return AI-readable findings:
@@ -31,10 +37,12 @@ visibility, tool reachability, and failure policy. Recursive-agent analysis is
 structural evidence with `formal_result: "not_run"`, not formal proof of LLM
 semantic correctness.
 
-Statistical evidence examples are external to `fslc ai check`:
+Statistical evidence examples are external to the kernel and run through
+`fslc ai eval`:
 
-- `statistical_eval_precomputed.jsonl` shows the MVP precomputed eval JSONL
-  record shape.
+- `support_answer_quality.fsl` declares `dataset`, `evaluator`,
+  `statistical_property`, `ai_migration`, and `observed_property` blocks.
+- `support_eval_v3.jsonl` shows the precomputed eval JSONL record shape.
 - `statistical_result_supported.json` shows a Wilson-bound result with
   `formal_result: "not_run"`.
 

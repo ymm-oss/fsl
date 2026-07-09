@@ -1,6 +1,6 @@
 # FSL Effect Lifecycle Design
 
-Status: adopted as part of the fsl-domain MVP.
+Status: adopted as part of fsl-domain v0.
 
 `effect` is the async/effect slice of the `domain` dialect. The authoritative
 implementation design is in [`DESIGN-domain.md`](DESIGN-domain.md); this file
@@ -13,7 +13,7 @@ An async effect is modeled as a finite lifecycle keyed by a declared
 NotStarted -> Pending -> Succeeded | Failed | TimedOut | Cancelled | Compensated
 ```
 
-The MVP lowers that lifecycle to kernel `Map<CorrelationId, EffectStatus>` and
+The v0 implementation lowers that lifecycle to kernel `Map<CorrelationId, EffectStatus>` and
 `Map<CorrelationId, Attempt>` state. Completion actions require the request to be
 pending, retry actions require a failed/timed-out status and `attempts < max`,
 and successful completion is sticky.

@@ -1,13 +1,14 @@
 # FSL Domain / Effect Dialect Design
 
-Status: adopted MVP.
+Status: adopted v0.
 
 ## Decision
 
 `domain` is a frontend dialect for Functional DDD boundaries and async effect
 lifecycles. It is not a new verifier kernel and not a programming language. The
-MVP parses domain declarations into typed IR, lowers the checkable part to the
-existing kernel, and emits stable fsl-domain findings for structural risks.
+v0 implementation parses domain declarations into typed IR, lowers the
+checkable part to the existing kernel, and emits stable fsl-domain findings for
+structural risks.
 
 Implemented top-level shape:
 
@@ -83,7 +84,7 @@ decide preconditions: all `requires` clauses and the negation of every
 
 An async `effect` declares the request event, completion events, correlation id,
 retry bound, timeout event, idempotency key, and optional reliable outbox/inbox
-boundary. The MVP lowers the lifecycle to finite maps:
+boundary. The v0 implementation lowers the lifecycle to finite maps:
 
 - `<effect>_status: Map<CorrelationId, EffectStatus>`
 - `<effect>_attempts: Map<CorrelationId, Attempt>`
@@ -121,7 +122,7 @@ result nested under `kernel`. Hard structural findings return `violated` with
 ## Findings
 
 Findings use `schemas/fslc/domain/finding.v0.schema.json` and
-`fsl:"fsl-domain-effect-mvp.v0"`. Implemented finding kinds include:
+`fsl:"fsl-domain-effect.v0"`. Implemented finding kinds include:
 
 - `missing_decide_for_command`
 - `missing_evolve_for_event`
@@ -177,7 +178,7 @@ completion without request, duplicate irreversible completion, or lifecycle
 ordering mismatch. This is runtime observation evidence, not a formal proof.
 
 Saga `await` and compensation `after` clauses use per-step event observations in
-the kernel model and add `DOMAIN-ASSUME-SAGA-HISTORY-MVP`. Durable process
+the kernel model and add `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. Durable process
 history is checked through replay evidence rather than treated as an unbounded
 kernel proof.
 

@@ -27,10 +27,27 @@
       "const": "fsl-ai-finding.v0"
     },
     "fsl": {
-      "enum": ["fsl-ai-hard-mvp.v0", "fsl-ai-agent-mvp.v0"]
+      "enum": [
+        "fsl-ai-hard.v0",
+        "fsl-ai-agent.v0",
+        "fsl-stochastic.v0",
+        "fsl-ai-migration.v0",
+        "fsl-ai-observed.v0",
+        "fsl-ai-compat-profile.v0"
+      ]
     },
     "result": {
-      "enum": ["violated", "observed_mismatch"]
+      "enum": [
+        "violated",
+        "observed_mismatch",
+        "dataset_invalid",
+        "evaluator_untrusted",
+        "slice_missing",
+        "insufficient_samples",
+        "inconclusive",
+        "statistically_unsupported",
+        "statistically_supported"
+      ]
     },
     "kind": {
       "enum": [
@@ -38,7 +55,10 @@
         "agent_structural_violation",
         "observed_contract_violation",
         "evaluator_backed_contract_violation",
-        "statistical_contract_unsupported"
+        "statistical_contract_unsupported",
+        "ai_migration_regression",
+        "ai_observed_drift",
+        "ai_observed_threshold_violation"
       ]
     },
     "severity": {
@@ -65,7 +85,8 @@
         "agent_structural",
         "runtime_observed",
         "evaluator_supported",
-        "statistically_supported"
+        "statistically_supported",
+        "statistically_unsupported"
       ]
     },
     "evidence": {

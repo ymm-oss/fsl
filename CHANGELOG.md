@@ -6,7 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
-- fsl-domain / fsl-effect MVP for Functional DDD and async lifecycle modeling:
+- fsl-ai stochastic/migration/drift evidence commands: `fslc ai eval` now checks
+  precomputed eval JSONL against `statistical_property` Wilson-bound thresholds,
+  `fslc ai regress` checks aggregate `ai_migration.no_regression` metric
+  drop/increase clauses, `fslc ai compare` reports metric deltas,
+  `fslc ai drift` checks runtime telemetry thresholds/drift, and
+  `fslc ai compat` emits shared DB artifact capability profiles. All return
+  external evidence with `formal_result:"not_run"` rather than kernel proof.
+- fsl-domain / fsl-effect v0 for Functional DDD and async lifecycle modeling:
   `domain` files now parse aggregate state, command/event/error, pure
   `decide`/`evolve`, projections, saga/process-manager steps, async effects
   with correlation/idempotency/retry/timeout/compensation/outbox boundaries, and
@@ -16,8 +23,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   Python/Kotlin/Swift/Rust scaffolds, domain adapter/conformance scaffolds,
   stable `fsl-domain-finding.v0` findings, examples under `examples/domain/`,
   and docs/skills/manual updates. Runtime replay is observation evidence; the
-  MVP keeps external API/queue/wall-clock and production exactly-once guarantees
-  outside formal proof.
+  v0 boundary keeps external API/queue/wall-clock and production exactly-once
+  guarantees outside formal proof.
 - Documented the agent-side natural-language review boundary for
   `fslc analyze`: `fslc` remains deterministic and language-agnostic, while AI
   agents may add non-authoritative review suggestions only when they cite source
@@ -29,7 +36,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   boundaries, and reports structural findings for unsafe delegation,
   visibility, review-gate, and tool-reachability patterns. Existing
   `ai_component` hard-contract behavior remains backward-compatible. (#157)
-- fsl-stochastic MVP design boundary and AI compatibility integration:
+- fsl-stochastic external evidence layer and AI compatibility integration:
   `docs/DESIGN-stochastic.md` fixes statistical evidence semantics as an
   external layer over precomputed eval JSONL, Bernoulli/proportion metrics, and
   Wilson intervals only (`formal_result:"not_run"`; no `fslc verify` semantics
@@ -48,7 +55,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   PDG/slicing, Event-B/Rodin, proof-assistant dependency graphs, mCRL2 static
   LPS analysis) stating plainly which parts of `analyze` are borrowed ideas and
   which parts of the combination are uncommon.
-- fsl-ai Phase 1 hard-contract MVP (`ai_component`) for AI tool-boundary
+- fsl-ai hard-contract dialect (`ai_component`) for AI tool-boundary
   safety. The dialect parses declared tools, authority, human approval,
   forbidden tools, symbolic business preconditions, and fallback metadata,
   lowers the deterministic hard-contract slice to the existing kernel, and adds
@@ -189,7 +196,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - `ai_component` rejects two `fallback` entries that share the same `reason`
   (they would silently collide into one generated `fallback_<reason>`
   action). `docs/DESIGN-ai-hard.md` now also documents explicitly that
-  `fallback` is structural-only in Phase 1 — no invariant is generated over
+  `fallback` is structural-only in the hard-contract layer — no invariant is generated over
   `fallback_required`, since `target` has no corresponding kernel action to
   check it against yet (`src/fslc/ai_expand.py` `validate_ai_component`).
 - `fslc refine` no longer silently merges a same-named impl/abs enum (or

@@ -27,14 +27,14 @@
   <div class="wrap">
     <p class="kicker reveal">境界</p>
     <h2 class="reveal">hard contract と evaluator / statistical evidence を分ける</h2>
-    <p class="lead narrow reveal">MVPは、自然言語回答の真偽を証明しようとはしません。検査するのは、どのtoolを提案・実行できるか、どのtoolに人間承認が必要か、どのtoolが禁止か、という実行前guardの事実です。</p>
+    <p class="lead narrow reveal">fsl-aiは、自然言語回答の真偽を証明しようとはしません。実行前guardの構造事実を検査し、統計品質・migration regression・driftは証明ではなく外部証拠として扱います。</p>
     <table class="matrix reveal">
       <tr><th>契約</th><th>例</th><th>fsl-aiでの扱い</th></tr>
       <tr><td><code>syntactic_hard</code></td><td>tool schema、approval token、forbidden tool、precondition evidence。</td><td>kernel展開と <code>ai_hard_contract_violation</code>。</td></tr>
       <tr><td><code>agent_structural</code></td><td>nested agent grant、visibility、delegation、review gate、tool reachability。</td><td><code>agent_structural_violation</code>。構造証拠であり証明ではない。</td></tr>
       <tr><td><code>runtime_observed</code></td><td>未宣言toolやschema mismatchがログに出た。</td><td><code>observed_contract_violation</code>。証明ではなく観測。</td></tr>
       <tr><td><code>evaluator_supported</code></td><td>groundedness、source support、prompt injection判定。</td><td>後続phase。<code>proved</code> とは表示しない。</td></tr>
-      <tr><td><code>statistically_supported</code></td><td>accuracy、recall、hallucination rate、slice指標。</td><td>後続phase。信頼区間つき証拠であり証明ではない。</td></tr>
+      <tr><td><code>statistically_supported</code></td><td>accuracy、recall、hallucination rate、slice指標。</td><td><code>fslc ai eval</code>。信頼区間つき証拠であり証明ではない。</td></tr>
     </table>
   </div>
 </section>
@@ -168,7 +168,7 @@ fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runti
     <div class="syntax-grid reveal">
       <div class="syntax-card">
         <h3>設計判断</h3>
-        <p>保証境界、lowering、event schema、finding、MVP外の範囲は design doc にまとまっています。</p>
+        <p>保証境界、lowering、event schema、finding、外部証拠として扱う境界は design doc にまとまっています。</p>
         <p><a class="btn" href="../DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></p>
       </div>
       <div class="syntax-card">

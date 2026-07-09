@@ -43,8 +43,17 @@ from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
 from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
 from .db_import import import_db_file
-from .ai_check import check_ai_source, load_ai_component, load_ai_source, replay_ai_events
+from .ai_check import check_ai_source, load_ai_source, replay_ai_events, select_ai_component
 from .ai_parser import is_ai_agent_source
+from .ai_project import AiProject, is_ai_project_source
+from .ai_stochastic import (
+    ai_compat_profile_from_file,
+    compare_ai_records,
+    drift_ai_project,
+    evaluate_ai_project,
+    load_ai_project_file,
+    regress_ai_project,
+)
 from .domain_check import (
     analyze_domain,
     check_domain_source,
@@ -305,15 +314,19 @@ def _bounds_skip_warnings(ids, kind, bounds_overrides):
 def run_check(file, strict_tags=False, requirements=None):
     try:
         src = open(file, encoding="utf-8").read()
-        if is_ai_agent_source(src):
+        if is_ai_agent_source(src) or is_ai_project_source(src):
             analysis = check_ai_source(load_ai_source(file))
-            return _envelope({
+            spec = analysis.get("ai_agent") or analysis.get("ai_project")
+            out = {
                 "result": "ok",
-                "spec": analysis["ai_agent"],
+                "spec": spec,
                 "dialect": analysis["dialect"],
                 "warnings": [],
-                "agent_analysis_result": analysis["result"],
-            })
+                "ai_analysis_result": analysis["result"],
+            }
+            if analysis.get("ai_agent"):
+                out["agent_analysis_result"] = analysis["result"]
+            return _envelope(out)
         ast, display_names = _parse_file(file, src)
         spec = build_spec(ast, display_names, semantic_check=False)
         acc, _ = _acceptance_error(spec)
@@ -1329,10 +1342,11 @@ def run_ai_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_ai_replay(file, logs):
+def run_ai_replay(file, logs, component=None):
     try:
-        component = load_ai_component(file)
-        return _envelope(replay_ai_events(component, logs))
+        source = load_ai_source(file)
+        selected = select_ai_component(source, component)
+        return _envelope(replay_ai_events(selected, logs))
     except UnexpectedInput as e:
         return _parse_error_result(e)
     except VisitError as e:
@@ -1349,6 +1363,129 @@ def run_ai_replay(file, logs):
                                getattr(e, "expected", None), getattr(e, "hint", None))
     except FileNotFoundError as e:
         return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_eval(file, records=None, dataset=None, slice_name=None, property_name=None):
+    try:
+        project = load_ai_project_file(file)
+        return _envelope(evaluate_ai_project(
+            project,
+            records_path=records,
+            dataset_name=dataset,
+            slice_name=slice_name,
+            property_name=property_name,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_regress(file, migration=None, before_records=None, after_records=None, dataset=None):
+    try:
+        if not before_records or not after_records:
+            raise FslError("ai regress requires --before-records and --after-records", kind="semantics")
+        project = load_ai_project_file(file)
+        return _envelope(regress_ai_project(
+            project,
+            migration_name=migration,
+            before_records_path=before_records,
+            after_records_path=after_records,
+            dataset_name=dataset,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_compare(before_records, after_records, dataset=None, from_label=None, to_label=None):
+    try:
+        return _envelope(compare_ai_records(
+            before_records,
+            after_records,
+            dataset_name=dataset,
+            from_label=from_label,
+            to_label=to_label,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_drift(file, logs, baseline_logs=None, property_name=None, window=None, baseline=None):
+    try:
+        project = load_ai_project_file(file)
+        return _envelope(drift_ai_project(
+            project,
+            current_logs_path=logs,
+            baseline_logs_path=baseline_logs,
+            property_name=property_name,
+            window=window,
+            baseline_label=baseline,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_compat(file, environment=None):
+    try:
+        return _envelope(ai_compat_profile_from_file(file, environment=environment))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_compat_check(file, include_ai=False):
+    try:
+        result = run_db_check(file)
+        if include_ai:
+            result.setdefault("compat", {})["include_ai"] = True
+            result.setdefault("compat", {})["source"] = "dbsystem artifact capability model"
+        return result
     except Exception as e:
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
@@ -1545,13 +1682,17 @@ def exit_code(result):
              "refines", "typestate", "mutated", "explained", "analyzed",
              "verified_under_assumptions", "agent_analyzed", "replay_conformant",
              "observed_conformant", "imported", "imported_with_warnings",
-             "expanded", "conformance_checked"):
+             "expanded", "conformance_checked", "ai_project_analyzed",
+             "statistically_supported", "observed_supported", "compared",
+             "compat_profile_generated"):
         return 0
     if r == "sweep_passed":
         return 0
     if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant",
              "refinement_failed", "sweep_failed", "replay_nonconformant",
-             "observed_mismatch"):
+             "observed_mismatch", "statistically_unsupported",
+             "dataset_invalid", "evaluator_untrusted", "slice_missing",
+             "insufficient_samples", "inconclusive"):
         return 1
     if r == "error":
         kind = result.get("kind")
@@ -1713,6 +1854,12 @@ def _build_arg_parser():
                      help="source format to import (default: auto by extension)")
     dbi.add_argument("-o", "--output")
 
+    compat = sub.add_parser("compat", help="shared compatibility commands")
+    compat_sub = compat.add_subparsers(dest="compat_cmd", required=True)
+    compat_check = compat_sub.add_parser("check", help="check dbsystem compatibility, optionally including AI capability profiles")
+    compat_check.add_argument("file")
+    compat_check.add_argument("--include-ai", action="store_true")
+
     ai = sub.add_parser("ai", help="AI dialect commands")
     ai_sub = ai.add_subparsers(dest="ai_cmd", required=True)
     aic = ai_sub.add_parser("check", help="check an ai_component hard contract or recursive agent structure")
@@ -1723,6 +1870,35 @@ def _build_arg_parser():
     air = ai_sub.add_parser("replay", help="compare AI runtime JSONL events to ai_component declarations")
     air.add_argument("file")
     air.add_argument("--logs", required=True)
+    air.add_argument("--component", help="ai_component to replay when FILE is a project-level fsl-ai file")
+    aie = ai_sub.add_parser("eval", help="evaluate precomputed AI eval JSONL against statistical_property thresholds")
+    aie.add_argument("file")
+    aie.add_argument("--records")
+    aie.add_argument("--dataset")
+    aie.add_argument("--slice", dest="slice_name")
+    aie.add_argument("--property", dest="property_name")
+    aig = ai_sub.add_parser("regress", help="check ai_migration no_regression metrics")
+    aig.add_argument("file")
+    aig.add_argument("--migration")
+    aig.add_argument("--before-records", required=True)
+    aig.add_argument("--after-records", required=True)
+    aig.add_argument("--dataset")
+    aicmp = ai_sub.add_parser("compare", help="compare two precomputed AI eval JSONL files")
+    aicmp.add_argument("--from", dest="from_records", required=True)
+    aicmp.add_argument("--to", dest="to_records", required=True)
+    aicmp.add_argument("--from-label")
+    aicmp.add_argument("--to-label")
+    aicmp.add_argument("--dataset")
+    aid = ai_sub.add_parser("drift", help="check observed_property thresholds and drift from runtime telemetry")
+    aid.add_argument("file")
+    aid.add_argument("--logs", required=True)
+    aid.add_argument("--baseline-logs")
+    aid.add_argument("--window")
+    aid.add_argument("--baseline")
+    aid.add_argument("--property", dest="property_name")
+    aicp = ai_sub.add_parser("compat", help="generate an AI artifact capability profile for dbsystem")
+    aicp.add_argument("file")
+    aicp.add_argument("--environment")
 
     dom = sub.add_parser("domain", help="Functional DDD / async effect dialect commands")
     dom_sub = dom.add_subparsers(dest="domain_cmd", required=True)
@@ -1879,12 +2055,63 @@ def _dispatch(args):
                 "message": f"unknown db command: {args.db_cmd}",
             })
             print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "compat":
+        if args.compat_cmd == "check":
+            result = run_compat_check(args.file, include_ai=args.include_ai)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown compat command: {args.compat_cmd}",
+            })
+            print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "ai":
         if args.ai_cmd == "check":
             result = run_ai_check(args.file, args.depth, args.engine, args.deadlock)
             print(json.dumps(result, indent=2, ensure_ascii=False))
         elif args.ai_cmd == "replay":
-            result = run_ai_replay(args.file, args.logs)
+            result = run_ai_replay(args.file, args.logs, component=args.component)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "eval":
+            result = run_ai_eval(
+                args.file,
+                records=args.records,
+                dataset=args.dataset,
+                slice_name=args.slice_name,
+                property_name=args.property_name,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "regress":
+            result = run_ai_regress(
+                args.file,
+                migration=args.migration,
+                before_records=args.before_records,
+                after_records=args.after_records,
+                dataset=args.dataset,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "compare":
+            result = run_ai_compare(
+                args.from_records,
+                args.to_records,
+                dataset=args.dataset,
+                from_label=args.from_label,
+                to_label=args.to_label,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "drift":
+            result = run_ai_drift(
+                args.file,
+                args.logs,
+                baseline_logs=args.baseline_logs,
+                property_name=args.property_name,
+                window=args.window,
+                baseline=args.baseline,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "compat":
+            result = run_ai_compat(args.file, environment=args.environment)
             print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
             result = _envelope({

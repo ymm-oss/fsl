@@ -154,12 +154,13 @@ Responsibility split:
 
 - `fslc db check`: the implemented shared artifact/environment compatibility
   checker. It is the source of truth for DB/API/mobile/server/AI coexistence.
-- `fslc compat check --include-ai`: reserved as a future alias or manifest-level
-  wrapper over the same compatibility IR. It must not define different
-  semantics.
-- `fslc ai compat`: reserved for producing or validating an AI component's
-  compatibility profile from AI-specific source files. It must feed the shared
-  artifact/environment model instead of creating a second checker.
+- `fslc compat check --include-ai`: implemented as a manifest-level wrapper over
+  the same compatibility IR. It delegates to `fslc db check` and must not define
+  different semantics.
+- `fslc ai compat`: implemented for producing an AI component's finite
+  `requires` / `provides` capability profile from AI-specific source files. The
+  profile feeds the shared artifact/environment model instead of creating a
+  second checker.
 
 This does not change `ai_component` hard-contract checking. `fslc ai check`
 continues to handle tool authority, human approval, forbidden tools, and replay.

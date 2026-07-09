@@ -17,6 +17,7 @@ from .ai_expand import (
 from .ai_agent import analyze_ai_agent
 from .ai_ir import AiAgent, AiComponent, AiTool
 from .ai_parser import parse_ai_component, parse_ai_source
+from .ai_project import AiProject, analyze_ai_project, is_ai_project_source, parse_ai_project
 from .bmc import prove, verify
 from .model import FslError, build_spec
 
@@ -29,10 +30,44 @@ def load_ai_component(path):
 
 
 def load_ai_source(path):
-    return parse_ai_source(Path(path).read_text(encoding="utf-8"))
+    text = Path(path).read_text(encoding="utf-8")
+    if is_ai_project_source(text):
+        return parse_ai_project(text, name=Path(path).stem)
+    return parse_ai_source(text)
+
+
+def select_ai_component(source, component_name: Optional[str] = None) -> AiComponent:
+    if isinstance(source, AiComponent):
+        if component_name and component_name != source.name:
+            raise FslError(
+                f"unknown ai_component '{component_name}'",
+                kind="semantics",
+            )
+        return source
+    if isinstance(source, AiProject):
+        components = list(source.components)
+        if component_name:
+            for component in components:
+                if component.name == component_name:
+                    return component
+            raise FslError(
+                f"unknown ai_component '{component_name}'",
+                kind="semantics",
+            )
+        if len(components) == 1:
+            return components[0]
+        if not components:
+            raise FslError("no ai_component declaration found", kind="semantics")
+        raise FslError(
+            "multiple ai_component declarations found; pass --component",
+            kind="semantics",
+        )
+    raise FslError("AI replay requires an ai_component or fsl-ai project file", kind="semantics")
 
 
 def check_ai_source(source, depth=8, engine="bmc", deadlock_mode="warn"):
+    if isinstance(source, AiProject):
+        return analyze_ai_project(source)
     if isinstance(source, AiAgent):
         return analyze_ai_agent(source)
     return check_ai_component(
@@ -117,7 +152,7 @@ def replay_ai_events(component: AiComponent, logs_path):
         },
         "assumptions": assumptions,
         "findings": findings,
-        "note": "runtime replay is separate from formal proof; statistical and evaluator-backed contracts are out of Phase 1",
+        "note": "runtime replay is separate from formal proof; statistical and evaluator-backed contracts are external evidence",
     }
 
 
@@ -129,8 +164,8 @@ def _ai_result(result, component, assumptions, findings, kernel, formal_result):
         "ai_component": component.name,
         "guarantee_boundary": {
             "proved": "kernel safety facts over the finite hard-contract expansion",
-            "evaluator_supported": "out of Phase 1 and never reported as formal proof",
-            "statistically_supported": "out of Phase 1 and never reported as formal proof",
+            "evaluator_supported": "external evaluator evidence and never reported as formal proof",
+            "statistically_supported": "external statistical evidence and never reported as formal proof",
             "runtime_replay": "observed evidence, not proof",
         },
         "assumptions": assumptions,
@@ -245,6 +280,8 @@ def _replay_findings(component: AiComponent, events, assumptions):
             ))
             continue
 
+        findings.extend(_component_metadata_findings(component, event, index, assumptions))
+
         event_type = event.get("event") or event.get("type")
         if event_type == "human_approval":
             tool_name = event.get("tool")
@@ -262,92 +299,172 @@ def _replay_findings(component: AiComponent, events, assumptions):
             approvals.add(tool_name)
             continue
 
-        if event_type != "tool_call":
-            continue
-
-        tool_name = event.get("tool") or event.get("name")
-        mode = event.get("mode") or event.get("phase") or "execute"
-        if tool_name not in tools:
+        tool_call_events, malformed_tool_calls = _tool_call_events(event)
+        for malformed in malformed_tool_calls:
             findings.append(_observed_finding(
                 component,
-                tool_name,
-                "undeclared_tool_observed",
+                None,
+                "malformed_tool_call",
                 index,
                 event,
                 assumptions,
-                "observed tool call is not declared by the AI component",
+                malformed,
             ))
+        if not tool_call_events:
             continue
 
-        tool = tools[tool_name]
-        if mode == "suggest":
-            if tool_name not in component.suggestible_tools() and tool_name not in component.executable_tools():
+        for tool_event in tool_call_events:
+            tool_name = tool_event.get("tool") or tool_event.get("name")
+            mode = tool_event.get("mode") or tool_event.get("phase") or "execute"
+            if tool_name not in tools:
+                findings.append(_observed_finding(
+                    component,
+                    tool_name,
+                    "undeclared_tool_observed",
+                    index,
+                    tool_event,
+                    assumptions,
+                    "observed tool call is not declared by the AI component",
+                ))
+                continue
+
+            tool = tools[tool_name]
+            if mode == "suggest":
+                if tool_name not in component.suggestible_tools() and tool_name not in component.executable_tools():
+                    findings.append(_hard_finding(
+                        component,
+                        tool,
+                        "tool_authority",
+                        "suggestion_without_authority",
+                        index,
+                        tool_event,
+                        assumptions,
+                        "tool suggestion is outside may_suggest/may_execute authority",
+                    ))
+                continue
+
+            if mode != "execute":
+                findings.append(_observed_finding(
+                    component,
+                    tool_name,
+                    "unknown_tool_call_mode",
+                    index,
+                    tool_event,
+                    assumptions,
+                    f"unknown tool_call mode '{mode}'",
+                ))
+                continue
+
+            if tool_name in component.authority.forbidden:
+                findings.append(_hard_finding(
+                    component,
+                    tool,
+                    "forbidden_tool_blocked",
+                    "forbidden_tool_call",
+                    index,
+                    tool_event,
+                    assumptions,
+                    "forbidden tool was observed in execute mode",
+                ))
+                continue
+
+            if tool_name not in component.executable_tools():
                 findings.append(_hard_finding(
                     component,
                     tool,
                     "tool_authority",
-                    "suggestion_without_authority",
+                    "execution_without_authority",
                     index,
-                    event,
+                    tool_event,
                     assumptions,
-                    "tool suggestion is outside may_suggest/may_execute authority",
+                    "tool execution is outside may_execute/requires_human_approval authority",
                 ))
-            continue
+                continue
 
-        if mode != "execute":
-            findings.append(_observed_finding(
-                component,
-                tool_name,
-                "unknown_tool_call_mode",
-                index,
-                event,
-                assumptions,
-                f"unknown tool_call mode '{mode}'",
-            ))
-            continue
+            if tool_name in component.approval_required_tools() and tool_name not in approvals:
+                findings.append(_hard_finding(
+                    component,
+                    tool,
+                    "human_approval_required",
+                    "human_approval_required_before_irreversible_tool",
+                    index,
+                    tool_event,
+                    assumptions,
+                    "tool execution occurred before a human_approval event for the tool",
+                ))
 
-        if tool_name in component.authority.forbidden:
-            findings.append(_hard_finding(
-                component,
-                tool,
-                "forbidden_tool_blocked",
-                "forbidden_tool_call",
-                index,
-                event,
-                assumptions,
-                "forbidden tool was observed in execute mode",
-            ))
-            continue
-
-        if tool_name not in component.executable_tools():
-            findings.append(_hard_finding(
-                component,
-                tool,
-                "tool_authority",
-                "execution_without_authority",
-                index,
-                event,
-                assumptions,
-                "tool execution is outside may_execute/requires_human_approval authority",
-            ))
-            continue
-
-        if tool_name in component.approval_required_tools() and tool_name not in approvals:
-            findings.append(_hard_finding(
-                component,
-                tool,
-                "human_approval_required",
-                "human_approval_required_before_irreversible_tool",
-                index,
-                event,
-                assumptions,
-                "tool execution occurred before a human_approval event for the tool",
-            ))
-
-        findings.extend(_schema_findings(component, tool, event, index, assumptions))
-        findings.extend(_precondition_findings(component, tool, event, index, assumptions))
+            findings.extend(_schema_findings(component, tool, tool_event, index, assumptions))
+            findings.extend(_precondition_findings(component, tool, tool_event, index, assumptions))
 
     return findings
+
+
+def _component_metadata_findings(component: AiComponent, event, index, assumptions):
+    checks = (
+        ("model", component.model, event.get("model"), "model_mismatch"),
+        ("prompt", component.prompt, event.get("prompt"), "prompt_mismatch"),
+        (
+            "retriever",
+            component.retriever,
+            event.get("retriever") or event.get("retriever_index"),
+            "retriever_mismatch",
+        ),
+        (
+            "output_schema",
+            component.output_schema,
+            event.get("output_schema") or event.get("schema"),
+            "output_schema_mismatch",
+        ),
+    )
+    findings = []
+    for label, declared, observed, violation in checks:
+        if declared and observed and observed != declared:
+            findings.append(_observed_finding(
+                component,
+                None,
+                violation,
+                index,
+                event,
+                assumptions,
+                f"observed {label} {observed} does not match declared {label} {declared}",
+            ))
+    return findings
+
+
+def _tool_call_events(event):
+    event_type = event.get("event") or event.get("type")
+    if event_type == "tool_call":
+        return [event], []
+    calls = event.get("tool_calls")
+    if calls is None:
+        return [], []
+    if not isinstance(calls, list):
+        return [], ["tool_calls must be a list"]
+
+    out = []
+    malformed = []
+    for pos, call in enumerate(calls):
+        if not isinstance(call, dict):
+            malformed.append(f"tool_calls[{pos}] must be an object")
+            continue
+        tool_event = {
+            "event": "tool_call",
+            "component": event.get("component"),
+            "mode": call.get("mode") or call.get("phase") or event.get("mode") or "execute",
+        }
+        for key in (
+            "tool",
+            "name",
+            "args",
+            "tool_schema",
+            "schema",
+            "schema_valid",
+            "preconditions",
+        ):
+            if key in call:
+                tool_event[key] = call[key]
+        out.append(tool_event)
+    return out, malformed
 
 
 def _schema_findings(component, tool: AiTool, event, index, assumptions):
@@ -470,9 +587,27 @@ def _event_witness(event_index, event, reason, extra=None):
         "reason": reason,
     }
     if isinstance(event, dict):
-        for key in ("event", "type", "component", "tool", "name", "mode", "tool_schema", "schema", "schema_valid"):
+        for key in (
+            "event",
+            "type",
+            "component",
+            "tool",
+            "name",
+            "mode",
+            "tool_schema",
+            "schema",
+            "schema_valid",
+            "model",
+            "prompt",
+            "retriever",
+            "retriever_index",
+            "output_schema",
+            "input_hash",
+        ):
             if key in event:
                 witness[key] = event[key]
+        if isinstance(event.get("tool_calls"), list):
+            witness["tool_call_count"] = len(event["tool_calls"])
         if isinstance(event.get("args"), dict):
             witness["arg_keys"] = sorted(str(k) for k in event["args"])
     else:
@@ -574,6 +709,19 @@ def _repairs_for_violation(violation, tool):
                 "kind": "workflow_change",
                 "weakens_spec": False,
                 "description": f"route {label} to fallback or human review when preconditions are not met",
+            },
+        ]
+    if violation in ("model_mismatch", "prompt_mismatch", "retriever_mismatch", "output_schema_mismatch"):
+        return [
+            {
+                "kind": "artifact_rollout_change",
+                "weakens_spec": False,
+                "description": "align the deployed AI artifact version with the declared component boundary",
+            },
+            {
+                "kind": "compatibility_profile_change",
+                "weakens_spec": False,
+                "description": "update the component declaration and rerun compatibility, eval, and drift checks before rollout",
             },
         ]
     return [
