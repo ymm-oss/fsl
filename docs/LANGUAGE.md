@@ -1613,6 +1613,39 @@ ai_component RefundAgentToolSafety {
 }
 ```
 
+`model`/`prompt`/`input`/`output`/`tool`/`authority`/`fallback` are the fields
+most specs need. Three more are optional, each at most once: `retriever
+<id>;`, `temperature <number>;`, and a `tools [Name, ...]` shorthand that
+declares bare tools with no schema/precondition/effect. A `tool` block's
+`precondition <name>;` line is repeatable (0 or more) and it may also declare
+one `effect <name>;`. None of these fields — nor `authority`, `fallback`, or
+the `check hard { }` block below — accept a `"description text"` tag; every
+field here is a bare identifier or number, unlike the declaration-tag
+convention in §10.
+
+An `ai_component` may also declare which hard rules get an explicit,
+separately-reported invariant:
+
+```fsl
+  check hard {
+    rule tool_authority;
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
+  }
+```
+
+Omitting `check hard { }` checks all five rules (the default); naming an
+unknown rule is a check-time error. Narrowing the set only removes an
+explicit, separately-reported invariant for `forbidden_tool_blocked` /
+`human_approval_required` — the structural guards themselves (no
+execute-action is ever generated for a forbidden tool; an approval-required
+tool's execute action always carries a `requires human_approved` guard) are
+generated unconditionally either way. `tool_authority`,
+`tool_schema_declared`, and `tool_precondition_declared` are checked
+unconditionally regardless of this block.
+
 `ai_component` lowers to a kernel spec with finite tool state:
 
 - `Tool` enum
@@ -1673,6 +1706,7 @@ agent SupportOrchestrator {
   authority {
     may_execute [SearchDocs, CheckPolicy, CreateDraft];
   }
+  review_gate PolicyCheckAgent;
 
   agent RetrievalAgent {
     trust medium;
@@ -1689,6 +1723,7 @@ agent SupportOrchestrator {
     grant context [CustomerTicket, ApprovedSupportDocs];
     tools [CheckPolicy];
     authority { may_execute [CheckPolicy]; }
+    contract { hard { rule PolicyMustCiteSource; } }
     output PolicyDecision visibility parent;
   }
 
@@ -1708,7 +1743,19 @@ Nested agents are ordinary agents scoped by their parent, not a distinct
 `SupportOrchestrator.RetrievalAgent`; runtime collaboration is declared
 separately in `orchestration`. Parent authority/context is not inherited
 implicitly. A child must receive explicit `grant authority` and `grant context`,
-and each grant must stay inside the immediate parent boundary.
+and each grant must stay inside the immediate parent boundary. `model`/
+`prompt` are also valid at any agent level (root or child), and a direct
+`tool { }` block works inside an agent the same way it does inside
+`ai_component`. `review_gate <Child>;` names a **direct child** agent through
+which every orchestration path to a high-authority-tool descendant must pass;
+a path that skips all declared review gates is flagged
+`policy_review_bypass_in_orchestration`. `trust` is a free identifier, not a
+validated enum — only the literal `low` currently drives a dedicated check
+(a low-trust agent's path to a high-authority tool); other values parse but
+have no distinct check yet. `contract { hard { rule <Name>; } }` is parsed
+and listed per agent, but — unlike `ai_component`'s `check hard { }` — its
+rule names are not validated against a known set and are not yet
+cross-checked against anything; treat it as forward-declared metadata.
 
 Design details: `docs/DESIGN-ai-hard.md`.
 

@@ -660,7 +660,14 @@ the relevant role skill directs it.
   approval / forbidden-tool guards to the kernel. Use `fslc ai check` for
   hard-contract findings and `fslc ai replay --logs` for runtime JSONL evidence;
   `replay_conformant` is not proof, and evaluator/statistical AI quality remains
-  outside the kernel. For statistical/migration/drift evidence over precomputed
+  outside the kernel. If you add `check hard { rule ...; }`, name only the
+  rules you mean to certify explicitly — omitting the block is the safe
+  default (checks all 5); do not add it as a shortcut past a violation (full
+  field list and the verified narrowing behavior: reference.md §1). For
+  recursive `agent` review-gate coverage, declare `review_gate <Child>;` on
+  every path that must pass human/policy review before reaching a
+  high-authority tool — an undeclared path is a silent bypass, not a warning.
+  For statistical/migration/drift evidence over precomputed
   eval JSONL (`dataset`/`evaluator`/`statistical_property`/`ai_migration`/
   `observed_property` project-level blocks), use `fslc ai eval`/`regress`/
   `compare`/`drift`/`compat` (syntax and flags in reference.md §1/§7); every

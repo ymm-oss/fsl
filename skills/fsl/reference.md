@@ -237,15 +237,20 @@ tool-boundary checks and reports stable fsl-ai findings for runtime replay):
 ai_component <Name> {
   model <model_id>;
   prompt <prompt_id>;
+  retriever <retriever_id>;              // optional, at most once
+  temperature <number>;                  // optional, at most once
   input <InputSchema>;
   output <OutputSchema>;
 
+  tools [<BareToolName>, ...];           // shorthand: declares tools with no schema/precondition/effect
+
   tool <ToolName> [irreversible] {
-    schema <ToolSchema>;
-    precondition <symbolic_business_precondition>;
+    schema <ToolSchema>;                 // at most once
+    precondition <symbolic_business_precondition>;  // repeatable, 0 or more
+    effect <EffectName>;                 // optional, at most once
   }
 
-  authority {
+  authority {                            // an optional NAME after `authority` is accepted and ignored here
     may_suggest <ToolName>, ...;
     may_execute <ToolName>, ...;
     requires_human_approval <ToolName>, ...;
@@ -255,6 +260,11 @@ ai_component <Name> {
   fallback {
     when <condition_name> require <safe_target>;
   }
+
+  check hard {                           // optional, at most once; omit for the default (all 5 rules)
+    rule <RuleName>;                     // tool_authority | human_approval_required | forbidden_tool_blocked
+                                          // | tool_schema_declared | tool_precondition_declared
+  }
 }
 ```
 
@@ -262,7 +272,21 @@ ai_component <Name> {
 approval-required execution, forbidden tools, declared tool schemas, symbolic
 business precondition evidence, and fallback routing. It does not model LLM
 truth, groundedness, evaluator judgment, probability, confidence intervals, or
-prompt/model sampling distributions in the kernel. Use `fslc ai check` for
+prompt/model sampling distributions in the kernel. No field on `ai_component`,
+`tool`, `authority`, `fallback`, or `check` accepts a `"description text"` /
+`"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
+convention (§10), every field here is a bare identifier or number.
+`check hard { rule <Name>; ... }` selects which of the 5 named rules above get
+an explicit, separately-reported invariant/finding in `fslc ai check`; an
+unlisted name is a check-time error (`kind:"semantics"`, hint lists the 5).
+Omitting the block checks all 5 (the safe default). Verified nuance: today
+only `forbidden_tool_blocked`/`human_approval_required` change what the kernel
+expansion generates (dropping the block drops one *redundant, explicit*
+certifying invariant — the underlying structural guards, no execute-action for
+a forbidden tool and the `requires human_approved` clause on an
+approval-required tool's execute action, are generated unconditionally
+either way); `tool_authority`/`tool_schema_declared`/`tool_precondition_declared`
+are checked unconditionally regardless of this block. Use `fslc ai check` for
 `verified_under_assumptions` hard-contract findings and `fslc ai replay --logs`
 for JSONL runtime evidence (`replay_conformant` / `replay_nonconformant`,
 `formal_result:"not_run"`). Statistical quality evidence uses the external
@@ -279,17 +303,22 @@ Recursive fsl-ai `agent` composition is checked structurally by
 
 ```fsl
 agent <Parent> {
+  model <model_id>;                      // optional at any agent level (root or child), at most once
+  prompt <prompt_id>;                    // optional at any agent level, at most once
   context [<ContextName>, ...];
   tools [<ToolName>, ...];
+  tool <ToolName> [irreversible] { schema <ToolSchema>; }  // a detailed `tool` block also works here
   authority { may_execute [<ToolName>, ...]; }
+  review_gate <Child>;                   // Child must be a direct child agent (see below)
 
   agent <Child> {
-    trust medium;
+    trust medium;                        // free NAME; only "low" has a distinct check today
     grant authority [<ToolName>, ...];
     grant context [<ContextName>, ...];
     tools [<ToolName>, ...];
     authority { may_execute [<ToolName>, ...]; }
-    output <OutputName> visibility [parent, <SiblingAgent>];
+    contract { hard { rule <Name>; } }   // parsed and echoed in agent_ir; not yet cross-checked
+    output <OutputName> visibility [parent, <SiblingAgent>];  // or bare `visibility parent;` for one name
   }
 
   orchestration {
@@ -307,7 +336,19 @@ Nested agents are ordinary scoped agents (`Parent.Child`), not a separate
 `sub_agent` type. Nesting defines lexical scope and grant boundaries only;
 runtime collaboration is the separate `orchestration` graph. Parent authority
 and context are never implicitly inherited: child `grant authority` and
-`grant context` must stay inside the immediate parent boundary. Structural
+`grant context` must stay inside the immediate parent boundary.
+`review_gate <Child>;` declares that any orchestration path reaching a
+descendant with high-authority tools must pass through one of the named
+review-gate children; a path that skips them all is the "review-gate bypass"
+finding below. `trust` is a free identifier, not a validated enum — only the
+literal `low` currently triggers a distinct check
+(`low_trust_agent_path_to_high_authority_tool`); other values (`medium`,
+`high`, or anything else) parse but have no dedicated check yet.
+`contract { hard { rule <Name>; } }` is parsed and listed under each agent's
+`agent_ir.contracts`, but — unlike `ai_component`'s `check hard { }` — its
+rule names are not validated against a known set and are not yet cross-checked
+against anything; treat it as forward-declared metadata. As with
+`ai_component`, no field here accepts a `"description text"` tag. Structural
 findings use `guarantee_kind:"agent_structural"` and cover child grant
 exceedance, low-trust paths to high-authority tools, irreversible tools without
 human approval, review-gate bypass, and sibling visibility leaks. This is not
