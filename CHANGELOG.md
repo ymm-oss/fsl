@@ -6,6 +6,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Persistent verdict cache for `fslc verify` (issue #169, `src/fslc/verify_cache.py`):
+  a sha256 key over the post-desugaring kernel AST, raw entry-file text, every
+  verify option, and an implementation fingerprint (fslc/z3/lark/Python
+  versions + a hash of the installed package's source) makes an unchanged
+  re-run in the write→verify→repair loop return instantly instead of
+  re-solving. A `violated` result is additionally reused at any deeper
+  requested depth (a counterexample's earliest step does not depend on the
+  search bound). Hits add one additive JSON field
+  (`"cache":{"hit","key","source"}`); misses are byte-identical to today's
+  output, and any cache-layer failure degrades to an ordinary uncached run —
+  never affects the verdict. New `--no-cache` flag / `FSLC_CACHE=off` env var
+  to opt out; `FSLC_CACHE_VERIFY=1` re-runs the engine on every hit and
+  reports a divergence as an internal error. Stage 1 of the design
+  (whole-verdict cache + cross-depth reuse) only — property-level
+  differential re-verification is explicitly deferred. See
+  `docs/DESIGN-incremental-verify.md`.
 - Dialect corpus conformance harness (issue #167): a declarative
   `tests/dialect_registry.py` (dialect construct → example corpus, plus
   documented exclusions for fsl-ai project/agent files and one Monitor
