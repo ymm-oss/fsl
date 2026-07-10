@@ -1857,7 +1857,14 @@ DESIGN-*.md).</p>
   projections for review diagrams while keeping JSON as the default. <code>--profile
   ai-review</code> emits review findings such as <code>disconnected_requirement</code>,
   <code>unanchored_property</code>, <code>progressless_cycle</code>, <code>unwritten_state</code>,
-  <code>unread_state</code>, <code>unguarded_action</code>, and <code>conservation_candidate</code>.
+  <code>unread_state</code>, <code>unguarded_action</code>, <code>conservation_candidate</code>,
+  <code>divergent_choice</code>, and <code>unconstrained_effect</code>. The last two use a fixed
+  depth-4 BMC probe: they include <code>evidence_basis:"bounded_bmc"</code>, the reachable
+  branch witness, and a question-form <code>spec_question</code> asking which outcome is
+  intended. A BMC-backed <code>unconstrained_effect</code> suppresses the same state's
+  structural <code>unread_state</code>; semantic action witnesses similarly suppress a
+  duplicate <code>unguarded_action</code>. Absence is not proof of determinism beyond the
+  bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
   These findings carry <code>formal_status: "not_a_violation"</code>; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under <code>schemas/fslc/analysis/</code>. →

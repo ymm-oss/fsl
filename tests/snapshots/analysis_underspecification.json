@@ -1,0 +1,58 @@
+{
+  "analysis": "structure",
+  "candidate_repairs": [
+    {
+      "kind": "ask_spec_question",
+      "template": "Both approve and reject are enabled in this reachable state and produce different contract outcomes. Which outcome is intended, or should both be explicitly allowed by an invariant or acceptance case?"
+    }
+  ],
+  "confidence": 0.86,
+  "do_not_assume": [
+    "Either action is wrong.",
+    "The bounded witness proves the product must choose only one action.",
+    "No deeper reachable choice exists beyond the analyzed bound."
+  ],
+  "evidence_basis": "bounded_bmc",
+  "finding_id": "STRUCT-DIVERGENT-CHOICE-0001",
+  "finding_type": "divergent_choice",
+  "formal_status": "not_a_violation",
+  "involved_nodes": [
+    "acceptance:AC-1",
+    "action:approve",
+    "action:reject"
+  ],
+  "severity": "review_required",
+  "spec_question": "Both approve and reject are enabled in this reachable state and produce different contract outcomes. Which outcome is intended, or should both be explicitly allowed by an invariant or acceptance case?",
+  "witness": {
+    "actions": [
+      {
+        "name": "approve",
+        "params": {},
+        "successor": {
+          "approved": true,
+          "ready": false
+        }
+      },
+      {
+        "name": "reject",
+        "params": {},
+        "successor": {
+          "approved": false,
+          "ready": false
+        }
+      }
+    ],
+    "bounded_evidence": {
+      "available": true,
+      "depth": 4,
+      "reachable_at_step": 0
+    },
+    "differing_predicates": [
+      {
+        "kind": "acceptance",
+        "name": "AC-1"
+      }
+    ],
+    "kind": "reachable_divergent_choice"
+  }
+}
