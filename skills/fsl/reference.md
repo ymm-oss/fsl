@@ -682,6 +682,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
                [--strict-tags] [--requirements ids.txt] [--no-cache]
+               [--lemma "<expr>"]...                 # induction only; independently adjudicated
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
@@ -719,6 +720,17 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+For an induction `unknown_cti`, pass candidate auxiliary invariants with
+repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
+init/actions + implicit bounds, without original user invariants), rejects
+false/non-inductive/invalid candidates with their own evidence, and makes only
+`proved` candidates available to the target proof. A candidate is used only
+when it is false on the current CTI; `lemma_cti_exclusions` records the target,
+CTI, and violated steps. On final `proved`, copy the declarations from
+`auxiliary_invariant_recommendation` into the spec and review that source edit.
+There is no flag for injecting an unverified assumption, and `--lemma` is an
+error with the BMC engine.
 
 `verify` is backed by a persistent verdict cache (issue #169) keyed on every
 input that can affect its output (the post-desugaring kernel AST, the raw

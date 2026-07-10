@@ -58,7 +58,9 @@ kept in one place (`verify_cache.compute_key`); adding a semantics-affecting par
 5. **All verify options**: `engine`, `depth`, `k_ind`, `deadlock_mode`, `vacuity_mode`,
    `property_name`, sorted `exclude_property_names`, `strict_tags`, the parsed
    `--instances`/`--values` overrides (defense in depth — they are already reflected in the
-   AST), and the **content hash** of the `--requirements` file (not its path).
+   AST), ordered repeatable `--lemma` candidate expressions, and the **content hash** of the
+   `--requirements` file (not its path). Lemma order is semantic because the CTI retry loop
+   deterministically selects the first independently-proved candidate that excludes a CTI.
 
 What is normalized away, and what deliberately is not: dialect surface syntax normalizes to
 the kernel (two dialect spellings with the same kernel AST + same source text share nothing in
@@ -185,7 +187,7 @@ strengthens the hypothesis. Until that lands, induction gets whole-verdict cachi
 |---|---|
 | Spec edit not detected | Key covers raw source bytes + full post-expansion kernel AST; parse always runs; no mtime/size shortcuts anywhere. |
 | Edit to a composed/`use`d/refined component while entry file unchanged | Expansion inlines components into the AST at parse time → AST hash moves. |
-| `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags` change | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. |
+| `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags`/`--lemma` change | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. Lemmas preserve CLI order in the key. |
 | `--requirements` file edited at same path | Content hash, not path, in the key. |
 | fslc upgraded, or dev edits `bmc.py` in an editable install | Version string **and** package source fingerprint in the key. |
 | z3 / lark / Python upgraded | Versions in the key. |

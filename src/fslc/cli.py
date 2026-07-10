@@ -17,7 +17,7 @@ from pathlib import Path
 from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
 from .model import build_spec, check_spec, FslError, strict_tag_warnings
-from .bmc import verify, prove, scenarios
+from .bmc import verify, prove, prove_with_lemmas, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
 from .runtime import Monitor
@@ -852,7 +852,7 @@ def run_sweep(
 
 def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock_mode,
                           vacuity_mode, property_name, exclude_property_names,
-                          strict_tags, requirements, instances, values):
+                          strict_tags, requirements, instances, values, lemmas):
     """Best-effort cache lookup. Returns ``(cache_key, xdepth_key, hit_or_None)``;
     ``cache_key`` is ``None`` if the run is uncacheable (cache disabled, or the
     key computation itself failed) -- callers must treat that as a plain miss
@@ -868,7 +868,7 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
             k_ind=k_ind, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode,
             property_name=property_name, exclude_property_names=exclude_property_names,
             strict_tags=strict_tags, requirements_sha256=requirements_sha256,
-            instances=instances, values=values,
+            instances=instances, values=values, lemmas=lemmas,
         )
         return cache_key, xdepth_key, verify_cache.lookup(cache_key, xdepth_key, depth)
     except Exception:  # noqa: BLE001 -- any cache-layer failure degrades to an uncached run
@@ -878,8 +878,14 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None, instances=None, values=None, use_cache=True):
+        exclude_property_names=None, instances=None, values=None, use_cache=True,
+        lemmas=None):
     try:
+        if lemmas and engine != "induction":
+            return _error_envelope(
+                "usage",
+                "--lemma requires --engine induction",
+            )
         bounds_overrides = _build_bounds_overrides(instances, values)
         has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
         spec, source_lines, ast, display_names, src = _read_spec(file, bounds_overrides)
@@ -895,7 +901,7 @@ def run_verify(
             cache_key, xdepth_key, cached = _verify_cache_lookup(
                 ast, display_names, src, engine, depth, k_ind, deadlock_mode, vacuity_mode,
                 property_name, exclude_property_names, strict_tags, requirements,
-                instances, values,
+                instances, values, lemmas,
             )
         verify_mode = cached is not None and os.environ.get("FSLC_CACHE_VERIFY") == "1"
         if cached is not None and not verify_mode:
@@ -905,13 +911,25 @@ def run_verify(
             return _envelope(out)
 
         if engine == "induction":
-            out = prove(
-                spec, k_ind, depth,
-                deadlock_mode=deadlock_mode,
-                vacuity_mode=vacuity_mode,
-                property_name=property_name,
-                exclude_property_names=exclude_property_names,
-            )
+            if lemmas:
+                out = prove_with_lemmas(
+                    spec,
+                    lemmas,
+                    k_ind,
+                    depth,
+                    deadlock_mode=deadlock_mode,
+                    vacuity_mode=vacuity_mode,
+                    property_name=property_name,
+                    exclude_property_names=exclude_property_names,
+                )
+            else:
+                out = prove(
+                    spec, k_ind, depth,
+                    deadlock_mode=deadlock_mode,
+                    vacuity_mode=vacuity_mode,
+                    property_name=property_name,
+                    exclude_property_names=exclude_property_names,
+                )
         else:
             out = verify(
                 spec,
@@ -1815,6 +1833,8 @@ def _build_arg_parser():
     v.add_argument("--requirements", default=None)
     v.add_argument("--no-cache", action="store_true",
                    help="skip the persistent verdict cache for this run (neither reads nor writes it)")
+    v.add_argument("--lemma", action="append", dest="lemmas", default=None,
+                   help="candidate auxiliary invariant expression (induction only; repeatable)")
 
     sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
     sw.add_argument("file")
@@ -2258,7 +2278,8 @@ def _dispatch(args):
                             exclude_property_names=args.exclude_property_names,
                             instances=args.instances,
                             values=args.values,
-                            use_cache=not args.no_cache)
+                            use_cache=not args.no_cache,
+                            lemmas=args.lemmas)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

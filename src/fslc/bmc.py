@@ -553,6 +553,29 @@ def _enum_phys_constraints(spec, state):
     return cons
 
 
+def _lemma_exclusions(model, states, upto, lemmas, spec, expr_cache):
+    """Return proved lemma candidates that are false on this concrete CTI."""
+    exclusions = []
+    for lemma in lemmas or []:
+        violated_steps = []
+        for step, state in enumerate(states[:upto + 1]):
+            try:
+                cond = _inv_constraint(lemma, state, spec, expr_cache)
+                value = model.eval(cond, model_completion=True)
+            except (FslError, z3.Z3Exception):
+                violated_steps = []
+                break
+            if z3.is_false(value):
+                violated_steps.append(step)
+        if violated_steps:
+            exclusions.append({
+                "name": lemma["name"],
+                "expression": lemma["expression"],
+                "violated_steps": violated_steps,
+            })
+    return exclusions
+
+
 
 def _type_of_expr(e, spec, ctx_ty=None):
     """Rough type inference for literals; ctx_ty used for enum member names."""
@@ -5506,7 +5529,8 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None, allow_unreac
 
 def prove(
         spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn",
-        property_name=None, exclude_property_names=None):
+        property_name=None, exclude_property_names=None,
+        auxiliary_invariants=None, lemma_probes=None):
     """k-induction: base BMC then step-case invariant proof."""
     started = time.perf_counter()
     filtered, property_error = _select_properties(
@@ -5531,6 +5555,15 @@ def prove(
                     f"engine cannot prove; check it with the default bmc engine"
                 ),
             }, spec, base_depth, started)
+
+    if auxiliary_invariants:
+        filtered = dict(filtered)
+        filtered["invariants"] = (
+            list(filtered.get("invariants", [])) + list(auxiliary_invariants)
+        )
+        filtered["user_invariants"] = (
+            list(filtered.get("user_invariants", [])) + list(auxiliary_invariants)
+        )
 
     spec = filtered
     invariants = spec.get("invariants", [])
@@ -5614,8 +5647,10 @@ def prove(
                 if s.check() == z3.sat:
                     model = s.model()
                     trace = _build_trace(model, states, choices, instances, spec, 1)
+                    exclusions = _lemma_exclusions(
+                        model, states, 1, lemma_probes, spec, expr_cache)
                     s.pop()
-                    return _finish_result(_attach_requirement({
+                    result = _attach_requirement({
                         "result": "unknown_cti",
                         "spec": spec["name"],
                         "trans": trans["name"],
@@ -5630,7 +5665,11 @@ def prove(
                         "invariants_checked": [i["name"] for i in invariants],
                         "transitions_checked": [tr["name"] for tr in transitions],
                         **_cti_hint_fields(trace, spec),
-                    }, trans), spec, base_depth, started, completeness="bounded")
+                    }, trans)
+                    if exclusions:
+                        result["_lemma_exclusions"] = exclusions
+                    return _finish_result(
+                        result, spec, base_depth, started, completeness="bounded")
                 s.pop()
 
         remaining = still_remaining
@@ -5640,7 +5679,9 @@ def prove(
     if remaining:
         inv, k, model = last_cti
         trace = _build_trace(model, states, choices, instances, spec, k)
-        return _finish_result(_attach_requirement({
+        exclusions = _lemma_exclusions(
+            model, states, k, lemma_probes, spec, expr_cache)
+        result = _attach_requirement({
             "result": "unknown_cti",
             "spec": spec["name"],
             "invariant": inv["name"],
@@ -5652,7 +5693,11 @@ def prove(
                 "violated_at": k,
             },
             **_cti_hint_fields(trace, spec),
-        }, inv), spec, base_depth, started, completeness="bounded")
+        }, inv)
+        if exclusions:
+            result["_lemma_exclusions"] = exclusions
+        return _finish_result(
+            result, spec, base_depth, started, completeness="bounded")
 
     rank_failure, ranked_leadstos = _prove_ranked_leadstos(
         spec, leadstos, invariants, instances)
@@ -5705,3 +5750,169 @@ def prove(
                 f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
             )
     return _finish_result(result, spec, base_depth, started, completeness="unbounded")
+
+
+def _lemma_only_spec(spec, lemma):
+    out = dict(spec)
+    implicit = [inv for inv in spec.get("invariants", []) if inv.get("implicit")]
+    out["invariants"] = implicit + [lemma]
+    out["user_invariants"] = [lemma]
+    out["transitions"] = []
+    out["leadstos"] = []
+    out["reachables"] = []
+    return out
+
+
+def _lemma_parse_error(expression, exc):
+    out = {
+        "result": "error",
+        "kind": "parse",
+        "message": str(exc).split("\n")[0],
+    }
+    if getattr(exc, "line", None) is not None:
+        out["loc"] = {"line": exc.line, "column": exc.column}
+    return out
+
+
+def _lemma_proof_summary(proof, name):
+    return {
+        "result": "proved",
+        "k": proof.get("k_used", {}).get(name),
+        "checked_to_depth": proof.get("checked_to_depth"),
+        "completeness": proof.get("completeness"),
+    }
+
+
+def prove_with_lemmas(
+        spec, lemma_expressions, k_ind, base_depth, deadlock_mode="warn",
+        vacuity_mode="warn", property_name=None, exclude_property_names=None):
+    """Adjudicate lemma candidates independently, then use only proved ones."""
+    from lark.exceptions import UnexpectedInput, VisitError
+    from .parser import parse_expr
+
+    started = time.perf_counter()
+    reports = []
+    proved_candidates = []
+    occupied_names = {
+        item["name"]
+        for collection in ("invariants", "transitions", "leadstos", "reachables")
+        for item in spec.get(collection, []) or []
+    }
+    for index, expression in enumerate(lemma_expressions, start=1):
+        name = f"AuxiliaryLemma{index}"
+        while name in occupied_names:
+            name += "Candidate"
+        occupied_names.add(name)
+        try:
+            expr = parse_expr(expression)
+            lemma = {
+                "name": name,
+                "expr": expr,
+                "implicit": False,
+                "loc": None,
+                "meta": None,
+                "expression": expression,
+            }
+            proof = prove(
+                _lemma_only_spec(spec, lemma),
+                k_ind,
+                base_depth,
+                deadlock_mode=deadlock_mode,
+                vacuity_mode=vacuity_mode,
+            )
+        except UnexpectedInput as exc:
+            reports.append({
+                "expression": expression,
+                "name": name,
+                "status": "rejected",
+                "used": False,
+                "proof": _lemma_parse_error(expression, exc),
+            })
+            continue
+        except VisitError as exc:
+            orig = exc.orig_exc
+            proof = {
+                "result": "error",
+                "kind": getattr(orig, "kind", "semantics"),
+                "message": str(orig),
+            }
+        except (FslError, z3.Z3Exception) as exc:
+            proof = {
+                "result": "error",
+                "kind": getattr(exc, "kind", "type"),
+                "message": str(exc),
+            }
+
+        if proof.get("result") == "proved":
+            report = {
+                "expression": expression,
+                "name": name,
+                "status": "proved",
+                "used": False,
+                "proof": _lemma_proof_summary(proof, name),
+            }
+            proved_candidates.append((lemma, report))
+        else:
+            stable_proof = {key: value for key, value in proof.items() if key != "cost"}
+            report = {
+                "expression": expression,
+                "name": name,
+                "status": "rejected",
+                "used": False,
+                "proof": stable_proof,
+            }
+        reports.append(report)
+
+    used = []
+    remaining = list(proved_candidates)
+    cti_exclusions = []
+    while True:
+        result = prove(
+            spec,
+            k_ind,
+            base_depth,
+            deadlock_mode=deadlock_mode,
+            vacuity_mode=vacuity_mode,
+            property_name=property_name,
+            exclude_property_names=exclude_property_names,
+            auxiliary_invariants=used,
+            lemma_probes=[lemma for lemma, _report in remaining],
+        )
+        exclusions = result.pop("_lemma_exclusions", [])
+        if result.get("result") != "unknown_cti" or not exclusions:
+            break
+        by_name = {entry["name"]: entry for entry in exclusions}
+        chosen_index = next(
+            (idx for idx, (lemma, _report) in enumerate(remaining)
+             if lemma["name"] in by_name),
+            None,
+        )
+        if chosen_index is None:
+            break
+        lemma, report = remaining.pop(chosen_index)
+        evidence = by_name[lemma["name"]]
+        report["used"] = True
+        used.append(lemma)
+        cti_exclusions.append({
+            "lemma": lemma["expression"],
+            "target": result.get("invariant") or result.get("trans"),
+            "k": result.get("k"),
+            "violated_steps": evidence["violated_steps"],
+            "cti": result.get("cti"),
+        })
+
+    result = dict(result)
+    result["lemmas"] = reports
+    result["lemma_cti_exclusions"] = cti_exclusions
+    if result.get("result") == "proved" and used:
+        result["auxiliary_invariant_recommendation"] = {
+            "message": (
+                "write the used proved lemmas into the specification as auxiliary invariants"
+            ),
+            "declarations": [
+                f"invariant {lemma['name']} {{ {lemma['expression']} }}"
+                for lemma in used
+            ],
+        }
+    result["cost"] = _result_cost(started)
+    return result

@@ -198,7 +198,7 @@ TOP_DEF_DESIGN_DOCS = {
 COMMAND_DESIGN_DOCS = {
     "version": "CLI plumbing, no design doc of its own",
     "check": ("DESIGN-v1.md",),
-    "verify": ("DESIGN-v1.md", "DESIGN-induction.md"),
+    "verify": ("DESIGN-v1.md", "DESIGN-induction.md", "DESIGN-induction-lemmas.md"),
     "sweep": "scope-grid driver over verify; no standalone semantics (documented in LANGUAGE.md)",
     "scenarios": ("DESIGN-scenarios.md",),
     "replay": ("DESIGN-bridge.md",),

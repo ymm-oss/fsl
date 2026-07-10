@@ -258,7 +258,11 @@ the formalization memo.**
    (note: `--depth K` **includes** step K. Invariants become infinite-depth under
    `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,
    in which case induction can prove that response with an unbounded ranking
-   argument)
+   argument). If induction returns `unknown_cti`, candidate auxiliary invariants
+   may be machine-judged with repeatable `--lemma "EXPR"`: only independently
+   `proved` candidates are used, rejected candidates retain counterexample/CTI
+   evidence, and successful output recommends declarations to write back. Never
+   treat a candidate as an assumption without this adjudication.
 4. As needed: `fslc explain file.fsl --depth 8 --readable`
    (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
    checks, a "what if this rule were absent" counterfactual for each user

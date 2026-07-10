@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Verified auxiliary lemma candidates for k-induction (issue #177): repeatable
+  `fslc verify --engine induction --lemma "EXPR"` independently proves each
+  candidate using the original transition system and implicit bounds, without
+  assuming the original user invariants. False/non-inductive/invalid candidates
+  are rejected with their own counterexample, CTI, or parse/type result; only
+  `proved` candidates can strengthen the target proof. The retry loop evaluates
+  candidates in each target CTI model, records which lemma excluded which CTI
+  and steps under `lemma_cti_exclusions`, and on final `proved` emits source
+  declarations under `auxiliary_invariant_recommendation` without rewriting the
+  file. Lemma text/order is included in the persistent verify cache key, and
+  BMC use is rejected as a usage error. See
+  `docs/DESIGN-induction-lemmas.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,
