@@ -652,6 +652,24 @@ result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.
 
+A `violated` result with `violation_kind` `invariant`/`type_bound` additionally
+carries **blame assignment** (issue #170), localizing the counterexample
+instead of just showing it: top-level `blame.conjuncts[]` (`{index, text,
+holds, violating_bindings?}`) names which AND-conjunct of the invariant is
+false when it is built from more than one (a 1-element list otherwise); each
+action-bearing `trace[k]` (k≥1) gets its own `blame: {guards[], effects[]}`
+naming the `requires` clauses and state-writing statements that fed the
+blamed conjunct(s) at that step (a backward slice over the concrete
+counterexample, not a new solver query). `fslc explain`'s counterfactuals
+inherit both automatically. Vacuity findings (`vacuous_implication` /
+`vacuous_leadsto`) gain `classification` (`insufficient_depth` |
+`over_constrained`) and `blocking` (the other invariants making the
+antecedent/trigger impossible, empty when it's merely unreached within
+depth) — same shape as `reachable_failed`'s `unreached[].blocking_requires`.
+Blame identifies; it never proposes a repair (weakening a guard, dropping a
+conjunct) — that would cut against the anti-hollowing principle. All of this
+is strictly additive to the JSON contract.
+
 Diagnostics that identify a faithfulness/intent gap may also carry
 `faithfulness_class` plus `recommended_action`. Current classes are:
 `partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`, and

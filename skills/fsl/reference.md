@@ -859,6 +859,20 @@ first failed layer and later layers are marked `skipped`.
 - faithfulness diagnostics may add `faithfulness_class` and
   `recommended_action`: `partial_op_unguarded`, `frozen_only_invariant`,
   `intent_unexercised`, or `liveness_not_refined`.
+- **blame assignment** (issue #170, additive): a `violated` result with
+  `violation_kind` `invariant`/`type_bound` carries top-level
+  `blame.conjuncts[]` (`{index, text, holds, violating_bindings?}`) — which
+  AND-conjunct of the invariant is false — and each action-bearing `trace[k]`
+  (k≥1) carries its own `blame: {guards[], effects[]}` naming the `requires`
+  clauses and state-writing statements that fed the blamed conjunct(s) at
+  that step (a backward slice over the concrete counterexample; no new
+  solver query). `fslc explain`'s `counterfactuals[].violation`/`.trace`
+  inherit both automatically. `reachable_failed`'s `unreached[]` gains no new
+  fields, but `vacuous_implication`/`vacuous_leadsto` warnings/findings gain
+  the same `classification` + a `blocking` list (empty when merely unreached
+  within depth, not structurally impossible). Blame identifies; it never
+  proposes a repair — do not turn a `blame` entry into a suggested guard
+  weakening (that cuts against the anti-hollowing principle).
 - **repair routing (`trace_type`)**: every counterexample/failure result carries a
   `trace_type` discriminator — one of `invariant` | `sla` | `type_bound` | `trans`
   | `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` |

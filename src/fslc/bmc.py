@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import z3
 
 from .diagnostics import with_faithfulness
+from .render import _display_from, expr_to_text, public_var
 from .model import (
     FslError,
     annotate_display_name,
@@ -2242,6 +2243,73 @@ def violating_bindings(model, inv_expr, state, spec):
     return search(inv_expr, {}, {})
 
 
+def _split_conjuncts(expr):
+    """An invariant's top-level AND structure, split into closed conjunct ASTs
+    in source order (issue #170 blame assignment). Descends through `forall`
+    (which distributes over `and`) and `bin and` only -- `exists`/`=>` stop
+    the descent, since splitting past them would change what's being blamed.
+    Each leaf is re-wrapped with the `forall` binders accumulated on the path
+    to it, so every returned conjunct is independently evaluable. A
+    conjunct-free invariant yields a 1-element list (uniform shape for
+    callers)."""
+    def walk(e, binders):
+        if isinstance(e, tuple) and e and e[0] == "forall":
+            return walk(e[2], binders + [e[1]])
+        if isinstance(e, tuple) and e and e[0] == "bin" and e[1] == "and":
+            return walk(e[2], binders) + walk(e[3], binders)
+        wrapped = e
+        for binder in reversed(binders):
+            wrapped = ("forall", binder, wrapped)
+        return [wrapped]
+
+    return walk(expr, [])
+
+
+def _conjunct_blame(model, inv, state, spec, expr_cache):
+    """Per top-level conjunct of `inv["expr"]`: its rendered text, whether it
+    holds under `model`, and (for a false conjunct) the violating bindings.
+    Model evaluation only -- no new solver calls.
+
+    Implicit `_bounds_*` invariants (`type_bound` violations) are handled
+    specially: their expr can embed synthetic internal names with no
+    `display_names` entry (Map's `__k` binder, a Seq's `<var>__data`/
+    `<var>__len` phys names) that were never meant to be rendered -- the
+    same reason `explain._auto_checks` prints only the target variable for
+    these, never the body. Treat the whole invariant as one opaque,
+    already-known-false conjunct instead of risking a leaked internal name
+    (caught by `tests/test_robustness.py`'s no-`__` corpus sweep while
+    implementing this).
+
+    A user conjunct whose truth `model.eval` cannot decide outright (only
+    the `set_bounds`/`map_value_bounds` bound-check nodes themselves, which
+    compile to a bare `z3.ForAll` rather than an unrolled ground formula --
+    ordinary user `forall`/`exists` unroll and always decide) reports
+    `holds: None` rather than guessing."""
+    if inv.get("implicit"):
+        target = public_var(inv.get("logical_var"), spec)
+        return [{"index": 0, "text": f"{target} stays within its declared type bounds", "holds": False}]
+
+    display_names = spec.get("display_names")
+    out = []
+    for idx, conj in enumerate(_split_conjuncts(inv["expr"])):
+        with _eval_cache_scope(expr_cache, id(state)):
+            cond = eval_expr(conj, state, {}, spec)
+        evaluated = model.eval(cond, model_completion=True)
+        if z3.is_true(evaluated):
+            holds = True
+        elif z3.is_false(evaluated):
+            holds = False
+        else:
+            holds = None
+        entry = {"index": idx, "text": expr_to_text(conj, display_names), "holds": holds}
+        if holds is False:
+            vb = violating_bindings(model, conj, state, spec)
+            if vb:
+                entry["violating_bindings"] = vb
+        out.append(entry)
+    return out
+
+
 def _display_max(spec):
     mx = 1
     for info in spec["types"].values():
@@ -3829,33 +3897,41 @@ def _reachable_blocking_entry(kind, source, spec, source_lines=None):
     return _attach_requirement(entry, source)
 
 
-def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
-    entry = _attach_requirement({
-        "name": reach["name"],
-        "loc": reach.get("loc"),
-    }, reach)
+def _diagnose_unreachable_expr(expr, spec, depth, source_lines=None, tag="diag", exclude_name=None):
+    """Is `expr` (an exists-wrapped reachable/vacuity-antecedent/leadsTo-trigger
+    predicate) satisfiable within the state's static/implicit invariants alone
+    (ignoring dynamics/depth)? If unsat, the unsat core names exactly the
+    invariants making it impossible; if sat, the real cause is more likely
+    "not reached within `depth` steps" than "structurally impossible". Shared
+    by `_diagnose_unreached_reachable` (issue #23) and vacuity finding
+    localization (issue #170) -- same solver-only, dynamics-free check.
 
-    state = make_state(spec, f"reach_diag_{id(reach)}")
+    `exclude_name` skips one invariant by name -- required for
+    `vacuous_implication`, whose target expr is that same invariant's own
+    antecedent: asserting `antecedent => consequent` directly constrains the
+    antecedent (trivially so when `consequent` is `false`), which would make
+    the unsat core always name the invariant being diagnosed instead of the
+    actual blocking assumptions."""
+    state = make_state(spec, f"{tag}_diag_{id(expr)}")
     expr_cache = {}
     s = z3.Solver()
     s.set(unsat_core=True)
 
     lit_map = {}
     for idx, inv in enumerate(spec.get("invariants", [])):
-        lit = z3.Bool(f"__reach_diag_inv_{idx}")
+        if exclude_name is not None and inv.get("name") == exclude_name:
+            continue
+        lit = z3.Bool(f"__{tag}_diag_inv_{idx}")
         s.assert_and_track(_inv_constraint(inv, state, spec, expr_cache), lit)
         lit_map[lit] = inv
 
-    target_lit = z3.Bool("__reach_diag_target")
+    target_lit = z3.Bool(f"__{tag}_diag_target")
     with _eval_cache_scope(expr_cache, id(state)):
-        target = eval_expr(reach["expr"], state, {}, spec)
+        target = eval_expr(expr, state, {}, spec)
     s.assert_and_track(target, target_lit)
 
-    status = s.check()
-    if status != z3.unsat:
-        entry["classification"] = "insufficient_depth"
-        entry["hint"] = _REACHABLE_INSUFFICIENT_HINT.format(depth=depth)
-        return entry
+    if s.check() != z3.unsat:
+        return {"classification": "insufficient_depth", "blocking": []}
 
     blocking = []
     for core_lit in s.unsat_core():
@@ -3864,9 +3940,22 @@ def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
             continue
         kind = "type_bound" if inv.get("implicit") else "invariant"
         blocking.append(_reachable_blocking_entry(kind, inv, spec, source_lines))
-    if not blocking:
-        blocking.append(_reachable_blocking_entry("reachable", reach, spec, source_lines))
+    return {"classification": "over_constrained", "blocking": blocking}
 
+
+def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
+    entry = _attach_requirement({
+        "name": reach["name"],
+        "loc": reach.get("loc"),
+    }, reach)
+
+    diag = _diagnose_unreachable_expr(reach["expr"], spec, depth, source_lines, tag="reach")
+    if diag["classification"] == "insufficient_depth":
+        entry["classification"] = "insufficient_depth"
+        entry["hint"] = _REACHABLE_INSUFFICIENT_HINT.format(depth=depth)
+        return entry
+
+    blocking = diag["blocking"] or [_reachable_blocking_entry("reachable", reach, spec, source_lines)]
     names = [
         b.get("name") or b.get("text") or b.get("kind", "constraint")
         for b in blocking
@@ -3979,6 +4068,90 @@ def _referenced_state_vars(expr, spec):
 
     walk(expr)
     return refs
+
+
+def _lvalue_text(lv, display_names):
+    tag = lv[0]
+    if tag == "var":
+        return _display_from(display_names, lv[1])
+    if tag == "index":
+        return f"{_display_from(display_names, lv[1])}[{expr_to_text(lv[2], display_names)}]"
+    if tag == "field_lv":
+        return f"{_lvalue_text(lv[1], display_names)}.{lv[2]}"
+    return str(lv)
+
+
+def _walk_executed_assigns(stmts, state, binds, model, spec, expr_cache):
+    """The `assign` statements on the model-decided execution path through
+    `stmts` -- `if`/`forall_stmt` are resolved concretely against `model`
+    (unlike the real transition encoding in `compute_updates`, which must
+    stay branch-agnostic and builds an ITE covering both branches for the
+    solver to decide later). Blame-only: given an already-decided model,
+    resolving the taken branch this way is exact and does not touch the
+    solve path."""
+    out = []
+    for st in stmts:
+        tag = st[0]
+        if tag == "assign":
+            out.append(st)
+        elif tag == "if":
+            _, cond, then_stmts, else_stmts, _loc = st
+            with _eval_cache_scope(expr_cache, id(state)):
+                c = eval_expr(cond, state, binds, spec)
+            branch = then_stmts if z3.is_true(model.eval(c, model_completion=True)) else else_stmts
+            out.extend(_walk_executed_assigns(branch, state, binds, model, spec, expr_cache))
+        elif tag == "forall_stmt":
+            binder, body = st[1], st[2]
+            for w, b2 in iter_binder_terms(binder, state, binds, spec, None, False, _SYM, eval_expr):
+                if w is not None and z3.is_false(model.eval(w, model_completion=True)):
+                    continue
+                out.extend(_walk_executed_assigns(body, state, b2, model, spec, expr_cache))
+    return out
+
+
+def _blame_trace_steps(model, states, choices, instances, spec, expr_cache, t, false_conjs):
+    """Per action-bearing trace step (k = 1..t), which guards/effects
+    contributed to the blamed conjuncts -- a dynamic backward slice over the
+    concrete, model-decided trace (not a per-statement unsat core: the
+    transition is one monolithic conjunction, and tracking every statement
+    would fork the Z3 encoding, exactly the bmc/Monitor divergence risk this
+    repo guards against). Returns `{step: {"guards": [...], "effects": [...]}}`
+    for every step, possibly with empty lists."""
+    display_names = spec.get("display_names")
+    read_set = set()
+    for conj in false_conjs:
+        read_set |= _referenced_state_vars(conj, spec)
+
+    blame_by_step = {}
+    for k in range(t, 0, -1):
+        idx = model.eval(choices[k - 1], model_completion=True).as_long()
+        inst = instances[idx]
+        _guard_terms, binds = _eval_requires(inst["requires"], inst["lets"], states[k - 1], inst["binds"], spec)
+
+        effects = []
+        for st in _walk_executed_assigns(inst["stmts"], states[k - 1], binds, model, spec, expr_cache):
+            root = _lvalue_base_name(st[1])
+            if root is None or root not in read_set:
+                continue
+            entry = {
+                "target": public_var(root, spec),
+                "text": f"{_lvalue_text(st[1], display_names)} = {expr_to_text(st[2], display_names)}",
+            }
+            if st[3]:
+                entry["loc"] = st[3]
+            effects.append(entry)
+            read_set |= _referenced_state_vars(st[2], spec)
+
+        guards = []
+        for req in inst["requires"]:
+            if _referenced_state_vars(req["expr"], spec) & read_set:
+                guard_entry = {"text": expr_to_text(req["expr"], display_names)}
+                if req.get("loc"):
+                    guard_entry["loc"] = req["loc"]
+                guards.append(guard_entry)
+
+        blame_by_step[k] = {"guards": guards, "effects": effects}
+    return blame_by_step
 
 
 def _init_model_for_frozen_check(spec):
@@ -4283,11 +4456,12 @@ def _check_requires_clause_can_constrain(s, inst, req_idx, state, spec, expr_cac
     return can_constrain
 
 
-def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, coverage, depth, spec):
+def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, coverage, depth, spec,
+                                source_lines=None):
     findings = []
     for item in pending_vacuity:
         if item["kind"] == "vacuous_implication":
-            findings.append(_vacuity_warning(
+            finding = _vacuity_warning(
                 "vacuous_implication",
                 item["name"],
                 item.get("loc"),
@@ -4298,9 +4472,13 @@ def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, covera
                 _VACUOUS_IMPLICATION_HINT,
                 item.get("source"),
                 spec,
+            )
+            finding.update(_diagnose_unreachable_expr(
+                item["expr"], spec, depth, source_lines, tag="vacuity", exclude_name=item["name"],
             ))
+            findings.append(finding)
         elif item["kind"] == "vacuous_leadsto":
-            findings.append(_vacuity_warning(
+            finding = _vacuity_warning(
                 "vacuous_leadsto",
                 item["name"],
                 item.get("loc"),
@@ -4311,7 +4489,11 @@ def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, covera
                 _VACUOUS_LEADSTO_HINT,
                 item.get("source"),
                 spec,
+            )
+            finding.update(_diagnose_unreachable_expr(
+                item["expr"], spec, depth, source_lines, tag="vacuity", exclude_name=item["name"],
             ))
+            findings.append(finding)
         elif item["kind"] == "tautology_over_frozen":
             frozen_vars = ", ".join(item.get("frozen_vars", ()))
             findings.append(_vacuity_warning(
@@ -4807,6 +4989,22 @@ def _bmc_explore(
             if inv_s.check() == z3.sat:
                 m = inv_s.model()
                 trace = _build_trace(m, states, choices, instances, spec, t)
+                conjunct_blame = _conjunct_blame(m, inv, states[t], spec, expr_cache)
+                if inv.get("implicit"):
+                    # The invariant's own expr may embed synthetic internal
+                    # names unsafe to feed into _referenced_state_vars's
+                    # exact-name matching (see _conjunct_blame) -- reference
+                    # the target logical variable directly instead.
+                    false_conjs = [("var", inv["logical_var"])] if inv.get("logical_var") else []
+                else:
+                    conjuncts = _split_conjuncts(inv["expr"])
+                    false_conjs = [conjuncts[e["index"]] for e in conjunct_blame if e["holds"] is False]
+                trace_blame = _blame_trace_steps(
+                    m, states, choices, instances, spec, expr_cache, t, false_conjs
+                ) if t > 0 else {}
+                for entry in trace:
+                    if entry["step"] > 0:
+                        entry["blame"] = trace_blame.get(entry["step"], {"guards": [], "effects": []})
                 return _attach_requirement({
                     "result": "violated",
                     "spec": spec["name"],
@@ -4815,6 +5013,7 @@ def _bmc_explore(
                     "loc": inv.get("loc"),
                     "violated_at_step": t,
                     "violating_bindings": violating_bindings(m, inv["expr"], states[t], spec),
+                    "blame": {"conjuncts": conjunct_blame},
                     "last_action": _last_action(m, choices, instances, t, spec),
                     "trace": trace,
                 }, inv)
@@ -5113,6 +5312,7 @@ def verify(
         explored["coverage"],
         depth,
         spec,
+        source_lines=source_lines,
     ) if vacuity_mode != "ignore" else []
     if vacuity_mode == "error" and vacuity_findings:
         return _finish_result({
