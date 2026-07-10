@@ -115,3 +115,7 @@ an informative change report from a repository-specific compatibility gate.
 - Automatic inversion of arbitrary refinement mappings.
 - Comparing non-adjacent project-chain revisions; a future project-aware layer
   can compose mappings and call this directional core.
+
+Git revision selection is provided by the separate thin adapter documented in
+[`DESIGN-diff-git.md`](DESIGN-diff-git.md). It materializes inputs and calls
+this unchanged two-path core.

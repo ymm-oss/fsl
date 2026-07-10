@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Git-aware semantic diff (issue #186): `fslc diff --git BASE..HEAD [SPEC]`
+  materializes both complete tracked trees before delegating to the
+  VCS-independent #176 comparison, so imports resolve from their own revision.
+  Omitting `SPEC` compares every changed `.fsl` file. JSON records both commit
+  hashes and `git_archive_full_tree`; batch gates aggregate child `--forbid`
+  violations. See `docs/DESIGN-diff-git.md`.
 - Semantic specification diff (issue #176): `fslc diff OLD.fsl NEW.fsl
   --depth K` classifies bounded changes through bidirectional auto-refinement
   (`behavior_added` / `behavior_removed`), SMT implication of user-invariant

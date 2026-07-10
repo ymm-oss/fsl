@@ -693,6 +693,8 @@ fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report
+fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
+                                                  # materialize both full revision trees; omit spec for changed .fsl batch
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
