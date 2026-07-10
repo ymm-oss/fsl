@@ -1219,10 +1219,10 @@ def run_explain(file, depth=8, readable=False):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
+def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True, engine="bmc"):
     try:
         explained = explain_file(file, depth=depth)
-        verification = run_verify(file, depth, deadlock_mode)
+        verification = run_verify(file, depth, deadlock_mode, engine=engine)
         source = open(file, encoding="utf-8").read()
         content = render_html_report(file, source, explained, verification)
         out_path = output or default_html_output_name(file)
@@ -1256,16 +1256,30 @@ def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None, write_file=True):
-    """Generate a business audit ledger (markdown) from verifier evidence (#24)."""
+def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None, write_file=True,
+               engine="bmc", evidence=None):
+    """Generate a business audit ledger (markdown) from verifier evidence (#24).
+
+    ``engine="induction"`` lets a requirement's assurance class reach
+    ``proved`` (issue #171); without it a ledger can only ever show
+    ``bounded``. ``evidence`` is a list of saved stdout envelopes (JSON files)
+    from external-evidence producers (``fslc ai eval/replay/drift``, ``fslc db
+    observe``, ``fslc domain replay``, ...) to fold into the per-requirement
+    assurance classification.
+    """
     try:
         src = Path(file).read_text(encoding="utf-8")
         ast, display_names = parse_src(src, str(Path(file).parent))
         spec = build_spec(ast, display_names)
-        verification = run_verify(file, depth, deadlock_mode)
+        verification = run_verify(file, depth, deadlock_mode, engine=engine)
         scenarios_result = run_scenarios(file, depth, deadlock_mode)
         replay_result = run_replay(file, impl_log) if impl_log else None
-        content = render_ledger(file, spec, verification, scenarios_result, replay_result)
+        evidence_results = [
+            (path, json.loads(Path(path).read_text(encoding="utf-8")))
+            for path in (evidence or [])
+        ]
+        content = render_ledger(file, spec, verification, scenarios_result, replay_result,
+                                 evidence_results=evidence_results)
         out_path = output or default_ledger_output_name(file)
         if write_file and output:
             open(output, "w", encoding="utf-8").write(content)
@@ -1855,6 +1869,8 @@ def _build_arg_parser():
     hr.add_argument("--depth", type=int, default=8)
     hr.add_argument("-o", "--output", default=None)
     hr.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    hr.add_argument("--engine", choices=["bmc", "induction"], default="bmc",
+                    help="use k-induction so a proved report can show assurance class 'proved'")
 
     lg = sub.add_parser("ledger",
                         help="generate a business audit ledger (markdown) by requirement id")
@@ -1864,6 +1880,12 @@ def _build_arg_parser():
     lg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="ignore")
     lg.add_argument("--impl-log", default=None,
                     help="optional implementation trace JSON to score conformance (fslc replay)")
+    lg.add_argument("--engine", choices=["bmc", "induction"], default="bmc",
+                    help="use k-induction so a requirement's assurance class can reach 'proved' (#171)")
+    lg.add_argument("--evidence", action="append", default=None,
+                    help="path to a saved stdout envelope (JSON) from an external-evidence producer "
+                         "(fslc ai eval/replay/drift, fslc db observe, fslc domain replay, ...); "
+                         "repeatable")
 
     rf = sub.add_parser("refine")
     rf.add_argument("impl")
@@ -2062,7 +2084,7 @@ def _dispatch(args):
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "html":
         result = run_html(args.file, args.depth, args.output, args.deadlock,
-                          write_file=bool(args.output))
+                          write_file=bool(args.output), engine=args.engine)
         if result.get("result") == "generated":
             content = result.pop("content")
             if args.output:
@@ -2074,7 +2096,8 @@ def _dispatch(args):
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "ledger":
         result = run_ledger(args.file, args.depth, args.output, args.deadlock,
-                            impl_log=args.impl_log, write_file=bool(args.output))
+                            impl_log=args.impl_log, write_file=bool(args.output),
+                            engine=args.engine, evidence=args.evidence)
         if result.get("result") == "generated":
             content = result.pop("content")
             if args.output:

@@ -1,3 +1,4 @@
+tests/test_assurance.py
 tests/test_cli_bounds_override.py
 tests/test_corpus_snapshot.py
 tests/test_coupled_change_meta.py
