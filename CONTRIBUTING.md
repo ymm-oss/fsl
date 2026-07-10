@@ -54,7 +54,12 @@ behavior.**
   update the corresponding `docs/DESIGN-*.md` as well.
 - **Adding a language feature**: Update grammar/model/bmc (and runtime if needed)
   consistently, reflect the change in `docs/LANGUAGE.md` and
-  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`.
+  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`. These
+  couplings are enforced by `tests/test_coupled_change_meta.py`: a new grammar
+  production, dialect, or CLI subcommand fails CI until it is indexed in
+  `src/fslc/lsp/index.py` and mapped to a `docs/DESIGN-<feature>.md` in
+  `docs/README.md`, or recorded in the test's allowlist with an explicit
+  reason (see `docs/DESIGN-coupled-change-metatest.md`).
 - **Adding a dialect or a new `examples/` corpus directory**: register the
   dialect's top-level construct (and a `min_files` floor for its example
   corpus) in `tests/dialect_registry.py`. `tests/test_dialect_conformance.py`

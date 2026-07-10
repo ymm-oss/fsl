@@ -1,5 +1,6 @@
 tests/test_cli_bounds_override.py
 tests/test_corpus_snapshot.py
+tests/test_coupled_change_meta.py
 tests/test_dialect_conformance.py
 tests/test_logic_temporal_sugar.py
 tests/test_ranking_synthesis.py
