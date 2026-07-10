@@ -165,6 +165,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   enveloped result tree reserves `kind` for the diagnostic discriminator.)
 
 ### Fixed
+- **CI**: `tests/test_site_reference_snapshot.py` (added with the doc-site
+  rebuild) was missing from every `.github/ci-shards/shard-*.txt`, so
+  `pr-shard-coverage` was failing on any PR touching the test suite. Added it
+  to `shard-2.txt`.
 - **Soundness**: `fslc verify --engine induction` could report a `leadsTo
   ... decreases ... helpful` property `"proved"` when it was genuinely false.
   With two or more distinct `helpful` action declarations,
