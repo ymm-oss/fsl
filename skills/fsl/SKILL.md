@@ -254,6 +254,9 @@ the formalization memo.**
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
+   To ask a bounded operational what-if from a complete `Monitor.state` JSON,
+   use `fslc verify file.fsl --from-state state.json --depth 8`; this replaces
+   `init`, is BMC-only, and is stamped `bounded_from_snapshot`.
 3. Once verified, run `fslc verify file.fsl --engine induction` → done at `proved`
    (note: `--depth K` **includes** step K. Invariants become infinite-depth under
    `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,

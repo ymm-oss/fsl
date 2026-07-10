@@ -93,6 +93,7 @@ options:
                    [--exclude-property EXCLUDE_PROPERTY_NAMES]
                    [--instances INSTANCES] [--values VALUES] [--strict-tags]
                    [--requirements REQUIREMENTS] [--no-cache]
+                   [--from-state FROM_STATE]
                    file
 
 positional arguments:
@@ -121,6 +122,9 @@ options:
   --requirements REQUIREMENTS
   --no-cache            skip the persistent verdict cache for this run
                         (neither reads nor writes it)
+  --from-state FROM_STATE
+                        replace spec init with a complete Monitor/replay
+                        logical-state JSON snapshot (BMC only)
 </pre></div></details>
 <details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
                   [--deadlock {warn,error,ignore}]
