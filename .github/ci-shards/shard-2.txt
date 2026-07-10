@@ -27,6 +27,7 @@ tests/test_robustness.py
 tests/test_runtime.py
 tests/test_self_examples.py
 tests/test_seq.py
+tests/test_site_reference_snapshot.py
 tests/test_strict_tags.py
 tests/test_sweep.py
 tests/test_ui_spike.py
