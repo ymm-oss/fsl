@@ -6,6 +6,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Dialect corpus conformance harness (issue #167): a declarative
+  `tests/dialect_registry.py` (dialect construct → example corpus, plus
+  documented exclusions for fsl-ai project/agent files and one Monitor
+  edge-case fixture) backs a new `tests/test_dialect_conformance.py` CI gate
+  that runs `parse -> desugar -> build_spec -> Monitor load -> BMC/Monitor
+  expression agreement -> verify-vs-oracle verdict agreement` over every
+  `.fsl` under `specs/`/`examples/`, closing the gap the 2026-07-08 fsl-db
+  audit found (an entire dialect corpus silently sat outside the dual-
+  evaluator safety net while `pytest -q` stayed green). No `pytest.skip`
+  anywhere — every non-conformance file is a classified, asserted case.
+  Along the way, hardened the shared expression-agreement check (now in
+  `tests/agreement.py`, reused by `tests/test_evaluator_agreement.py`): array
+  state is pinned as a fully-determined term instead of per-key equalities,
+  and agreement is proved by solver unsat-check rather than `Model.eval`,
+  fixing spurious disagreements on `Set<domain>` bound checks (a real z3
+  quantifier-evaluation gap the broadened corpus scan surfaced, not a
+  bmc.py/runtime.py semantics bug — see `docs/DESIGN-conformance-harness.md`).
 - Rebuilt the `docs/intro/` manual site's information architecture around 4
   fixed categories (Get Started / Guides / Reference / Examples & Background),
   designed with the Relational Design plugin (decisions in
