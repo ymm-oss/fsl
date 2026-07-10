@@ -681,7 +681,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
-               [--strict-tags] [--requirements ids.txt]
+               [--strict-tags] [--requirements ids.txt] [--no-cache]
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
@@ -718,6 +718,20 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+`verify` is backed by a persistent verdict cache (issue #169) keyed on every
+input that can affect its output (the post-desugaring kernel AST, the raw
+entry-file text, and every flag/override) plus an implementation fingerprint,
+so an unchanged re-run in the same write→verify→repair loop returns instantly
+instead of re-solving. A hit adds one additive field,
+`"cache":{"hit":true,"key":...,"source":"exact"|"cross_depth"}`; a miss looks
+exactly like today's output. `"source":"cross_depth"` means a prior
+`violated` result at a shallower depth was reused, because a counterexample's
+earliest step does not depend on the requested search bound. Comment/
+whitespace-only edits still miss (diagnostics quote source by line number,
+so entry-file text is hashed verbatim) — that is a deliberate hit-rate/
+staleness trade-off, never a soundness one. `--no-cache` (or `FSLC_CACHE=off`)
+opts a run out entirely. See `docs/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
