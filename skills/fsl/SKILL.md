@@ -231,6 +231,7 @@ the formalization memo.**
 | "must never" / "always the case" (prohibition, invariance) | `invariant` (safety) |
 | "prohibit/constrain a change from one state to the next" (two-state safety) | `trans` (use `old()` to reference the pre-transition state) |
 | "can only do X when Y" (precondition) | an action's `requires` |
+| a long/repeated business condition needs a stable name | file-local non-recursive `def name(p: Type) = expr`, then call it from guards/properties |
 | "once X happens, Y must eventually happen" (response, progress) | `leadsTo` + `fair` on the action that drives progress |
 | "P must become Q within K steps" (bounded response) | `leadsTo Name { P ~> within K Q }` |
 | "keep P true until Q" (safety, Q may never happen) | `unless Name { P unless Q }` |

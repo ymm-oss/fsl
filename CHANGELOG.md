@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Named predicate frontend sugar (issue #187): file-local `def name(p: Type) =
+  expr` declarations can be used in kernel, requirements, and compose
+  expressions. Calls are inlined before model construction, keeping
+  model/BMC/runtime unchanged and equivalent to hand expansion. Unknown calls,
+  arity mismatch, direct/mutual recursion, shadowing, and capture-changing
+  substitution are explicit diagnostics. Includes a tagged flagship example;
+  see `docs/DESIGN-def.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,

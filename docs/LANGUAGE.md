@@ -29,6 +29,8 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
   symmetric enum <Name> { <Member>, ... }
   struct <Name> { <field>: <scalar type | Option<scalar type>>, ... }
 
+  def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
+
   state { <var>: <type>, ... }
   init  { <stmt>... }
 
@@ -445,6 +447,20 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
   `Map<TaskId, Status>` where no task identity is special.
 
 ## 3. Expressions
+
+Named predicates factor repeated or business-significant expressions:
+
+```fsl
+def eligible(c: Claim) = submitted[c] and amount[c] <= AUTO_LIMIT
+invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
+```
+
+Calls must name a `def` in the same source file and match its arity. Definitions
+may call earlier or later definitions but cannot be directly or mutually
+recursive. They are expanded before semantic checking; the verifier and
+runtime see the same kernel expression as hand expansion. Expansion rejects
+variable capture instead of inventing internal binder names. See
+[`DESIGN-def.md`](DESIGN-def.md).
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a, b)` / `max(a, b)` / `abs(a)`
   (since `a//b` would turn everything after `//` into a comment, write division
