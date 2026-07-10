@@ -6,6 +6,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Persistent verdict cache for `fslc verify` (issue #169, `src/fslc/verify_cache.py`):
+  a sha256 key over the post-desugaring kernel AST, raw entry-file text, every
+  verify option, and an implementation fingerprint (fslc/z3/lark/Python
+  versions + a hash of the installed package's source) makes an unchanged
+  re-run in the write→verify→repair loop return instantly instead of
+  re-solving. A `violated` result is additionally reused at any deeper
+  requested depth (a counterexample's earliest step does not depend on the
+  search bound). Hits add one additive JSON field
+  (`"cache":{"hit","key","source"}`); misses are byte-identical to today's
+  output, and any cache-layer failure degrades to an ordinary uncached run —
+  never affects the verdict. New `--no-cache` flag / `FSLC_CACHE=off` env var
+  to opt out; `FSLC_CACHE_VERIFY=1` re-runs the engine on every hit and
+  reports a divergence as an internal error. Stage 1 of the design
+  (whole-verdict cache + cross-depth reuse) only — property-level
+  differential re-verification is explicitly deferred. See
+  `docs/DESIGN-incremental-verify.md`.
 - Rebuilt the `docs/intro/` manual site's information architecture around 4
   fixed categories (Get Started / Guides / Reference / Examples & Background),
   designed with the Relational Design plugin (decisions in

@@ -92,7 +92,7 @@ options:
                    [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]
                    [--exclude-property EXCLUDE_PROPERTY_NAMES]
                    [--instances INSTANCES] [--values VALUES] [--strict-tags]
-                   [--requirements REQUIREMENTS]
+                   [--requirements REQUIREMENTS] [--no-cache]
                    file
 
 positional arguments:
@@ -119,6 +119,8 @@ options:
                         (NAME=LO..HI; repeatable)
   --strict-tags
   --requirements REQUIREMENTS
+  --no-cache            skip the persistent verdict cache for this run
+                        (neither reads nor writes it)
 </pre></div></details>
 <details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
                   [--deadlock {warn,error,ignore}]
