@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- External mutation adjudication (issue #178): `fslc mutate SPEC --from
+  mutants.jsonl` appends externally generated full-spec or exact-replacement
+  mutations to the built-in catalog and judges valid records through the same
+  BMC/acceptance/forbidden/refinement oracle. Malformed JSON/instructions,
+  duplicate ids, parse/name/type/construction errors, and spec-name changes are
+  first-class `invalid` generation-quality findings rather than false kills.
+  Mutants now carry `source:"builtin"|"external"`; combined and per-source
+  summaries include `invalid` and kill rates over killed+survived only.
+  `--max-mutants` caps the built-in catalog, enabling external-only runs with
+  `--max-mutants 0`. See `docs/DESIGN-mutate.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,

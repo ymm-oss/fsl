@@ -686,6 +686,7 @@ fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
+              [--from mutants.jsonl]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
@@ -803,6 +804,14 @@ first failed layer and later layers are marked `skipped`.
   the baseline result is returned. `--by-requirement` aggregates by the requirement
   tag of the "killed property" and warns on zero kills as `empty_formalization`
   (a lower bound observed for this mutant set and depth).
+  `--from` appends external JSONL mutants. Each line supplies either full
+  `mutated_spec` source (`spec` alias accepted) or an exact
+  `replace:{target,replacement,occurrence?}` instruction. Valid records use the
+  same oracle; malformed JSON/instructions and parse/name/type/construction
+  errors are `invalid` rather than killed. `summary.kill_rate` and
+  `summary.by_source` exclude invalid records from their denominator, and each
+  mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
+  to the built-in catalog (`0` gives an external-only run).
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
   `reachable` declarations and checks only the named property kind in isolation.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
