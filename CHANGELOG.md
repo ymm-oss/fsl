@@ -19,6 +19,77 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `fslc html` gains an Assurance row/column and the same `--engine` flag.
   Presentation-only: no change to verification semantics, the JSON envelope,
   or exit codes. See `docs/DESIGN-assurance-classes.md`.
+- Counterexample blame assignment (issue #170): a `violated` result with
+  `violation_kind` `invariant`/`type_bound` now carries top-level
+  `blame.conjuncts[]` (which AND-conjunct of the invariant is false, with
+  violating bindings) and per-step `blame: {guards[], effects[]}` on the
+  trace (a backward slice naming the `requires` clauses and state-writing
+  statements that fed the blamed conjunct(s), verified to exclude untouched
+  sibling variables, not just list every write). `fslc explain`'s
+  counterfactuals inherit both automatically with zero explain-side logic.
+  `vacuous_implication`/`vacuous_leadsto` findings gain `classification`
+  (`insufficient_depth`/`over_constrained`) and `blocking` (the invariants
+  actually making the antecedent/trigger impossible) — reusing the existing
+  reachable-diagnosis unsat-core machinery, with a fix for a self-reference
+  bug found while wiring it up (a vacuous_implication's own invariant was
+  always appearing in its own blocking core). All additive; no change to
+  existing fields or exit codes. Moved the AST-to-text renderer out of
+  `explain.py` into a new leaf module `src/fslc/render.py` so `bmc.py` can
+  render blame text without an import cycle. See
+  `docs/DESIGN-blame-assignment.md`.
+- Persistent verdict cache for `fslc verify` (issue #169, `src/fslc/verify_cache.py`):
+  a sha256 key over the post-desugaring kernel AST, raw entry-file text, every
+  verify option, and an implementation fingerprint (fslc/z3/lark/Python
+  versions + a hash of the installed package's source) makes an unchanged
+  re-run in the write→verify→repair loop return instantly instead of
+  re-solving. A `violated` result is additionally reused at any deeper
+  requested depth (a counterexample's earliest step does not depend on the
+  search bound). Hits add one additive JSON field
+  (`"cache":{"hit","key","source"}`); misses are byte-identical to today's
+  output, and any cache-layer failure degrades to an ordinary uncached run —
+  never affects the verdict. New `--no-cache` flag / `FSLC_CACHE=off` env var
+  to opt out; `FSLC_CACHE_VERIFY=1` re-runs the engine on every hit and
+  reports a divergence as an internal error. Stage 1 of the design
+  (whole-verdict cache + cross-depth reuse) only — property-level
+  differential re-verification is explicitly deferred. See
+  `docs/DESIGN-incremental-verify.md`.
+- Dialect corpus conformance harness (issue #167): a declarative
+  `tests/dialect_registry.py` (dialect construct → example corpus, plus
+  documented exclusions for fsl-ai project/agent files and one Monitor
+  edge-case fixture) backs a new `tests/test_dialect_conformance.py` CI gate
+  that runs `parse -> desugar -> build_spec -> Monitor load -> BMC/Monitor
+  expression agreement -> verify-vs-oracle verdict agreement` over every
+  `.fsl` under `specs/`/`examples/`, closing the gap the 2026-07-08 fsl-db
+  audit found (an entire dialect corpus silently sat outside the dual-
+  evaluator safety net while `pytest -q` stayed green). No `pytest.skip`
+  anywhere — every non-conformance file is a classified, asserted case.
+  Along the way, hardened the shared expression-agreement check (now in
+  `tests/agreement.py`, reused by `tests/test_evaluator_agreement.py`): array
+  state is pinned as a fully-determined term instead of per-key equalities,
+  and agreement is proved by solver unsat-check rather than `Model.eval`,
+  fixing spurious disagreements on `Set<domain>` bound checks (a real z3
+  quantifier-evaluation gap the broadened corpus scan surfaced, not a
+  bmc.py/runtime.py semantics bug — see `docs/DESIGN-conformance-harness.md`).
+- Coupled-change metatests (issue #168): `tests/test_coupled_change_meta.py`
+  mechanizes the "grammar/dialect/CLI command moves its LSP index entry and
+  DESIGN doc together" discipline that was previously only a human checklist.
+  A corpus-wide, two-stage check (structural scan + position cross-check)
+  verifies every grammar production's NAME/REQ_ID tokens reach
+  `src/fslc/lsp/index.py`'s symbols/references, with a reviewed, staleness-
+  checked allowlist for genuine free-form labels; a second check verifies
+  every kernel dialect and CLI command maps to an existing
+  `docs/DESIGN-*.md`, and that `docs/README.md`'s DESIGN-doc map is
+  bidirectional. Prototyping this metatest re-found the same class of bug
+  `d1770c4` fixed, twice more, fixed in this PR: fsl-domain sources crashed
+  the LSP entirely (`_parser_for_source` never dispatched to the domain
+  grammar), fsl-ai project files (multi-block bundles that happen to start
+  with `ai_component`) crashed it too (now indexed via
+  `ai_project._top_blocks` directly, matching how that dialect is actually
+  parsed), and several fsl-db/fsl-ai productions
+  (`env_flag`/`database_def`/`delegation_edge`/`agent_event`/
+  `agent_output_def`) were silently unindexed -- including a pre-existing
+  bug in `_visit_env_artifact` that dropped every `when flag F=V` condition
+  on a database artifact. See `docs/DESIGN-coupled-change-metatest.md`.
 - Rebuilt the `docs/intro/` manual site's information architecture around 4
   fixed categories (Get Started / Guides / Reference / Examples & Background),
   designed with the Relational Design plugin (decisions in

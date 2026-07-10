@@ -7,6 +7,8 @@ import json
 import argparse
 import re
 import itertools
+import hashlib
+import os
 
 from lark.exceptions import UnexpectedInput, VisitError
 
@@ -16,6 +18,7 @@ from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
 from .model import build_spec, check_spec, FslError, strict_tag_warnings
 from .bmc import verify, prove, scenarios
+from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
@@ -644,7 +647,7 @@ def _display_path(path):
 def _read_spec(file, bounds_overrides=None):
     src = open(file, encoding="utf-8").read()
     ast, display_names = _parse_file(file, src, bounds_overrides)
-    return build_spec(ast, display_names), src.splitlines()
+    return build_spec(ast, display_names), src.splitlines(), ast, display_names, src
 
 
 def _parse_instances_override(raw):
@@ -847,20 +850,60 @@ def run_sweep(
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock_mode,
+                          vacuity_mode, property_name, exclude_property_names,
+                          strict_tags, requirements, instances, values):
+    """Best-effort cache lookup. Returns ``(cache_key, xdepth_key, hit_or_None)``;
+    ``cache_key`` is ``None`` if the run is uncacheable (cache disabled, or the
+    key computation itself failed) -- callers must treat that as a plain miss
+    and never let a cache-layer problem affect the verdict."""
+    try:
+        if not verify_cache.enabled():
+            return None, None, None
+        requirements_sha256 = None
+        if requirements:
+            requirements_sha256 = hashlib.sha256(Path(requirements).read_bytes()).hexdigest()
+        cache_key, xdepth_key = verify_cache.compute_key(
+            ast=ast, display_names=display_names, src=src, engine=engine, depth=depth,
+            k_ind=k_ind, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode,
+            property_name=property_name, exclude_property_names=exclude_property_names,
+            strict_tags=strict_tags, requirements_sha256=requirements_sha256,
+            instances=instances, values=values,
+        )
+        return cache_key, xdepth_key, verify_cache.lookup(cache_key, xdepth_key, depth)
+    except Exception:  # noqa: BLE001 -- any cache-layer failure degrades to an uncached run
+        return None, None, None
+
+
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None, instances=None, values=None):
+        exclude_property_names=None, instances=None, values=None, use_cache=True):
     try:
         bounds_overrides = _build_bounds_overrides(instances, values)
         has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
-        spec, source_lines = _read_spec(file, bounds_overrides)
+        spec, source_lines, ast, display_names, src = _read_spec(file, bounds_overrides)
         acc, acc_skipped = _acceptance_error(spec, skip_out_of_range=has_bounds_overrides)
         if acc:
             return _envelope(acc)
         forb, forb_skipped = _forbidden_error(spec, skip_out_of_range=has_bounds_overrides)
         if forb:
             return _envelope(forb)
+
+        cache_key = xdepth_key = cached = None
+        if use_cache:
+            cache_key, xdepth_key, cached = _verify_cache_lookup(
+                ast, display_names, src, engine, depth, k_ind, deadlock_mode, vacuity_mode,
+                property_name, exclude_property_names, strict_tags, requirements,
+                instances, values,
+            )
+        verify_mode = cached is not None and os.environ.get("FSLC_CACHE_VERIFY") == "1"
+        if cached is not None and not verify_mode:
+            out, source = cached
+            out = dict(out)
+            out["cache"] = {"hit": True, "key": cache_key, "source": source}
+            return _envelope(out)
+
         if engine == "induction":
             out = prove(
                 spec, k_ind, depth,
@@ -879,6 +922,16 @@ def run_verify(
                 property_name=property_name,
                 exclude_property_names=exclude_property_names,
             )
+        if verify_mode:
+            cached_out, _source = cached
+            if cached_out.get("result") != out.get("result"):
+                return _envelope({
+                    "result": "error", "kind": "internal",
+                    "message": (
+                        f"verify cache divergence: cached result={cached_out.get('result')!r} "
+                        f"fresh result={out.get('result')!r} for key={cache_key}"
+                    ),
+                })
         impl = _implements_result(spec, depth)
         if impl:
             out = dict(out)
@@ -897,6 +950,11 @@ def run_verify(
                 "instances": dict(bounds_overrides["instances"]),
                 "values": {k: [lo, hi] for k, (lo, hi) in bounds_overrides["values"].items()},
             }
+        if cache_key is not None and cached is None:
+            try:
+                verify_cache.store(cache_key, xdepth_key, out)
+            except Exception:  # noqa: BLE001 -- a failed write must never affect the verdict
+                pass
         return _envelope(out)
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -921,7 +979,7 @@ def run_verify(
 
 def run_scenarios(file, depth, deadlock_mode="warn"):
     try:
-        spec, source_lines = _read_spec(file)
+        spec, source_lines, _ast, _display_names, _src = _read_spec(file)
         return _envelope(scenarios(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines))
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -946,7 +1004,7 @@ def run_scenarios(file, depth, deadlock_mode="warn"):
 
 def run_replay(file, trace_path):
     try:
-        spec, _ = _read_spec(file)
+        spec, *_rest = _read_spec(file)
         mon = Monitor(spec)
         raw = open(trace_path, encoding="utf-8").read()
         data = json.loads(raw)
@@ -1012,8 +1070,8 @@ def run_replay(file, trace_path):
 
 def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
     try:
-        impl_spec, _ = _read_spec(impl_file)
-        abs_spec, _ = _read_spec(abs_file)
+        impl_spec, *_rest_impl = _read_spec(impl_file)
+        abs_spec, *_rest_abs = _read_spec(abs_file)
         mapping_src = open(mapping_file, encoding="utf-8").read()
         mapping = build_refinement(parse_refinement(mapping_src), impl_spec, abs_spec)
         if not rest:
@@ -1029,7 +1087,7 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
         prev = abs_spec
         i = 0
         while i < len(rest):
-            nxt_spec, _ = _read_spec(rest[i])
+            nxt_spec, *_rest_nxt = _read_spec(rest[i])
             nxt_map = build_refinement(
                 parse_refinement(open(rest[i + 1], encoding="utf-8").read()),
                 prev, nxt_spec)
@@ -1755,6 +1813,8 @@ def _build_arg_parser():
                         "(NAME=LO..HI; repeatable)")
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
+    v.add_argument("--no-cache", action="store_true",
+                   help="skip the persistent verdict cache for this run (neither reads nor writes it)")
 
     sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
     sw.add_argument("file")
@@ -2197,7 +2257,8 @@ def _dispatch(args):
                             property_name=args.property_name,
                             exclude_property_names=args.exclude_property_names,
                             instances=args.instances,
-                            values=args.values)
+                            values=args.values,
+                            use_cache=not args.no_cache)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))
