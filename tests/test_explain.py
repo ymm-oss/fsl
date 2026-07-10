@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from fslc.cli import exit_code, run_explain
+from fslc.cli import exit_code, run_explain, run_verify
 from fslc.explain import _expr_to_text, explain_file
 
 
@@ -343,3 +343,108 @@ def test_expr_to_text_omits_parens_not_required_by_precedence():
         _expr_to_text(_bin("or", _bin("and", _var("A"), _var("B")), _var("C")))
         == "A and B or C"
     )
+
+
+# --------------------------------------------------------------------------
+# issue #170: counterexample blame assignment
+# --------------------------------------------------------------------------
+def _write(tmp_path, name, src):
+    p = tmp_path / name
+    p.write_text(src, encoding="utf-8")
+    return p
+
+
+def test_verify_violated_blame_identifies_false_conjunct(tmp_path):
+    p = _write(tmp_path, "blame_conjunct.fsl", """
+spec BlameConjunct {
+  state { x: Int, y: Int }
+  init { x = 0  y = 0 }
+  action bump() { requires x < 5  x = x + 1  y = y + 1 }
+  invariant Both { x <= 2 and y <= 10 }
+}
+""")
+    out = run_verify(str(p), 6, "ignore")
+    assert out["result"] == "violated"
+    conjuncts = out["blame"]["conjuncts"]
+    assert len(conjuncts) == 2
+    assert conjuncts[0]["text"] == "x <= 2"
+    assert conjuncts[0]["holds"] is False
+    assert conjuncts[0]["violating_bindings"]
+    assert conjuncts[1]["text"] == "y <= 10"
+    assert conjuncts[1]["holds"] is True
+    assert "violating_bindings" not in conjuncts[1]
+
+
+def test_verify_violated_trace_steps_carry_guard_effect_blame(tmp_path):
+    p = _write(tmp_path, "blame_trace.fsl", """
+spec BlameTrace {
+  state { x: Int, y: Int }
+  init { x = 0  y = 0 }
+  action bump() { requires x < 5  x = x + 1  y = y + 1 }
+  invariant Both { x <= 2 and y <= 10 }
+}
+""")
+    out = run_verify(str(p), 6, "ignore")
+    assert out["result"] == "violated"
+    action_steps = [entry for entry in out["trace"] if entry["step"] > 0]
+    assert action_steps
+    for entry in action_steps:
+        assert "blame" in entry
+        assert "guards" in entry["blame"] and "effects" in entry["blame"]
+
+    # the failing step's blamed effect is x's write -- y is untouched by the
+    # false conjunct (x <= 2), so it must not appear in effects.
+    failing_step = action_steps[-1]
+    effect_targets = {e["target"] for e in failing_step["blame"]["effects"]}
+    assert effect_targets == {"x"}
+    assert any(e["text"] == "x = x + 1" for e in failing_step["blame"]["effects"])
+    guard_texts = {g["text"] for g in failing_step["blame"]["guards"]}
+    assert "x < 5" in guard_texts
+
+
+def test_conjunct_blame_never_renders_implicit_bound_invariant_body(tmp_path):
+    # Regression: an implicit `_bounds_<var>` invariant for a Seq/Map can
+    # embed synthetic internal names (a Seq's `<var>__data`/`<var>__len` phys
+    # vars, a Map's `__k` binder) that have no display_names entry and were
+    # never meant to be rendered -- caught by test_robustness.py's no-`__`
+    # corpus sweep while implementing blame assignment (a Seq bound conjunct
+    # rendered as `forall __k in 0..1: .k < q.len => q__data[.k] >= 0 ...`).
+    # `_conjunct_blame` must treat the whole invariant as one opaque
+    # conjunct instead, matching `explain._auto_checks`'s existing
+    # target-only treatment of implicit invariants.
+    from fslc import bmc
+    from fslc.model import build_spec
+    from fslc.parser import parse_src
+    import z3
+
+    src = """
+spec SeqBoundsTest {
+  type Id = 0..1
+  state { q: Seq<Id, 2> }
+  init { q = Seq {} }
+  action pushit(i: Id) { q = q.push(i) }
+}
+"""
+    ast, display_names = parse_src(src)
+    spec = build_spec(ast, display_names)
+    inv = next(i for i in spec["invariants"] if i["name"] == "_bounds_q")
+    state = bmc.make_state(spec, 0)
+    solver = z3.Solver()
+    solver.add(*bmc.init_constraints(spec, state))
+    assert solver.check() == z3.sat
+    model = solver.model()
+
+    blame = bmc._conjunct_blame(model, inv, state, spec, {})
+    assert "__" not in json.dumps(blame)
+    assert blame == [{"index": 0, "text": "q stays within its declared type bounds", "holds": False}]
+
+
+def test_explain_counterfactual_inherits_blame():
+    out = explain_file(str(SPECS / "order_workflow.fsl"), depth=6)
+    cf = _counterfactual(out, "ShippedWasPaid")
+    assert cf["violation"]["blame"]["conjuncts"]
+    assert cf["violation"]["blame"]["conjuncts"][0]["holds"] is False
+    # the surviving `shipped.add(o)` write is the necessary effect under the
+    # assignment-removal mutant (`orders[o].status = Shipped` was removed).
+    last_step_blame = cf["trace"][-1]["blame"]
+    assert any(e["target"] == "shipped" for e in last_step_blame["effects"])

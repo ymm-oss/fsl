@@ -761,6 +761,23 @@ result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc 
 </tbody>
 </table>
 <p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>.</p>
+<p>A <code>violated</code> result with <code>violation_kind</code> <code>invariant</code>/<code>type_bound</code> additionally
+carries <strong>blame assignment</strong> (issue #170), localizing the counterexample
+instead of just showing it: top-level <code>blame.conjuncts[]</code> (<code>{index, text,
+holds, violating_bindings?}</code>) names which AND-conjunct of the invariant is
+false when it is built from more than one (a 1-element list otherwise); each
+action-bearing <code>trace[k]</code> (k≥1) gets its own <code>blame: {guards[], effects[]}</code>
+naming the <code>requires</code> clauses and state-writing statements that fed the
+blamed conjunct(s) at that step (a backward slice over the concrete
+counterexample, not a new solver query). <code>fslc explain</code>'s counterfactuals
+inherit both automatically. Vacuity findings (<code>vacuous_implication</code> /
+<code>vacuous_leadsto</code>) gain <code>classification</code> (<code>insufficient_depth</code> |
+<code>over_constrained</code>) and <code>blocking</code> (the other invariants making the
+antecedent/trigger impossible, empty when it's merely unreached within
+depth) — same shape as <code>reachable_failed</code>'s <code>unreached[].blocking_requires</code>.
+Blame identifies; it never proposes a repair (weakening a guard, dropping a
+conjunct) — that would cut against the anti-hollowing principle. All of this
+is strictly additive to the JSON contract.</p>
 <p>Diagnostics that identify a faithfulness/intent gap may also carry
 <code>faithfulness_class</code> plus <code>recommended_action</code>. Current classes are:
 <code>partial_op_unguarded</code>, <code>frozen_only_invariant</code>, <code>intent_unexercised</code>, and

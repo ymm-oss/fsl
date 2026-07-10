@@ -40,6 +40,46 @@ def test_vacuous_implication_warning_has_name_loc_and_requirement():
     assert "within depth 2" in warning["message"]
 
 
+def test_vacuous_implication_finding_names_insufficient_depth_when_structurally_possible():
+    # issue #170: the antecedent `x == 1` is not blocked by any *other*
+    # invariant (nothing stops x from reaching 1) -- it is simply never
+    # reached by the spec's one no-op action within depth 2. The invariant
+    # being diagnosed must be excluded from its own blocking-core check, or
+    # `x == 1 => false` trivially "blocks itself" and misreports
+    # over_constrained for every vacuous_implication (a bug caught while
+    # implementing this).
+    src = """
+    spec VacuousInvariant {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant NeverOne "REQ-I: x never reaches one" { x == 1 => false }
+    }
+    """
+    out = verify(_spec(src), 2, deadlock_mode="ignore")
+    warning = next(w for w in out["warnings"] if w.get("kind") == "vacuous_implication")
+    assert warning["classification"] == "insufficient_depth"
+    assert warning["blocking"] == []
+
+
+def test_vacuous_implication_finding_names_blocking_invariant():
+    src = """
+    spec OverConstrainedInvariant {
+      state { x: Int }
+      init { x = 0 }
+      action noop() { x = x }
+      invariant XIsZero { x == 0 }
+      invariant NeverOne "REQ-I: x never reaches one" { x == 1 => false }
+    }
+    """
+    out = verify(_spec(src), 2, deadlock_mode="ignore")
+    warning = next(w for w in out["warnings"] if w.get("kind") == "vacuous_implication")
+    assert warning["classification"] == "over_constrained"
+    blocking_names = {b.get("name") for b in warning["blocking"]}
+    assert "XIsZero" in blocking_names
+    assert "NeverOne" not in blocking_names
+
+
 def test_forall_wrapped_implication_antecedent_is_checked():
     src = """
     spec ForallVacuousInvariant {

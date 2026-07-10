@@ -6,6 +6,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Counterexample blame assignment (issue #170): a `violated` result with
+  `violation_kind` `invariant`/`type_bound` now carries top-level
+  `blame.conjuncts[]` (which AND-conjunct of the invariant is false, with
+  violating bindings) and per-step `blame: {guards[], effects[]}` on the
+  trace (a backward slice naming the `requires` clauses and state-writing
+  statements that fed the blamed conjunct(s), verified to exclude untouched
+  sibling variables, not just list every write). `fslc explain`'s
+  counterfactuals inherit both automatically with zero explain-side logic.
+  `vacuous_implication`/`vacuous_leadsto` findings gain `classification`
+  (`insufficient_depth`/`over_constrained`) and `blocking` (the invariants
+  actually making the antecedent/trigger impossible) — reusing the existing
+  reachable-diagnosis unsat-core machinery, with a fix for a self-reference
+  bug found while wiring it up (a vacuous_implication's own invariant was
+  always appearing in its own blocking core). All additive; no change to
+  existing fields or exit codes. Moved the AST-to-text renderer out of
+  `explain.py` into a new leaf module `src/fslc/render.py` so `bmc.py` can
+  render blame text without an import cycle. See
+  `docs/DESIGN-blame-assignment.md`.
 - Persistent verdict cache for `fslc verify` (issue #169, `src/fslc/verify_cache.py`):
   a sha256 key over the post-desugaring kernel AST, raw entry-file text, every
   verify option, and an implementation fingerprint (fslc/z3/lark/Python

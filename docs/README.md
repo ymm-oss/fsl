@@ -46,6 +46,7 @@
 | [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain --readable` (verification bounds, skeleton enumeration, counterfactuals, witness narration) |
 | [`DESIGN-html-report.md`](DESIGN-html-report.md) | `fslc html` (self-contained visual review report from explain + verify evidence) |
 | [`DESIGN-typestate.md`](DESIGN-typestate.md) | `fslc typestate` (applicability check for state machine → typestate + TS scaffold) |
+| [`DESIGN-blame-assignment.md`](DESIGN-blame-assignment.md) | Counterexample blame assignment (`fslc verify`/`fslc explain`): false-conjunct identification, per-step guard/effect backward slicing, and vacuity blocking-core localization |
 | [`DESIGN-incremental-verify.md`](DESIGN-incremental-verify.md) | `fslc verify`'s persistent verdict cache (`src/fslc/verify_cache.py`): exhaustive cache-key enumeration, cross-depth counterexample reuse, and the soundness argument for why a cached verdict can never be stale |
 | [`DESIGN-conformance-harness.md`](DESIGN-conformance-harness.md) | Dialect corpus conformance harness (`tests/test_dialect_conformance.py`, `tests/dialect_registry.py`): the Monitor/BMC-agreement/oracle safety net as a CI gate over every `.fsl` under `specs/`/`examples/`, with a loud, reviewable exclusion policy |
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests (`tests/test_coupled_change_meta.py`): LSP index coverage (grammar production ↔ visitor handler, corpus-driven, two-stage) and DESIGN-doc coverage (dialect/CLI command ↔ `docs/DESIGN-*.md`) |
