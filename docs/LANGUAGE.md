@@ -587,6 +587,9 @@ fslc scenarios <file.fsl> [--depth K]            # generate integration-test sca
 fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
+fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
+               [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
+                                                 # bounded semantic change analysis
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -630,8 +633,29 @@ under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
 bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
 
+`diff` compares state-machine meaning instead of source text. It runs bounded
+refinement in both directions: NEW→OLD failure is `behavior_added`, while
+OLD→NEW failure is `behavior_removed`. It separately checks implication between
+the conjunctions of user invariants (`invariant_weakened` /
+`invariant_strengthened`) and replays OLD `forbidden` scenarios against NEW
+(`forbidden_relaxed`). Directional failures include counterexample witnesses.
+Same-named compatible state/actions are mapped automatically; name mismatches
+are `unknown` unless `--mapping` supplies that direction. An arbitrary mapping
+is never inverted automatically.
+
+The JSON result is `semantic_diff` with `bounded`, `scope`, `directions`,
+`summary`, `findings`, and `gate`. A changed `verify { instances/values }`
+scope is reported as `scope_changed`, and shared OLD bounds are rebuilt under
+the NEW scope recorded by `scope.comparison:"new"` and
+`scope.applied_to_old`. With no findings, `summary` is
+`["no_semantic_change"]`. Findings are analysis output and therefore exit 0 by
+default. Only findings explicitly listed by comma-separated `--forbid` make
+the gate fail and exit 1. All comparisons remain bounded to `--depth`; clean
+output is not an unbounded equivalence proof.
+
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / typestate / sweep_passed / observed_conformant /
+mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
 sweep_failed / observed_mismatch,

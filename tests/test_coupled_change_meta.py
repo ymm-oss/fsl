@@ -208,6 +208,7 @@ COMMAND_DESIGN_DOCS = {
     "html": ("DESIGN-html-report.md",),
     "ledger": ("DESIGN-ledger.md",),
     "refine": ("DESIGN-refinement.md",),
+    "diff": ("DESIGN-semantic-diff.md",),
     "chain": ("DESIGN-layers.md",),
     "typestate": ("DESIGN-typestate.md",),
     "analyze": ("DESIGN-analysis.md",),

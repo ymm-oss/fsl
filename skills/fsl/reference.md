@@ -690,6 +690,9 @@ fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* 
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc diff <old> <new> [--depth K] [--mapping <mapping>]
+          [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
+                                                  # bounded semantic change report
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
@@ -719,6 +722,17 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+`diff` uses bidirectional bounded refinement for behavior changes, implication
+between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
+scenarios against NEW. Its stable finding kinds are `behavior_added`,
+`behavior_removed`, `invariant_weakened`, `invariant_strengthened`,
+`forbidden_relaxed`, `scope_changed`, and `unknown`; an empty report uses
+`no_semantic_change`. A changed `verify` scope is explicit and comparison uses
+NEW's shared entity/number bounds. Findings exit 0 because the command is an
+analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
+verdict is bounded by `--depth`, and a mapping only resolves the direction
+declared in its `impl`/`abs` fields (it is never inverted).
 
 `verify` is backed by a persistent verdict cache (issue #169) keyed on every
 input that can affect its output (the post-desugaring kernel AST, the raw

@@ -287,7 +287,10 @@ the formalization memo.**
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
    (log conformance), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
-   of a detailed spec).
+   of a detailed spec), and `fslc diff old.fsl new.fsl --depth 8` (bounded
+   semantic change analysis with behavior/invariant/forbidden witnesses). Diff
+   findings are informational by default; add an explicit comma-separated
+   `--forbid` policy to make selected kinds fail CI.
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
    runtime event evidence. For recursive fsl-ai agent composition, use

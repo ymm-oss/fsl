@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Semantic specification diff (issue #176): `fslc diff OLD.fsl NEW.fsl
+  --depth K` classifies bounded changes through bidirectional auto-refinement
+  (`behavior_added` / `behavior_removed`), SMT implication of user-invariant
+  conjunctions (`invariant_weakened` / `invariant_strengthened`), and replay of
+  OLD negative scenarios against NEW (`forbidden_relaxed`). Directional
+  differences include counterexample witnesses; incompatible names are
+  explicit `unknown` unless a one-direction `--mapping` is supplied. Changes
+  to `verify` entity/number bounds are first-class `scope_changed` findings and
+  comparisons record/use NEW's scope. Findings are analysis (exit 0); only an
+  explicit `--forbid kind,...` gate exits 1. See
+  `docs/DESIGN-semantic-diff.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,
