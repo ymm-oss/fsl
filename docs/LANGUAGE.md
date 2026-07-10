@@ -584,7 +584,9 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
-fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
+fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
+fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
+                                                 # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
@@ -1145,6 +1147,7 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 
 ```bash
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
@@ -1152,6 +1155,23 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 ```
+
+The `--from-log` form reuses the exact refinement mapping grammar to translate
+external JSONL records into spec actions and logical state; it does not add a
+second mapping language. Each non-empty line is
+`{"action":"external_name","params":{...},"state":{...}}`, where `state`
+is the observed post-action state. In the mapping, `impl` labels the external
+log schema, `abs` must name the replayed spec, `map` entries cover every spec
+state variable, and `action external(params) -> spec_action(exprs)` (or
+`stutter`) maps the event. The Monitor executes the mapped action and compares
+its result with the mapped observed state on every line. The first divergence
+reports zero-based `failed_at_record` / `failed_at_event`, one-based `log_line`,
+and either the Monitor violation or a `state_mismatch` with leaf paths.
+
+This first version requires full observation: a missing field or Map key is a
+`log_mapping` nonconformance, not an unconstrained value. See
+`DESIGN-log-replay.md` for the record schema, mapping example, and the boundary
+with `db observe` / `ai replay` / `domain replay`.
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
 explicitly in the output `note`). `Monitor` requires init to be deterministic

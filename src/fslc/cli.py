@@ -1002,9 +1002,33 @@ def run_scenarios(file, depth, deadlock_mode="warn"):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_replay(file, trace_path):
+def run_replay(file, trace_path=None, *, from_log=None, mapping_path=None):
     try:
         spec, *_rest = _read_spec(file)
+        if from_log is not None:
+            if trace_path is not None:
+                return _envelope({
+                    "result": "error",
+                    "kind": "io",
+                    "message": "--trace and --from-log are mutually exclusive",
+                })
+            if mapping_path is None:
+                return _envelope({
+                    "result": "error",
+                    "kind": "io",
+                    "message": "--mapping is required with --from-log",
+                })
+            from .log_replay import build_log_mapping, load_jsonl, replay_mapped_log
+
+            mapping_src = open(mapping_path, encoding="utf-8").read()
+            mapping = build_log_mapping(parse_refinement(mapping_src), spec)
+            return _envelope(replay_mapped_log(spec, load_jsonl(from_log), mapping))
+        if trace_path is None:
+            return _envelope({
+                "result": "error",
+                "kind": "io",
+                "message": "one of --trace or --from-log is required",
+            })
         mon = Monitor(spec)
         raw = open(trace_path, encoding="utf-8").read()
         data = json.loads(raw)
@@ -1841,7 +1865,12 @@ def _build_arg_parser():
 
     rp = sub.add_parser("replay")
     rp.add_argument("file")
-    rp.add_argument("--trace", required=True)
+    replay_input = rp.add_mutually_exclusive_group(required=True)
+    replay_input.add_argument("--trace")
+    replay_input.add_argument("--from-log", dest="from_log",
+                              help="production JSONL records to map and replay")
+    rp.add_argument("--mapping",
+                    help="refinement-syntax log mapping (required with --from-log)")
 
     tg = sub.add_parser("testgen")
     tg.add_argument("file")
@@ -2047,7 +2076,12 @@ def _dispatch(args):
                            values=args.values)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "replay":
-        result = run_replay(args.file, args.trace)
+        result = run_replay(
+            args.file,
+            args.trace,
+            from_log=args.from_log,
+            mapping_path=args.mapping,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "refine":
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)

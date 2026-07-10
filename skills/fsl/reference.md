@@ -688,6 +688,8 @@ fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emi
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
+fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
+                                                # production JSONL -> mapped action/state -> Monitor
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
@@ -719,6 +721,17 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+For production-log replay, each non-empty JSONL line is an object with
+`action`, `params`, and the observed post-action `state`. The mapping file is
+parsed by the same `parse_refinement` path as `fslc refine`: `impl` names the
+external log schema, `abs` names the target spec, `map` covers every target
+state variable, and `action external(args) -> target(exprs)` (or `stutter`)
+maps events. The Monitor executes the target action and compares its state with
+the mapped observed state. This v1 requires complete observed state; missing
+fields/keys are `log_mapping` nonconformance. The first divergence includes
+`failed_at_record` (0-based), `log_line` (1-based), and the action/state
+mismatch. Finite replay does not check `leadsTo`.
 
 `verify` is backed by a persistent verdict cache (issue #169) keyed on every
 input that can affect its output (the post-desugaring kernel AST, the raw

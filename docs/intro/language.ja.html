@@ -668,7 +668,9 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
-fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # conformance check of an event log (§12)
+fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace conformance (§12)
+fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
+                                                 # production log mapping + conformance (§12)
 fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
@@ -1200,6 +1202,7 @@ mon.reset()
 r = mon.step(&quot;add_to_cart&quot;, {&quot;u&quot;: 0, &quot;i&quot;: 0})   # ok / kind / state / changes
 </code></pre>
 <pre><code class="language-bash">fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
@@ -1207,6 +1210,21 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 </code></pre>
+<p>The <code>--from-log</code> form reuses the exact refinement mapping grammar to translate
+external JSONL records into spec actions and logical state; it does not add a
+second mapping language. Each non-empty line is
+<code>{"action":"external_name","params":{...},"state":{...}}</code>, where <code>state</code>
+is the observed post-action state. In the mapping, <code>impl</code> labels the external
+log schema, <code>abs</code> must name the replayed spec, <code>map</code> entries cover every spec
+state variable, and <code>action external(params) -&gt; spec_action(exprs)</code> (or
+<code>stutter</code>) maps the event. The Monitor executes the mapped action and compares
+its result with the mapped observed state on every line. The first divergence
+reports zero-based <code>failed_at_record</code> / <code>failed_at_event</code>, one-based <code>log_line</code>,
+and either the Monitor violation or a <code>state_mismatch</code> with leaf paths.</p>
+<p>This first version requires full observation: a missing field or Map key is a
+<code>log_mapping</code> nonconformance, not an unconstrained value. See
+<code>DESIGN-log-replay.md</code> for the record schema, mapping example, and the boundary
+with <code>db observe</code> / <code>ai replay</code> / <code>domain replay</code>.</p>
 <p>Since <code>replay</code> checks only finite logs, <strong><code>leadsTo</code> is out of scope</strong> (stated
 explicitly in the output <code>note</code>). <code>Monitor</code> requires init to be deterministic
 (forall bulk assignment is allowed). For a Map/index target (<code>m[K] = ...</code>),
