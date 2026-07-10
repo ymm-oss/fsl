@@ -6,12 +6,22 @@
 This module intentionally reads ``fslc.grammar.PARSER`` directly and does not
 touch the tuple AST transformer or verifier kernel. FSL keywords are mostly
 contextual, so declarations and references are classified by parse-tree
-position, not by spelling. The `ai_component`/`agent`/`dbsystem` frontend dialects
-have their own Lark grammars (``fslc.ai_parser``/``fslc.db_parser``) that
-never reach the kernel grammar at all -- ``build_index`` picks the matching
-raw parser via ``is_ai_source``/``is_dbsystem_source`` before
-falling back to the kernel ``PARSER``, so those files no longer fail to
-parse here just because indexing hard-codes the kernel grammar.
+position, not by spelling. The `ai_component`/`agent`/`dbsystem`/`domain`
+frontend dialects have their own Lark grammars (``fslc.ai_parser``/
+``fslc.db_parser``/``fslc.domain_parser``) that never reach the kernel
+grammar at all -- ``build_index`` picks the matching raw parser via
+``is_ai_source``/``is_dbsystem_source``/``is_domain_source`` before falling
+back to the kernel ``PARSER``, so those files no longer fail to parse here
+just because indexing hard-codes the kernel grammar. fsl-ai *project* files
+(``is_ai_project_source``) are a further special case: they are not
+Lark-parsed at all (``ai_project.py`` scans top-level blocks with regexes),
+so ``build_index`` indexes them directly from ``ai_project._top_blocks``
+instead of building a tree.
+
+``tests/test_coupled_change_meta.py`` corpus-scans every grammar production
+against this module's ``_visit_*`` handlers and fails CI if a new one ships
+unindexed (or undocumented as an intentional exclusion) -- see
+``docs/DESIGN-coupled-change-metatest.md``.
 """
 from __future__ import annotations
 
@@ -24,7 +34,9 @@ from lark import Tree, Token
 
 from fslc.grammar import PARSER
 from fslc.ai_parser import AI_PARSER, is_ai_source
+from fslc.ai_project import _top_blocks, is_ai_project_source
 from fslc.db_parser import DB_PARSER, is_dbsystem_source
+from fslc.domain_parser import PARSER as DOMAIN_PARSER, is_domain_source
 
 
 VALUE_ROLES = {
@@ -559,14 +571,51 @@ class DocumentIndex:
 def _parser_for_source(source: str):
     if is_dbsystem_source(source):
         return DB_PARSER
+    if is_domain_source(source):
+        return DOMAIN_PARSER
     if is_ai_source(source):
         return AI_PARSER
     return PARSER
 
 
+def _build_ai_project_index(source: str, path: Optional[str]) -> "DocumentIndex":
+    """fsl-ai project files (``is_ai_project_source``) are not Lark-parsed at
+    all -- ``ai_project.py`` scans top-level ``kind name { ... }`` blocks with
+    regexes/brace-matching (``_top_blocks``). Index each top-level block as an
+    outline symbol (kind as role) so go-to-definition/outline at least finds
+    the block; nested content (dataset records, statistical thresholds, ...)
+    is this dialect's own semantics, not the LSP's, and stays unindexed."""
+    symbols: List[Symbol] = []
+    for block in _top_blocks(source):
+        if not block.name:
+            continue
+        header_line = block.text.split("\n", 1)[0]
+        col = header_line.find(block.name)
+        if col < 0:
+            col = 0
+        pos = Position(block.line - 1, col)
+        sel_range = Range(pos, Position(pos.line, pos.character + len(block.name)))
+        symbols.append(Symbol(
+            name=block.name,
+            role=block.kind,
+            range=sel_range,
+            selection_range=sel_range,
+            detail=block.kind,
+        ))
+    return DocumentIndex(
+        source=source,
+        path=_normalize_path(path),
+        symbols=symbols,
+        references=[],
+        imports=[],
+    )
+
+
 def build_index(source: str, path: Optional[str] = None) -> DocumentIndex:
     """Parse ``source`` and return a raw-tree symbol/reference index."""
 
+    if is_ai_project_source(source):
+        return _build_ai_project_index(source, path)
     tree = _parser_for_source(source).parse(source)
     builder = _IndexBuilder(source, path)
     builder.visit(tree, None, None)
@@ -828,6 +877,37 @@ class _IndexBuilder:
             self._add_symbol(names[1], "fallback_target", _tree_range(node), parent=parent,
                               detail="fallback target", exported=False)
 
+    def _visit_delegation_edge(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `AgentA -> AgentB` in an `orchestration { ... }` block: both sides
+        # reference sibling `agent` declarations.
+        for token in _name_tokens(node):
+            self._add_ref(token, "agent")
+
+    def _visit_agent_event(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `AgentName.status` in a `failure_policy { ... }` block: the first
+        # NAME references an agent; the status word (failed/uncertain/...) is
+        # fixed vocabulary, not an in-file declaration -- recorded as a
+        # non-exported symbol so it still shows up on hover instead of
+        # silently vanishing (same treatment as `_visit_fallback_item`).
+        names = _name_tokens(node)
+        if names:
+            self._add_ref(names[0], "agent")
+        if len(names) > 1:
+            self._add_symbol(names[1], "agent_status", _tree_range(node), parent=parent,
+                              detail="agent status", exported=False)
+
+    def _visit_agent_output_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `output Name visibility [parent, OtherAgent, ...]`: the declared
+        # output name, then a visibility list of sibling agent references
+        # (plus the literal "parent") -- collected directly rather than via
+        # the shared name_list handler, which would mislabel them as "tool".
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "agent_output", _tree_range(node), parent=parent,
+                              detail="agent output", exported=False)
+        for ref_token in _all_name_tokens(node)[1:]:
+            self._add_ref(ref_token, "agent")
+
     def _visit_table_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
         idx = parent
@@ -879,6 +959,305 @@ class _IndexBuilder:
         names = [c for c in node.children if isinstance(c, Token) and c.type == "NAME"]
         if names:
             self._add_ref(names[0], "artifact")
+        # `env_window`/`env_flag_condition*` are Tree children (the artifact
+        # NAME itself is the only bare Token) -- visit them too, or a
+        # `when flag F=V` condition on this artifact silently vanishes
+        # (pre-existing gap, found by the corpus-wide LSP coverage scan).
+        for child in node.children:
+            if isinstance(child, Tree):
+                self.visit(child, parent, local_scope)
+
+    def _visit_database_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "database", _tree_range(node), parent=parent, detail="database")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_env_flag(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "feature_flag", _tree_range(node), parent=parent, detail="feature flag")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_flag_variant_list(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _name_tokens(node):
+            self._add_symbol(token, "flag_variant", _token_range(token), parent=parent,
+                              detail="flag variant", exported=False)
+
+    def _visit_flag_default(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "flag_variant")
+
+    def _visit_env_flag_condition(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        names = _name_tokens(node)
+        if len(names) == 2:
+            self._add_ref(names[0], "feature_flag")
+            self._add_ref(names[1], "flag_variant")
+
+    # -- fsl-domain dialect (own grammar, see _parser_for_source) --
+    #
+    # ``state_def``/``invariant_def`` reuse the kernel handlers below
+    # unchanged: both are generic (first-token + safely-skip-Token-children),
+    # and domain's shapes ("state" "{" state_field* "}" / "invariant" NAME "{"
+    # RAW_EXPR "}") satisfy them correctly. Reference-bearing productions that
+    # wrap their NAME(s) in domain's inlined ``emit_names``/``bracket_name_list``/
+    # ``name_list`` helper rules are handled by directly collecting every NAME
+    # under the node (``_all_name_tokens``) and registering it, rather than
+    # letting the generic child-walk reach ``name_list`` -- that rule already
+    # has an ai_component-specific handler (tool authority lists) that would
+    # mislabel a domain event/field reference as a "tool".
+
+    def _visit_domain_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_named_container(node, "domain", None)
+
+    def _visit_implementation_profile_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "implementation_profile", _tree_range(node), parent=parent,
+                              detail="implementation profile", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_type_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # NOTE: the kernel grammar also has a (differently-shaped) `type_def`
+        # rule (`type_def: plain_type_def | symmetric_type_def`, an unaliased
+        # wrapper with no NAME child of its own) -- `_first_token` returning
+        # None there is what tells the two shapes apart; falling through to
+        # `_visit_children_after_first_token` is what still reaches
+        # `plain_type_def`/`symmetric_type_def`'s own handlers in that case.
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "domain_type", _tree_range(node), parent=parent, detail="type")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_value_object_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "value_object", _tree_range(node), parent=parent, detail="value object")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_aggregate_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "aggregate", _tree_range(node), parent=parent, detail="aggregate")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_id_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "aggregate_id", _tree_range(node), parent=parent, detail="id", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_state_field(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "state_field", _tree_range(node), scope_range=local_scope,
+                              parent=parent, detail="state field", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_input_field(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "field", _tree_range(node), parent=parent, detail="field", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_bare_field(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_input_field(node, parent, local_scope)
+
+    def _visit_command_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "command", _tree_range(node), parent=parent, detail="command")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_event_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "event", _tree_range(node), parent=parent, detail="event")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_error_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "domain_error", _tree_range(node), parent=parent, detail="error")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_decide_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `decide CommandName { requires ...; rejects ...; emits ... }` --
+        # the NAME references the command being decided, it is not a fresh
+        # declaration (see examples/domain/*.fsl).
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "command")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_rejects_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "domain_error")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_emits_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _all_name_tokens(node):
+            self._add_ref(token, "event")
+
+    def _visit_evolve_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `evolve EventName { ... assign_def* }` -- NAME references the event
+        # being evolved; assign_def children still need their own handler.
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "event")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_lvalue(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _name_tokens(node):
+            self._add_ref(token, "state_field")
+
+    def _visit_projection_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "projection", _tree_range(node), parent=parent, detail="projection")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_projection_from(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "aggregate")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_projection_fields(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _all_name_tokens(node):
+            self._add_ref(token, "state_field")
+
+    def _visit_on_stale_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "projection")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_effect_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "effect", _tree_range(node), parent=parent, detail="effect")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_handles_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "command")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_request_event_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "event")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_success_event_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_request_event_def(node, parent, local_scope)
+
+    def _visit_failure_event_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_request_event_def(node, parent, local_scope)
+
+    def _visit_timeout_event_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_request_event_def(node, parent, local_scope)
+
+    def _visit_backoff_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `backoff exponential` -- a free retry-policy word, not a reference
+        # to anything declared in-file (see docs/DESIGN-domain.md).
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "backoff_policy", _tree_range(node), parent=parent,
+                              detail="backoff policy", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_timeout_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "event")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_waits_for_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _all_name_tokens(node):
+            self._add_ref(token, "event")
+
+    def _visit_await_on_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _all_name_tokens(node):
+            self._add_ref(token, "event")
+
+    def _visit_await_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "await", _tree_range(node), parent=parent, detail="await")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_saga_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "saga", _tree_range(node), parent=parent, detail="saga")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_starts_on_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "event")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_saga_step_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "saga_step", _tree_range(node), parent=parent, detail="saga step")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_awaits_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _all_name_tokens(node):
+            self._add_ref(token, "event")
+
+    def _visit_saga_compensation_item(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        # `when EventA after EventB { emits ... }` -- both NAMEs reference
+        # events; the stale_item* (emits_def) children still need visiting.
+        for token in _name_tokens(node):
+            self._add_ref(token, "event")
+        for child in node.children:
+            if isinstance(child, Tree):
+                self.visit(child, parent, local_scope)
+
+    def _visit_outbox_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "outbox", _tree_range(node), parent=parent, detail="outbox", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_inbox_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(token, "inbox", _tree_range(node), parent=parent, detail="inbox", exported=False)
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_type_name(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "domain_type")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_type_generic1(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        for token in _name_tokens(node):
+            self._add_ref(token, "domain_type")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
+    def _visit_type_generic2(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_type_generic1(node, parent, local_scope)
 
     def _visit_named_container(
         self,
@@ -1820,6 +2199,22 @@ def _first_token(tree: Tree, token_types: Sequence[str] = ("NAME", "REQ_ID")) ->
 
 def _name_tokens(tree: Tree) -> List[Token]:
     return [child for child in tree.children if isinstance(child, Token) and child.type == "NAME"]
+
+
+def _all_name_tokens(node: object) -> List[Token]:
+    """Every NAME token anywhere under ``node``, regardless of nesting --
+    used for fsl-domain reference lists (``emits``/``awaits``/``waits_for``)
+    whose grammar wraps them in inlined/aliased helper rules
+    (``one_of_names``/``bracket_name_list``/``name_list``) that would
+    otherwise need their own handlers duplicating this same walk."""
+    tokens: List[Token] = []
+    if isinstance(node, Token):
+        if node.type == "NAME":
+            tokens.append(node)
+    elif isinstance(node, Tree):
+        for child in node.children:
+            tokens.extend(_all_name_tokens(child))
+    return tokens
 
 
 def _req_id_tokens(tree: Tree) -> List[Token]:

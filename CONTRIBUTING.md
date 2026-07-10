@@ -54,7 +54,21 @@ behavior.**
   update the corresponding `docs/DESIGN-*.md` as well.
 - **Adding a language feature**: Update grammar/model/bmc (and runtime if needed)
   consistently, reflect the change in `docs/LANGUAGE.md` and
-  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`.
+  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`. These
+  couplings are enforced by `tests/test_coupled_change_meta.py`: a new grammar
+  production, dialect, or CLI subcommand fails CI until it is indexed in
+  `src/fslc/lsp/index.py` and mapped to a `docs/DESIGN-<feature>.md` in
+  `docs/README.md`, or recorded in the test's allowlist with an explicit
+  reason (see `docs/DESIGN-coupled-change-metatest.md`).
+- **Adding a dialect or a new `examples/` corpus directory**: register the
+  dialect's top-level construct (and a `min_files` floor for its example
+  corpus) in `tests/dialect_registry.py`. `tests/test_dialect_conformance.py`
+  fails the build on any `.fsl` under `specs/`/`examples/` that no registry
+  entry claims, and every claimed file must pass the full `parse -> desugar ->
+  build_spec -> Monitor load -> BMC/Monitor expression agreement -> verify-vs-
+  oracle verdict agreement` pipeline. A file the Monitor legitimately cannot
+  load needs a documented `MONITOR_EXCLUSIONS` entry — never a silent skip
+  (see `docs/DESIGN-conformance-harness.md`).
 - **Adding or changing specs (`.fsl`)**: Run `fslc check` → `verify` →
   `--engine induction`, and also confirm the spec is non-vacuous (`fslc mutate`
   kill-rate, `--vacuity`). Avoid hollowing out specs (weakening invariants to
