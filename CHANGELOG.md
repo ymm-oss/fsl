@@ -6,6 +6,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Coupled-change metatests (issue #168): `tests/test_coupled_change_meta.py`
+  mechanizes the "grammar/dialect/CLI command moves its LSP index entry and
+  DESIGN doc together" discipline that was previously only a human checklist.
+  A corpus-wide, two-stage check (structural scan + position cross-check)
+  verifies every grammar production's NAME/REQ_ID tokens reach
+  `src/fslc/lsp/index.py`'s symbols/references, with a reviewed, staleness-
+  checked allowlist for genuine free-form labels; a second check verifies
+  every kernel dialect and CLI command maps to an existing
+  `docs/DESIGN-*.md`, and that `docs/README.md`'s DESIGN-doc map is
+  bidirectional. Prototyping this metatest re-found the same class of bug
+  `d1770c4` fixed, twice more, fixed in this PR: fsl-domain sources crashed
+  the LSP entirely (`_parser_for_source` never dispatched to the domain
+  grammar), fsl-ai project files (multi-block bundles that happen to start
+  with `ai_component`) crashed it too (now indexed via
+  `ai_project._top_blocks` directly, matching how that dialect is actually
+  parsed), and several fsl-db/fsl-ai productions
+  (`env_flag`/`database_def`/`delegation_edge`/`agent_event`/
+  `agent_output_def`) were silently unindexed -- including a pre-existing
+  bug in `_visit_env_artifact` that dropped every `when flag F=V` condition
+  on a database artifact. See `docs/DESIGN-coupled-change-metatest.md`.
 - Rebuilt the `docs/intro/` manual site's information architecture around 4
   fixed categories (Get Started / Guides / Reference / Examples & Background),
   designed with the Relational Design plugin (decisions in

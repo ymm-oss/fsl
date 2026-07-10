@@ -54,7 +54,12 @@ behavior.**
   update the corresponding `docs/DESIGN-*.md` as well.
 - **Adding a language feature**: Update grammar/model/bmc (and runtime if needed)
   consistently, reflect the change in `docs/LANGUAGE.md` and
-  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`.
+  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`. These
+  couplings are enforced by `tests/test_coupled_change_meta.py`: a new grammar
+  production, dialect, or CLI subcommand fails CI until it is indexed in
+  `src/fslc/lsp/index.py` and mapped to a `docs/DESIGN-<feature>.md` in
+  `docs/README.md`, or recorded in the test's allowlist with an explicit
+  reason (see `docs/DESIGN-coupled-change-metatest.md`).
 - **Adding or changing specs (`.fsl`)**: Run `fslc check` → `verify` →
   `--engine induction`, and also confirm the spec is non-vacuous (`fslc mutate`
   kill-rate, `--vacuity`). Avoid hollowing out specs (weakening invariants to
