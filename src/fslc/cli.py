@@ -16,7 +16,13 @@ from pathlib import Path
 
 from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
-from .model import build_spec, check_spec, FslError, strict_tag_warnings
+from .model import (
+    build_spec,
+    check_spec,
+    FslError,
+    strict_tag_warnings,
+    validate_state_snapshot,
+)
 from .bmc import verify, prove, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
@@ -878,11 +884,30 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None, instances=None, values=None, use_cache=True):
+        exclude_property_names=None, instances=None, values=None, use_cache=True,
+        from_state=None):
     try:
+        if from_state is not None and engine != "bmc":
+            raise FslError(
+                "--from-state is available only with the BMC engine; induction "
+                "proves the spec init contract and cannot start from one snapshot",
+                kind="semantics",
+            )
         bounds_overrides = _build_bounds_overrides(instances, values)
         has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
         spec, source_lines, ast, display_names, src = _read_spec(file, bounds_overrides)
+        initial_snapshot = None
+        if from_state is not None:
+            try:
+                initial_snapshot = json.loads(Path(from_state).read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                raise FslError(f"file not found: {from_state}", kind="io")
+            except json.JSONDecodeError as exc:
+                raise FslError(
+                    f"invalid state JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+                    kind="io",
+                )
+            validate_state_snapshot(spec, initial_snapshot)
         acc, acc_skipped = _acceptance_error(spec, skip_out_of_range=has_bounds_overrides)
         if acc:
             return _envelope(acc)
@@ -891,7 +916,7 @@ def run_verify(
             return _envelope(forb)
 
         cache_key = xdepth_key = cached = None
-        if use_cache:
+        if use_cache and initial_snapshot is None:
             cache_key, xdepth_key, cached = _verify_cache_lookup(
                 ast, display_names, src, engine, depth, k_ind, deadlock_mode, vacuity_mode,
                 property_name, exclude_property_names, strict_tags, requirements,
@@ -921,6 +946,7 @@ def run_verify(
                 vacuity_mode=vacuity_mode,
                 property_name=property_name,
                 exclude_property_names=exclude_property_names,
+                initial_snapshot=initial_snapshot,
             )
         if verify_mode:
             cached_out, _source = cached
@@ -949,6 +975,19 @@ def run_verify(
             out["bounds_overrides"] = {
                 "instances": dict(bounds_overrides["instances"]),
                 "values": {k: [lo, hi] for k, (lo, hi) in bounds_overrides["values"].items()},
+            }
+        if initial_snapshot is not None:
+            out = dict(out)
+            out["initial_state"] = {
+                "source": "snapshot",
+                "path": str(from_state),
+                "complete": True,
+                "replaces_spec_init": True,
+            }
+            out["faithfulness"] = {
+                "scope": "bounded_from_snapshot",
+                "spec_init": "not_used",
+                "induction": "not_applicable",
             }
         if cache_key is not None and cached is None:
             try:
@@ -1839,6 +1878,9 @@ def _build_arg_parser():
     v.add_argument("--requirements", default=None)
     v.add_argument("--no-cache", action="store_true",
                    help="skip the persistent verdict cache for this run (neither reads nor writes it)")
+    v.add_argument("--from-state", default=None,
+                   help="replace spec init with a complete Monitor/replay logical-state "
+                        "JSON snapshot (BMC only)")
 
     sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
     sw.add_argument("file")
@@ -2292,7 +2334,8 @@ def _dispatch(args):
                             exclude_property_names=args.exclude_property_names,
                             instances=args.instances,
                             values=args.values,
-                            use_cache=not args.no_cache)
+                            use_cache=not args.no_cache,
+                            from_state=args.from_state)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

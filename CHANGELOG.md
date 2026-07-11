@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Predictive BMC from a state snapshot (issue #175): `fslc verify SPEC
+  --from-state state.json` replaces the declared init with a complete
+  Monitor/replay logical-state JSON and searches for violations from that point.
+  Snapshot runs are BMC-only, bypass the verdict cache, preserve concrete
+  identities by disabling symmetry reduction, and stamp
+  `faithfulness.scope:"bounded_from_snapshot"` with `spec_init:"not_used"`.
+  Full type/shape validation covers every kernel state type; partial snapshots
+  are rejected rather than treated as unconstrained. See
+  `docs/DESIGN-from-state.md`.
 - Production-log replay mappings (issue #174): `fslc replay SPEC --from-log
   events.jsonl --mapping log_mapping.fsl` reuses the refinement parser and
   mapping expressions to translate external action/parameter names and observed

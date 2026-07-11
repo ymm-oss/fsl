@@ -681,6 +681,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
+               [--from-state state.json]            # complete Monitor/replay state; replaces init (BMC only)
                [--strict-tags] [--requirements ids.txt] [--no-cache]
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
@@ -721,6 +722,17 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+Use `verify --from-state` for bounded prediction from a current concrete state,
+not for proof. The input must be the complete logical JSON emitted by
+`Monitor.state`/replay (enum names, Option as value/`null`, complete Map keys,
+Set/Seq arrays, relation pairs). It replaces `init`, bypasses the verdict cache,
+disables symmetry reduction for concrete identities, and is rejected with the
+induction engine. Results always stamp
+`faithfulness.scope:"bounded_from_snapshot"`, `spec_init:"not_used"`, and
+`induction:"not_applicable"`. A step-zero invariant violation is a valid
+predictive result. Do not fill missing variables: partial snapshots are a
+different, weaker existential query and are rejected.
 
 For production-log replay, each non-empty JSONL line is an object with
 `action`, `params`, and the observed post-action `state`. The mapping file is

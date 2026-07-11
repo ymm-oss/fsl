@@ -659,6 +659,7 @@ variable.</p></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
                [--property &lt;Name&gt;]               # check one named property in isolation —
@@ -692,6 +693,17 @@ fslc db import &lt;file.sql&gt; [--name Name] [-o out.fsl]            # minimal 
 fslc ai check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runtime event replay evidence
 </code></pre>
+<p><code>verify --from-state state.json</code> replaces the declared <code>init</code> for one bounded
+run and asks what can happen from that complete current state. The JSON shape is
+exactly <code>Monitor.state</code> / replay logical state: all variables and Map keys are
+required, enums are member names, Option is value or <code>null</code>, Set/Seq are arrays,
+and relation is an array of pairs. Missing/extra/type-invalid values are rejected
+before solving. Snapshot runs bypass the verdict cache, disable symmetry
+reduction (the identities are concrete), and reject <code>--engine induction</code>.
+Results add <code>initial_state.source:"snapshot"</code> and
+<code>faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}</code>
+so bounded <code>verified</code> cannot be mistaken for verification from the spec init.
+See <code>DESIGN-from-state.md</code>.</p>
 <p>In addition to <code>reachable</code> and action coverage, <code>scenarios</code> outputs, for each
 <code>leadsTo P ~&gt; Q</code>, a <code>respond_&lt;Name&gt;[_&lt;binding&gt;]</code> scenario. Each scenario has
 <code>kind: "leadsTo"</code>, <code>pending_at</code>, <code>satisfied_at</code>, <code>bindings</code>, <code>steps</code>,

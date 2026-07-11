@@ -575,6 +575,7 @@ variable.
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
                [--property <Name>]               # check one named property in isolation —
@@ -608,6 +609,18 @@ fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DD
 fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
+
+`verify --from-state state.json` replaces the declared `init` for one bounded
+run and asks what can happen from that complete current state. The JSON shape is
+exactly `Monitor.state` / replay logical state: all variables and Map keys are
+required, enums are member names, Option is value or `null`, Set/Seq are arrays,
+and relation is an array of pairs. Missing/extra/type-invalid values are rejected
+before solving. Snapshot runs bypass the verdict cache, disable symmetry
+reduction (the identities are concrete), and reject `--engine induction`.
+Results add `initial_state.source:"snapshot"` and
+`faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}`
+so bounded `verified` cannot be mistaken for verification from the spec init.
+See `DESIGN-from-state.md`.
 
 In addition to `reachable` and action coverage, `scenarios` outputs, for each
 `leadsTo P ~> Q`, a `respond_<Name>[_<binding>]` scenario. Each scenario has
