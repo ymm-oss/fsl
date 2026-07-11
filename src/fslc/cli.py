@@ -26,6 +26,7 @@ from .model import (
 from .bmc import verify, prove, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
+from .semantic_diff import semantic_diff
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import TestgenScenarioError, generate_test_bundle, default_output_name
@@ -1811,8 +1812,36 @@ def run_domain_replay(file, logs):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_diff(old, new, depth=8, mapping=None, forbid=None):
+    """Run a bounded semantic comparison and return the standard JSON envelope."""
+    try:
+        if isinstance(forbid, str):
+            forbid = [item.strip() for item in forbid.split(",") if item.strip()]
+        return _envelope(semantic_diff(old, new, depth, mapping, forbid))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
+    if r == "semantic_diff":
+        return 0 if result.get("gate", {}).get("passed", True) else 1
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
              "verified_under_assumptions", "agent_analyzed", "replay_conformant",
@@ -1965,6 +1994,15 @@ def _build_arg_parser():
     rf.add_argument("rest", nargs="*",
                     help="chain check: appending more (abs map) pairs runs an end-to-end composed check")
     rf.add_argument("--depth", type=int, default=8)
+
+    df = sub.add_parser("diff", help="compare OLD and NEW specification semantics")
+    df.add_argument("old")
+    df.add_argument("new")
+    df.add_argument("--depth", type=int, default=8)
+    df.add_argument("--mapping", default=None,
+                    help="optional refinement mapping for one comparison direction")
+    df.add_argument("--forbid", default="",
+                    help="comma-separated finding kinds that should fail the gate")
 
     ch = sub.add_parser("chain", help="run a project manifest across business, requirements, design, and impl")
     ch.add_argument("path", nargs="?", default="fsl-project.toml")
@@ -2127,6 +2165,9 @@ def _dispatch(args):
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "refine":
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "diff":
+        result = run_diff(args.old, args.new, args.depth, args.mapping, args.forbid)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "chain":
         from .chain import format_chain_table, run_chain
