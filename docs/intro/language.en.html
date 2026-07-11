@@ -659,6 +659,9 @@ variable.</p></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--lemma &quot;&lt;expr&gt;&quot;]...             # independently prove auxiliary candidates,
+                                                 # then retry CTIs with proved lemmas only
+               [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
                [--property &lt;Name&gt;]               # check one named property in isolation —
@@ -668,9 +671,14 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
-fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # conformance check of an event log (§12)
+fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace conformance (§12)
+fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
+                                                 # production log mapping + conformance (§12)
 fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
+fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
+               [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
+                                                 # bounded semantic change analysis
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
@@ -691,6 +699,17 @@ fslc db import &lt;file.sql&gt; [--name Name] [-o out.fsl]            # minimal 
 fslc ai check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runtime event replay evidence
 </code></pre>
+<p><code>verify --from-state state.json</code> replaces the declared <code>init</code> for one bounded
+run and asks what can happen from that complete current state. The JSON shape is
+exactly <code>Monitor.state</code> / replay logical state: all variables and Map keys are
+required, enums are member names, Option is value or <code>null</code>, Set/Seq are arrays,
+and relation is an array of pairs. Missing/extra/type-invalid values are rejected
+before solving. Snapshot runs bypass the verdict cache, disable symmetry
+reduction (the identities are concrete), and reject <code>--engine induction</code>.
+Results add <code>initial_state.source:"snapshot"</code> and
+<code>faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}</code>
+so bounded <code>verified</code> cannot be mistaken for verification from the spec init.
+See <code>DESIGN-from-state.md</code>.</p>
 <p>In addition to <code>reachable</code> and action coverage, <code>scenarios</code> outputs, for each
 <code>leadsTo P ~&gt; Q</code>, a <code>respond_&lt;Name&gt;[_&lt;binding&gt;]</code> scenario. Each scenario has
 <code>kind: "leadsTo"</code>, <code>pending_at</code>, <code>satisfied_at</code>, <code>bindings</code>, <code>steps</code>,
@@ -704,6 +723,20 @@ it removes named invariants, <code>trans</code>, <code>leadsTo</code>, and <code
 from the run and from checked-property outputs (<code>invariants_checked</code>,
 <code>transitions_checked</code>, <code>leads_to</code>, and <code>reachables</code>). When <code>--property</code> and
 <code>--exclude-property</code> name the same property, exclusion wins.</p>
+<p><code>verify --engine induction --lemma "EXPR"</code> accepts repeatable auxiliary
+invariant candidates for an <code>unknown_cti</code> repair loop. Each expression is first
+proved independently against the original init/actions and implicit type
+bounds, without assuming the original user invariants. A false candidate is
+<code>rejected</code> with its reachable counterexample; a non-inductive candidate is
+rejected with its own CTI; invalid candidates carry a parse/type error. Only
+candidates whose independent result is <code>proved</code> may enter the original proof.
+The verifier evaluates those candidates on each target CTI, adds the first one
+that is actually false on that CTI, and retries. JSON fields <code>lemmas</code> and
+<code>lemma_cti_exclusions</code> record adjudication and the exact CTI/violated steps.
+When the target reaches <code>proved</code>, <code>auxiliary_invariant_recommendation</code> emits the
+declarations to persist in the source; the command never rewrites the file.
+There is no unverified-assumption mode. <code>--lemma</code> with the BMC engine is a usage
+error. Candidate text/order is part of the verification cache key.</p>
 <p><code>sweep</code> is an opt-in wrapper around <code>verify</code>; it does not change normal
 verification. It evaluates a deterministic grid of <code>--instances NAME=lo..hi</code>,
 <code>--values NAME=lo..hi</code>, and <code>--depth lo..hi</code> overrides, records each underlying
@@ -711,8 +744,27 @@ verification result under <code>sweep.results</code>, and returns the first fail
 under <code>sweep.minimal_counterexample</code>. For <code>--values</code>, the sweep fixes the lower
 bound and expands the upper bound (<code>lo..lo</code>, <code>lo..lo+1</code>, ..., <code>lo..hi</code>). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.</p>
+<p><code>diff</code> compares state-machine meaning instead of source text. It runs bounded
+refinement in both directions: NEW→OLD failure is <code>behavior_added</code>, while
+OLD→NEW failure is <code>behavior_removed</code>. It separately checks implication between
+the conjunctions of user invariants (<code>invariant_weakened</code> /
+<code>invariant_strengthened</code>) and replays OLD <code>forbidden</code> scenarios against NEW
+(<code>forbidden_relaxed</code>). Directional failures include counterexample witnesses.
+Same-named compatible state/actions are mapped automatically; name mismatches
+are <code>unknown</code> unless <code>--mapping</code> supplies that direction. An arbitrary mapping
+is never inverted automatically.</p>
+<p>The JSON result is <code>semantic_diff</code> with <code>bounded</code>, <code>scope</code>, <code>directions</code>,
+<code>summary</code>, <code>findings</code>, and <code>gate</code>. A changed <code>verify { instances/values }</code>
+scope is reported as <code>scope_changed</code>, and shared OLD bounds are rebuilt under
+the NEW scope recorded by <code>scope.comparison:"new"</code> and
+<code>scope.applied_to_old</code>. With no findings, <code>summary</code> is
+<code>["no_semantic_change"]</code>. Findings are analysis output and therefore exit 0 by
+default. Only findings explicitly listed by comma-separated <code>--forbid</code> make
+the gate fail and exit 1. All comparisons remain bounded to <code>--depth</code>; clean
+output is not an unbounded equivalence proof.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / typestate / sweep_passed / observed_conformant /
+mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 <code>1</code> = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
 sweep_failed / observed_mismatch,
@@ -1201,6 +1253,7 @@ mon.reset()
 r = mon.step(&quot;add_to_cart&quot;, {&quot;u&quot;: 0, &quot;i&quot;: 0})   # ok / kind / state / changes
 </code></pre>
 <pre><code class="language-bash">fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
@@ -1208,6 +1261,21 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 </code></pre>
+<p>The <code>--from-log</code> form reuses the exact refinement mapping grammar to translate
+external JSONL records into spec actions and logical state; it does not add a
+second mapping language. Each non-empty line is
+<code>{"action":"external_name","params":{...},"state":{...}}</code>, where <code>state</code>
+is the observed post-action state. In the mapping, <code>impl</code> labels the external
+log schema, <code>abs</code> must name the replayed spec, <code>map</code> entries cover every spec
+state variable, and <code>action external(params) -&gt; spec_action(exprs)</code> (or
+<code>stutter</code>) maps the event. The Monitor executes the mapped action and compares
+its result with the mapped observed state on every line. The first divergence
+reports zero-based <code>failed_at_record</code> / <code>failed_at_event</code>, one-based <code>log_line</code>,
+and either the Monitor violation or a <code>state_mismatch</code> with leaf paths.</p>
+<p>This first version requires full observation: a missing field or Map key is a
+<code>log_mapping</code> nonconformance, not an unconstrained value. See
+<code>DESIGN-log-replay.md</code> for the record schema, mapping example, and the boundary
+with <code>db observe</code> / <code>ai replay</code> / <code>domain replay</code>.</p>
 <p>Since <code>replay</code> checks only finite logs, <strong><code>leadsTo</code> is out of scope</strong> (stated
 explicitly in the output <code>note</code>). <code>Monitor</code> requires init to be deterministic
 (forall bulk assignment is allowed). For a Map/index target (<code>m[K] = ...</code>),
