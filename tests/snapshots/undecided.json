@@ -1,0 +1,39 @@
+{
+  "declarations": [
+    {
+      "kind": "action",
+      "name": "approve",
+      "node_id": "action:approve",
+      "text": "approval policy awaits owner decision",
+      "requirements": [
+        "REQ-1"
+      ],
+      "loc": {
+        "line": 6,
+        "column": 5
+      },
+      "verification_semantics": "metadata_only"
+    }
+  ],
+  "finding": {
+    "finding_type": "divergent_choice",
+    "acknowledged": true,
+    "acknowledged_by": [
+      {
+        "kind": "action",
+        "name": "approve",
+        "node_id": "action:approve",
+        "text": "approval policy awaits owner decision",
+        "requirements": [
+          "REQ-1"
+        ],
+        "loc": {
+          "line": 6,
+          "column": 5
+        },
+        "verification_semantics": "metadata_only"
+      }
+    ],
+    "evidence_basis": "bounded_bmc"
+  }
+}

@@ -21,6 +21,7 @@ from .render import (
     expr_to_text as _expr_to_text,
     public_var as _public_name,
 )
+from .undecided import undecided_declarations
 
 
 WEAKENING_OPS = {
@@ -390,6 +391,7 @@ def _skeleton(spec, source_lines):
         "domains": _verification_world_lines(spec),
         "enums": _enums_skeleton(spec),
         "stage_flows": _stage_flows(spec, source_lines),
+        "undecided": undecided_declarations(spec),
     }
 
 

@@ -53,6 +53,7 @@
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests (`tests/test_coupled_change_meta.py`): LSP index coverage (grammar production ↔ visitor handler, corpus-driven, two-stage) and DESIGN-doc coverage (dialect/CLI command ↔ `docs/DESIGN-*.md`) |
 | [`DESIGN-analysis.md`](DESIGN-analysis.md) | `fslc analyze` (Typed Semantic Graph, graph projections, focus impact slices, action dependency/conflict graphs, structural metrics, batch mode, refinement/project traceability graphs, DOT/Mermaid exports, schemas, AI-readable structural review findings/candidates) |
 | [`DESIGN-underspecification.md`](DESIGN-underspecification.md) | bounded `divergent_choice` / `unconstrained_effect` AI-review findings and question-form output |
+| [`DESIGN-undecided.md`](DESIGN-undecided.md) | Intentional `undecided:` declaration metadata, ledger/HTML presentation, and #179 acknowledgement contract |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 | [`DESIGN-domain.md`](DESIGN-domain.md) | fsl-domain (`domain`) Functional DDD / async effect dialect: aggregate ownership, command/event decide/evolve lowering, saga/process-manager actions, effect lifecycle state, findings, multi-target scaffolds, and runtime replay |
 | [`DESIGN-effect.md`](DESIGN-effect.md) | fsl-effect lifecycle semantics used by fsl-domain: correlation, retry, timeout, idempotency, and guarantee boundary |

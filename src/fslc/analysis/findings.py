@@ -10,6 +10,7 @@ from .projections import build_action_dependency_graph, project_tsg
 from .schema import FINDINGS_SCHEMA_VERSION
 from .tsg import PROPERTY_NODE_KINDS, SCENARIO_NODE_KINDS, build_tsg, expr_reads, node_by_id
 from .underspecification import analyze_underspecification
+from ..undecided import undecided_declarations
 
 
 def analyze(spec, profile="ai-review"):
@@ -21,6 +22,18 @@ def analyze(spec, profile="ai-review"):
         spec,
         [state_id.removeprefix("state:") for state_id in unread_candidates],
     )
+    undecided_by_node = {
+        item["node_id"]: item for item in undecided_declarations(spec)
+    }
+    for collection in ("divergent_choices", "unconstrained_effects"):
+        for record in semantic[collection]:
+            acknowledgements = [
+                undecided_by_node[node]
+                for node in record["action_nodes"]
+                if node in undecided_by_node
+            ]
+            record["acknowledged"] = bool(acknowledgements)
+            record["acknowledged_by"] = acknowledgements
     unconstrained_nodes = {
         f"state:{item['state_name']}" for item in semantic["unconstrained_effects"]
     }
@@ -268,7 +281,7 @@ def _divergent_choice_findings(records):
             "or should both be explicitly allowed by an invariant or acceptance case?"
         )
         involved = sorted(set(record["predicate_nodes"] + record["action_nodes"]))
-        findings.append(_finding(
+        finding = _finding(
             "divergent_choice",
             involved,
             record,
@@ -285,7 +298,10 @@ def _divergent_choice_findings(records):
             confidence=0.86,
             spec_question=question,
             evidence_basis="bounded_bmc",
-        ))
+        )
+        finding["acknowledged"] = record.get("acknowledged", False)
+        finding["acknowledged_by"] = record.get("acknowledged_by", [])
+        findings.append(finding)
     return findings
 
 
@@ -300,7 +316,7 @@ def _unconstrained_effect_findings(records):
             "or scenario constrains that value. What outcome is intended, or should both "
             "possibilities be declared explicitly?"
         )
-        findings.append(_finding(
+        finding = _finding(
             "unconstrained_effect",
             [f"state:{state_name}", *sorted(record["action_nodes"])],
             record,
@@ -317,7 +333,10 @@ def _unconstrained_effect_findings(records):
             confidence=0.82,
             spec_question=question,
             evidence_basis="bounded_bmc",
-        ))
+        )
+        finding["acknowledged"] = record.get("acknowledged", False)
+        finding["acknowledged_by"] = record.get("acknowledged_by", [])
+        findings.append(finding)
     return findings
 
 

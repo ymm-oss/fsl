@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Intentional undecision metadata (issue #189): existing declaration tags accept
+  `"REQ-n: undecided: ..."` (or spec-wide `"undecided: ..."`). Ledger and HTML
+  reports gain an undecided-items section with affected requirement IDs.
+  Bounded underspecification findings are never suppressed; matching witness
+  actions add `acknowledged` / `acknowledged_by`. The marker is metadata-only
+  and cannot change verification semantics. See `docs/DESIGN-undecided.md`.
 - Bounded underspecification findings (issue #179): `fslc analyze --profile
   ai-review` now uses a fixed depth-4 BMC probe to emit `divergent_choice` when
   two distinct actions are enabled in the same reachable state and split an

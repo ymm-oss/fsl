@@ -212,6 +212,10 @@ confirmed assumptions in the `.fsl` itself as comments / tags**:
   `// ASSUME-1: stock is reserved by only one user at a time`
 - An assumption justifying a specific guard / invariant → tag that declaration:
   `invariant OnePerUser "ASSUME-1: only one user reserves at a time" { ... }`
+- An intentionally deferred product decision → tag the affected declaration
+  `"REQ-1: undecided: owner must select the policy"`. Keep bounded
+  underspecification findings visible; the tag acknowledges review debt but
+  does not change verification semantics.
 
 This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from

@@ -114,6 +114,12 @@ Other findings are not duplicates. For example, `progressless_cycle` asks about
 eventual progress, while `divergent_choice` asks which immediate contract
 outcome is intended.
 
+An intentional-undecision tag does not suppress either semantic finding. If a
+witness action is tagged with `"REQ-n: undecided: ..."` or `"undecided: ..."`,
+the finding carries `acknowledged:true` and the matching declarations under
+`acknowledged_by`; otherwise it carries `false` and an empty list. See
+[`DESIGN-undecided.md`](DESIGN-undecided.md).
+
 ## Non-goals
 
 - Proving determinism or completeness at all depths.

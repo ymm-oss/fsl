@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 from .assurance import ASSURANCE_ORDER, NOT_RUN, assurance_label, classify_result, requirement_assurance
+from .undecided import undecided_declarations
 
 
 def default_output_name(file: str) -> str:
@@ -281,6 +282,25 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
             L.append(f"- ⚠ 実装ログ適合: **非適合**（イベント {replay_result.get('failed_at_event')} で乖離）")
         elif rr == "conformant":
             L.append(f"- 実装ログ適合: 適合（{replay_result.get('steps_checked')} ステップ）")
+    L.append("")
+
+    undecided = undecided_declarations(spec)
+    L.append("## 未決定一覧")
+    L.append("")
+    L.append("`undecided:` は意図を保留したメタデータであり、検証条件を弱めたり反例を抑制したりしません。")
+    L.append("")
+    if undecided:
+        L.append("| 宣言 | 未決定事項 | 影響する要件ID | 検証上の扱い |")
+        L.append("|---|---|---|---|")
+        for entry in undecided:
+            declaration = f"{entry['kind']} `{entry['name']}`"
+            requirements = ", ".join(entry["requirements"]) or "（仕様全体）"
+            L.append(
+                f"| {declaration} | {_esc(entry['text'])} | {_esc(requirements)} | "
+                "metadata only（findingは抑制せずacknowledged表示） |"
+            )
+    else:
+        L.append("意図的未決定として宣言された項目はありません。")
     L.append("")
 
     # page 1 — risk list

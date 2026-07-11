@@ -1180,6 +1180,20 @@ invariant PaidLedger "REQ-3: the ledger matches the number of payments" { ... }
 action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are auto-approved" { ... }
 ```
 
+To record an intentional decision deferral without changing verification
+semantics, prefix the tag text with `undecided:`:
+
+```fsl
+action approve() "REQ-1: undecided: approval policy awaits owner decision" { ... }
+action choose_route() "undecided: routing owner has not selected a policy" { ... }
+```
+
+`ledger` and `html` list these declarations and affected requirement IDs.
+Bounded underspecification findings remain visible but add
+`acknowledged:true` when their witness includes a marked action. The marker is
+metadata only; it cannot weaken a property or make verification pass. See
+[`DESIGN-undecided.md`](DESIGN-undecided.md).
+
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
 ```fsl

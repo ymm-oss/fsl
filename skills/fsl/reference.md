@@ -1062,6 +1062,13 @@ leadsTo / action:
 `requirement: {id, text}` in violated / unknown_cti / coverage diagnostic /
 scenarios / `refinement_failed` (root).
 
+For an intentionally deferred choice, keep the requirement ID and prefix the
+tag text: `"REQ-3: undecided: owner must select settlement policy"`; use
+`"undecided: ..."` only for a spec-wide item. This is metadata only. `ledger`
+and `html` list it, while bounded underspecification findings stay visible with
+`acknowledged:true/false`. Never weaken a guard or invariant merely to silence
+an underspecification finding.
+
 ### Authoring specs as readable documentation (requirements + design)
 
 The spec source IS the documentation: a rule you can read is also the rule that is

@@ -53,6 +53,7 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
     body = "\n".join([
         _hero(spec, file, depth, status, len(state), len(actions), len(properties), coverage_label, warnings, subtitle, kind),
         _model_section(state, actions, enums, domains, kpis, stage_flows),
+        _undecided_section(skeleton.get("undecided") or []),
         _actions_section(actions, coverage),
         _properties_section(properties, auto_checks, verification),
         _status_section(verification),
@@ -525,6 +526,7 @@ def _sidebar(spec: str) -> str:
       <div class="mark"><span class="mark-dot" aria-hidden="true"></span><span>{escape(spec)}</span></div>
       <nav>
         <a href="#model">Model</a>
+        <a href="#undecided">Undecided</a>
         <a href="#actions">Actions</a>
         <a href="#properties">Properties</a>
         <a href="#status">Status</a>
@@ -815,6 +817,33 @@ def _model_section(state: dict, actions: list, enums: dict, domains: list, kpis:
           <div>{_influence_svg(list(sorted(state)), actions)}</div>
         </div>
         {extra}
+      </section>
+"""
+
+
+def _undecided_section(entries: list) -> str:
+    if entries:
+        rows = "".join(
+            "<tr>"
+            f"<td>{escape(str(item.get('kind', '')))} <code>{escape(str(item.get('name', '')))}</code></td>"
+            f"<td>{escape(str(item.get('text', '')))}</td>"
+            f"<td>{escape(', '.join(item.get('requirements') or []) or 'spec-wide')}</td>"
+            "<td>metadata only; findings remain visible</td>"
+            "</tr>"
+            for item in entries
+        )
+    else:
+        rows = '<tr><td colspan="4">No intentional undecision markers.</td></tr>'
+    return f"""
+      <section class="section" id="undecided">
+        <div class="section-head"><div>
+          <h2>Undecided Items</h2>
+          <p>Intentional decision deferrals. These markers do not change verification semantics.</p>
+        </div></div>
+        <div class="panel table-wrap"><table>
+          <thead><tr><th>Declaration</th><th>Open decision</th><th>Requirements</th><th>Semantics</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table></div>
       </section>
 """
 

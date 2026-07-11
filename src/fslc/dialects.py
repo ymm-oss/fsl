@@ -10,6 +10,7 @@ from pathlib import Path
 from .compose import expand_compose
 from .grammar import Ast, PARSER
 from .model import FslError, eval_const
+from .undecided import undecided_meta
 
 
 def _err(message, kind="type", loc=None, hint=None):
@@ -279,22 +280,34 @@ def expand_spec_domains(ast):
     return ("spec", name, type_items + rest)
 
 
+def _merge_requirement_meta(requirement_meta, declaration_meta):
+    marker = undecided_meta(declaration_meta)
+    if marker is None or requirement_meta is None:
+        return requirement_meta if requirement_meta is not None else declaration_meta
+    merged = dict(requirement_meta)
+    merged["text"] = f"undecided: {marker['text']}"
+    return merged
+
+
 def _with_meta(item, meta):
     tag = item[0]
     if tag == "req_action":
-        return item[:6] + (meta, item[7])
+        return item[:6] + (_merge_requirement_meta(meta, item[6]), item[7])
     if tag == "action":
-        return item[:6] + (meta,)
+        own_meta = item[6] if len(item) > 6 else None
+        return item[:6] + (_merge_requirement_meta(meta, own_meta),)
     if tag in ("invariant", "reachable"):
-        return item[:4] + (meta,)
+        own_meta = item[4] if len(item) > 4 else None
+        return item[:4] + (_merge_requirement_meta(meta, own_meta),)
     if tag == "leadsto":
-        return item[:6] + (meta,) + item[7:]
+        own_meta = item[6] if len(item) > 6 else None
+        return item[:6] + (_merge_requirement_meta(meta, own_meta),) + item[7:]
     return item
 
 
 def _kernel_action_from_req(item, meta=None):
     _, name, params, body, loc, fair, own_meta, maps = item
-    out_meta = meta if meta is not None else own_meta
+    out_meta = _merge_requirement_meta(meta, own_meta)
     return ("action", name, params, body, loc, fair, out_meta), maps
 
 
@@ -401,7 +414,7 @@ def _action_map(name, params, maps, loc):
 
 def _split_branch_action(item, req_meta, display_names, action_aliases):
     _, name, params, body, loc, fair, own_meta, action_maps = item
-    meta = req_meta if req_meta is not None else own_meta
+    meta = _merge_requirement_meta(req_meta, own_meta)
     branches = [b for b in body if b[0] == "branches"]
     if not branches:
         action, maps = _kernel_action_from_req(item, meta)

@@ -169,3 +169,7 @@ def test_findings_schema_declares_question_and_evidence_basis():
 
     assert properties["spec_question"] == {"type": "string", "pattern": "\\?$"}
     assert properties["evidence_basis"] == {"enum": ["structural", "bounded_bmc"]}
+    assert properties["acknowledged"] == {"type": "boolean"}
+    assert properties["acknowledged_by"] == {
+        "type": "array", "items": {"type": "object"},
+    }
