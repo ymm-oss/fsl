@@ -9,3 +9,4 @@ tests/test_self.py
 tests/test_spec_domains.py
 tests/test_trans.py
 tests/test_verify_cache.py
+tests/test_from_state.py
