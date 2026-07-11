@@ -709,7 +709,7 @@ fslc diff <old> <new> [--depth K] [--mapping <mapping>]
 fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
                                                   # materialize both full revision trees; omit spec for changed .fsl batch
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
-fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review
+fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]...
@@ -825,6 +825,11 @@ Treat all findings as review signals: they carry
 
 Natural-language interpretation on top of `analyze` is agent-side only. The core
 analyzer must not infer semantics from English, Japanese, or other free text.
+The deterministic tag checks compare only exact code-shaped identifiers:
+`tag_stale_reference` and `tag_formula_disjoint`. For meaning review, run
+`fslc analyze file.fsl --export tag-review`, compare each `tag.text` with its
+`formal_definition`, cite the declaration tuple, and keep conclusions marked
+`formal_status:not_a_violation`; never silently rewrite intent from this export.
 If an agent reviews requirement text, comments, or source excerpts together with
 the TSG, it must cite the exact text and graph node ids it used, keep
 `formal_status:"not_a_violation"`, and never convert that suggestion into an

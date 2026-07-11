@@ -207,6 +207,15 @@ language-specific words such as "retry" or "pending". A cycle can be valid
 retry, review, or compensation behavior; the finding only says that a
 requirement/scenario-linked cycle has no visible progress story.
 
+Tag checks are the narrow exception to the no-natural-language-interpretation
+boundary: they compare exact, code-shaped identifier tokens only and never
+infer sentence meaning. `tag_stale_reference` reports a tag token absent from
+the current spec; `tag_formula_disjoint` reports a named current state/constant
+absent from the tagged formal definition. See
+[`DESIGN-tag-drift.md`](DESIGN-tag-drift.md). For semantic wording review,
+`fslc analyze spec.fsl --export tag-review` emits declaration-local tuples for
+an external reviewer without making any model call.
+
 Project-level `traceability_graph` can additionally emit
 `traceability_gap` findings when an upper-layer requirement/control ID has no
 visible lower-layer structural anchor. This is still review-only; verified
@@ -219,6 +228,7 @@ Versioned schema files live under `schemas/fslc/analysis/`:
 - `tsg.v0.schema.json`
 - `analysis-graph.v0.schema.json`
 - `analysis-findings.v0.schema.json`
+- `tag-review.v0.schema.json`
 
 Downstream consumers should check `schema_version` before assuming shape.
 Additive optional fields can remain in the same schema version; removing or

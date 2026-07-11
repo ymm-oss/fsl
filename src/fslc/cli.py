@@ -49,6 +49,7 @@ from .analysis import (
     analyze_refinement_ast,
     build_tsg,
     export_graph,
+    export_tag_review,
 )
 from .analysis.projections import SUPPORTED_PROJECTIONS
 from .analysis.schema import FINDINGS_SCHEMA_VERSION
@@ -412,15 +413,23 @@ ANALYZE_PROJECTIONS = [
 ]
 
 
-def run_analyze(file, projection="tsg", profile=None, output_format="json", focus=None):
+def run_analyze(file, projection="tsg", profile=None, output_format="json", focus=None,
+                export_kind=None):
     paths = list(file) if isinstance(file, (list, tuple)) else [file]
     if len(paths) != 1 or any(Path(p).is_dir() for p in paths):
-        return _run_analyze_batch(paths, projection, profile, output_format, focus)
-    return _run_analyze_one_enveloped(paths[0], projection, profile, output_format, focus)
+        return _run_analyze_batch(
+            paths, projection, profile, output_format, focus, export_kind,
+        )
+    return _run_analyze_one_enveloped(
+        paths[0], projection, profile, output_format, focus, export_kind,
+    )
 
 
-def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="json", focus=None):
+def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="json", focus=None,
+                       export_kind=None):
     try:
+        if export_kind:
+            raise FslError("tag-review export accepts exactly one specification file", kind="semantics")
         if output_format != "json":
             raise FslError("batch analyze supports only --format json", kind="semantics")
         if focus:
@@ -474,9 +483,10 @@ def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="jso
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_format="json", focus=None):
+def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_format="json", focus=None,
+                               export_kind=None):
     try:
-        out = _run_analyze_one(file, projection, profile, output_format, focus)
+        out = _run_analyze_one(file, projection, profile, output_format, focus, export_kind)
         return _envelope(out)
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -499,7 +509,8 @@ def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_form
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def _run_analyze_one(file, projection="tsg", profile=None, output_format="json", focus=None):
+def _run_analyze_one(file, projection="tsg", profile=None, output_format="json", focus=None,
+                     export_kind=None):
     if output_format not in ANALYZE_FORMATS:
         raise FslError(f"unsupported analyze format: {output_format}", kind="semantics")
     if output_format != "json" and profile:
@@ -510,9 +521,20 @@ def _run_analyze_one(file, projection="tsg", profile=None, output_format="json",
         raise FslError("--focus is supported only with --projection impact_graph", kind="semantics")
     if projection == "impact_graph" and not focus:
         raise FslError("--projection impact_graph requires --focus <node-id>", kind="semantics")
+    if export_kind:
+        if export_kind != "tag-review":
+            raise FslError(f"unsupported analyze export: {export_kind}", kind="semantics")
+        if profile or focus or output_format != "json" or projection != "tsg":
+            raise FslError(
+                "--export tag-review cannot be combined with --profile, --focus, "
+                "--projection, or non-JSON --format",
+                kind="semantics",
+            )
 
     path = Path(file)
     if _is_project_manifest(path):
+        if export_kind:
+            raise FslError("tag-review export requires an FSL specification", kind="semantics")
         if profile:
             raise FslError("project traceability analysis does not support --profile", kind="semantics")
         if projection != "traceability_graph":
@@ -528,6 +550,8 @@ def _run_analyze_one(file, projection="tsg", profile=None, output_format="json",
         src = open(file, encoding="utf-8").read()
         ast, display_names = _parse_file(file, src)
         if ast[0] == "refinement":
+            if export_kind:
+                raise FslError("tag-review export requires an FSL specification", kind="semantics")
             if profile:
                 return {
                     "result": "analyzed",
@@ -549,7 +573,13 @@ def _run_analyze_one(file, projection="tsg", profile=None, output_format="json",
             }
         else:
             spec = build_spec(ast, display_names)
-            if profile:
+            if export_kind:
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **export_tag_review(spec),
+                }
+            elif profile:
                 out = {
                     "result": "analyzed",
                     "spec": spec["name"],
@@ -2067,6 +2097,9 @@ def _build_arg_parser():
                     help="structural projection to emit")
     an.add_argument("--profile", choices=["ai-review"], default=None,
                     help="emit AI-readable structural review findings")
+    an.add_argument("--export", choices=["tag-review"], default=None,
+                    dest="export_kind",
+                    help="export declaration-level tag/formula review tuples")
     an.add_argument("--focus",
                     help="node id for --projection impact_graph, e.g. state:stock or action:checkout")
     an.add_argument("--format", choices=sorted(ANALYZE_FORMATS), default="json",
@@ -2291,7 +2324,10 @@ def _dispatch(args):
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "analyze":
-        result = run_analyze(args.file, args.projection, args.profile, args.output_format, args.focus)
+        result = run_analyze(
+            args.file, args.projection, args.profile, args.output_format,
+            args.focus, args.export_kind,
+        )
         if args.output_format != "json" and result.get("result") == "analyzed" and "content" in result:
             sys.stdout.write(result["content"])
         else:

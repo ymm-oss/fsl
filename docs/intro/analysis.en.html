@@ -101,6 +101,7 @@ fslc analyze spec.fsl --projection impact_graph --focus state:stock --format jso
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
 fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze spec.fsl --export tag-review
 fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
 fslc analyze fsl-project.toml --projection traceability_graph --format json
 fslc analyze spec.fsl --projection action_state_graph --format dot
@@ -117,6 +118,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       <tr><td><code>refinement_graph</code></td><td>Standalone mapping files: impl/abs names, state maps, action maps, stutters, and preserve-progress declarations.</td><td>Review refinement correspondences.</td></tr>
       <tr><td><code>traceability_graph</code></td><td>Project-manifest structure across business, requirements, design, and refinement mapping files.</td><td>Check whether upper requirements land in lower design.</td></tr>
       <tr><td><code>--profile ai-review</code></td><td>Structural review candidates with witnesses, repair candidates, and do-not-assume caveats.</td><td>Choose the first places to inspect.</td></tr>
+      <tr><td><code>--export tag-review</code></td><td>One tagged declaration at a time with its rendered formal definition and identifiers.</td><td>Give a human or explicitly approved external reviewer a stable local review tuple.</td></tr>
     </table>
   </div>
 </section>
@@ -155,6 +157,10 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
         <p>Counter-like effects structurally preserve a weighted sum. Treat it as a candidate invariant, then prove it with <code>verify</code>.</p>
       </div>
       <div class="card">
+        <h3><code>tag_stale_reference</code> / <code>tag_formula_disjoint</code></h3>
+        <p>Exact code-shaped tag identifiers are missing from the current spec or the tagged formal definition. This is local drift evidence, not natural-language meaning judgment.</p>
+      </div>
+      <div class="card">
         <h3><code>divergent_choice</code></h3>
         <p>A depth-4 BMC witness shows two actions enabled in one reachable state and splitting an invariant or acceptance outcome. The finding asks which outcome is intended.</p>
       </div>
@@ -178,6 +184,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>Stable graph data for downstream projections and tools. Schema: <code>schemas/fslc/analysis/tsg.v0.schema.json</code>.</td></tr>
       <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, degree, and structural metrics such as cycle rank and fan-in/fan-out hubs. DOT/Mermaid exports are views over this data.</td></tr>
       <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>Structured review findings with witnesses, repairs, caveats, and optional source locations for editor diagnostics.</td></tr>
+      <tr><td>Tag review export</td><td><code>tag-review.v0</code></td><td>Declaration-local tag/formal-definition tuples for an external meaning review; no model call and no violation verdict.</td></tr>
     </table>
   </div>
 </section>

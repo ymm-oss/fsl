@@ -101,6 +101,7 @@ fslc analyze spec.fsl --projection impact_graph --focus state:stock --format jso
 fslc analyze spec.fsl --projection requirement_property_graph --format json
 fslc analyze spec.fsl --projection property_state_graph --format json
 fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze spec.fsl --export tag-review
 fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
 fslc analyze fsl-project.toml --projection traceability_graph --format json
 fslc analyze spec.fsl --projection action_state_graph --format dot
@@ -117,6 +118,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       <tr><td><code>refinement_graph</code></td><td>単体の mapping file に含まれる impl/abs 名、state map、action map、stutter、preserve-progress 宣言。</td><td>詳細化の対応関係をレビューする。</td></tr>
       <tr><td><code>traceability_graph</code></td><td>project manifest から business、requirements、design、refinement mapping を横断した構造。</td><td>上位要件が下位設計へ落ちているか確認する。</td></tr>
       <tr><td><code>--profile ai-review</code></td><td>構造上のレビュー候補と、その witness、修正候補、早合点してはいけないこと。</td><td>レビューの初動で見る順序を決める。</td></tr>
+      <tr><td><code>--export tag-review</code></td><td>タグ付き宣言を、整形済み形式定義・識別子とともに1宣言ずつ出力。</td><td>人間または明示承認された外部レビュアーへ安定した局所レビュー単位を渡す。</td></tr>
     </table>
   </div>
 </section>
@@ -155,6 +157,10 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
         <p>counter 風の効果が重み付き和を構造的に保存しています。候補 invariant として扱い、<code>verify</code> で証明します。</p>
       </div>
       <div class="card">
+        <h3><code>tag_stale_reference</code> / <code>tag_formula_disjoint</code></h3>
+        <p>タグ中のコード形状識別子が、現在の仕様またはタグ対象の形式定義にありません。局所的なドリフト根拠であり、自然言語の意味判定ではありません。</p>
+      </div>
+      <div class="card">
         <h3><code>divergent_choice</code></h3>
         <p>深さ4のBMC witness が、同じ到達状態で2操作が有効になり、invariant または acceptance の結果が分かれることを示します。どちらが意図かを質問します。</p>
       </div>
@@ -178,6 +184,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>下流の投影やツールが使う安定したグラフデータ。Schema は <code>schemas/fslc/analysis/tsg.v0.schema.json</code>。</td></tr>
       <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>components、SCC、cycles、degree、cycle rank や fan-in/fan-out hub などの structural metrics を含むレビュー用グラフ要約。DOT/Mermaid はこのデータの表示形式です。</td></tr>
       <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>witness、repair、caveat、editor diagnostics 用の任意 source location を含む構造化レビュー所見。</td></tr>
+      <tr><td>Tag review export</td><td><code>tag-review.v0</code></td><td>外部の意味レビュー向け宣言単位タグ/形式定義tuple。モデル呼出しも違反判定も行いません。</td></tr>
     </table>
   </div>
 </section>

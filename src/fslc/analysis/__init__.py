@@ -5,6 +5,7 @@
 
 from .findings import analyze
 from .export import export_graph
+from .tag_review import export_tag_review
 from .project import analyze_project_manifest
 from .projections import analyze_projection
 from .refinement import analyze_refinement_ast
@@ -17,4 +18,5 @@ __all__ = [
     "analyze_refinement_ast",
     "build_tsg",
     "export_graph",
+    "export_tag_review",
 ]
