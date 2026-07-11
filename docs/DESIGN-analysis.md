@@ -175,6 +175,16 @@ These are trend and review-priority signals for downstream tooling.
 - `conservation_candidate`: counter-like `Int` effects structurally preserve a
   weighted sum. This is a candidate invariant only; proving the invariant is the
   job of `fslc verify` / `--engine induction`.
+- `divergent_choice`: bounded BMC finds two distinct actions enabled in the same
+  reachable state whose successors differ on an invariant or acceptance
+  predicate.
+- `unconstrained_effect`: a structural `unread_state` candidate has a bounded
+  reachable witness where two enabled actions write different next values.
+  This supersedes the duplicate `unread_state` finding for that state.
+
+The underspecification findings add a question-form `spec_question`,
+`evidence_basis:"bounded_bmc"`, and explicit depth/reachability metadata. See
+`DESIGN-underspecification.md` for the fixed bound, cost cap, and overlap rules.
 
 Every finding has:
 
@@ -189,12 +199,22 @@ Every finding has:
 - `why_it_matters`
 - `candidate_repairs`
 - `do_not_assume`
+- optional `spec_question` and `evidence_basis`
 
 `progressless_cycle` is deliberately conservative in naming. It does not use
 `H1`, `Betti`, or `homology` in public output, and it does not rely on
 language-specific words such as "retry" or "pending". A cycle can be valid
 retry, review, or compensation behavior; the finding only says that a
 requirement/scenario-linked cycle has no visible progress story.
+
+Tag checks are the narrow exception to the no-natural-language-interpretation
+boundary: they compare exact, code-shaped identifier tokens only and never
+infer sentence meaning. `tag_stale_reference` reports a tag token absent from
+the current spec; `tag_formula_disjoint` reports a named current state/constant
+absent from the tagged formal definition. See
+[`DESIGN-tag-drift.md`](DESIGN-tag-drift.md). For semantic wording review,
+`fslc analyze spec.fsl --export tag-review` emits declaration-local tuples for
+an external reviewer without making any model call.
 
 Project-level `traceability_graph` can additionally emit
 `traceability_gap` findings when an upper-layer requirement/control ID has no
@@ -208,6 +228,7 @@ Versioned schema files live under `schemas/fslc/analysis/`:
 - `tsg.v0.schema.json`
 - `analysis-graph.v0.schema.json`
 - `analysis-findings.v0.schema.json`
+- `tag-review.v0.schema.json`
 
 Downstream consumers should check `schema_version` before assuming shape.
 Additive optional fields can remain in the same schema version; removing or

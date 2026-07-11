@@ -13,6 +13,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   enum  <Name> { <Member>, ... }
   symmetric enum <Name> { <Member>, ... }
   struct <Name> { <field>: <type>, ... }  // field: scalar | Option<scalar>
+  def <name>(<p>: <type name>, ...) = <expr> // non-recursive predicate, frontend-inlined
 
   state { <var>: <type>, ... }
   init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
@@ -41,6 +42,13 @@ usable bare as a guard (`requires b`, `requires not b`) or assigned into
 can't be enumerated) — use a range parameter instead:
 `action f(p in <lo>..<hi>) { ... }` (inline alternative to `<p>: <type name>`,
 no named domain type required).
+
+Use `def` to give a business name to a repeated guard/property expression.
+Calls are file-local and arity-checked; direct/mutual recursion and
+capture-changing substitution are errors. `def` is frontend sugar only, so
+verify/prove/scenarios/Monitor behave exactly as for the hand-expanded
+expression. Put the human-facing requirement tag on the surrounding invariant
+or action; no compiler-generated predicate name appears in diagnostics.
 
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:
@@ -681,17 +689,27 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
+               [--from-state state.json]            # complete Monitor/replay state; replaces init (BMC only)
                [--strict-tags] [--requirements ids.txt] [--no-cache]
+               [--lemma "<expr>"]...                 # induction only; independently adjudicated
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
+              [--from mutants.jsonl]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
+fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
+                                                # production JSONL -> mapped action/state -> Monitor
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc diff <old> <new> [--depth K] [--mapping <mapping>]
+          [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
+                                                  # bounded semantic change report
+fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
+                                                  # materialize both full revision trees; omit spec for changed .fsl batch
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
-fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review
+fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]...
@@ -719,6 +737,50 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+For an induction `unknown_cti`, pass candidate auxiliary invariants with
+repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
+init/actions + implicit bounds, without original user invariants), rejects
+false/non-inductive/invalid candidates with their own evidence, and makes only
+`proved` candidates available to the target proof. A candidate is used only
+when it is false on the current CTI; `lemma_cti_exclusions` records the target,
+CTI, and violated steps. On final `proved`, copy the declarations from
+`auxiliary_invariant_recommendation` into the spec and review that source edit.
+There is no flag for injecting an unverified assumption, and `--lemma` is an
+error with the BMC engine.
+
+`diff` uses bidirectional bounded refinement for behavior changes, implication
+between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
+scenarios against NEW. Its stable finding kinds are `behavior_added`,
+`behavior_removed`, `invariant_weakened`, `invariant_strengthened`,
+`forbidden_relaxed`, `scope_changed`, and `unknown`; an empty report uses
+`no_semantic_change`. A changed `verify` scope is explicit and comparison uses
+NEW's shared entity/number bounds. Findings exit 0 because the command is an
+analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
+verdict is bounded by `--depth`, and a mapping only resolves the direction
+declared in its `impl`/`abs` fields (it is never inverted).
+
+Use `verify --from-state` for bounded prediction from a current concrete state,
+not for proof. The input must be the complete logical JSON emitted by
+`Monitor.state`/replay (enum names, Option as value/`null`, complete Map keys,
+Set/Seq arrays, relation pairs). It replaces `init`, bypasses the verdict cache,
+disables symmetry reduction for concrete identities, and is rejected with the
+induction engine. Results always stamp
+`faithfulness.scope:"bounded_from_snapshot"`, `spec_init:"not_used"`, and
+`induction:"not_applicable"`. A step-zero invariant violation is a valid
+predictive result. Do not fill missing variables: partial snapshots are a
+different, weaker existential query and are rejected.
+
+For production-log replay, each non-empty JSONL line is an object with
+`action`, `params`, and the observed post-action `state`. The mapping file is
+parsed by the same `parse_refinement` path as `fslc refine`: `impl` names the
+external log schema, `abs` names the target spec, `map` covers every target
+state variable, and `action external(args) -> target(exprs)` (or `stutter`)
+maps events. The Monitor executes the target action and compares its state with
+the mapped observed state. This v1 requires complete observed state; missing
+fields/keys are `log_mapping` nonconformance. The first divergence includes
+`failed_at_record` (0-based), `log_line` (1-based), and the action/state
+mismatch. Finite replay does not check `leadsTo`.
 
 `verify` is backed by a persistent verdict cache (issue #169) keyed on every
 input that can affect its output (the post-desugaring kernel AST, the raw
@@ -748,13 +810,26 @@ graph projections can export DOT or Mermaid with `--format dot|mermaid`.
 `--profile ai-review` emits AI-readable review findings such as
 `disconnected_requirement`, `unanchored_property`, `progressless_cycle`,
 `unwritten_state`, `unread_state`, `unguarded_action`, and
-`conservation_candidate`. Treat these as review signals: they carry
+`conservation_candidate`. It also runs a fixed depth-4 bounded semantic probe
+for `divergent_choice` (two same-state enabled actions split an
+invariant/acceptance outcome) and `unconstrained_effect` (an unread state can
+receive different next values from two enabled actions). These add
+`evidence_basis:"bounded_bmc"`, a reachable witness, and `spec_question` ending
+in `?`. Ask that question; do not invent which branch is intended. BMC-backed
+findings supersede duplicate `unread_state`/`unguarded_action` approximations.
+No finding means only “not witnessed within depth 4,” not proof of determinism.
+Treat all findings as review signals: they carry
 `formal_status:"not_a_violation"` unless a future finding explicitly cites
 `verify`/`refine`/`replay` evidence. Versioned schemas live under
 `schemas/fslc/analysis/`.
 
 Natural-language interpretation on top of `analyze` is agent-side only. The core
 analyzer must not infer semantics from English, Japanese, or other free text.
+The deterministic tag checks compare only exact code-shaped identifiers:
+`tag_stale_reference` and `tag_formula_disjoint`. For meaning review, run
+`fslc analyze file.fsl --export tag-review`, compare each `tag.text` with its
+`formal_definition`, cite the declaration tuple, and keep conclusions marked
+`formal_status:not_a_violation`; never silently rewrite intent from this export.
 If an agent reviews requirement text, comments, or source excerpts together with
 the TSG, it must cite the exact text and graph node ids it used, keep
 `formal_status:"not_a_violation"`, and never convert that suggestion into an
@@ -803,6 +878,14 @@ first failed layer and later layers are marked `skipped`.
   the baseline result is returned. `--by-requirement` aggregates by the requirement
   tag of the "killed property" and warns on zero kills as `empty_formalization`
   (a lower bound observed for this mutant set and depth).
+  `--from` appends external JSONL mutants. Each line supplies either full
+  `mutated_spec` source (`spec` alias accepted) or an exact
+  `replace:{target,replacement,occurrence?}` instruction. Valid records use the
+  same oracle; malformed JSON/instructions and parse/name/type/construction
+  errors are `invalid` rather than killed. `summary.kill_rate` and
+  `summary.by_source` exclude invalid records from their denominator, and each
+  mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
+  to the built-in catalog (`0` gives an external-only run).
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
   `reachable` declarations and checks only the named property kind in isolation.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:

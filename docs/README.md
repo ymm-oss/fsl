@@ -25,11 +25,16 @@
 | [`DESIGN-dialects.md`](DESIGN-dialects.md) | Implementation spec for the dialects (declaration tags, fsl-req, fsl-biz) |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
+| [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
+| [`DESIGN-from-state.md`](DESIGN-from-state.md) | Predictive BMC from a complete Monitor/replay logical-state snapshot (`verify --from-state`), including type validation, faithfulness metadata, cache/symmetry boundaries, and induction exclusion |
 | [`DESIGN-trans.md`](DESIGN-trans.md) | `trans` (transition invariant / two-state safety) |
 | [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |
 | [`DESIGN-refinement.md`](DESIGN-refinement.md) | Refinement checking (mapping files, conditional expressions, preserve progress) |
+| [`DESIGN-semantic-diff.md`](DESIGN-semantic-diff.md) | `fslc diff` bounded semantic comparison (bidirectional refinement, invariant implication, forbidden replay, scope and gate contract) |
+| [`DESIGN-diff-git.md`](DESIGN-diff-git.md) | Git/CI adapter for revision-consistent full-tree materialization and changed-spec batch semantic diff |
 | [`DESIGN-compose.md`](DESIGN-compose.md) | Spec composition (namespaces, synchronized actions, internal) |
 | [`DESIGN-bridge.md`](DESIGN-bridge.md) | Implementation bridge (runtime Monitor / replay / testgen) |
+| [`DESIGN-log-replay.md`](DESIGN-log-replay.md) | Production JSONL replay through refinement mapping syntax: record contract, complete-observation boundary, first-divergence JSON, and Monitor execution |
 | [`DESIGN-scenarios.md`](DESIGN-scenarios.md) | scenarios and the unsat-core diagnostics for coverage |
 | [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N> (partial_op, type whitelist) |
 | [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | Option fields in structs |
@@ -40,6 +45,7 @@
 | [`DESIGN-init-if.md`](DESIGN-init-if.md) | Statement-level `if` in `init` (lowered to path-conditional initial-state constraints, same branch shape as action bodies) |
 | [`DESIGN-inline-range.md`](DESIGN-inline-range.md) | Inline anonymous range types (`x: lo..hi`) |
 | [`DESIGN-spec-domains.md`](DESIGN-spec-domains.md) | `entity` / `number` in the kernel `spec` (decoupling a domain from the verification bound) |
+| [`DESIGN-def.md`](DESIGN-def.md) | Non-recursive named predicate frontend sugar, expansion order, capture and diagnostic contract |
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
@@ -53,6 +59,8 @@
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests (`tests/test_coupled_change_meta.py`): LSP index coverage (grammar production ↔ visitor handler, corpus-driven, two-stage) and DESIGN-doc coverage (dialect/CLI command ↔ `docs/DESIGN-*.md`) |
 | [`DESIGN-rust-port.md`](DESIGN-rust-port.md) | Accepted phased architecture for a native Rust CLI and browser Web Worker/WASM port, including solver/runtime dependency boundaries and cross-implementation parity gates |
 | [`DESIGN-analysis.md`](DESIGN-analysis.md) | `fslc analyze` (Typed Semantic Graph, graph projections, focus impact slices, action dependency/conflict graphs, structural metrics, batch mode, refinement/project traceability graphs, DOT/Mermaid exports, schemas, AI-readable structural review findings/candidates) |
+| [`DESIGN-tag-drift.md`](DESIGN-tag-drift.md) | Deterministic declaration-tag identifier drift findings and `tag-review.v0` external review export contract |
+| [`DESIGN-underspecification.md`](DESIGN-underspecification.md) | bounded `divergent_choice` / `unconstrained_effect` AI-review findings and question-form output |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 | [`DESIGN-domain.md`](DESIGN-domain.md) | fsl-domain (`domain`) Functional DDD / async effect dialect: aggregate ownership, command/event decide/evolve lowering, saga/process-manager actions, effect lifecycle state, findings, multi-target scaffolds, and runtime replay |
 | [`DESIGN-effect.md`](DESIGN-effect.md) | fsl-effect lifecycle semantics used by fsl-domain: correlation, retry, timeout, idempotency, and guarantee boundary |

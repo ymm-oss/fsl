@@ -1,0 +1,82 @@
+{
+  "fsl": "1.0",
+  "result": "analyzed",
+  "spec": "TagReview",
+  "analysis": "tag_review",
+  "export": "tag-review",
+  "schema_version": "tag-review.v0",
+  "review_contract": {
+    "unit": "declaration",
+    "decision": "compare tag.text with formal_definition",
+    "formal_status": "not_a_violation",
+    "meaning_judgment": "external_review_required"
+  },
+  "declarations": [
+    {
+      "kind": "action",
+      "name": "increment",
+      "node_id": "action:increment",
+      "tag": {
+        "id": "REQ-1",
+        "text": "updates `old_count`"
+      },
+      "loc": {
+        "line": 8,
+        "column": 3
+      },
+      "formal_definition": {
+        "parameters": [],
+        "requires": [],
+        "ensures": [],
+        "effects": [
+          {
+            "target": "renamed_count",
+            "expression": "renamed_count + 1",
+            "conditions": []
+          }
+        ]
+      },
+      "formal_identifiers": [
+        "renamed_count"
+      ]
+    },
+    {
+      "kind": "invariant",
+      "name": "Aligned",
+      "node_id": "invariant:Aligned",
+      "tag": {
+        "id": "REQ-3",
+        "text": "`renamed_count` stays nonnegative"
+      },
+      "loc": {
+        "line": 16,
+        "column": 3
+      },
+      "formal_definition": {
+        "expression": "renamed_count >= 0"
+      },
+      "formal_identifiers": [
+        "renamed_count"
+      ]
+    },
+    {
+      "kind": "invariant",
+      "name": "Disjoint",
+      "node_id": "invariant:Disjoint",
+      "tag": {
+        "id": "REQ-2",
+        "text": "`AUTO_LIMIT` caps `renamed_count`"
+      },
+      "loc": {
+        "line": 12,
+        "column": 3
+      },
+      "formal_definition": {
+        "expression": "renamed_count >= 0"
+      },
+      "formal_identifiers": [
+        "renamed_count"
+      ]
+    }
+  ]
+}

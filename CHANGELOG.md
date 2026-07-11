@@ -14,6 +14,87 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   and corpus-parity gates for every migration phase. This is a design milestone,
   not a claim that the Rust implementation exists. See
   `docs/DESIGN-rust-port.md`.
+- Declaration tag drift review (issue #188): `analyze --profile ai-review`
+  gains deterministic `tag_stale_reference` and `tag_formula_disjoint`
+  findings based only on exact code-shaped identifiers. `analyze --export
+  tag-review` emits tagged actions/properties with rendered formal definitions
+  under the new `tag-review.v0` schema for declaration-local external review;
+  it never calls a model or promotes wording judgments to violations. See
+  `docs/DESIGN-tag-drift.md`.
+- Named predicate frontend sugar (issue #187): file-local `def name(p: Type) =
+  expr` declarations can be used in kernel, requirements, and compose
+  expressions. Calls are inlined before model construction, keeping
+  model/BMC/runtime unchanged and equivalent to hand expansion. Unknown calls,
+  arity mismatch, direct/mutual recursion, shadowing, and capture-changing
+  substitution are explicit diagnostics. Includes a tagged flagship example;
+  see `docs/DESIGN-def.md`.
+- Git-aware semantic diff (issue #186): `fslc diff --git BASE..HEAD [SPEC]`
+  materializes both complete tracked trees before delegating to the
+  VCS-independent #176 comparison, so imports resolve from their own revision.
+  Omitting `SPEC` compares every changed `.fsl` file. JSON records both commit
+  hashes and `git_archive_full_tree`; batch gates aggregate child `--forbid`
+  violations. See `docs/DESIGN-diff-git.md`.
+- Bounded underspecification findings (issue #179): `fslc analyze --profile
+  ai-review` now uses a fixed depth-4 BMC probe to emit `divergent_choice` when
+  two distinct actions are enabled in the same reachable state and split an
+  invariant/acceptance outcome, and `unconstrained_effect` when an unread state
+  can receive different next values from two enabled actions. Findings include
+  `evidence_basis:"bounded_bmc"`, reachable branch/successor evidence, and a
+  question-form `spec_question`; they remain review-only
+  `formal_status:"not_a_violation"`. Strong semantic findings suppress duplicate
+  `unread_state`/`unguarded_action` approximations, while structural findings
+  remain when no bounded witness exists. The v0 schema gains additive optional
+  question/evidence fields. See `docs/DESIGN-underspecification.md`.
+- External mutation adjudication (issue #178): `fslc mutate SPEC --from
+  mutants.jsonl` appends externally generated full-spec or exact-replacement
+  mutations to the built-in catalog and judges valid records through the same
+  BMC/acceptance/forbidden/refinement oracle. Malformed JSON/instructions,
+  duplicate ids, parse/name/type/construction errors, and spec-name changes are
+  first-class `invalid` generation-quality findings rather than false kills.
+  Mutants now carry `source:"builtin"|"external"`; combined and per-source
+  summaries include `invalid` and kill rates over killed+survived only.
+  `--max-mutants` caps the built-in catalog, enabling external-only runs with
+  `--max-mutants 0`. See `docs/DESIGN-mutate.md`.
+- Verified auxiliary lemma candidates for k-induction (issue #177): repeatable
+  `fslc verify --engine induction --lemma "EXPR"` independently proves each
+  candidate using the original transition system and implicit bounds, without
+  assuming the original user invariants. False/non-inductive/invalid candidates
+  are rejected with their own counterexample, CTI, or parse/type result; only
+  `proved` candidates can strengthen the target proof. The retry loop evaluates
+  candidates in each target CTI model, records which lemma excluded which CTI
+  and steps under `lemma_cti_exclusions`, and on final `proved` emits source
+  declarations under `auxiliary_invariant_recommendation` without rewriting the
+  file. Lemma text/order is included in the persistent verify cache key, and
+  BMC use is rejected as a usage error. See
+  `docs/DESIGN-induction-lemmas.md`.
+- Semantic specification diff (issue #176): `fslc diff OLD.fsl NEW.fsl
+  --depth K` classifies bounded changes through bidirectional auto-refinement
+  (`behavior_added` / `behavior_removed`), SMT implication of user-invariant
+  conjunctions (`invariant_weakened` / `invariant_strengthened`), and replay of
+  OLD negative scenarios against NEW (`forbidden_relaxed`). Directional
+  differences include counterexample witnesses; incompatible names are
+  explicit `unknown` unless a one-direction `--mapping` is supplied. Changes
+  to `verify` entity/number bounds are first-class `scope_changed` findings and
+  comparisons record/use NEW's scope. Findings are analysis (exit 0); only an
+  explicit `--forbid kind,...` gate exits 1. See
+  `docs/DESIGN-semantic-diff.md`.
+- Predictive BMC from a state snapshot (issue #175): `fslc verify SPEC
+  --from-state state.json` replaces the declared init with a complete
+  Monitor/replay logical-state JSON and searches for violations from that point.
+  Snapshot runs are BMC-only, bypass the verdict cache, preserve concrete
+  identities by disabling symmetry reduction, and stamp
+  `faithfulness.scope:"bounded_from_snapshot"` with `spec_init:"not_used"`.
+  Full type/shape validation covers every kernel state type; partial snapshots
+  are rejected rather than treated as unconstrained. See
+  `docs/DESIGN-from-state.md`.
+- Production-log replay mappings (issue #174): `fslc replay SPEC --from-log
+  events.jsonl --mapping log_mapping.fsl` reuses the refinement parser and
+  mapping expressions to translate external action/parameter names and observed
+  post-action state into the target spec. The Z3-free Monitor stops at the first
+  rejected action, mapping failure, or state mismatch and reports both the
+  zero-based record index and one-based JSONL line. The initial contract requires
+  complete observed state; missing fields are nonconformant rather than silently
+  unconstrained. See `docs/DESIGN-log-replay.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,

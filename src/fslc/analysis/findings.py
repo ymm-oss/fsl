@@ -9,20 +9,39 @@ from .invariants import conservation_candidates
 from .projections import build_action_dependency_graph, project_tsg
 from .schema import FINDINGS_SCHEMA_VERSION
 from .tsg import PROPERTY_NODE_KINDS, SCENARIO_NODE_KINDS, build_tsg, expr_reads, node_by_id
+from .tag_review import tag_drift_candidates
+from .underspecification import analyze_underspecification
 
 
 def analyze(spec, profile="ai-review"):
     if profile != "ai-review":
         raise ValueError(f"unsupported profile: {profile}")
     tsg = build_tsg(spec)
+    unread_candidates = _unread_state_candidates(tsg)
+    semantic = analyze_underspecification(
+        spec,
+        [state_id.removeprefix("state:") for state_id in unread_candidates],
+    )
+    unconstrained_nodes = {
+        f"state:{item['state_name']}" for item in semantic["unconstrained_effects"]
+    }
+    semantic_action_nodes = {
+        action_node
+        for collection in ("divergent_choices", "unconstrained_effects")
+        for item in semantic[collection]
+        for action_node in item["action_nodes"]
+    }
     findings = []
     findings.extend(_disconnected_requirements(tsg))
     findings.extend(_unanchored_properties(tsg))
     findings.extend(_progressless_cycles(spec, tsg))
     findings.extend(_unwritten_state(tsg))
-    findings.extend(_unread_state(tsg))
-    findings.extend(_unguarded_actions(tsg))
+    findings.extend(_unread_state(tsg, suppress=unconstrained_nodes))
+    findings.extend(_unguarded_actions(tsg, suppress=semantic_action_nodes))
+    findings.extend(_tag_drift_findings(spec))
     findings.extend(_conservation_candidate_findings(spec))
+    findings.extend(_divergent_choice_findings(semantic["divergent_choices"]))
+    findings.extend(_unconstrained_effect_findings(semantic["unconstrained_effects"]))
     findings = _renumber(findings)
     return {
         "analysis": "structure",
@@ -64,6 +83,43 @@ def _disconnected_requirements(tsg):
                 "The implementation is missing behavior.",
             ],
             confidence=0.8,
+        ))
+    return findings
+
+
+def _tag_drift_findings(spec):
+    findings = []
+    for candidate in tag_drift_candidates(spec):
+        declaration = candidate["declaration"]
+        identifiers = candidate["identifiers"]
+        if candidate["finding_type"] == "tag_stale_reference":
+            witness_kind = "tag_mentions_unknown_identifier"
+            why = "The declaration tag contains a code-shaped identifier that is not present in the current specification, which may be a stale reference after a rename or deletion."
+            repair = "Update the tag to the current identifier, or confirm that the token is prose and quote/reword it so it is not presented as an FSL identifier."
+            caveat = "The analyzer does not prove that the prose intended to reference an FSL identifier."
+        else:
+            witness_kind = "tag_identifier_absent_from_formula"
+            why = "The tag names a current state variable or constant that the tagged formal definition does not reference, so the human label and checked formula may have drifted apart."
+            repair = "Review the tag and formal definition together; update whichever side no longer expresses the intended requirement."
+            caveat = "Identifier overlap is not proof that natural-language and formal meanings agree."
+        findings.append(_finding(
+            candidate["finding_type"],
+            [declaration["node_id"]],
+            {
+                "kind": witness_kind,
+                "declaration": {
+                    "kind": declaration["kind"],
+                    "name": declaration["name"],
+                    "tag": declaration["tag"],
+                },
+                "identifiers": identifiers,
+                "formal_identifiers": declaration["formal_identifiers"],
+            },
+            why,
+            [{"kind": "review_tag_formula_pair", "template": repair}],
+            [caveat, "This finding is not a verifier violation."],
+            confidence=0.82 if candidate["finding_type"] == "tag_stale_reference" else 0.74,
+            loc=declaration.get("loc"),
         ))
     return findings
 
@@ -183,11 +239,11 @@ def _progressless_cycles(spec, tsg):
     return findings
 
 
-def _unread_state(tsg):
+def _unread_state_candidates(tsg):
     nodes = node_by_id(tsg)
     relevant = _transitively_relevant_state(tsg)
     writers = _state_writers(tsg)
-    findings = []
+    candidates = []
     for state in sorted((n for n in tsg["nodes"] if n["kind"] == "state"), key=lambda n: n["id"]):
         state_id = state["id"]
         state_writers = sorted(writers.get(state_id, set()))
@@ -195,6 +251,20 @@ def _unread_state(tsg):
             continue
         if any((nodes.get(writer) or {}).get("meta") for writer in state_writers):
             continue
+        candidates.append(state_id)
+    return candidates
+
+
+def _unread_state(tsg, suppress=None):
+    nodes = node_by_id(tsg)
+    writers = _state_writers(tsg)
+    state_by_id = {n["id"]: n for n in tsg["nodes"] if n["kind"] == "state"}
+    findings = []
+    for state_id in _unread_state_candidates(tsg):
+        if state_id in (suppress or set()):
+            continue
+        state = state_by_id[state_id]
+        state_writers = sorted(writers.get(state_id, set()))
         findings.append(_finding(
             "unread_state",
             [state_id],
@@ -223,6 +293,69 @@ def _unread_state(tsg):
             ],
             confidence=0.64,
             loc=state.get("loc"),
+        ))
+    return findings
+
+
+def _divergent_choice_findings(records):
+    findings = []
+    for record in records:
+        action_names = [action["name"] for action in record["actions"]]
+        question = (
+            f"Both {action_names[0]} and {action_names[1]} are enabled in this reachable "
+            "state and produce different contract outcomes. Which outcome is intended, "
+            "or should both be explicitly allowed by an invariant or acceptance case?"
+        )
+        involved = sorted(set(record["predicate_nodes"] + record["action_nodes"]))
+        findings.append(_finding(
+            "divergent_choice",
+            involved,
+            record,
+            (
+                "Two different actions are enabled in the same bounded-reachable state, "
+                "and choosing between them changes an invariant or acceptance predicate."
+            ),
+            [{"kind": "ask_spec_question", "template": question}],
+            [
+                "Either action is wrong.",
+                "The bounded witness proves the product must choose only one action.",
+                "No deeper reachable choice exists beyond the analyzed bound.",
+            ],
+            confidence=0.86,
+            spec_question=question,
+            evidence_basis="bounded_bmc",
+        ))
+    return findings
+
+
+def _unconstrained_effect_findings(records):
+    findings = []
+    for record in records:
+        action_names = [action["name"] for action in record["actions"]]
+        state_name = record["state_name"]
+        question = (
+            f"Both {action_names[0]} and {action_names[1]} can write different values to "
+            f"{state_name} in this reachable state, but no guard, property, ensures clause, "
+            "or scenario constrains that value. What outcome is intended, or should both "
+            "possibilities be declared explicitly?"
+        )
+        findings.append(_finding(
+            "unconstrained_effect",
+            [f"state:{state_name}", *sorted(record["action_nodes"])],
+            record,
+            (
+                "A state value outside the contract-observation graph has multiple concrete "
+                "next values from the same bounded-reachable state."
+            ),
+            [{"kind": "ask_spec_question", "template": question}],
+            [
+                "The state variable is safe to delete.",
+                "Either successor is incorrect.",
+                "The bounded witness is an unbounded proof of freedom.",
+            ],
+            confidence=0.82,
+            spec_question=question,
+            evidence_basis="bounded_bmc",
         ))
     return findings
 
@@ -304,7 +437,7 @@ def _conservation_candidate_findings(spec):
     return findings
 
 
-def _unguarded_actions(tsg):
+def _unguarded_actions(tsg, suppress=None):
     has_guard = set()
     nodes = node_by_id(tsg)
     for e in tsg["edges"]:
@@ -314,6 +447,8 @@ def _unguarded_actions(tsg):
     findings = []
     for action in sorted((n for n in tsg["nodes"] if n["kind"] == "action"), key=lambda n: n["id"]):
         if action.get("generated"):
+            continue
+        if action["id"] in (suppress or set()):
             continue
         if action["id"] in has_guard:
             continue
@@ -477,7 +612,9 @@ def read_for_state(tsg, state_id):
     return readers
 
 
-def _finding(finding_type, involved_nodes, witness, why, repairs, caveats, confidence, loc=None):
+def _finding(
+        finding_type, involved_nodes, witness, why, repairs, caveats, confidence,
+        loc=None, spec_question=None, evidence_basis=None):
     out = {
         "finding_id": "",
         "analysis": "structure",
@@ -493,6 +630,10 @@ def _finding(finding_type, involved_nodes, witness, why, repairs, caveats, confi
     }
     if loc:
         out["loc"] = loc
+    if spec_question is not None:
+        out["spec_question"] = spec_question
+    if evidence_basis is not None:
+        out["evidence_basis"] = evidence_basis
     return out
 
 

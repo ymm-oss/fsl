@@ -231,6 +231,7 @@ the formalization memo.**
 | "must never" / "always the case" (prohibition, invariance) | `invariant` (safety) |
 | "prohibit/constrain a change from one state to the next" (two-state safety) | `trans` (use `old()` to reference the pre-transition state) |
 | "can only do X when Y" (precondition) | an action's `requires` |
+| a long/repeated business condition needs a stable name | file-local non-recursive `def name(p: Type) = expr`, then call it from guards/properties |
 | "once X happens, Y must eventually happen" (response, progress) | `leadsTo` + `fair` on the action that drives progress |
 | "P must become Q within K steps" (bounded response) | `leadsTo Name { P ~> within K Q }` |
 | "keep P true until Q" (safety, Q may never happen) | `unless Name { P unless Q }` |
@@ -254,11 +255,18 @@ the formalization memo.**
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
+   To ask a bounded operational what-if from a complete `Monitor.state` JSON,
+   use `fslc verify file.fsl --from-state state.json --depth 8`; this replaces
+   `init`, is BMC-only, and is stamped `bounded_from_snapshot`.
 3. Once verified, run `fslc verify file.fsl --engine induction` → done at `proved`
    (note: `--depth K` **includes** step K. Invariants become infinite-depth under
    `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,
    in which case induction can prove that response with an unbounded ranking
-   argument)
+   argument). If induction returns `unknown_cti`, candidate auxiliary invariants
+   may be machine-judged with repeatable `--lemma "EXPR"`: only independently
+   `proved` candidates are used, rejected candidates retain counterexample/CTI
+   evidence, and successful output recommends declarations to write back. Never
+   treat a candidate as an assumption without this adjudication.
 4. As needed: `fslc explain file.fsl --depth 8 --readable`
    (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
    checks, a "what if this rule were absent" counterfactual for each user
@@ -269,7 +277,10 @@ the formalization memo.**
    `fslc analyze file.fsl --profile ai-review`
    (emits structural review findings over the Typed Semantic Graph, such as
    disconnected requirements, unanchored properties, progressless cycles,
-   unwritten state, and unguarded actions. `analyze` also supports batch
+   unwritten state, and unguarded actions, plus depth-4 BMC-backed
+   `divergent_choice` / `unconstrained_effect` questions. Present
+   `spec_question` to the specification owner instead of choosing a branch or
+   inventing a constraint. `analyze` also supports batch
    file/directory review, standalone `refinement_graph`, project
    `traceability_graph`, DOT/Mermaid graph exports, and JSON schemas under
    `schemas/fslc/analysis/`. These are review signals with
@@ -279,6 +290,10 @@ the formalization memo.**
    `formal_status:"not_a_violation"`, do not turn suggestions into fslc
    violations or CI failures, and do not send source/requirement/comment text to
    an external model unless the user or environment has explicitly opted in,
+   For tag/formula alignment, first run
+   `fslc analyze file.fsl --export tag-review` and compare one declaration tuple
+   at a time. Treat `tag_stale_reference` / `tag_formula_disjoint` as exact
+   identifier evidence only, not semantic proof,
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a
@@ -286,8 +301,17 @@ the formalization memo.**
    baseline result), `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
-   (log conformance), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
-   of a detailed spec).
+   (normalized spec-action log conformance), or `fslc replay --from-log
+   events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
+   refinement syntax), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
+   of a detailed spec), and `fslc diff old.fsl new.fsl --depth 8` (bounded
+   semantic change analysis with behavior/invariant/forbidden witnesses). Diff
+   findings are informational by default; add an explicit comma-separated
+   `--forbid` policy to make selected kinds fail CI.
+   In a Git/PR workflow use `fslc diff --git BASE..HEAD [spec.fsl]`: both full
+   trees are materialized so imports resolve at their own revision. Omit the
+   path to compare all changed `.fsl` files. Do not replace this with two
+   `git show` temporary files for imported or composed specifications.
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
    runtime event evidence. For recursive fsl-ai agent composition, use

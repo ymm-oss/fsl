@@ -215,9 +215,15 @@ spec StateRelevance {
     out = run_analyze(str(path), profile="ai-review")
     unread = _findings(out, "unread_state")
     unread_nodes = {tuple(f["involved_nodes"]) for f in unread}
+    unconstrained = _findings(out, "unconstrained_effect")
+    unconstrained_nodes = {f["involved_nodes"][0] for f in unconstrained}
 
-    assert ("state:dead_source",) in unread_nodes
-    assert ("state:dead_derived",) in unread_nodes
+    # The bounded semantic probe upgrades these two structural unread findings
+    # to unconstrained_effect and suppresses the duplicate report.
+    assert "state:dead_source" in unconstrained_nodes
+    assert "state:dead_derived" in unconstrained_nodes
+    assert ("state:dead_source",) not in unread_nodes
+    assert ("state:dead_derived",) not in unread_nodes
     assert ("state:source",) not in unread_nodes
     assert ("state:derived",) not in unread_nodes
     assert ("state:observed",) not in unread_nodes
@@ -244,8 +250,12 @@ spec ActionGuards {
 
     out = run_analyze(str(path), profile="ai-review")
     unguarded = _findings(out, "unguarded_action")
+    unconstrained = _findings(out, "unconstrained_effect")
 
-    assert any(f["involved_nodes"] == ["action:broad"] for f in unguarded)
+    # The reachable broad-vs-guarded choice produces different unconstrained y
+    # successors, so the semantic question supersedes the structural no-guard report.
+    assert not any(f["involved_nodes"] == ["action:broad"] for f in unguarded)
+    assert any(f["involved_nodes"][0] == "state:y" for f in unconstrained)
     assert not any(f["involved_nodes"] == ["action:guarded"] for f in unguarded)
     assert all(f["candidate_repairs"] and f["do_not_assume"] for f in unguarded)
 
