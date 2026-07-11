@@ -17,6 +17,7 @@ from pathlib import Path
 from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
 from .model import build_spec, check_spec, FslError, strict_tag_warnings
+from .doc_trace import check_doc_trace
 from .bmc import verify, prove, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
@@ -314,7 +315,7 @@ def _bounds_skip_warnings(ids, kind, bounds_overrides):
     ]
 
 
-def run_check(file, strict_tags=False, requirements=None):
+def run_check(file, strict_tags=False, requirements=None, docs=None):
     try:
         src = open(file, encoding="utf-8").read()
         if is_ai_agent_source(src) or is_ai_project_source(src):
@@ -343,6 +344,9 @@ def run_check(file, strict_tags=False, requirements=None):
             "spec": spec["name"],
             "warnings": spec["warnings"],
         }
+        doc_warnings, _doc_path, _doc_sha256 = check_doc_trace(file, spec, docs)
+        if doc_warnings:
+            out["warnings"] = list(out["warnings"]) + doc_warnings
         impl = _implements_result(spec)
         if impl:
             out["implements"] = impl
@@ -852,7 +856,7 @@ def run_sweep(
 
 def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock_mode,
                           vacuity_mode, property_name, exclude_property_names,
-                          strict_tags, requirements, instances, values):
+                          strict_tags, requirements, instances, values, docs_sha256):
     """Best-effort cache lookup. Returns ``(cache_key, xdepth_key, hit_or_None)``;
     ``cache_key`` is ``None`` if the run is uncacheable (cache disabled, or the
     key computation itself failed) -- callers must treat that as a plain miss
@@ -868,7 +872,7 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
             k_ind=k_ind, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode,
             property_name=property_name, exclude_property_names=exclude_property_names,
             strict_tags=strict_tags, requirements_sha256=requirements_sha256,
-            instances=instances, values=values,
+            instances=instances, values=values, docs_sha256=docs_sha256,
         )
         return cache_key, xdepth_key, verify_cache.lookup(cache_key, xdepth_key, depth)
     except Exception:  # noqa: BLE001 -- any cache-layer failure degrades to an uncached run
@@ -878,11 +882,13 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None, instances=None, values=None, use_cache=True):
+        exclude_property_names=None, instances=None, values=None, use_cache=True,
+        docs=None):
     try:
         bounds_overrides = _build_bounds_overrides(instances, values)
         has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
         spec, source_lines, ast, display_names, src = _read_spec(file, bounds_overrides)
+        doc_warnings, _doc_path, docs_sha256 = check_doc_trace(file, spec, docs)
         acc, acc_skipped = _acceptance_error(spec, skip_out_of_range=has_bounds_overrides)
         if acc:
             return _envelope(acc)
@@ -895,7 +901,7 @@ def run_verify(
             cache_key, xdepth_key, cached = _verify_cache_lookup(
                 ast, display_names, src, engine, depth, k_ind, deadlock_mode, vacuity_mode,
                 property_name, exclude_property_names, strict_tags, requirements,
-                instances, values,
+                instances, values, docs_sha256,
             )
         verify_mode = cached is not None and os.environ.get("FSLC_CACHE_VERIFY") == "1"
         if cached is not None and not verify_mode:
@@ -937,6 +943,9 @@ def run_verify(
             out = dict(out)
             out["implements"] = impl
         out = _add_strict_tag_warnings(out, spec, strict_tags, requirements)
+        if doc_warnings:
+            out = dict(out)
+            out["warnings"] = list(out.get("warnings") or []) + doc_warnings
         skip_warnings = (
             _bounds_skip_warnings(acc_skipped, "acceptance", bounds_overrides)
             + _bounds_skip_warnings(forb_skipped, "forbidden", bounds_overrides)
@@ -1789,6 +1798,8 @@ def _build_arg_parser():
     c.add_argument("file")
     c.add_argument("--strict-tags", action="store_true")
     c.add_argument("--requirements", default=None)
+    c.add_argument("--docs", default=None,
+                   help="canonical Markdown requirements document")
 
     v = sub.add_parser("verify")
     v.add_argument("file")
@@ -1813,6 +1824,8 @@ def _build_arg_parser():
                         "(NAME=LO..HI; repeatable)")
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
+    v.add_argument("--docs", default=None,
+                   help="canonical Markdown requirements document")
     v.add_argument("--no-cache", action="store_true",
                    help="skip the persistent verdict cache for this run (neither reads nor writes it)")
 
@@ -2023,7 +2036,7 @@ def _dispatch(args):
         print(f"fslc {__version__}")
         return 0
     if args.cmd == "check":
-        result = run_check(args.file, args.strict_tags, args.requirements)
+        result = run_check(args.file, args.strict_tags, args.requirements, args.docs)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "typestate":
         result = run_typestate(args.file)
@@ -2258,7 +2271,8 @@ def _dispatch(args):
                             exclude_property_names=args.exclude_property_names,
                             instances=args.instances,
                             values=args.values,
-                            use_cache=not args.no_cache)
+                            use_cache=not args.no_cache,
+                            docs=args.docs)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

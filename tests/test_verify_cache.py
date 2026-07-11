@@ -279,7 +279,10 @@ def test_run_verify_signature_is_fully_classified():
     key_params = set(inspect.signature(verify_cache.compute_key).parameters)
     # run_verify's `requirements` (a path) becomes compute_key's
     # `requirements_sha256`; everything else must match by name.
-    mapped = {"requirements": "requirements_sha256"}
+    mapped = {
+        "requirements": "requirements_sha256",
+        "docs": "docs_sha256",
+    }
     for name in run_verify_params - _NON_SEMANTIC_RUN_VERIFY_PARAMS:
         target = mapped.get(name, name)
         assert target in key_params or name in ("ast", "display_names", "src"), (

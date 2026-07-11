@@ -56,7 +56,9 @@ default output unchanged.
 
 ## 6. Future work / related
 
-`unknown_requirement_id` (ghost requirements, typos) and `--strict-tags error` (CI gate) are v2.
+Canonical-document `ghost_requirement`, `missing_formalization`, and copied-text
+freshness are implemented by `--docs`; see
+[`DESIGN-doc-trace.md`](DESIGN-doc-trace.md). `--strict-tags error` remains v2.
 Limited to **existence-level** reconciliation — empty formalization that is tag-only
 (**semantic level**) is handled by #6 mutate's requirement stress report
 (`empty_formalization`). Roadmap #1.

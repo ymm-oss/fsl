@@ -656,7 +656,7 @@ variable.</p></div></details>
 <li>A full <code>push</code> into a Seq is also detected automatically as <code>type_bound</code>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
-<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt; [--docs requirements.md] # syntax / names / types + optional canonical-doc trace
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--deadlock warn|error|ignore]
@@ -665,6 +665,7 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                                                  #   invariant / trans / leadsTo / reachable (for probing)
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+               [--docs requirements.md]          # canonical Markdown ID/freshness trace
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
@@ -1226,6 +1227,14 @@ scenarios carry <code>requirement: {id, text}</code>:</p>
 <pre><code class="language-fsl">invariant PaidLedger &quot;REQ-3: the ledger matches the number of payments&quot; { ... }
 action submit(c: Case, a: Amount) &quot;REQ-1: amounts at or below the threshold are auto-approved&quot; { ... }
 </code></pre>
+<p>When Markdown must remain the canonical natural-language contract, write every
+normative section as <code>## REQ-n: title</code>, with its body continuing until the next
+heading. The canonical tag text is <code>title + body</code> with whitespace collapsed.
+<code>check/verify --docs FILE</code> reports <code>missing_formalization</code>,
+<code>ghost_requirement</code>, and <code>stale_tag</code> (including old/new text). A spec-level tag
+<code>spec Cart "source: requirements.md"</code> auto-discovers the file relative to the
+spec. Without either input, output is unchanged. See
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-doc-trace.md"><code>DESIGN-doc-trace.md</code></a>.</p>
 <h3 id="132-requirements-layer-requirements-the-fsl-req-dialect">13.2 Requirements layer: <code>requirements</code> (the fsl-req dialect)</h3>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }

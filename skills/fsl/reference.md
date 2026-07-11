@@ -673,7 +673,7 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 ## 7. CLI and JSON essentials
 
 ```
-fslc check <f>                                  # syntax / names / types only
+fslc check <f> [--docs requirements.md]         # syntax / names / types + optional canonical-doc trace
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property in isolation
@@ -682,6 +682,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
                [--strict-tags] [--requirements ids.txt] [--no-cache]
+               [--docs requirements.md]
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
@@ -1053,6 +1054,13 @@ leadsTo / action:
 `invariant PaidLedger "REQ-3: ledger consistency" { ... }` →
 `requirement: {id, text}` in violated / unknown_cti / coverage diagnostic /
 scenarios / `refinement_failed` (root).
+
+If Markdown is canonical, every normative requirement must use
+`## REQ-n: title`; its body ends at the next heading. Copy the whitespace-
+normalized `title + body` into FSL tags, then run `check/verify --docs FILE`.
+`missing_formalization`, `ghost_requirement`, and `stale_tag` are trace/freshness
+warnings, not semantic-equivalence judgments. `spec X "source: relative.md"`
+auto-discovers the doc from the spec directory.
 
 ### Authoring specs as readable documentation (requirements + design)
 

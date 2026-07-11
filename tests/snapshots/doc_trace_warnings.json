@@ -1,0 +1,44 @@
+[
+  {
+    "kind": "missing_formalization",
+    "requirement": {
+      "id": "REQ-2",
+      "text": "audit is retained Audit history remains available."
+    },
+    "document": "requirements.md",
+    "message": "canonical requirement REQ-2 has no formal tag or scenario"
+  },
+  {
+    "kind": "ghost_requirement",
+    "requirement": {
+      "id": "REQ-3"
+    },
+    "document": "requirements.md",
+    "elements": [
+      "invariant:Ghost"
+    ],
+    "message": "formal requirement REQ-3 is absent from the canonical document"
+  },
+  {
+    "kind": "stale_tag",
+    "requirement": {
+      "id": "REQ-1"
+    },
+    "element": "action:enable",
+    "document": "requirements.md",
+    "old_text": "old flag wording",
+    "new_text": "flag can be enabled The flag moves from false to true.",
+    "message": "formal tag text for REQ-1 differs from the canonical document"
+  },
+  {
+    "kind": "stale_tag",
+    "requirement": {
+      "id": "REQ-1"
+    },
+    "element": "invariant:BoolFlag",
+    "document": "requirements.md",
+    "old_text": "old flag wording",
+    "new_text": "flag can be enabled The flag moves from false to true.",
+    "message": "formal tag text for REQ-1 differs from the canonical document"
+  }
+]

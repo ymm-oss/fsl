@@ -217,6 +217,11 @@ This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
 "unfounded fabrications (untagged)."
 
+When the user's canonical contract is Markdown rather than `.fsl`, enforce the
+`## REQ-n: title` normative-section format, copy the normalized title+body into
+the matching FSL tags, and run `check/verify --docs`. Treat stale old/new text
+as review evidence; do not claim that matching text proves formula meaning.
+
 ## Natural language → syntax mapping (from the formalization memo to the spec)
 
 Map the sentences extracted during requirement normalization (the memo above) to

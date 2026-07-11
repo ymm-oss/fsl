@@ -142,6 +142,7 @@ def compute_key(
     exclude_property_names: Optional[list],
     strict_tags: bool,
     requirements_sha256: Optional[str],
+    docs_sha256: Optional[str],
     instances: Optional[list],
     values: Optional[list],
 ) -> tuple:
@@ -163,6 +164,7 @@ def compute_key(
         "exclude_property_names": sorted(exclude_property_names or []),
         "strict_tags": strict_tags,
         "requirements_sha256": requirements_sha256,
+        "docs_sha256": docs_sha256,
         "instances": sorted(instances or []),
         "values": sorted(values or []),
     }

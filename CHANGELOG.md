@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Canonical Markdown trace checks (issue #192): `check/verify --docs FILE`
+  extracts normative `## REQ-n: title` sections and reports
+  `missing_formalization`, `ghost_requirement`, and `stale_tag` with old/new
+  text evidence. `spec X "source: relative.md"` auto-discovers the doc. Exact
+  doc bytes participate in the verify-cache key, while no-doc defaults remain
+  unchanged. See `docs/DESIGN-doc-trace.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,

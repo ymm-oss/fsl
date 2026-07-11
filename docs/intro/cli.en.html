@@ -77,7 +77,9 @@ def _error_envelope(kind, message, loc=None, expected=None, hint=None):
     if hint:
         err[&quot;hint&quot;] = hint
     return _envelope(err)
-</pre></div></details><div class="disclosure-tree"><details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] file
+</pre></div></details><div class="disclosure-tree"><details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS]
+                  [--docs DOCS]
+                  file
 
 positional arguments:
   file
@@ -86,13 +88,14 @@ options:
   -h, --help            show this help message and exit
   --strict-tags
   --requirements REQUIREMENTS
+  --docs DOCS           canonical Markdown requirements document
 </pre></div></details>
 <details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
                    [--deadlock {warn,error,ignore}]
                    [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]
                    [--exclude-property EXCLUDE_PROPERTY_NAMES]
                    [--instances INSTANCES] [--values VALUES] [--strict-tags]
-                   [--requirements REQUIREMENTS] [--no-cache]
+                   [--requirements REQUIREMENTS] [--docs DOCS] [--no-cache]
                    file
 
 positional arguments:
@@ -119,6 +122,7 @@ options:
                         (NAME=LO..HI; repeatable)
   --strict-tags
   --requirements REQUIREMENTS
+  --docs DOCS           canonical Markdown requirements document
   --no-cache            skip the persistent verdict cache for this run
                         (neither reads nor writes it)
 </pre></div></details>

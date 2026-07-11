@@ -572,7 +572,7 @@ variable.
 ## 7. The verifier `fslc`
 
 ```
-fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc check     <file.fsl> [--docs requirements.md] # syntax / names / types + optional canonical-doc trace
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--deadlock warn|error|ignore]
@@ -581,6 +581,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                                                  #   invariant / trans / leadsTo / reachable (for probing)
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+               [--docs requirements.md]          # canonical Markdown ID/freshness trace
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
@@ -1179,6 +1180,15 @@ scenarios carry `requirement: {id, text}`:
 invariant PaidLedger "REQ-3: the ledger matches the number of payments" { ... }
 action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are auto-approved" { ... }
 ```
+
+When Markdown must remain the canonical natural-language contract, write every
+normative section as `## REQ-n: title`, with its body continuing until the next
+heading. The canonical tag text is `title + body` with whitespace collapsed.
+`check/verify --docs FILE` reports `missing_formalization`,
+`ghost_requirement`, and `stale_tag` (including old/new text). A spec-level tag
+`spec Cart "source: requirements.md"` auto-discovers the file relative to the
+spec. Without either input, output is unchanged. See
+[`DESIGN-doc-trace.md`](DESIGN-doc-trace.md).
 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 

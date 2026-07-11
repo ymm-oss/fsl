@@ -197,8 +197,8 @@ TOP_DEF_DESIGN_DOCS = {
 # command -> tuple of required docs, or a str waiver reason.
 COMMAND_DESIGN_DOCS = {
     "version": "CLI plumbing, no design doc of its own",
-    "check": ("DESIGN-v1.md",),
-    "verify": ("DESIGN-v1.md", "DESIGN-induction.md"),
+    "check": ("DESIGN-v1.md", "DESIGN-doc-trace.md"),
+    "verify": ("DESIGN-v1.md", "DESIGN-induction.md", "DESIGN-doc-trace.md"),
     "sweep": "scope-grid driver over verify; no standalone semantics (documented in LANGUAGE.md)",
     "scenarios": ("DESIGN-scenarios.md",),
     "replay": ("DESIGN-bridge.md",),
