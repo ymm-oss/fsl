@@ -216,7 +216,7 @@ COMMAND_DESIGN_DOCS = {
     "diff": ("DESIGN-semantic-diff.md",),
     "chain": ("DESIGN-layers.md",),
     "typestate": ("DESIGN-typestate.md",),
-    "analyze": ("DESIGN-analysis.md",),
+    "analyze": ("DESIGN-analysis.md", "DESIGN-underspecification.md"),
     "db": ("DESIGN-db.md",),
     "compat": ("DESIGN-db.md",),
     "ai": ("DESIGN-ai-hard.md", "DESIGN-stochastic.md"),

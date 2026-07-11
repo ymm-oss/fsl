@@ -800,7 +800,15 @@ graph projections can export DOT or Mermaid with `--format dot|mermaid`.
 `--profile ai-review` emits AI-readable review findings such as
 `disconnected_requirement`, `unanchored_property`, `progressless_cycle`,
 `unwritten_state`, `unread_state`, `unguarded_action`, and
-`conservation_candidate`. Treat these as review signals: they carry
+`conservation_candidate`. It also runs a fixed depth-4 bounded semantic probe
+for `divergent_choice` (two same-state enabled actions split an
+invariant/acceptance outcome) and `unconstrained_effect` (an unread state can
+receive different next values from two enabled actions). These add
+`evidence_basis:"bounded_bmc"`, a reachable witness, and `spec_question` ending
+in `?`. Ask that question; do not invent which branch is intended. BMC-backed
+findings supersede duplicate `unread_state`/`unguarded_action` approximations.
+No finding means only “not witnessed within depth 4,” not proof of determinism.
+Treat all findings as review signals: they carry
 `formal_status:"not_a_violation"` unless a future finding explicitly cites
 `verify`/`refine`/`replay` evidence. Versioned schemas live under
 `schemas/fslc/analysis/`.

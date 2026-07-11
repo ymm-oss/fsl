@@ -154,9 +154,17 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
         <h3><code>conservation_candidate</code></h3>
         <p>Counter-like effects structurally preserve a weighted sum. Treat it as a candidate invariant, then prove it with <code>verify</code>.</p>
       </div>
+      <div class="card">
+        <h3><code>divergent_choice</code></h3>
+        <p>A depth-4 BMC witness shows two actions enabled in one reachable state and splitting an invariant or acceptance outcome. The finding asks which outcome is intended.</p>
+      </div>
+      <div class="card">
+        <h3><code>unconstrained_effect</code></h3>
+        <p>A depth-4 BMC witness shows two actions writing different next values to state outside the contract-observation graph. It supersedes the duplicate <code>unread_state</code> signal.</p>
+      </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">The cycle finding does not inspect English keywords in names. It relies on structural anchors such as requirement tags and scenarios, so non-English requirement text is preserved without being interpreted by core fslc.</p>
+      <p style="margin:0">The cycle finding does not inspect English keywords in names. The underspecification findings are bounded review evidence, not proof of determinism: absence means only “not witnessed within depth 4.”</p>
     </div>
   </div>
 </section>

@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Bounded underspecification findings (issue #179): `fslc analyze --profile
+  ai-review` now uses a fixed depth-4 BMC probe to emit `divergent_choice` when
+  two distinct actions are enabled in the same reachable state and split an
+  invariant/acceptance outcome, and `unconstrained_effect` when an unread state
+  can receive different next values from two enabled actions. Findings include
+  `evidence_basis:"bounded_bmc"`, reachable branch/successor evidence, and a
+  question-form `spec_question`; they remain review-only
+  `formal_status:"not_a_violation"`. Strong semantic findings suppress duplicate
+  `unread_state`/`unguarded_action` approximations, while structural findings
+  remain when no bounded witness exists. The v0 schema gains additive optional
+  question/evidence fields. See `docs/DESIGN-underspecification.md`.
 - External mutation adjudication (issue #178): `fslc mutate SPEC --from
   mutants.jsonl` appends externally generated full-spec or exact-replacement
   mutations to the built-in catalog and judges valid records through the same
