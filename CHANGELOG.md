@@ -15,6 +15,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   Full type/shape validation covers every kernel state type; partial snapshots
   are rejected rather than treated as unconstrained. See
   `docs/DESIGN-from-state.md`.
+- Production-log replay mappings (issue #174): `fslc replay SPEC --from-log
+  events.jsonl --mapping log_mapping.fsl` reuses the refinement parser and
+  mapping expressions to translate external action/parameter names and observed
+  post-action state into the target spec. The Z3-free Monitor stops at the first
+  rejected action, mapping failure, or state mismatch and reports both the
+  zero-based record index and one-based JSONL line. The initial contract requires
+  complete observed state; missing fields are nonconformant rather than silently
+  unconstrained. See `docs/DESIGN-log-replay.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,

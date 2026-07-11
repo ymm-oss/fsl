@@ -280,6 +280,12 @@ def eval_index(base_e, idx, state, spec, dom):
 
 
 def eval_field(base, field):
+    # Production-log mapping expressions reuse the refinement expression AST,
+    # but JSON objects arrive as ordinary dicts rather than FSL struct tuples.
+    if isinstance(base, dict):
+        if field not in base:
+            _err(f"unknown field '{field}'")
+        return base[field]
     if isinstance(base, tuple) and base[0] == "struct_map_val":
         fields = base[3]
         if field not in fields:

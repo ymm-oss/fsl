@@ -201,7 +201,7 @@ COMMAND_DESIGN_DOCS = {
     "verify": ("DESIGN-v1.md", "DESIGN-induction.md", "DESIGN-from-state.md"),
     "sweep": "scope-grid driver over verify; no standalone semantics (documented in LANGUAGE.md)",
     "scenarios": ("DESIGN-scenarios.md",),
-    "replay": ("DESIGN-bridge.md",),
+    "replay": ("DESIGN-bridge.md", "DESIGN-log-replay.md"),
     "testgen": ("DESIGN-bridge.md",),
     "mutate": ("DESIGN-mutate.md",),
     "explain": ("DESIGN-explain.md",),

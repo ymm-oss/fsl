@@ -162,14 +162,19 @@ options:
   --depth DEPTH
   --deadlock {warn,error,ignore}
 </pre></div></details>
-<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] --trace TRACE file
+<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG)
+                   [--mapping MAPPING]
+                   file
 
 positional arguments:
   file
 
 options:
-  -h, --help     show this help message and exit
+  -h, --help           show this help message and exit
   --trace TRACE
+  --from-log FROM_LOG  production JSONL records to map and replay
+  --mapping MAPPING    refinement-syntax log mapping (required with --from-
+                       log)
 </pre></div></details>
 <details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT]
                     [--target {pytest,vitest,swift,kotlin,dart,phpunit}]
