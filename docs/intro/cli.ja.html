@@ -198,7 +198,7 @@ options:
   --strict
 </pre></div></details>
 <details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement]
-                   [--max-mutants MAX_MUTANTS]
+                   [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM]
                    file
 
 positional arguments:
@@ -209,6 +209,8 @@ options:
   --depth DEPTH
   --by-requirement
   --max-mutants MAX_MUTANTS
+  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
+                        built-in catalog
 </pre></div></details>
 <details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
 

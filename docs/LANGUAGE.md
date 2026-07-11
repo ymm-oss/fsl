@@ -596,7 +596,8 @@ fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                  # bounded semantic change analysis
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
+fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
+               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
@@ -1903,6 +1904,14 @@ DESIGN-*.md).
 - **`fslc mutate`** — mechanically mutates the spec and measures whether each
   mutant is killed by the existing net of checks. A surviving mutant = behavior
   constrained by no property = a place where an invariant is missing.
+  `--from mutants.jsonl` additionally adjudicates externally generated
+  mutations expressed as a full `mutated_spec` or an exact
+  `replace:{target,replacement,occurrence?}` instruction. Valid external
+  mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
+  instruction, parse, name, type, and construction errors are `invalid`, never
+  killed, and are excluded from combined/per-source kill-rate denominators.
+  Every entry carries `source:"builtin"|"external"`; `--max-mutants` caps only
+  the built-in catalog, so `--max-mutants 0 --from ...` runs external-only.
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
   `empty_formalization` warning (the semantic-level extension of
   `--strict-tags`). → [`DESIGN-mutate.md`](DESIGN-mutate.md)

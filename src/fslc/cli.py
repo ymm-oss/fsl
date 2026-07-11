@@ -1247,13 +1247,16 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS):
+def run_mutate(
+        file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS,
+        external_mutants=None):
     try:
         return _envelope(mutate_file(
             file,
             depth=depth,
             by_requirement=by_requirement,
             max_mutants=max_mutants,
+            external_mutants=external_mutants,
         ))
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -1269,9 +1272,9 @@ def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTA
     except FslError as e:
         return _error_envelope(e.kind, str(e), _loc_from_exc(e),
                                getattr(e, "expected", None), getattr(e, "hint", None))
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         return _envelope({"result": "error", "kind": "io",
-                          "message": f"file not found: {file}"})
+                          "message": f"file not found: {e.filename or file}"})
     except Exception as e:
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
@@ -1977,6 +1980,8 @@ def _build_arg_parser():
     mt.add_argument("--depth", type=int, default=8)
     mt.add_argument("--by-requirement", action="store_true")
     mt.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS)
+    mt.add_argument("--from", dest="mutants_from",
+                    help="adjudicate external JSONL mutants in addition to the built-in catalog")
 
     ex = sub.add_parser("explain")
     ex.add_argument("file")
@@ -2209,7 +2214,13 @@ def _dispatch(args):
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "mutate":
-        result = run_mutate(args.file, args.depth, args.by_requirement, args.max_mutants)
+        result = run_mutate(
+            args.file,
+            args.depth,
+            args.by_requirement,
+            args.max_mutants,
+            external_mutants=args.mutants_from,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
         sys.exit(0)
     elif args.cmd == "explain":
