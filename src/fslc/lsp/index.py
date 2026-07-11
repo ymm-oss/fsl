@@ -78,7 +78,7 @@ _ROLE_TO_TOKEN_TYPE = {
     "type": "type", "number": "type", "entity": "class", "struct": "struct",
     "enum": "enum", "enum_member": "enumMember",
     # callables
-    "action": "function", "transition": "function",
+    "action": "function", "transition": "function", "predicate": "function",
     # values
     "const": "variable", "state_var": "variable", "binder": "variable",
     "let": "variable", "actor": "variable", "kpi": "variable", "authority": "variable",
@@ -107,7 +107,7 @@ _READONLY_SYMBOL_ROLES = {"const"}
 FSL_KEYWORDS = [
     "spec", "compose", "requirements", "business", "governance", "refinement",
     "verify", "instances", "values", "use", "as", "from", "internal",
-    "const", "type", "symmetric", "enum", "struct", "entity", "number",
+    "const", "def", "type", "symmetric", "enum", "struct", "entity", "number",
     "state", "init", "action", "fair", "requires", "ensures", "let",
     "if", "else", "forall", "exists", "invariant", "trans", "reachable",
     "terminal", "until", "unless", "leadsTo", "decreases", "within", "helpful",
@@ -1331,6 +1331,29 @@ class _IndexBuilder:
             self._add_symbol(token, "const", _tree_range(node), parent=parent, detail="const")
         self._visit_children_after_first_token(node, parent, local_scope)
 
+    def _visit_def_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        predicate_scope = _tree_range(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(
+                token,
+                "predicate",
+                predicate_scope,
+                parent=parent,
+                detail="named predicate",
+            )
+        self._visit_children_after_first_token(node, idx, predicate_scope)
+
+    def _visit_def_param(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        self._visit_parameter(node, parent, local_scope)
+
+    def _visit_call_e(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_ref(token, "predicate")
+        self._visit_children_after_first_token(node, parent, local_scope)
+
     def _visit_plain_type_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         self._visit_type_like(node, parent, local_scope, "type")
 
@@ -2101,6 +2124,8 @@ def _roles_for_reference(role: str) -> set:
         return {"column"}
     if role == "artifact":
         return {"artifact"}
+    if role == "predicate":
+        return {"predicate"}
     return set(VALUE_ROLES)
 
 

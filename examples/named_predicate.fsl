@@ -1,0 +1,40 @@
+// Named predicates keep tagged contracts aligned with the business vocabulary.
+// expected: verified
+// expected-command: verify --depth 3
+
+spec ClaimEligibility {
+  type Claim = 0..1
+  type Amount = 0..100
+  const AUTO_LIMIT = 50
+
+  state {
+    amount: Map<Claim, Amount>,
+    submitted: Map<Claim, Bool>,
+    auto_approved: Map<Claim, Bool>
+  }
+
+  init {
+    forall c: Claim {
+      amount[c] = 0
+      submitted[c] = false
+      auto_approved[c] = false
+    }
+  }
+
+  def eligible(c: Claim) = submitted[c] and amount[c] <= AUTO_LIMIT
+
+  action submit(c: Claim, requested: Amount) {
+    requires not submitted[c]
+    amount[c] = requested
+    submitted[c] = true
+  }
+
+  action auto_approve(c: Claim) {
+    requires eligible(c)
+    auto_approved[c] = true
+  }
+
+  invariant OnlyEligibleAutoApproved "REQ-2: only eligible claims are auto-approved" {
+    forall c: Claim { auto_approved[c] => eligible(c) }
+  }
+}

@@ -13,6 +13,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   enum  <Name> { <Member>, ... }
   symmetric enum <Name> { <Member>, ... }
   struct <Name> { <field>: <type>, ... }  // field: scalar | Option<scalar>
+  def <name>(<p>: <type name>, ...) = <expr> // non-recursive predicate, frontend-inlined
 
   state { <var>: <type>, ... }
   init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
@@ -41,6 +42,13 @@ usable bare as a guard (`requires b`, `requires not b`) or assigned into
 can't be enumerated) — use a range parameter instead:
 `action f(p in <lo>..<hi>) { ... }` (inline alternative to `<p>: <type name>`,
 no named domain type required).
+
+Use `def` to give a business name to a repeated guard/property expression.
+Calls are file-local and arity-checked; direct/mutual recursion and
+capture-changing substitution are errors. `def` is frontend sugar only, so
+verify/prove/scenarios/Monitor behave exactly as for the hand-expanded
+expression. Put the human-facing requirement tag on the surrounding invariant
+or action; no compiler-generated predicate name appears in diagnostics.
 
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:

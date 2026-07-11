@@ -28,6 +28,7 @@ from .ai_expand import expand_ai_component
 from .ai_parser import is_ai_component_source, parse_ai_component
 from .domain_expand import expand_domain
 from .domain_parser import is_domain_source, parse_domain
+from .predicates import expand_named_predicates
 
 
 _EXPR_PARSER = None
@@ -110,6 +111,7 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
         e.source = src
         raise
     ast = Ast().transform(tree)
+    ast = expand_named_predicates(ast)
     if bounds_overrides:
         ast = apply_verify_bounds_overrides(ast, bounds_overrides)
     display_names = {}

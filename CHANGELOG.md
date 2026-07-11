@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Named predicate frontend sugar (issue #187): file-local `def name(p: Type) =
+  expr` declarations can be used in kernel, requirements, and compose
+  expressions. Calls are inlined before model construction, keeping
+  model/BMC/runtime unchanged and equivalent to hand expansion. Unknown calls,
+  arity mismatch, direct/mutual recursion, shadowing, and capture-changing
+  substitution are explicit diagnostics. Includes a tagged flagship example;
+  see `docs/DESIGN-def.md`.
 - Git-aware semantic diff (issue #186): `fslc diff --git BASE..HEAD [SPEC]`
   materializes both complete tracked trees before delegating to the
   VCS-independent #176 comparison, so imports resolve from their own revision.

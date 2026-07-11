@@ -18,7 +18,7 @@ spec_def: "spec" NAME meta_tag? "{" item* "}"
 
 compose_def: "compose" NAME "{" compose_item* "}"
 ?compose_item: use_def | internal_def | compose_state | compose_init
-             | sync_action | action_def
+             | sync_action | action_def | def_def
              | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def
 use_def: "use" NAME "as" NAME "from" STRING
 internal_def: "internal" NAME "." NAME
@@ -49,10 +49,12 @@ preserve_progress_def: "preserve" "progress" "{" progress_item* "}"
 progress_respond: "respond" NAME "by" NAME ("," NAME)* ","?
 
 ?item: const_def | type_def | enum_def | struct_def | entity_def | number_def
-     | state_def | init_def | action_def
+     | state_def | init_def | action_def | def_def
      | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 
 const_def: "const" NAME "=" expr
+def_def: "def" NAME "(" [def_param ("," def_param)*] ")" "=" expr
+def_param: NAME ":" qname
 type_def: plain_type_def | symmetric_type_def
 plain_type_def: "type" NAME "=" expr ".." expr
 symmetric_type_def: "symmetric" "type" NAME "=" expr ".." expr
@@ -175,6 +177,7 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "old" "(" expr ")" -> old_e
      | "unique" "(" binder ")" -> unique_e
      | "exactlyOne" "(" binder ")" -> exactly_one_e
+     | NAME "(" [expr_list] ")" -> call_e
      | NAME -> var
      | "(" expr ")"
 struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
@@ -188,7 +191,7 @@ ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> st
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
-                  | state_def | init_def | req_action_def | process_def | time_def
+                  | state_def | init_def | req_action_def | process_def | time_def | def_def
                   | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def | maps_auto_def | refinement_action | preserve_progress_def
@@ -357,6 +360,9 @@ class Ast(Transformer):
 
     def var(self, meta, n):
         return ("var", n)
+
+    def call_e(self, meta, n, args=None):
+        return ("call", n, list(args or []), _loc(meta))
 
     def idx_suffix(self, meta, e):
         return ("idx", e)
@@ -613,6 +619,14 @@ class Ast(Transformer):
 
     def const_def(self, meta, n, e):
         return ("const", n, e)
+
+    def def_param(self, meta, n, ty):
+        return ("def_param", n, ty)
+
+    def def_def(self, meta, n, *parts):
+        params = [part for part in parts if part[0] == "def_param"]
+        expr = next(part for part in reversed(parts) if part[0] != "def_param")
+        return ("def", n, params, expr, _loc(meta))
 
     def plain_type_def(self, meta, n, lo, hi):
         return ("type", n, lo, hi)

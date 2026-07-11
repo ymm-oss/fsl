@@ -79,6 +79,8 @@
   symmetric enum &lt;Name&gt; { &lt;Member&gt;, ... }
   struct &lt;Name&gt; { &lt;field&gt;: &lt;scalar type | Option&lt;scalar type&gt;&gt;, ... }
 
+  def &lt;name&gt;(&lt;p&gt;: &lt;type name&gt;, ...) = &lt;expr&gt; // non-recursive named predicate; frontend-inlined
+
   state { &lt;var&gt;: &lt;type&gt;, ... }
   init  { &lt;stmt&gt;... }
 
@@ -510,7 +512,17 @@ scalar | <code>Option&lt;scalar&gt;</code> | struct (scalar / <code>Option&lt;sc
   it contains no symmetric identity type. This is intended for models such as
   <code>Map&lt;TaskId, Status&gt;</code> where no task identity is special.</li>
 </ul></div></details>
-<details id="3-expressions"><summary>3. Expressions<span class="tree-blurb"> — 式の文法 — 演算子、量化子、関数呼び出しなど。</span></summary><div class="tree-body"><ul>
+<details id="3-expressions"><summary>3. Expressions<span class="tree-blurb"> — 式の文法 — 演算子、量化子、関数呼び出しなど。</span></summary><div class="tree-body"><p>Named predicates factor repeated or business-significant expressions:</p>
+<pre><code class="language-fsl">def eligible(c: Claim) = submitted[c] and amount[c] &lt;= AUTO_LIMIT
+invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
+</code></pre>
+<p>Calls must name a <code>def</code> in the same source file and match its arity. Definitions
+may call earlier or later definitions but cannot be directly or mutually
+recursive. They are expanded before semantic checking; the verifier and
+runtime see the same kernel expression as hand expansion. Expansion rejects
+variable capture instead of inventing internal binder names. See
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
+<ul>
 <li>Arithmetic: <code>+ - * / %</code>, unary <code>-</code>, <code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (since <code>a//b</code> would turn everything after <code>//</code> into a comment, write division
   as <code>a / b</code> with whitespace)</li>
