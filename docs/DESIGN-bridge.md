@@ -102,6 +102,11 @@ evaluates with the Python values of §1.1. Note the following:
 
 ## 2. `fslc replay` — conformance checking of event logs
 
+The original `--trace` form below accepts already-normalized spec actions. For
+production JSONL whose action/state names differ from the spec, use
+`--from-log ... --mapping ...`; that extension reuses refinement mapping syntax
+and is specified in `DESIGN-log-replay.md`.
+
 ```
 fslc replay <file.fsl> --trace <events.json>
 ```

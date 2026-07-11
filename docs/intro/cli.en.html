@@ -32,6 +32,8 @@
     </div>
     <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— exit_code() / _envelope() / _error_envelope(), from src/fslc/cli.py</span></summary><div class="tree-body"><p>Every command prints one JSON object to stdout and maps its <code>result</code> field to a process exit code through this function — verbatim from the source, so this table cannot drift from the actual contract:</p><pre>def exit_code(result):
     r = result.get(&quot;result&quot;)
+    if r in (&quot;semantic_diff&quot;, &quot;semantic_diff_batch&quot;):
+        return 0 if result.get(&quot;gate&quot;, {}).get(&quot;passed&quot;, True) else 1
     if r in (&quot;verified&quot;, &quot;proved&quot;, &quot;scenarios&quot;, &quot;conformant&quot;, &quot;generated&quot;,
              &quot;refines&quot;, &quot;typestate&quot;, &quot;mutated&quot;, &quot;explained&quot;, &quot;analyzed&quot;,
              &quot;verified_under_assumptions&quot;, &quot;agent_analyzed&quot;, &quot;replay_conformant&quot;,
@@ -92,7 +94,8 @@ options:
                    [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]
                    [--exclude-property EXCLUDE_PROPERTY_NAMES]
                    [--instances INSTANCES] [--values VALUES] [--strict-tags]
-                   [--requirements REQUIREMENTS] [--no-cache]
+                   [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS]
+                   [--from-state FROM_STATE]
                    file
 
 positional arguments:
@@ -121,6 +124,11 @@ options:
   --requirements REQUIREMENTS
   --no-cache            skip the persistent verdict cache for this run
                         (neither reads nor writes it)
+  --lemma LEMMAS        candidate auxiliary invariant expression (induction
+                        only; repeatable)
+  --from-state FROM_STATE
+                        replace spec init with a complete Monitor/replay
+                        logical-state JSON snapshot (BMC only)
 </pre></div></details>
 <details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
                   [--deadlock {warn,error,ignore}]
@@ -158,14 +166,19 @@ options:
   --depth DEPTH
   --deadlock {warn,error,ignore}
 </pre></div></details>
-<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] --trace TRACE file
+<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG)
+                   [--mapping MAPPING]
+                   file
 
 positional arguments:
   file
 
 options:
-  -h, --help     show this help message and exit
+  -h, --help           show this help message and exit
   --trace TRACE
+  --from-log FROM_LOG  production JSONL records to map and replay
+  --mapping MAPPING    refinement-syntax log mapping (required with --from-
+                       log)
 </pre></div></details>
 <details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT]
                     [--target {pytest,vitest,swift,kotlin,dart,phpunit}]
@@ -185,7 +198,7 @@ options:
   --strict
 </pre></div></details>
 <details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement]
-                   [--max-mutants MAX_MUTANTS]
+                   [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM]
                    file
 
 positional arguments:
@@ -196,6 +209,8 @@ options:
   --depth DEPTH
   --by-requirement
   --max-mutants MAX_MUTANTS
+  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
+                        built-in catalog
 </pre></div></details>
 <details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
 
@@ -257,6 +272,22 @@ positional arguments:
 options:
   -h, --help     show this help message and exit
   --depth DEPTH
+</pre></div></details>
+<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING]
+                 [--forbid FORBID]
+                 [old] [new]
+
+positional arguments:
+  old
+  new
+
+options:
+  -h, --help         show this help message and exit
+  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two
+                     Git revisions
+  --depth DEPTH
+  --mapping MAPPING  optional refinement mapping for one comparison direction
+  --forbid FORBID    comma-separated finding kinds that should fail the gate
 </pre></div></details>
 <details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [path]
 

@@ -1,0 +1,75 @@
+{
+  "bounded": {
+    "completeness": "bounded",
+    "depth": 3
+  },
+  "directions": {
+    "new_to_old": {
+      "checked_to_depth": 3,
+      "kind": "abs_requires_failed",
+      "result": "refinement_failed",
+      "violated_at_step": 2
+    },
+    "old_to_new": {
+      "checked_to_depth": 3,
+      "result": "refines"
+    }
+  },
+  "findings": [
+    {
+      "direction": "new_to_old",
+      "kind": "behavior_added",
+      "witness": {
+        "trace": [
+          {
+            "state": {"flag": false},
+            "step": 0
+          },
+          {
+            "action": {
+              "loc": {"column": 55, "line": 1},
+              "name": "enable",
+              "params": {}
+            },
+            "changes": {"flag": {"from": false, "to": true}},
+            "state": {"flag": true},
+            "step": 1
+          },
+          {
+            "action": {
+              "loc": {"column": 55, "line": 1},
+              "name": "enable",
+              "params": {}
+            },
+            "changes": {},
+            "state": {"flag": true},
+            "step": 2
+          }
+        ],
+        "trace_type": "counterexample",
+        "violation": {
+          "impl_action": {
+            "loc": {"column": 55, "line": 1},
+            "name": "enable",
+            "params": {}
+          },
+          "kind": "abs_requires_failed",
+          "mismatch": [],
+          "violated_at_step": 2
+        }
+      }
+    }
+  ],
+  "fsl": "1.0",
+  "gate": {"forbidden": [], "passed": true, "violations": []},
+  "new": {"file": "new.fsl", "spec": "New"},
+  "old": {"file": "old.fsl", "spec": "Old"},
+  "result": "semantic_diff",
+  "scope": {
+    "applied_to_old": {"instances": {}, "values": {}},
+    "comparison": "new",
+    "new": {"instances": {}, "values": {}},
+    "old": {"instances": {}, "values": {}}
+  },
+  "summary": ["behavior_added"]
+}

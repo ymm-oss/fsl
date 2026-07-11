@@ -175,6 +175,16 @@ These are trend and review-priority signals for downstream tooling.
 - `conservation_candidate`: counter-like `Int` effects structurally preserve a
   weighted sum. This is a candidate invariant only; proving the invariant is the
   job of `fslc verify` / `--engine induction`.
+- `divergent_choice`: bounded BMC finds two distinct actions enabled in the same
+  reachable state whose successors differ on an invariant or acceptance
+  predicate.
+- `unconstrained_effect`: a structural `unread_state` candidate has a bounded
+  reachable witness where two enabled actions write different next values.
+  This supersedes the duplicate `unread_state` finding for that state.
+
+The underspecification findings add a question-form `spec_question`,
+`evidence_basis:"bounded_bmc"`, and explicit depth/reachability metadata. See
+`DESIGN-underspecification.md` for the fixed bound, cost cap, and overlap rules.
 
 Every finding has:
 
@@ -189,6 +199,7 @@ Every finding has:
 - `why_it_matters`
 - `candidate_repairs`
 - `do_not_assume`
+- optional `spec_question` and `evidence_basis`
 
 `progressless_cycle` is deliberately conservative in naming. It does not use
 `H1`, `Betti`, or `homology` in public output, and it does not rely on

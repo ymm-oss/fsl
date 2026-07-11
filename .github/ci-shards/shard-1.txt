@@ -10,3 +10,10 @@ tests/test_spec_domains.py
 tests/test_trans.py
 tests/test_verify_cache.py
 tests/test_analysis_tag_drift.py
+tests/test_named_predicates.py
+tests/test_semantic_diff.py
+tests/test_analysis_underspecification.py
+tests/test_external_mutants.py
+tests/test_induction_lemmas.py
+tests/test_from_state.py
+tests/test_log_replay.py

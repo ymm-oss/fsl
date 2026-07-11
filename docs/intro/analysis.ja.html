@@ -160,9 +160,17 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
         <h3><code>tag_stale_reference</code> / <code>tag_formula_disjoint</code></h3>
         <p>タグ中のコード形状識別子が、現在の仕様またはタグ対象の形式定義にありません。局所的なドリフト根拠であり、自然言語の意味判定ではありません。</p>
       </div>
+      <div class="card">
+        <h3><code>divergent_choice</code></h3>
+        <p>深さ4のBMC witness が、同じ到達状態で2操作が有効になり、invariant または acceptance の結果が分かれることを示します。どちらが意図かを質問します。</p>
+      </div>
+      <div class="card">
+        <h3><code>unconstrained_effect</code></h3>
+        <p>深さ4のBMC witness が、契約の観測グラフ外の状態へ2操作が異なる次値を書けることを示します。重複する <code>unread_state</code> は抑制します。</p>
+      </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">cycle 所見は、名前の英単語を見ていません。要件タグやシナリオなどの構造アンカーに基づきます。日本語の要件文は保持されますが、fslc core は意味解釈しません。</p>
+      <p style="margin:0">cycle 所見は名前の英単語を見ません。未決定領域の所見は有界レビュー証拠であり、決定性の証明ではありません。所見がないことは「深さ4以内では witness がない」という意味だけです。</p>
     </div>
   </div>
 </section>
