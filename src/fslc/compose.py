@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .grammar import PARSER, Ast
 from .model import FslError
+from .literate import extract_literate_source, is_literate_source
 
 
 def _compose_err(message, kind="type", loc=None):
@@ -21,6 +22,8 @@ def _prefix(name, alias):
 
 def _parse_file(path):
     src = Path(path).read_text(encoding="utf-8")
+    if is_literate_source(src):
+        src = extract_literate_source(src)
     return Ast().transform(PARSER.parse(src))
 
 

@@ -27,6 +27,7 @@ from .ai_expand import expand_ai_component
 from .ai_parser import is_ai_component_source, parse_ai_component
 from .domain_expand import expand_domain
 from .domain_parser import is_domain_source, parse_domain
+from .literate import extract_literate_source, is_literate_source
 
 
 def parse_src(src, base_dir=None, bounds_overrides=None):
@@ -36,6 +37,9 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
     comes from ``fslc verify --instances``/``--values`` and replaces the matching
     ``verify { ... }`` bounds before dialect desugaring runs.
     """
+    if is_literate_source(src):
+        src = extract_literate_source(src)
+
     if is_dbsystem_source(src):
         has_bounds_overrides = bool(
             bounds_overrides

@@ -3,6 +3,14 @@
 Read this entire file before writing a spec. This is the full syntax and full set
 of rules as of v2.x.
 
+FSL may be the canonical executable part of a Markdown document: put declarations
+in one or more standalone fenced `fsl` blocks, then run the normal command on the
+`.md` path without a special flag. Blocks share one compilation unit; prose and
+fence lines are ignored in place so diagnostics, counterexamples, and LSP symbols
+keep the Markdown line numbers. Relative imports use the document's directory.
+An unclosed `fsl` fence is a parse error, and a document without one is not
+silently accepted as an empty spec.
+
 ## 1. Top-level structure
 
 ```fsl

@@ -12,6 +12,12 @@ read it before writing a spec). Within the repository, `docs/LANGUAGE.md` is the
 complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
 form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
 
+When the surrounding prose is itself the durable design artifact, it may be a
+Markdown file containing one or more fenced `fsl` blocks. Run ordinary `fslc`
+commands on that `.md` file; do not copy the blocks to a temporary `.fsl`, because
+the in-place extraction deliberately preserves diagnostics and counterexamples at
+the Markdown line numbers. Keep imports relative to the Markdown document.
+
 **What makes FSL different — connectivity, not just per-spec checking.** Classic
 formal methods describe one hard spot and verify it in isolation (the "island"
 model). FSL's distinctive value is stitching business ⊒ requirements ⊒ design

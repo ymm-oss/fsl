@@ -33,6 +33,11 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from lark import Tree, Token
 
 from fslc.grammar import PARSER
+from fslc.literate import (
+    LiterateParser,
+    extract_literate_source,
+    is_literate_source,
+)
 from fslc.ai_parser import AI_PARSER, is_ai_source
 from fslc.ai_project import _top_blocks, is_ai_project_source
 from fslc.db_parser import DB_PARSER, is_dbsystem_source
@@ -569,6 +574,9 @@ class DocumentIndex:
 
 
 def _parser_for_source(source: str):
+    if is_literate_source(source):
+        extracted = extract_literate_source(source)
+        return LiterateParser(_parser_for_source(extracted))
     if is_dbsystem_source(source):
         return DB_PARSER
     if is_domain_source(source):

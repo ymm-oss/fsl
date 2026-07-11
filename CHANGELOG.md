@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Literate Markdown FSL (issue #193): `fslc` now automatically recognizes one or
+  more standalone fenced `fsl` blocks in a Markdown source and parses them as one
+  compilation unit without a CLI flag. Prose and fence lines are blanked in place,
+  preserving original document locations for parser diagnostics, counterexamples,
+  and LSP symbols/references; imported Markdown files use their own directory for
+  relative paths. Files without an `fsl` fence retain the ordinary parse path, an
+  unclosed fence is a located parse error, and the verification cache still keys
+  the raw document bytes. See `docs/DESIGN-literate.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,

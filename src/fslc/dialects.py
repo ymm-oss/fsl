@@ -10,6 +10,7 @@ from pathlib import Path
 from .compose import expand_compose
 from .grammar import Ast, PARSER
 from .model import FslError, eval_const
+from .literate import extract_literate_source, is_literate_source
 
 
 def _err(message, kind="type", loc=None, hint=None):
@@ -18,6 +19,8 @@ def _err(message, kind="type", loc=None, hint=None):
 
 def _parse_file(path, bounds_overrides=None):
     src = Path(path).read_text(encoding="utf-8")
+    if is_literate_source(src):
+        src = extract_literate_source(src)
     ast = Ast().transform(PARSER.parse(src))
     filtered = _overrides_for_declared_names(ast, bounds_overrides)
     if filtered is not None:

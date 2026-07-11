@@ -7,6 +7,15 @@ always tracks the latest implementation). The background to design decisions and
 the implementation design of each feature can be reached from
 [`README.md`](README.md) (the docs map).
 
+An FSL compilation unit may also be embedded in Markdown. Put declarations in
+one or more standalone fenced `fsl` blocks and pass the `.md` file directly to
+commands such as `fslc check` or `fslc verify`; no flag is required. All `fsl`
+blocks form one compilation unit, relative imports resolve from the Markdown
+file's directory, and diagnostics/counterexamples retain the document's original
+line and column numbers. Files without an `fsl` fence are parsed normally rather
+than being treated as empty specifications. See `docs/DESIGN-literate.md` for the
+extraction and tooling contract.
+
 ## Design principles
 
 | Principle | Existing languages (TLA+/Alloy) | FSL |

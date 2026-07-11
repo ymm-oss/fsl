@@ -40,6 +40,7 @@
 | [`DESIGN-init-if.md`](DESIGN-init-if.md) | Statement-level `if` in `init` (lowered to path-conditional initial-state constraints, same branch shape as action bodies) |
 | [`DESIGN-inline-range.md`](DESIGN-inline-range.md) | Inline anonymous range types (`x: lo..hi`) |
 | [`DESIGN-spec-domains.md`](DESIGN-spec-domains.md) | `entity` / `number` in the kernel `spec` (decoupling a domain from the verification bound) |
+| [`DESIGN-literate.md`](DESIGN-literate.md) | Literate FSL in Markdown: automatic fenced-`fsl` extraction, original document locations, imports, LSP, and cache identity |
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
