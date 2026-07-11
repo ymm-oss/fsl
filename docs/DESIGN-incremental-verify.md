@@ -21,6 +21,10 @@ and re-wraps it with `_envelope` on a hit. It is **not** inside `bmc.py` or `run
 
 - `fslc mutate` calls `bmc.verify` directly → mutant verdicts never enter the cache and the
   kill-rate signal is never served from it.
+- `fslc verify --from-state` deliberately bypasses lookup and storage. The external
+  snapshot changes the initial constraint, and v1 does not include canonical snapshot
+  content in the cache key; bypassing is fail-closed and guarded by a signature-classification
+  metatest plus a normal-init-vs-snapshot regression.
 - The dual-evaluator cross-checks (`tests/test_evaluator_agreement.py`) and the Z3-independent
   oracle (`tests/oracle.py`) exercise `bmc`/`runtime` below the cache — they stay cache-free
   by construction, so the correctness safety net is unaffected.

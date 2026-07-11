@@ -577,6 +577,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--lemma "<expr>"]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
+               [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
                [--property <Name>]               # check one named property in isolation —
@@ -586,9 +587,14 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
-fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
+fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
+fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
+                                                 # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
+fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
+               [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
+                                                 # bounded semantic change analysis
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -608,6 +614,18 @@ fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DD
 fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
+
+`verify --from-state state.json` replaces the declared `init` for one bounded
+run and asks what can happen from that complete current state. The JSON shape is
+exactly `Monitor.state` / replay logical state: all variables and Map keys are
+required, enums are member names, Option is value or `null`, Set/Seq are arrays,
+and relation is an array of pairs. Missing/extra/type-invalid values are rejected
+before solving. Snapshot runs bypass the verdict cache, disable symmetry
+reduction (the identities are concrete), and reject `--engine induction`.
+Results add `initial_state.source:"snapshot"` and
+`faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}`
+so bounded `verified` cannot be mistaken for verification from the spec init.
+See `DESIGN-from-state.md`.
 
 In addition to `reachable` and action coverage, `scenarios` outputs, for each
 `leadsTo P ~> Q`, a `respond_<Name>[_<binding>]` scenario. Each scenario has
@@ -647,8 +665,29 @@ under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
 bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
 
+`diff` compares state-machine meaning instead of source text. It runs bounded
+refinement in both directions: NEW→OLD failure is `behavior_added`, while
+OLD→NEW failure is `behavior_removed`. It separately checks implication between
+the conjunctions of user invariants (`invariant_weakened` /
+`invariant_strengthened`) and replays OLD `forbidden` scenarios against NEW
+(`forbidden_relaxed`). Directional failures include counterexample witnesses.
+Same-named compatible state/actions are mapped automatically; name mismatches
+are `unknown` unless `--mapping` supplies that direction. An arbitrary mapping
+is never inverted automatically.
+
+The JSON result is `semantic_diff` with `bounded`, `scope`, `directions`,
+`summary`, `findings`, and `gate`. A changed `verify { instances/values }`
+scope is reported as `scope_changed`, and shared OLD bounds are rebuilt under
+the NEW scope recorded by `scope.comparison:"new"` and
+`scope.applied_to_old`. With no findings, `summary` is
+`["no_semantic_change"]`. Findings are analysis output and therefore exit 0 by
+default. Only findings explicitly listed by comma-separated `--forbid` make
+the gate fail and exit 1. All comparisons remain bounded to `--depth`; clean
+output is not an unbounded equivalence proof.
+
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / typestate / sweep_passed / observed_conformant /
+mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
 sweep_failed / observed_mismatch,
@@ -1162,6 +1201,7 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 
 ```bash
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
@@ -1169,6 +1209,23 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 ```
+
+The `--from-log` form reuses the exact refinement mapping grammar to translate
+external JSONL records into spec actions and logical state; it does not add a
+second mapping language. Each non-empty line is
+`{"action":"external_name","params":{...},"state":{...}}`, where `state`
+is the observed post-action state. In the mapping, `impl` labels the external
+log schema, `abs` must name the replayed spec, `map` entries cover every spec
+state variable, and `action external(params) -> spec_action(exprs)` (or
+`stutter`) maps the event. The Monitor executes the mapped action and compares
+its result with the mapped observed state on every line. The first divergence
+reports zero-based `failed_at_record` / `failed_at_event`, one-based `log_line`,
+and either the Monitor violation or a `state_mismatch` with leaf paths.
+
+This first version requires full observation: a missing field or Map key is a
+`log_mapping` nonconformance, not an unconstrained value. See
+`DESIGN-log-replay.md` for the record schema, mapping example, and the boundary
+with `db observe` / `ai replay` / `domain replay`.
 
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
 explicitly in the output `note`). `Monitor` requires init to be deterministic

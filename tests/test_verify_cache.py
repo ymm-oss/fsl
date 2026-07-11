@@ -278,6 +278,7 @@ def test_verified_result_is_not_reused_across_depths(cache_dir, tmp_path):
 # key-completeness guard
 # --------------------------------------------------------------------------
 _NON_SEMANTIC_RUN_VERIFY_PARAMS = {"file", "use_cache"}
+_CACHE_BYPASSED_SEMANTIC_RUN_VERIFY_PARAMS = {"from_state"}
 
 
 def test_run_verify_signature_is_fully_classified():
@@ -292,12 +293,29 @@ def test_run_verify_signature_is_fully_classified():
     # run_verify's `requirements` (a path) becomes compute_key's
     # `requirements_sha256`; everything else must match by name.
     mapped = {"requirements": "requirements_sha256"}
-    for name in run_verify_params - _NON_SEMANTIC_RUN_VERIFY_PARAMS:
+    classified = (
+        _NON_SEMANTIC_RUN_VERIFY_PARAMS
+        | _CACHE_BYPASSED_SEMANTIC_RUN_VERIFY_PARAMS
+    )
+    for name in run_verify_params - classified:
         target = mapped.get(name, name)
         assert target in key_params or name in ("ast", "display_names", "src"), (
             f"run_verify parameter {name!r} is not threaded into verify_cache.compute_key "
             "and is not on the non-semantic allowlist -- classify it"
         )
+
+
+def test_from_state_never_reuses_normal_init_cache(cache_dir, tmp_path):
+    spec = _counter(tmp_path, bound=1)
+    normal = run_verify(str(spec), 0, "ignore")
+    assert normal["result"] == "verified"
+
+    snapshot = _write(tmp_path, "state.json", '{"x": 2}')
+    predicted = run_verify(str(spec), 0, "ignore", from_state=str(snapshot))
+
+    assert predicted["result"] == "violated"
+    assert predicted["violated_at_step"] == 0
+    assert "cache" not in predicted
 
 
 # --------------------------------------------------------------------------
