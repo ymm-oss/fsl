@@ -10,9 +10,10 @@ on grammar transform-time semantic errors. Compose/requirements expansion
 :class:`fslc.model.FslError` directly (not wrapped in ``VisitError``).
 The CLI translates all of these into the machine-readable JSON error envelope.
 """
+from lark import Lark
 from lark.exceptions import UnexpectedInput
 
-from .grammar import PARSER, Ast
+from .grammar import GRAMMAR, PARSER, Ast
 from .compose import expand_compose
 from .dialects import (
     apply_verify_bounds_overrides,
@@ -28,6 +29,28 @@ from .ai_parser import is_ai_component_source, parse_ai_component
 from .domain_expand import expand_domain
 from .domain_parser import is_domain_source, parse_domain
 from .predicates import expand_named_predicates
+
+
+_EXPR_PARSER = None
+
+
+def parse_expr(src):
+    """Parse one standalone FSL expression (used by CLI lemma candidates)."""
+    global _EXPR_PARSER
+    if _EXPR_PARSER is None:
+        _EXPR_PARSER = Lark(
+            GRAMMAR,
+            parser="earley",
+            start="expr",
+            maybe_placeholders=True,
+            propagate_positions=True,
+        )
+    try:
+        tree = _EXPR_PARSER.parse(src)
+    except UnexpectedInput as exc:
+        exc.source = src
+        raise
+    return Ast().transform(tree)
 
 
 def parse_src(src, base_dir=None, bounds_overrides=None):

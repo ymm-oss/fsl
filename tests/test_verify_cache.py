@@ -138,6 +138,18 @@ def test_engine_flip_misses(cache_dir, tmp_path):
     assert "cache" not in out
 
 
+def test_lemma_candidates_are_part_of_induction_cache_key(cache_dir, tmp_path):
+    p = _counter(tmp_path)
+    base = {"depth": 8, "deadlock_mode": "ignore", "engine": "induction"}
+    run_verify(str(p), **base)
+
+    first = run_verify(str(p), **base, lemmas=["x >= 0"])
+    second = run_verify(str(p), **base, lemmas=["x >= 0"])
+
+    assert "cache" not in first
+    assert second["cache"]["hit"] is True
+
+
 def test_instances_and_values_overrides_change_the_key(cache_dir, tmp_path):
     p = _write(tmp_path, "map_spec.fsl", """
 spec MapSpec {
@@ -266,6 +278,7 @@ def test_verified_result_is_not_reused_across_depths(cache_dir, tmp_path):
 # key-completeness guard
 # --------------------------------------------------------------------------
 _NON_SEMANTIC_RUN_VERIFY_PARAMS = {"file", "use_cache"}
+_CACHE_BYPASSED_SEMANTIC_RUN_VERIFY_PARAMS = {"from_state"}
 
 
 def test_run_verify_signature_is_fully_classified():
@@ -280,12 +293,29 @@ def test_run_verify_signature_is_fully_classified():
     # run_verify's `requirements` (a path) becomes compute_key's
     # `requirements_sha256`; everything else must match by name.
     mapped = {"requirements": "requirements_sha256"}
-    for name in run_verify_params - _NON_SEMANTIC_RUN_VERIFY_PARAMS:
+    classified = (
+        _NON_SEMANTIC_RUN_VERIFY_PARAMS
+        | _CACHE_BYPASSED_SEMANTIC_RUN_VERIFY_PARAMS
+    )
+    for name in run_verify_params - classified:
         target = mapped.get(name, name)
         assert target in key_params or name in ("ast", "display_names", "src"), (
             f"run_verify parameter {name!r} is not threaded into verify_cache.compute_key "
             "and is not on the non-semantic allowlist -- classify it"
         )
+
+
+def test_from_state_never_reuses_normal_init_cache(cache_dir, tmp_path):
+    spec = _counter(tmp_path, bound=1)
+    normal = run_verify(str(spec), 0, "ignore")
+    assert normal["result"] == "verified"
+
+    snapshot = _write(tmp_path, "state.json", '{"x": 2}')
+    predicted = run_verify(str(spec), 0, "ignore", from_state=str(snapshot))
+
+    assert predicted["result"] == "violated"
+    assert predicted["violated_at_step"] == 0
+    assert "cache" not in predicted
 
 
 # --------------------------------------------------------------------------

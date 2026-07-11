@@ -25,11 +25,16 @@
 | [`DESIGN-dialects.md`](DESIGN-dialects.md) | Implementation spec for the dialects (declaration tags, fsl-req, fsl-biz) |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
+| [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
+| [`DESIGN-from-state.md`](DESIGN-from-state.md) | Predictive BMC from a complete Monitor/replay logical-state snapshot (`verify --from-state`), including type validation, faithfulness metadata, cache/symmetry boundaries, and induction exclusion |
 | [`DESIGN-trans.md`](DESIGN-trans.md) | `trans` (transition invariant / two-state safety) |
 | [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |
 | [`DESIGN-refinement.md`](DESIGN-refinement.md) | Refinement checking (mapping files, conditional expressions, preserve progress) |
+| [`DESIGN-semantic-diff.md`](DESIGN-semantic-diff.md) | `fslc diff` bounded semantic comparison (bidirectional refinement, invariant implication, forbidden replay, scope and gate contract) |
+| [`DESIGN-diff-git.md`](DESIGN-diff-git.md) | Git/CI adapter for revision-consistent full-tree materialization and changed-spec batch semantic diff |
 | [`DESIGN-compose.md`](DESIGN-compose.md) | Spec composition (namespaces, synchronized actions, internal) |
 | [`DESIGN-bridge.md`](DESIGN-bridge.md) | Implementation bridge (runtime Monitor / replay / testgen) |
+| [`DESIGN-log-replay.md`](DESIGN-log-replay.md) | Production JSONL replay through refinement mapping syntax: record contract, complete-observation boundary, first-divergence JSON, and Monitor execution |
 | [`DESIGN-scenarios.md`](DESIGN-scenarios.md) | scenarios and the unsat-core diagnostics for coverage |
 | [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N> (partial_op, type whitelist) |
 | [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | Option fields in structs |
@@ -53,6 +58,7 @@
 | [`DESIGN-conformance-harness.md`](DESIGN-conformance-harness.md) | Dialect corpus conformance harness (`tests/test_dialect_conformance.py`, `tests/dialect_registry.py`): the Monitor/BMC-agreement/oracle safety net as a CI gate over every `.fsl` under `specs/`/`examples/`, with a loud, reviewable exclusion policy |
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests (`tests/test_coupled_change_meta.py`): LSP index coverage (grammar production ↔ visitor handler, corpus-driven, two-stage) and DESIGN-doc coverage (dialect/CLI command ↔ `docs/DESIGN-*.md`) |
 | [`DESIGN-analysis.md`](DESIGN-analysis.md) | `fslc analyze` (Typed Semantic Graph, graph projections, focus impact slices, action dependency/conflict graphs, structural metrics, batch mode, refinement/project traceability graphs, DOT/Mermaid exports, schemas, AI-readable structural review findings/candidates) |
+| [`DESIGN-underspecification.md`](DESIGN-underspecification.md) | bounded `divergent_choice` / `unconstrained_effect` AI-review findings and question-form output |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 | [`DESIGN-domain.md`](DESIGN-domain.md) | fsl-domain (`domain`) Functional DDD / async effect dialect: aggregate ownership, command/event decide/evolve lowering, saga/process-manager actions, effect lifecycle state, findings, multi-target scaffolds, and runtime replay |
 | [`DESIGN-effect.md`](DESIGN-effect.md) | fsl-effect lifecycle semantics used by fsl-domain: correlation, retry, timeout, idempotency, and guarantee boundary |
