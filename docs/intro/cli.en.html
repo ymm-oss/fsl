@@ -32,7 +32,7 @@
     </div>
     <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— exit_code() / _envelope() / _error_envelope(), from src/fslc/cli.py</span></summary><div class="tree-body"><p>Every command prints one JSON object to stdout and maps its <code>result</code> field to a process exit code through this function — verbatim from the source, so this table cannot drift from the actual contract:</p><pre>def exit_code(result):
     r = result.get(&quot;result&quot;)
-    if r == &quot;semantic_diff&quot;:
+    if r in (&quot;semantic_diff&quot;, &quot;semantic_diff_batch&quot;):
         return 0 if result.get(&quot;gate&quot;, {}).get(&quot;passed&quot;, True) else 1
     if r in (&quot;verified&quot;, &quot;proved&quot;, &quot;scenarios&quot;, &quot;conformant&quot;, &quot;generated&quot;,
              &quot;refines&quot;, &quot;typestate&quot;, &quot;mutated&quot;, &quot;explained&quot;, &quot;analyzed&quot;,
@@ -273,8 +273,9 @@ options:
   -h, --help     show this help message and exit
   --depth DEPTH
 </pre></div></details>
-<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--depth DEPTH] [--mapping MAPPING] [--forbid FORBID]
-                 old new
+<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING]
+                 [--forbid FORBID]
+                 [old] [new]
 
 positional arguments:
   old
@@ -282,6 +283,8 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
+  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two
+                     Git revisions
   --depth DEPTH
   --mapping MAPPING  optional refinement mapping for one comparison direction
   --forbid FORBID    comma-separated finding kinds that should fail the gate

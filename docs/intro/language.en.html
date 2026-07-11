@@ -679,6 +679,8 @@ fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity ch
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                  # bounded semantic change analysis
+fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
+                                                 # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
@@ -762,6 +764,14 @@ the NEW scope recorded by <code>scope.comparison:"new"</code> and
 default. Only findings explicitly listed by comma-separated <code>--forbid</code> make
 the gate fail and exit 1. All comparisons remain bounded to <code>--depth</code>; clean
 output is not an unbounded equivalence proof.</p>
+<p><code>diff --git BASE..HEAD [spec.fsl]</code> is the VCS/CI adapter. It resolves and
+records both full commit hashes, materializes both complete tracked trees, and
+then invokes the same two-path comparison. This makes relative imports resolve
+from their own revision. Omitting the spec compares every changed <code>.fsl</code> path
+and returns <code>semantic_diff_batch</code>; supplying one spec preserves
+<code>semantic_diff</code>. Both forms include <code>vcs.materialization:
+"git_archive_full_tree"</code>. The ordinary two-path form never invokes Git and
+works outside a repository.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /

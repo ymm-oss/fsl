@@ -27,6 +27,7 @@ from .bmc import verify, prove, prove_with_lemmas, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
 from .semantic_diff import semantic_diff
+from .git_diff import semantic_diff_git
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import TestgenScenarioError, generate_test_bundle, default_output_name
@@ -1858,9 +1859,26 @@ def run_diff(old, new, depth=8, mapping=None, forbid=None):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_diff_git(git_range, spec=None, depth=8, mapping=None, forbid=None):
+    """Run semantic diff against two materialized Git revisions."""
+    try:
+        if isinstance(forbid, str):
+            forbid = [item.strip() for item in forbid.split(",") if item.strip()]
+        return _envelope(semantic_diff_git(
+            git_range, spec, depth, mapping, forbid,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
-    if r == "semantic_diff":
+    if r in ("semantic_diff", "semantic_diff_batch"):
         return 0 if result.get("gate", {}).get("passed", True) else 1
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
@@ -2020,8 +2038,10 @@ def _build_arg_parser():
     rf.add_argument("--depth", type=int, default=8)
 
     df = sub.add_parser("diff", help="compare OLD and NEW specification semantics")
-    df.add_argument("old")
-    df.add_argument("new")
+    df.add_argument("old", nargs="?")
+    df.add_argument("new", nargs="?")
+    df.add_argument("--git", dest="git_range", default=None, metavar="BASE..HEAD",
+                    help="compare a spec (or every changed .fsl file) across two Git revisions")
     df.add_argument("--depth", type=int, default=8)
     df.add_argument("--mapping", default=None,
                     help="optional refinement mapping for one comparison direction")
@@ -2191,7 +2211,23 @@ def _dispatch(args):
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "diff":
-        result = run_diff(args.old, args.new, args.depth, args.mapping, args.forbid)
+        if args.git_range:
+            if args.new is not None:
+                result = _envelope({
+                    "result": "error", "kind": "semantics",
+                    "message": "--git accepts at most one spec path",
+                })
+            else:
+                result = run_diff_git(
+                    args.git_range, args.old, args.depth, args.mapping, args.forbid,
+                )
+        elif args.old is None or args.new is None:
+            result = _envelope({
+                "result": "error", "kind": "semantics",
+                "message": "diff requires OLD NEW or --git BASE..HEAD [SPEC]",
+            })
+        else:
+            result = run_diff(args.old, args.new, args.depth, args.mapping, args.forbid)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "chain":
         from .chain import format_chain_table, run_chain

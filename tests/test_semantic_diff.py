@@ -5,19 +5,41 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import textwrap
 from pathlib import Path
 
-from fslc.cli import _build_arg_parser, exit_code, run_diff
+from fslc.cli import _build_arg_parser, exit_code, run_diff, run_diff_git
 
 
 SNAPSHOT = Path(__file__).parent / "snapshots" / "semantic_diff_behavior_added.json"
+GIT_SNAPSHOT = Path(__file__).parent / "snapshots" / "semantic_diff_git.json"
 
 
 def _write(tmp_path, name, source):
     path = tmp_path / name
     path.write_text(textwrap.dedent(source), encoding="utf-8")
     return str(path)
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _commit(repo, message):
+    _git(repo, "add", ".")
+    _git(
+        repo,
+        "-c", "user.name=FSL Test",
+        "-c", "user.email=fsl@example.invalid",
+        "commit", "-m", message,
+    )
+    return _git(repo, "rev-parse", "HEAD")
 
 
 def _flag_spec(name, requires="requires not flag", invariant=""):
@@ -255,3 +277,109 @@ def test_diff_cli_contract():
     assert args.new == "new.fsl"
     assert args.depth == 5
     assert args.forbid == "behavior_added,invariant_weakened"
+
+
+def test_git_diff_materializes_imports_from_each_revision(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _write(
+        repo,
+        "child.fsl",
+        """
+        spec Child {
+          type X = 0..0
+          state { flag: Bool }
+          init { flag = false }
+          action enable(x: X) { requires not flag  flag = true }
+        }
+        """,
+    )
+    _write(
+        repo,
+        "root.fsl",
+        """
+        compose Root {
+          use Child as child from "child.fsl"
+          action enable(x: child.X) = child.enable(x) { }
+          internal child.enable
+        }
+        """,
+    )
+    base = _commit(repo, "base")
+    _write(
+        repo,
+        "child.fsl",
+        """
+        spec Child {
+          type X = 0..0
+          state { flag: Bool }
+          init { flag = false }
+          action enable(x: X) { flag = true }
+        }
+        """,
+    )
+    head = _commit(repo, "head")
+    monkeypatch.chdir(repo)
+
+    out = run_diff_git(f"{base}..{head}", "root.fsl", depth=2)
+
+    assert out["result"] == "semantic_diff", out
+    assert "behavior_added" in out["summary"]
+    assert out["old"]["file"] == f"{base}:root.fsl"
+    assert out["new"]["file"] == f"{head}:root.fsl"
+    assert out["vcs"]["materialization"] == "git_archive_full_tree"
+
+    normalized = json.loads(json.dumps(out))
+    normalized["old"]["file"] = "BASE:root.fsl"
+    normalized["new"]["file"] = "HEAD:root.fsl"
+    normalized["vcs"]["range"] = "BASE..HEAD"
+    normalized["vcs"]["base"] = {"revision": "BASE", "commit": "base-commit"}
+    normalized["vcs"]["head"] = {"revision": "HEAD", "commit": "head-commit"}
+    assert normalized == json.loads(GIT_SNAPSHOT.read_text(encoding="utf-8"))
+
+
+def test_git_diff_without_spec_enumerates_changed_fsl_files(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _write(repo, "a.fsl", _flag_spec("A"))
+    _write(repo, "unchanged.fsl", _flag_spec("Unchanged"))
+    base = _commit(repo, "base")
+    _write(repo, "a.fsl", _flag_spec("A", requires=""))
+    head = _commit(repo, "head")
+    monkeypatch.chdir(repo)
+
+    out = run_diff_git(f"{base}..{head}", depth=2)
+
+    assert out["result"] == "semantic_diff_batch"
+    assert out["specs"] == ["a.fsl"]
+    assert len(out["comparisons"]) == 1
+    assert exit_code(out) == 0
+
+
+def test_two_path_diff_remains_git_independent(tmp_path, monkeypatch):
+    outside = tmp_path / "not-a-repository"
+    outside.mkdir()
+    old = _write(outside, "old.fsl", _flag_spec("Old"))
+    new = _write(outside, "new.fsl", _flag_spec("New"))
+    monkeypatch.chdir(outside)
+
+    out = run_diff(old, new, depth=1)
+
+    assert out["result"] == "semantic_diff"
+    assert out["summary"] == ["no_semantic_change"]
+
+
+def test_git_diff_cli_contract():
+    single = _build_arg_parser().parse_args([
+        "diff", "--git", "main..HEAD", "specs/cart.fsl", "--depth", "4",
+    ])
+    batch = _build_arg_parser().parse_args(["diff", "--git", "main..HEAD"])
+
+    assert single.git_range == "main..HEAD"
+    assert single.old == "specs/cart.fsl"
+    assert single.new is None
+    assert single.depth == 4
+    assert batch.git_range == "main..HEAD"
+    assert batch.old is None

@@ -303,6 +303,10 @@ the formalization memo.**
    semantic change analysis with behavior/invariant/forbidden witnesses). Diff
    findings are informational by default; add an explicit comma-separated
    `--forbid` policy to make selected kinds fail CI.
+   In a Git/PR workflow use `fslc diff --git BASE..HEAD [spec.fsl]`: both full
+   trees are materialized so imports resolve at their own revision. Omit the
+   path to compare all changed `.fsl` files. Do not replace this with two
+   `git show` temporary files for imported or composed specifications.
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
    runtime event evidence. For recursive fsl-ai agent composition, use
