@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Rust port architecture (issue #195): an accepted, phased design for a
+  repository-local Cargo workspace that targets a native single-binary CLI and a
+  browser Web Worker/WASM kernel backed by the official `z3-solver` npm package.
+  The design makes the Monitor/oracle solver-independence a crate-graph invariant,
+  freezes the JSON/exit-code contract, and defines parser, envelope, trace-replay,
+  and corpus-parity gates for every migration phase. This is a design milestone,
+  not a claim that the Rust implementation exists. See
+  `docs/DESIGN-rust-port.md`.
 - Declaration tag drift review (issue #188): `analyze --profile ai-review`
   gains deterministic `tag_stale_reference` and `tag_formula_disjoint`
   findings based only on exact code-shaped identifiers. `analyze --export
