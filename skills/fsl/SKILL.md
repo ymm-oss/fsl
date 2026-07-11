@@ -286,7 +286,9 @@ the formalization memo.**
    baseline result), `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
-   (log conformance), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
+   (normalized spec-action log conformance), or `fslc replay --from-log
+   events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
+   refinement syntax), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
    of a detailed spec).
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
