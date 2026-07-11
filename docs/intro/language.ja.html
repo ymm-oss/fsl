@@ -674,7 +674,7 @@ fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity ch
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
-fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
+fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -1858,6 +1858,12 @@ DESIGN-*.md).</p>
   ai-review</code> emits review findings such as <code>disconnected_requirement</code>,
   <code>unanchored_property</code>, <code>progressless_cycle</code>, <code>unwritten_state</code>,
   <code>unread_state</code>, <code>unguarded_action</code>, and <code>conservation_candidate</code>.
+  Exact identifier checks additionally emit <code>tag_stale_reference</code> when a
+  code-shaped tag token no longer exists and <code>tag_formula_disjoint</code> when a tag
+  names a current state/constant absent from that declaration's formal
+  definition. <code>--export tag-review</code> emits tagged declarations one at a time
+  with their rendered formal definition under schema <code>tag-review.v0</code>; it does
+  not judge natural-language meaning or call a model.
   These findings carry <code>formal_status: "not_a_violation"</code>; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under <code>schemas/fslc/analysis/</code>. →

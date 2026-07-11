@@ -9,6 +9,7 @@ from .invariants import conservation_candidates
 from .projections import build_action_dependency_graph, project_tsg
 from .schema import FINDINGS_SCHEMA_VERSION
 from .tsg import PROPERTY_NODE_KINDS, SCENARIO_NODE_KINDS, build_tsg, expr_reads, node_by_id
+from .tag_review import tag_drift_candidates
 
 
 def analyze(spec, profile="ai-review"):
@@ -22,6 +23,7 @@ def analyze(spec, profile="ai-review"):
     findings.extend(_unwritten_state(tsg))
     findings.extend(_unread_state(tsg))
     findings.extend(_unguarded_actions(tsg))
+    findings.extend(_tag_drift_findings(spec))
     findings.extend(_conservation_candidate_findings(spec))
     findings = _renumber(findings)
     return {
@@ -64,6 +66,43 @@ def _disconnected_requirements(tsg):
                 "The implementation is missing behavior.",
             ],
             confidence=0.8,
+        ))
+    return findings
+
+
+def _tag_drift_findings(spec):
+    findings = []
+    for candidate in tag_drift_candidates(spec):
+        declaration = candidate["declaration"]
+        identifiers = candidate["identifiers"]
+        if candidate["finding_type"] == "tag_stale_reference":
+            witness_kind = "tag_mentions_unknown_identifier"
+            why = "The declaration tag contains a code-shaped identifier that is not present in the current specification, which may be a stale reference after a rename or deletion."
+            repair = "Update the tag to the current identifier, or confirm that the token is prose and quote/reword it so it is not presented as an FSL identifier."
+            caveat = "The analyzer does not prove that the prose intended to reference an FSL identifier."
+        else:
+            witness_kind = "tag_identifier_absent_from_formula"
+            why = "The tag names a current state variable or constant that the tagged formal definition does not reference, so the human label and checked formula may have drifted apart."
+            repair = "Review the tag and formal definition together; update whichever side no longer expresses the intended requirement."
+            caveat = "Identifier overlap is not proof that natural-language and formal meanings agree."
+        findings.append(_finding(
+            candidate["finding_type"],
+            [declaration["node_id"]],
+            {
+                "kind": witness_kind,
+                "declaration": {
+                    "kind": declaration["kind"],
+                    "name": declaration["name"],
+                    "tag": declaration["tag"],
+                },
+                "identifiers": identifiers,
+                "formal_identifiers": declaration["formal_identifiers"],
+            },
+            why,
+            [{"kind": "review_tag_formula_pair", "template": repair}],
+            [caveat, "This finding is not a verifier violation."],
+            confidence=0.82 if candidate["finding_type"] == "tag_stale_reference" else 0.74,
+            loc=declaration.get("loc"),
         ))
     return findings
 

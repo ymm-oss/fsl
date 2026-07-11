@@ -54,6 +54,9 @@ fslc analyze specs/cart_v1.fsl --projection property_state_graph
 # レビュー候補（findings）を出す
 fslc analyze specs/cart_v1.fsl --profile ai-review
 
+# 宣言タグと形式定義を1宣言ずつ外部レビューへ渡す
+fslc analyze specs/cart_v1.fsl --export tag-review
+
 # ディレクトリ・複数ファイルを一括（バッチ）
 fslc analyze specs/ examples/e2e/ --profile ai-review
 
@@ -70,6 +73,8 @@ fslc analyze specs/cart_v1.fsl --projection action_state_graph --format mermaid
 
 - `--projection`: `tsg`（既定）/ `action_state_graph` / `requirement_property_graph` / `property_state_graph` / `refinement_graph` / `traceability_graph`。
 - `--profile ai-review`: findings モード。projection ではなく「所見の抽出」を行う。
+- `--export tag-review`: タグ付き宣言を `(tag, formal_definition, identifiers)`
+  の固定JSONにする単一ファイル専用モード。自然言語と式の意味一致は判定しない。
 - `--format`: `json`（既定）/ `dot` / `mermaid`。DOT・Mermaid は**グラフ形状の projection のみ**（findings や非グラフには使えない）。Graphviz / Mermaid ランタイムには依存しない（文字列を生成するだけ）。
 
 **終了コードと result（他コマンドと同じ契約）**
@@ -158,6 +163,8 @@ findings は**決定的なヒューリスティック**で、すべて `severity
 | `progressless_cycle` | 要件/シナリオに紐づく多操作の構造閉路に、明示的な進行（leadsTo/有界exit/terminal/fairness）が付いていない | 0.68 |
 | `unwritten_state` | 状態変数が初期化されるが、どの操作も書き込まない | 0.68–0.76 |
 | `unguarded_action` | 非生成の操作に `requires` が一つもない（構造上、常時実行可能に見える） | 0.72 |
+| `tag_stale_reference` | タグ中のコード形状識別子が現在の仕様に存在しない | 0.82 |
+| `tag_formula_disjoint` | タグが名指すstate/constを形式定義が参照しない | 0.74 |
 | `traceability_gap`（プロジェクト層のみ） | 上位層の要件/control ID に、下位層の構造的アンカーが見えない | 0.74 |
 
 各 finding は次のフィールドを持つ:

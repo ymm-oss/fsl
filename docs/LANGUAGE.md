@@ -590,7 +590,7 @@ fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed 
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
-fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review (§15)
+fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -1855,6 +1855,12 @@ DESIGN-*.md).
   ai-review` emits review findings such as `disconnected_requirement`,
   `unanchored_property`, `progressless_cycle`, `unwritten_state`,
   `unread_state`, `unguarded_action`, and `conservation_candidate`.
+  Exact identifier checks additionally emit `tag_stale_reference` when a
+  code-shaped tag token no longer exists and `tag_formula_disjoint` when a tag
+  names a current state/constant absent from that declaration's formal
+  definition. `--export tag-review` emits tagged declarations one at a time
+  with their rendered formal definition under schema `tag-review.v0`; it does
+  not judge natural-language meaning or call a model.
   These findings carry `formal_status: "not_a_violation"`; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under `schemas/fslc/analysis/`. →

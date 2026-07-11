@@ -279,6 +279,10 @@ the formalization memo.**
    `formal_status:"not_a_violation"`, do not turn suggestions into fslc
    violations or CI failures, and do not send source/requirement/comment text to
    an external model unless the user or environment has explicitly opted in,
+   For tag/formula alignment, first run
+   `fslc analyze file.fsl --export tag-review` and compare one declaration tuple
+   at a time. Treat `tag_stale_reference` / `tag_formula_disjoint` as exact
+   identifier evidence only, not semantic proof,
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a

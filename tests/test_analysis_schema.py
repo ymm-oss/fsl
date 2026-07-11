@@ -31,6 +31,7 @@ def test_analysis_schema_files_exist_and_have_stable_ids():
         ("tsg.v0.schema.json", "tsg.v0"),
         ("analysis-graph.v0.schema.json", "analysis-graph.v0"),
         ("analysis-findings.v0.schema.json", "analysis-findings.v0"),
+        ("tag-review.v0.schema.json", "tag-review.v0"),
     ]:
         schema = _load_schema(filename)
         assert schema["$id"].endswith(filename)
@@ -54,8 +55,14 @@ spec SchemaCase {
     tsg = run_analyze(str(path), projection="tsg")
     graph = run_analyze(str(path), projection="action_state_graph")
     findings = run_analyze(str(path), profile="ai-review")
+    tag_review = run_analyze(str(path), export_kind="tag-review")
 
     _assert_required(_load_schema("tsg.v0.schema.json"), tsg)
     _assert_required(_load_schema("analysis-graph.v0.schema.json"), graph)
     _assert_required(_load_schema("analysis-findings.v0.schema.json"), findings)
+    _assert_required(_load_schema("tag-review.v0.schema.json"), tag_review)
+    declaration_required = set(
+        _load_schema("tag-review.v0.schema.json")["$defs"]["declaration"]["required"]
+    )
+    assert all(declaration_required <= set(item) for item in tag_review["declarations"])
     assert set(_load_schema("analysis-graph.v0.schema.json")["$defs"]["metrics"]["required"]) <= set(graph["metrics"])

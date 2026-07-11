@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Declaration tag drift review (issue #188): `analyze --profile ai-review`
+  gains deterministic `tag_stale_reference` and `tag_formula_disjoint`
+  findings based only on exact code-shaped identifiers. `analyze --export
+  tag-review` emits tagged actions/properties with rendered formal definitions
+  under the new `tag-review.v0` schema for declaration-local external review;
+  it never calls a model or promotes wording judgments to violations. See
+  `docs/DESIGN-tag-drift.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,
