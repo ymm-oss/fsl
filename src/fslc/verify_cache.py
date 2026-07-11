@@ -144,6 +144,7 @@ def compute_key(
     requirements_sha256: Optional[str],
     instances: Optional[list],
     values: Optional[list],
+    lemmas: Optional[list] = None,
 ) -> tuple:
     """Returns ``(full_key, depth_agnostic_key)``. Raises ``CacheKeyError`` if
     any component (most likely the kernel AST) contains a value the canonical
@@ -165,6 +166,7 @@ def compute_key(
         "requirements_sha256": requirements_sha256,
         "instances": sorted(instances or []),
         "values": sorted(values or []),
+        "lemmas": list(lemmas or []),
     }
     xdepth_key = canonical_hash(base)
     full = dict(base)

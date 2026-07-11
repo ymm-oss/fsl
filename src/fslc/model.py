@@ -165,6 +165,147 @@ def domain_range(ty, types_meta):
     _err(f"expected bounded type, got {ty}", kind="type")
 
 
+def _snapshot_scalar(value, ty, types_meta, path):
+    if ty[0] == "bool":
+        if not isinstance(value, bool):
+            _err(f"{path}: expected Bool, got {value!r}", kind="type")
+        return value
+    if ty[0] == "int":
+        if not isinstance(value, int) or isinstance(value, bool):
+            _err(f"{path}: expected Int, got {value!r}", kind="type")
+        return value
+    if ty[0] == "domain":
+        if not isinstance(value, int) or isinstance(value, bool):
+            _err(f"{path}: expected bounded integer, got {value!r}", kind="type")
+        lo, hi = domain_range(ty, types_meta)
+        if value < lo or value > hi:
+            _err(f"{path}: value {value} is out of range [{lo}..{hi}]", kind="type")
+        return value
+    if ty[0] == "enum":
+        members = types_meta[ty[1]]["members"]
+        if not isinstance(value, str) or value not in members:
+            _err(
+                f"{path}: expected {ty[1]} enum member {members}, got {value!r}",
+                kind="type",
+            )
+        return members.index(value)
+    _err(f"{path}: expected scalar type, got {ty}", kind="type")
+
+
+def _snapshot_domain_values(ty, types_meta):
+    if ty[0] == "bool":
+        return [False, True]
+    lo, hi = domain_range(ty, types_meta)
+    return list(range(lo, hi + 1))
+
+
+def _snapshot_display_key(key, ty, types_meta):
+    if ty[0] == "bool":
+        return "true" if key else "false"
+    if ty[0] == "enum":
+        return types_meta[ty[1]]["members"][key]
+    return str(key)
+
+
+def _validate_snapshot_value(value, ty, types_meta, path):
+    if ty[0] in ("bool", "int", "domain", "enum"):
+        return _snapshot_scalar(value, ty, types_meta, path)
+    if ty[0] == "option":
+        if value is None:
+            return None
+        return _validate_snapshot_value(value, ty[1], types_meta, path)
+    if ty[0] == "struct":
+        if not isinstance(value, dict):
+            _err(f"{path}: expected object for struct {ty[1]}", kind="type")
+        fields = types_meta[ty[1]]["fields"]
+        missing = sorted(set(fields) - set(value))
+        extra = sorted(set(value) - set(fields))
+        if missing:
+            _err(f"{path}: missing struct field '{missing[0]}'", kind="type")
+        if extra:
+            _err(f"{path}: unknown struct field '{extra[0]}'", kind="type")
+        return {
+            field: _validate_snapshot_value(value[field], field_ty, types_meta,
+                                            f"{path}.{field}")
+            for field, field_ty in fields.items()
+        }
+    if ty[0] == "map":
+        if not isinstance(value, dict):
+            _err(f"{path}: expected object for Map", kind="type")
+        expected = {
+            _snapshot_display_key(key, ty[1], types_meta): key
+            for key in _snapshot_domain_values(ty[1], types_meta)
+        }
+        missing = sorted(set(expected) - set(value))
+        extra = sorted(set(value) - set(expected))
+        if missing:
+            _err(f"{path}: missing Map key '{missing[0]}'", kind="type")
+        if extra:
+            _err(f"{path}: unknown Map key '{extra[0]}'", kind="type")
+        return {
+            key: _validate_snapshot_value(
+                value[display], ty[2], types_meta, f"{path}[{display}]"
+            )
+            for display, key in expected.items()
+        }
+    if ty[0] == "set":
+        if not isinstance(value, list):
+            _err(f"{path}: expected array for Set", kind="type")
+        normalized = [
+            _validate_snapshot_value(item, ty[1], types_meta, f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+        if len(normalized) != len(set(normalized)):
+            _err(f"{path}: duplicate Set element", kind="type")
+        return frozenset(normalized)
+    if ty[0] == "seq":
+        if not isinstance(value, list):
+            _err(f"{path}: expected array for Seq", kind="type")
+        if len(value) > ty[2]:
+            _err(f"{path}: Seq length {len(value)} exceeds capacity {ty[2]}", kind="type")
+        return [
+            _validate_snapshot_value(item, ty[1], types_meta, f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if ty[0] == "relation":
+        if not isinstance(value, list):
+            _err(f"{path}: expected array of pairs for relation", kind="type")
+        normalized = []
+        for index, pair in enumerate(value):
+            if not isinstance(pair, list) or len(pair) != 2:
+                _err(f"{path}[{index}]: relation entry must be a two-element array",
+                     kind="type")
+            normalized.append((
+                _validate_snapshot_value(pair[0], ty[1], types_meta, f"{path}[{index}][0]"),
+                _validate_snapshot_value(pair[1], ty[2], types_meta, f"{path}[{index}][1]"),
+            ))
+        if len(normalized) != len(set(normalized)):
+            _err(f"{path}: duplicate relation pair", kind="type")
+        return frozenset(normalized)
+    _err(f"{path}: unsupported snapshot type {ty}", kind="type")
+
+
+def validate_state_snapshot(spec, snapshot):
+    """Validate Monitor/replay logical-state JSON and return internal values."""
+
+    if not isinstance(snapshot, dict):
+        _err("state snapshot must be a JSON object", kind="type")
+    display_names = spec.get("display_names") or {}
+    public_to_logical = {display_names.get(name, name): name for name in spec["state"]}
+    missing = sorted(set(public_to_logical) - set(snapshot))
+    extra = sorted(set(snapshot) - set(public_to_logical))
+    if missing:
+        _err(f"missing state variable '{missing[0]}'", kind="type")
+    if extra:
+        _err(f"unknown state variable '{extra[0]}'", kind="type")
+    return {
+        logical: _validate_snapshot_value(
+            snapshot[public], spec["state"][logical], spec["types"], f"state.{public}"
+        )
+        for public, logical in public_to_logical.items()
+    }
+
+
 def enum_member_index(types_meta, member_name):
     for ename, info in types_meta.items():
         if info["kind"] == "enum" and member_name in info["members"]:

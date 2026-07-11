@@ -22,6 +22,7 @@ from .model import (
     eval_const,
     phys_z3_sort,
     resolve_action_name,
+    validate_state_snapshot,
     z3_sort,
 )
 from .values import (
@@ -551,6 +552,29 @@ def _enum_phys_constraints(spec, state):
         cons.append(state[phys] >= lo)
         cons.append(state[phys] <= hi)
     return cons
+
+
+def _lemma_exclusions(model, states, upto, lemmas, spec, expr_cache):
+    """Return proved lemma candidates that are false on this concrete CTI."""
+    exclusions = []
+    for lemma in lemmas or []:
+        violated_steps = []
+        for step, state in enumerate(states[:upto + 1]):
+            try:
+                cond = _inv_constraint(lemma, state, spec, expr_cache)
+                value = model.eval(cond, model_completion=True)
+            except (FslError, z3.Z3Exception):
+                violated_steps = []
+                break
+            if z3.is_false(value):
+                violated_steps.append(step)
+        if violated_steps:
+            exclusions.append({
+                "name": lemma["name"],
+                "expression": lemma["expression"],
+                "violated_steps": violated_steps,
+            })
+    return exclusions
 
 
 
@@ -1513,6 +1537,118 @@ def init_constraints(spec, s0):
 
     for st in spec["init"]:
         run(st, {})
+    return cons
+
+
+def _snapshot_scalar_expr(value, ty):
+    if ty[0] == "bool":
+        return z3.BoolVal(value)
+    return z3.IntVal(value)
+
+
+def _snapshot_default_scalar(ty):
+    if ty[0] == "bool":
+        return False
+    if ty[0] == "domain":
+        return ty[1]
+    return 0
+
+
+def state_snapshot_constraints(spec, state, snapshot):
+    """Pin a symbolic state to complete Monitor/replay logical-state JSON."""
+
+    normalized = validate_state_snapshot(spec, snapshot)
+    cons = []
+
+    def add_scalar(phys, ty, value):
+        cons.append(state[phys] == _snapshot_scalar_expr(value, ty))
+
+    def add_value(name, ty, value):
+        if ty[0] in ("int", "bool", "domain", "enum"):
+            add_scalar(_phys_for_logical(spec, name), ty, value)
+            return
+        if ty[0] == "option":
+            present = value is not None
+            cons.append(state[f"{name}__present"] == z3.BoolVal(present))
+            if present:
+                add_scalar(f"{name}__value", ty[1], value)
+            return
+        if ty[0] == "struct":
+            for field, field_ty in spec["types"][ty[1]]["fields"].items():
+                field_value = value[field]
+                if field_ty[0] == "option":
+                    present = field_value is not None
+                    cons.append(state[f"{name}__{field}__present"] == z3.BoolVal(present))
+                    if present:
+                        add_scalar(f"{name}__{field}__value", field_ty[1], field_value)
+                else:
+                    add_scalar(f"{name}__{field}", field_ty, field_value)
+            return
+        if ty[0] == "map":
+            key_ty, value_ty = ty[1], ty[2]
+            for key, item in value.items():
+                zkey = _z3_domain_value(key_ty, key)
+                if value_ty[0] == "option":
+                    present = item is not None
+                    cons.append(z3.Select(state[f"{name}__present"], zkey) == present)
+                    if present:
+                        cons.append(
+                            z3.Select(state[f"{name}__value"], zkey)
+                            == _snapshot_scalar_expr(item, value_ty[1])
+                        )
+                elif value_ty[0] == "struct":
+                    for field, field_ty in spec["types"][value_ty[1]]["fields"].items():
+                        field_value = item[field]
+                        if field_ty[0] == "option":
+                            present = field_value is not None
+                            cons.append(
+                                z3.Select(state[f"{name}__{field}__present"], zkey) == present
+                            )
+                            if present:
+                                cons.append(
+                                    z3.Select(state[f"{name}__{field}__value"], zkey)
+                                    == _snapshot_scalar_expr(field_value, field_ty[1])
+                                )
+                        else:
+                            cons.append(
+                                z3.Select(state[f"{name}__{field}"], zkey)
+                                == _snapshot_scalar_expr(field_value, field_ty)
+                            )
+                else:
+                    cons.append(
+                        z3.Select(state[name], zkey) == _snapshot_scalar_expr(item, value_ty)
+                    )
+            return
+        if ty[0] == "set":
+            array = z3.K(state[name].sort().domain(), z3.BoolVal(False))
+            for item in value:
+                array = z3.Store(array, _z3_domain_value(ty[1], item), z3.BoolVal(True))
+            cons.append(state[name] == array)
+            return
+        if ty[0] == "seq":
+            cons.append(state[f"{name}__len"] == z3.IntVal(len(value)))
+            for index in range(ty[2]):
+                item = value[index] if index < len(value) else _snapshot_default_scalar(ty[1])
+                cons.append(
+                    z3.Select(state[f"{name}__data"], z3.IntVal(index))
+                    == _snapshot_scalar_expr(item, ty[1])
+                )
+            return
+        if ty[0] == "relation":
+            array = z3.K(state[name].sort().domain(), z3.BoolVal(False))
+            for source, target in value:
+                key = _relation_key(
+                    ty[1], ty[2],
+                    _z3_domain_value(ty[1], source),
+                    _z3_domain_value(ty[2], target), spec,
+                )
+                array = z3.Store(array, key, z3.BoolVal(True))
+            cons.append(state[name] == array)
+            return
+        _err(f"unsupported state snapshot type {ty}", kind="type")
+
+    for logical, ty in spec["state"].items():
+        add_value(logical, ty, normalized[logical])
     return cons
 
 
@@ -4886,7 +5022,8 @@ def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cach
 
 
 def _bmc_explore(
-        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn"):
+        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn",
+        initial_snapshot=None):
     invariants = spec.get("invariants", [])
     transitions = spec.get("transitions", [])
     leadstos = spec.get("leadstos", [])
@@ -4900,7 +5037,11 @@ def _bmc_explore(
     s.set(unsat_core=True)
     inv_s = z3.Solver()
     with _eval_cache_scope(expr_cache, id(states[0])):
-        init_cons = init_constraints(spec, states[0])
+        init_cons = (
+            init_constraints(spec, states[0])
+            if initial_snapshot is None
+            else state_snapshot_constraints(spec, states[0], initial_snapshot)
+        )
     s.add(*init_cons)
     inv_s.add(*init_cons)
 
@@ -5254,18 +5395,23 @@ def _bmc_explore(
 
 def verify(
         spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
-        property_name=None, exclude_property_names=None):
+        property_name=None, exclude_property_names=None, initial_snapshot=None):
     started = time.perf_counter()
     filtered, property_error = _select_properties(
         spec, property_name, exclude_property_names)
     if property_error is not None:
         return _finish_result(property_error, spec, depth, started, completeness="bounded")
     spec = filtered
+    if initial_snapshot is not None:
+        # A production snapshot names concrete identities; symmetry reduction
+        # must not discard it merely because its labels are non-canonical.
+        spec = {**spec, "symmetry": {}}
     explored = _bmc_explore(
         spec,
         depth,
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
+        initial_snapshot=initial_snapshot,
     )
     if explored["result"] != "explored":
         return _finish_result(explored, spec, depth, started, completeness="bounded")
@@ -5506,7 +5652,8 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None, allow_unreac
 
 def prove(
         spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn",
-        property_name=None, exclude_property_names=None):
+        property_name=None, exclude_property_names=None,
+        auxiliary_invariants=None, lemma_probes=None):
     """k-induction: base BMC then step-case invariant proof."""
     started = time.perf_counter()
     filtered, property_error = _select_properties(
@@ -5531,6 +5678,15 @@ def prove(
                     f"engine cannot prove; check it with the default bmc engine"
                 ),
             }, spec, base_depth, started)
+
+    if auxiliary_invariants:
+        filtered = dict(filtered)
+        filtered["invariants"] = (
+            list(filtered.get("invariants", [])) + list(auxiliary_invariants)
+        )
+        filtered["user_invariants"] = (
+            list(filtered.get("user_invariants", [])) + list(auxiliary_invariants)
+        )
 
     spec = filtered
     invariants = spec.get("invariants", [])
@@ -5614,8 +5770,10 @@ def prove(
                 if s.check() == z3.sat:
                     model = s.model()
                     trace = _build_trace(model, states, choices, instances, spec, 1)
+                    exclusions = _lemma_exclusions(
+                        model, states, 1, lemma_probes, spec, expr_cache)
                     s.pop()
-                    return _finish_result(_attach_requirement({
+                    result = _attach_requirement({
                         "result": "unknown_cti",
                         "spec": spec["name"],
                         "trans": trans["name"],
@@ -5630,7 +5788,11 @@ def prove(
                         "invariants_checked": [i["name"] for i in invariants],
                         "transitions_checked": [tr["name"] for tr in transitions],
                         **_cti_hint_fields(trace, spec),
-                    }, trans), spec, base_depth, started, completeness="bounded")
+                    }, trans)
+                    if exclusions:
+                        result["_lemma_exclusions"] = exclusions
+                    return _finish_result(
+                        result, spec, base_depth, started, completeness="bounded")
                 s.pop()
 
         remaining = still_remaining
@@ -5640,7 +5802,9 @@ def prove(
     if remaining:
         inv, k, model = last_cti
         trace = _build_trace(model, states, choices, instances, spec, k)
-        return _finish_result(_attach_requirement({
+        exclusions = _lemma_exclusions(
+            model, states, k, lemma_probes, spec, expr_cache)
+        result = _attach_requirement({
             "result": "unknown_cti",
             "spec": spec["name"],
             "invariant": inv["name"],
@@ -5652,7 +5816,11 @@ def prove(
                 "violated_at": k,
             },
             **_cti_hint_fields(trace, spec),
-        }, inv), spec, base_depth, started, completeness="bounded")
+        }, inv)
+        if exclusions:
+            result["_lemma_exclusions"] = exclusions
+        return _finish_result(
+            result, spec, base_depth, started, completeness="bounded")
 
     rank_failure, ranked_leadstos = _prove_ranked_leadstos(
         spec, leadstos, invariants, instances)
@@ -5705,3 +5873,169 @@ def prove(
                 f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
             )
     return _finish_result(result, spec, base_depth, started, completeness="unbounded")
+
+
+def _lemma_only_spec(spec, lemma):
+    out = dict(spec)
+    implicit = [inv for inv in spec.get("invariants", []) if inv.get("implicit")]
+    out["invariants"] = implicit + [lemma]
+    out["user_invariants"] = [lemma]
+    out["transitions"] = []
+    out["leadstos"] = []
+    out["reachables"] = []
+    return out
+
+
+def _lemma_parse_error(expression, exc):
+    out = {
+        "result": "error",
+        "kind": "parse",
+        "message": str(exc).split("\n")[0],
+    }
+    if getattr(exc, "line", None) is not None:
+        out["loc"] = {"line": exc.line, "column": exc.column}
+    return out
+
+
+def _lemma_proof_summary(proof, name):
+    return {
+        "result": "proved",
+        "k": proof.get("k_used", {}).get(name),
+        "checked_to_depth": proof.get("checked_to_depth"),
+        "completeness": proof.get("completeness"),
+    }
+
+
+def prove_with_lemmas(
+        spec, lemma_expressions, k_ind, base_depth, deadlock_mode="warn",
+        vacuity_mode="warn", property_name=None, exclude_property_names=None):
+    """Adjudicate lemma candidates independently, then use only proved ones."""
+    from lark.exceptions import UnexpectedInput, VisitError
+    from .parser import parse_expr
+
+    started = time.perf_counter()
+    reports = []
+    proved_candidates = []
+    occupied_names = {
+        item["name"]
+        for collection in ("invariants", "transitions", "leadstos", "reachables")
+        for item in spec.get(collection, []) or []
+    }
+    for index, expression in enumerate(lemma_expressions, start=1):
+        name = f"AuxiliaryLemma{index}"
+        while name in occupied_names:
+            name += "Candidate"
+        occupied_names.add(name)
+        try:
+            expr = parse_expr(expression)
+            lemma = {
+                "name": name,
+                "expr": expr,
+                "implicit": False,
+                "loc": None,
+                "meta": None,
+                "expression": expression,
+            }
+            proof = prove(
+                _lemma_only_spec(spec, lemma),
+                k_ind,
+                base_depth,
+                deadlock_mode=deadlock_mode,
+                vacuity_mode=vacuity_mode,
+            )
+        except UnexpectedInput as exc:
+            reports.append({
+                "expression": expression,
+                "name": name,
+                "status": "rejected",
+                "used": False,
+                "proof": _lemma_parse_error(expression, exc),
+            })
+            continue
+        except VisitError as exc:
+            orig = exc.orig_exc
+            proof = {
+                "result": "error",
+                "kind": getattr(orig, "kind", "semantics"),
+                "message": str(orig),
+            }
+        except (FslError, z3.Z3Exception) as exc:
+            proof = {
+                "result": "error",
+                "kind": getattr(exc, "kind", "type"),
+                "message": str(exc),
+            }
+
+        if proof.get("result") == "proved":
+            report = {
+                "expression": expression,
+                "name": name,
+                "status": "proved",
+                "used": False,
+                "proof": _lemma_proof_summary(proof, name),
+            }
+            proved_candidates.append((lemma, report))
+        else:
+            stable_proof = {key: value for key, value in proof.items() if key != "cost"}
+            report = {
+                "expression": expression,
+                "name": name,
+                "status": "rejected",
+                "used": False,
+                "proof": stable_proof,
+            }
+        reports.append(report)
+
+    used = []
+    remaining = list(proved_candidates)
+    cti_exclusions = []
+    while True:
+        result = prove(
+            spec,
+            k_ind,
+            base_depth,
+            deadlock_mode=deadlock_mode,
+            vacuity_mode=vacuity_mode,
+            property_name=property_name,
+            exclude_property_names=exclude_property_names,
+            auxiliary_invariants=used,
+            lemma_probes=[lemma for lemma, _report in remaining],
+        )
+        exclusions = result.pop("_lemma_exclusions", [])
+        if result.get("result") != "unknown_cti" or not exclusions:
+            break
+        by_name = {entry["name"]: entry for entry in exclusions}
+        chosen_index = next(
+            (idx for idx, (lemma, _report) in enumerate(remaining)
+             if lemma["name"] in by_name),
+            None,
+        )
+        if chosen_index is None:
+            break
+        lemma, report = remaining.pop(chosen_index)
+        evidence = by_name[lemma["name"]]
+        report["used"] = True
+        used.append(lemma)
+        cti_exclusions.append({
+            "lemma": lemma["expression"],
+            "target": result.get("invariant") or result.get("trans"),
+            "k": result.get("k"),
+            "violated_steps": evidence["violated_steps"],
+            "cti": result.get("cti"),
+        })
+
+    result = dict(result)
+    result["lemmas"] = reports
+    result["lemma_cti_exclusions"] = cti_exclusions
+    if result.get("result") == "proved" and used:
+        result["auxiliary_invariant_recommendation"] = {
+            "message": (
+                "write the used proved lemmas into the specification as auxiliary invariants"
+            ),
+            "declarations": [
+                f"invariant {lemma['name']} {{ {lemma['expression']} }}"
+                for lemma in used
+            ],
+        }
+    result["cost"] = _result_cost(started)
+    return result

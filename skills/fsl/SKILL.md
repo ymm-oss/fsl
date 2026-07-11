@@ -254,11 +254,18 @@ the formalization memo.**
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
+   To ask a bounded operational what-if from a complete `Monitor.state` JSON,
+   use `fslc verify file.fsl --from-state state.json --depth 8`; this replaces
+   `init`, is BMC-only, and is stamped `bounded_from_snapshot`.
 3. Once verified, run `fslc verify file.fsl --engine induction` → done at `proved`
    (note: `--depth K` **includes** step K. Invariants become infinite-depth under
    `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,
    in which case induction can prove that response with an unbounded ranking
-   argument)
+   argument). If induction returns `unknown_cti`, candidate auxiliary invariants
+   may be machine-judged with repeatable `--lemma "EXPR"`: only independently
+   `proved` candidates are used, rejected candidates retain counterexample/CTI
+   evidence, and successful output recommends declarations to write back. Never
+   treat a candidate as an assumption without this adjudication.
 4. As needed: `fslc explain file.fsl --depth 8 --readable`
    (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
    checks, a "what if this rule were absent" counterfactual for each user
@@ -289,8 +296,13 @@ the formalization memo.**
    baseline result), `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
-   (log conformance), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
-   of a detailed spec).
+   (normalized spec-action log conformance), or `fslc replay --from-log
+   events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
+   refinement syntax), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
+   of a detailed spec), and `fslc diff old.fsl new.fsl --depth 8` (bounded
+   semantic change analysis with behavior/invariant/forbidden witnesses). Diff
+   findings are informational by default; add an explicit comma-separated
+   `--forbid` policy to make selected kinds fail CI.
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
    runtime event evidence. For recursive fsl-ai agent composition, use
