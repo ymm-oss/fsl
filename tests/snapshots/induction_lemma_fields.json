@@ -1,0 +1,40 @@
+{
+  "auxiliary_invariant_recommendation": {
+    "declarations": [
+      "invariant AuxiliaryLemma1 { x == y }"
+    ],
+    "message": "write the used proved lemmas into the specification as auxiliary invariants"
+  },
+  "completeness": "unbounded",
+  "engine": "induction",
+  "invariants_checked": [
+    "Sync",
+    "AuxiliaryLemma1"
+  ],
+  "lemma_cti_exclusions": [
+    {
+      "k": 1,
+      "lemma": "x == y",
+      "target": "Sync",
+      "violated_steps": [
+        0,
+        1
+      ]
+    }
+  ],
+  "lemmas": [
+    {
+      "expression": "x == y",
+      "name": "AuxiliaryLemma1",
+      "proof": {
+        "checked_to_depth": 8,
+        "completeness": "unbounded",
+        "k": 1,
+        "result": "proved"
+      },
+      "status": "proved",
+      "used": true
+    }
+  ],
+  "result": "proved"
+}

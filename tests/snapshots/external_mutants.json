@@ -1,0 +1,53 @@
+{
+  "mutants": [
+    {
+      "id": "llm-killed",
+      "input_kind": "replacement",
+      "killed_by": "_bounds_x",
+      "op": "weaken_guard_and_increment",
+      "source": "external",
+      "status": "killed"
+    },
+    {
+      "id": "llm-survived",
+      "input_kind": "replacement",
+      "killed_by": null,
+      "op": "remove_guard",
+      "source": "external",
+      "status": "survived"
+    },
+    {
+      "id": "llm-invalid",
+      "input_kind": "full_spec",
+      "invalid_kind": "parse",
+      "killed_by": null,
+      "op": "broken_syntax",
+      "source": "external",
+      "status": "invalid"
+    }
+  ],
+  "result": "mutated",
+  "summary": {
+    "by_source": {
+      "builtin": {
+        "invalid": 0,
+        "kill_rate": null,
+        "killed": 0,
+        "survived": 0,
+        "total": 0
+      },
+      "external": {
+        "invalid": 1,
+        "kill_rate": 0.5,
+        "killed": 1,
+        "survived": 1,
+        "total": 3
+      }
+    },
+    "invalid": 1,
+    "kill_rate": 0.5,
+    "killed": 1,
+    "survived": 1,
+    "total": 3
+  }
+}

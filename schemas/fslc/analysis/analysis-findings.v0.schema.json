@@ -54,6 +54,8 @@
         "why_it_matters": { "type": "string" },
         "candidate_repairs": { "type": "array", "items": { "type": "object" } },
         "do_not_assume": { "type": "array", "items": { "type": "string" } },
+        "spec_question": { "type": "string", "pattern": "\\?$" },
+        "evidence_basis": { "enum": ["structural", "bounded_bmc"] },
         "loc": { "$ref": "#/$defs/loc" }
       },
       "additionalProperties": true

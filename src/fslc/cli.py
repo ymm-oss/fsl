@@ -16,8 +16,14 @@ from pathlib import Path
 
 from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
-from .model import build_spec, check_spec, FslError, strict_tag_warnings
-from .bmc import verify, prove, scenarios
+from .model import (
+    build_spec,
+    check_spec,
+    FslError,
+    strict_tag_warnings,
+    validate_state_snapshot,
+)
+from .bmc import verify, prove, prove_with_lemmas, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
 from .semantic_diff import semantic_diff
@@ -854,7 +860,7 @@ def run_sweep(
 
 def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock_mode,
                           vacuity_mode, property_name, exclude_property_names,
-                          strict_tags, requirements, instances, values):
+                          strict_tags, requirements, instances, values, lemmas):
     """Best-effort cache lookup. Returns ``(cache_key, xdepth_key, hit_or_None)``;
     ``cache_key`` is ``None`` if the run is uncacheable (cache disabled, or the
     key computation itself failed) -- callers must treat that as a plain miss
@@ -870,7 +876,7 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
             k_ind=k_ind, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode,
             property_name=property_name, exclude_property_names=exclude_property_names,
             strict_tags=strict_tags, requirements_sha256=requirements_sha256,
-            instances=instances, values=values,
+            instances=instances, values=values, lemmas=lemmas,
         )
         return cache_key, xdepth_key, verify_cache.lookup(cache_key, xdepth_key, depth)
     except Exception:  # noqa: BLE001 -- any cache-layer failure degrades to an uncached run
@@ -880,11 +886,35 @@ def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None, instances=None, values=None, use_cache=True):
+        exclude_property_names=None, instances=None, values=None, use_cache=True,
+        lemmas=None, from_state=None):
     try:
+        if lemmas and engine != "induction":
+            return _error_envelope(
+                "usage",
+                "--lemma requires --engine induction",
+            )
+        if from_state is not None and engine != "bmc":
+            raise FslError(
+                "--from-state is available only with the BMC engine; induction "
+                "proves the spec init contract and cannot start from one snapshot",
+                kind="semantics",
+            )
         bounds_overrides = _build_bounds_overrides(instances, values)
         has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
         spec, source_lines, ast, display_names, src = _read_spec(file, bounds_overrides)
+        initial_snapshot = None
+        if from_state is not None:
+            try:
+                initial_snapshot = json.loads(Path(from_state).read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                raise FslError(f"file not found: {from_state}", kind="io")
+            except json.JSONDecodeError as exc:
+                raise FslError(
+                    f"invalid state JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+                    kind="io",
+                )
+            validate_state_snapshot(spec, initial_snapshot)
         acc, acc_skipped = _acceptance_error(spec, skip_out_of_range=has_bounds_overrides)
         if acc:
             return _envelope(acc)
@@ -893,11 +923,11 @@ def run_verify(
             return _envelope(forb)
 
         cache_key = xdepth_key = cached = None
-        if use_cache:
+        if use_cache and initial_snapshot is None:
             cache_key, xdepth_key, cached = _verify_cache_lookup(
                 ast, display_names, src, engine, depth, k_ind, deadlock_mode, vacuity_mode,
                 property_name, exclude_property_names, strict_tags, requirements,
-                instances, values,
+                instances, values, lemmas,
             )
         verify_mode = cached is not None and os.environ.get("FSLC_CACHE_VERIFY") == "1"
         if cached is not None and not verify_mode:
@@ -907,13 +937,25 @@ def run_verify(
             return _envelope(out)
 
         if engine == "induction":
-            out = prove(
-                spec, k_ind, depth,
-                deadlock_mode=deadlock_mode,
-                vacuity_mode=vacuity_mode,
-                property_name=property_name,
-                exclude_property_names=exclude_property_names,
-            )
+            if lemmas:
+                out = prove_with_lemmas(
+                    spec,
+                    lemmas,
+                    k_ind,
+                    depth,
+                    deadlock_mode=deadlock_mode,
+                    vacuity_mode=vacuity_mode,
+                    property_name=property_name,
+                    exclude_property_names=exclude_property_names,
+                )
+            else:
+                out = prove(
+                    spec, k_ind, depth,
+                    deadlock_mode=deadlock_mode,
+                    vacuity_mode=vacuity_mode,
+                    property_name=property_name,
+                    exclude_property_names=exclude_property_names,
+                )
         else:
             out = verify(
                 spec,
@@ -923,6 +965,7 @@ def run_verify(
                 vacuity_mode=vacuity_mode,
                 property_name=property_name,
                 exclude_property_names=exclude_property_names,
+                initial_snapshot=initial_snapshot,
             )
         if verify_mode:
             cached_out, _source = cached
@@ -951,6 +994,19 @@ def run_verify(
             out["bounds_overrides"] = {
                 "instances": dict(bounds_overrides["instances"]),
                 "values": {k: [lo, hi] for k, (lo, hi) in bounds_overrides["values"].items()},
+            }
+        if initial_snapshot is not None:
+            out = dict(out)
+            out["initial_state"] = {
+                "source": "snapshot",
+                "path": str(from_state),
+                "complete": True,
+                "replaces_spec_init": True,
+            }
+            out["faithfulness"] = {
+                "scope": "bounded_from_snapshot",
+                "spec_init": "not_used",
+                "induction": "not_applicable",
             }
         if cache_key is not None and cached is None:
             try:
@@ -1004,9 +1060,33 @@ def run_scenarios(file, depth, deadlock_mode="warn"):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_replay(file, trace_path):
+def run_replay(file, trace_path=None, *, from_log=None, mapping_path=None):
     try:
         spec, *_rest = _read_spec(file)
+        if from_log is not None:
+            if trace_path is not None:
+                return _envelope({
+                    "result": "error",
+                    "kind": "io",
+                    "message": "--trace and --from-log are mutually exclusive",
+                })
+            if mapping_path is None:
+                return _envelope({
+                    "result": "error",
+                    "kind": "io",
+                    "message": "--mapping is required with --from-log",
+                })
+            from .log_replay import build_log_mapping, load_jsonl, replay_mapped_log
+
+            mapping_src = open(mapping_path, encoding="utf-8").read()
+            mapping = build_log_mapping(parse_refinement(mapping_src), spec)
+            return _envelope(replay_mapped_log(spec, load_jsonl(from_log), mapping))
+        if trace_path is None:
+            return _envelope({
+                "result": "error",
+                "kind": "io",
+                "message": "one of --trace or --from-log is required",
+            })
         mon = Monitor(spec)
         raw = open(trace_path, encoding="utf-8").read()
         data = json.loads(raw)
@@ -1168,13 +1248,16 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS):
+def run_mutate(
+        file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS,
+        external_mutants=None):
     try:
         return _envelope(mutate_file(
             file,
             depth=depth,
             by_requirement=by_requirement,
             max_mutants=max_mutants,
+            external_mutants=external_mutants,
         ))
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -1190,9 +1273,9 @@ def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTA
     except FslError as e:
         return _error_envelope(e.kind, str(e), _loc_from_exc(e),
                                getattr(e, "expected", None), getattr(e, "hint", None))
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         return _envelope({"result": "error", "kind": "io",
-                          "message": f"file not found: {file}"})
+                          "message": f"file not found: {e.filename or file}"})
     except Exception as e:
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
@@ -1862,6 +1945,11 @@ def _build_arg_parser():
     v.add_argument("--requirements", default=None)
     v.add_argument("--no-cache", action="store_true",
                    help="skip the persistent verdict cache for this run (neither reads nor writes it)")
+    v.add_argument("--lemma", action="append", dest="lemmas", default=None,
+                   help="candidate auxiliary invariant expression (induction only; repeatable)")
+    v.add_argument("--from-state", default=None,
+                   help="replace spec init with a complete Monitor/replay logical-state "
+                        "JSON snapshot (BMC only)")
 
     sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
     sw.add_argument("file")
@@ -1888,7 +1976,12 @@ def _build_arg_parser():
 
     rp = sub.add_parser("replay")
     rp.add_argument("file")
-    rp.add_argument("--trace", required=True)
+    replay_input = rp.add_mutually_exclusive_group(required=True)
+    replay_input.add_argument("--trace")
+    replay_input.add_argument("--from-log", dest="from_log",
+                              help="production JSONL records to map and replay")
+    rp.add_argument("--mapping",
+                    help="refinement-syntax log mapping (required with --from-log)")
 
     tg = sub.add_parser("testgen")
     tg.add_argument("file")
@@ -1905,6 +1998,8 @@ def _build_arg_parser():
     mt.add_argument("--depth", type=int, default=8)
     mt.add_argument("--by-requirement", action="store_true")
     mt.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS)
+    mt.add_argument("--from", dest="mutants_from",
+                    help="adjudicate external JSONL mutants in addition to the built-in catalog")
 
     ex = sub.add_parser("explain")
     ex.add_argument("file")
@@ -2105,7 +2200,12 @@ def _dispatch(args):
                            values=args.values)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "replay":
-        result = run_replay(args.file, args.trace)
+        result = run_replay(
+            args.file,
+            args.trace,
+            from_log=args.from_log,
+            mapping_path=args.mapping,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "refine":
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
@@ -2150,7 +2250,13 @@ def _dispatch(args):
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "mutate":
-        result = run_mutate(args.file, args.depth, args.by_requirement, args.max_mutants)
+        result = run_mutate(
+            args.file,
+            args.depth,
+            args.by_requirement,
+            args.max_mutants,
+            external_mutants=args.mutants_from,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
         sys.exit(0)
     elif args.cmd == "explain":
@@ -2335,7 +2441,9 @@ def _dispatch(args):
                             exclude_property_names=args.exclude_property_names,
                             instances=args.instances,
                             values=args.values,
-                            use_cache=not args.no_cache)
+                            use_cache=not args.no_cache,
+                            lemmas=args.lemmas,
+                            from_state=args.from_state)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

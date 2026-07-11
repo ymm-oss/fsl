@@ -94,7 +94,8 @@ options:
                    [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]
                    [--exclude-property EXCLUDE_PROPERTY_NAMES]
                    [--instances INSTANCES] [--values VALUES] [--strict-tags]
-                   [--requirements REQUIREMENTS] [--no-cache]
+                   [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS]
+                   [--from-state FROM_STATE]
                    file
 
 positional arguments:
@@ -123,6 +124,11 @@ options:
   --requirements REQUIREMENTS
   --no-cache            skip the persistent verdict cache for this run
                         (neither reads nor writes it)
+  --lemma LEMMAS        candidate auxiliary invariant expression (induction
+                        only; repeatable)
+  --from-state FROM_STATE
+                        replace spec init with a complete Monitor/replay
+                        logical-state JSON snapshot (BMC only)
 </pre></div></details>
 <details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
                   [--deadlock {warn,error,ignore}]
@@ -160,14 +166,19 @@ options:
   --depth DEPTH
   --deadlock {warn,error,ignore}
 </pre></div></details>
-<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] --trace TRACE file
+<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG)
+                   [--mapping MAPPING]
+                   file
 
 positional arguments:
   file
 
 options:
-  -h, --help     show this help message and exit
+  -h, --help           show this help message and exit
   --trace TRACE
+  --from-log FROM_LOG  production JSONL records to map and replay
+  --mapping MAPPING    refinement-syntax log mapping (required with --from-
+                       log)
 </pre></div></details>
 <details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT]
                     [--target {pytest,vitest,swift,kotlin,dart,phpunit}]
@@ -187,7 +198,7 @@ options:
   --strict
 </pre></div></details>
 <details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement]
-                   [--max-mutants MAX_MUTANTS]
+                   [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM]
                    file
 
 positional arguments:
@@ -198,6 +209,8 @@ options:
   --depth DEPTH
   --by-requirement
   --max-mutants MAX_MUTANTS
+  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
+                        built-in catalog
 </pre></div></details>
 <details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
 

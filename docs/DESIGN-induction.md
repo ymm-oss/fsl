@@ -199,11 +199,16 @@ JSON (the shape finalized in §9, generalized to multiple states):
 
 ```
 fslc verify <file.fsl> --engine induction [--k N] [--depth K]
+            [--lemma "<expr>"]...
 ```
 
 - `--engine bmc` (default) behaves exactly as before. Code paths are untouched outside the shared parts.
 - `--k N`: maximum induction depth K_ind. Default 1.
 - `--depth K`: BMC depth of the base case + reachable witness search depth. Default 8.
+- `--lemma EXPR`: repeatable, independently proved auxiliary-invariant
+  candidates. Only `proved` candidates may enter the target proof; see
+  `DESIGN-induction-lemmas.md` for the adjudication, CTI-exclusion, JSON, and
+  cache contract.
 - Output on success:
 
 ```json
