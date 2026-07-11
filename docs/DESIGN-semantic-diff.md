@@ -108,6 +108,15 @@ Only a finding named by `--forbid` makes `gate.passed:false` and exits 1.
 Parse/type/IO errors remain exit 2 and internal failures exit 3. This separates
 an informative change report from a repository-specific compatibility gate.
 
+An approval sidecar can supply OLD directly:
+
+```bash
+fslc diff --approval spec.approval.json current.fsl --depth 8
+```
+
+The embedded approved source group is digest-checked before this unchanged core
+comparison runs. See [`DESIGN-approval.md`](DESIGN-approval.md).
+
 ## Non-goals
 
 - Source/AST edit descriptions; use the VCS diff for those.

@@ -1,0 +1,30 @@
+{
+  "schema": "fslc-approval.v0",
+  "approved_at": "2026-07-11T12:00:00+09:00",
+  "approver": "Product Owner",
+  "spec": {
+    "name": "ApprovalLatch",
+    "entry": "approval.fsl",
+    "digest": "<digest>",
+    "digest_algorithm": "sha256_canonical_kernel_ast_without_locations",
+    "requirements": [
+      "REQ-1"
+    ]
+  },
+  "rendering": {
+    "kind": "html",
+    "path": "approval.html",
+    "sha256": "7382885f622fb83a889be071c20e6002445d5883df7e662a4e8bbbc191dc97e9",
+    "generation": {
+      "spec_entry": "approval.fsl",
+      "command": "fslc html approval.fsl -o approval.html"
+    }
+  },
+  "baseline": {
+    "digest": "<digest>",
+    "entry": "approval.fsl",
+    "files": {
+      "approval.fsl": "\nspec ApprovalLatch {\n  state { flag: Bool }\n  init { flag = false }\n  action enable() \"REQ-1: enable once\" {\n    requires not flag\n    flag = true\n  }\n  invariant EnabledIsBool \"REQ-1: flag remains boolean\" { flag or not flag }\n}\n"
+    }
+  }
+}

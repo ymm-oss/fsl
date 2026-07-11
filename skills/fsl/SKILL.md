@@ -291,6 +291,10 @@ the formalization memo.**
    semantic change analysis with behavior/invariant/forbidden witnesses). Diff
    findings are informational by default; add an explicit comma-separated
    `--forbid` policy to make selected kinds fail CI.
+   When a stakeholder approves generated behavior evidence, create a digest-
+   bound sidecar with `fslc approval create`; later use `approval check`,
+   `ledger --approval`, and `diff --approval record current` to distinguish
+   approved from drifted meaning and inspect the bounded behavior change.
    For AI tool-boundary contracts, use `fslc ai check file.fsl` on
    `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
    runtime event evidence. For recursive fsl-ai agent composition, use

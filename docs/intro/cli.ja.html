@@ -34,6 +34,8 @@
     r = result.get(&quot;result&quot;)
     if r == &quot;semantic_diff&quot;:
         return 0 if result.get(&quot;gate&quot;, {}).get(&quot;passed&quot;, True) else 1
+    if r == &quot;approval_checked&quot;:
+        return 0 if result.get(&quot;status&quot;) == &quot;approved&quot; else 1
     if r in (&quot;verified&quot;, &quot;proved&quot;, &quot;scenarios&quot;, &quot;conformant&quot;, &quot;generated&quot;,
              &quot;refines&quot;, &quot;typestate&quot;, &quot;mutated&quot;, &quot;explained&quot;, &quot;analyzed&quot;,
              &quot;verified_under_assumptions&quot;, &quot;agent_analyzed&quot;, &quot;replay_conformant&quot;,
@@ -41,6 +43,8 @@
              &quot;expanded&quot;, &quot;conformance_checked&quot;, &quot;ai_project_analyzed&quot;,
              &quot;statistically_supported&quot;, &quot;observed_supported&quot;, &quot;compared&quot;,
              &quot;compat_profile_generated&quot;):
+        return 0
+    if r == &quot;approval_created&quot;:
         return 0
     if r == &quot;sweep_passed&quot;:
         return 0
@@ -228,6 +232,7 @@ options:
 <details><summary>fslc ledger</summary><div class="tree-body"><pre>usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT]
                    [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG]
                    [--engine {bmc,induction}] [--evidence EVIDENCE]
+                   [--approval APPROVAL]
                    file
 
 positional arguments:
@@ -246,6 +251,8 @@ options:
   --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an
                         external-evidence producer (fslc ai eval/replay/drift,
                         fslc db observe, fslc domain replay, ...); repeatable
+  --approval APPROVAL   approval sidecar to show approved/drifted per
+                        requirement
 </pre></div></details>
 <details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
 
@@ -260,8 +267,9 @@ options:
   -h, --help     show this help message and exit
   --depth DEPTH
 </pre></div></details>
-<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--depth DEPTH] [--mapping MAPPING] [--forbid FORBID]
-                 old new
+<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--approval RECORD] [--depth DEPTH] [--mapping MAPPING]
+                 [--forbid FORBID]
+                 [old] [new]
 
 positional arguments:
   old
@@ -269,10 +277,39 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
+  --approval RECORD  use an approval record&#x27;s embedded source snapshot as OLD
   --depth DEPTH
   --mapping MAPPING  optional refinement mapping for one comparison direction
   --forbid FORBID    comma-separated finding kinds that should fail the gate
 </pre></div></details>
+<details><summary>fslc approval <span class="tree-blurb">— 2 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc approval create</summary><div class="tree-body"><pre>usage: fslc approval create [-h] --rendered RENDERED --rendering-kind
+                            {ledger,html,scenarios} --approver APPROVER
+                            [--approved-at APPROVED_AT] [--command COMMAND]
+                            [-o OUTPUT]
+                            file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --rendered RENDERED   approved ledger/html/scenarios artifact
+  --rendering-kind {ledger,html,scenarios}
+  --approver APPROVER
+  --approved-at APPROVED_AT
+  --command COMMAND     generation command/options recorded as audit metadata
+  -o OUTPUT, --output OUTPUT
+</pre></div></details>
+<details><summary>fslc approval check</summary><div class="tree-body"><pre>usage: fslc approval check [-h] --record RECORD [--rendered RENDERED] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help           show this help message and exit
+  --record RECORD
+  --rendered RENDERED  optional current rendering to check for rendering drift
+</pre></div></details></div></div></details>
 <details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [path]
 
 positional arguments:

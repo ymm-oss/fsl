@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Spec-digest-bound approval records (issue #190): `fslc approval create`
+  commits a `fslc-approval.v0` JSON sidecar binding approver/time, normalized
+  kernel AST digest, approved HTML/ledger/scenarios bytes, generation metadata,
+  and an embedded relative source group. `approval check` and `ledger
+  --approval` show `approved`/`drifted`; `diff --approval RECORD CURRENT`
+  materializes and digest-checks the approved source before bounded semantic
+  comparison. See `docs/DESIGN-approval.md`.
 - Semantic specification diff (issue #176): `fslc diff OLD.fsl NEW.fsl
   --depth K` classifies bounded changes through bidirectional auto-refinement
   (`behavior_added` / `behavior_removed`), SMT implication of user-invariant

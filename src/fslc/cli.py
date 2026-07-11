@@ -21,6 +21,11 @@ from .bmc import verify, prove, scenarios
 from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
 from .semantic_diff import semantic_diff
+from .approval import (
+    check_approval_record,
+    create_approval_record,
+    semantic_diff_approval,
+)
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import TestgenScenarioError, generate_test_bundle, default_output_name
@@ -1258,7 +1263,7 @@ def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True, 
 
 
 def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None, write_file=True,
-               engine="bmc", evidence=None):
+               engine="bmc", evidence=None, approval=None):
     """Generate a business audit ledger (markdown) from verifier evidence (#24).
 
     ``engine="induction"`` lets a requirement's assurance class reach
@@ -1279,18 +1284,23 @@ def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None
             (path, json.loads(Path(path).read_text(encoding="utf-8")))
             for path in (evidence or [])
         ]
+        approval_status = check_approval_record(file, approval) if approval else None
         content = render_ledger(file, spec, verification, scenarios_result, replay_result,
-                                 evidence_results=evidence_results)
+                                 evidence_results=evidence_results,
+                                 approval_status=approval_status)
         out_path = output or default_ledger_output_name(file)
         if write_file and output:
             open(output, "w", encoding="utf-8").write(content)
-        return _envelope({
+        result = {
             "result": "generated",
             "kind": "audit_ledger",
             "spec": spec["name"],
             "output": out_path,
             "content": content,
-        })
+        }
+        if approval_status is not None:
+            result["approval"] = approval_status
+        return _envelope(result)
     except UnexpectedInput as e:
         return _parse_error_result(e)
     except VisitError as e:
@@ -1775,10 +1785,67 @@ def run_diff(old, new, depth=8, mapping=None, forbid=None):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_diff_approval(record, current, depth=8, mapping=None, forbid=None):
+    """Compare the source snapshot embedded in an approval record to CURRENT."""
+    try:
+        if isinstance(forbid, str):
+            forbid = [item.strip() for item in forbid.split(",") if item.strip()]
+        return _envelope(semantic_diff_approval(
+            record, current, depth, mapping, forbid,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_approval_create(file, rendered, rendering_kind, approver, approved_at=None,
+                        command=None, output=None):
+    try:
+        record = create_approval_record(
+            file, rendered, rendering_kind, approver, approved_at, command,
+        )
+        out_path = output or str(Path(file).with_suffix(".approval.json"))
+        Path(out_path).write_text(
+            json.dumps(record, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return _envelope({
+            "result": "approval_created",
+            "output": out_path,
+            "status": "approved",
+            "record": record,
+        })
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except (FileNotFoundError, OSError) as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_approval_check(file, record, rendered=None):
+    try:
+        return _envelope(check_approval_record(file, record, rendered))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except (FileNotFoundError, OSError) as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
     if r == "semantic_diff":
         return 0 if result.get("gate", {}).get("passed", True) else 1
+    if r == "approval_checked":
+        return 0 if result.get("status") == "approved" else 1
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
              "refines", "typestate", "mutated", "explained", "analyzed",
              "verified_under_assumptions", "agent_analyzed", "replay_conformant",
@@ -1786,6 +1853,8 @@ def exit_code(result):
              "expanded", "conformance_checked", "ai_project_analyzed",
              "statistically_supported", "observed_supported", "compared",
              "compat_profile_generated"):
+        return 0
+    if r == "approval_created":
         return 0
     if r == "sweep_passed":
         return 0
@@ -1915,6 +1984,8 @@ def _build_arg_parser():
                     help="path to a saved stdout envelope (JSON) from an external-evidence producer "
                          "(fslc ai eval/replay/drift, fslc db observe, fslc domain replay, ...); "
                          "repeatable")
+    lg.add_argument("--approval", default=None,
+                    help="approval sidecar to show approved/drifted per requirement")
 
     rf = sub.add_parser("refine")
     rf.add_argument("impl")
@@ -1925,13 +1996,33 @@ def _build_arg_parser():
     rf.add_argument("--depth", type=int, default=8)
 
     df = sub.add_parser("diff", help="compare OLD and NEW specification semantics")
-    df.add_argument("old")
-    df.add_argument("new")
+    df.add_argument("old", nargs="?")
+    df.add_argument("new", nargs="?")
+    df.add_argument("--approval", default=None, metavar="RECORD",
+                    help="use an approval record's embedded source snapshot as OLD")
     df.add_argument("--depth", type=int, default=8)
     df.add_argument("--mapping", default=None,
                     help="optional refinement mapping for one comparison direction")
     df.add_argument("--forbid", default="",
                     help="comma-separated finding kinds that should fail the gate")
+
+    approval = sub.add_parser("approval", help="create or check a spec-digest-bound approval record")
+    approval_sub = approval.add_subparsers(dest="approval_cmd", required=True)
+    approval_create = approval_sub.add_parser("create")
+    approval_create.add_argument("file")
+    approval_create.add_argument("--rendered", required=True,
+                                 help="approved ledger/html/scenarios artifact")
+    approval_create.add_argument("--rendering-kind", choices=["ledger", "html", "scenarios"], required=True)
+    approval_create.add_argument("--approver", required=True)
+    approval_create.add_argument("--approved-at", default=None)
+    approval_create.add_argument("--command", default=None,
+                                 help="generation command/options recorded as audit metadata")
+    approval_create.add_argument("-o", "--output", default=None)
+    approval_check = approval_sub.add_parser("check")
+    approval_check.add_argument("file")
+    approval_check.add_argument("--record", required=True)
+    approval_check.add_argument("--rendered", default=None,
+                                help="optional current rendering to check for rendering drift")
 
     ch = sub.add_parser("chain", help="run a project manifest across business, requirements, design, and impl")
     ch.add_argument("path", nargs="?", default="fsl-project.toml")
@@ -2091,7 +2182,32 @@ def _dispatch(args):
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "diff":
-        result = run_diff(args.old, args.new, args.depth, args.mapping, args.forbid)
+        if args.approval:
+            if args.old is None or args.new is not None:
+                result = _envelope({
+                    "result": "error", "kind": "semantics",
+                    "message": "diff --approval RECORD requires exactly one CURRENT spec",
+                })
+            else:
+                result = run_diff_approval(
+                    args.approval, args.old, args.depth, args.mapping, args.forbid,
+                )
+        elif args.old is None or args.new is None:
+            result = _envelope({
+                "result": "error", "kind": "semantics",
+                "message": "diff requires OLD NEW or --approval RECORD CURRENT",
+            })
+        else:
+            result = run_diff(args.old, args.new, args.depth, args.mapping, args.forbid)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "approval":
+        if args.approval_cmd == "create":
+            result = run_approval_create(
+                args.file, args.rendered, args.rendering_kind, args.approver,
+                args.approved_at, args.command, args.output,
+            )
+        else:
+            result = run_approval_check(args.file, args.record, args.rendered)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "chain":
         from .chain import format_chain_table, run_chain
@@ -2138,7 +2254,8 @@ def _dispatch(args):
     elif args.cmd == "ledger":
         result = run_ledger(args.file, args.depth, args.output, args.deadlock,
                             impl_log=args.impl_log, write_file=bool(args.output),
-                            engine=args.engine, evidence=args.evidence)
+                            engine=args.engine, evidence=args.evidence,
+                            approval=args.approval)
         if result.get("result") == "generated":
             content = result.pop("content")
             if args.output:

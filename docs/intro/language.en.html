@@ -674,6 +674,10 @@ fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity ch
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                  # bounded semantic change analysis
+fslc diff      --approval record.json &lt;current&gt; [--depth K]
+                                                 # compare approved embedded baseline to current
+fslc approval  create &lt;spec&gt; --rendered &lt;artifact&gt; --rendering-kind html|ledger|scenarios --approver &lt;name&gt; [-o record.json]
+fslc approval  check &lt;spec&gt; --record record.json [--rendered &lt;current-artifact&gt;]
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -731,6 +735,13 @@ the NEW scope recorded by <code>scope.comparison:"new"</code> and
 default. Only findings explicitly listed by comma-separated <code>--forbid</code> make
 the gate fail and exit 1. All comparisons remain bounded to <code>--depth</code>; clean
 output is not an unbounded equivalence proof.</p>
+<p><code>approval create</code> binds an approved HTML/ledger/scenarios artifact to the
+normalized post-desugaring spec digest and an embedded relative source group.
+<code>approval check</code> reports <code>approved</code> or <code>drifted</code> (plus rendering status when a
+current artifact is supplied). <code>ledger --approval RECORD</code> adds per-requirement
+approval status. <code>diff --approval RECORD CURRENT</code> uses the digest-verified
+embedded baseline for the same bounded semantic comparison. See
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-approval.md"><code>DESIGN-approval.md</code></a>.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /

@@ -245,12 +245,15 @@ def _confirmed_reqs(scenarios_result: dict) -> dict:
 
 
 def render_ledger(file, spec, verification, scenarios_result, replay_result=None,
-                   evidence_results=None) -> str:
+                   evidence_results=None, approval_status=None) -> str:
     registry = _requirement_registry(spec)
     findings = _collect_findings(verification)
     confirmed = _confirmed_reqs(scenarios_result or {})
     evidence_dicts = [ev for _src, ev in (evidence_results or [])]
     assurance = requirement_assurance(registry, verification, evidence_dicts)
+    approval_by_req = {
+        item["id"]: item for item in (approval_status or {}).get("requirements", [])
+    }
 
     by_req: dict = {}
     spec_level = []
@@ -260,6 +263,9 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
     # every requirement id that exists or has a finding
     all_ids = list(registry.keys())
     for rid in by_req:
+        if rid not in all_ids:
+            all_ids.append(rid)
+    for rid in approval_by_req:
         if rid not in all_ids:
             all_ids.append(rid)
 
@@ -275,6 +281,12 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
         "詳細は `docs/DESIGN-assurance-classes.md`。"
     )
     L.append("- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。")
+    if approval_status is not None:
+        L.append(
+            f"- 承認照合: **{approval_status['status']}** / approved digest "
+            f"`{approval_status['approved_digest']}` / current "
+            f"`{approval_status['current_digest']}`"
+        )
     if replay_result is not None:
         rr = replay_result.get("result")
         if rr == "nonconformant":
@@ -286,8 +298,9 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
     # page 1 — risk list
     L.append("## リスク一覧（要件ID別）")
     L.append("")
-    L.append("| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |")
-    L.append("|---|---|---|---|---|---|---|---|")
+    approval_header = " 承認 |" if approval_status is not None else ""
+    L.append(f"| 要件ID | 業務目的 | 状態 | 保証クラス |{approval_header} 検出種別 | リスク | 判断者 | 次アクション |")
+    L.append("|---|---|---|---|" + ("---|" if approval_status is not None else "") + "---|---|---|---|")
     for rid in all_ids:
         reg = registry.get(rid, {})
         fs = by_req.get(rid, [])
@@ -304,10 +317,14 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
         owner = _esc(reg.get("owner") or ("____" if fs else "—"))
         ac = assurance.get(rid)
         assurance_col = _esc(_assurance_cell(ac, verification))
-        L.append(f"| {_esc(rid)} | {purpose} | {status} | {assurance_col} | {_esc(types)} | {risk} | {owner} | {_esc(action)} |")
+        approval_col = ""
+        if approval_status is not None:
+            approval_col = f" {_esc((approval_by_req.get(rid) or {}).get('status') or approval_status['status'])} |"
+        L.append(f"| {_esc(rid)} | {purpose} | {status} | {assurance_col} |{approval_col} {_esc(types)} | {risk} | {owner} | {_esc(action)} |")
     if spec_level:
         types = ", ".join(sorted({f["trace_type"] for f in spec_level}))
-        L.append(f"| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {_esc(assurance_label(classify_result(verification), depth=verification.get('checked_to_depth')))} | {_esc(types)} | 要確認 | ____ | 下記詳細 |")
+        approval_col = f" {_esc(approval_status['status'])} |" if approval_status is not None else ""
+        L.append(f"| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {_esc(assurance_label(classify_result(verification), depth=verification.get('checked_to_depth')))} |{approval_col} {_esc(types)} | 要確認 | ____ | 下記詳細 |")
     L.append("")
 
     # page 2+ — per-requirement detail

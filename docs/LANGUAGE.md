@@ -590,6 +590,10 @@ fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed 
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                  # bounded semantic change analysis
+fslc diff      --approval record.json <current> [--depth K]
+                                                 # compare approved embedded baseline to current
+fslc approval  create <spec> --rendered <artifact> --rendering-kind html|ledger|scenarios --approver <name> [-o record.json]
+fslc approval  check <spec> --record record.json [--rendered <current-artifact>]
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -652,6 +656,14 @@ the NEW scope recorded by `scope.comparison:"new"` and
 default. Only findings explicitly listed by comma-separated `--forbid` make
 the gate fail and exit 1. All comparisons remain bounded to `--depth`; clean
 output is not an unbounded equivalence proof.
+
+`approval create` binds an approved HTML/ledger/scenarios artifact to the
+normalized post-desugaring spec digest and an embedded relative source group.
+`approval check` reports `approved` or `drifted` (plus rendering status when a
+current artifact is supplied). `ledger --approval RECORD` adds per-requirement
+approval status. `diff --approval RECORD CURRENT` uses the digest-verified
+embedded baseline for the same bounded semantic comparison. See
+[`DESIGN-approval.md`](DESIGN-approval.md).
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /

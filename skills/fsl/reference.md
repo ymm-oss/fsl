@@ -693,6 +693,9 @@ fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report
+fslc diff --approval <record.json> <current> [--depth K]
+fslc approval create <spec> --rendered <artifact> --rendering-kind html|ledger|scenarios --approver <name> [-o record.json]
+fslc approval check <spec> --record <record.json> [--rendered <current-artifact>]
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--format json|dot|mermaid]  # structural review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
