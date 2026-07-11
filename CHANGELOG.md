@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Rust port architecture (issue #195): an accepted, phased design for a
+  repository-local Cargo workspace that targets a native single-binary CLI and a
+  browser Web Worker/WASM kernel backed by the official `z3-solver` npm package.
+  The design makes the Monitor/oracle solver-independence a crate-graph invariant,
+  freezes the JSON/exit-code contract, and defines parser, envelope, trace-replay,
+  and corpus-parity gates for every migration phase. This is a design milestone,
+  not a claim that the Rust implementation exists. See
+  `docs/DESIGN-rust-port.md`.
 - Assurance classes (issue #171): a shared `fslc.assurance` classifier turns
   every command's result dict (BMC `verify`, k-induction `prove`, and the
   fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"` producers — replay,
