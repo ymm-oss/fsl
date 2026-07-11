@@ -681,6 +681,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
+               [--from-state state.json]            # complete Monitor/replay state; replaces init (BMC only)
                [--strict-tags] [--requirements ids.txt] [--no-cache]
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
@@ -688,6 +689,8 @@ fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emi
 fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
+fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
+                                                # production JSONL -> mapped action/state -> Monitor
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
@@ -733,6 +736,28 @@ NEW's shared entity/number bounds. Findings exit 0 because the command is an
 analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
 verdict is bounded by `--depth`, and a mapping only resolves the direction
 declared in its `impl`/`abs` fields (it is never inverted).
+
+Use `verify --from-state` for bounded prediction from a current concrete state,
+not for proof. The input must be the complete logical JSON emitted by
+`Monitor.state`/replay (enum names, Option as value/`null`, complete Map keys,
+Set/Seq arrays, relation pairs). It replaces `init`, bypasses the verdict cache,
+disables symmetry reduction for concrete identities, and is rejected with the
+induction engine. Results always stamp
+`faithfulness.scope:"bounded_from_snapshot"`, `spec_init:"not_used"`, and
+`induction:"not_applicable"`. A step-zero invariant violation is a valid
+predictive result. Do not fill missing variables: partial snapshots are a
+different, weaker existential query and are rejected.
+
+For production-log replay, each non-empty JSONL line is an object with
+`action`, `params`, and the observed post-action `state`. The mapping file is
+parsed by the same `parse_refinement` path as `fslc refine`: `impl` names the
+external log schema, `abs` names the target spec, `map` covers every target
+state variable, and `action external(args) -> target(exprs)` (or `stutter`)
+maps events. The Monitor executes the target action and compares its state with
+the mapped observed state. This v1 requires complete observed state; missing
+fields/keys are `log_mapping` nonconformance. The first divergence includes
+`failed_at_record` (0-based), `log_line` (1-based), and the action/state
+mismatch. Finite replay does not check `leadsTo`.
 
 `verify` is backed by a persistent verdict cache (issue #169) keyed on every
 input that can affect its output (the post-desugaring kernel AST, the raw
