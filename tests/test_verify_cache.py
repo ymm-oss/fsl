@@ -138,6 +138,18 @@ def test_engine_flip_misses(cache_dir, tmp_path):
     assert "cache" not in out
 
 
+def test_lemma_candidates_are_part_of_induction_cache_key(cache_dir, tmp_path):
+    p = _counter(tmp_path)
+    base = {"depth": 8, "deadlock_mode": "ignore", "engine": "induction"}
+    run_verify(str(p), **base)
+
+    first = run_verify(str(p), **base, lemmas=["x >= 0"])
+    second = run_verify(str(p), **base, lemmas=["x >= 0"])
+
+    assert "cache" not in first
+    assert second["cache"]["hit"] is True
+
+
 def test_instances_and_values_overrides_change_the_key(cache_dir, tmp_path):
     p = _write(tmp_path, "map_spec.fsl", """
 spec MapSpec {

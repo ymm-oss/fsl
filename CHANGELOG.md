@@ -6,6 +6,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Verified auxiliary lemma candidates for k-induction (issue #177): repeatable
+  `fslc verify --engine induction --lemma "EXPR"` independently proves each
+  candidate using the original transition system and implicit bounds, without
+  assuming the original user invariants. False/non-inductive/invalid candidates
+  are rejected with their own counterexample, CTI, or parse/type result; only
+  `proved` candidates can strengthen the target proof. The retry loop evaluates
+  candidates in each target CTI model, records which lemma excluded which CTI
+  and steps under `lemma_cti_exclusions`, and on final `proved` emits source
+  declarations under `auxiliary_invariant_recommendation` without rewriting the
+  file. Lemma text/order is included in the persistent verify cache key, and
+  BMC use is rejected as a usage error. See
+  `docs/DESIGN-induction-lemmas.md`.
 - Semantic specification diff (issue #176): `fslc diff OLD.fsl NEW.fsl
   --depth K` classifies bounded changes through bidirectional auto-refinement
   (`behavior_added` / `behavior_removed`), SMT implication of user-invariant

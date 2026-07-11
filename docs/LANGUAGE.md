@@ -575,6 +575,8 @@ variable.
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--lemma "<expr>"]...             # independently prove auxiliary candidates,
+                                                 # then retry CTIs with proved lemmas only
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
@@ -639,6 +641,21 @@ it removes named invariants, `trans`, `leadsTo`, and `reachable` properties
 from the run and from checked-property outputs (`invariants_checked`,
 `transitions_checked`, `leads_to`, and `reachables`). When `--property` and
 `--exclude-property` name the same property, exclusion wins.
+
+`verify --engine induction --lemma "EXPR"` accepts repeatable auxiliary
+invariant candidates for an `unknown_cti` repair loop. Each expression is first
+proved independently against the original init/actions and implicit type
+bounds, without assuming the original user invariants. A false candidate is
+`rejected` with its reachable counterexample; a non-inductive candidate is
+rejected with its own CTI; invalid candidates carry a parse/type error. Only
+candidates whose independent result is `proved` may enter the original proof.
+The verifier evaluates those candidates on each target CTI, adds the first one
+that is actually false on that CTI, and retries. JSON fields `lemmas` and
+`lemma_cti_exclusions` record adjudication and the exact CTI/violated steps.
+When the target reaches `proved`, `auxiliary_invariant_recommendation` emits the
+declarations to persist in the source; the command never rewrites the file.
+There is no unverified-assumption mode. `--lemma` with the BMC engine is a usage
+error. Candidate text/order is part of the verification cache key.
 
 `sweep` is an opt-in wrapper around `verify`; it does not change normal
 verification. It evaluates a deterministic grid of `--instances NAME=lo..hi`,
