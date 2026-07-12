@@ -1,0 +1,21 @@
+{
+  "name": "fsl-z3js-worker-spike",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "build:browser": "node build-browser.mjs",
+    "probe": "node probe.mjs",
+    "probe:browser": "node browser-probe.mjs",
+    "serve:browser": "node serve-browser.mjs",
+    "bench": "node bench.mjs"
+  },
+  "dependencies": {
+    "z3-solver": "4.16.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.6"
+  }
+}

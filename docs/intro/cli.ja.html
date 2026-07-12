@@ -191,7 +191,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --depth DEPTH
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
   --target {pytest,vitest,swift,kotlin,dart,phpunit}
                         test harness to emit (default: pytest)
   --deadlock {warn,error,ignore}
@@ -232,7 +232,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --depth DEPTH
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
   --deadlock {warn,error,ignore}
   --engine {bmc,induction}
                         use k-induction so a proved report can show assurance
@@ -249,7 +249,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --depth DEPTH
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
   --deadlock {warn,error,ignore}
   --impl-log IMPL_LOG   optional implementation trace JSON to score
                         conformance (fslc replay)
@@ -363,7 +363,7 @@ options:
   --name NAME
   --source {auto,sql,prisma}
                         source format to import (default: auto by extension)
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
 </pre></div></details></div></div></details>
 <details><summary>fslc compat <span class="tree-blurb">— 1 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc compat check</summary><div class="tree-body"><pre>usage: fslc compat check [-h] [--include-ai] file
 
@@ -413,9 +413,9 @@ options:
   --slice SLICE_NAME
   --property PROPERTY_NAME
 </pre></div></details>
-<details><summary>fslc ai regress</summary><div class="tree-body"><pre>usage: fslc ai regress [-h] [--migration MIGRATION] --before-records
-                       BEFORE_RECORDS --after-records AFTER_RECORDS
-                       [--dataset DATASET]
+<details><summary>fslc ai regress</summary><div class="tree-body"><pre>usage: fslc ai regress [-h] [--migration MIGRATION]
+                       --before-records BEFORE_RECORDS
+                       --after-records AFTER_RECORDS [--dataset DATASET]
                        file
 
 positional arguments:
@@ -492,8 +492,8 @@ positional arguments:
   file
 
 options:
-  -h, --help            show this help message and exit
-  -o OUTPUT, --output OUTPUT
+  -h, --help           show this help message and exit
+  -o, --output OUTPUT
 </pre></div></details>
 <details><summary>fslc domain generate</summary><div class="tree-body"><pre>usage: fslc domain generate [-h] [--profile {functional-ddd}]
                             [--target {typescript,kotlin,swift,python,rust}]
@@ -507,7 +507,7 @@ options:
   -h, --help            show this help message and exit
   --profile {functional-ddd}
   --target {typescript,kotlin,swift,python,rust}
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
 </pre></div></details>
 <details><summary>fslc domain replay</summary><div class="tree-body"><pre>usage: fslc domain replay [-h] --logs LOGS file
 
@@ -533,7 +533,7 @@ options:
   --target {vitest,pytest,swift,kotlin,dart,phpunit}
   --deadlock {warn,error,ignore}
   --strict
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
 </pre></div></details></div></div></details></div>
   </div>
 </section>

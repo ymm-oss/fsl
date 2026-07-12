@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (Swift Testing).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired every test is
+// skipped (the `.enabled(if:)` trait checks the adapter and disables the test).
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+import Testing
+
+struct StepResult {
+    let ok: Bool
+    let kind: String?
+}
+
+// A self-contained JSON-null sentinel so the harness depends only on `Testing`
+// (no Foundation/NSNull). Project a None/absent Option state field to this.
+struct FSLNull: Equatable {
+    static let instance = FSLNull()
+}
+
+enum FSLNotWired: Error { case notWired }
+
+/// Connect your implementation to the spec actions/state.
+///  - reset(): put the implementation in the same initial state as spec `init`
+///  - step(action, params): drive one spec action; return a StepResult for
+///    forbidden-rejection scenarios (nil is fine for ordinary steps)
+///  - observe(): project implementation state onto the spec's logical-state shape
+///    (enum = name string, Option = FSLNull.instance|value, Seq = [Any],
+///     Map = [String: Any], struct = [String: Any])
+protocol Adapter {
+    func reset()
+    func step(_ action: String, _ params: [String: Any]) -> StepResult?
+    func observe() -> [String: Any]
+}
+
+// Wire your implementation here. Throwing leaves the suite skipped (not failed).
+func makeAdapter() throws -> any Adapter {
+    throw FSLNotWired.notWired
+}
+
+func isAdapterWired() -> Bool {
+    do {
+        let a = try makeAdapter()
+        a.reset()
+        _ = a.observe()
+        return true
+    } catch {
+        return false
+    }
+}
+
+// Deep equality over the JSON-normal world: Bool/Int/Double/String/FSLNull,
+// [Any] (ordered) and [String: Any] (by key). Int and Double do not cross-match.
+func fslEqual(_ a: Any, _ b: Any) -> Bool {
+    switch (a, b) {
+    case (is FSLNull, is FSLNull): return true
+    case let (x as Bool, y as Bool): return x == y
+    case let (x as Int, y as Int): return x == y
+    case let (x as Double, y as Double): return x == y
+    case let (x as String, y as String): return x == y
+    case let (x as [Any], y as [Any]):
+        return x.count == y.count && zip(x, y).allSatisfy { fslEqual($0, $1) }
+    case let (x as [String: Any], y as [String: Any]):
+        return x.count == y.count && x.allSatisfy { (k, v) in
+            guard let w = y[k] else { return false }
+            return fslEqual(v, w)
+        }
+    default: return false
+    }
+}
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct) shapes.
+func assertPartial(_ observed: [String: Any], _ expected: [String: Any]) {
+    for (key, val) in expected {
+        let seen = observed[key]
+        if let v = val as? [String: Any], let s = seen as? [String: Any] {
+            assertPartial(s, v)
+        } else {
+            #expect(seen != nil, "missing state key \(key)")
+            if let s = seen {
+                #expect(fslEqual(s, val), "state \(key): expected \(val), got \(s)")
+            }
+        }
+    }
+}
+
+func assertRejected(_ result: StepResult?, _ expectedKind: String?) {
+    #expect(result != nil, "forbidden step must return a StepResult")
+    #expect(result?.ok == false)
+    if let kind = expectedKind {
+        #expect(result?.kind == kind)
+    }
+}

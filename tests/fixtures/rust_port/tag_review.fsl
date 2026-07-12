@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+spec TagReview {
+  type Count = 0..20
+  const AUTO_LIMIT = 10
+  state { renamed_count: Count }
+  init { renamed_count = 0 }
+
+  action increment() "REQ-1: updates `old_count`" {
+    renamed_count = renamed_count + 1
+  }
+
+  invariant Disjoint "REQ-2: `AUTO_LIMIT` caps `renamed_count`" {
+    renamed_count >= 0
+  }
+
+  invariant Aligned "REQ-3: `renamed_count` stays nonnegative" {
+    renamed_count >= 0
+  }
+}

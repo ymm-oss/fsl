@@ -72,12 +72,16 @@ def _state_invariants(spec, state, cache):
         return [eval_expr(inv["expr"], state, {}, spec) for inv in spec.get("invariants", [])]
 
 
-def _predicate_terms(predicates, left, right, spec, cache):
+def _predicate_terms(predicates, left, right, spec, _cache):
     terms = []
     for predicate in predicates:
-        with _eval_cache_scope(cache, id(left)):
+        # Successor states are short-lived inside the instance-pair loop. CPython
+        # may reuse their ids while `cache` still contains entries from an older
+        # pair, making two unrelated successor formulas appear to diverge. Keep
+        # each successor evaluation cache-local; path-state caches remain shared.
+        with _eval_cache_scope({}, id(left)):
             left_value = eval_expr(predicate["expr"], left, {}, spec)
-        with _eval_cache_scope(cache, id(right)):
+        with _eval_cache_scope({}, id(right)):
             right_value = eval_expr(predicate["expr"], right, {}, spec)
         if z3.is_bool(left_value) and z3.is_bool(right_value):
             terms.append((predicate, left_value, right_value))

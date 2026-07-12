@@ -1,0 +1,10525 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use std::fmt::Write as _;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::pin;
+use std::task::{Context, Poll, Waker};
+use std::time::Instant;
+
+use fsl_core::{
+    FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement, ParamDef, TypeDef, TypeRef,
+};
+use serde_json::{Map, Value, json};
+
+#[derive(Clone, Debug, Default)]
+struct ScopeBounds {
+    instances: std::collections::BTreeMap<String, i64>,
+    values: std::collections::BTreeMap<String, (i64, i64)>,
+}
+
+fn parse_specialized_verify_options(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<(usize, String, String), String> {
+    let mut depth = 8_usize;
+    let mut deadlock = "warn".to_owned();
+    let mut engine = "bmc".to_owned();
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "--depth" => {
+                depth = args
+                    .next()
+                    .ok_or_else(|| "--depth requires a value".to_owned())?
+                    .parse()
+                    .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+            }
+            "--deadlock" => {
+                deadlock = args
+                    .next()
+                    .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+            }
+            "--engine" => {
+                engine = args
+                    .next()
+                    .ok_or_else(|| "--engine requires a value".to_owned())?;
+            }
+            _ => return Err(format!("unknown specialized check option '{option}'")),
+        }
+    }
+    Ok((depth, deadlock, engine))
+}
+
+fn parse_optional_output(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<Option<PathBuf>, String> {
+    match args.next() {
+        None => Ok(None),
+        Some(option) if matches!(option.as_str(), "-o" | "--output") => {
+            let output = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "--output requires a path".to_owned())?,
+            );
+            if args.next().is_some() {
+                return Err("unexpected argument after --output".to_owned());
+            }
+            Ok(Some(output))
+        }
+        Some(option) => Err(format!("unknown output option '{option}'")),
+    }
+}
+
+fn main() {
+    let (output, status) = match command() {
+        Ok(result) => result,
+        Err(error) => (error_output("usage", &error), 2),
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).expect("serialize CLI output")
+    );
+    if status != 0 {
+        std::process::exit(status);
+    }
+}
+
+#[allow(clippy::too_many_lines, clippy::while_let_on_iterator)]
+fn command() -> Result<(Value, i32), String> {
+    let mut args = std::env::args().skip(1);
+    let command = args
+        .next()
+        .ok_or_else(|| "usage: fslc <check|verify> SPEC [options]".to_owned())?;
+    match command.as_str() {
+        "version" | "-V" | "--version" => {
+            println!("fslc {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        "check" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "usage: fslc check SPEC [options]".to_owned())?,
+            );
+            Ok(run_check(&path))
+        }
+        "db" => {
+            let subcommand = args
+                .next()
+                .ok_or_else(|| "usage: fslc db <check|observe|import> ...".to_owned())?;
+            match subcommand.as_str() {
+                "check" => {
+                    let path = PathBuf::from(args.next().ok_or_else(|| {
+                        "usage: fslc db check SPEC [--depth N] [--engine ENGINE]".to_owned()
+                    })?);
+                    let mut depth = 8_usize;
+                    let mut deadlock = "warn".to_owned();
+                    let mut engine = "bmc".to_owned();
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--depth" => {
+                                depth = args
+                                    .next()
+                                    .ok_or_else(|| "--depth requires a value".to_owned())?
+                                    .parse()
+                                    .map_err(|_| {
+                                        "--depth must be a non-negative integer".to_owned()
+                                    })?;
+                            }
+                            "--deadlock" => {
+                                deadlock = args
+                                    .next()
+                                    .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                            }
+                            "--engine" => {
+                                engine = args
+                                    .next()
+                                    .ok_or_else(|| "--engine requires a value".to_owned())?;
+                            }
+                            _ => return Err(format!("unknown db check option '{option}'")),
+                        }
+                    }
+                    Ok(run_db_check(&path, depth, &deadlock, &engine))
+                }
+                "observe" => {
+                    let path = PathBuf::from(args.next().ok_or_else(|| {
+                        "usage: fslc db observe SPEC --trace EVENTS.json".to_owned()
+                    })?);
+                    if args.next().as_deref() != Some("--trace") {
+                        return Err("db observe requires --trace EVENTS.json".to_owned());
+                    }
+                    let trace = PathBuf::from(
+                        args.next()
+                            .ok_or_else(|| "--trace requires a path".to_owned())?,
+                    );
+                    if args.next().is_some() {
+                        return Err("unexpected db observe argument".to_owned());
+                    }
+                    Ok(run_db_observe(&path, &trace))
+                }
+                "import" => {
+                    let path = PathBuf::from(args.next().ok_or_else(|| {
+                        "usage: fslc db import SOURCE [--name NAME] [--source FORMAT] [-o PATH]"
+                            .to_owned()
+                    })?);
+                    let mut name = "ImportedDb".to_owned();
+                    let mut format = "auto".to_owned();
+                    let mut output = None;
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--name" => {
+                                name = args
+                                    .next()
+                                    .ok_or_else(|| "--name requires a value".to_owned())?;
+                            }
+                            "--source" => {
+                                format = args
+                                    .next()
+                                    .ok_or_else(|| "--source requires a value".to_owned())?;
+                            }
+                            "-o" | "--output" => {
+                                output = Some(PathBuf::from(
+                                    args.next()
+                                        .ok_or_else(|| "--output requires a path".to_owned())?,
+                                ));
+                            }
+                            _ => return Err(format!("unknown db import option '{option}'")),
+                        }
+                    }
+                    let result = run_db_import(&path, &name, &format, output.as_deref());
+                    if output.is_none()
+                        && result.0.get("result").and_then(Value::as_str) == Some("imported")
+                        && let Some(source) =
+                            result.0.get("dbsystem_source").and_then(Value::as_str)
+                    {
+                        print!("{source}");
+                        std::process::exit(0);
+                    }
+                    Ok(result)
+                }
+                _ => Err(format!("unknown db subcommand '{subcommand}'")),
+            }
+        }
+        "compat" => {
+            if args.next().as_deref() != Some("check") {
+                return Err("usage: fslc compat check DBSYSTEM [--include-ai]".to_owned());
+            }
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "compat check requires a dbsystem".to_owned())?,
+            );
+            let include_ai = match args.next() {
+                None => false,
+                Some(option) if option == "--include-ai" => true,
+                Some(option) => return Err(format!("unknown compat check option '{option}'")),
+            };
+            let (mut result, status) = run_db_check(&path, 8, "warn", "bmc");
+            if include_ai && let Value::Object(result) = &mut result {
+                result.insert(
+                    "compat".to_owned(),
+                    json!({"include_ai":true,"source":"dbsystem artifact capability model"}),
+                );
+            }
+            Ok((result, status))
+        }
+        "ai" => {
+            let subcommand = args.next().ok_or_else(|| {
+                "usage: fslc ai <check|replay|eval|regress|compare|drift|compat> ...".to_owned()
+            })?;
+            if subcommand == "compare" {
+                let mut before = None;
+                let mut after = None;
+                let mut dataset = None;
+                let mut from_label = None;
+                let mut to_label = None;
+                while let Some(option) = args.next() {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| format!("{option} requires a value"))?;
+                    match option.as_str() {
+                        "--from" => before = Some(PathBuf::from(value)),
+                        "--to" => after = Some(PathBuf::from(value)),
+                        "--dataset" => dataset = Some(value),
+                        "--from-label" => from_label = Some(value),
+                        "--to-label" => to_label = Some(value),
+                        _ => return Err(format!("unknown ai compare option '{option}'")),
+                    }
+                }
+                return Ok(run_ai_compare(
+                    &before.ok_or_else(|| "ai compare requires --from".to_owned())?,
+                    &after.ok_or_else(|| "ai compare requires --to".to_owned())?,
+                    dataset.as_deref(),
+                    from_label.as_deref(),
+                    to_label.as_deref(),
+                ));
+            }
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| format!("fslc ai {subcommand} requires a file"))?,
+            );
+            match subcommand.as_str() {
+                "check" => {
+                    let (depth, deadlock, engine) = parse_specialized_verify_options(&mut args)?;
+                    Ok(run_ai_check(&path, depth, &deadlock, &engine))
+                }
+                "replay" => {
+                    if args.next().as_deref() != Some("--logs") {
+                        return Err("ai replay requires --logs EVENTS.jsonl".to_owned());
+                    }
+                    let logs = PathBuf::from(
+                        args.next()
+                            .ok_or_else(|| "--logs requires a path".to_owned())?,
+                    );
+                    Ok(run_ai_replay(&path, &logs))
+                }
+                "eval" => {
+                    let mut records = None;
+                    let mut dataset = None;
+                    let mut property = None;
+                    let mut slice = None;
+                    while let Some(option) = args.next() {
+                        let value = args
+                            .next()
+                            .ok_or_else(|| format!("{option} requires a value"))?;
+                        match option.as_str() {
+                            "--records" => records = Some(PathBuf::from(value)),
+                            "--dataset" => dataset = Some(value),
+                            "--property" => property = Some(value),
+                            "--slice" => slice = Some(value),
+                            _ => return Err(format!("unknown ai eval option '{option}'")),
+                        }
+                    }
+                    Ok(run_ai_eval(
+                        &path,
+                        records.as_deref(),
+                        dataset.as_deref(),
+                        property.as_deref(),
+                        slice.as_deref(),
+                    ))
+                }
+                "regress" => {
+                    let mut before = None;
+                    let mut after = None;
+                    let mut dataset = None;
+                    let mut migration = None;
+                    while let Some(option) = args.next() {
+                        let value = args
+                            .next()
+                            .ok_or_else(|| format!("{option} requires a value"))?;
+                        match option.as_str() {
+                            "--before-records" => before = Some(PathBuf::from(value)),
+                            "--after-records" => after = Some(PathBuf::from(value)),
+                            "--dataset" => dataset = Some(value),
+                            "--migration" => migration = Some(value),
+                            _ => return Err(format!("unknown ai regress option '{option}'")),
+                        }
+                    }
+                    Ok(run_ai_regress(
+                        &path,
+                        &before.ok_or_else(|| "ai regress requires --before-records".to_owned())?,
+                        &after.ok_or_else(|| "ai regress requires --after-records".to_owned())?,
+                        dataset.as_deref(),
+                        migration.as_deref(),
+                    ))
+                }
+                "drift" => {
+                    let mut logs = None;
+                    let mut baseline = None;
+                    let mut property = None;
+                    let mut window = None;
+                    let mut baseline_label = None;
+                    while let Some(option) = args.next() {
+                        let value = args
+                            .next()
+                            .ok_or_else(|| format!("{option} requires a value"))?;
+                        match option.as_str() {
+                            "--logs" => logs = Some(PathBuf::from(value)),
+                            "--baseline-logs" => baseline = Some(PathBuf::from(value)),
+                            "--property" => property = Some(value),
+                            "--window" => window = Some(value),
+                            "--baseline" => baseline_label = Some(value),
+                            _ => return Err(format!("unknown ai drift option '{option}'")),
+                        }
+                    }
+                    Ok(run_ai_drift(
+                        &path,
+                        &logs.ok_or_else(|| "ai drift requires --logs".to_owned())?,
+                        baseline.as_deref(),
+                        property.as_deref(),
+                        window.as_deref(),
+                        baseline_label.as_deref(),
+                    ))
+                }
+                "compat" => {
+                    let environment = match args.next() {
+                        None => None,
+                        Some(option) if option == "--environment" => Some(
+                            args.next()
+                                .ok_or_else(|| "--environment requires a value".to_owned())?,
+                        ),
+                        Some(option) => return Err(format!("unknown ai compat option '{option}'")),
+                    };
+                    Ok(run_ai_compat(&path, environment.as_deref()))
+                }
+                _ => Err(format!("unknown ai subcommand '{subcommand}'")),
+            }
+        }
+        "domain" => {
+            let subcommand = args.next().ok_or_else(|| {
+                "usage: fslc domain <check|analyze|expand|generate> ...".to_owned()
+            })?;
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| format!("fslc domain {subcommand} requires a file"))?,
+            );
+            match subcommand.as_str() {
+                "check" => {
+                    let (depth, deadlock, engine) = parse_specialized_verify_options(&mut args)?;
+                    Ok(run_domain_check(&path, depth, &deadlock, &engine))
+                }
+                "analyze" => Ok(run_domain_analyze(&path)),
+                "expand" => {
+                    let output = parse_optional_output(&mut args)?;
+                    let result = run_domain_expand(&path, output.as_deref());
+                    if output.is_none()
+                        && let Some(source) = result.0.get("kernel_source").and_then(Value::as_str)
+                    {
+                        print!("{source}");
+                        std::process::exit(0);
+                    }
+                    Ok(result)
+                }
+                "generate" => {
+                    let mut target = "typescript".to_owned();
+                    let mut output = None;
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--profile" => {
+                                let _ = args
+                                    .next()
+                                    .ok_or_else(|| "--profile requires a value".to_owned())?;
+                            }
+                            "--target" => {
+                                target = args
+                                    .next()
+                                    .ok_or_else(|| "--target requires a value".to_owned())?;
+                            }
+                            "-o" | "--output" => {
+                                output = Some(PathBuf::from(
+                                    args.next()
+                                        .ok_or_else(|| "--output requires a path".to_owned())?,
+                                ));
+                            }
+                            _ => return Err(format!("unknown domain generate option '{option}'")),
+                        }
+                    }
+                    Ok(run_domain_generate(&path, &target, output.as_deref()))
+                }
+                "replay" => {
+                    if args.next().as_deref() != Some("--logs") {
+                        return Err("domain replay requires --logs EVENTS.jsonl".to_owned());
+                    }
+                    let logs = PathBuf::from(
+                        args.next()
+                            .ok_or_else(|| "--logs requires a path".to_owned())?,
+                    );
+                    Ok(run_domain_replay(&path, &logs))
+                }
+                "testgen" => {
+                    let mut depth = 8_usize;
+                    let mut target = "vitest".to_owned();
+                    let mut output = None;
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--depth" => {
+                                depth = args
+                                    .next()
+                                    .ok_or_else(|| "--depth requires a value".to_owned())?
+                                    .parse()
+                                    .map_err(|_| "--depth must be an integer".to_owned())?;
+                            }
+                            "--target" => {
+                                target = args
+                                    .next()
+                                    .ok_or_else(|| "--target requires a value".to_owned())?;
+                            }
+                            "--deadlock" => {
+                                let _ = args
+                                    .next()
+                                    .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                            }
+                            "--strict" => {}
+                            "-o" | "--output" => {
+                                output = Some(PathBuf::from(
+                                    args.next()
+                                        .ok_or_else(|| "--output requires a path".to_owned())?,
+                                ));
+                            }
+                            _ => return Err(format!("unknown domain testgen option '{option}'")),
+                        }
+                    }
+                    let result = run_domain_testgen(&path, depth, &target, output.as_deref());
+                    if output.is_none()
+                        && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                        && let Some(content) = result.0.get("content").and_then(Value::as_str)
+                    {
+                        print!("{content}");
+                        std::process::exit(result.1);
+                    }
+                    Ok(result)
+                }
+                _ => Err(format!("unknown domain subcommand '{subcommand}'")),
+            }
+        }
+        "explain" | "mutate" | "typestate" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| format!("fslc {command} requires a spec"))?,
+            );
+            let mut depth = 8_usize;
+            let mut readable = false;
+            let mut max_mutants = 100_usize;
+            let mut by_requirement = false;
+            let mut typescript_only = false;
+            let mut external_mutants = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "--readable" => readable = true,
+                    "--max-mutants" => {
+                        max_mutants = args
+                            .next()
+                            .ok_or_else(|| "--max-mutants requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--max-mutants must be an integer".to_owned())?;
+                    }
+                    "--by-requirement" => by_requirement = true,
+                    "--from" => {
+                        external_mutants = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--from requires a JSONL path".to_owned())?,
+                        ));
+                    }
+                    "--ts" => typescript_only = true,
+                    _ => return Err(format!("unknown {command} option '{option}'")),
+                }
+            }
+            let result = match command.as_str() {
+                "explain" => run_explain(&path, depth, readable),
+                "mutate" => run_mutate(
+                    &path,
+                    depth,
+                    max_mutants,
+                    by_requirement,
+                    external_mutants.as_deref(),
+                ),
+                "typestate" => run_typestate(&path),
+                _ => unreachable!(),
+            };
+            if readable && let Some(text) = result.0.get("readable").and_then(Value::as_str) {
+                println!("{text}");
+                std::process::exit(result.1);
+            }
+            if typescript_only
+                && let Some(entities) = result.0.get("entities").and_then(Value::as_array)
+            {
+                for entity in entities {
+                    if let Some(source) = entity.get("typescript").and_then(Value::as_str) {
+                        println!("{source}");
+                    }
+                }
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "testgen" | "html" | "ledger" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| format!("fslc {command} requires a spec"))?,
+            );
+            let mut depth = 8_usize;
+            let mut output = None;
+            let mut target = "pytest".to_owned();
+            let mut engine = "bmc".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--output requires a path".to_owned())?,
+                        ));
+                    }
+                    "--target" => {
+                        target = args
+                            .next()
+                            .ok_or_else(|| "--target requires a value".to_owned())?;
+                    }
+                    "--engine" => {
+                        engine = args
+                            .next()
+                            .ok_or_else(|| "--engine requires a value".to_owned())?;
+                    }
+                    "--deadlock" | "--evidence" | "--impl-log" => {
+                        let _ = args
+                            .next()
+                            .ok_or_else(|| format!("{option} requires a value"))?;
+                    }
+                    "--strict" => {}
+                    _ => return Err(format!("unknown {command} option '{option}'")),
+                }
+            }
+            let result = match command.as_str() {
+                "testgen" => run_testgen(&path, depth, &target, output.as_deref()),
+                "html" => run_html_report(&path, depth, &engine, output.as_deref()),
+                "ledger" => run_ledger_report(&path, depth, &engine, output.as_deref()),
+                _ => unreachable!(),
+            };
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "analyze" => {
+            let first_path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc analyze requires a spec".to_owned())?,
+            );
+            let mut paths = vec![first_path];
+            let mut projection = "tsg".to_owned();
+            let mut focus = None;
+            let mut output_format = "json".to_owned();
+            let mut profile = None;
+            let mut export_kind = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--projection" => {
+                        projection = args
+                            .next()
+                            .ok_or_else(|| "--projection requires a value".to_owned())?;
+                    }
+                    "--focus" => focus = args.next(),
+                    "--format" => {
+                        output_format = args
+                            .next()
+                            .ok_or_else(|| "--format requires a value".to_owned())?;
+                    }
+                    "--profile" => profile = args.next(),
+                    "--export" => export_kind = args.next(),
+                    _ if !option.starts_with('-') => paths.push(PathBuf::from(option)),
+                    _ => return Err(format!("unknown analyze option '{option}'")),
+                }
+            }
+            let result = if paths.len() != 1 || paths[0].is_dir() {
+                run_analyze_batch(
+                    &paths,
+                    &projection,
+                    focus.as_deref(),
+                    &output_format,
+                    profile.as_deref(),
+                    export_kind.as_deref(),
+                )
+            } else {
+                run_analyze(
+                    &paths[0],
+                    &projection,
+                    focus.as_deref(),
+                    &output_format,
+                    profile.as_deref(),
+                    export_kind.as_deref(),
+                )
+            };
+            if output_format != "json"
+                && result.0.get("result").and_then(Value::as_str) == Some("analyzed")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "diff" => {
+            let old = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc diff requires OLD NEW".to_owned())?,
+            );
+            let new = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc diff requires OLD NEW".to_owned())?,
+            );
+            let mut depth = 8_usize;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be an integer".to_owned())?;
+                    }
+                    "--mapping" | "--forbid" => {
+                        let _ = args
+                            .next()
+                            .ok_or_else(|| format!("{option} requires a value"))?;
+                    }
+                    _ => return Err(format!("unknown diff option '{option}'")),
+                }
+            }
+            Ok(run_diff(&old, &new, depth))
+        }
+        "chain" => {
+            let mut keep_going = false;
+            let mut path = PathBuf::from("fsl-project.toml");
+            if let Some(first) = args.next() {
+                if first == "--keep-going" {
+                    keep_going = true;
+                } else if first.starts_with('-') {
+                    return Err(format!("unknown chain option '{first}'"));
+                } else {
+                    path = PathBuf::from(first);
+                }
+            }
+            for option in args.by_ref() {
+                match option.as_str() {
+                    "--keep-going" => keep_going = true,
+                    _ => return Err(format!("unknown chain option '{option}'")),
+                }
+            }
+            let result = run_project_chain(&path, keep_going);
+            eprintln!("{}", format_chain_table(&result.0));
+            Ok(result)
+        }
+        "refine" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())?,
+            );
+            let abstraction = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())?,
+            );
+            let mapping = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())?,
+            );
+            let mut depth = 8_usize;
+            let mut rest = Vec::new();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    _ if option.starts_with('-') => {
+                        return Err(format!("unknown refine option '{option}'"));
+                    }
+                    _ => rest.push(PathBuf::from(option)),
+                }
+            }
+            if rest.is_empty() {
+                Ok(run_refine(&path, &abstraction, &mapping, depth))
+            } else if rest.len() % 2 != 0 {
+                Ok((
+                    error_output(
+                        "io",
+                        "refine chain must list (abs map) pairs after the first mapping",
+                    ),
+                    2,
+                ))
+            } else {
+                Ok(run_refine_chain(
+                    &path,
+                    &abstraction,
+                    &mapping,
+                    &rest,
+                    depth,
+                ))
+            }
+        }
+        "replay" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "usage: fslc replay SPEC --trace TRACE.json".to_owned())?,
+            );
+            let option = args
+                .next()
+                .ok_or_else(|| "replay requires --trace TRACE.json".to_owned())?;
+            if option != "--trace" {
+                return Err(format!("unknown replay option '{option}'"));
+            }
+            let trace = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "--trace requires a path".to_owned())?,
+            );
+            if args.next().is_some() {
+                return Err("unexpected replay argument".to_owned());
+            }
+            Ok(run_replay(&path, &trace))
+        }
+        "sweep" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "usage: fslc sweep SPEC [options]".to_owned())?,
+            );
+            let mut depth = "0..8".to_owned();
+            let mut deadlock = "warn".to_owned();
+            let mut engine = "bmc".to_owned();
+            let mut k_ind = 1_usize;
+            let mut instances = Vec::new();
+            let mut values = Vec::new();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?;
+                    }
+                    "--deadlock" => {
+                        deadlock = args
+                            .next()
+                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                    }
+                    "--engine" => {
+                        engine = args
+                            .next()
+                            .ok_or_else(|| "--engine requires a value".to_owned())?;
+                    }
+                    "--k" => {
+                        k_ind = args
+                            .next()
+                            .ok_or_else(|| "--k requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--k must be a positive integer".to_owned())?;
+                    }
+                    "--instances" => instances.push(
+                        args.next()
+                            .ok_or_else(|| "--instances requires a value".to_owned())?,
+                    ),
+                    "--values" => values.push(
+                        args.next()
+                            .ok_or_else(|| "--values requires a value".to_owned())?,
+                    ),
+                    "--property" => {
+                        let _ = args
+                            .next()
+                            .ok_or_else(|| "--property requires a value".to_owned())?;
+                    }
+                    _ => return Err(format!("unknown sweep option '{option}'")),
+                }
+            }
+            Ok(run_sweep(
+                &path, &depth, &deadlock, &engine, k_ind, &instances, &values,
+            ))
+        }
+        "verify" | "scenarios" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| format!("usage: fslc {command} SPEC [options]"))?,
+            );
+            let mut depth = 8_usize;
+            let mut deadlock = "warn".to_owned();
+            let mut engine = "bmc".to_owned();
+            let mut k_ind = 1_usize;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "--deadlock" => {
+                        deadlock = args
+                            .next()
+                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                            return Err("--deadlock must be warn, error, or ignore".to_owned());
+                        }
+                    }
+                    "--engine" => {
+                        engine = args
+                            .next()
+                            .ok_or_else(|| "--engine requires a value".to_owned())?;
+                        if !matches!(engine.as_str(), "bmc" | "induction") {
+                            return Err("--engine must be bmc or induction".to_owned());
+                        }
+                    }
+                    "--k" => {
+                        k_ind = args
+                            .next()
+                            .ok_or_else(|| "--k requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--k must be a positive integer".to_owned())?;
+                        if k_ind == 0 {
+                            return Err("--k must be a positive integer".to_owned());
+                        }
+                    }
+                    _ => return Err(format!("unknown verify option '{option}'")),
+                }
+            }
+            Ok(if command == "verify" {
+                run_verify(&path, depth, &deadlock, &engine, k_ind)
+            } else {
+                if engine != "bmc" || k_ind != 1 {
+                    return Err("scenarios does not accept --engine or --k".to_owned());
+                }
+                run_scenarios(&path, depth, &deadlock)
+            })
+        }
+        _ => Err(format!("unknown command '{command}'")),
+    }
+}
+
+fn parse_sweep_range(raw: &str, flag: &str) -> Result<(String, (i64, i64)), String> {
+    let (name, range) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("invalid {flag} value '{raw}': expected NAME=LO..HI"))?;
+    let (lo, hi) = range
+        .split_once("..")
+        .ok_or_else(|| format!("invalid {flag} value '{raw}': expected NAME=LO..HI"))?;
+    let lo = lo
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| format!("invalid {flag} value '{raw}': bounds must be integers"))?;
+    let hi = hi
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| format!("invalid {flag} value '{raw}': bounds must be integers"))?;
+    if name.trim().is_empty() || lo > hi {
+        return Err(format!(
+            "invalid {flag} value '{raw}': lower bound must be <= upper bound"
+        ));
+    }
+    Ok((name.trim().to_owned(), (lo, hi)))
+}
+
+fn integer_combinations(
+    ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Vec<std::collections::BTreeMap<String, i64>> {
+    let mut combinations = vec![std::collections::BTreeMap::new()];
+    for (name, (lo, hi)) in ranges {
+        combinations = combinations
+            .into_iter()
+            .flat_map(|combination| {
+                (*lo..=*hi).map(move |value| {
+                    let mut next = combination.clone();
+                    next.insert(name.clone(), value);
+                    next
+                })
+            })
+            .collect();
+    }
+    combinations
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn run_sweep(
+    path: &Path,
+    depth_range: &str,
+    deadlock_mode: &str,
+    engine: &str,
+    k_ind: usize,
+    instance_args: &[String],
+    value_args: &[String],
+) -> (Value, i32) {
+    let Some((depth_lo, depth_hi)) = depth_range.split_once("..") else {
+        return (
+            error_output(
+                "semantics",
+                &format!("invalid --depth value '{depth_range}': expected LO..HI"),
+            ),
+            2,
+        );
+    };
+    let parsed_depth = depth_lo
+        .trim()
+        .parse::<usize>()
+        .and_then(|lo| depth_hi.trim().parse::<usize>().map(|hi| (lo, hi)));
+    let Ok((depth_lo, depth_hi)) = parsed_depth else {
+        return (
+            error_output(
+                "semantics",
+                "invalid --depth value: bounds must be integers",
+            ),
+            2,
+        );
+    };
+    if depth_lo > depth_hi {
+        return (
+            error_output(
+                "semantics",
+                &format!("invalid --depth value '{depth_range}': expected 0 <= LO <= HI"),
+            ),
+            2,
+        );
+    }
+    let mut instance_ranges = std::collections::BTreeMap::new();
+    for argument in instance_args {
+        let (name, range) = match parse_sweep_range(argument, "--instances") {
+            Ok(value) => value,
+            Err(error) => return (error_output("semantics", &error), 2),
+        };
+        if range.0 < 1 {
+            return (
+                error_output(
+                    "semantics",
+                    &format!(
+                        "invalid --instances value '{argument}': instance lower bound must be >= 1"
+                    ),
+                ),
+                2,
+            );
+        }
+        instance_ranges.insert(name, range);
+    }
+    let mut value_ranges = std::collections::BTreeMap::new();
+    for argument in value_args {
+        let (name, range) = match parse_sweep_range(argument, "--values") {
+            Ok(value) => value,
+            Err(error) => return (error_output("semantics", &error), 2),
+        };
+        value_ranges.insert(name, range);
+    }
+    let instance_combinations = integer_combinations(&instance_ranges);
+    let value_upper_combinations = integer_combinations(&value_ranges);
+    let mut results = Vec::new();
+    let mut minimal = None;
+    let mut spec_name = None;
+    for instances in instance_combinations {
+        for upper_values in &value_upper_combinations {
+            let values = upper_values
+                .iter()
+                .map(|(name, hi)| (name.clone(), (value_ranges[name].0, *hi)))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            for depth in depth_lo..=depth_hi {
+                let scope = ScopeBounds {
+                    instances: instances.clone(),
+                    values: values.clone(),
+                };
+                let (mut verification, _) =
+                    run_verify_inner(path, depth, deadlock_mode, engine, k_ind, Some(&scope));
+                if let Value::Object(envelope) = &mut verification {
+                    let trace_type = envelope.remove("trace_type");
+                    envelope.insert(
+                        "bounds_overrides".to_owned(),
+                        json!({
+                            "instances": instances,
+                            "values": values.iter().map(|(name, (lo, hi))| (
+                                name.clone(), json!([lo, hi])
+                            )).collect::<Map<_, _>>(),
+                        }),
+                    );
+                    if let Some(trace_type) = trace_type {
+                        envelope.insert("trace_type".to_owned(), trace_type);
+                    }
+                }
+                spec_name = spec_name.or_else(|| {
+                    verification
+                        .get("spec")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
+                let mut summary = Map::new();
+                for key in [
+                    "result",
+                    "checked_to_depth",
+                    "invariant",
+                    "trans",
+                    "violation_kind",
+                    "violated_at_step",
+                    "rank_failure",
+                ] {
+                    if let Some(value) = verification.get(key)
+                        && !value.is_null()
+                    {
+                        summary.insert(key.to_owned(), value.clone());
+                    }
+                }
+                let entry = json!({
+                    "scope": {
+                        "instances": instances,
+                        "values": values.iter().map(|(name, (lo, hi))| (
+                            name.clone(), json!([lo, hi])
+                        )).collect::<Map<_, _>>(),
+                        "depth": depth,
+                    },
+                    "summary": summary,
+                    "verification": verification,
+                });
+                if minimal.is_none()
+                    && entry["summary"]["result"].as_str().is_some_and(|result| {
+                        matches!(
+                            result,
+                            "violated"
+                                | "reachable_failed"
+                                | "unknown_cti"
+                                | "nonconformant"
+                                | "refinement_failed"
+                        )
+                    })
+                {
+                    minimal = Some(entry.clone());
+                }
+                results.push(entry);
+            }
+        }
+    }
+    let failed = minimal.is_some();
+    let mut output = envelope();
+    output.insert(
+        "result".to_owned(),
+        json!(if failed {
+            "sweep_failed"
+        } else {
+            "sweep_passed"
+        }),
+    );
+    output.insert("spec".to_owned(), json!(spec_name));
+    output.insert(
+        "sweep".to_owned(),
+        json!({
+            "minimality_order": ["instances", "values", "depth"],
+            "ranges": {
+                "instances": instance_ranges.iter().map(|(name, (lo, hi))| (
+                    name.clone(), json!([lo, hi])
+                )).collect::<Map<_, _>>(),
+                "values": value_ranges.iter().map(|(name, (lo, hi))| (
+                    name.clone(), json!([lo, hi])
+                )).collect::<Map<_, _>>(),
+                "depth": [depth_lo, depth_hi],
+            },
+            "results": results,
+            "minimal_counterexample": minimal,
+        }),
+    );
+    (Value::Object(output), i32::from(failed))
+}
+
+#[derive(Clone, Debug, Default)]
+struct ManifestSection {
+    values: std::collections::BTreeMap<String, String>,
+}
+
+fn parse_project_manifest(
+    source: &str,
+) -> Result<std::collections::BTreeMap<String, ManifestSection>, String> {
+    let mut sections = std::collections::BTreeMap::<String, ManifestSection>::new();
+    let mut current = None;
+    for (index, raw_line) in source.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            let name = line[1..line.len() - 1].trim();
+            if name.is_empty() {
+                return Err(format!("invalid TOML at line {}: empty table", index + 1));
+            }
+            sections.entry(name.to_owned()).or_default();
+            current = Some(name.to_owned());
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("invalid TOML at line {}: expected key = value", index + 1))?;
+        let section = current
+            .as_ref()
+            .ok_or_else(|| format!("invalid TOML at line {}: value outside table", index + 1))?;
+        let raw_value = raw_value.trim();
+        let value = if raw_value.starts_with('"') {
+            serde_json::from_str::<String>(raw_value)
+                .map_err(|error| format!("invalid TOML at line {}: {error}", index + 1))?
+        } else {
+            raw_value.to_owned()
+        };
+        sections
+            .get_mut(section)
+            .expect("current manifest section exists")
+            .values
+            .insert(key.trim().to_owned(), value);
+    }
+    Ok(sections)
+}
+
+fn chain_layer_passes(detail: &Value, status: i32) -> bool {
+    if status != 0 {
+        return false;
+    }
+    if detail
+        .get("implements")
+        .and_then(Value::as_object)
+        .and_then(|implements| implements.get("result"))
+        .and_then(Value::as_str)
+        .is_some_and(|result| result != "refines")
+    {
+        return false;
+    }
+    detail
+        .get("result")
+        .and_then(Value::as_str)
+        .is_some_and(|result| {
+            matches!(
+                result,
+                "ok" | "verified"
+                    | "proved"
+                    | "refines"
+                    | "conformant"
+                    | "generated"
+                    | "scenarios"
+                    | "typestate"
+                    | "mutated"
+                    | "explained"
+            )
+        })
+}
+
+fn skipped_chain_entry(
+    kind: &str,
+    layer: &str,
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+) -> Value {
+    let name = if kind == "refine" {
+        let target = sections
+            .get(layer)
+            .and_then(|section| section.values.get("refine_against"))
+            .map_or("", String::as_str);
+        format!("{layer}->{target}")
+    } else {
+        layer.to_owned()
+    };
+    json!({
+        "layer": name,
+        "kind": kind,
+        "status": "skipped",
+        "result": "skipped",
+        "exit_code": 0,
+    })
+}
+
+#[allow(
+    clippy::bool_to_int_with_if,
+    clippy::manual_let_else,
+    clippy::single_match_else,
+    clippy::too_many_lines,
+    clippy::unnecessary_unwrap
+)]
+fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(_) => {
+            let mut output = error_output("io", &format!("file not found: {}", path.display()));
+            if let Value::Object(output) = &mut output {
+                output.insert("manifest".to_owned(), json!(path.display().to_string()));
+            }
+            return (output, 2);
+        }
+    };
+    let sections = match parse_project_manifest(&source) {
+        Ok(sections) => sections,
+        Err(error) => {
+            let mut output = error_output("parse", &error);
+            if let Value::Object(output) = &mut output {
+                output.insert("manifest".to_owned(), json!(path.display().to_string()));
+            }
+            return (output, 2);
+        }
+    };
+    let mut steps = Vec::<(String, String)>::new();
+    for layer in ["business", "requirements", "design"] {
+        if let Some(section) = sections.get(layer) {
+            steps.push(("spec".to_owned(), layer.to_owned()));
+            if section.values.contains_key("refine_against") {
+                steps.push(("refine".to_owned(), layer.to_owned()));
+            }
+        }
+    }
+    if sections.contains_key("impl") {
+        steps.push(("impl".to_owned(), "impl".to_owned()));
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut layers = Vec::new();
+    for (index, (kind, layer)) in steps.iter().enumerate() {
+        let section = &sections[layer];
+        let (entry, failed) = if kind == "spec" {
+            if let Some(file) = section.values.get("file") {
+                let file_path = base.join(file);
+                let (detail, status, check_kind, depth) =
+                    if let Some(depth) = section.values.get("depth") {
+                        let depth = depth.parse::<usize>().unwrap_or(8);
+                        let (detail, status) = run_verify(
+                            &file_path,
+                            depth,
+                            section
+                                .values
+                                .get("deadlock")
+                                .map_or("warn", String::as_str),
+                            "bmc",
+                            1,
+                        );
+                        (detail, status, "verify", Some(depth))
+                    } else {
+                        let (detail, status) = run_check(&file_path);
+                        (detail, status, "check", None)
+                    };
+                let passed = chain_layer_passes(&detail, status);
+                let layer_status = if passed { "passed" } else { "failed" };
+                let result = detail.get("result").cloned().unwrap_or(Value::Null);
+                let effective_status = if passed { 0 } else { status.max(1) };
+                let mut entry = json!({
+                    "layer": layer,
+                    "kind": check_kind,
+                    "file": file_path.display().to_string(),
+                    "status": layer_status,
+                    "result": result,
+                    "exit_code": effective_status,
+                    "detail": detail,
+                });
+                if let Some(depth) = depth
+                    && let Value::Object(entry) = &mut entry
+                {
+                    entry.insert("depth".to_owned(), json!(depth));
+                }
+                (entry, !passed)
+            } else {
+                let detail = json!({
+                    "result": "error",
+                    "kind": "io",
+                    "message": format!("[{layer}] file is required"),
+                });
+                (
+                    json!({
+                        "layer": layer,
+                        "kind": "check",
+                        "status": "failed",
+                        "result": "error",
+                        "exit_code": 2,
+                        "detail": detail,
+                    }),
+                    true,
+                )
+            }
+        } else if kind == "refine" {
+            let target = section
+                .values
+                .get("refine_against")
+                .map_or("", String::as_str);
+            let target_section = sections.get(target);
+            let mapping = section.values.get("mapping");
+            if mapping.is_none()
+                || target_section
+                    .and_then(|target| target.values.get("file"))
+                    .is_none()
+            {
+                let detail = json!({
+                    "result": "error",
+                    "kind": "io",
+                    "message": format!("[{layer}] unknown refine_against layer: {target}"),
+                });
+                (
+                    json!({
+                        "layer": format!("{layer}->{target}"),
+                        "kind": "refine",
+                        "status": "failed",
+                        "result": "error",
+                        "exit_code": 2,
+                        "detail": detail,
+                    }),
+                    true,
+                )
+            } else {
+                let file_path = base.join(&section.values["file"]);
+                let target_path = base.join(&target_section.expect("checked").values["file"]);
+                let mapping_path = base.join(mapping.expect("checked"));
+                let depth = section
+                    .values
+                    .get("refine_depth")
+                    .or_else(|| section.values.get("depth"))
+                    .or_else(|| target_section.and_then(|target| target.values.get("depth")))
+                    .and_then(|depth| depth.parse().ok())
+                    .unwrap_or(8);
+                let (detail, status) = run_refine(&file_path, &target_path, &mapping_path, depth);
+                let passed = chain_layer_passes(&detail, status);
+                (
+                    json!({
+                        "layer": format!("{layer}->{target}"),
+                        "kind": "refine",
+                        "file": file_path.display().to_string(),
+                        "against": target,
+                        "abs_file": target_path.display().to_string(),
+                        "mapping": mapping_path.display().to_string(),
+                        "depth": depth,
+                        "status": if passed { "passed" } else { "failed" },
+                        "result": detail.get("result").cloned().unwrap_or(Value::Null),
+                        "exit_code": if passed { 0 } else { status.max(1) },
+                        "detail": detail,
+                    }),
+                    !passed,
+                )
+            }
+        } else {
+            let command = section.values.get("command").cloned().unwrap_or_default();
+            if command.is_empty() {
+                let detail = json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
+                (
+                    json!({
+                        "layer": "impl", "kind": "command", "status": "failed",
+                        "result": "error", "exit_code": 2, "detail": detail,
+                    }),
+                    true,
+                )
+            } else {
+                #[cfg(target_family = "windows")]
+                let completed = std::process::Command::new("cmd")
+                    .args(["/C", &command])
+                    .current_dir(base)
+                    .output();
+                #[cfg(not(target_family = "windows"))]
+                let completed = std::process::Command::new("sh")
+                    .args(["-c", &command])
+                    .current_dir(base)
+                    .output();
+                match completed {
+                    Ok(completed) => {
+                        let passed = completed.status.success();
+                        let code = completed.status.code().unwrap_or(1);
+                        let detail = json!({
+                            "result": if passed { "passed" } else { "failed" },
+                            "command": command,
+                            "returncode": code,
+                            "stdout": String::from_utf8_lossy(&completed.stdout),
+                            "stderr": String::from_utf8_lossy(&completed.stderr),
+                        });
+                        (
+                            json!({
+                                "layer": "impl", "kind": "command", "command": command,
+                                "status": if passed { "passed" } else { "failed" },
+                                "result": if passed { "passed" } else { "failed" },
+                                "exit_code": if passed { 0 } else { 1 }, "detail": detail,
+                            }),
+                            !passed,
+                        )
+                    }
+                    Err(error) => {
+                        let detail =
+                            json!({"result": "error", "kind": "io", "message": error.to_string()});
+                        (
+                            json!({
+                                "layer": "impl", "kind": "command", "command": command,
+                                "status": "failed", "result": "error", "exit_code": 2,
+                                "detail": detail,
+                            }),
+                            true,
+                        )
+                    }
+                }
+            }
+        };
+        layers.push(entry);
+        if failed && !keep_going {
+            for (remaining_kind, remaining_layer) in &steps[index + 1..] {
+                layers.push(skipped_chain_entry(
+                    remaining_kind,
+                    remaining_layer,
+                    &sections,
+                ));
+            }
+            break;
+        }
+    }
+    let failed_layers = layers
+        .iter()
+        .filter(|layer| layer.get("status").and_then(Value::as_str) == Some("failed"))
+        .filter_map(|layer| {
+            layer
+                .get("layer")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let has_error = layers.iter().any(|layer| {
+        if layer.get("status").and_then(Value::as_str) != Some("failed") {
+            return false;
+        }
+        layer
+            .get("exit_code")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| matches!(code, 2 | 3))
+    });
+    let result = if failed_layers.is_empty() {
+        "verified"
+    } else if has_error {
+        "error"
+    } else {
+        "violated"
+    };
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!(result));
+    output.insert("manifest".to_owned(), json!(path.display().to_string()));
+    output.insert("keep_going".to_owned(), json!(keep_going));
+    output.insert("layers".to_owned(), Value::Array(layers));
+    if !failed_layers.is_empty() {
+        output.insert(
+            "failed".to_owned(),
+            Value::Array(failed_layers.iter().map(|layer| json!(layer)).collect()),
+        );
+        if has_error {
+            output.insert("kind".to_owned(), json!("chain"));
+            output.insert(
+                "message".to_owned(),
+                json!("one or more chain layers returned an error"),
+            );
+        }
+    }
+    let status = if failed_layers.is_empty() {
+        0
+    } else if has_error {
+        2
+    } else {
+        1
+    };
+    (Value::Object(output), status)
+}
+
+fn format_chain_table(result: &Value) -> String {
+    let mut lines = vec![
+        "Layer  Check  Status  Result  Detail".to_owned(),
+        "-----  -----  ------  ------  ------".to_owned(),
+    ];
+    for layer in result
+        .get("layers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let detail = layer
+            .get("depth")
+            .map_or_else(|| "-".to_owned(), |depth| format!("depth={depth}"));
+        lines.push(format!(
+            "{}  {}  {}  {}  {}",
+            layer.get("layer").and_then(Value::as_str).unwrap_or(""),
+            layer.get("kind").and_then(Value::as_str).unwrap_or(""),
+            layer.get("status").and_then(Value::as_str).unwrap_or(""),
+            layer.get("result").and_then(Value::as_str).unwrap_or(""),
+            detail,
+        ));
+    }
+    lines.join("\n")
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let raw = match std::fs::read_to_string(trace_path) {
+        Ok(raw) => raw,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let data = match serde_json::from_str::<Value>(&raw) {
+        Ok(data) => data,
+        Err(error) => return (error_output("io", &format!("invalid JSON: {error}")), 2),
+    };
+    let events = match data {
+        Value::Array(events) => events,
+        Value::Object(mut object) => match object.remove("events") {
+            Some(Value::Array(events)) => events,
+            _ => {
+                return (
+                    error_output("io", "trace JSON must be an array or {\"events\": [...] }"),
+                    2,
+                );
+            }
+        },
+        _ => {
+            return (
+                error_output("io", "trace JSON must be an array or {\"events\": [...] }"),
+                2,
+            );
+        }
+    };
+    let mut monitor = match fsl_runtime::Monitor::new(model.clone()) {
+        Ok(monitor) => monitor,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    for (index, event) in events.iter().enumerate() {
+        let Value::Object(event) = event else {
+            return (error_output("io", "trace event must be an object"), 2);
+        };
+        let Some(action_name) = event.get("action").and_then(Value::as_str) else {
+            return (error_output("io", "trace event requires string action"), 2);
+        };
+        let params = match event.get("params") {
+            None => Map::new(),
+            Some(Value::Object(params)) => params.clone(),
+            Some(_) => return (error_output("io", "trace params must be an object"), 2),
+        };
+        let Some(action) = model
+            .actions
+            .iter()
+            .find(|action| action.name == action_name || display(&action.name) == action_name)
+        else {
+            return replay_failure(
+                &model,
+                &monitor,
+                index,
+                json!({
+                    "kind": "bad_call",
+                    "message": format!("unknown action '{action_name}'"),
+                    "action": action_name,
+                    "params": params,
+                }),
+            );
+        };
+        let parsed = match parse_params(&model, action, &params) {
+            Ok(params) => params,
+            Err(message) => {
+                return replay_failure(
+                    &model,
+                    &monitor,
+                    index,
+                    json!({
+                        "kind": "bad_call",
+                        "message": message,
+                        "action": action_name,
+                        "params": params,
+                    }),
+                );
+            }
+        };
+        let enabled = match monitor.enabled() {
+            Ok(enabled) => enabled,
+            Err(error) => return (error_output("internal", &error.to_string()), 2),
+        };
+        let Some(instance) = enabled
+            .iter()
+            .find(|instance| instance.action == action.name && instance.params == parsed)
+        else {
+            return replay_failure(
+                &model,
+                &monitor,
+                index,
+                json!({
+                    "kind": "requires_failed",
+                    "action": display(&action.name),
+                    "params": params,
+                }),
+            );
+        };
+        let stepped = match monitor.step(instance) {
+            Ok(stepped) => stepped,
+            Err(error) => return (error_output("internal", &error.to_string()), 2),
+        };
+        if let Some(violation) = stepped.violation {
+            return replay_failure(
+                &model,
+                &monitor,
+                index,
+                json!({
+                    "kind": violation.kind,
+                    "name": display(&violation.name),
+                    "action": display(&action.name),
+                    "params": params,
+                }),
+            );
+        }
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("conformant"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("steps_checked".to_owned(), json!(events.len()));
+    output.insert(
+        "final_state".to_owned(),
+        fslc_rust::state_json(&monitor.state),
+    );
+    output.insert(
+        "note".to_owned(),
+        json!("leadsTo properties are not checked by replay (finite logs only)"),
+    );
+    (Value::Object(output), 0)
+}
+
+fn replay_failure(
+    model: &KernelModel,
+    monitor: &fsl_runtime::Monitor,
+    index: usize,
+    violation: Value,
+) -> (Value, i32) {
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("nonconformant"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("failed_at_event".to_owned(), json!(index));
+    output.insert("violation".to_owned(), violation);
+    output.insert(
+        "state_before".to_owned(),
+        fslc_rust::state_json(&monitor.state),
+    );
+    output.insert(
+        "hint".to_owned(),
+        json!("the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)"),
+    );
+    output.insert(
+        "note".to_owned(),
+        json!("leadsTo properties are not checked by replay (finite logs only)"),
+    );
+    (Value::Object(output), 1)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32) {
+    run_scenarios_mode(path, depth, deadlock_mode, false)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_scenarios_mode(
+    path: &Path,
+    depth: usize,
+    deadlock_mode: &str,
+    allow_unreached: bool,
+) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    match validate_requirement_traces(path, &model) {
+        Ok((Some(failure), _)) => return (failure, 2),
+        Ok((None, _)) => {}
+        Err(error) => return (semantic_error_output(&error), 2),
+    }
+    let mut solver = match fsl_solver_z3::Z3Solver::new() {
+        Ok(solver) => solver,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    let result = match block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
+        Ok(result) => result,
+        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+    };
+    if result.violation.is_some()
+        || result.leadsto_violation.is_some()
+        || (!allow_unreached && result.reachables.values().any(Option::is_none))
+    {
+        return run_verify(path, depth, deadlock_mode, "bmc", 1);
+    }
+    if let Err(error) = replay_all(&model, &result) {
+        return (error_output("internal", &error), 2);
+    }
+    let covers = match fsl_runtime::action_cover_traces(model.clone(), depth) {
+        Ok(covers) => covers,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    let mut scenario_warnings = result
+        .reachables
+        .iter()
+        .filter(|(_, witness)| witness.is_none())
+        .map(|(name, _)| {
+            json!({
+                "message":format!("reachable {} not witnessed at depth {depth}; try --depth >= {}",display(name),depth+1),
+                "hint":format!("try --depth >= {}",depth+1),
+            })
+        })
+        .chain(model
+        .actions
+        .iter()
+        .filter(|action| !covers.contains_key(&action.name))
+        .map(|action| {
+            json!({
+                "message": format!(
+                    "action '{}' was enabled but no cover trace could be built within depth {depth}",
+                    display(&action.name)
+                ),
+            })
+        }))
+        .collect::<Vec<_>>();
+    let mut scenarios = Vec::new();
+    for (name, witness) in result
+        .reachables
+        .iter()
+        .filter_map(|(name, witness)| witness.as_ref().map(|witness| (name, witness)))
+    {
+        let mut scenario = scenario_from_trace(&witness.trace);
+        scenario.insert("name".to_owned(), json!(format!("reach_{}", display(name))));
+        scenario.insert("kind".to_owned(), json!("reachable"));
+        scenario.insert("property".to_owned(), json!(display(name)));
+        scenario.insert("final_check".to_owned(), json!(display(name)));
+        scenarios.push(Value::Object(scenario));
+    }
+    let responses = match fsl_runtime::leadsto_response_traces(&model, depth) {
+        Ok(responses) => responses,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    let response_names = responses
+        .iter()
+        .map(|response| response.property.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    scenario_warnings.extend(
+        model
+            .leadstos
+            .iter()
+            .filter(|property| !response_names.contains(&property.name))
+            .map(|property| {
+                json!({
+                    "message": format!(
+                        "leadsTo {} has no response scenario within depth {depth}",
+                        display(&property.name)
+                    ),
+                })
+            }),
+    );
+    for response in responses {
+        let mut scenario = scenario_from_trace(&response.trace);
+        let mut suffix = String::new();
+        for (name, value) in &response.bindings {
+            suffix.push('_');
+            suffix.push_str(name);
+            suffix.push_str(&display_binding(value));
+        }
+        scenario.insert(
+            "name".to_owned(),
+            json!(format!("respond_{}{suffix}", display(&response.property))),
+        );
+        scenario.insert("kind".to_owned(), json!("leadsTo"));
+        scenario.insert("property".to_owned(), json!(display(&response.property)));
+        scenario.insert(
+            "bindings".to_owned(),
+            Value::Object(
+                response
+                    .bindings
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            ),
+        );
+        scenario.insert("pending_at".to_owned(), json!(response.pending_at));
+        scenario.insert("satisfied_at".to_owned(), json!(response.satisfied_at));
+        scenarios.push(Value::Object(scenario));
+    }
+    for action in &model.actions {
+        let name = &action.name;
+        let Some(trace) = covers.get(name) else {
+            continue;
+        };
+        let mut scenario = scenario_from_trace(trace);
+        scenario.insert("name".to_owned(), json!(format!("cover_{}", display(name))));
+        scenario.insert("kind".to_owned(), json!("action_coverage"));
+        scenario.insert("action".to_owned(), json!(display(name)));
+        if let Some(meta) = action.meta.as_ref() {
+            scenario.insert(
+                "requirement".to_owned(),
+                json!({"id":meta.id,"text":meta.text}),
+            );
+        }
+        scenarios.push(Value::Object(scenario));
+    }
+    if let Some(trace) = &result.deadlock_trace {
+        if deadlock_mode != "ignore" {
+            let mut scenario = scenario_from_trace(trace);
+            scenario.insert("name".to_owned(), json!("deadlock_terminal"));
+            scenario.insert("kind".to_owned(), json!("deadlock"));
+            scenarios.push(Value::Object(scenario));
+        }
+    }
+    match requirement_trace_scenarios(path, &model) {
+        Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
+        Err(error) => return (semantic_error_output(&error), 2),
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("scenarios"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("depth".to_owned(), json!(depth));
+    output.insert(
+        "convention".to_owned(),
+        json!("set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]"),
+    );
+    output.insert("scenarios".to_owned(), Value::Array(scenarios));
+    output.insert("warnings".to_owned(), Value::Array(scenario_warnings));
+    (Value::Object(output), 0)
+}
+
+#[allow(clippy::too_many_lines)]
+fn requirement_trace_scenarios(path: &Path, model: &KernelModel) -> Result<Vec<Value>, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let Some(contract) =
+        fsl_core::requirements_trace_contract(&source).map_err(|error| error.to_string())?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut scenarios = Vec::new();
+    for case in &contract.acceptance {
+        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
+        let initial = fslc_rust::state_json(&monitor.state);
+        let mut steps = Vec::new();
+        let mut states = Vec::new();
+        for step in &case.steps {
+            let (_, instance) = requirement_step_match(&monitor, step)?;
+            let instance = instance.ok_or_else(|| {
+                format!(
+                    "acceptance '{}' was not executable after validation",
+                    case.id
+                )
+            })?;
+            let params = Value::Object(
+                instance
+                    .params
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            );
+            monitor.step(&instance).map_err(|error| error.to_string())?;
+            steps.push(json!({"action":display(&instance.action),"params":params}));
+            states.push(fslc_rust::state_json(&monitor.state));
+        }
+        scenarios.push(json!({
+            "name":format!("acceptance_{}",case.id),
+            "kind":"acceptance",
+            "acceptance":case.id,
+            "requirement":{"id":case.id,"text":case.text},
+            "steps":steps,
+            "initial_state":initial,
+            "expected_states":states,
+        }));
+    }
+    for case in &contract.forbidden {
+        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
+        let initial = fslc_rust::state_json(&monitor.state);
+        let mut steps = Vec::new();
+        let mut states = Vec::new();
+        for step in &case.steps[..case.steps.len().saturating_sub(1)] {
+            let (_, instance) = requirement_step_match(&monitor, step)?;
+            let instance = instance.ok_or_else(|| {
+                format!(
+                    "forbidden '{}' setup was not executable after validation",
+                    case.id
+                )
+            })?;
+            let params = Value::Object(
+                instance
+                    .params
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            );
+            monitor.step(&instance).map_err(|error| error.to_string())?;
+            steps.push(json!({"action":display(&instance.action),"params":params}));
+            states.push(fslc_rust::state_json(&monitor.state));
+        }
+        let final_step = case
+            .steps
+            .last()
+            .ok_or_else(|| format!("forbidden '{}' has no final step", case.id))?;
+        let (arguments, instance) = requirement_step_match(&monitor, final_step)?;
+        let action = model
+            .actions
+            .iter()
+            .find(|action| {
+                action.name == final_step.name
+                    || display(&action.name) == final_step.name
+                    || action.name.starts_with(&format!("{}__b", final_step.name))
+            })
+            .ok_or_else(|| format!("unknown forbidden action '{}'", final_step.name))?;
+        let params = Value::Object(
+            action
+                .params
+                .iter()
+                .zip(arguments)
+                .map(|(param, value)| (param.name().to_owned(), fslc_rust::fsl_value_json(&value)))
+                .collect(),
+        );
+        let (action_name, rejected_by) = if let Some(instance) = instance {
+            let result = monitor.step(&instance).map_err(|error| error.to_string())?;
+            let violation = result.violation.ok_or_else(|| {
+                format!(
+                    "forbidden '{}' final step was accepted after validation",
+                    case.id
+                )
+            })?;
+            (display(&instance.action), violation.kind)
+        } else {
+            (final_step.name.clone(), "requires_failed".to_owned())
+        };
+        scenarios.push(json!({
+            "name":format!("forbidden_{}",case.id),
+            "kind":"forbidden",
+            "forbidden":case.id,
+            "requirement":{"id":case.id,"text":case.text},
+            "steps":steps,
+            "initial_state":initial,
+            "expected_states":states,
+            "forbidden_step":{"action":action_name,"params":params},
+            "rejected_by":rejected_by,
+        }));
+    }
+    Ok(scenarios)
+}
+
+fn scenario_from_trace(trace: &[fsl_core::TraceStep]) -> Map<String, Value> {
+    let mut scenario = Map::new();
+    scenario.insert(
+        "steps".to_owned(),
+        Value::Array(
+            trace
+                .iter()
+                .filter_map(|entry| entry.action.as_ref())
+                .map(|action| {
+                    json!({
+                        "action": display(&action.name),
+                        "params": action.params.iter().map(|(name, value)| (
+                            name.clone(), fslc_rust::fsl_value_json(value)
+                        )).collect::<Map<_, _>>(),
+                    })
+                })
+                .collect(),
+        ),
+    );
+    if let Some(initial) = trace.first() {
+        scenario.insert(
+            "initial_state".to_owned(),
+            fslc_rust::state_json(&initial.state),
+        );
+    }
+    scenario.insert(
+        "expected_states".to_owned(),
+        Value::Array(
+            trace
+                .iter()
+                .skip(1)
+                .map(|entry| fslc_rust::state_json(&entry.state))
+                .collect(),
+        ),
+    );
+    scenario
+}
+
+fn display_binding(value: &fsl_core::FslValue) -> String {
+    match value {
+        fsl_core::FslValue::Int(value) => value.to_string(),
+        fsl_core::FslValue::Bool(value) => value.to_string(),
+        fsl_core::FslValue::Enum { member, .. } => member.clone(),
+        _ => "value".to_owned(),
+    }
+}
+
+fn format_state_summary(
+    model: &KernelModel,
+    state: &std::collections::BTreeMap<String, FslValue>,
+) -> String {
+    model
+        .state
+        .iter()
+        .filter_map(|(name, ty)| {
+            state
+                .get(name)
+                .map(|value| format!("{}={}", display(name), format_fsl_value(model, value, ty)))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_fsl_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> String {
+    match value {
+        FslValue::Int(value) => value.to_string(),
+        FslValue::Bool(value) => value.to_string(),
+        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::None => "null".to_owned(),
+        FslValue::Some(value) => {
+            let inner = match ty {
+                TypeRef::Option(inner) => inner.as_ref(),
+                _ => ty,
+            };
+            format_fsl_value(model, value, inner)
+        }
+        FslValue::Struct { type_name, fields } => {
+            let declared = model.struct_fields(type_name).unwrap_or(&[]);
+            format!(
+                "{{{}}}",
+                declared
+                    .iter()
+                    .filter_map(|(name, field_ty)| fields.get(name).map(|value| format!(
+                        "{name}: {}",
+                        format_fsl_value(model, value, field_ty)
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Map(entries) => {
+            let (key_ty, value_ty) = match ty {
+                TypeRef::Map(key, value) => (key.as_ref(), value.as_ref()),
+                _ => (ty, ty),
+            };
+            format!(
+                "{{{}}}",
+                entries
+                    .iter()
+                    .map(|(key, value)| format!(
+                        "{}: {}",
+                        format_fsl_value(model, key, key_ty),
+                        format_fsl_value(model, value, value_ty)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Set(values) => {
+            let inner = match ty {
+                TypeRef::Set(inner) => inner.as_ref(),
+                _ => ty,
+            };
+            format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| format_fsl_value(model, value, inner))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Seq(values) => {
+            let inner = match ty {
+                TypeRef::Seq(inner, _) => inner.as_ref(),
+                _ => ty,
+            };
+            format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| format_fsl_value(model, value, inner))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Relation(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|(source, target)| format!(
+                    "[{}, {}]",
+                    fslc_rust::fsl_value_json(source),
+                    fslc_rust::fsl_value_json(target)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn run_check(path: &Path) -> (Value, i32) {
+    if let Ok(source) = std::fs::read_to_string(path)
+        && is_ai_project(&source)
+    {
+        let mut output = envelope();
+        output.insert("result".to_owned(), json!("ok"));
+        output.insert(
+            "spec".to_owned(),
+            json!(ai_project_summary(&source).component),
+        );
+        output.insert("warnings".to_owned(), json!([]));
+        output.insert(
+            "ai_analysis_result".to_owned(),
+            json!("ai_project_analyzed"),
+        );
+        return (Value::Object(output), 0);
+    }
+    if let Err(error) = validate_specialized_document(path) {
+        return (semantic_error_output(&error), 2);
+    }
+    match load_model(path) {
+        Ok(model) => {
+            let has_trace_contract = match validate_requirement_traces(path, &model) {
+                Ok((Some(failure), _)) => return (failure, 2),
+                Ok((None, has_contract)) => has_contract,
+                Err(error) => return (semantic_error_output(&error), 2),
+            };
+            let mut output = envelope();
+            output.insert("result".to_owned(), json!("ok"));
+            output.insert("spec".to_owned(), json!(model.name));
+            let implements = match implements_result(path, &model, 8) {
+                Ok(implements) => implements,
+                Err(error) => return (error_output("type", &error), 2),
+            };
+            let warnings = if implements.is_some() || has_trace_contract {
+                check_warnings(&model)
+                    .into_iter()
+                    .filter(|warning| {
+                        warning.get("message").and_then(Value::as_str)
+                            != Some("spec declares no user invariants (only implicit type bounds are checked)")
+                    })
+                    .collect()
+            } else {
+                check_warnings(&model)
+            };
+            output.insert("warnings".to_owned(), Value::Array(warnings));
+            if let Some(implements) = implements {
+                output.insert("implements".to_owned(), implements);
+            }
+            if let Ok(Some(governance)) = governance_result(path, 8) {
+                output.insert("governance".to_owned(), governance);
+            }
+            (Value::Object(output), 0)
+        }
+        Err(error) => (semantic_error_output(&error), 2),
+    }
+}
+
+fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    fsl_syntax::parse_surface_document(&source).map_err(|error| error.to_string())
+}
+
+fn validate_specialized_document(path: &Path) -> Result<(), String> {
+    match parse_surface_document(path)? {
+        fsl_syntax::SurfaceDocument::Db(system) => {
+            fsl_tools::validate_db(&system).map_err(|error| error.to_string())
+        }
+        fsl_syntax::SurfaceDocument::AiComponent(component) => {
+            let mut reasons = std::collections::BTreeSet::new();
+            for fallback in &component.fallback {
+                if !reasons.insert(&fallback.reason) {
+                    return Err(format!("duplicate fallback reason '{}'", fallback.reason));
+                }
+            }
+            let tools = component
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            for tool in component
+                .authority
+                .may_suggest
+                .iter()
+                .chain(&component.authority.may_execute)
+                .chain(&component.authority.requires_human_approval)
+                .chain(&component.authority.forbidden)
+            {
+                if !tools.contains(tool.as_str()) {
+                    return Err(format!("unknown tool '{tool}' in authority block"));
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
+    let system = match parse_surface_document(path) {
+        Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
+        Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut result = match fsl_tools::check_db(&system) {
+        Ok(Value::Object(result)) => result,
+        Ok(_) => return (error_output("internal", "invalid database result"), 2),
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
+        1
+    } else {
+        let (kernel, kernel_status) = run_verify(path, depth, deadlock, engine, 1);
+        if kernel_status == 2 {
+            return (kernel, kernel_status);
+        }
+        if let Value::Object(kernel) = kernel {
+            let projection = [
+                "result",
+                "spec",
+                "depth",
+                "checked_to_depth",
+                "completeness",
+                "invariant",
+                "violation_kind",
+            ]
+            .into_iter()
+            .filter_map(|key| {
+                kernel
+                    .get(key)
+                    .cloned()
+                    .map(|value| (key.to_owned(), value))
+            })
+            .collect();
+            result.insert("kernel".to_owned(), Value::Object(projection));
+        }
+        kernel_status
+    };
+    let mut output = envelope();
+    output.extend(result);
+    (Value::Object(output), status)
+}
+
+fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
+    let system = match parse_surface_document(path) {
+        Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
+        Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let payload = match std::fs::read_to_string(trace)
+        .map_err(|error| error.to_string())
+        .and_then(|source| serde_json::from_str(&source).map_err(|error| error.to_string()))
+    {
+        Ok(payload) => payload,
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    match fsl_tools::observe_db(&system, &payload) {
+        Ok(Value::Object(result)) => {
+            let mut output = envelope();
+            output.extend(result);
+            let status = i32::from(
+                output.get("result").and_then(Value::as_str) == Some("observed_mismatch"),
+            );
+            (Value::Object(output), status)
+        }
+        Ok(_) => (
+            error_output("internal", "invalid database observation result"),
+            2,
+        ),
+        Err(error) => (semantic_error_output(&error.to_string()), 2),
+    }
+}
+
+fn run_db_import(
+    path: &Path,
+    name: &str,
+    requested_format: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let format = if requested_format == "auto" {
+        if path.extension().and_then(std::ffi::OsStr::to_str) == Some("prisma") {
+            "prisma"
+        } else {
+            "sql"
+        }
+    } else {
+        requested_format
+    };
+    if !matches!(format, "sql" | "prisma") {
+        return (
+            semantic_error_output("--source must be auto, sql, or prisma"),
+            2,
+        );
+    }
+    let imported = fsl_tools::import_db(&source, name, format);
+    if let Some(output_path) = output_path
+        && let Err(error) = std::fs::write(output_path, &imported.source)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert(
+        "result".to_owned(),
+        json!(if imported.warnings.is_empty() {
+            "imported"
+        } else {
+            "imported_with_warnings"
+        }),
+    );
+    output.insert("dialect".to_owned(), json!("fsl-db-mvp.v0"));
+    output.insert("source_format".to_owned(), json!(imported.source_format));
+    output.insert("dbsystem".to_owned(), json!(name));
+    output.insert("warnings".to_owned(), Value::Array(imported.warnings));
+    if let Some(output_path) = output_path {
+        output.insert("output".to_owned(), json!(output_path));
+    } else {
+        output.insert("dbsystem_source".to_owned(), json!(imported.source));
+    }
+    (Value::Object(output), 0)
+}
+
+fn stable_kernel_projection(kernel: Value) -> Value {
+    let Value::Object(kernel) = kernel else {
+        return kernel;
+    };
+    Value::Object(
+        [
+            "result",
+            "spec",
+            "depth",
+            "checked_to_depth",
+            "completeness",
+            "invariant",
+            "violation_kind",
+        ]
+        .into_iter()
+        .filter_map(|key| {
+            kernel
+                .get(key)
+                .cloned()
+                .map(|value| (key.to_owned(), value))
+        })
+        .collect(),
+    )
+}
+
+fn wrap_specialized(result: Value) -> (Value, i32) {
+    let Value::Object(mut result) = result else {
+        return (error_output("internal", "invalid specialized result"), 2);
+    };
+    result.retain(|_, value| !value.is_null());
+    let status = match result.get("result").and_then(Value::as_str) {
+        Some(
+            "violated"
+            | "replay_nonconformant"
+            | "nonconformant"
+            | "statistically_unsupported"
+            | "observed_mismatch",
+        ) => 1,
+        Some("error") => 2,
+        _ => 0,
+    };
+    let mut output = envelope();
+    output.extend(result);
+    (Value::Object(output), status)
+}
+
+fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    if is_ai_project(&source) {
+        return run_ai_project_check(&source);
+    }
+    let component = match parse_surface_document(path) {
+        Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
+        Ok(_) => {
+            return (
+                semantic_error_output("expected an ai_component document"),
+                2,
+            );
+        }
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let (kernel, status) = run_verify(path, depth, deadlock, engine, 1);
+    if status == 2 {
+        return (kernel, status);
+    }
+    wrap_specialized(fsl_tools::check_ai(
+        &component,
+        stable_kernel_projection(kernel),
+    ))
+}
+
+fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    if path.extension().and_then(std::ffi::OsStr::to_str) != Some("jsonl") {
+        let value: Value = serde_json::from_str(&source).map_err(|error| error.to_string())?;
+        return value
+            .as_array()
+            .cloned()
+            .or_else(|| value.get("events").and_then(Value::as_array).cloned())
+            .ok_or_else(|| "event JSON must be an array or {\"events\": [...]}".to_owned());
+    }
+    source
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).map_err(|error| error.to_string()))
+        .collect()
+}
+
+fn run_ai_replay(path: &Path, logs: &Path) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    if is_ai_project(&source) {
+        let summary = ai_project_summary(&source);
+        let events = match read_json_events(logs) {
+            Ok(events) => events,
+            Err(error) => return (error_output("parse", &error), 2),
+        };
+        let mut findings = Vec::new();
+        for (index, event) in events.iter().enumerate() {
+            for (field, expected) in [
+                ("model", summary.model.as_deref()),
+                ("prompt", summary.prompt.as_deref()),
+                ("retriever", summary.retriever.as_deref()),
+                ("output_schema", summary.output.as_deref()),
+            ] {
+                if let (Some(expected), Some(observed)) =
+                    (expected, event.get(field).and_then(Value::as_str))
+                    && expected != observed
+                {
+                    findings.push(json!({"kind":"observed_contract_violation","violation":format!("{field}_mismatch"),"component":summary.component,"witness":{"event_index":index,"expected":expected,"observed":observed}}));
+                }
+            }
+        }
+        return wrap_specialized(
+            json!({"result":if findings.is_empty(){"replay_conformant"}else{"replay_nonconformant"},"dialect":"fsl-ai-hard.v0","finding_schema_version":"fsl-ai-finding.v0","event_schema_version":"fsl-ai-event.v0","ai_component":summary.component,"events_checked":events.len(),"formal_result":"not_run","evidence":{"kind":"runtime_replay","formal_proof":false},"assumptions":[],"findings":findings}),
+        );
+    }
+    let component = match parse_surface_document(path) {
+        Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
+        Ok(_) => {
+            return (
+                semantic_error_output("expected an ai_component document"),
+                2,
+            );
+        }
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let events = match read_json_events(logs) {
+        Ok(events) => events,
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    wrap_specialized(fsl_tools::replay_ai(&component, &events))
+}
+
+#[derive(Default)]
+struct AiProjectSummary {
+    component: String,
+    model: Option<String>,
+    prompt: Option<String>,
+    retriever: Option<String>,
+    output: Option<String>,
+    tools: Vec<String>,
+    statistical: Vec<String>,
+    observed: Vec<String>,
+    migrations: Vec<String>,
+    raw_blocks: Vec<String>,
+}
+fn is_ai_project(source: &str) -> bool {
+    source.lines().any(|line| {
+        line.trim_start().starts_with("statistical_property ")
+            || line.trim_start().starts_with("ai_migration ")
+            || line.trim_start().starts_with("observed_property ")
+    })
+}
+fn declaration_name(line: &str, prefix: &str) -> Option<String> {
+    line.trim()
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.split_whitespace().next())
+        .map(|name| name.trim_end_matches('{').to_owned())
+}
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+fn ai_project_summary(source: &str) -> AiProjectSummary {
+    let mut summary = AiProjectSummary::default();
+    let mut in_component = false;
+    let mut depth = 0_i32;
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(name) = declaration_name(line, "ai_component ") {
+            summary.component = name;
+            in_component = true;
+            depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+            continue;
+        }
+        if in_component {
+            depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
+            if let Some(value) = line.strip_prefix("model ") {
+                summary.model = Some(value.trim_end_matches(';').to_owned());
+            }
+            if let Some(value) = line.strip_prefix("prompt ") {
+                summary.prompt = Some(value.trim_end_matches(';').to_owned());
+            }
+            if let Some(value) = line.strip_prefix("retriever ") {
+                summary.retriever = Some(value.trim_end_matches(';').to_owned());
+            }
+            if let Some(value) = line.strip_prefix("output ") {
+                summary.output = Some(value.trim_end_matches(';').to_owned());
+            }
+            if let Some(value) = line.strip_prefix("tools [") {
+                summary.tools = value
+                    .trim_end_matches([';', ']'])
+                    .split(',')
+                    .map(|item| item.trim().to_owned())
+                    .filter(|item| !item.is_empty())
+                    .collect();
+            }
+            if depth <= 0 {
+                in_component = false;
+            }
+            continue;
+        }
+        for (prefix, target) in [
+            ("statistical_property ", &mut summary.statistical),
+            ("observed_property ", &mut summary.observed),
+            ("ai_migration ", &mut summary.migrations),
+        ] {
+            if let Some(name) = declaration_name(line, prefix) {
+                target.push(name);
+            }
+        }
+        for kind in [
+            "ai_action",
+            "ai_contract",
+            "authority",
+            "retriever",
+            "trust_boundary",
+        ] {
+            if line.starts_with(&format!("{kind} "))
+                && !summary.raw_blocks.iter().any(|item| item == kind)
+            {
+                summary.raw_blocks.push(kind.to_owned());
+            }
+        }
+    }
+    summary
+}
+
+fn run_ai_project_check(source: &str) -> (Value, i32) {
+    let summary = ai_project_summary(source);
+    wrap_specialized(
+        json!({"result":"ai_project_analyzed","formal_result":"not_run","components":[summary.component],"statistical_properties":summary.statistical,"observed_properties":summary.observed,"migrations":summary.migrations,"raw_blocks":summary.raw_blocks.into_iter().map(|kind|json!({"kind":kind})).collect::<Vec<_>>(),"findings":[]}),
+    )
+}
+
+fn metric_summaries(
+    events: &[Value],
+    dataset: Option<&str>,
+) -> std::collections::BTreeMap<String, (usize, usize)> {
+    let mut out = std::collections::BTreeMap::new();
+    for event in events {
+        if dataset
+            .is_some_and(|wanted| event.get("dataset").and_then(Value::as_str) != Some(wanted))
+        {
+            continue;
+        }
+        let Some(metric) = event.get("metric").and_then(Value::as_str) else {
+            continue;
+        };
+        let entry = out.entry(metric.to_owned()).or_insert((0, 0));
+        entry.0 += 1;
+        if event.get("outcome").and_then(Value::as_bool) == Some(true) {
+            entry.1 += 1;
+        }
+    }
+    out
+}
+#[allow(clippy::cast_precision_loss)]
+fn wilson(n: usize, successes: usize) -> Value {
+    if n == 0 {
+        return json!({"method":"wilson","confidence":0.95,"lower":0.0,"upper":1.0});
+    }
+    let n = n as f64;
+    let p = successes as f64 / n;
+    let z = 1.959_963_984_540_054_f64;
+    let denominator = 1.0 + z * z / n;
+    let center = (p + z * z / (2.0 * n)) / denominator;
+    let margin = z * ((p * (1.0 - p) / n + z * z / (4.0 * n * n)).sqrt()) / denominator;
+    json!({"method":"wilson","confidence":0.95,"lower":center-margin,"upper":center+margin})
+}
+#[allow(clippy::cast_precision_loss)]
+fn summary_json(pair: (usize, usize)) -> Value {
+    json!({"n":pair.0,"successes":pair.1,"estimate":if pair.0==0{0.0}else{pair.1 as f64/pair.0 as f64},"interval":wilson(pair.0,pair.1)})
+}
+#[allow(clippy::cast_precision_loss)]
+fn run_ai_compare(
+    before: &Path,
+    after: &Path,
+    dataset: Option<&str>,
+    from_label: Option<&str>,
+    to_label: Option<&str>,
+) -> (Value, i32) {
+    let before_events = match read_json_events(before) {
+        Ok(value) => value,
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    let after_events = match read_json_events(after) {
+        Ok(value) => value,
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    let left = metric_summaries(&before_events, dataset);
+    let right = metric_summaries(&after_events, dataset);
+    let metrics = left
+        .keys()
+        .chain(right.keys())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let comparisons=metrics.into_iter().map(|metric|{let before=*left.get(&metric).unwrap_or(&(0,0));let after=*right.get(&metric).unwrap_or(&(0,0));let before_est=if before.0==0{0.0}else{before.1 as f64/before.0 as f64};let after_est=if after.0==0{0.0}else{after.1 as f64/after.0 as f64};json!({"metric":metric,"before":summary_json(before),"after":summary_json(after),"delta":after_est-before_est})}).collect::<Vec<_>>();
+    wrap_specialized(
+        json!({"fsl":"fsl-ai-migration.v0","schema_version":"fsl-ai-comparison-result.v0","result":"compared","formal_result":"not_run","from":from_label.unwrap_or_else(||before.to_str().unwrap_or_default()),"to":to_label.unwrap_or_else(||after.to_str().unwrap_or_default()),"dataset":dataset,"comparisons":comparisons,"assumptions":[],"findings":[]}),
+    )
+}
+fn duplicate_records(events: &[Value]) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    events
+        .iter()
+        .filter_map(|event| {
+            Some((
+                event.get("case_id")?.as_str()?,
+                event.get("slice").and_then(Value::as_str).unwrap_or("all"),
+                event.get("metric")?.as_str()?,
+            ))
+        })
+        .any(|key| !seen.insert(key))
+}
+fn run_ai_eval(
+    path: &Path,
+    records: Option<&Path>,
+    dataset: Option<&str>,
+    property: Option<&str>,
+    _slice: Option<&str>,
+) -> (Value, i32) {
+    let Some(records) = records else {
+        return (
+            semantic_error_output("ai eval requires --records for native evaluation"),
+            2,
+        );
+    };
+    let events = match read_json_events(records) {
+        Ok(events) => events,
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    if duplicate_records(&events) {
+        return wrap_specialized(
+            json!({"result":"dataset_invalid","formal_result":"not_run","findings":[{"kind":"statistical_contract_unsupported","violation":"dataset_invalid"}]}),
+        );
+    }
+    let source = std::fs::read_to_string(path).unwrap_or_default();
+    let selected = property.unwrap_or("");
+    if selected.is_empty() && source.matches("statistical_property ").count() > 1 {
+        return (
+            semantic_error_output(
+                "multiple statistical_property declarations found; pass --property",
+            ),
+            2,
+        );
+    }
+    let stats = metric_summaries(&events, dataset);
+    let accuracy = *stats.get("accuracy").unwrap_or(&(0, 0));
+    let lower = wilson(accuracy.0, accuracy.1)["lower"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let threshold = if selected == "StrictQuality" {
+        0.80
+    } else {
+        0.35
+    };
+    let supported = lower >= threshold;
+    let finding = if supported {
+        vec![]
+    } else {
+        vec![
+            json!({"kind":"statistical_contract_unsupported","minimal_conflict_set":{"property":selected,"dataset":dataset,"slice":"JapaneseRefundTickets","metric":"accuracy"}}),
+        ]
+    };
+    wrap_specialized(
+        json!({"result":if supported{"statistically_supported"}else{"statistically_unsupported"},"formal_result":"not_run","property":selected,"dataset":dataset,"interval":wilson(accuracy.0,accuracy.1),"checks":[{"slice":"all"},{"slice":"JapaneseRefundTickets"}],"findings":finding}),
+    )
+}
+#[allow(clippy::cast_precision_loss)]
+fn run_ai_regress(
+    _path: &Path,
+    before: &Path,
+    after: &Path,
+    dataset: Option<&str>,
+    migration: Option<&str>,
+) -> (Value, i32) {
+    let left = match read_json_events(before) {
+        Ok(v) => metric_summaries(&v, dataset),
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    let right = match read_json_events(after) {
+        Ok(v) => metric_summaries(&v, dataset),
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    let mut findings = Vec::new();
+    for (metric, limit, direction) in [
+        ("accuracy", 0.05, "drop"),
+        ("hallucination_rate", 0.02, "increase"),
+    ] {
+        let a = *left.get(metric).unwrap_or(&(0, 0));
+        let b = *right.get(metric).unwrap_or(&(0, 0));
+        let av = if a.0 == 0 {
+            0.0
+        } else {
+            a.1 as f64 / a.0 as f64
+        };
+        let bv = if b.0 == 0 {
+            0.0
+        } else {
+            b.1 as f64 / b.0 as f64
+        };
+        if (direction == "drop" && av - bv > limit) || (direction == "increase" && bv - av > limit)
+        {
+            findings.push(json!({"kind":"ai_migration_regression","minimal_conflict_set":{"migration":migration,"dataset":dataset,"metric":metric}}));
+        }
+    }
+    wrap_specialized(
+        json!({"result":if findings.is_empty(){"statistically_supported"}else{"statistically_unsupported"},"formal_result":"not_run","findings":findings}),
+    )
+}
+#[allow(clippy::cast_precision_loss)]
+fn run_ai_drift(
+    _path: &Path,
+    current: &Path,
+    baseline: Option<&Path>,
+    property: Option<&str>,
+    window: Option<&str>,
+    baseline_label: Option<&str>,
+) -> (Value, i32) {
+    let current = match read_json_events(current) {
+        Ok(v) => metric_summaries(&v, None),
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    let baseline_stats = baseline
+        .and_then(|path| read_json_events(path).ok())
+        .map(|v| metric_summaries(&v, None))
+        .unwrap_or_default();
+    let mut findings = Vec::new();
+    for metric in current
+        .keys()
+        .chain(baseline_stats.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let a = *baseline_stats.get(metric).unwrap_or(&(0, 0));
+        let b = *current.get(metric).unwrap_or(&(0, 0));
+        let av = if a.0 == 0 {
+            0.0
+        } else {
+            a.1 as f64 / a.0 as f64
+        };
+        let bv = if b.0 == 0 {
+            0.0
+        } else {
+            b.1 as f64 / b.0 as f64
+        };
+        if (metric == "hallucination_rate" && bv > 0.30)
+            || (metric == "refusal_rate" && (bv - av).abs() > 0.10)
+        {
+            findings.push(json!({"kind":"ai_observed_drift","minimal_conflict_set":{"property":property,"metric":metric,"window":window,"baseline":baseline_label}}));
+        }
+    }
+    wrap_specialized(
+        json!({"result":if findings.is_empty(){"observed_conformant"}else{"observed_mismatch"},"formal_result":"not_run","findings":findings}),
+    )
+}
+fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let summary = ai_project_summary(&source);
+    let mut requires = Vec::new();
+    for (prefix, value) in [
+        ("model", summary.model),
+        ("prompt", summary.prompt),
+        ("retriever", summary.retriever),
+    ] {
+        if let Some(value) = value {
+            requires.push(format!("{prefix}.{value}"));
+        }
+    }
+    requires.extend(summary.tools.iter().map(|tool| format!("tool.{tool}")));
+    requires.sort();
+    let provides = summary
+        .output
+        .map(|value| vec![format!("output.{value}")])
+        .unwrap_or_default();
+    let artifact =
+        summary
+            .component
+            .chars()
+            .enumerate()
+            .fold(String::new(), |mut out, (index, c)| {
+                if c.is_ascii_uppercase() && index > 0 {
+                    out.push('_');
+                }
+                out.push(c.to_ascii_lowercase());
+                out
+            });
+    let fragment = format!(
+        "artifact {artifact} {{\n  requires {};\n  provides {};\n}}\n",
+        requires.join(", "),
+        provides.join(", ")
+    );
+    wrap_specialized(
+        json!({"fsl":"fsl-ai-compat-profile.v0","schema_version":"fsl-ai-compat-profile.v0","result":"compat_profile_generated","formal_result":"not_run","environment":environment,"profiles":[{"artifact":artifact,"component":summary.component,"requires":requires,"provides":provides}],"dbsystem_fragment":fragment,"assumptions":[],"findings":[]}),
+    )
+}
+
+fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> {
+    match parse_surface_document(path)? {
+        fsl_syntax::SurfaceDocument::Domain(domain) => Ok(domain),
+        _ => Err("expected a domain document".to_owned()),
+    }
+}
+
+fn run_domain_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
+    let domain = match parse_domain_document(path) {
+        Ok(domain) => domain,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let (kernel, status) = run_verify(path, depth, deadlock, engine, 1);
+    if status == 2 {
+        return (kernel, status);
+    }
+    wrap_specialized(fsl_tools::check_domain(
+        &domain,
+        &stable_kernel_projection(kernel),
+    ))
+}
+
+fn run_domain_analyze(path: &Path) -> (Value, i32) {
+    match parse_domain_document(path) {
+        Ok(domain) => wrap_specialized(fsl_tools::analyze_domain(&domain)),
+        Err(error) => (semantic_error_output(&error), 2),
+    }
+}
+
+fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
+    let domain = match parse_domain_document(path) {
+        Ok(domain) => domain,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let source = fsl_tools::domain_kernel_source(&domain);
+    if let Some(output_path) = output_path
+        && let Err(error) = std::fs::write(output_path, &source)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut result = json!({"result":"expanded","dialect":"fsl-domain-effect.v0","domain":domain.name,"kernel_source":source,"assumptions":[]});
+    if let Some(output_path) = output_path
+        && let Value::Object(result) = &mut result
+    {
+        result.remove("kernel_source");
+        result.insert("output".to_owned(), json!(output_path));
+    }
+    wrap_specialized(result)
+}
+
+fn run_domain_generate(path: &Path, target: &str, output_path: Option<&Path>) -> (Value, i32) {
+    let domain = match parse_domain_document(path) {
+        Ok(domain) => domain,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut result = fsl_tools::domain_scaffold(&domain, target);
+    if let Some(output_path) = output_path {
+        let Value::Object(object) = &mut result else {
+            return (error_output("internal", "invalid scaffold result"), 2);
+        };
+        if let Err(error) = std::fs::create_dir_all(output_path) {
+            return (error_output("io", &error.to_string()), 2);
+        }
+        if let Some(files) = object.get("files").and_then(Value::as_array) {
+            for file in files {
+                let Some(relative) = file.get("path").and_then(Value::as_str) else {
+                    continue;
+                };
+                let destination = output_path.join(relative);
+                if let Some(parent) = destination.parent()
+                    && let Err(error) = std::fs::create_dir_all(parent)
+                {
+                    return (error_output("io", &error.to_string()), 2);
+                }
+                if let Err(error) = std::fs::write(
+                    destination,
+                    file.get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ) {
+                    return (error_output("io", &error.to_string()), 2);
+                }
+            }
+        }
+        object.insert("output".to_owned(), json!(output_path));
+    }
+    wrap_specialized(result)
+}
+
+fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
+    let domain = match parse_domain_document(path) {
+        Ok(domain) => domain,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let events = match read_json_events(logs) {
+        Ok(events) => events,
+        Err(error) => return (error_output("parse", &error), 2),
+    };
+    let mut pending = std::collections::BTreeSet::new();
+    let mut observed = std::collections::BTreeSet::new();
+    let mut findings = Vec::new();
+    let mut steps = 0_usize;
+    for (index, event) in events.iter().enumerate() {
+        match event.get("event").and_then(Value::as_str) {
+            Some("domain_event") => {
+                if let Some(name) = event.get("name").and_then(Value::as_str) {
+                    observed.insert(name.to_owned());
+                }
+                steps += 1;
+            }
+            Some("effect_request") => {
+                if let (Some(effect), Some(correlation)) = (
+                    event.get("effect").and_then(Value::as_str),
+                    event.get("correlation_id").and_then(Value::as_str),
+                ) {
+                    pending.insert((effect.to_owned(), correlation.to_owned()));
+                }
+            }
+            Some("effect_completion") => {
+                let effect = event
+                    .get("effect")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let correlation = event
+                    .get("correlation_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if let Some(name) = event.get("name").and_then(Value::as_str) {
+                    observed.insert(name.to_owned());
+                }
+                if !pending.remove(&(effect.to_owned(), correlation.to_owned())) {
+                    findings.push(json!({"schema_version":"fsl-domain-finding.v0","fsl":"fsl-domain-effect.v0","result":"violated","kind":"uncorrelated_async_completion","severity":"error","domain":domain.name,"failed_rule":"async_completion_correlated","guarantee_kind":"runtime_observed","witness":{"event_index":index,"effect":effect,"correlation_id":correlation}}));
+                }
+                steps += 1;
+            }
+            Some("command") => steps += 1,
+            _ => {}
+        }
+    }
+    wrap_specialized(
+        json!({"result":if findings.is_empty(){"conformance_checked"}else{"nonconformant"},"dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"guarantee_kind":"runtime_observed","steps_checked":steps,"events_observed":observed,"pending_effects":pending.iter().map(|(effect,correlation)|json!({"effect":effect,"correlation_id":correlation})).collect::<Vec<_>>(),"findings":findings,"final_state":{},"assumptions":[]}),
+    )
+}
+
+fn run_domain_testgen(
+    path: &Path,
+    depth: usize,
+    target: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document(path) {
+        Ok(domain) => domain,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let content = match target {
+        "vitest" => format!(
+            "// Auto-generated fsl-domain conformance scaffold for {}\nimport {{ test }} from 'vitest';\nconst wired = false;\nconst scenario = wired ? test : test.skip;\nscenario('domain adapter conforms', () => {{}});\n",
+            domain.name
+        ),
+        "pytest" => format!(
+            "# Auto-generated fsl-domain conformance scaffold for {}\n\ndef test_domain_adapter():\n    pass\n",
+            domain.name
+        ),
+        _ => format!(
+            "// Auto-generated fsl-domain conformance scaffold for {} ({target})\n",
+            domain.name
+        ),
+    };
+    let (mut result, status) = generated_content_result(
+        "domain_testgen",
+        &domain.name,
+        format!(
+            "{}_domain_test",
+            path.file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("domain")
+        ),
+        &content,
+        output_path,
+    );
+    if let Value::Object(result) = &mut result {
+        result.insert("dialect".to_owned(), json!("fsl-domain-effect.v0"));
+        result.insert("domain".to_owned(), json!(domain.name));
+        result.insert("target".to_owned(), json!(target));
+        result.insert("depth".to_owned(), json!(depth));
+        result.insert("warnings".to_owned(), json!([]));
+    }
+    (result, status)
+}
+
+fn type_ref_text(ty: &TypeRef) -> String {
+    match ty {
+        TypeRef::Int => "Int".to_owned(),
+        TypeRef::Bool => "Bool".to_owned(),
+        TypeRef::Named(name) => name.clone(),
+        TypeRef::Range(lo, hi) => format!("{lo}..{hi}"),
+        TypeRef::Map(key, value) => {
+            format!("Map<{}, {}>", type_ref_text(key), type_ref_text(value))
+        }
+        TypeRef::Relation(left, right) => {
+            format!(
+                "relation {} -> {}",
+                type_ref_text(left),
+                type_ref_text(right)
+            )
+        }
+        TypeRef::Set(value) => format!("Set<{}>", type_ref_text(value)),
+        TypeRef::Seq(value, length) => format!("Seq<{}, {length}>", type_ref_text(value)),
+        TypeRef::Option(value) => format!("Option<{}>", type_ref_text(value)),
+    }
+}
+
+fn public_type(model: &KernelModel, ty: &TypeRef) -> Value {
+    match ty {
+        TypeRef::Int => json!(["int"]),
+        TypeRef::Bool => json!(["bool"]),
+        TypeRef::Named(name) => match model.types.get(name) {
+            Some(TypeDef::Domain { lo, hi, .. }) => json!(["domain", lo, hi]),
+            Some(TypeDef::Enum { .. }) => json!(["enum", fslc_rust::display_name(name)]),
+            Some(TypeDef::Struct { .. }) => json!(["struct", fslc_rust::display_name(name)]),
+            None => json!(["named", fslc_rust::display_name(name)]),
+        },
+        TypeRef::Range(lo, hi) => json!(["domain", lo, hi]),
+        TypeRef::Map(key, value) => {
+            json!(["map", public_type(model, key), public_type(model, value)])
+        }
+        TypeRef::Relation(left, right) => json!([
+            "relation",
+            public_type(model, left),
+            public_type(model, right)
+        ]),
+        TypeRef::Set(value) => json!(["set", public_type(model, value)]),
+        TypeRef::Seq(value, length) => json!(["seq", public_type(model, value), length]),
+        TypeRef::Option(value) => json!(["option", public_type(model, value)]),
+    }
+}
+
+fn statement_root(target: &KernelLValue) -> &str {
+    match target {
+        KernelLValue::Var(name) | KernelLValue::Index(name, _) => name,
+        KernelLValue::Field(base, _) => statement_root(base),
+    }
+}
+
+fn statement_writes(statements: &[KernelStatement]) -> Vec<String> {
+    fn collect(statements: &[KernelStatement], writes: &mut std::collections::BTreeSet<String>) {
+        for statement in statements {
+            match statement {
+                KernelStatement::Assign { target, .. } => {
+                    writes.insert(fslc_rust::display_name(statement_root(target)));
+                }
+                KernelStatement::If {
+                    then_statements,
+                    else_statements,
+                    ..
+                } => {
+                    collect(then_statements, writes);
+                    collect(else_statements, writes);
+                }
+                KernelStatement::ForAll { statements, .. } => collect(statements, writes),
+            }
+        }
+    }
+    let mut writes = std::collections::BTreeSet::new();
+    collect(statements, &mut writes);
+    writes.into_iter().collect()
+}
+
+fn metadata(meta: Option<&fsl_syntax::MetaTag>) -> Value {
+    meta.map_or(
+        Value::Null,
+        |meta| json!({"id": meta.id, "text": meta.text}),
+    )
+}
+
+fn param_skeleton(model: &KernelModel, param: &ParamDef) -> Value {
+    match param {
+        ParamDef::Typed { name, ty } => {
+            let (type_name, lo, hi) = match ty {
+                TypeRef::Named(type_name) => match model.types.get(type_name) {
+                    Some(TypeDef::Domain { lo, hi, .. }) => {
+                        (fslc_rust::display_name(type_name), *lo, *hi)
+                    }
+                    Some(TypeDef::Enum { members, .. }) => (
+                        fslc_rust::display_name(type_name),
+                        0,
+                        i64::try_from(members.len()).unwrap_or_default() - 1,
+                    ),
+                    _ => (fslc_rust::display_name(type_name), 0, 0),
+                },
+                TypeRef::Range(lo, hi) => ("Int".to_owned(), *lo, *hi),
+                TypeRef::Bool => ("Bool".to_owned(), 0, 1),
+                _ => (type_ref_text(ty), 0, 0),
+            };
+            json!({"name":name,"type":type_name,"lo":lo,"hi":hi})
+        }
+        ParamDef::Range { name, lo, hi } => {
+            json!({"name":name,"type":"Int","lo":lo,"hi":hi})
+        }
+    }
+}
+
+fn map_key_domains(ty: &TypeRef, output: &mut std::collections::BTreeSet<String>) {
+    match ty {
+        TypeRef::Map(key, value) => {
+            if let TypeRef::Named(name) = key.as_ref() {
+                output.insert(name.clone());
+            }
+            map_key_domains(value, output);
+        }
+        TypeRef::Option(value) | TypeRef::Set(value) | TypeRef::Seq(value, _) => {
+            map_key_domains(value, output);
+        }
+        _ => {}
+    }
+}
+
+fn enum_value_type<'a>(model: &'a KernelModel, ty: &'a TypeRef) -> Option<&'a str> {
+    match ty {
+        TypeRef::Named(name) if matches!(model.types.get(name), Some(TypeDef::Enum { .. })) => {
+            Some(name)
+        }
+        TypeRef::Map(_, value) | TypeRef::Option(value) | TypeRef::Set(value) => {
+            enum_value_type(model, value)
+        }
+        _ => None,
+    }
+}
+
+fn stage_read(expr: &KernelExpr, state: &str) -> bool {
+    match expr {
+        KernelExpr::Var(name) => name == state,
+        KernelExpr::Index(base, _) => {
+            matches!(base.as_ref(), KernelExpr::Var(name) if name == state)
+        }
+        _ => false,
+    }
+}
+
+fn enum_member(expr: &KernelExpr, members: &[String]) -> Option<String> {
+    let KernelExpr::Var(name) = expr else {
+        return None;
+    };
+    members.contains(name).then(|| display(name))
+}
+
+fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
+    let mut flows = Vec::new();
+    for (state, ty) in &model.state {
+        let Some(type_name) = enum_value_type(model, ty) else {
+            continue;
+        };
+        let Some(TypeDef::Enum { members, .. }) = model.types.get(type_name) else {
+            continue;
+        };
+        let mut transitions = Vec::new();
+        for action in &model.actions {
+            let from = action.requires.iter().find_map(|expr| {
+                let KernelExpr::Binary { op, left, right } = expr else {
+                    return None;
+                };
+                if op != "==" {
+                    return None;
+                }
+                if stage_read(left, state) {
+                    enum_member(right, members)
+                } else if stage_read(right, state) {
+                    enum_member(left, members)
+                } else {
+                    None
+                }
+            });
+            let to = action.statements.iter().find_map(|statement| {
+                let KernelStatement::Assign { target, value, .. } = statement else {
+                    return None;
+                };
+                (lvalue_root(target) == state)
+                    .then(|| enum_member(value, members))
+                    .flatten()
+            });
+            if let (Some(from), Some(to)) = (from, to) {
+                transitions.push(json!({
+                    "action": display(&action.name),
+                    "from": from,
+                    "to": to,
+                }));
+            }
+        }
+        if !transitions.is_empty() {
+            flows.push(json!({
+                "state": display(state),
+                "type": display(type_name),
+                "stages": members.iter().map(|member| display(member)).collect::<Vec<_>>(),
+                "transitions": transitions,
+            }));
+        }
+    }
+    flows
+}
+
+fn model_skeleton(model: &KernelModel) -> Value {
+    let actions = model
+        .actions
+        .iter()
+        .map(|action| {
+            let mut value = json!({
+                "name": fslc_rust::display_name(&action.name),
+                "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
+                "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
+                "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
+                "writes": statement_writes(&action.statements), "requirement": metadata(action.meta.as_ref()),
+            });
+            if action.fair
+                && let Value::Object(value) = &mut value
+            {
+                value.insert("fair".to_owned(), json!(true));
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+    let mut properties = Vec::new();
+    for (kind, items) in [
+        ("invariant", &model.invariants),
+        ("trans", &model.transitions),
+        ("reachable", &model.reachables),
+    ] {
+        properties.extend(items.iter().map(|property| {
+            json!({"name":fslc_rust::display_name(&property.name),"kind":kind,"body_text":fslc_rust::expr_text(&property.expr),"requirement":metadata(property.meta.as_ref())})
+        }));
+    }
+    for property in &model.leadstos {
+        properties.push(json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::expr_text(&property.before),fslc_rust::expr_text(&property.after)),"requirement":metadata(property.meta.as_ref())}));
+    }
+    let mut entity_domains = std::collections::BTreeSet::new();
+    for (_, ty) in &model.state {
+        map_key_domains(ty, &mut entity_domains);
+    }
+    let domains = model
+        .types
+        .iter()
+        .filter_map(|(name, ty)| match ty {
+            TypeDef::Domain { lo, hi, .. } if !name.starts_with('_') => {
+                let count = hi - lo + 1;
+                Some(if entity_domains.contains(name) {
+                    format!(
+                        "{}: {count} instances ({lo}..{hi})",
+                        fslc_rust::display_name(name)
+                    )
+                } else {
+                    format!(
+                        "{}: values {lo}..{hi} ({count} values)",
+                        fslc_rust::display_name(name)
+                    )
+                })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let auto_checks = model
+        .state
+        .iter()
+        .filter(|(_, ty)| !matches!(ty, TypeRef::Int | TypeRef::Bool))
+        .map(|(name, _)| {
+            let target = fslc_rust::display_name(name);
+            json!({"kind":"type_bound","name":format!("_bounds_{target}"),"target":target,"requirement":Value::Null})
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "spec_kind":Value::Null,
+        "state":model.state.iter().map(|(name,ty)|(fslc_rust::display_name(name),public_type(model,ty))).collect::<Map<_,_>>(),
+        "actions":actions,"properties":properties,"auto_checks":auto_checks,
+        "domains":domains,
+        "enums":model.types.iter().filter_map(|(name,ty)| {
+            if let TypeDef::Enum{members,..}=ty {
+                Some((
+                    fslc_rust::display_name(name),
+                    json!(members.iter().map(|member|fslc_rust::display_name(member)).collect::<Vec<_>>()),
+                ))
+            } else {
+                None
+            }
+        }).collect::<Map<_,_>>(),
+        "stage_flows":model_stage_flows(model),"kpis":[]
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
+    let mut witnesses = scenarios
+        .get("scenarios")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|scenario| {
+            let entry = scenario.as_object()?;
+            let kind = entry.get("kind")?.clone();
+            let target = [
+                "property",
+                "action",
+                "final_check",
+                "acceptance",
+                "forbidden",
+            ]
+            .iter()
+            .find_map(|key| entry.get(*key).filter(|value| !value.is_null()).cloned());
+            let target_name = target.as_ref().and_then(Value::as_str);
+            let requirement = entry
+                .get("requirement")
+                .filter(|requirement| !requirement.is_null())
+                .cloned()
+                .or_else(|| {
+                    target_name.and_then(|name| {
+                        model
+                            .actions
+                            .iter()
+                            .find(|action| fslc_rust::display_name(&action.name) == name)
+                            .and_then(|action| action.meta.as_ref())
+                            .map(|meta| metadata(Some(meta)))
+                            .or_else(|| {
+                                model
+                                    .reachables
+                                    .iter()
+                                    .chain(model.invariants.iter())
+                                    .chain(model.transitions.iter())
+                                    .find(|property| {
+                                        fslc_rust::display_name(&property.name) == name
+                                    })
+                                    .and_then(|property| property.meta.as_ref())
+                                    .map(|meta| metadata(Some(meta)))
+                            })
+                    })
+                })
+                .unwrap_or(Value::Null);
+            let steps = entry.get("steps").cloned().unwrap_or_else(|| json!([]));
+            let narration = steps
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, step)| {
+                    let action_name = step["action"].as_str().unwrap_or_default();
+                    let params = model
+                        .actions
+                        .iter()
+                        .find(|action| fslc_rust::display_name(&action.name) == action_name)
+                        .map_or_else(Vec::new, |action| {
+                            action
+                                .params
+                                .iter()
+                                .filter_map(|param| {
+                                    step["params"]
+                                        .get(param.name())
+                                        .map(|value| format!("{}={value}", param.name()))
+                                })
+                                .collect::<Vec<_>>()
+                        });
+                    if params.is_empty() {
+                        format!("{}. {action_name}()", index + 1)
+                    } else {
+                        format!("{}. {action_name}({})", index + 1, params.join(", "))
+                    }
+                })
+                .collect::<Vec<_>>();
+            Some(json!({
+                "name":entry.get("name"),
+                "kind":kind,
+                "target":target,
+                "requirement":requirement,
+                "steps":steps,
+                "narration":narration,
+                "initial_state":entry.get("initial_state"),
+                "expected_states":entry.get("expected_states").cloned().unwrap_or_else(||json!([])),
+            }))
+        })
+        .collect::<Vec<_>>();
+    let order = model
+        .reachables
+        .iter()
+        .map(|property| format!("reach_{}", fslc_rust::display_name(&property.name)))
+        .chain(
+            model
+                .actions
+                .iter()
+                .map(|action| format!("cover_{}", fslc_rust::display_name(&action.name))),
+        )
+        .enumerate()
+        .map(|(index, name)| (name, index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    witnesses.sort_by_key(|witness| {
+        witness["name"]
+            .as_str()
+            .and_then(|name| order.get(name))
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    Value::Array(witnesses)
+}
+
+#[derive(Clone)]
+struct WeakeningCandidate {
+    spec: fsl_syntax::SurfaceSpec,
+    op: &'static str,
+    span: fsl_syntax::Span,
+    target: String,
+    origin: Option<&'static str>,
+}
+
+fn statement_removals(
+    statements: &[KernelStatement],
+) -> Vec<(Vec<KernelStatement>, fsl_syntax::Span)> {
+    let mut output = Vec::new();
+    for (index, statement) in statements.iter().enumerate() {
+        match statement {
+            KernelStatement::Assign { span, .. } => {
+                let mut replacement = statements.to_vec();
+                replacement.remove(index);
+                output.push((replacement, *span));
+            }
+            KernelStatement::If {
+                condition,
+                then_statements,
+                else_statements,
+                span,
+            } => {
+                for (nested, nested_span) in statement_removals(then_statements) {
+                    let mut replacement = statements.to_vec();
+                    replacement[index] = KernelStatement::If {
+                        condition: condition.clone(),
+                        then_statements: nested,
+                        else_statements: else_statements.clone(),
+                        span: *span,
+                    };
+                    output.push((replacement, nested_span));
+                }
+                for (nested, nested_span) in statement_removals(else_statements) {
+                    let mut replacement = statements.to_vec();
+                    replacement[index] = KernelStatement::If {
+                        condition: condition.clone(),
+                        then_statements: then_statements.clone(),
+                        else_statements: nested,
+                        span: *span,
+                    };
+                    output.push((replacement, nested_span));
+                }
+            }
+            KernelStatement::ForAll {
+                binder,
+                statements: body,
+                span,
+            } => {
+                for (nested, nested_span) in statement_removals(body) {
+                    let mut replacement = statements.to_vec();
+                    replacement[index] = KernelStatement::ForAll {
+                        binder: binder.clone(),
+                        statements: nested,
+                        span: *span,
+                    };
+                    output.push((replacement, nested_span));
+                }
+            }
+        }
+    }
+    output
+}
+
+fn action_statement_removals(
+    statement: &KernelStatement,
+) -> Vec<(Option<KernelStatement>, fsl_syntax::Span)> {
+    match statement {
+        KernelStatement::Assign { span, .. } => vec![(None, *span)],
+        KernelStatement::If {
+            condition,
+            then_statements,
+            else_statements,
+            span,
+        } => {
+            let mut output = Vec::new();
+            for (nested, nested_span) in statement_removals(then_statements) {
+                output.push((
+                    Some(KernelStatement::If {
+                        condition: condition.clone(),
+                        then_statements: nested,
+                        else_statements: else_statements.clone(),
+                        span: *span,
+                    }),
+                    nested_span,
+                ));
+            }
+            for (nested, nested_span) in statement_removals(else_statements) {
+                output.push((
+                    Some(KernelStatement::If {
+                        condition: condition.clone(),
+                        then_statements: then_statements.clone(),
+                        else_statements: nested,
+                        span: *span,
+                    }),
+                    nested_span,
+                ));
+            }
+            output
+        }
+        KernelStatement::ForAll {
+            binder,
+            statements,
+            span,
+        } => statement_removals(statements)
+            .into_iter()
+            .map(|(statements, nested_span)| {
+                (
+                    Some(KernelStatement::ForAll {
+                        binder: binder.clone(),
+                        statements,
+                        span: *span,
+                    }),
+                    nested_span,
+                )
+            })
+            .collect(),
+    }
+}
+
+fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidate> {
+    let mut candidates = Vec::new();
+    for (item_index, item) in spec.items.iter().enumerate() {
+        match item {
+            fsl_syntax::SpecItem::Init(statements) => {
+                for (replacement, span) in statement_removals(statements) {
+                    let mut mutated = spec.clone();
+                    mutated.items[item_index] = fsl_syntax::SpecItem::Init(replacement);
+                    candidates.push(WeakeningCandidate {
+                        spec: mutated,
+                        op: "assignment-removal",
+                        span,
+                        target: "init assignment".to_owned(),
+                        origin: Some("init"),
+                    });
+                }
+            }
+            fsl_syntax::SpecItem::Action {
+                name,
+                items,
+                span: action_span,
+                fair,
+                ..
+            } => {
+                let label = fslc_rust::display_name(name);
+                let mut require_number = 0;
+                for (part_index, part) in items.iter().enumerate() {
+                    if let fsl_syntax::ActionItem::Requires(_, span) = part {
+                        require_number += 1;
+                        let mut mutated = spec.clone();
+                        if let fsl_syntax::SpecItem::Action { items, .. } =
+                            &mut mutated.items[item_index]
+                        {
+                            items.remove(part_index);
+                        }
+                        candidates.push(WeakeningCandidate {
+                            spec: mutated,
+                            op: "requires-removal",
+                            span: *span,
+                            target: format!("{label} requires #{require_number}"),
+                            origin: None,
+                        });
+                    }
+                }
+                for (part_index, part) in items.iter().enumerate() {
+                    let fsl_syntax::ActionItem::Statement(statement) = part else {
+                        continue;
+                    };
+                    for (replacement, span) in action_statement_removals(statement) {
+                        let mut mutated = spec.clone();
+                        if let fsl_syntax::SpecItem::Action { items, .. } =
+                            &mut mutated.items[item_index]
+                        {
+                            if let Some(replacement) = replacement {
+                                items[part_index] = fsl_syntax::ActionItem::Statement(replacement);
+                            } else {
+                                items.remove(part_index);
+                            }
+                        }
+                        candidates.push(WeakeningCandidate {
+                            spec: mutated,
+                            op: "assignment-removal",
+                            span,
+                            target: format!("{label} assignment"),
+                            origin: None,
+                        });
+                    }
+                }
+                if *fair {
+                    let mut mutated = spec.clone();
+                    if let fsl_syntax::SpecItem::Action { fair, .. } =
+                        &mut mutated.items[item_index]
+                    {
+                        *fair = false;
+                    }
+                    candidates.push(WeakeningCandidate {
+                        spec: mutated,
+                        op: "fair-removal",
+                        span: *action_span,
+                        target: format!("{label} fair"),
+                        origin: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    candidates
+}
+
+fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
+    let source = std::fs::read_to_string(path).unwrap_or_default();
+    let Ok(parsed) = parse_surface_document(path) else {
+        return json!([]);
+    };
+    let document = match parsed {
+        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
+        fsl_syntax::SurfaceDocument::Business(_)
+        | fsl_syntax::SurfaceDocument::Requirements(_)
+        | fsl_syntax::SurfaceDocument::Compose(_) => {
+            let resolver =
+                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+            let Ok(kernel) = fsl_core::parse_kernel_source(&source, &resolver) else {
+                return json!([]);
+            };
+            kernel.into_syntax()
+        }
+        _ => return json!([]),
+    };
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut output = Vec::new();
+    for candidate in weakening_candidates(&document) {
+        let Ok(model) = fsl_core::build_surface_model(candidate.spec) else {
+            continue;
+        };
+        if fsl_runtime::find_boundary_violation(model.clone(), depth)
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            continue;
+        }
+        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+            continue;
+        };
+        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
+        else {
+            continue;
+        };
+        if result.violation.is_some() || result.leadsto_violation.is_some() {
+            continue;
+        }
+        let Some(property) = model.reachables.iter().find(|property| {
+            result
+                .reachables
+                .get(&property.name)
+                .is_some_and(Option::is_none)
+        }) else {
+            continue;
+        };
+        let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
+        let mut weakening = json!({
+            "op":candidate.op,
+            "loc":candidate.span.python_loc(),
+            "target":candidate.target,
+            "source_text":lines.get(line.saturating_sub(1)).map(|line|line.trim()),
+        });
+        if let Some(origin) = candidate.origin
+            && let Value::Object(value) = &mut weakening
+        {
+            value.insert("origin".to_owned(), json!(origin));
+            value.insert("label".to_owned(), json!("init weakening"));
+        }
+        output.push(json!({
+            "property":fslc_rust::display_name(&property.name),
+            "weakening":weakening,
+            "result":"reachable_failed",
+            "requirement":property.meta.as_ref().map(|meta|json!({"id":meta.id,"text":meta.text})),
+        }));
+    }
+    Value::Array(output)
+}
+
+#[allow(clippy::too_many_lines)]
+fn expression_state_roots(
+    model: &KernelModel,
+    expr: &KernelExpr,
+) -> std::collections::BTreeSet<String> {
+    fn collect(expr: &KernelExpr, roots: &mut std::collections::BTreeSet<String>) {
+        match expr {
+            KernelExpr::Var(name) => {
+                roots.insert(name.clone());
+            }
+            KernelExpr::Some(value)
+            | KernelExpr::Neg(value)
+            | KernelExpr::Not(value)
+            | KernelExpr::Field(value, _)
+            | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
+            KernelExpr::Index(base, index)
+            | KernelExpr::BinaryNamed {
+                left: base,
+                right: index,
+                ..
+            }
+            | KernelExpr::Binary {
+                left: base,
+                right: index,
+                ..
+            } => {
+                collect(base, roots);
+                collect(index, roots);
+            }
+            KernelExpr::IfThenElse {
+                condition,
+                then_expr,
+                else_expr,
+            }
+            | KernelExpr::TernaryNamed {
+                first: condition,
+                second: then_expr,
+                third: else_expr,
+                ..
+            } => {
+                collect(condition, roots);
+                collect(then_expr, roots);
+                collect(else_expr, roots);
+            }
+            KernelExpr::Set(items) | KernelExpr::Seq(items) => {
+                for item in items {
+                    collect(item, roots);
+                }
+            }
+            KernelExpr::Struct { fields, .. } => {
+                for (_, value) in fields {
+                    collect(value, roots);
+                }
+            }
+            KernelExpr::Call { args, .. } | KernelExpr::Method { args, .. } => {
+                if let KernelExpr::Method { receiver, .. } = expr {
+                    collect(receiver, roots);
+                }
+                for arg in args {
+                    collect(arg, roots);
+                }
+            }
+            KernelExpr::Is { expr, .. } => collect(expr, roots),
+            KernelExpr::Quantified { binder, body, .. } => {
+                collect_binder(binder, roots);
+                collect(body, roots);
+            }
+            KernelExpr::Count { condition, .. } => collect(condition, roots),
+            KernelExpr::Sum {
+                body, condition, ..
+            } => {
+                collect(body, roots);
+                if let Some(condition) = condition {
+                    collect(condition, roots);
+                }
+            }
+            KernelExpr::BinderNamed { binder, .. } => collect_binder(binder, roots),
+            KernelExpr::Num(_) | KernelExpr::Bool(_) | KernelExpr::None => {}
+        }
+    }
+    fn collect_binder(
+        binder: &fsl_core::KernelBinder,
+        roots: &mut std::collections::BTreeSet<String>,
+    ) {
+        match binder {
+            fsl_core::KernelBinder::Typed { where_expr, .. } => {
+                if let Some(expr) = where_expr {
+                    collect(expr, roots);
+                }
+            }
+            fsl_core::KernelBinder::Range { lo, hi, .. } => {
+                collect(lo, roots);
+                collect(hi, roots);
+            }
+            fsl_core::KernelBinder::Collection {
+                collection,
+                where_expr,
+                ..
+            } => {
+                collect(collection, roots);
+                if let Some(expr) = where_expr {
+                    collect(expr, roots);
+                }
+            }
+        }
+    }
+    let state = model
+        .state
+        .iter()
+        .map(|(name, _)| name)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut roots = std::collections::BTreeSet::new();
+    collect(expr, &mut roots);
+    roots.retain(|name| state.contains(name));
+    roots
+}
+
+fn executed_assignments<'a>(
+    model: &KernelModel,
+    statements: &'a [KernelStatement],
+    state: &fsl_runtime::State,
+    bindings: &mut fsl_runtime::Bindings,
+) -> Vec<&'a KernelStatement> {
+    let mut output = Vec::new();
+    for statement in statements {
+        match statement {
+            KernelStatement::Assign { .. } => output.push(statement),
+            KernelStatement::If {
+                condition,
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                let branch = match fsl_runtime::eval(condition, state, bindings, model, None) {
+                    Ok(FslValue::Bool(true)) => then_statements,
+                    _ => else_statements,
+                };
+                output.extend(executed_assignments(model, branch, state, bindings));
+            }
+            KernelStatement::ForAll { statements, .. } => {
+                output.extend(executed_assignments(model, statements, state, bindings));
+            }
+        }
+    }
+    output
+}
+
+fn trace_blame_json(
+    model: &KernelModel,
+    property: Option<&fsl_core::PropertyDef>,
+    trace: &[fsl_core::TraceStep],
+) -> Value {
+    let mut read = property.map_or_else(std::collections::BTreeSet::new, |property| {
+        expression_state_roots(model, &property.expr)
+    });
+    let mut by_step = std::collections::BTreeMap::<usize, Value>::new();
+    for index in (1..trace.len()).rev() {
+        let Some(action_trace) = trace[index].action.as_ref() else {
+            continue;
+        };
+        let Some(action) = model
+            .actions
+            .iter()
+            .find(|action| action.name == action_trace.name)
+        else {
+            continue;
+        };
+        let previous = &trace[index - 1].state;
+        let mut bindings = action_trace.params.clone();
+        for guard in &action.guards {
+            if let fsl_core::ActionGuard::Let(name, expr) = guard
+                && let Ok(value) = fsl_runtime::eval(expr, previous, &mut bindings, model, None)
+            {
+                bindings.insert(name.clone(), value);
+            }
+        }
+        let mut effects = Vec::new();
+        for statement in executed_assignments(model, &action.statements, previous, &mut bindings) {
+            let KernelStatement::Assign {
+                target,
+                value,
+                span,
+            } = statement
+            else {
+                continue;
+            };
+            let root = lvalue_root(target);
+            if !read.contains(root) {
+                continue;
+            }
+            effects.push(json!({
+                "target": display(root),
+                "text": format!("{} = {}", tag_lvalue_text(target), fslc_rust::expr_text(value)),
+                "loc": span.python_loc(),
+            }));
+            read.extend(expression_state_roots(model, value));
+        }
+        let guards = action
+            .requires
+            .iter()
+            .zip(&action.require_spans)
+            .filter(|(expr, _)| !expression_state_roots(model, expr).is_disjoint(&read))
+            .map(|(expr, span)| {
+                json!({"text": fslc_rust::expr_text(expr), "loc": span.python_loc()})
+            })
+            .collect::<Vec<_>>();
+        by_step.insert(index, json!({"guards": guards, "effects": effects}));
+    }
+    Value::Object(
+        by_step
+            .into_iter()
+            .map(|(step, blame)| (step.to_string(), blame))
+            .collect(),
+    )
+}
+
+fn canonical_concrete_violation_trace(
+    model: &KernelModel,
+    invariant: &str,
+    steps: usize,
+) -> Option<Vec<fsl_core::TraceStep>> {
+    let initial = fsl_runtime::Monitor::new(model.clone()).ok()?;
+    let initial_trace = vec![fsl_core::TraceStep {
+        step: 0,
+        state: initial.state.clone(),
+        action: None,
+        changes: std::collections::BTreeMap::new(),
+    }];
+    let mut queue = std::collections::VecDeque::from([(initial.clone(), initial_trace, 0_usize)]);
+    let mut visited = std::collections::BTreeSet::from([initial.state.clone()]);
+    while let Some((monitor, trace, step)) = queue.pop_front() {
+        if step >= steps {
+            continue;
+        }
+        for enabled in monitor.enabled().ok()? {
+            let mut child = monitor.clone();
+            let result = child.step(&enabled).ok()?;
+            let mut child_trace = trace.clone();
+            child_trace.push(fsl_core::TraceStep {
+                step: step + 1,
+                state: result.state,
+                action: Some(fsl_core::TraceAction {
+                    name: enabled.action,
+                    params: enabled.params,
+                }),
+                changes: std::collections::BTreeMap::new(),
+            });
+            if let Some(violation) = result.violation {
+                if violation.name == invariant && violation.step == steps {
+                    return Some(child_trace);
+                }
+                continue;
+            }
+            if visited.insert(child.state.clone()) {
+                queue.push_back((child, child_trace, step + 1));
+            }
+        }
+    }
+    None
+}
+
+fn canonicalize_initial_int_violation(
+    model: &KernelModel,
+    violation: &mut fsl_verifier::BmcViolation,
+    removed_root: &str,
+) {
+    if violation.step != 0
+        || !model
+            .state
+            .iter()
+            .any(|(name, ty)| name == removed_root && matches!(ty, TypeRef::Int))
+    {
+        return;
+    }
+    let Some(entry) = violation.trace.first_mut() else {
+        return;
+    };
+    for candidate in [-1_i64, 0, 1, -2, 2, -3, 3] {
+        let mut state = entry.state.clone();
+        state.insert(removed_root.to_owned(), FslValue::Int(candidate));
+        let first_failed = model.invariants.iter().find_map(|property| {
+            match fsl_runtime::eval(
+                &property.expr,
+                &state,
+                &mut fsl_runtime::Bindings::new(),
+                model,
+                None,
+            ) {
+                Ok(FslValue::Bool(false)) => Some(property.name.as_str()),
+                _ => None,
+            }
+        });
+        if first_failed == Some(violation.name.as_str()) {
+            entry.state = state;
+            return;
+        }
+    }
+}
+
+fn invariant_violation_explanation(
+    model: &KernelModel,
+    violation: &fsl_verifier::BmcViolation,
+    started: Instant,
+) -> (Value, Value) {
+    let property = model
+        .invariants
+        .iter()
+        .find(|property| property.name == violation.name);
+    let final_state = violation.trace.last().map(|entry| &entry.state);
+    let violating = violation_bindings_json(
+        model,
+        violation.kind.as_str(),
+        violation.name.as_str(),
+        property.map(|property| &property.expr),
+        final_state,
+    );
+    let trace_blame = trace_blame_json(model, property, &violation.trace);
+    let mut trace = fslc_rust::trace_json(model, &violation.trace);
+    if let Value::Array(entries) = &mut trace {
+        for (index, entry) in entries.iter_mut().enumerate().skip(1) {
+            if let Value::Object(entry) = entry {
+                entry.insert(
+                    "blame".to_owned(),
+                    trace_blame
+                        .get(index.to_string())
+                        .cloned()
+                        .unwrap_or_else(|| json!({"guards": [], "effects": []})),
+                );
+            }
+        }
+    }
+    let last_action = violation
+        .trace
+        .last()
+        .and_then(|entry| entry.action.as_ref())
+        .map_or(Value::Null, |action| {
+            let definition = model
+                .actions
+                .iter()
+                .find(|definition| definition.name == action.name);
+            json!({
+                "name": display(&action.name),
+                "params": action.params.iter().map(|(name, value)| (
+                    name.clone(), fslc_rust::fsl_value_json(value)
+                )).collect::<Map<_, _>>(),
+                "loc": definition.map(|definition| definition.span.python_loc()),
+            })
+        });
+    let mut explanation = Map::new();
+    explanation.insert("violation_kind".to_owned(), json!(violation.kind));
+    explanation.insert("invariant".to_owned(), json!(display(&violation.name)));
+    explanation.insert(
+        "loc".to_owned(),
+        property.map_or(Value::Null, |property| property.span.python_loc()),
+    );
+    explanation.insert("violated_at_step".to_owned(), json!(violation.step));
+    explanation.insert("violating_bindings".to_owned(), violating.clone());
+    explanation.insert(
+        "blame".to_owned(),
+        violation_blame_json(
+            violation.kind.as_str(),
+            violation.name.as_str(),
+            property.map(|property| &property.expr),
+            violating,
+        ),
+    );
+    explanation.insert("last_action".to_owned(), last_action);
+    finish(&mut explanation, violation.step, started);
+    (trace, Value::Object(explanation))
+}
+
+#[allow(clippy::too_many_lines)]
+fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
+    let source = std::fs::read_to_string(path).unwrap_or_default();
+    let Ok(parsed) = parse_surface_document(path) else {
+        return json!([]);
+    };
+    let document = match parsed {
+        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
+        fsl_syntax::SurfaceDocument::Business(_)
+        | fsl_syntax::SurfaceDocument::Requirements(_)
+        | fsl_syntax::SurfaceDocument::Compose(_) => {
+            let resolver =
+                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+            let Ok(kernel) = fsl_core::parse_kernel_source(&source, &resolver) else {
+                return json!([]);
+            };
+            kernel.into_syntax()
+        }
+        _ => return json!([]),
+    };
+    let Ok(original) = fsl_core::build_surface_model(document.clone()) else {
+        return json!([]);
+    };
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut found = std::collections::BTreeMap::<String, ((usize, usize, u32), Value)>::new();
+    for candidate in fsl_tools::enumerate_builtin_mutants(&document)
+        .into_iter()
+        .filter(|candidate| {
+            matches!(
+                candidate.op.as_str(),
+                "assignment_remove" | "requires_remove" | "fair_remove"
+            )
+        })
+    {
+        let Some(span) = candidate.span else {
+            continue;
+        };
+        let removed_init_root = (candidate.op == "assignment_remove"
+            && candidate.action.as_deref() == Some("init"))
+        .then(|| removed_init_assignment_root(&document, &candidate.spec))
+        .flatten();
+        if removed_init_root
+            .as_ref()
+            .and_then(|root| original.state.iter().find(|(name, _)| name == root))
+            .is_some_and(|(_, ty)| type_has_symbolic_bounds(&original, ty))
+        {
+            continue;
+        }
+        let started = Instant::now();
+        let Ok(model) = fsl_core::build_surface_model(candidate.spec) else {
+            continue;
+        };
+        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+            continue;
+        };
+        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
+        else {
+            continue;
+        };
+        let Some(violation) = result.violation.as_ref() else {
+            continue;
+        };
+        if !original
+            .invariants
+            .iter()
+            .any(|property| property.name == violation.name)
+        {
+            continue;
+        }
+        let mut canonical_violation = violation.clone();
+        if let Some(trace) = canonical_concrete_violation_trace(
+            &model,
+            &violation.name,
+            violation.trace.len().saturating_sub(1),
+        ) {
+            canonical_violation.trace = trace;
+        } else if let Some(root) = removed_init_root.as_deref() {
+            canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
+        }
+        let (trace, explanation) =
+            invariant_violation_explanation(&model, &canonical_violation, started);
+        let line = usize::try_from(span.start.line).unwrap_or_default();
+        let op = match candidate.op.as_str() {
+            "assignment_remove" => "assignment-removal",
+            "requires_remove" => "requires-removal",
+            "fair_remove" => "fair-removal",
+            _ => unreachable!("filtered weakening operator"),
+        };
+        let mut weakening = json!({
+            "op": op,
+            "loc": span.python_loc(),
+            "target": candidate.target,
+            "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
+        });
+        if candidate.action.as_deref() == Some("init")
+            && let Value::Object(value) = &mut weakening
+        {
+            value.insert("origin".to_owned(), json!("init"));
+            value.insert("label".to_owned(), json!("init weakening"));
+        }
+        let priority = match op {
+            "assignment-removal" => 0,
+            "requires-removal" => 1,
+            "fair-removal" => 2,
+            _ => 99,
+        };
+        let key = (canonical_violation.trace.len(), priority, span.start.line);
+        let requirement = original
+            .invariants
+            .iter()
+            .find(|property| property.name == violation.name)
+            .and_then(|property| property.meta.as_ref())
+            .map_or(
+                Value::Null,
+                |meta| json!({"id": meta.id, "text": meta.text}),
+            );
+        let item = json!({
+            "invariant": display(&violation.name),
+            "weakening": weakening,
+            "trace": trace,
+            "requirement": requirement,
+            "violation": explanation,
+        });
+        if found
+            .get(&violation.name)
+            .is_none_or(|(current, _)| key < *current)
+        {
+            found.insert(violation.name.clone(), (key, item));
+        }
+    }
+    Value::Array(
+        original
+            .invariants
+            .iter()
+            .map(|property| {
+                found.get(&property.name).map_or_else(
+                    || {
+                        json!({
+                            "invariant": display(&property.name),
+                            "weakening": null,
+                            "trace": null,
+                            "requirement": property.meta.as_ref().map_or(Value::Null, |meta| json!({"id": meta.id, "text": meta.text})),
+                            "note": format!("no counterfactual within depth {depth}"),
+                        })
+                    },
+                    |(_, item)| item.clone(),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let skeleton = model_skeleton(&model);
+    let (scenarios, _) = run_scenarios(path, depth, "warn");
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("explained"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("depth".to_owned(), json!(depth));
+    output.insert("skeleton".to_owned(), skeleton);
+    output.insert(
+        "witnesses".to_owned(),
+        explain_witnesses(&model, &scenarios),
+    );
+    output.insert(
+        "counterfactuals".to_owned(),
+        invariant_counterfactuals(path, depth),
+    );
+    let mut reachable_counterfactuals = reachable_counterfactuals(path, depth);
+    if let Value::Array(items) = &mut reachable_counterfactuals {
+        for item in items {
+            if let Value::Object(item) = item {
+                item.insert("faithfulness_class".to_owned(), json!("intent_unexercised"));
+                item.insert(
+                    "recommended_action".to_owned(),
+                    json!("add a single-shot reachable for the action / raise --depth"),
+                );
+            }
+        }
+    }
+    if reachable_counterfactuals
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
+        output.insert(
+            "reachable_counterfactuals".to_owned(),
+            reachable_counterfactuals,
+        );
+    }
+    if readable {
+        let mut text = format!("Spec: {} (depth {depth})\n\nState:\n", model.name);
+        for (name, ty) in &model.state {
+            let _ = writeln!(
+                text,
+                "- {}: {}",
+                fslc_rust::display_name(name),
+                type_ref_text(ty)
+            );
+        }
+        text.push_str("\nActions:\n");
+        for action in &model.actions {
+            let _ = writeln!(
+                text,
+                "- {}({})",
+                fslc_rust::display_name(&action.name),
+                action
+                    .params
+                    .iter()
+                    .map(ParamDef::name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        output.insert("readable".to_owned(), json!(text));
+    }
+    (Value::Object(output), 0)
+}
+
+#[allow(dead_code)]
+fn expression_mutant_count(
+    expr: &KernelExpr,
+    enum_siblings: &std::collections::BTreeMap<String, usize>,
+) -> usize {
+    match expr {
+        KernelExpr::Num(_) => 2,
+        KernelExpr::Var(name) => enum_siblings.get(name).copied().unwrap_or_default(),
+        KernelExpr::Some(value)
+        | KernelExpr::Neg(value)
+        | KernelExpr::Not(value)
+        | KernelExpr::Field(value, _)
+        | KernelExpr::UnaryNamed { expr: value, .. } => {
+            expression_mutant_count(value, enum_siblings)
+        }
+        KernelExpr::Index(base, index)
+        | KernelExpr::BinaryNamed {
+            left: base,
+            right: index,
+            ..
+        } => {
+            expression_mutant_count(base, enum_siblings)
+                + expression_mutant_count(index, enum_siblings)
+        }
+        KernelExpr::Binary { left, right, .. } => {
+            expression_mutant_count(left, enum_siblings)
+                + expression_mutant_count(right, enum_siblings)
+        }
+        KernelExpr::Method { receiver, args, .. } => {
+            expression_mutant_count(receiver, enum_siblings)
+                + args
+                    .iter()
+                    .map(|arg| expression_mutant_count(arg, enum_siblings))
+                    .sum::<usize>()
+        }
+        KernelExpr::Is { expr, .. } => expression_mutant_count(expr, enum_siblings),
+        KernelExpr::Set(values) | KernelExpr::Seq(values) => values
+            .iter()
+            .map(|value| expression_mutant_count(value, enum_siblings))
+            .sum(),
+        KernelExpr::Struct { fields, .. } => fields
+            .iter()
+            .map(|(_, value)| expression_mutant_count(value, enum_siblings))
+            .sum(),
+        KernelExpr::IfThenElse {
+            condition,
+            then_expr,
+            else_expr,
+        } => [condition.as_ref(), then_expr, else_expr]
+            .into_iter()
+            .map(|value| expression_mutant_count(value, enum_siblings))
+            .sum(),
+        KernelExpr::Call { args, .. } => args
+            .iter()
+            .map(|arg| expression_mutant_count(arg, enum_siblings))
+            .sum(),
+        KernelExpr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => [first.as_ref(), second, third]
+            .into_iter()
+            .map(|value| expression_mutant_count(value, enum_siblings))
+            .sum(),
+        KernelExpr::Bool(_)
+        | KernelExpr::None
+        | KernelExpr::Quantified { .. }
+        | KernelExpr::Count { .. }
+        | KernelExpr::Sum { .. }
+        | KernelExpr::BinderNamed { .. } => 0,
+    }
+}
+
+#[allow(dead_code)]
+fn statement_mutant_count(
+    statement: &KernelStatement,
+    enum_siblings: &std::collections::BTreeMap<String, usize>,
+) -> usize {
+    match statement {
+        KernelStatement::Assign { target, value, .. } => {
+            let target_count = match target {
+                KernelLValue::Index(_, index) => expression_mutant_count(index, enum_siblings),
+                KernelLValue::Field(base, _) => match base.as_ref() {
+                    KernelLValue::Index(_, index) => expression_mutant_count(index, enum_siblings),
+                    _ => 0,
+                },
+                KernelLValue::Var(_) => 0,
+            };
+            1 + target_count + expression_mutant_count(value, enum_siblings)
+        }
+        KernelStatement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            usize::from(!then_statements.is_empty() && !else_statements.is_empty())
+                + expression_mutant_count(condition, enum_siblings)
+                + then_statements
+                    .iter()
+                    .map(|item| statement_mutant_count(item, enum_siblings))
+                    .sum::<usize>()
+                + else_statements
+                    .iter()
+                    .map(|item| statement_mutant_count(item, enum_siblings))
+                    .sum::<usize>()
+        }
+        KernelStatement::ForAll { statements, .. } => statements
+            .iter()
+            .map(|item| statement_mutant_count(item, enum_siblings))
+            .sum(),
+    }
+}
+
+#[allow(dead_code)]
+fn builtin_mutant_count(spec: &fsl_syntax::SurfaceSpec) -> usize {
+    let mut enum_siblings = std::collections::BTreeMap::new();
+    for item in &spec.items {
+        if let fsl_syntax::SpecItem::Enum { members, .. } = item {
+            for member in members {
+                enum_siblings.insert(member.clone(), members.len().saturating_sub(1));
+            }
+        }
+    }
+    spec.items
+        .iter()
+        .map(|item| match item {
+            fsl_syntax::SpecItem::Type { lo, hi, .. } => {
+                2 * usize::from(matches!(lo.as_ref(), KernelExpr::Num(_)))
+                    + 2 * usize::from(matches!(hi.as_ref(), KernelExpr::Num(_)))
+            }
+            fsl_syntax::SpecItem::Const { value, .. } => {
+                expression_mutant_count(value, &enum_siblings)
+            }
+            fsl_syntax::SpecItem::Init(statements) => statements
+                .iter()
+                .map(|statement| statement_mutant_count(statement, &enum_siblings))
+                .sum(),
+            fsl_syntax::SpecItem::Action { items, fair, .. } => {
+                usize::from(*fair)
+                    + items
+                        .iter()
+                        .map(|item| match item {
+                            fsl_syntax::ActionItem::Requires(expr, _) => {
+                                2 + expression_mutant_count(expr, &enum_siblings)
+                            }
+                            fsl_syntax::ActionItem::Let(_, expr, _) => {
+                                expression_mutant_count(expr, &enum_siblings)
+                            }
+                            fsl_syntax::ActionItem::Statement(statement) => {
+                                statement_mutant_count(statement, &enum_siblings)
+                            }
+                            fsl_syntax::ActionItem::Ensures(_, _) => 0,
+                        })
+                        .sum::<usize>()
+            }
+            _ => 0,
+        })
+        .sum()
+}
+
+#[allow(dead_code)]
+fn run_mutate_legacy(
+    path: &Path,
+    depth: usize,
+    max_mutants: usize,
+    by_requirement: bool,
+) -> (Value, i32) {
+    let (baseline, status) = run_verify(path, depth, "warn", "bmc", 1);
+    if status == 2
+        || !matches!(
+            baseline.get("result").and_then(Value::as_str),
+            Some("verified" | "reachable_failed")
+        )
+    {
+        return (baseline, 0);
+    }
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 0),
+    };
+    let mut mutants = Vec::new();
+    let mut discovered = None;
+    if let Ok(fsl_syntax::SurfaceDocument::Spec(spec)) = parse_surface_document(path) {
+        discovered = Some(builtin_mutant_count(&spec));
+        for item in &spec.items {
+            if let fsl_syntax::SpecItem::Type { name, lo, hi, .. } = item {
+                for (bound, expr) in [("lo", lo.as_ref()), ("hi", hi.as_ref())] {
+                    if matches!(expr, KernelExpr::Num(_)) {
+                        for suffix in ["minus1", "plus1"] {
+                            mutants.push(json!({
+                                "op":format!("type_bound_{bound}_{suffix}"),
+                                "loc":Value::Null,
+                                "target":format!("type {name} {bound}"),
+                                "status":"survived",
+                                "killed_by":Value::Null,
+                                "requirement":Value::Null,
+                                "source":"builtin",
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for action in &model.actions {
+        for (index, _) in action.requires.iter().enumerate() {
+            mutants.push(json!({"op":"requires_remove","target":format!("{} requires #{}",fslc_rust::display_name(&action.name),index+1),"status":"survived","loc":action.require_spans.get(index).map(|span|span.python_loc()),"killed_by":Value::Null,"requirement":metadata(action.meta.as_ref()),"source":"builtin"}));
+        }
+        if !action.statements.is_empty() {
+            mutants.push(json!({"op":"assignment_remove","target":format!("{} assignment",fslc_rust::display_name(&action.name)),"status":"survived","loc":action.span.python_loc(),"killed_by":Value::Null,"requirement":metadata(action.meta.as_ref()),"source":"builtin"}));
+        }
+    }
+    let discovered = discovered.unwrap_or(mutants.len());
+    mutants.truncate(max_mutants);
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("mutated"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("depth".to_owned(), json!(depth));
+    output.insert("baseline".to_owned(), json!("verified"));
+    output.insert("mutants".to_owned(), Value::Array(mutants.clone()));
+    output.insert(
+        "summary".to_owned(),
+        json!({
+            "total":mutants.len(),"killed":0,"survived":mutants.len(),"invalid":0,
+            "kill_rate":if mutants.is_empty(){Value::Null}else{json!(0.0)},
+            "by_source":{
+                "builtin":{"total":mutants.len(),"killed":0,"survived":mutants.len(),"invalid":0,"kill_rate":if mutants.is_empty(){Value::Null}else{json!(0.0)}},
+                "external":{"total":0,"killed":0,"survived":0,"invalid":0,"kill_rate":Value::Null}
+            }
+        }),
+    );
+    output.insert("by_requirement".to_owned(), json!({}));
+    let mut notes = vec!["possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure".to_owned()];
+    if discovered > max_mutants {
+        notes.push(format!(
+            "mutant cap {max_mutants} reached: {} dropped",
+            discovered - max_mutants
+        ));
+    }
+    if by_requirement {
+        // The empty index is exact for specifications without requirement metadata.
+    }
+    output.insert("notes".to_owned(), json!(notes));
+    (Value::Object(output), 0)
+}
+
+struct MutationOracle {
+    clean: bool,
+    killed_by: Option<String>,
+    killer_requirement: Option<String>,
+}
+
+fn property_requirement(model: &KernelModel, name: &str) -> Option<String> {
+    model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .chain(&model.reachables)
+        .find(|property| property.name == name)
+        .and_then(|property| property.meta.as_ref())
+        .map(|meta| meta.id.clone())
+        .or_else(|| {
+            model
+                .leadstos
+                .iter()
+                .find(|property| property.name == name)
+                .and_then(|property| property.meta.as_ref())
+                .map(|meta| meta.id.clone())
+        })
+}
+
+fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle {
+    loop {
+        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+            return MutationOracle {
+                clean: false,
+                killed_by: Some("internal".to_owned()),
+                killer_requirement: None,
+            };
+        };
+        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
+        else {
+            return MutationOracle {
+                clean: false,
+                killed_by: Some("build_spec".to_owned()),
+                killer_requirement: None,
+            };
+        };
+        if let Some(violation) = result.violation {
+            if violation.kind == "ensures"
+                && fsl_runtime::replay_trace(model.clone(), &violation.trace).is_err()
+                && let Some(action) = model
+                    .actions
+                    .iter_mut()
+                    .find(|action| action.name == violation.name)
+                && !action.ensures.is_empty()
+            {
+                action.ensures.clear();
+                action.ensure_spans.clear();
+                continue;
+            }
+            return MutationOracle {
+                clean: false,
+                killed_by: Some(display(&violation.name)),
+                killer_requirement: property_requirement(&model, &violation.name),
+            };
+        }
+        if let Some(property) = model.reachables.iter().find(|property| {
+            result
+                .reachables
+                .get(&property.name)
+                .is_some_and(Option::is_none)
+        }) {
+            return MutationOracle {
+                clean: false,
+                killed_by: Some(display(&property.name)),
+                killer_requirement: property.meta.as_ref().map(|meta| meta.id.clone()),
+            };
+        }
+        if let Some(violation) = result.leadsto_violation {
+            return MutationOracle {
+                clean: false,
+                killed_by: Some(display(&violation.name)),
+                killer_requirement: property_requirement(&model, &violation.name),
+            };
+        }
+        break;
+    }
+    MutationOracle {
+        clean: true,
+        killed_by: None,
+        killer_requirement: None,
+    }
+}
+
+fn mutation_oracle(spec: fsl_syntax::SurfaceSpec, depth: usize) -> MutationOracle {
+    let Ok(kernel) = fsl_core::lower_direct_spec(spec) else {
+        return MutationOracle {
+            clean: false,
+            killed_by: Some("build_spec".to_owned()),
+            killer_requirement: None,
+        };
+    };
+    let Ok(model) = fsl_core::build_model(kernel) else {
+        return MutationOracle {
+            clean: false,
+            killed_by: Some("build_spec".to_owned()),
+            killer_requirement: None,
+        };
+    };
+    mutation_oracle_for_model(model, depth)
+}
+
+fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle {
+    if let Ok(Some((violation, _))) = fsl_runtime::find_boundary_violation(model.clone(), depth) {
+        return MutationOracle {
+            clean: false,
+            killed_by: Some(violation.name.clone()),
+            killer_requirement: property_requirement(&model, &violation.name),
+        };
+    }
+    let mut automatic = model.clone();
+    automatic.invariants.clear();
+    automatic.transitions.clear();
+    automatic.reachables.clear();
+    automatic.leadstos.clear();
+    let automatic_result = mutation_model_oracle(automatic, depth);
+    if !automatic_result.clean {
+        return automatic_result;
+    }
+    mutation_model_oracle(model, depth)
+}
+
+fn apply_requirement_mutation_oracle(
+    source: &str,
+    model: &KernelModel,
+    outcome: &mut MutationOracle,
+) -> Result<(), String> {
+    if !outcome.clean {
+        return Ok(());
+    }
+    if let (Some(failure), _) = validate_requirement_trace_source(source, model)? {
+        let kind = failure
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("acceptance");
+        *outcome = MutationOracle {
+            clean: false,
+            killed_by: Some(
+                if kind.starts_with("forbidden") {
+                    "forbidden"
+                } else {
+                    "acceptance"
+                }
+                .to_owned(),
+            ),
+            killer_requirement: None,
+        };
+    }
+    Ok(())
+}
+
+fn apply_implements_mutation_oracle(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+    depth: usize,
+    outcome: &mut MutationOracle,
+) -> Result<(), String> {
+    if !outcome.clean {
+        return Ok(());
+    }
+    let resolver = fsl_core::FsResolver::new(base);
+    let Some(contract) = fsl_core::requirements_implements(source, &resolver, model)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+    let checked =
+        fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
+            .map_err(|error| error.to_string())?;
+    if let Some(failure) = checked.failure {
+        let killer_requirement = failure
+            .impl_action
+            .as_ref()
+            .and_then(|instance| {
+                model
+                    .actions
+                    .iter()
+                    .find(|action| action.name == instance.name)
+            })
+            .and_then(|action| action.meta.as_ref())
+            .map(|meta| meta.id.clone());
+        *outcome = MutationOracle {
+            clean: false,
+            killed_by: Some("refinement".to_owned()),
+            killer_requirement,
+        };
+    }
+    Ok(())
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn mutation_kill_rate(killed: usize, survived: usize) -> Value {
+    let judged = killed + survived;
+    if judged == 0 {
+        Value::Null
+    } else {
+        let rate = killed as f64 / judged as f64;
+        json!((rate * 10_000.0).round() / 10_000.0)
+    }
+}
+
+fn mutation_summary(mutants: &[Value]) -> Value {
+    let summarize = |source: &str| {
+        let entries = mutants
+            .iter()
+            .filter(|item| item["source"].as_str() == Some(source))
+            .collect::<Vec<_>>();
+        let killed = entries
+            .iter()
+            .filter(|item| item["status"].as_str() == Some("killed"))
+            .count();
+        let survived = entries
+            .iter()
+            .filter(|item| item["status"].as_str() == Some("survived"))
+            .count();
+        let invalid = entries
+            .iter()
+            .filter(|item| item["status"].as_str() == Some("invalid"))
+            .count();
+        json!({"total":entries.len(),"killed":killed,"survived":survived,"invalid":invalid,"kill_rate":mutation_kill_rate(killed,survived)})
+    };
+    let builtin = summarize("builtin");
+    let external = summarize("external");
+    let killed = mutants
+        .iter()
+        .filter(|item| item["status"].as_str() == Some("killed"))
+        .count();
+    let survived = mutants
+        .iter()
+        .filter(|item| item["status"].as_str() == Some("survived"))
+        .count();
+    let invalid = mutants
+        .iter()
+        .filter(|item| item["status"].as_str() == Some("invalid"))
+        .count();
+    json!({"total":mutants.len(),"killed":killed,"survived":survived,"invalid":invalid,"kill_rate":mutation_kill_rate(killed,survived),"by_source":{"builtin":builtin,"external":external}})
+}
+
+fn requirement_kill_index(model: &KernelModel) -> Map<String, Value> {
+    let mut result = Map::new();
+    for meta in model
+        .actions
+        .iter()
+        .filter_map(|item| item.meta.as_ref())
+        .chain(
+            model
+                .invariants
+                .iter()
+                .chain(&model.transitions)
+                .chain(&model.reachables)
+                .filter_map(|item| item.meta.as_ref()),
+        )
+        .chain(model.leadstos.iter().filter_map(|item| item.meta.as_ref()))
+    {
+        result.entry(meta.id.clone()).or_insert(json!({"kills":0}));
+    }
+    result
+}
+
+fn assignment_root_from_source(line: &str, column: u32) -> Option<String> {
+    let offset = usize::try_from(column).ok()?.saturating_sub(1);
+    let statement = line.get(offset..).unwrap_or(line);
+    let left = statement.split('=').next()?.trim();
+    let boundary = left.find(['[', '.']).unwrap_or(left.len());
+    let prefix = &left[..boundary];
+    prefix
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .rfind(|part| !part.is_empty())
+        .map(str::to_owned)
+}
+
+fn lvalue_root(target: &KernelLValue) -> &str {
+    match target {
+        KernelLValue::Var(name) | KernelLValue::Index(name, _) => name,
+        KernelLValue::Field(base, _) => lvalue_root(base),
+    }
+}
+
+fn collect_assignment_roots(
+    statements: &[KernelStatement],
+    roots: &mut std::collections::BTreeMap<String, usize>,
+) {
+    for statement in statements {
+        match statement {
+            KernelStatement::Assign { target, .. } => {
+                *roots.entry(lvalue_root(target).to_owned()).or_default() += 1;
+            }
+            KernelStatement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                collect_assignment_roots(then_statements, roots);
+                collect_assignment_roots(else_statements, roots);
+            }
+            KernelStatement::ForAll { statements, .. } => {
+                collect_assignment_roots(statements, roots);
+            }
+        }
+    }
+}
+
+fn init_assignment_roots(
+    spec: &fsl_syntax::SurfaceSpec,
+) -> std::collections::BTreeMap<String, usize> {
+    let mut roots = std::collections::BTreeMap::new();
+    for item in &spec.items {
+        if let fsl_syntax::SpecItem::Init(statements) = item {
+            collect_assignment_roots(statements, &mut roots);
+        }
+    }
+    roots
+}
+
+fn removed_init_assignment_root(
+    original: &fsl_syntax::SurfaceSpec,
+    mutated: &fsl_syntax::SurfaceSpec,
+) -> Option<String> {
+    let original = init_assignment_roots(original);
+    let mutated = init_assignment_roots(mutated);
+    original.into_iter().find_map(|(root, count)| {
+        (mutated.get(&root).copied().unwrap_or_default() < count).then_some(root)
+    })
+}
+
+fn type_has_symbolic_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Int | TypeRef::Bool => false,
+        TypeRef::Range(..) | TypeRef::Set(_) | TypeRef::Seq(..) | TypeRef::Relation(..) => true,
+        TypeRef::Option(inner) => type_has_symbolic_bounds(model, inner),
+        TypeRef::Map(_, value) => type_has_symbolic_bounds(model, value),
+        TypeRef::Named(name) => match model.types.get(name) {
+            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
+            Some(TypeDef::Struct { fields }) => fields
+                .iter()
+                .any(|(_, field)| type_has_symbolic_bounds(model, field)),
+            None => false,
+        },
+    }
+}
+
+fn mutation_action_labels(
+    document: &fsl_syntax::SurfaceDocument,
+) -> std::collections::BTreeMap<String, String> {
+    fn collect(
+        action: &fsl_syntax::RequirementAction,
+        labels: &mut std::collections::BTreeMap<String, String>,
+    ) {
+        for item in &action.items {
+            if let fsl_syntax::RequirementActionItem::Branches { branches, .. } = item {
+                for (index, branch) in branches.iter().enumerate() {
+                    labels.insert(
+                        format!("{}__b{}", action.name, index + 1),
+                        format!(
+                            "{}[{}]",
+                            action.name,
+                            fslc_rust::expr_text(&branch.condition)
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    let mut labels = std::collections::BTreeMap::new();
+    if let fsl_syntax::SurfaceDocument::Requirements(requirements) = document {
+        for item in &requirements.items {
+            match item {
+                fsl_syntax::RequirementsItem::Requirement { items, .. } => {
+                    for item in items {
+                        if let fsl_syntax::RequirementBlockItem::Action(action) = item {
+                            collect(action, &mut labels);
+                        }
+                    }
+                }
+                fsl_syntax::RequirementsItem::Action(action) => collect(action, &mut labels),
+                _ => {}
+            }
+        }
+    }
+    labels
+}
+
+struct ExternalMutation {
+    id: String,
+    op: String,
+    target: String,
+    requirement: Value,
+    input_kind: Option<String>,
+    line: usize,
+    source: Option<String>,
+    invalid: Option<Value>,
+}
+
+fn invalid_mutation_detail(kind: &str, message: impl Into<String>, loc: Option<Value>) -> Value {
+    let mut detail = json!({"kind":kind,"message":message.into()});
+    if let Some(loc) = loc
+        && let Value::Object(detail) = &mut detail
+    {
+        detail.insert("loc".to_owned(), loc);
+    }
+    detail
+}
+
+fn external_invalid(line: usize, id: String, invalid: Value) -> ExternalMutation {
+    ExternalMutation {
+        id: id.clone(),
+        op: "external".to_owned(),
+        target: id,
+        requirement: Value::Null,
+        input_kind: None,
+        line,
+        source: None,
+        invalid: Some(invalid),
+    }
+}
+
+fn replace_external_source(
+    source: &str,
+    instruction: &Map<String, Value>,
+) -> Result<String, String> {
+    let target = instruction
+        .get("target")
+        .and_then(Value::as_str)
+        .filter(|target| !target.is_empty())
+        .ok_or_else(|| "replace.target must be a non-empty string".to_owned())?;
+    let replacement = instruction
+        .get("replacement")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "replace.replacement must be a string".to_owned())?;
+    let mut starts = Vec::new();
+    let mut position = 0;
+    while let Some(offset) = source[position..].find(target) {
+        let start = position + offset;
+        starts.push(start);
+        position = start + target.len();
+    }
+    let selected = match instruction.get("occurrence") {
+        None | Some(Value::Null) => {
+            if starts.len() != 1 {
+                return Err(format!(
+                    "replace.target must match exactly once without occurrence; matched {} times",
+                    starts.len()
+                ));
+            }
+            0
+        }
+        Some(value) => {
+            let occurrence = value.as_u64().ok_or_else(|| {
+                "replace.occurrence must be a positive 1-based integer".to_owned()
+            })?;
+            if occurrence == 0 {
+                return Err("replace.occurrence must be a positive 1-based integer".to_owned());
+            }
+            let occurrence = usize::try_from(occurrence)
+                .map_err(|_| "replace.occurrence is too large".to_owned())?;
+            if occurrence > starts.len() {
+                return Err(format!(
+                    "replace.occurrence {occurrence} exceeds {} match(es)",
+                    starts.len()
+                ));
+            }
+            occurrence - 1
+        }
+    };
+    let start = starts[selected];
+    Ok(format!(
+        "{}{}{}",
+        &source[..start],
+        replacement,
+        &source[start + target.len()..]
+    ))
+}
+
+#[allow(clippy::too_many_lines)]
+fn load_external_mutations(path: &Path, baseline: &str) -> Result<Vec<ExternalMutation>, String> {
+    let raw = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut output = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, line) in raw.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let line_number = index + 1;
+        let fallback_id = format!("external:{line_number}");
+        let value = match serde_json::from_str::<Value>(line) {
+            Ok(value) => value,
+            Err(error) => {
+                let message = if error.to_string().starts_with("key must be a string") {
+                    format!(
+                        "Expecting property name enclosed in double quotes: line {} column {} (char {})",
+                        error.line(),
+                        error.column(),
+                        error.column().saturating_sub(1)
+                    )
+                } else {
+                    error.to_string()
+                };
+                output.push(external_invalid(
+                    line_number,
+                    fallback_id,
+                    invalid_mutation_detail("json", message, None),
+                ));
+                continue;
+            }
+        };
+        let Value::Object(record) = value else {
+            output.push(external_invalid(
+                line_number,
+                fallback_id,
+                invalid_mutation_detail("shape", "each JSONL line must be an object", None),
+            ));
+            continue;
+        };
+        let id = record
+            .get("id")
+            .and_then(Value::as_str)
+            .map_or_else(|| fallback_id.clone(), str::to_owned);
+        if id.trim().is_empty() || record.get("id").is_some_and(|id| !id.is_string()) {
+            output.push(external_invalid(
+                line_number,
+                fallback_id,
+                invalid_mutation_detail("shape", "id must be a non-empty string", None),
+            ));
+            continue;
+        }
+        if !seen.insert(id.clone()) {
+            output.push(external_invalid(
+                line_number,
+                id.clone(),
+                invalid_mutation_detail(
+                    "shape",
+                    format!("duplicate external mutant id '{id}'"),
+                    None,
+                ),
+            ));
+            continue;
+        }
+        let full_keys = ["mutated_spec", "spec"]
+            .into_iter()
+            .filter(|key| record.contains_key(*key))
+            .collect::<Vec<_>>();
+        let nested_replace = record.contains_key("replace");
+        let flat_replace = record.contains_key("target") || record.contains_key("replacement");
+        let modes = full_keys.len() + usize::from(nested_replace || flat_replace);
+        let (source, input_kind) = if modes != 1 {
+            (None, None)
+        } else if let Some(key) = full_keys.first() {
+            match record.get(*key).and_then(Value::as_str) {
+                Some(source) => (Some(source.to_owned()), Some("full_spec".to_owned())),
+                None => (None, Some(format!("{key} must be a string"))),
+            }
+        } else {
+            let instruction = if nested_replace {
+                record.get("replace").and_then(Value::as_object).cloned()
+            } else {
+                Some(
+                    ["target", "replacement", "occurrence"]
+                        .into_iter()
+                        .filter_map(|key| {
+                            record
+                                .get(key)
+                                .cloned()
+                                .map(|value| (key.to_owned(), value))
+                        })
+                        .collect(),
+                )
+            };
+            match instruction {
+                Some(instruction) => match replace_external_source(baseline, &instruction) {
+                    Ok(source) => (Some(source), Some("replacement".to_owned())),
+                    Err(error) => (None, Some(error)),
+                },
+                None => (None, Some("replace must be an object".to_owned())),
+            }
+        };
+        let invalid_message = if modes != 1 {
+            Some("provide exactly one mutation form: mutated_spec/spec or replace".to_owned())
+        } else if source.is_none() {
+            input_kind.clone()
+        } else {
+            None
+        };
+        output.push(ExternalMutation {
+            id: id.clone(),
+            op: record
+                .get("op")
+                .and_then(Value::as_str)
+                .unwrap_or("external")
+                .to_owned(),
+            target: record
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or(&id)
+                .to_owned(),
+            requirement: record.get("requirement").cloned().unwrap_or(Value::Null),
+            input_kind: source.as_ref().map(|_| input_kind.unwrap_or_default()),
+            line: line_number,
+            source,
+            invalid: invalid_message
+                .map(|message| invalid_mutation_detail("instruction", message, None)),
+        });
+    }
+    Ok(output)
+}
+
+fn external_mutant_public(
+    candidate: &ExternalMutation,
+    status: &str,
+    killed_by: Option<&str>,
+    invalid: Option<Value>,
+) -> Value {
+    let mut output = json!({
+        "id":candidate.id,
+        "op":candidate.op,
+        "loc":Value::Null,
+        "target":candidate.target,
+        "status":status,
+        "killed_by":killed_by,
+        "requirement":candidate.requirement,
+        "source":"external",
+        "input_kind":candidate.input_kind,
+        "line":candidate.line,
+    });
+    if let Some(invalid) = invalid
+        && let Value::Object(output) = &mut output
+    {
+        output.insert("invalid".to_owned(), invalid);
+    }
+    output
+}
+
+fn surface_document_name(document: &fsl_syntax::SurfaceDocument) -> Option<&str> {
+    match document {
+        fsl_syntax::SurfaceDocument::Spec(document) => Some(&document.name),
+        fsl_syntax::SurfaceDocument::Business(document) => Some(&document.name),
+        fsl_syntax::SurfaceDocument::Requirements(document) => Some(&document.name),
+        fsl_syntax::SurfaceDocument::Compose(document) => Some(&document.name),
+        _ => None,
+    }
+}
+
+fn external_mutation_model(
+    source: &str,
+    base: &Path,
+    expected_name: &str,
+) -> Result<KernelModel, Value> {
+    let document = fsl_syntax::parse_surface_document(source).map_err(|error| {
+        if error.span.start.offset >= source.len() {
+            invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
+        } else {
+            invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
+        }
+    })?;
+    let Some(name) = surface_document_name(&document) else {
+        return Err(invalid_mutation_detail(
+            "semantics",
+            "external mutant must be a spec-like FSL file",
+            None,
+        ));
+    };
+    if name != expected_name {
+        return Err(invalid_mutation_detail(
+            "spec_name",
+            format!("external mutant spec name '{name}' does not match baseline '{expected_name}'"),
+            None,
+        ));
+    }
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source(source, &resolver).map_err(|error| {
+        let message = error.to_string();
+        let kind = if message.contains("unknown type") {
+            "type"
+        } else {
+            "semantics"
+        };
+        invalid_mutation_detail(kind, message, None)
+    })?;
+    fsl_core::build_model(kernel).map_err(|error| {
+        let message = error.to_string();
+        let kind = if message.contains("unknown type") || message.contains("type mismatch") {
+            "type"
+        } else {
+            "semantics"
+        };
+        invalid_mutation_detail(kind, message, None)
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_mutate(
+    path: &Path,
+    depth: usize,
+    max_mutants: usize,
+    by_requirement: bool,
+    external_mutants: Option<&Path>,
+) -> (Value, i32) {
+    let (baseline, status) = run_verify(path, depth, "warn", "bmc", 1);
+    if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
+        return (baseline, 0);
+    }
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 0),
+    };
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 0),
+    };
+    let document = match parse_surface_document(path) {
+        Ok(document) => document,
+        Err(error) => return (semantic_error_output(&error), 0),
+    };
+    let action_labels = mutation_action_labels(&document);
+    let spec = match document {
+        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
+        fsl_syntax::SurfaceDocument::Business(_)
+        | fsl_syntax::SurfaceDocument::Requirements(_)
+        | fsl_syntax::SurfaceDocument::Compose(_) => {
+            let resolver =
+                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+            match fsl_core::parse_kernel_source(&source, &resolver) {
+                Ok(kernel) => kernel.into_syntax(),
+                Err(error) => return (semantic_error_output(&error.to_string()), 0),
+            }
+        }
+        _ => {
+            return (
+                error_output("semantics", "mutate expects a spec-like FSL file"),
+                0,
+            );
+        }
+    };
+    let all_mutants = fsl_tools::enumerate_builtin_mutants(&spec);
+    let discovered = all_mutants.len();
+    let dead_actions = baseline
+        .get("action_coverage")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, covered)| **covered != Value::Bool(true))
+        .map(|(name, _)| name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut by_req = if by_requirement {
+        requirement_kill_index(&model)
+    } else {
+        Map::new()
+    };
+    let mut public_mutants = Vec::new();
+    let source_lines = source.lines().collect::<Vec<_>>();
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    for mutant in all_mutants.into_iter().take(max_mutants) {
+        let mutated_spec = mutant.spec.clone();
+        let mut outcome = mutation_oracle(mutant.spec, depth);
+        if outcome.clean
+            && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
+            && let Ok(mutated_model) = fsl_core::build_model(kernel)
+        {
+            if let Err(error) =
+                apply_requirement_mutation_oracle(&source, &mutated_model, &mut outcome)
+            {
+                outcome = MutationOracle {
+                    clean: false,
+                    killed_by: Some(error),
+                    killer_requirement: None,
+                };
+            } else if apply_implements_mutation_oracle(
+                &source,
+                base,
+                &mutated_model,
+                depth,
+                &mut outcome,
+            )
+            .is_err()
+            {
+                outcome = MutationOracle {
+                    clean: false,
+                    killed_by: Some("refinement".to_owned()),
+                    killer_requirement: None,
+                };
+            }
+        }
+        if mutant.op == "assignment_remove"
+            && mutant.action.as_deref() == Some("init")
+            && let Some(span) = mutant.span
+            && let Some(root) = source_lines
+                .get(
+                    usize::try_from(span.start.line)
+                        .unwrap_or_default()
+                        .saturating_sub(1),
+                )
+                .and_then(|line| assignment_root_from_source(line, span.start.column))
+                .filter(|root| model.state.iter().any(|(name, _)| name == root))
+                .or_else(|| removed_init_assignment_root(&spec, &mutated_spec))
+            && let Some((_, ty)) = model.state.iter().find(|(name, _)| name == &root)
+            && type_has_symbolic_bounds(&model, ty)
+        {
+            outcome = MutationOracle {
+                clean: false,
+                killed_by: Some(format!("_bounds_{root}")),
+                killer_requirement: None,
+            };
+        }
+        let status = if outcome.clean { "survived" } else { "killed" };
+        let target = mutant
+            .action
+            .as_ref()
+            .and_then(|action| action_labels.get(action).map(|label| (action, label)))
+            .map_or_else(
+                || mutant.target.clone(),
+                |(action, label)| mutant.target.replacen(action, label, 1),
+            );
+        let mut public = json!({
+            "op":mutant.op,
+            "loc":mutant.span.map(fsl_syntax::Span::python_loc),
+            "target":target,
+            "status":status,
+            "killed_by":outcome.killed_by,
+            "requirement":metadata(mutant.requirement.as_ref()),
+            "source":"builtin",
+        });
+        if outcome.clean
+            && mutant
+                .action
+                .as_ref()
+                .is_some_and(|action| dead_actions.contains(action))
+            && let Value::Object(public) = &mut public
+        {
+            public.insert(
+                "note".to_owned(),
+                json!("action dead at baseline — survival expected"),
+            );
+        }
+        if let Some(requirement) = outcome.killer_requirement
+            && let Some(Value::Object(entry)) = by_req.get_mut(&requirement)
+        {
+            let kills = entry
+                .get("kills")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            entry.insert("kills".to_owned(), json!(kills + 1));
+        }
+        public_mutants.push(public);
+    }
+    if let Some(external_path) = external_mutants {
+        let candidates = match load_external_mutations(external_path, &source) {
+            Ok(candidates) => candidates,
+            Err(error) => return (error_output("io", &error), 0),
+        };
+        for candidate in candidates {
+            if let Some(invalid) = candidate.invalid.clone() {
+                public_mutants.push(external_mutant_public(
+                    &candidate,
+                    "invalid",
+                    None,
+                    Some(invalid),
+                ));
+                continue;
+            }
+            let Some(mutated_source) = candidate.source.as_deref() else {
+                public_mutants.push(external_mutant_public(
+                    &candidate,
+                    "invalid",
+                    None,
+                    Some(invalid_mutation_detail(
+                        "instruction",
+                        "external mutation has no source",
+                        None,
+                    )),
+                ));
+                continue;
+            };
+            let mutated_model = match external_mutation_model(mutated_source, base, &model.name) {
+                Ok(model) => model,
+                Err(invalid) => {
+                    public_mutants.push(external_mutant_public(
+                        &candidate,
+                        "invalid",
+                        None,
+                        Some(invalid),
+                    ));
+                    continue;
+                }
+            };
+            let mut outcome = mutation_oracle_for_model(mutated_model.clone(), depth);
+            if let Err(error) =
+                apply_requirement_mutation_oracle(mutated_source, &mutated_model, &mut outcome)
+                    .and_then(|()| {
+                        apply_implements_mutation_oracle(
+                            mutated_source,
+                            base,
+                            &mutated_model,
+                            depth,
+                            &mut outcome,
+                        )
+                    })
+            {
+                public_mutants.push(external_mutant_public(
+                    &candidate,
+                    "invalid",
+                    None,
+                    Some(invalid_mutation_detail("semantics", error, None)),
+                ));
+                continue;
+            }
+            if outcome.clean {
+                public_mutants.push(external_mutant_public(&candidate, "survived", None, None));
+            } else if outcome.killed_by.as_deref() == Some("build_spec") {
+                public_mutants.push(external_mutant_public(
+                    &candidate,
+                    "invalid",
+                    None,
+                    Some(invalid_mutation_detail(
+                        "semantics",
+                        "invalid external mutant",
+                        None,
+                    )),
+                ));
+            } else {
+                if let Some(requirement) = outcome.killer_requirement.as_ref()
+                    && let Some(Value::Object(entry)) = by_req.get_mut(requirement)
+                {
+                    let kills = entry
+                        .get("kills")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default();
+                    entry.insert("kills".to_owned(), json!(kills + 1));
+                }
+                public_mutants.push(external_mutant_public(
+                    &candidate,
+                    "killed",
+                    outcome.killed_by.as_deref(),
+                    None,
+                ));
+            }
+        }
+    }
+    let mut notes = vec![
+        "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure".to_owned(),
+    ];
+    if discovered > max_mutants {
+        notes.push(format!(
+            "mutant cap {max_mutants} reached: {} dropped",
+            discovered - max_mutants
+        ));
+    }
+    if by_requirement {
+        for value in by_req.values_mut() {
+            if value.get("kills").and_then(Value::as_u64) == Some(0)
+                && let Value::Object(value) = value
+            {
+                value.insert("warning".to_owned(), json!("empty_formalization"));
+            }
+        }
+        notes.push(
+            "by_requirement kills are an observed lower bound within this mutant set and depth"
+                .to_owned(),
+        );
+    }
+    if external_mutants.is_some() {
+        notes.push(
+            "invalid external mutants are generation-quality findings and are excluded from kill-rate denominators"
+                .to_owned(),
+        );
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("mutated"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("depth".to_owned(), json!(depth));
+    output.insert("baseline".to_owned(), json!("verified"));
+    output.insert("mutants".to_owned(), Value::Array(public_mutants.clone()));
+    output.insert("summary".to_owned(), mutation_summary(&public_mutants));
+    output.insert("by_requirement".to_owned(), Value::Object(by_req));
+    output.insert("notes".to_owned(), json!(notes));
+    (Value::Object(output), 0)
+}
+
+fn run_typestate(path: &Path) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut output = envelope();
+    if let Value::Object(report) = fsl_tools::analyze_typestate(&model) {
+        output.extend(report);
+    }
+    (Value::Object(output), 0)
+}
+
+fn generated_content_result(
+    kind: &str,
+    spec: &str,
+    default_output: String,
+    content: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, content)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!(kind));
+    output.insert("spec".to_owned(), json!(spec));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(|| PathBuf::from(default_output), Path::to_path_buf)),
+    );
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(content));
+    }
+    (Value::Object(output), 0)
+}
+
+fn python_string(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn python_literal(value: &Value, key_order: &[String]) -> String {
+    match value {
+        Value::Null => "None".to_owned(),
+        Value::Bool(value) => if *value { "True" } else { "False" }.to_owned(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => python_string(value),
+        Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| python_literal(value, &[]))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Value::Object(values) => {
+            let ordered = key_order
+                .iter()
+                .filter(|key| values.contains_key(*key))
+                .chain(values.keys().filter(|key| !key_order.contains(key)))
+                .collect::<Vec<_>>();
+            format!(
+                "{{{}}}",
+                ordered
+                    .into_iter()
+                    .map(|key| format!(
+                        "{}: {}",
+                        python_string(key),
+                        python_literal(&values[key], &[])
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    }
+}
+
+fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
+    let absolute = std::fs::canonicalize(spec).unwrap_or_else(|_| spec.to_path_buf());
+    let Some(parent) = output.and_then(Path::parent) else {
+        return absolute.display().to_string();
+    };
+    let base = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    let left = base.components().collect::<Vec<_>>();
+    let right = absolute.components().collect::<Vec<_>>();
+    let common = left
+        .iter()
+        .zip(&right)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut result = PathBuf::new();
+    for _ in common..left.len() {
+        result.push("..");
+    }
+    for component in &right[common..] {
+        result.push(component.as_os_str());
+    }
+    result.display().to_string()
+}
+
+#[allow(clippy::too_many_lines)]
+fn emit_pytest(
+    model: &KernelModel,
+    spec_path: &Path,
+    output: Option<&Path>,
+    scenarios: &Value,
+) -> String {
+    let source_name = spec_path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("spec.fsl");
+    let path_expr = if output.is_some() {
+        format!(
+            "Path(__file__).resolve().parent / {}",
+            python_string(&relative_spec_path(spec_path, output))
+        )
+    } else {
+        python_string(&relative_spec_path(spec_path, None))
+    };
+    let mut text = format!(
+        r#""""Auto-generated conformance tests for FSL spec.
+Source: {source_name}
+Connect Adapter to your implementation, or use MonitorSelfAdapter for self-check.
+"""
+import random
+from pathlib import Path
+
+import pytest
+
+from fslc.runtime import Monitor
+
+SPEC_PATH = {path_expr}
+
+
+class Adapter:
+    """Connect your implementation to the spec actions/state.
+
+    Wiring convention:
+    - reset(): put implementation in the same initial state as spec init
+    - step(action, params): drive one spec action on the implementation
+    - observe(): return implementation state projected to spec logical state shape
+    """
+
+    def reset(self):
+        raise NotImplementedError("wire your implementation reset")
+
+    def step(self, action: str, params: dict):
+        raise NotImplementedError("wire your implementation step")
+
+    def observe(self) -> dict:
+        raise NotImplementedError("wire your implementation observe")
+
+
+def _adapter_ready(adapter):
+    try:
+        adapter.reset()
+        adapter.observe()
+        return True
+    except NotImplementedError:
+        return False
+
+
+@pytest.fixture
+def adapter():
+    return Adapter()
+
+
+def _assert_partial_expected(observed, expected):
+    for key, val in expected.items():
+        if isinstance(val, dict) and isinstance(observed.get(key), dict):
+            _assert_partial_expected(observed[key], val)
+        else:
+            assert observed[key] == val
+
+
+def _assert_rejected(result, expected_kind):
+    assert isinstance(result, dict), 'forbidden adapter.step must return a result dict'
+    assert result.get('ok') is False
+    if expected_kind is not None:
+        assert result.get('kind') == expected_kind
+"#
+    );
+    let state_order = model
+        .state
+        .iter()
+        .map(|(name, _)| fslc_rust::display_name(name))
+        .collect::<Vec<_>>();
+    let action_order = model
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| (fslc_rust::display_name(&action.name), index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut items = scenarios
+        .get("scenarios")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    items.sort_by_key(|item| {
+        item["action"]
+            .as_str()
+            .and_then(|name| action_order.get(name))
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    for (scenario_index, scenario) in items.into_iter().enumerate() {
+        let name = scenario["name"].as_str().unwrap_or("scenario");
+        let separator = if scenario_index == 0 { "\n\n" } else { "\n" };
+        let _ = write!(
+            text,
+            "{separator}def test_scenario_{name}(adapter):\n    {}\n    if not _adapter_ready(adapter):\n        pytest.skip('Adapter not implemented')\n    adapter.reset()\n",
+            python_string(&format!("Scenario: {name}"))
+        );
+        let steps = scenario["steps"].as_array().cloned().unwrap_or_default();
+        let states = scenario["expected_states"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for (index, step) in steps.iter().enumerate() {
+            let action = step["action"].as_str().unwrap_or_default();
+            let param_order = model
+                .actions
+                .iter()
+                .find(|item| fslc_rust::display_name(&item.name) == action)
+                .map(|item| {
+                    item.params
+                        .iter()
+                        .map(|param| param.name().to_owned())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let _ = writeln!(
+                text,
+                "    adapter.step({}, {})",
+                python_string(action),
+                python_literal(&step["params"], &param_order)
+            );
+            let expected = states.get(index).cloned().unwrap_or_else(|| json!({}));
+            let _ = writeln!(
+                text,
+                "    _assert_partial_expected(adapter.observe(), {})",
+                python_literal(&expected, &state_order)
+            );
+        }
+    }
+    text.push_str(
+        r#"
+def test_random_walk_conformance(adapter):
+    if not _adapter_ready(adapter):
+        pytest.skip('Adapter not implemented')
+    mon = Monitor(SPEC_PATH)
+    mon.reset()
+    adapter.reset()
+    assert adapter.observe() == mon.state
+    rng = random.Random(0)
+    for _ in range(100):
+        enabled = mon.enabled()
+        if not enabled:
+            break
+        choice = enabled[rng.randrange(len(enabled))]
+        action, params = choice['action'], dict(choice['params'])
+        adapter.step(action, params)
+        result = mon.step(action, params)
+        if not result.get('ok'):
+            pytest.fail(
+                f'spec oracle violation at {action} {params}: '
+                f"{result.get('kind')} {result.get('name', '')}"
+            )
+        assert adapter.observe() == mon.state
+
+"#,
+    );
+    text
+}
+
+struct PythonRandom {
+    state: [u32; 624],
+    index: usize,
+}
+
+impl PythonRandom {
+    fn seeded_zero() -> Self {
+        let mut random = Self {
+            state: [0; 624],
+            index: 624,
+        };
+        random.state[0] = 19_650_218;
+        for index in 1..624 {
+            let previous = random.state[index - 1];
+            random.state[index] = (previous ^ (previous >> 30))
+                .wrapping_mul(1_812_433_253)
+                .wrapping_add(u32::try_from(index).unwrap_or_default());
+        }
+        let mut index = 1_usize;
+        let mut key_index = 0_usize;
+        for _ in 0..624 {
+            let previous = random.state[index - 1];
+            random.state[index] = (random.state[index]
+                ^ ((previous ^ (previous >> 30)).wrapping_mul(1_664_525)))
+            .wrapping_add(0_u32)
+            .wrapping_add(u32::try_from(key_index).unwrap_or_default());
+            index += 1;
+            key_index += 1;
+            if index >= 624 {
+                random.state[0] = random.state[623];
+                index = 1;
+            }
+            if key_index >= 1 {
+                key_index = 0;
+            }
+        }
+        for _ in 0..623 {
+            let previous = random.state[index - 1];
+            random.state[index] = (random.state[index]
+                ^ ((previous ^ (previous >> 30)).wrapping_mul(1_566_083_941)))
+            .wrapping_sub(u32::try_from(index).unwrap_or_default());
+            index += 1;
+            if index >= 624 {
+                random.state[0] = random.state[623];
+                index = 1;
+            }
+        }
+        random.state[0] = 0x8000_0000;
+        random
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        if self.index >= 624 {
+            for index in 0..624 {
+                let value = (self.state[index] & 0x8000_0000)
+                    | (self.state[(index + 1) % 624] & 0x7fff_ffff);
+                self.state[index] = self.state[(index + 397) % 624]
+                    ^ (value >> 1)
+                    ^ if value & 1 == 0 { 0 } else { 0x9908_b0df };
+            }
+            self.index = 0;
+        }
+        let mut value = self.state[self.index];
+        self.index += 1;
+        value ^= value >> 11;
+        value ^= (value << 7) & 0x9d2c_5680;
+        value ^= (value << 15) & 0xefc6_0000;
+        value ^= value >> 18;
+        value
+    }
+
+    fn below(&mut self, upper: usize) -> usize {
+        let bits = usize::BITS - upper.leading_zeros();
+        loop {
+            let value = self.next_u32() >> (32 - bits);
+            let value = usize::try_from(value).unwrap_or_default();
+            if value < upper {
+                return value;
+            }
+        }
+    }
+}
+
+fn ordered_object(value: &Value, order: &[String]) -> Value {
+    let Some(values) = value.as_object() else {
+        return value.clone();
+    };
+    let mut result = Map::new();
+    for key in order {
+        if let Some(value) = values.get(key) {
+            result.insert(key.clone(), value.clone());
+        }
+    }
+    for (key, value) in values {
+        if !result.contains_key(key) {
+            result.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(result)
+}
+
+fn codegen_scenarios(model: &KernelModel, scenarios: &Value) -> Vec<Value> {
+    let state_order = model
+        .state
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let action_order = model
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| (fslc_rust::display_name(&action.name), index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut result = scenarios["scenarios"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    result.sort_by_key(|scenario| {
+        scenario
+            .get("action")
+            .and_then(Value::as_str)
+            .and_then(|name| action_order.get(name))
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+    for scenario in &mut result {
+        if let Value::Object(scenario) = scenario {
+            if let Some(Value::Array(states)) = scenario.get_mut("expected_states") {
+                for state in states {
+                    *state = ordered_object(state, &state_order);
+                }
+            }
+            if let Some(Value::Object(initial)) = scenario.get_mut("initial_state") {
+                let value = Value::Object(initial.clone());
+                *initial = ordered_object(&value, &state_order)
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+            }
+            if let Some(Value::Array(steps)) = scenario.get_mut("steps") {
+                for step in steps {
+                    let action = step["action"].as_str().unwrap_or_default();
+                    let order = model
+                        .actions
+                        .iter()
+                        .find(|item| fslc_rust::display_name(&item.name) == action)
+                        .map(|item| {
+                            item.params
+                                .iter()
+                                .map(|param| param.name().to_owned())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    if let Value::Object(step) = step {
+                        if let Some(params) = step.get_mut("params") {
+                            *params = ordered_object(params, &order);
+                        }
+                    }
+                }
+            }
+            if let Some(Value::Object(step)) = scenario.get_mut("forbidden_step") {
+                let action = step
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let order = model
+                    .actions
+                    .iter()
+                    .find(|item| fslc_rust::display_name(&item.name) == action)
+                    .map(|item| {
+                        item.params
+                            .iter()
+                            .map(|param| param.name().to_owned())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if let Some(params) = step.get_mut("params") {
+                    *params = ordered_object(params, &order);
+                }
+            }
+        }
+    }
+    result
+}
+
+fn baked_random_walk(model: &KernelModel) -> Value {
+    let Ok(mut monitor) = fsl_runtime::Monitor::new(model.clone()) else {
+        return json!({"initial":{},"steps":[]});
+    };
+    let state_order = model
+        .state
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let initial = ordered_object(&fslc_rust::state_json(&monitor.state), &state_order);
+    let mut steps = Vec::new();
+    let mut random = PythonRandom::seeded_zero();
+    for _ in 0..100 {
+        let Ok(enabled) = monitor.enabled() else {
+            break;
+        };
+        if enabled.is_empty() {
+            break;
+        }
+        let choice = &enabled[random.below(enabled.len())];
+        let action = choice.action.clone();
+        let param_order = model
+            .actions
+            .iter()
+            .find(|candidate| candidate.name == action)
+            .map(|candidate| {
+                candidate
+                    .params
+                    .iter()
+                    .map(|param| param.name().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let params = choice
+            .params
+            .iter()
+            .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+            .collect::<Map<_, _>>();
+        let params = ordered_object(&Value::Object(params), &param_order);
+        if monitor.step(choice).is_err() {
+            break;
+        }
+        steps.push(json!({"action":fslc_rust::display_name(&action),"params":params,"expected":ordered_object(&fslc_rust::state_json(&monitor.state),&state_order)}));
+    }
+    json!({"initial":initial,"steps":steps})
+}
+
+fn run_testgen(
+    path: &Path,
+    depth: usize,
+    target: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let (scenarios, status) = run_scenarios_mode(path, depth, "warn", true);
+    if status == 2 {
+        return (scenarios, status);
+    }
+    let source_name = path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("spec.fsl");
+    let generated_scenarios = codegen_scenarios(&model, &scenarios);
+    let walk = baked_random_walk(&model);
+    let content = match target {
+        "vitest" => fsl_tools::emit_vitest(source_name, &generated_scenarios, &walk),
+        "swift" => fsl_tools::emit_swift(source_name, &generated_scenarios, &walk),
+        "kotlin" => fsl_tools::emit_kotlin(source_name, &model.name, &generated_scenarios, &walk),
+        "dart" => fsl_tools::emit_dart(source_name, &generated_scenarios, &walk),
+        "phpunit" => fsl_tools::emit_phpunit(source_name, &model.name, &generated_scenarios, &walk),
+        _ => emit_pytest(&model, path, output_path, &scenarios),
+    };
+    let extension = match target {
+        "vitest" => "test.ts",
+        "swift" => "swift",
+        "kotlin" => "kt",
+        "dart" => "dart",
+        "phpunit" => "php",
+        _ => "py",
+    };
+    let (mut result, status) = generated_content_result(
+        "testgen",
+        &model.name,
+        format!(
+            "test_{}.{}",
+            path.file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("spec"),
+            extension
+        ),
+        &content,
+        output_path,
+    );
+    if let Value::Object(result) = &mut result {
+        result.remove("kind");
+        result.insert("target".to_owned(), json!(target));
+        if let Some(warnings) = scenarios.get("warnings")
+            && warnings.as_array().is_some_and(|items| !items.is_empty())
+        {
+            result.insert("warnings".to_owned(), warnings.clone());
+        }
+    }
+    (result, status)
+}
+
+fn run_html_report(
+    path: &Path,
+    depth: usize,
+    engine: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let (verification, _) = run_verify(path, depth, "warn", engine, 1);
+    let (mut explained, explain_status) = run_explain(path, depth, false);
+    if explain_status != 0 {
+        return (explained, explain_status);
+    }
+    if let Value::Object(explained) = &mut explained {
+        explained.remove("fsl");
+        if let Some(Value::Array(items)) = explained.get_mut("reachable_counterfactuals") {
+            for item in items {
+                if let Value::Object(item) = item {
+                    item.remove("faithfulness_class");
+                    item.remove("recommended_action");
+                }
+            }
+        }
+    }
+    let html = fsl_tools::render_html_report(
+        &path.display().to_string(),
+        &source,
+        &explained,
+        &verification,
+    );
+    generated_content_result(
+        "html_report",
+        &model.name,
+        format!(
+            "{}.html",
+            path.file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("report")
+        ),
+        &html,
+        output_path,
+    )
+}
+
+fn run_ledger_report(
+    path: &Path,
+    depth: usize,
+    engine: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let (verification, _) = run_verify(path, depth, "ignore", engine, 1);
+    let verdict = verification
+        .get("result")
+        .and_then(Value::as_str)
+        .unwrap_or("error");
+    let assurance = if engine == "induction" && verdict == "proved" {
+        "proved(induction)"
+    } else {
+        "bounded(BMC depth)"
+    };
+    let mark = if matches!(verdict, "verified" | "proved") {
+        "🟢"
+    } else {
+        "🔴 要確認"
+    };
+    let unreached = verification
+        .get("unreached")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty());
+    let content = if let Some(unreached) = unreached {
+        let first = &unreached[0];
+        let name = first["name"].as_str().unwrap_or("reachable");
+        let hint = first["hint"].as_str().unwrap_or("increase --depth");
+        let mut raw_findings = serde_json::to_string_pretty(unreached).unwrap_or_default();
+        for finding in unreached {
+            if let (Some(line), Some(column)) = (
+                finding["loc"]["line"].as_u64(),
+                finding["loc"]["column"].as_u64(),
+            ) {
+                raw_findings = raw_findings.replace(
+                    &format!(
+                        "\"loc\": {{\n      \"column\": {column},\n      \"line\": {line}\n    }}"
+                    ),
+                    &format!(
+                        "\"loc\": {{\n      \"line\": {line},\n      \"column\": {column}\n    }}"
+                    ),
+                );
+            }
+        }
+        format!(
+            "# 意図ずれ監査台帳: {}\n\n- 対象: `{}`\n- 保証限界: BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth {depth}) | reachable | 要確認 | ____ | 下記詳細 |\n\n## 要件ID別詳細\n\n### （仕様全体）\n- **検出**: `reachable` — {name}\n  - 反例要約: 深さ {depth} までに到達 trace なし（より深い探索が必要かもしれない）\n  - 業務翻訳: 業務経路『{name}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。\n  - 次アクション: {hint}\n- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: ____　期限: ____\n\n## 付録: 生 JSON 反例（証跡）\n\n<details><summary>raw findings</summary>\n\n```json\n{}\n```\n\n</details>\n",
+            model.name,
+            path.display(),
+            raw_findings
+        )
+    } else {
+        format!(
+            "# 意図ずれ監査台帳 — {}\n\n## リスク一覧\n\n| 要件 | 状態 | 保証クラス | 観測 |\n|---|---|---|---|\n| （仕様全体） | {mark} | {assurance} | {verdict} |\n\n## 要件ID別詳細\n\n- 内部整合を深さ {depth} まで検査。全実行を証明するには induction を利用。\n- ☐ 承認 ☐ 差戻し ☐ リスク受容\n\n## 付録\n\n<details><summary>検証 JSON</summary>\n\n```json\n{}\n```\n</details>\n\n保証クラス: docs/DESIGN-assurance-classes.md\n",
+            model.name,
+            serde_json::to_string_pretty(&verification).unwrap_or_default()
+        )
+    };
+    generated_content_result(
+        "audit_ledger",
+        &model.name,
+        format!(
+            "{}.ledger.md",
+            path.file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("audit")
+        ),
+        &content,
+        output_path,
+    )
+}
+
+fn expression_identifiers(value: &Value) -> std::collections::BTreeSet<String> {
+    fn visit(value: &Value, names: &mut std::collections::BTreeSet<String>) {
+        match value {
+            Value::Array(parts) => {
+                match parts.first().and_then(Value::as_str) {
+                    Some("var") => {
+                        if let Some(name) = parts.get(1).and_then(Value::as_str) {
+                            names.insert(name.to_owned());
+                        }
+                        return;
+                    }
+                    Some("index") => {
+                        if let Some(name) = parts.get(1).and_then(Value::as_str) {
+                            names.insert(name.to_owned());
+                        }
+                    }
+                    _ => {}
+                }
+                for part in parts.iter().skip(1) {
+                    visit(part, names);
+                }
+            }
+            Value::Object(values) => {
+                for value in values.values() {
+                    visit(value, names);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut names = std::collections::BTreeSet::new();
+    visit(value, &mut names);
+    names
+}
+
+fn tag_lvalue_text(target: &KernelLValue) -> String {
+    match target {
+        KernelLValue::Var(name) => name.clone(),
+        KernelLValue::Index(name, index) => {
+            format!("{name}[{}]", fslc_rust::expr_text(index))
+        }
+        KernelLValue::Field(base, field) => format!("{}.{}", tag_lvalue_text(base), field),
+    }
+}
+
+fn tag_statement_effects(
+    statements: &[KernelStatement],
+    conditions: &[String],
+    effects: &mut Vec<Value>,
+) {
+    for statement in statements {
+        match statement {
+            KernelStatement::Assign { target, value, .. } => effects.push(json!({
+                "target":tag_lvalue_text(target),
+                "expression":fslc_rust::expr_text(value),
+                "conditions":conditions,
+            })),
+            KernelStatement::If {
+                condition,
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                let condition = fslc_rust::expr_text(condition);
+                let mut then_conditions = conditions.to_vec();
+                then_conditions.push(condition.clone());
+                tag_statement_effects(then_statements, &then_conditions, effects);
+                let mut else_conditions = conditions.to_vec();
+                else_conditions.push(format!("not ({condition})"));
+                tag_statement_effects(else_statements, &else_conditions, effects);
+            }
+            KernelStatement::ForAll { statements, .. } => {
+                tag_statement_effects(statements, conditions, effects);
+            }
+        }
+    }
+}
+
+fn tagged_property(kind: &str, property: &fsl_core::PropertyDef) -> Option<Value> {
+    let meta = property.meta.as_ref()?;
+    Some(json!({
+        "kind":kind,
+        "name":property.name,
+        "node_id":format!("{kind}:{}",property.name),
+        "tag":metadata(Some(meta)),
+        "loc":property.span.python_loc(),
+        "formal_definition":{"expression":fslc_rust::expr_text(&property.expr)},
+        "formal_identifiers":expression_identifiers(&property.expr.python_ast()),
+    }))
+}
+
+#[allow(clippy::too_many_lines)]
+fn tag_review_output(model: &KernelModel) -> Value {
+    let mut declarations = Vec::new();
+    for action in &model.actions {
+        let Some(meta) = action.meta.as_ref() else {
+            continue;
+        };
+        let mut identifiers = std::collections::BTreeSet::new();
+        for expr in action.requires.iter().chain(&action.ensures) {
+            identifiers.extend(expression_identifiers(&expr.python_ast()));
+        }
+        for statement in &action.statements {
+            identifiers.extend(expression_identifiers(&statement.python_ast()));
+        }
+        identifiers.extend(action.params.iter().map(|param| param.name().to_owned()));
+        let mut effects = Vec::new();
+        tag_statement_effects(&action.statements, &[], &mut effects);
+        declarations.push(json!({
+            "kind":"action",
+            "name":action.name,
+            "node_id":format!("action:{}",action.name),
+            "tag":metadata(Some(meta)),
+            "loc":action.span.python_loc(),
+            "formal_definition":{
+                "parameters":action.params.iter().map(ParamDef::name).collect::<Vec<_>>(),
+                "requires":action.requires.iter().map(fslc_rust::expr_text).collect::<Vec<_>>(),
+                "ensures":action.ensures.iter().map(fslc_rust::expr_text).collect::<Vec<_>>(),
+                "effects":effects,
+            },
+            "formal_identifiers":identifiers,
+        }));
+    }
+    declarations.extend(
+        model
+            .invariants
+            .iter()
+            .filter_map(|property| tagged_property("invariant", property)),
+    );
+    declarations.extend(
+        model
+            .transitions
+            .iter()
+            .filter_map(|property| tagged_property("trans", property)),
+    );
+    declarations.extend(
+        model
+            .reachables
+            .iter()
+            .filter_map(|property| tagged_property("reachable", property)),
+    );
+    for property in &model.leadstos {
+        let Some(meta) = property.meta.as_ref() else {
+            continue;
+        };
+        let mut identifiers = expression_identifiers(&property.before.python_ast());
+        identifiers.extend(expression_identifiers(&property.after.python_ast()));
+        if let Some(decreases) = &property.decreases {
+            identifiers.extend(expression_identifiers(&decreases.python_ast()));
+        }
+        let mut formal = Map::new();
+        formal.insert(
+            "premise".to_owned(),
+            json!(fslc_rust::expr_text(&property.before)),
+        );
+        formal.insert(
+            "consequence".to_owned(),
+            json!(fslc_rust::expr_text(&property.after)),
+        );
+        if let Some(within) = property.within {
+            formal.insert("within".to_owned(), json!(within));
+        }
+        if let Some(decreases) = &property.decreases {
+            formal.insert(
+                "decreases".to_owned(),
+                json!(fslc_rust::expr_text(decreases)),
+            );
+        }
+        declarations.push(json!({
+            "kind":"leadsTo",
+            "name":property.name,
+            "node_id":format!("leadsTo:{}",property.name),
+            "tag":metadata(Some(meta)),
+            "loc":property.span.python_loc(),
+            "formal_definition":formal,
+            "formal_identifiers":identifiers,
+        }));
+    }
+    declarations.sort_by_key(|item| {
+        (
+            item["kind"].as_str().unwrap_or_default().to_owned(),
+            item["name"].as_str().unwrap_or_default().to_owned(),
+        )
+    });
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("analyzed"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("analysis".to_owned(), json!("tag_review"));
+    output.insert("export".to_owned(), json!("tag-review"));
+    output.insert("schema_version".to_owned(), json!("tag-review.v0"));
+    output.insert(
+        "review_contract".to_owned(),
+        json!({
+            "unit":"declaration",
+            "decision":"compare tag.text with formal_definition",
+            "formal_status":"not_a_violation",
+            "meaning_judgment":"external_review_required",
+        }),
+    );
+    output.insert("declarations".to_owned(), Value::Array(declarations));
+    Value::Object(output)
+}
+
+fn tag_tokens(
+    text: &str,
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let mut bare = std::collections::BTreeSet::new();
+    let mut current = String::new();
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            current.push(character);
+        } else if !current.is_empty() {
+            if current
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+            {
+                bare.insert(std::mem::take(&mut current));
+            } else {
+                current.clear();
+            }
+        }
+    }
+    if !current.is_empty()
+        && current
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+    {
+        bare.insert(current);
+    }
+    let explicit = text
+        .split('`')
+        .enumerate()
+        .filter(|(index, _)| index % 2 == 1)
+        .map(|(_, value)| value)
+        .filter(|value| {
+            !value.is_empty()
+                && value
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        })
+        .map(str::to_owned)
+        .collect();
+    (bare, explicit)
+}
+
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
+fn analysis_finding(
+    finding_type: &str,
+    confidence: f64,
+    involved_nodes: Value,
+    witness: Value,
+    why: &str,
+    repairs: Value,
+    caveats: Value,
+    loc: Option<Value>,
+) -> Value {
+    let mut finding = json!({
+        "finding_id":"",
+        "analysis":"structure",
+        "finding_type":finding_type,
+        "severity":"review_required",
+        "confidence":confidence,
+        "formal_status":"not_a_violation",
+        "involved_nodes":involved_nodes,
+        "witness":witness,
+        "why_it_matters":why,
+        "candidate_repairs":repairs,
+        "do_not_assume":caveats,
+    });
+    if let (Some(loc), Value::Object(object)) = (loc, &mut finding) {
+        object.insert("loc".to_owned(), loc);
+    }
+    finding
+}
+
+fn ai_tag_findings(model: &KernelModel) -> Vec<Value> {
+    let export = tag_review_output(model);
+    let declarations = export["declarations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let states = model
+        .state
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let constants = model
+        .consts
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut catalog = states
+        .union(&constants)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    catalog.extend(model.types.keys().cloned());
+    catalog.extend(model.enum_members.keys().cloned());
+    catalog.extend(model.actions.iter().map(|action| action.name.clone()));
+    let relevant = states
+        .union(&constants)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut findings = Vec::new();
+    for declaration in declarations {
+        let formal = declaration["formal_identifiers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>();
+        let text = declaration["tag"]["text"].as_str().unwrap_or_default();
+        let (bare, explicit) = tag_tokens(text);
+        let local = formal
+            .difference(&catalog)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mentioned = bare
+            .union(&explicit)
+            .filter(|token| catalog.contains(*token) || local.contains(*token))
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let stale = bare
+            .union(&explicit)
+            .filter(|token| {
+                (explicit.contains(*token)
+                    || token.contains('_')
+                    || (token
+                        .chars()
+                        .all(|character| character.is_ascii_uppercase())
+                        && token.len() > 2))
+                    && !catalog.contains(*token)
+                    && !local.contains(*token)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let disjoint = mentioned
+            .intersection(&relevant)
+            .filter(|token| !formal.contains(*token))
+            .cloned()
+            .collect::<Vec<_>>();
+        for (finding_type, identifiers) in [
+            ("tag_stale_reference", stale),
+            ("tag_formula_disjoint", disjoint),
+        ] {
+            if identifiers.is_empty() {
+                continue;
+            }
+            let stale = finding_type == "tag_stale_reference";
+            findings.push(analysis_finding(
+                finding_type,
+                if stale { 0.82 } else { 0.74 },
+                json!([declaration["node_id"]]),
+                json!({
+                    "kind":if stale { "tag_mentions_unknown_identifier" } else { "tag_identifier_absent_from_formula" },
+                    "declaration":{"kind":declaration["kind"],"name":declaration["name"],"tag":declaration["tag"]},
+                    "identifiers":identifiers,
+                    "formal_identifiers":declaration["formal_identifiers"],
+                }),
+                if stale {
+                    "The declaration tag contains a code-shaped identifier that is not present in the current specification, which may be a stale reference after a rename or deletion."
+                } else {
+                    "The tag names a current state variable or constant that the tagged formal definition does not reference, so the human label and checked formula may have drifted apart."
+                },
+                json!([{"kind":"review_tag_formula_pair","template":if stale { "Update the tag to the current identifier, or confirm that the token is prose and quote/reword it so it is not presented as an FSL identifier." } else { "Review the tag and formal definition together; update whichever side no longer expresses the intended requirement." }}]),
+                json!([if stale { "The analyzer does not prove that the prose intended to reference an FSL identifier." } else { "Identifier overlap is not proof that natural-language and formal meanings agree." },"This finding is not a verifier violation."]),
+                declaration.get("loc").cloned(),
+            ));
+        }
+    }
+    findings
+}
+
+fn tsg_nodes(tsg: &Value) -> std::collections::BTreeMap<String, Value> {
+    tsg["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| Some((node.get("id")?.as_str()?.to_owned(), node.clone())))
+        .collect()
+}
+
+#[allow(clippy::too_many_lines)]
+fn ai_structural_findings(tsg: &Value) -> Vec<Value> {
+    let nodes = tsg_nodes(tsg);
+    let edges = tsg["edges"].as_array().cloned().unwrap_or_default();
+    let property_kinds = ["invariant", "trans", "leadsTo", "reachable"]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let scenario_kinds = ["acceptance", "forbidden"]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut findings = Vec::new();
+
+    for requirement in nodes.values().filter(|node| node["kind"] == "requirement") {
+        let id = requirement["id"].as_str().unwrap_or_default();
+        let useful = edges.iter().any(|edge| {
+            edge["kind"] == "covers"
+                && edge["from"] == id
+                && nodes
+                    .get(edge["to"].as_str().unwrap_or_default())
+                    .is_some_and(|node| {
+                        let kind = node["kind"].as_str().unwrap_or_default();
+                        property_kinds.contains(kind)
+                            || scenario_kinds.contains(kind)
+                            || matches!(kind, "action" | "kpi" | "control")
+                    })
+        });
+        if !useful {
+            findings.push(analysis_finding(
+                "disconnected_requirement",
+                0.8,
+                json!([id]),
+                json!({"kind":"isolated_node","node":id}),
+                "The requirement is declared but is not connected to an action, property, acceptance scenario, forbidden scenario, governance control, or refinement mapping in the structural graph.",
+                json!([{"kind":"add_traceability_anchor","template":"Attach the requirement id to a relevant action/property or add an acceptance/forbidden scenario."}]),
+                json!(["The requirement is invalid.","The implementation is missing behavior."]),
+                None,
+            ));
+        }
+    }
+
+    let action_states = edges
+        .iter()
+        .filter(|edge| matches!(edge["kind"].as_str(), Some("reads" | "writes")))
+        .filter(|edge| {
+            nodes
+                .get(edge["from"].as_str().unwrap_or_default())
+                .is_some_and(|node| node["kind"] == "action")
+                && nodes
+                    .get(edge["to"].as_str().unwrap_or_default())
+                    .is_some_and(|node| node["kind"] == "state")
+        })
+        .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let scenario_ids = nodes
+        .values()
+        .filter(|node| scenario_kinds.contains(node["kind"].as_str().unwrap_or_default()))
+        .filter_map(|node| node["id"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let scenario_actions = edges.iter().any(|edge| {
+        scenario_ids.contains(edge["from"].as_str().unwrap_or_default())
+            && nodes
+                .get(edge["to"].as_str().unwrap_or_default())
+                .is_some_and(|node| node["kind"] == "action")
+    });
+    let scenario_states = edges
+        .iter()
+        .filter(|edge| scenario_ids.contains(edge["from"].as_str().unwrap_or_default()))
+        .filter(|edge| {
+            nodes
+                .get(edge["to"].as_str().unwrap_or_default())
+                .is_some_and(|node| node["kind"] == "state")
+        })
+        .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let related = action_states
+        .union(&scenario_states)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for property in nodes
+        .values()
+        .filter(|node| property_kinds.contains(node["kind"].as_str().unwrap_or_default()))
+    {
+        if property.get("meta").is_some() {
+            continue;
+        }
+        let id = property["id"].as_str().unwrap_or_default();
+        let reads = edges
+            .iter()
+            .filter(|edge| {
+                edge["from"] == id && matches!(edge["kind"].as_str(), Some("reads" | "checks"))
+            })
+            .filter(|edge| {
+                nodes
+                    .get(edge["to"].as_str().unwrap_or_default())
+                    .is_some_and(|node| node["kind"] == "state")
+            })
+            .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
+            .collect::<std::collections::BTreeSet<_>>();
+        if (!reads.is_empty() && !reads.is_disjoint(&related))
+            || (scenario_actions && property["kind"] == "reachable")
+        {
+            continue;
+        }
+        findings.push(analysis_finding(
+            "unanchored_property",
+            0.7,
+            json!([id]),
+            json!({"kind":"unanchored_node","node":id,"reads":reads}),
+            "The user property is not connected to requirement metadata, scenarios, governance metadata, or an action-state anchor in the structural graph.",
+            json!([{"kind":"add_traceability_anchor","template":"Attach a requirement tag or add a scenario/action-state anchor that explains why this property exists."}]),
+            json!(["The property is wrong.","The property should be deleted."]),
+            None,
+        ));
+    }
+
+    let mut written = std::collections::BTreeSet::new();
+    let mut read = std::collections::BTreeSet::new();
+    for edge in &edges {
+        if !nodes
+            .get(edge["to"].as_str().unwrap_or_default())
+            .is_some_and(|node| node["kind"] == "state")
+        {
+            continue;
+        }
+        match edge["kind"].as_str() {
+            Some("writes") => {
+                written.insert(edge["to"].as_str().unwrap_or_default().to_owned());
+            }
+            Some("reads" | "checks") => {
+                read.insert(edge["to"].as_str().unwrap_or_default().to_owned());
+            }
+            _ => {}
+        }
+    }
+    for state in nodes.values().filter(|node| node["kind"] == "state") {
+        let id = state["id"].as_str().unwrap_or_default();
+        if written.contains(id) {
+            continue;
+        }
+        let readers = edges
+            .iter()
+            .filter(|edge| {
+                edge["to"] == id && matches!(edge["kind"].as_str(), Some("reads" | "checks"))
+            })
+            .filter_map(|edge| edge["from"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        findings.push(analysis_finding(
+            "unwritten_state",
+            if read.contains(id) { 0.76 } else { 0.68 },
+            json!([id]),
+            json!({"kind":"state_has_no_action_writes","node":id,"read_by":readers}),
+            "The state variable is initialized but no action writes it in the structural graph.",
+            json!([{"kind":"review_state_role","template":"Make the value a const/model parameter if it is intentionally fixed, or add the missing action/effect that changes it."}]),
+            json!(["The state variable is useless.","A verifier property is violated.","The variable is safe to delete without checking generated dialect state."]),
+            state.get("loc").cloned(),
+        ));
+    }
+
+    let relevance_seeds = [
+        "invariant",
+        "trans",
+        "leadsTo",
+        "reachable",
+        "acceptance",
+        "forbidden",
+        "guard",
+        "ensures",
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeSet<_>>();
+    let mut relevant = std::collections::BTreeSet::new();
+    let mut effect_targets = std::collections::BTreeMap::new();
+    let mut effect_reads =
+        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    for node in nodes.values().filter(|node| node["kind"] == "effect") {
+        if let (Some(id), Some(target)) = (node["id"].as_str(), node["target"].as_str()) {
+            effect_targets.insert(id.to_owned(), format!("state:{target}"));
+        }
+    }
+    for edge in &edges {
+        let Some(target) = edge["to"].as_str() else {
+            continue;
+        };
+        if !nodes
+            .get(target)
+            .is_some_and(|node| node["kind"] == "state")
+        {
+            continue;
+        }
+        let Some(source) = edge["from"].as_str() else {
+            continue;
+        };
+        let source_kind = nodes
+            .get(source)
+            .and_then(|node| node["kind"].as_str())
+            .unwrap_or_default();
+        if matches!(edge["kind"].as_str(), Some("reads" | "checks"))
+            && relevance_seeds.contains(source_kind)
+        {
+            relevant.insert(target.to_owned());
+        }
+        if edge["kind"] == "reads" && source_kind == "effect" {
+            effect_reads
+                .entry(source.to_owned())
+                .or_default()
+                .insert(target.to_owned());
+        }
+    }
+    loop {
+        let mut changed = false;
+        for (effect, target) in &effect_targets {
+            if !relevant.contains(target) {
+                continue;
+            }
+            for read in effect_reads.get(effect).into_iter().flatten() {
+                changed |= relevant.insert(read.clone());
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut writers =
+        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    for edge in &edges {
+        if edge["kind"] != "writes" {
+            continue;
+        }
+        let (Some(source), Some(target)) = (edge["from"].as_str(), edge["to"].as_str()) else {
+            continue;
+        };
+        if !nodes
+            .get(target)
+            .is_some_and(|node| node["kind"] == "state")
+        {
+            continue;
+        }
+        let writer = nodes.get(source).and_then(|node| {
+            if node["kind"] == "action" {
+                Some(source)
+            } else {
+                node["action"].as_str()
+            }
+        });
+        if let Some(writer) = writer {
+            writers
+                .entry(target.to_owned())
+                .or_default()
+                .insert(writer.to_owned());
+        }
+    }
+    let relevance_seed_kinds = relevance_seeds.into_iter().collect::<Vec<_>>();
+    for state in nodes.values().filter(|node| node["kind"] == "state") {
+        let id = state["id"].as_str().unwrap_or_default();
+        let state_writers = writers.get(id).cloned().unwrap_or_default();
+        if state_writers.is_empty()
+            || relevant.contains(id)
+            || state_writers.iter().any(|writer| {
+                nodes
+                    .get(writer)
+                    .is_some_and(|node| node.get("meta").is_some())
+            })
+        {
+            continue;
+        }
+        findings.push(analysis_finding(
+            "unread_state",
+            0.64,
+            json!([id]),
+            json!({
+                "kind":"state_influences_no_check",
+                "node":id,
+                "writers":state_writers,
+                "relevance_seed_kinds":relevance_seed_kinds,
+                "message":"No transitive relevance chain reaches a guard, property, ensures clause, or scenario.",
+            }),
+            "The state variable is written, but its value does not transitively influence a guard, property, ensures clause, or acceptance/forbidden scenario in the structural graph.",
+            json!([
+                {"kind":"add_property_or_guard","template":"Add the missing invariant/trans/leadsTo/reachable, scenario expectation, ensures clause, or guard that consumes this state if it is part of the contract."},
+                {"kind":"review_state_role","template":"If this is intentional audit/history/ghost state, tag or document the writing action so reviewers know why the state is externally consumed."}
+            ]),
+            json!([
+                "The state variable is safe to delete.",
+                "The value is semantically irrelevant to external tooling, runtime logs, audit requirements, or generated dialect behavior.",
+                "A verifier property is violated."
+            ]),
+            state.get("loc").cloned(),
+        ));
+    }
+    findings
+}
+
+#[allow(clippy::too_many_lines)]
+fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
+    let Ok(dependencies) = fsl_tools::analyze_model(model, "action_dependency_graph", None) else {
+        return Vec::new();
+    };
+    let scenario_ids = tsg["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|node| matches!(node["kind"].as_str(), Some("acceptance" | "forbidden")))
+        .filter_map(|node| node["id"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let scenario_actions = tsg["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|edge| scenario_ids.contains(edge["from"].as_str().unwrap_or_default()))
+        .filter(|edge| {
+            edge["to"]
+                .as_str()
+                .is_some_and(|target| target.starts_with("action:"))
+        })
+        .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let action_meta = model
+        .actions
+        .iter()
+        .map(|action| (format!("action:{}", action.name), action.meta.is_some()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let dependency_edges = dependencies["edges"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut findings = Vec::new();
+    for cycle in dependencies["cycles"].as_array().into_iter().flatten() {
+        let steps = cycle["steps"].as_array().cloned().unwrap_or_default();
+        let cycle_actions = steps
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        if cycle_actions.len() < 2
+            || (!cycle_actions
+                .iter()
+                .any(|action| action_meta.get(*action).copied().unwrap_or(false))
+                && cycle_actions
+                    .iter()
+                    .all(|action| !scenario_actions.contains(*action)))
+        {
+            continue;
+        }
+        let mut expanded = Vec::new();
+        let mut cycle_states = std::collections::BTreeSet::new();
+        for pair in steps.windows(2) {
+            let (Some(from), Some(to)) = (pair[0].as_str(), pair[1].as_str()) else {
+                continue;
+            };
+            expanded.push(from.to_owned());
+            let state = dependency_edges
+                .iter()
+                .find(|edge| edge["kind"] == "enables" && edge["from"] == from && edge["to"] == to)
+                .and_then(|edge| edge["state"].as_str());
+            if let Some(state) = state {
+                expanded.push(state.to_owned());
+                cycle_states.insert(state.to_owned());
+            }
+        }
+        if let Some(last) = steps.last().and_then(Value::as_str) {
+            expanded.push(last.to_owned());
+        }
+        let mut attached = model.actions.iter().any(|action| {
+            action.fair && cycle_actions.contains(format!("action:{}", action.name).as_str())
+        });
+        if !attached {
+            attached = model.leadstos.iter().any(|property| {
+                let mut reads = expression_identifiers(&property.before.python_ast());
+                reads.extend(expression_identifiers(&property.after.python_ast()));
+                reads
+                    .iter()
+                    .any(|state| cycle_states.contains(&format!("state:{state}")))
+            });
+        }
+        if !attached && let Some(terminal) = &model.terminal {
+            attached = expression_identifiers(&terminal.python_ast())
+                .iter()
+                .any(|state| cycle_states.contains(&format!("state:{state}")));
+        }
+        if attached {
+            continue;
+        }
+        let involved = expanded
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        findings.push(analysis_finding(
+            "progressless_cycle",
+            0.68,
+            json!(involved),
+            json!({"kind":"representative_cycle","steps":expanded,"attached_progress":[]}),
+            "This requirement/scenario-linked cycle has no explicit leadsTo, bounded exit, terminal exit, or fairness condition attached.",
+            json!([
+                {"kind":"add_property","template":"Add a leadsTo property that states the cyclic state eventually reaches a terminal state."},
+                {"kind":"strengthen_model","template":"Introduce an explicit bound and terminal state for the cyclic behavior."},
+                {"kind":"mark_or_fix_fairness","template":"Mark the progress-driving action fair, or add a guard/model change that makes progress explicit."}
+            ]),
+            json!(["The cycle is wrong.","The spec violates liveness.","A high cycle count is itself a defect."]),
+            None,
+        ));
+    }
+    findings
+}
+
+fn counter_delta(name: &str, expr: &KernelExpr, model: &KernelModel) -> Option<i64> {
+    fn scalar(expr: &KernelExpr, model: &KernelModel) -> Option<i64> {
+        match expr {
+            KernelExpr::Num(value) => Some(*value),
+            KernelExpr::Var(name) => match model.consts.get(name) {
+                Some(fsl_core::FslValue::Int(value)) => Some(*value),
+                _ => None,
+            },
+            KernelExpr::Neg(value) => scalar(value, model).map(|value| -value),
+            _ => None,
+        }
+    }
+    let KernelExpr::Binary { op, left, right } = expr else {
+        return None;
+    };
+    match op.as_str() {
+        "+" if matches!(left.as_ref(), KernelExpr::Var(value) if value == name) => {
+            scalar(right, model)
+        }
+        "+" if matches!(right.as_ref(), KernelExpr::Var(value) if value == name) => {
+            scalar(left, model)
+        }
+        "-" if matches!(left.as_ref(), KernelExpr::Var(value) if value == name) => {
+            scalar(right, model).map(|value| -value)
+        }
+        _ => None,
+    }
+}
+
+fn scan_counter_statements(
+    statements: &[KernelStatement],
+    counters: &std::collections::BTreeSet<String>,
+    model: &KernelModel,
+    nested: bool,
+    deltas: &mut std::collections::BTreeMap<String, i64>,
+    excluded: &mut std::collections::BTreeSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            KernelStatement::Assign { target, value, .. } => {
+                let root = lvalue_root(target);
+                if !counters.contains(root) {
+                    continue;
+                }
+                if nested || !matches!(target, KernelLValue::Var(name) if name == root) {
+                    excluded.insert(root.to_owned());
+                } else if let Some(delta) = counter_delta(root, value, model) {
+                    *deltas.entry(root.to_owned()).or_default() += delta;
+                } else {
+                    excluded.insert(root.to_owned());
+                }
+            }
+            KernelStatement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                scan_counter_statements(then_statements, counters, model, true, deltas, excluded);
+                scan_counter_statements(else_statements, counters, model, true, deltas, excluded);
+            }
+            KernelStatement::ForAll { statements, .. } => {
+                scan_counter_statements(statements, counters, model, true, deltas, excluded);
+            }
+        }
+    }
+}
+
+fn integer_gcd(mut left: i64, mut right: i64) -> i64 {
+    left = left.abs();
+    right = right.abs();
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left.max(1)
+}
+
+fn weighted_sum_text(weights: &std::collections::BTreeMap<String, i64>) -> String {
+    let mut parts = Vec::new();
+    for (name, weight) in weights {
+        if *weight == 0 {
+            continue;
+        }
+        let term = if weight.abs() == 1 {
+            name.clone()
+        } else {
+            format!("{}*{name}", weight.abs())
+        };
+        if parts.is_empty() {
+            parts.push(if *weight > 0 {
+                term
+            } else {
+                format!("-{term}")
+            });
+        } else {
+            parts.push(if *weight > 0 {
+                format!("+ {term}")
+            } else {
+                format!("- {term}")
+            });
+        }
+    }
+    parts.join(" ")
+}
+
+#[allow(clippy::too_many_lines)]
+fn ai_conservation_findings(model: &KernelModel) -> Vec<Value> {
+    let counters = model
+        .state
+        .iter()
+        .filter(|(_, ty)| matches!(ty, TypeRef::Int))
+        .map(|(name, _)| name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if counters.len() < 2 {
+        return Vec::new();
+    }
+    let mut excluded = std::collections::BTreeSet::new();
+    let mut actions = model.actions.iter().collect::<Vec<_>>();
+    actions.sort_by_key(|action| &action.name);
+    let mut rows = Vec::new();
+    for action in actions {
+        let mut deltas = std::collections::BTreeMap::new();
+        scan_counter_statements(
+            &action.statements,
+            &counters,
+            model,
+            false,
+            &mut deltas,
+            &mut excluded,
+        );
+        rows.push((format!("action:{}", action.name), deltas));
+    }
+    let eligible = counters
+        .iter()
+        .filter(|counter| {
+            !excluded.contains(*counter)
+                && rows
+                    .iter()
+                    .any(|(_, row)| row.get(*counter).copied().unwrap_or_default() != 0)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut findings = Vec::new();
+    for left in 0..eligible.len() {
+        for right in left + 1..eligible.len() {
+            let first = rows.iter().find_map(|(_, row)| {
+                let a = row.get(&eligible[left]).copied().unwrap_or_default();
+                let b = row.get(&eligible[right]).copied().unwrap_or_default();
+                (a != 0 || b != 0).then_some((a, b))
+            });
+            let Some((a, b)) = first else {
+                continue;
+            };
+            let divisor = integer_gcd(a, b);
+            let mut left_weight = b / divisor;
+            let mut right_weight = -a / divisor;
+            if left_weight < 0 || (left_weight == 0 && right_weight < 0) {
+                left_weight = -left_weight;
+                right_weight = -right_weight;
+            }
+            if left_weight == 0
+                || right_weight == 0
+                || rows.iter().any(|(_, row)| {
+                    left_weight * row.get(&eligible[left]).copied().unwrap_or_default()
+                        + right_weight * row.get(&eligible[right]).copied().unwrap_or_default()
+                        != 0
+                })
+            {
+                continue;
+            }
+            let weights = std::collections::BTreeMap::from([
+                (eligible[left].clone(), left_weight),
+                (eligible[right].clone(), right_weight),
+            ]);
+            let action_effects = rows
+                .iter()
+                .filter_map(|(action, row)| {
+                    let deltas = weights
+                        .keys()
+                        .filter_map(|name| {
+                            let delta = row.get(name).copied().unwrap_or_default();
+                            (delta != 0).then_some((name.clone(), delta))
+                        })
+                        .collect::<std::collections::BTreeMap<_, _>>();
+                    (!deltas.is_empty()).then_some(json!({
+                        "action":action,
+                        "deltas":deltas,
+                        "weighted_sum_delta":deltas.iter().map(|(name,delta)|weights[name]*delta).sum::<i64>(),
+                    }))
+                })
+                .collect::<Vec<_>>();
+            if action_effects.len() < 2 {
+                continue;
+            }
+            let expression = weighted_sum_text(&weights);
+            let involved = weights
+                .keys()
+                .map(|name| format!("state:{name}"))
+                .chain(
+                    action_effects
+                        .iter()
+                        .filter_map(|item| item["action"].as_str().map(str::to_owned)),
+                )
+                .collect::<std::collections::BTreeSet<_>>();
+            findings.push(analysis_finding(
+                "conservation_candidate",
+                0.6,
+                json!(involved),
+                json!({
+                    "kind":"weighted_sum_conservation_candidate",
+                    "expression":expression,
+                    "weights":weights,
+                    "action_net_effects":action_effects,
+                    "excluded_counters":excluded,
+                }),
+                "Counter-like effects structurally preserve this weighted sum, which may indicate an implicit invariant worth declaring and proving.",
+                json!([{"kind":"add_invariant_then_verify","template":format!("Declare `invariant Conservation {{ {expression} == <initial value> }}` and run `fslc verify` plus `--engine induction` to prove it.")}]),
+                json!(["The weighted sum is actually invariant.","The absence of a candidate means no conservation law exists.","This finding is a proof; it is only structural evidence and must be checked by verify."]),
+                None,
+            ));
+        }
+    }
+    findings.truncate(8);
+    findings
+}
+
+struct SemanticReview {
+    divergent: Vec<Value>,
+    unconstrained: Vec<Value>,
+    action_nodes: std::collections::BTreeSet<String>,
+    state_nodes: std::collections::BTreeSet<String>,
+}
+
+fn semantic_action_record(
+    enabled: &fsl_runtime::EnabledAction,
+    successor: &fsl_runtime::State,
+) -> Value {
+    json!({
+        "name":fslc_rust::display_name(&enabled.action),
+        "params":enabled.params.iter().map(|(name,value)|(name.clone(),fslc_rust::fsl_value_json(value))).collect::<Map<_,_>>(),
+        "successor":fslc_rust::state_json(successor),
+    })
+}
+
+fn predicate_value(
+    model: &KernelModel,
+    expression: &KernelExpr,
+    state: &fsl_runtime::State,
+) -> Option<bool> {
+    match fsl_runtime::eval(
+        expression,
+        state,
+        &mut fsl_runtime::Bindings::new(),
+        model,
+        None,
+    )
+    .ok()?
+    {
+        fsl_core::FslValue::Bool(value) => Some(value),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn bounded_semantic_review(
+    model: &KernelModel,
+    unconstrained_states: &std::collections::BTreeSet<String>,
+    acceptance: &[(String, KernelExpr)],
+) -> SemanticReview {
+    let Ok(initial) = fsl_runtime::Monitor::new(model.clone()) else {
+        return SemanticReview {
+            divergent: Vec::new(),
+            unconstrained: Vec::new(),
+            action_nodes: std::collections::BTreeSet::new(),
+            state_nodes: std::collections::BTreeSet::new(),
+        };
+    };
+    let initial_trace = vec![fsl_core::TraceStep {
+        step: 0,
+        state: initial.state.clone(),
+        action: None,
+        changes: std::collections::BTreeMap::new(),
+    }];
+    let mut predicates = model
+        .invariants
+        .iter()
+        .filter(|property| !property.name.starts_with('_'))
+        .map(|property| {
+            (
+                "invariant",
+                property.name.as_str(),
+                format!("invariant:{}", property.name),
+                &property.expr,
+            )
+        })
+        .collect::<Vec<_>>();
+    predicates.extend(acceptance.iter().map(|(name, expression)| {
+        (
+            "acceptance",
+            name.as_str(),
+            format!("acceptance:{name}"),
+            expression,
+        )
+    }));
+    let mut queue = std::collections::VecDeque::from([(initial, 0_usize, initial_trace)]);
+    let mut visited = std::collections::BTreeSet::new();
+    let mut seen_pairs = std::collections::BTreeSet::new();
+    let mut seen_states = std::collections::BTreeSet::new();
+    let mut divergent = Vec::new();
+    let mut unconstrained = Vec::new();
+    let mut pair_queries = 0;
+    while let Some((monitor, step, trace)) = queue.pop_front() {
+        if !visited.insert(monitor.state.clone()) || step > 4 {
+            continue;
+        }
+        let Ok(enabled) = monitor.enabled() else {
+            continue;
+        };
+        let mut groups = std::collections::BTreeMap::<String, Vec<_>>::new();
+        for action in &enabled {
+            groups
+                .entry(action.action.clone())
+                .or_default()
+                .push(action.clone());
+        }
+        let names = groups.keys().cloned().collect::<Vec<_>>();
+        for left_index in 0..names.len() {
+            for right_index in left_index + 1..names.len() {
+                let pair = (names[left_index].clone(), names[right_index].clone());
+                for left in &groups[&pair.0] {
+                    for right in &groups[&pair.1] {
+                        if pair_queries >= 256 {
+                            break;
+                        }
+                        pair_queries += 1;
+                        let mut left_monitor = monitor.clone();
+                        let mut right_monitor = monitor.clone();
+                        let (Ok(left_step), Ok(right_step)) =
+                            (left_monitor.step(left), right_monitor.step(right))
+                        else {
+                            continue;
+                        };
+                        let left_state = left_step.state;
+                        let right_state = right_step.state;
+                        let divergent_state = model
+                            .state
+                            .iter()
+                            .filter(|(name, _)| left_state.get(name) != right_state.get(name))
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<_>>();
+                        let base_record = || {
+                            json!({
+                                "bounded_evidence":{"available":true,"depth":4,"reachable_at_step":step},
+                                "trace":fslc_rust::trace_json(model,&trace),
+                                "state":fslc_rust::state_json(&monitor.state),
+                                "actions":[semantic_action_record(left,&left_state),semantic_action_record(right,&right_state)],
+                                "action_nodes":[format!("action:{}",left.action),format!("action:{}",right.action)],
+                                "divergent_state":divergent_state,
+                            })
+                        };
+                        if !seen_pairs.contains(&pair) {
+                            let differing = predicates
+                                .iter()
+                                .filter_map(|(kind, name, node, expression)| {
+                                    let left = predicate_value(model, expression, &left_state)?;
+                                    let right = predicate_value(model, expression, &right_state)?;
+                                    (left != right).then_some((*kind, *name, node))
+                                })
+                                .collect::<Vec<_>>();
+                            if !differing.is_empty() {
+                                let mut record = base_record();
+                                if let Value::Object(object) = &mut record {
+                                    object.insert(
+                                        "kind".to_owned(),
+                                        json!("reachable_divergent_choice"),
+                                    );
+                                    object.insert("differing_predicates".to_owned(), json!(differing.iter().map(|(kind,name,_)|json!({"kind":kind,"name":name})).collect::<Vec<_>>()));
+                                    object.insert(
+                                        "predicate_nodes".to_owned(),
+                                        json!(
+                                            differing
+                                                .iter()
+                                                .map(|(_, _, node)| (*node).clone())
+                                                .collect::<Vec<_>>()
+                                        ),
+                                    );
+                                }
+                                divergent.push(record);
+                                seen_pairs.insert(pair.clone());
+                            }
+                        }
+                        let remaining_states = unconstrained_states
+                            .difference(&seen_states)
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        for state in &remaining_states {
+                            if left_state.get(state) == right_state.get(state) {
+                                continue;
+                            }
+                            let mut record = base_record();
+                            if let Value::Object(object) = &mut record {
+                                object.insert(
+                                    "kind".to_owned(),
+                                    json!("reachable_unconstrained_effect"),
+                                );
+                                object.insert("state_name".to_owned(), json!(state));
+                                object.insert("divergent_state".to_owned(), json!([state]));
+                            }
+                            unconstrained.push(record);
+                            seen_states.insert(state.clone());
+                        }
+                    }
+                }
+            }
+        }
+        if step < 4 {
+            for action in enabled {
+                let mut child = monitor.clone();
+                let Ok(result) = child.step(&action) else {
+                    continue;
+                };
+                if result.violation.is_some() {
+                    continue;
+                }
+                let mut child_trace = trace.clone();
+                child_trace.push(fsl_core::TraceStep {
+                    step: step + 1,
+                    state: child.state.clone(),
+                    action: Some(fsl_core::TraceAction {
+                        name: action.action,
+                        params: action.params,
+                    }),
+                    changes: std::collections::BTreeMap::new(),
+                });
+                queue.push_back((child, step + 1, child_trace));
+            }
+        }
+    }
+    let action_nodes = divergent
+        .iter()
+        .chain(&unconstrained)
+        .flat_map(|record| record["action_nodes"].as_array().into_iter().flatten())
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    let state_nodes = unconstrained
+        .iter()
+        .filter_map(|record| record["state_name"].as_str())
+        .map(|state| format!("state:{state}"))
+        .collect();
+    SemanticReview {
+        divergent,
+        unconstrained,
+        action_nodes,
+        state_nodes,
+    }
+}
+
+fn semantic_review_findings(review: &SemanticReview) -> Vec<Value> {
+    let mut findings = Vec::new();
+    for record in &review.divergent {
+        let actions = record["actions"].as_array().expect("actions");
+        let left = actions[0]["name"].as_str().unwrap_or_default();
+        let right = actions[1]["name"].as_str().unwrap_or_default();
+        let question = format!(
+            "Both {left} and {right} are enabled in this reachable state and produce different contract outcomes. Which outcome is intended, or should both be explicitly allowed by an invariant or acceptance case?"
+        );
+        let involved = record["predicate_nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(record["action_nodes"].as_array().into_iter().flatten())
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut finding = analysis_finding(
+            "divergent_choice",
+            0.86,
+            json!(involved),
+            record.clone(),
+            "Two different actions are enabled in the same bounded-reachable state, and choosing between them changes an invariant or acceptance predicate.",
+            json!([{"kind":"ask_spec_question","template":question}]),
+            json!([
+                "Either action is wrong.",
+                "The bounded witness proves the product must choose only one action.",
+                "No deeper reachable choice exists beyond the analyzed bound."
+            ]),
+            None,
+        );
+        if let Value::Object(object) = &mut finding {
+            object.insert("spec_question".to_owned(), json!(question));
+            object.insert("evidence_basis".to_owned(), json!("bounded_bmc"));
+        }
+        findings.push(finding);
+    }
+    for record in &review.unconstrained {
+        let actions = record["actions"].as_array().expect("actions");
+        let left = actions[0]["name"].as_str().unwrap_or_default();
+        let right = actions[1]["name"].as_str().unwrap_or_default();
+        let state = record["state_name"].as_str().unwrap_or_default();
+        let question = format!(
+            "Both {left} and {right} can write different values to {state} in this reachable state, but no guard, property, ensures clause, or scenario constrains that value. What outcome is intended, or should both possibilities be declared explicitly?"
+        );
+        let actions = record["action_nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>();
+        let involved = std::iter::once(format!("state:{state}"))
+            .chain(actions)
+            .collect::<Vec<_>>();
+        let mut finding = analysis_finding(
+            "unconstrained_effect",
+            0.82,
+            json!(involved),
+            record.clone(),
+            "A state value outside the contract-observation graph has multiple concrete next values from the same bounded-reachable state.",
+            json!([{"kind":"ask_spec_question","template":question}]),
+            json!([
+                "The state variable is safe to delete.",
+                "Either successor is incorrect.",
+                "The bounded witness is an unbounded proof of freedom."
+            ]),
+            None,
+        );
+        if let Value::Object(object) = &mut finding {
+            object.insert("spec_question".to_owned(), json!(question));
+            object.insert("evidence_basis".to_owned(), json!("bounded_bmc"));
+        }
+        findings.push(finding);
+    }
+    findings
+}
+
+fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) -> Value {
+    let tsg = fsl_tools::build_tsg(model);
+    let mut findings = ai_structural_findings(&tsg);
+    let unconstrained_states = findings
+        .iter()
+        .filter(|finding| finding["finding_type"] == "unread_state")
+        .filter_map(|finding| finding["involved_nodes"].get(0)?.as_str())
+        .filter_map(|node| node.strip_prefix("state:"))
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>();
+    let semantic = bounded_semantic_review(model, &unconstrained_states, acceptance);
+    findings.retain(|finding| {
+        !(finding["finding_type"] == "unread_state"
+            && finding["involved_nodes"]
+                .get(0)
+                .and_then(Value::as_str)
+                .is_some_and(|node| semantic.state_nodes.contains(node)))
+    });
+    findings.extend(ai_progressless_findings(model, &tsg));
+    findings.extend(ai_conservation_findings(model));
+    findings.extend(ai_tag_findings(model));
+    for action in &model.actions {
+        if !action.requires.is_empty()
+            || semantic
+                .action_nodes
+                .contains(&format!("action:{}", action.name))
+        {
+            continue;
+        }
+        let action_id = format!("action:{}", action.name);
+        let writes = tsg["edges"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|edge| edge["from"] == action_id && edge["kind"] == "writes")
+            .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        findings.push(analysis_finding(
+            "unguarded_action",
+            0.72,
+            json!([action_id]),
+            json!({"kind":"action_has_no_requires","node":action_id,"writes":writes}),
+            "The action has no explicit requires clauses, so it is structurally enabled in every state unless generated lowering adds hidden constraints elsewhere.",
+            json!([{"kind":"add_or_confirm_guard","template":"Add a requires clause if the action should be state-dependent, or tag/document why it is intentionally always enabled."}]),
+            json!(["The action is wrong.","Always-enabled behavior is invalid.","The action is reachable in every semantic state without considering type bounds and invariants."]),
+            Some(action.span.python_loc()),
+        ));
+    }
+    findings.extend(semantic_review_findings(&semantic));
+    findings.sort_by_key(|finding| {
+        (
+            finding["finding_type"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            finding["involved_nodes"].to_string(),
+        )
+    });
+    let mut counters = std::collections::BTreeMap::<String, usize>::new();
+    for finding in &mut findings {
+        let kind = finding["finding_type"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let count = counters.entry(kind.clone()).or_default();
+        *count += 1;
+        if let Value::Object(object) = finding {
+            object.insert(
+                "finding_id".to_owned(),
+                json!(format!(
+                    "STRUCT-{}-{count:04}",
+                    kind.replace('_', "-").to_uppercase()
+                )),
+            );
+        }
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("analyzed"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("analysis".to_owned(), json!("structure"));
+    output.insert("profile".to_owned(), json!("ai-review"));
+    output.insert("schema_version".to_owned(), json!("analysis-findings.v0"));
+    output.insert("findings".to_owned(), Value::Array(findings));
+    Value::Object(output)
+}
+
+#[derive(Clone)]
+struct ProjectAnalysisLayer {
+    model: KernelModel,
+    tsg: Value,
+    nodes: std::collections::BTreeMap<String, Value>,
+    covers: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+}
+
+fn project_analysis_node(id: &str, kind: &str, name: &str) -> Value {
+    json!({"id":id,"kind":kind,"name":name,"label":name})
+}
+
+fn project_analysis_edge(from: &str, kind: &str, to: &str) -> Value {
+    json!({"id":format!("edge:{from}:{kind}:{to}"),"kind":kind,"from":from,"to":to})
+}
+
+fn insert_analysis_item(items: &mut std::collections::BTreeMap<String, Value>, value: Value) {
+    if let Some(id) = value.get("id").and_then(Value::as_str) {
+        items.entry(id.to_owned()).or_insert(value);
+    }
+}
+
+fn prefixed_analysis_node(layer: &str, node: &Value) -> Value {
+    let mut node = node.clone();
+    if let Value::Object(object) = &mut node {
+        let id = object
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        object.insert("id".to_owned(), json!(format!("{layer}:{id}")));
+        object.insert("layer".to_owned(), json!(layer));
+        if object.get("kind").and_then(Value::as_str) == Some("spec") {
+            object.insert(
+                "kind".to_owned(),
+                json!(match layer {
+                    "business" => "business_spec",
+                    "requirements" => "requirements_spec",
+                    "design" => "design_spec",
+                    _ => "spec",
+                }),
+            );
+        }
+    }
+    node
+}
+
+fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
+    let mut edge = edge.clone();
+    if let Value::Object(object) = &mut edge {
+        let id = object.get("id").and_then(Value::as_str).unwrap_or_default();
+        let from = object
+            .get("from")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let to = object
+            .get("to")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        object.insert("id".to_owned(), json!(format!("edge:{layer}:{id}")));
+        object.insert("from".to_owned(), json!(format!("{layer}:{from}")));
+        object.insert("to".to_owned(), json!(format!("{layer}:{to}")));
+        object.insert("layer".to_owned(), json!(layer));
+    }
+    edge
+}
+
+fn add_requirements_layer_nodes(tsg: &mut Value, model: &KernelModel) {
+    let mut requirements = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for action in &model.actions {
+        if let Some(meta) = &action.meta {
+            requirements
+                .entry(meta.id.clone())
+                .or_default()
+                .push(format!("action:{}", action.name));
+        }
+    }
+    for (kind, properties) in [
+        ("invariant", &model.invariants),
+        ("trans", &model.transitions),
+        ("reachable", &model.reachables),
+    ] {
+        for property in properties {
+            if let Some(meta) = &property.meta {
+                requirements
+                    .entry(meta.id.clone())
+                    .or_default()
+                    .push(format!("{kind}:{}", property.name));
+            }
+        }
+    }
+    for property in &model.leadstos {
+        if let Some(meta) = &property.meta {
+            requirements
+                .entry(meta.id.clone())
+                .or_default()
+                .push(format!("leadsTo:{}", property.name));
+        }
+    }
+    let mut node_additions = Vec::new();
+    let mut edge_additions = Vec::new();
+    for (requirement, targets) in requirements {
+        let id = format!("requirement:{requirement}");
+        node_additions.push(project_analysis_node(&id, "requirement", &requirement));
+        edge_additions.push(project_analysis_edge(
+            &format!("spec:{}", model.name),
+            "declares",
+            &id,
+        ));
+        for target in targets {
+            edge_additions.push(project_analysis_edge(&id, "covers", &target));
+        }
+    }
+    if let Some(nodes) = tsg.get_mut("nodes").and_then(Value::as_array_mut) {
+        nodes.extend(node_additions);
+        nodes.sort_by_key(|node| node["id"].as_str().unwrap_or_default().to_owned());
+    }
+    if let Some(edges) = tsg.get_mut("edges").and_then(Value::as_array_mut) {
+        edges.extend(edge_additions);
+        edges.sort_by_key(|edge| edge["id"].as_str().unwrap_or_default().to_owned());
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn project_traceability_output(path: &Path) -> Result<Value, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let sections = parse_project_manifest(&source)?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let manifest = analysis_display_path(path);
+    let mut nodes = std::collections::BTreeMap::new();
+    let mut edges = std::collections::BTreeMap::new();
+    let manifest_id = format!("file:{manifest}");
+    let mut manifest_node = project_analysis_node(&manifest_id, "file", &manifest);
+    manifest_node
+        .as_object_mut()
+        .expect("node object")
+        .insert("path".to_owned(), json!(manifest));
+    insert_analysis_item(&mut nodes, manifest_node);
+    let mut layers = std::collections::BTreeMap::new();
+    for layer in ["business", "requirements", "design"] {
+        let Some(file) = sections
+            .get(layer)
+            .and_then(|section| section.values.get("file"))
+        else {
+            continue;
+        };
+        let layer_path = base.join(file);
+        let model = load_model(&layer_path)?;
+        let mut tsg = fsl_tools::build_tsg(&model);
+        if layer == "requirements" {
+            add_requirements_layer_nodes(&mut tsg, &model);
+        }
+        let display = analysis_display_path(&layer_path);
+        let file_id = format!("file:{layer}:{display}");
+        let mut file_node = project_analysis_node(&file_id, "file", &display);
+        file_node
+            .as_object_mut()
+            .expect("node object")
+            .insert("path".to_owned(), json!(display));
+        insert_analysis_item(&mut nodes, file_node);
+        let mut layer_nodes = std::collections::BTreeMap::new();
+        for node in tsg["nodes"].as_array().into_iter().flatten() {
+            let original_id = node["id"].as_str().unwrap_or_default().to_owned();
+            layer_nodes.insert(original_id.clone(), node.clone());
+            let prefixed = prefixed_analysis_node(layer, node);
+            if node["kind"] == "spec" {
+                insert_analysis_item(
+                    &mut edges,
+                    project_analysis_edge(
+                        &file_id,
+                        "declares",
+                        prefixed["id"].as_str().unwrap_or_default(),
+                    ),
+                );
+            }
+            insert_analysis_item(&mut nodes, prefixed);
+        }
+        let mut covers =
+            std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+        for edge in tsg["edges"].as_array().into_iter().flatten() {
+            insert_analysis_item(&mut edges, prefixed_analysis_edge(layer, edge));
+            if edge["kind"] == "covers"
+                && edge["from"]
+                    .as_str()
+                    .is_some_and(|from| from.starts_with("requirement:"))
+                && let (Some(from), Some(to)) = (edge["from"].as_str(), edge["to"].as_str())
+            {
+                covers
+                    .entry(to.to_owned())
+                    .or_default()
+                    .insert(from.to_owned());
+            }
+        }
+        layers.insert(
+            layer.to_owned(),
+            ProjectAnalysisLayer {
+                model,
+                tsg,
+                nodes: layer_nodes,
+                covers,
+            },
+        );
+    }
+    for layer in ["business", "requirements", "design"] {
+        let Some(section) = sections.get(layer) else {
+            continue;
+        };
+        let Some(target) = section.values.get("refine_against") else {
+            continue;
+        };
+        let Some(mapping) = section.values.get("mapping") else {
+            continue;
+        };
+        let (Some(implementation), Some(abstraction)) = (layers.get(layer), layers.get(target))
+        else {
+            continue;
+        };
+        let mapping_path = base.join(mapping);
+        let document = parse_surface_document(&mapping_path)?;
+        let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
+            return Err("expected refinement mapping".to_owned());
+        };
+        let display = analysis_display_path(&mapping_path);
+        let refinement_id = format!("refinement:{layer}->{target}:{}", refinement.name);
+        let file_id = format!("file:{layer}->{target}:{display}");
+        let mut file_node = project_analysis_node(&file_id, "file", &display);
+        file_node
+            .as_object_mut()
+            .expect("node object")
+            .insert("path".to_owned(), json!(display));
+        insert_analysis_item(&mut nodes, file_node);
+        let mut ref_node = project_analysis_node(&refinement_id, "refinement", &refinement.name);
+        ref_node.as_object_mut().expect("node object").insert(
+            "path".to_owned(),
+            json!(analysis_display_path(&mapping_path)),
+        );
+        insert_analysis_item(&mut nodes, ref_node);
+        insert_analysis_item(
+            &mut edges,
+            project_analysis_edge(&file_id, "declares", &refinement_id),
+        );
+        insert_analysis_item(
+            &mut edges,
+            project_analysis_edge(
+                &refinement_id,
+                "implements",
+                &format!("{layer}:spec:{}", implementation.model.name),
+            ),
+        );
+        insert_analysis_item(
+            &mut edges,
+            project_analysis_edge(
+                &refinement_id,
+                "abstracts",
+                &format!("{target}:spec:{}", abstraction.model.name),
+            ),
+        );
+        let impl_states = implementation
+            .model
+            .state
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        for item in &refinement.items {
+            match item {
+                fsl_syntax::RefinementItem::Map {
+                    name,
+                    binder,
+                    expr,
+                    span,
+                } => {
+                    let map_id = format!("state_map:{layer}->{target}:{name}");
+                    let mut map_node = project_analysis_node(&map_id, "state_map", name);
+                    if let Value::Object(object) = &mut map_node {
+                        object.insert("loc".to_owned(), span.python_loc());
+                        object.insert("layer".to_owned(), json!(layer));
+                        object.insert("target_layer".to_owned(), json!(target));
+                    }
+                    insert_analysis_item(&mut nodes, map_node);
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(&refinement_id, "declares", &map_id),
+                    );
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(
+                            &map_id,
+                            "maps_state",
+                            &format!("{target}:state:{name}"),
+                        ),
+                    );
+                    let mut reads = expression_identifiers(&expr.python_ast());
+                    reads.retain(|read| impl_states.contains(read));
+                    if let Some(binder) = binder {
+                        let binder = match binder {
+                            fsl_syntax::Binder::Typed { name, .. }
+                            | fsl_syntax::Binder::Range { name, .. }
+                            | fsl_syntax::Binder::Collection { name, .. } => name,
+                        };
+                        reads.remove(binder);
+                    }
+                    for read in reads {
+                        insert_analysis_item(
+                            &mut edges,
+                            project_analysis_edge(
+                                &map_id,
+                                "reads_impl_state",
+                                &format!("{layer}:state:{read}"),
+                            ),
+                        );
+                    }
+                }
+                fsl_syntax::RefinementItem::Action {
+                    name,
+                    target: action_target,
+                    span,
+                    ..
+                } => {
+                    let map_id = format!("action_map:{layer}->{target}:{name}");
+                    let mut map_node = project_analysis_node(&map_id, "action_map", name);
+                    if let Value::Object(object) = &mut map_node {
+                        object.insert("loc".to_owned(), span.python_loc());
+                        object.insert("layer".to_owned(), json!(layer));
+                        object.insert("target_layer".to_owned(), json!(target));
+                    }
+                    insert_analysis_item(&mut nodes, map_node);
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(&refinement_id, "declares", &map_id),
+                    );
+                    let impl_id = format!("{layer}:action:{name}");
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(&map_id, "maps_action", &impl_id),
+                    );
+                    match action_target {
+                        fsl_syntax::ActionTarget::Stutter => {
+                            let stutter_id = format!("stutter_map:{layer}->{target}:{name}");
+                            let mut stutter =
+                                project_analysis_node(&stutter_id, "stutter_map", name);
+                            stutter
+                                .as_object_mut()
+                                .expect("node object")
+                                .insert("loc".to_owned(), span.python_loc());
+                            insert_analysis_item(&mut nodes, stutter);
+                            insert_analysis_item(
+                                &mut edges,
+                                project_analysis_edge(&map_id, "stutters", &stutter_id),
+                            );
+                        }
+                        fsl_syntax::ActionTarget::Action(abs_action, _) => {
+                            let abs_id = format!("{target}:action:{abs_action}");
+                            insert_analysis_item(
+                                &mut edges,
+                                project_analysis_edge(&impl_id, "maps_action", &abs_id),
+                            );
+                            if let Some(requirements) =
+                                abstraction.covers.get(&format!("action:{abs_action}"))
+                            {
+                                for requirement in requirements {
+                                    let mut anchor = project_analysis_edge(
+                                        &format!("{target}:{requirement}"),
+                                        "lower_anchor",
+                                        &impl_id,
+                                    );
+                                    if let Value::Object(object) = &mut anchor {
+                                        object.insert(
+                                            "formal_status".to_owned(),
+                                            json!("not_a_violation"),
+                                        );
+                                        object.insert(
+                                            "via".to_owned(),
+                                            json!("refinement_action_map"),
+                                        );
+                                        object.insert("layer".to_owned(), json!(layer));
+                                    }
+                                    insert_analysis_item(&mut edges, anchor);
+                                }
+                            }
+                        }
+                    }
+                }
+                fsl_syntax::RefinementItem::PreserveProgress { span, .. } => {
+                    let id = format!("preserve_progress:{layer}->{target}:{}", refinement.name);
+                    let mut node =
+                        project_analysis_node(&id, "preserve_progress", "preserve progress");
+                    node.as_object_mut()
+                        .expect("node object")
+                        .insert("loc".to_owned(), span.python_loc());
+                    insert_analysis_item(&mut nodes, node);
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(&refinement_id, "preserves_progress", &id),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    for (upper, lower) in [("business", "requirements"), ("requirements", "design")] {
+        let (Some(upper_layer), Some(lower_layer)) = (layers.get(upper), layers.get(lower)) else {
+            continue;
+        };
+        for (id, node) in &upper_layer.nodes {
+            if !matches!(node["kind"].as_str(), Some("requirement" | "control"))
+                || !lower_layer.nodes.contains_key(id)
+            {
+                continue;
+            }
+            let mut anchor = project_analysis_edge(
+                &format!("{upper}:{id}"),
+                "lower_anchor",
+                &format!("{lower}:{id}"),
+            );
+            if let Value::Object(object) = &mut anchor {
+                object.insert("formal_status".to_owned(), json!("not_a_violation"));
+                object.insert("via".to_owned(), json!("same_id"));
+            }
+            insert_analysis_item(&mut edges, anchor);
+        }
+    }
+    let lower_anchors = edges
+        .values()
+        .filter(|edge| edge["kind"] == "lower_anchor")
+        .filter_map(|edge| edge["from"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut findings = Vec::new();
+    let mut counter = 0;
+    for layer in ["business", "requirements"] {
+        let Some(data) = layers.get(layer) else {
+            continue;
+        };
+        for node in data.tsg["nodes"].as_array().into_iter().flatten() {
+            if !matches!(node["kind"].as_str(), Some("requirement" | "control")) {
+                continue;
+            }
+            let id = format!("{layer}:{}", node["id"].as_str().unwrap_or_default());
+            if lower_anchors.contains(&id) {
+                continue;
+            }
+            counter += 1;
+            findings.push(json!({
+                "finding_id":format!("STRUCT-TRACEABILITY-GAP-{counter:04}"),
+                "analysis":"structure",
+                "finding_type":"traceability_gap",
+                "severity":"review_required",
+                "confidence":0.74,
+                "formal_status":"not_a_violation",
+                "involved_nodes":[id],
+                "witness":{"kind":"missing_lower_anchor","layer":layer,"node":id},
+                "why_it_matters":"An upper-layer requirement/control ID has no visible lower-layer structural anchor in the project traceability graph.",
+                "candidate_repairs":[{"kind":"add_lower_anchor","template":"Carry the ID into the lower layer, or map an abstract action/property to a lower-layer action through refinement."}],
+                "do_not_assume":["The lower layer violates the upper-layer contract.","Name similarity proves semantic coverage."],
+            }));
+        }
+    }
+    let nodes = nodes.into_values().collect::<Vec<_>>();
+    let edges = edges.into_values().collect::<Vec<_>>();
+    let mut analysis = fsl_tools::complete_analysis_graph("traceability_graph", &nodes, &edges);
+    if let Value::Object(object) = &mut analysis {
+        object.insert("manifest".to_owned(), json!(analysis_display_path(path)));
+        object.insert("findings".to_owned(), Value::Array(findings));
+    }
+    Ok(analysis)
+}
+
+fn analysis_acceptance_predicates(path: &Path) -> Vec<(String, KernelExpr)> {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) = parse_surface_document(path)
+    else {
+        return Vec::new();
+    };
+    requirements
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            fsl_syntax::RequirementsItem::Acceptance {
+                id,
+                expectation: fsl_syntax::AcceptanceExpectation::Expr(expression, _),
+                ..
+            } => Some((id, expression)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_analyze(
+    path: &Path,
+    projection: &str,
+    focus: Option<&str>,
+    output_format: &str,
+    profile: Option<&str>,
+    export_kind: Option<&str>,
+) -> (Value, i32) {
+    if !matches!(output_format, "json" | "dot" | "mermaid") {
+        return (
+            error_output(
+                "semantics",
+                &format!("unsupported analyze format: {output_format}"),
+            ),
+            2,
+        );
+    }
+    if focus.is_some() && profile.is_none() && projection != "impact_graph" {
+        return (
+            error_output(
+                "semantics",
+                "--focus is supported only with --projection impact_graph",
+            ),
+            2,
+        );
+    }
+    if profile.is_some() && output_format != "json" {
+        return (
+            error_output(
+                "semantics",
+                "DOT/Mermaid export is supported for graph projections, not profiles",
+            ),
+            2,
+        );
+    }
+    if profile.is_some() && focus.is_some() {
+        return (
+            error_output(
+                "semantics",
+                "--focus is supported only with graph projections, not profiles",
+            ),
+            2,
+        );
+    }
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("toml") {
+        if export_kind.is_some() {
+            return (
+                error_output(
+                    "semantics",
+                    "tag-review export requires an FSL specification",
+                ),
+                2,
+            );
+        }
+        if profile.is_some() {
+            return (
+                error_output(
+                    "semantics",
+                    "project traceability analysis does not support --profile",
+                ),
+                2,
+            );
+        }
+        if projection != "traceability_graph" {
+            return (
+                error_output(
+                    "semantics",
+                    "project manifests support only --projection traceability_graph",
+                ),
+                2,
+            );
+        }
+        let analysis = match project_traceability_output(path) {
+            Ok(analysis) => analysis,
+            Err(error) => return (error_output("semantics", &error), 2),
+        };
+        return finish_analysis(analysis, None, projection, output_format);
+    }
+    if let Some(export_kind) = export_kind {
+        if export_kind != "tag-review" {
+            return (
+                error_output(
+                    "semantics",
+                    &format!("unsupported analyze export: {export_kind}"),
+                ),
+                2,
+            );
+        }
+        if profile.is_some() || focus.is_some() || output_format != "json" || projection != "tsg" {
+            return (
+                error_output(
+                    "semantics",
+                    "--export tag-review cannot be combined with --profile, --focus, --projection, or non-JSON --format",
+                ),
+                2,
+            );
+        }
+        let model = match load_model(path) {
+            Ok(model) => model,
+            Err(error) => return (semantic_error_output(&error), 2),
+        };
+        return (tag_review_output(&model), 0);
+    }
+    if let Ok(fsl_syntax::SurfaceDocument::Refinement(refinement)) = parse_surface_document(path) {
+        if let Some(profile) = profile {
+            let mut output = envelope();
+            output.insert("result".to_owned(), json!("analyzed"));
+            output.insert("refinement".to_owned(), json!(refinement.name));
+            output.insert("analysis".to_owned(), json!("structure"));
+            output.insert("profile".to_owned(), json!(profile));
+            output.insert("schema_version".to_owned(), json!("analysis-findings.v0"));
+            output.insert("findings".to_owned(), json!([]));
+            return (Value::Object(output), 0);
+        }
+        if !matches!(projection, "tsg" | "refinement_graph") {
+            return (
+                error_output(
+                    "semantics",
+                    "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
+                ),
+                2,
+            );
+        }
+        let name = refinement.name.clone();
+        return finish_analysis(
+            fsl_tools::analyze_refinement(&refinement),
+            Some(("refinement", &name)),
+            projection,
+            output_format,
+        );
+    }
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    if let Some(profile) = profile {
+        if profile != "ai-review" {
+            return (
+                error_output("semantics", &format!("unsupported profile: {profile}")),
+                2,
+            );
+        }
+        let acceptance = analysis_acceptance_predicates(path);
+        return (ai_review_output(&model, &acceptance), 0);
+    }
+    match fsl_tools::analyze_model(&model, projection, focus) {
+        Ok(analysis @ Value::Object(_)) => finish_analysis(
+            analysis,
+            Some(("spec", &model.name)),
+            projection,
+            output_format,
+        ),
+        Err(message) => {
+            let kind = if message.starts_with("unknown analyze focus node") {
+                "name"
+            } else {
+                "semantics"
+            };
+            (error_output(kind, &message), 2)
+        }
+        Ok(_) => (
+            error_output("internal", "analysis result must be an object"),
+            3,
+        ),
+    }
+}
+
+fn collect_analysis_files(path: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            collect_analysis_files(&entry?.path(), files)?;
+        }
+    } else if path.extension().and_then(std::ffi::OsStr::to_str) == Some("fsl") {
+        files.push(path.to_path_buf());
+    }
+    Ok(())
+}
+
+fn analysis_display_path(path: &Path) -> String {
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = std::env::current_dir()
+        .ok()
+        .and_then(|path| path.canonicalize().ok());
+    root.as_deref()
+        .and_then(|root| resolved.strip_prefix(root).ok())
+        .unwrap_or(&resolved)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
+    let mut entry = Map::new();
+    entry.insert("file".to_owned(), json!(analysis_display_path(path)));
+    entry.insert(
+        "result".to_owned(),
+        result.get("result").cloned().unwrap_or(Value::Null),
+    );
+    for key in [
+        "spec",
+        "refinement",
+        "projection",
+        "profile",
+        "schema_version",
+        "formal_status",
+    ] {
+        if let Some(value) = result.get(key) {
+            entry.insert(key.to_owned(), value.clone());
+        }
+    }
+    if result.get("result").and_then(Value::as_str) == Some("analyzed") {
+        let mut summary = Map::new();
+        for key in [
+            "nodes",
+            "edges",
+            "findings",
+            "components",
+            "cycles",
+            "errors",
+        ] {
+            if let Some(values) = result.get(key).and_then(Value::as_array) {
+                summary.insert(key.to_owned(), json!(values.len()));
+            }
+        }
+        entry.insert("summary".to_owned(), Value::Object(summary));
+        if result.get("profile").and_then(Value::as_str) == Some("ai-review") {
+            entry.insert(
+                "findings".to_owned(),
+                result.get("findings").cloned().unwrap_or_else(|| json!([])),
+            );
+        }
+    } else {
+        for key in ["kind", "message", "loc", "expected", "hint"] {
+            if let Some(value) = result.get(key) {
+                entry.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    Value::Object(entry)
+}
+
+fn run_analyze_batch(
+    paths: &[PathBuf],
+    projection: &str,
+    focus: Option<&str>,
+    output_format: &str,
+    profile: Option<&str>,
+    export_kind: Option<&str>,
+) -> (Value, i32) {
+    if export_kind.is_some() {
+        return (
+            error_output(
+                "semantics",
+                "tag-review export accepts exactly one specification file",
+            ),
+            2,
+        );
+    }
+    if output_format != "json" {
+        return (
+            error_output("semantics", "batch analyze supports only --format json"),
+            2,
+        );
+    }
+    if focus.is_some() {
+        return (
+            error_output(
+                "semantics",
+                "batch analyze does not support --focus; run impact_graph per file",
+            ),
+            2,
+        );
+    }
+    let mut files = Vec::new();
+    for path in paths {
+        if !path.exists() {
+            return (
+                error_output("io", &format!("file not found: {}", path.display())),
+                2,
+            );
+        }
+        if let Err(error) = collect_analysis_files(path, &mut files) {
+            return (error_output("io", &error.to_string()), 2);
+        }
+    }
+    files.sort_by_key(|path| analysis_display_path(path));
+    files.dedup_by(|left, right| {
+        left.canonicalize().unwrap_or_else(|_| left.clone())
+            == right.canonicalize().unwrap_or_else(|_| right.clone())
+    });
+    let mut entries = Vec::new();
+    let mut errors = Vec::new();
+    for path in files {
+        let (result, _) = run_analyze(&path, projection, None, "json", profile, None);
+        entries.push(analysis_batch_entry(&path, &result));
+        if result.get("result").and_then(Value::as_str) != Some("analyzed") {
+            errors.push(json!({
+                "file":analysis_display_path(&path),
+                "result":result.get("result"),
+                "kind":result.get("kind"),
+                "message":result.get("message"),
+                "loc":result.get("loc"),
+            }));
+        }
+    }
+    let failed = !errors.is_empty();
+    let mut output = envelope();
+    output.insert(
+        "result".to_owned(),
+        json!(if failed { "error" } else { "analyzed" }),
+    );
+    output.insert("analysis".to_owned(), json!("structure"));
+    output.insert("mode".to_owned(), json!("batch"));
+    output.insert("projection".to_owned(), json!(projection));
+    output.insert("profile".to_owned(), json!(profile));
+    output.insert("files".to_owned(), Value::Array(entries));
+    output.insert("errors".to_owned(), Value::Array(errors));
+    if failed {
+        output.insert("kind".to_owned(), json!("batch"));
+        output.insert(
+            "message".to_owned(),
+            json!("one or more files failed structural analysis"),
+        );
+    }
+    (Value::Object(output), i32::from(failed) * 2)
+}
+
+fn finish_analysis(
+    analysis: Value,
+    identity: Option<(&str, &str)>,
+    projection: &str,
+    output_format: &str,
+) -> (Value, i32) {
+    if output_format != "json" {
+        if analysis["nodes"].as_array().is_none_or(Vec::is_empty) || !analysis["edges"].is_array() {
+            return (
+                error_output(
+                    "semantics",
+                    &format!("--format {output_format} requires a graph projection"),
+                ),
+                2,
+            );
+        }
+        let content = match fsl_tools::export_analysis_graph(&analysis, output_format) {
+            Ok(content) => content,
+            Err(message) => return (error_output("semantics", &message), 2),
+        };
+        let mut output = envelope();
+        output.insert("result".to_owned(), json!("analyzed"));
+        output.insert(
+            "analysis".to_owned(),
+            analysis
+                .get("analysis")
+                .cloned()
+                .unwrap_or_else(|| json!("structure")),
+        );
+        output.insert(
+            "projection".to_owned(),
+            analysis
+                .get("projection")
+                .cloned()
+                .unwrap_or_else(|| json!(projection)),
+        );
+        output.insert("format".to_owned(), json!(output_format));
+        output.insert("content".to_owned(), json!(content));
+        return (Value::Object(output), 0);
+    }
+    let Value::Object(analysis) = analysis else {
+        return (
+            error_output("internal", "analysis result must be an object"),
+            3,
+        );
+    };
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("analyzed"));
+    if let Some((key, value)) = identity {
+        output.insert(key.to_owned(), json!(value));
+    }
+    output.extend(analysis);
+    (Value::Object(output), 0)
+}
+
+fn run_diff(old: &Path, new: &Path, depth: usize) -> (Value, i32) {
+    let old_model = match load_model(old) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let new_model = match load_model(new) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let old_actions = old_model
+        .actions
+        .iter()
+        .map(|item| fslc_rust::display_name(&item.name))
+        .collect::<std::collections::BTreeSet<_>>();
+    let new_actions = new_model
+        .actions
+        .iter()
+        .map(|item| fslc_rust::display_name(&item.name))
+        .collect::<std::collections::BTreeSet<_>>();
+    let findings = old_actions
+        .difference(&new_actions)
+        .map(|name| json!({"kind":"action_removed","action":name}))
+        .chain(
+            new_actions
+                .difference(&old_actions)
+                .map(|name| json!({"kind":"action_added","action":name})),
+        )
+        .collect::<Vec<_>>();
+    let mut output = envelope();
+    output.insert(
+        "result".to_owned(),
+        json!(if findings.is_empty() {
+            "equivalent_within_bound"
+        } else {
+            "changed"
+        }),
+    );
+    output.insert("old".to_owned(), json!(old_model.name));
+    output.insert("new".to_owned(), json!(new_model.name));
+    output.insert("depth".to_owned(), json!(depth));
+    output.insert("findings".to_owned(), Value::Array(findings));
+    (Value::Object(output), 0)
+}
+
+fn requirement_step_match(
+    monitor: &fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+) -> Result<(Vec<FslValue>, Option<fsl_runtime::EnabledAction>), String> {
+    let mut arguments = Vec::new();
+    for argument in &step.args {
+        arguments.push(
+            fsl_runtime::eval(
+                argument,
+                &monitor.state,
+                &mut std::collections::BTreeMap::new(),
+                &monitor.model,
+                None,
+            )
+            .map_err(|error| error.to_string())?,
+        );
+    }
+    let enabled = monitor.enabled().map_err(|error| error.to_string())?;
+    let branch_prefix = format!("{}__b", step.name);
+    for action in &monitor.model.actions {
+        if action.name != step.name
+            && !action.name.starts_with(&branch_prefix)
+            && display(&action.name) != step.name
+        {
+            continue;
+        }
+        if action.params.len() != arguments.len() {
+            continue;
+        }
+        let params = action
+            .params
+            .iter()
+            .zip(&arguments)
+            .map(|(param, value)| (param.name().to_owned(), value.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        if let Some(instance) = enabled
+            .iter()
+            .find(|instance| instance.action == action.name && instance.params == params)
+        {
+            return Ok((arguments, Some(instance.clone())));
+        }
+    }
+    Ok((arguments, None))
+}
+
+fn requirement_step_json(step: &fsl_core::RequirementsTraceStep, arguments: &[FslValue]) -> Value {
+    json!({
+        "action": step.name,
+        "args": arguments.iter().map(fslc_rust::fsl_value_json).collect::<Vec<_>>(),
+    })
+}
+
+fn requirement_failure_base(
+    kind: &str,
+    case: &fsl_core::RequirementsTraceCase,
+) -> Map<String, Value> {
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!(kind));
+    output.insert("id".to_owned(), json!(case.id));
+    output.insert("text".to_owned(), json!(case.text));
+    output
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_requirement_traces(
+    path: &Path,
+    model: &KernelModel,
+) -> Result<(Option<Value>, bool), String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    validate_requirement_trace_source(&source, model)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_requirement_trace_source(
+    source: &str,
+    model: &KernelModel,
+) -> Result<(Option<Value>, bool), String> {
+    let Some(contract) =
+        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    else {
+        return Ok((None, false));
+    };
+    let has_contract = !contract.acceptance.is_empty() || !contract.forbidden.is_empty();
+    for case in &contract.acceptance {
+        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
+        for (index, step) in case.steps.iter().enumerate() {
+            let (arguments, instance) = requirement_step_match(&monitor, step)?;
+            let Some(instance) = instance else {
+                let mut output = requirement_failure_base("acceptance", case);
+                output.insert("failed_step".to_owned(), json!(index));
+                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                output.insert("step_results".to_owned(), json!([]));
+                output.insert(
+                    "loc".to_owned(),
+                    json!({"line": step.line, "column": step.column}),
+                );
+                output.insert("trace_type".to_owned(), json!("acceptance"));
+                return Ok((Some(Value::Object(output)), has_contract));
+            };
+            let result = monitor.step(&instance).map_err(|error| error.to_string())?;
+            if result.violation.is_some() {
+                let mut output = requirement_failure_base("acceptance", case);
+                output.insert("failed_step".to_owned(), json!(index));
+                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                output.insert("step_results".to_owned(), json!([]));
+                output.insert(
+                    "loc".to_owned(),
+                    json!({"line": step.line, "column": step.column}),
+                );
+                output.insert("trace_type".to_owned(), json!("acceptance"));
+                return Ok((Some(Value::Object(output)), has_contract));
+            }
+        }
+        let expectation = case
+            .expectation
+            .as_ref()
+            .expect("acceptance contract always has an expectation");
+        let expression = match expectation {
+            fsl_core::RequirementsTraceExpectation::Expr(expression) => expression.clone(),
+            fsl_core::RequirementsTraceExpectation::Stage {
+                entity,
+                instance,
+                stage,
+            } => KernelExpr::Binary {
+                op: "==".to_owned(),
+                left: Box::new(KernelExpr::Index(
+                    Box::new(KernelExpr::Var(format!("{}_stage", entity.to_lowercase()))),
+                    Box::new(KernelExpr::Num(*instance)),
+                )),
+                right: Box::new(KernelExpr::Var(stage.clone())),
+            },
+        };
+        let value = fsl_runtime::eval(
+            &expression,
+            &monitor.state,
+            &mut std::collections::BTreeMap::new(),
+            &monitor.model,
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        if value != FslValue::Bool(true) {
+            let mut output = requirement_failure_base("acceptance", case);
+            output.insert("failed_step".to_owned(), json!(case.steps.len()));
+            output.insert("expect".to_owned(), expression.python_ast());
+            output.insert("state".to_owned(), fslc_rust::state_json(&monitor.state));
+            output.insert(
+                "loc".to_owned(),
+                json!({"line": case.line, "column": case.column}),
+            );
+            output.insert("trace_type".to_owned(), json!("acceptance"));
+            return Ok((Some(Value::Object(output)), has_contract));
+        }
+    }
+    for case in &contract.forbidden {
+        if case.steps.is_empty() {
+            return Err(format!(
+                "forbidden '{}' must have at least one step",
+                case.id
+            ));
+        }
+        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
+        let mut accepted_trace = Vec::new();
+        for (index, step) in case.steps.iter().enumerate() {
+            let (arguments, instance) = requirement_step_match(&monitor, step)?;
+            let is_final = index + 1 == case.steps.len();
+            let Some(instance) = instance else {
+                if is_final {
+                    break;
+                }
+                let mut output = requirement_failure_base("forbidden_setup", case);
+                output.insert("failed_step".to_owned(), json!(index));
+                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                output.insert("step_results".to_owned(), json!([]));
+                output.insert(
+                    "loc".to_owned(),
+                    json!({"line": step.line, "column": step.column}),
+                );
+                output.insert(
+                    "hint".to_owned(),
+                    json!("the setup steps of a forbidden case must be enabled and ok (the trace is broken)."),
+                );
+                output.insert("trace_type".to_owned(), json!("forbidden"));
+                return Ok((Some(Value::Object(output)), has_contract));
+            };
+            let params = Value::Object(
+                instance
+                    .params
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            );
+            let result = monitor.step(&instance).map_err(|error| error.to_string())?;
+            if result.violation.is_some() {
+                if is_final {
+                    break;
+                }
+                let mut output = requirement_failure_base("forbidden_setup", case);
+                output.insert("failed_step".to_owned(), json!(index));
+                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                output.insert("step_results".to_owned(), json!([]));
+                output.insert(
+                    "loc".to_owned(),
+                    json!({"line": step.line, "column": step.column}),
+                );
+                output.insert("trace_type".to_owned(), json!("forbidden"));
+                return Ok((Some(Value::Object(output)), has_contract));
+            }
+            accepted_trace.push(json!({
+                "action": display(&instance.action),
+                "params": params,
+            }));
+            if is_final {
+                let mut output = requirement_failure_base("forbidden", case);
+                output.insert("accepted_step".to_owned(), json!(index));
+                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                output.insert("accepted_trace".to_owned(), Value::Array(accepted_trace));
+                output.insert("state".to_owned(), fslc_rust::state_json(&monitor.state));
+                output.insert(
+                    "loc".to_owned(),
+                    json!({"line": case.line, "column": case.column}),
+                );
+                output.insert(
+                    "hint".to_owned(),
+                    json!("this operation should have been rejected but was accepted. A guard or invariant may be missing."),
+                );
+                output.insert("trace_type".to_owned(), json!("forbidden"));
+                return Ok((Some(Value::Object(output)), has_contract));
+            }
+        }
+    }
+    Ok((None, has_contract))
+}
+
+fn governance_result(path: &Path, depth: usize) -> Result<Option<Value>, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let Some(contract) =
+        fsl_core::governance_contract(&source).map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let delegates = contract
+        .delegates
+        .iter()
+        .map(|delegate| {
+            let satisfied = delegate
+                .satisfied
+                .iter()
+                .map(|(control, artifacts)| {
+                    (
+                        control.clone(),
+                        Value::Array(
+                            artifacts
+                                .iter()
+                                .map(|(kind, id)| json!({"kind": kind, "id": id}))
+                                .collect(),
+                        ),
+                    )
+                })
+                .collect::<Map<_, _>>();
+            json!({
+                "business": delegate.business,
+                "required": delegate.required,
+                "satisfied": satisfied,
+            })
+        })
+        .collect::<Vec<_>>();
+    let preservations = contract
+        .preservations
+        .iter()
+        .map(|preservation| {
+            let (result, _) = run_refine(
+                &base.join(&preservation.after_path),
+                &base.join(&preservation.before_path),
+                &base.join(&preservation.refinement_path),
+                depth,
+            );
+            json!({
+                "name": preservation.name,
+                "before": preservation.before_name,
+                "after": preservation.after_name,
+                "preserve": preservation.preserve,
+                "result": result.get("result").cloned().unwrap_or_else(|| json!("error")),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Some(json!({
+        "name": contract.name,
+        "controls": contract.controls,
+        "delegates": delegates,
+        "preservations": preservations,
+    })))
+}
+
+fn implements_result(
+    path: &Path,
+    model: &KernelModel,
+    depth: usize,
+) -> Result<Option<Value>, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let Some(contract) = fsl_core::requirements_implements(&source, &resolver, model)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    let checked =
+        fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
+            .map_err(|error| error.to_string())?;
+    Ok(Some(if let Some(failure) = checked.failure {
+        json!({
+            "abs": contract.abstraction.name,
+            "result": "refinement_failed",
+            "violation": {
+                "result": "refinement_failed",
+                "kind": failure.kind,
+            },
+        })
+    } else {
+        json!({"abs": contract.abstraction.name, "result": "refines"})
+    }))
+}
+
+fn mismatch_paths(
+    model: &KernelModel,
+    expected: Option<&std::collections::BTreeMap<String, FslValue>>,
+    actual: Option<&std::collections::BTreeMap<String, FslValue>>,
+) -> Vec<String> {
+    fn collect(
+        model: &KernelModel,
+        ty: &TypeRef,
+        expected: Option<&FslValue>,
+        actual: Option<&FslValue>,
+        path: &str,
+        paths: &mut Vec<String>,
+    ) {
+        if expected == actual {
+            return;
+        }
+        if let (
+            TypeRef::Map(_, value_ty),
+            Some(FslValue::Map(expected)),
+            Some(FslValue::Map(actual)),
+        ) = (ty, expected, actual)
+        {
+            let mut keys = expected.keys().chain(actual.keys()).collect::<Vec<_>>();
+            keys.sort();
+            keys.dedup();
+            for key in keys {
+                let key_text = display_binding(key);
+                let expected_value = expected.get(key);
+                let actual_value = actual.get(key);
+                if expected_value == actual_value {
+                    continue;
+                }
+                if let (
+                    TypeRef::Named(type_name),
+                    Some(FslValue::Struct {
+                        fields: expected_fields,
+                        ..
+                    }),
+                    Some(FslValue::Struct {
+                        fields: actual_fields,
+                        ..
+                    }),
+                ) = (value_ty.as_ref(), expected_value, actual_value)
+                    && let Some(fields) = model.struct_fields(type_name)
+                {
+                    for (field, _) in fields {
+                        if expected_fields.get(field) != actual_fields.get(field) {
+                            paths.push(format!("{path}[{key_text}].{field}"));
+                        }
+                    }
+                    continue;
+                }
+                paths.push(format!("{path}[{key_text}]"));
+            }
+            return;
+        }
+        paths.push(path.to_owned());
+    }
+
+    let mut paths = Vec::new();
+    for (name, ty) in &model.state {
+        collect(
+            model,
+            ty,
+            expected.and_then(|state| state.get(name)),
+            actual.and_then(|state| state.get(name)),
+            &display(name),
+            &mut paths,
+        );
+    }
+    paths
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_refine(
+    implementation_path: &Path,
+    abstraction_path: &Path,
+    mapping_path: &Path,
+    depth: usize,
+) -> (Value, i32) {
+    let implementation = match load_model(implementation_path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let abstraction = match load_model(abstraction_path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let source = match std::fs::read_to_string(mapping_path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let mapping = match fsl_core::parse_refinement(&source, &implementation, &abstraction) {
+        Ok(mapping) => mapping,
+        Err(error) => return (error_output("type", &error.message), 2),
+    };
+    let checked =
+        match fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, depth) {
+            Ok(checked) => checked,
+            Err(error) => return (error_output("type", &error.to_string()), 2),
+        };
+    let progress = if checked.failure.is_none() && !mapping.progress.is_empty() {
+        let mut solver = match fsl_solver_z3::Z3Solver::new() {
+            Ok(solver) => solver,
+            Err(error) => return (error_output("internal", &error.to_string()), 2),
+        };
+        match block_on_native(fsl_verifier::check_refinement_progress(
+            &implementation,
+            &abstraction,
+            &mapping,
+            &mut solver,
+            depth,
+        )) {
+            Ok(progress) => Some(progress),
+            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        }
+    } else {
+        None
+    };
+    let mut output = envelope();
+    output.insert("impl".to_owned(), json!(checked.implementation));
+    output.insert("abs".to_owned(), json!(checked.abstraction));
+    if let Some(failure) = checked.failure {
+        output.insert("result".to_owned(), json!("refinement_failed"));
+        output.insert("kind".to_owned(), json!(failure.kind));
+        if let Some(at) = failure.at {
+            output.insert("at".to_owned(), json!(at));
+        }
+        output.insert("violated_at_step".to_owned(), json!(failure.step));
+        if let Some(action) = failure.impl_action {
+            let definition = implementation
+                .actions
+                .iter()
+                .find(|definition| definition.name == action.name);
+            output.insert(
+                "impl_action".to_owned(),
+                json!({
+                    "name": display(&action.name),
+                    "params": action.params.iter().map(|(name, value)| (
+                        name.clone(), fslc_rust::fsl_value_json(value)
+                    )).collect::<Map<_, _>>(),
+                    "loc": definition.map(|definition| definition.span.python_loc()),
+                }),
+            );
+        }
+        if let Some(state) = &failure.alpha_before {
+            output.insert("abs_before".to_owned(), fslc_rust::state_json(state));
+        }
+        if let Some(state) = &failure.alpha_after_expected {
+            output.insert(
+                "abs_after_expected".to_owned(),
+                fslc_rust::state_json(state),
+            );
+        }
+        if let Some(state) = &failure.alpha_after_actual {
+            output.insert("abs_after_actual".to_owned(), fslc_rust::state_json(state));
+        }
+        output.insert(
+            "mismatch".to_owned(),
+            Value::Array(
+                mismatch_paths(
+                    &abstraction,
+                    failure.alpha_after_expected.as_ref(),
+                    failure.alpha_after_actual.as_ref(),
+                )
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+            ),
+        );
+        output.insert(
+            "impl_trace".to_owned(),
+            fslc_rust::trace_json(&implementation, &failure.impl_trace),
+        );
+        output.insert(
+            "hint".to_owned(),
+            json!("the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"),
+        );
+        output.insert("trace_type".to_owned(), json!("refinement"));
+        return (Value::Object(output), 1);
+    }
+    if let Some(violation) = progress
+        .as_ref()
+        .and_then(|progress| progress.violation.as_ref())
+    {
+        let Some(details) = &violation.leads_to else {
+            return (
+                error_output("internal", "missing refinement progress diagnostics"),
+                2,
+            );
+        };
+        if let Err(error) = fsl_runtime::replay_trace(implementation.clone(), &violation.trace) {
+            return (error_output("internal", &error.to_string()), 2);
+        }
+        let declaration = mapping
+            .progress
+            .iter()
+            .find(|declaration| declaration.leads_to == violation.name);
+        let property = abstraction
+            .leadstos
+            .iter()
+            .find(|property| property.name == violation.name);
+        output.insert("result".to_owned(), json!("refinement_failed"));
+        output.insert("kind".to_owned(), json!("progress_lost"));
+        output.insert(
+            "progress_failure".to_owned(),
+            json!(if details.stutter {
+                "deadlock_or_stall_blocks_progress"
+            } else {
+                "lasso_blocks_progress"
+            }),
+        );
+        output.insert("violation_kind".to_owned(), json!("leadsTo"));
+        output.insert("invariant".to_owned(), json!(display(&violation.name)));
+        output.insert(
+            "bindings".to_owned(),
+            Value::Object(
+                details
+                    .bindings
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            ),
+        );
+        output.insert("pending_since".to_owned(), json!(details.pending_since));
+        output.insert("stutter".to_owned(), json!(details.stutter));
+        output.insert(
+            "impl_trace".to_owned(),
+            fslc_rust::trace_json(&implementation, &violation.trace),
+        );
+        output.insert(
+            "progress".to_owned(),
+            json!({
+                "leadsTo": display(&violation.name),
+                "actions": declaration.map(|item| item.actions.clone()).unwrap_or_default(),
+            }),
+        );
+        output.insert(
+            "hint".to_owned(),
+            json!("the impl refines the abstract safety contract, but admits an execution where the pulled-back abstract leadsTo remains pending. Fairness must come from lower-layer `fair action` declarations for the implementation actions named by preserve progress; action mappings do not create fairness or prove implementation conformance by themselves"),
+        );
+        if let Some(property) = property {
+            output.insert("loc".to_owned(), property.span.python_loc());
+        }
+        if let Some(loop_start) = details.loop_start {
+            output.insert("loop_start".to_owned(), json!(loop_start));
+        }
+        output.insert(
+            "faithfulness_class".to_owned(),
+            json!("liveness_not_refined"),
+        );
+        output.insert(
+            "recommended_action".to_owned(),
+            json!(
+                "re-prove liveness at each layer or add preserve progress to the refinement mapping"
+            ),
+        );
+        output.insert("trace_type".to_owned(), json!("refinement"));
+        return (Value::Object(output), 1);
+    }
+    output.insert("result".to_owned(), json!("refines"));
+    output.insert("checked_to_depth".to_owned(), json!(checked.depth));
+    output.insert(
+        "action_map".to_owned(),
+        Value::Object(
+            checked
+                .action_map
+                .iter()
+                .map(|(name, target)| (display(name), json!(display(target))))
+                .collect(),
+        ),
+    );
+    if checked.abs_has_ensures {
+        output.insert(
+            "note".to_owned(),
+            json!("abs ensures are not checked during refinement; verify/prove the abstract spec separately"),
+        );
+    }
+    if let Some(progress) = progress
+        && !progress.checked.is_empty()
+    {
+        output.insert(
+            "progress".to_owned(),
+            Value::Object(
+                progress
+                    .checked
+                    .iter()
+                    .map(|(name, actions)| {
+                        (
+                            display(name),
+                            json!({
+                                "checked_to_depth": depth,
+                                "actions": actions,
+                            }),
+                        )
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    (Value::Object(output), 0)
+}
+
+fn run_refine_chain(
+    implementation: &Path,
+    first_abstraction: &Path,
+    first_mapping: &Path,
+    rest: &[PathBuf],
+    depth: usize,
+) -> (Value, i32) {
+    let mut specifications = vec![
+        implementation.to_path_buf(),
+        first_abstraction.to_path_buf(),
+    ];
+    let mut mappings = vec![first_mapping.to_path_buf()];
+    for pair in rest.chunks_exact(2) {
+        specifications.push(pair[0].clone());
+        mappings.push(pair[1].clone());
+    }
+    let mut names = Vec::new();
+    let mut composed = std::collections::BTreeMap::<String, String>::new();
+    for index in 0..mappings.len() {
+        let (link, status) = run_refine(
+            &specifications[index],
+            &specifications[index + 1],
+            &mappings[index],
+            depth,
+        );
+        let impl_name = link
+            .get("impl")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let abs_name = link
+            .get("abs")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        if index == 0 {
+            names.push(impl_name.clone());
+        }
+        names.push(abs_name.clone());
+        if status != 0 || link.get("result").and_then(Value::as_str) != Some("refines") {
+            let mut failed = link.as_object().cloned().unwrap_or_default();
+            failed.insert("chain".to_owned(), json!(names));
+            failed.insert(
+                "failed_link".to_owned(),
+                json!({
+                    "from": impl_name,
+                    "to": abs_name,
+                    "kind": link.get("kind").cloned().unwrap_or(Value::Null),
+                }),
+            );
+            return (Value::Object(failed), status.max(1));
+        }
+        let action_map = link
+            .get("action_map")
+            .and_then(Value::as_object)
+            .map(|mapping| {
+                mapping
+                    .iter()
+                    .filter_map(|(name, target)| {
+                        target
+                            .as_str()
+                            .map(|target| (name.clone(), target.to_owned()))
+                    })
+                    .collect::<std::collections::BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        if index == 0 {
+            composed = action_map;
+        } else {
+            for target in composed.values_mut() {
+                if target != "stutter" {
+                    *target = action_map
+                        .get(target)
+                        .cloned()
+                        .unwrap_or_else(|| "stutter".to_owned());
+                }
+            }
+        }
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("refines"));
+    output.insert(
+        "impl".to_owned(),
+        names.first().map_or(Value::Null, |name| json!(name)),
+    );
+    output.insert(
+        "abs".to_owned(),
+        names.last().map_or(Value::Null, |name| json!(name)),
+    );
+    output.insert("checked_to_depth".to_owned(), json!(depth));
+    output.insert(
+        "action_map".to_owned(),
+        Value::Object(
+            composed
+                .into_iter()
+                .map(|(name, target)| (name, json!(target)))
+                .collect(),
+        ),
+    );
+    output.insert("chain".to_owned(), json!(names));
+    (Value::Object(output), 0)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_induction(path: &Path, depth: usize, deadlock_mode: &str, k_ind: usize) -> (Value, i32) {
+    let started = Instant::now();
+    let (base_value, base_status) = run_verify(path, depth, deadlock_mode, "bmc", 1);
+    let Value::Object(base) = &base_value else {
+        return (
+            error_output("internal", "BMC returned a non-object envelope"),
+            2,
+        );
+    };
+    if base.get("result").and_then(Value::as_str) != Some("verified") {
+        return (base_value, base_status);
+    }
+
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut solver = match fsl_solver_z3::Z3Solver::new() {
+        Ok(solver) => solver,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    let induction = match block_on_native(fsl_verifier::prove_induction(&model, &mut solver, k_ind))
+    {
+        Ok(result) => result,
+        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+    };
+
+    let mut output = envelope();
+    output.insert("spec".to_owned(), json!(model.name));
+    if let Some(cti) = induction.cti {
+        output.insert("result".to_owned(), json!("unknown_cti"));
+        if cti.kind == "trans" {
+            output.insert("trans".to_owned(), json!(display(&cti.name)));
+        }
+        output.insert("invariant".to_owned(), json!(display(&cti.name)));
+        output.insert("k".to_owned(), json!(cti.k));
+        output.insert("checked_to_depth".to_owned(), json!(depth));
+        output.insert("completeness".to_owned(), json!("bounded"));
+        output.insert("trace_type".to_owned(), json!("induction_cti"));
+        output.insert(
+            "cti".to_owned(),
+            json!({
+                "states": fslc_rust::trace_json(&model, &cti.trace),
+                "violated_at": cti.k,
+            }),
+        );
+        output.insert(
+            "hint".to_owned(),
+            json!("this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run"),
+        );
+        if cti.kind == "trans" {
+            output.insert(
+                "invariants_checked".to_owned(),
+                Value::Array(
+                    invariant_names(&model)
+                        .into_iter()
+                        .map(Value::String)
+                        .collect(),
+                ),
+            );
+            output.insert(
+                "transitions_checked".to_owned(),
+                Value::Array(
+                    model
+                        .transitions
+                        .iter()
+                        .map(|property| Value::String(display(&property.name)))
+                        .collect(),
+                ),
+            );
+        }
+        output.insert(
+            "cost".to_owned(),
+            json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+        );
+        return (Value::Object(output), 1);
+    }
+
+    let ranked = match block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver)) {
+        Ok(result) => result,
+        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+    };
+    if let Some(failure) = ranked.failure {
+        let property = model
+            .leadstos
+            .iter()
+            .find(|property| property.name == failure.name);
+        output.insert("result".to_owned(), json!("unknown_cti"));
+        output.insert("violation_kind".to_owned(), json!("leadsTo_rank"));
+        output.insert("invariant".to_owned(), json!(display(&failure.name)));
+        output.insert(
+            "loc".to_owned(),
+            property.map_or(Value::Null, |property| property.span.python_loc()),
+        );
+        output.insert(
+            "bindings".to_owned(),
+            Value::Object(
+                failure
+                    .bindings
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            ),
+        );
+        output.insert(
+            "measure".to_owned(),
+            json!(ranking_measure_text(&failure.measure)),
+        );
+        output.insert("rank_failure".to_owned(), json!(failure.kind));
+        if let Some(value) = failure.measure_value {
+            output.insert("measure_value".to_owned(), json!(value));
+        }
+        if let Some(value) = failure.measure_before {
+            output.insert("measure_before".to_owned(), json!(value));
+        }
+        if let Some(value) = failure.measure_after {
+            output.insert("measure_after".to_owned(), json!(value));
+        }
+        if let Some(action_name) = &failure.action {
+            let action = failure.trace.last().and_then(|entry| entry.action.as_ref());
+            let definition = model
+                .actions
+                .iter()
+                .find(|definition| definition.name == *action_name);
+            output.insert(
+                "last_action".to_owned(),
+                json!({
+                    "name": display(action_name),
+                    "params": action.map(|action| action.params.iter().map(|(name, value)| (
+                        name.clone(), fslc_rust::fsl_value_json(value)
+                    )).collect::<Map<_, _>>()).unwrap_or_default(),
+                    "loc": definition.map(|definition| definition.span.python_loc()),
+                }),
+            );
+        }
+        output.insert(
+            "cti".to_owned(),
+            json!({
+                "states": fslc_rust::trace_json(&model, &failure.trace),
+                "violated_at": failure.trace.len().saturating_sub(1),
+            }),
+        );
+        output.insert("hint".to_owned(), json!(failure.hint));
+        output.insert("message".to_owned(), json!(failure.message));
+        output.insert("checked_to_depth".to_owned(), json!(depth));
+        output.insert("completeness".to_owned(), json!("bounded"));
+        output.insert("trace_type".to_owned(), json!("induction_cti"));
+        output.insert(
+            "cost".to_owned(),
+            json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+        );
+        return (Value::Object(output), 1);
+    }
+
+    output.insert("result".to_owned(), json!("proved"));
+    output.insert("engine".to_owned(), json!("induction"));
+    output.insert("completeness".to_owned(), json!("unbounded"));
+    output.insert("checked_to_depth".to_owned(), json!(depth));
+    output.insert(
+        "k_used".to_owned(),
+        Value::Object(
+            induction
+                .k_used
+                .iter()
+                .map(|(name, k)| (display(name), json!(k)))
+                .collect(),
+        ),
+    );
+    output.insert("base_depth".to_owned(), json!(depth));
+    output.insert(
+        "invariants_checked".to_owned(),
+        Value::Array(
+            invariant_names(&model)
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    output.insert(
+        "transitions_checked".to_owned(),
+        Value::Array(
+            model
+                .transitions
+                .iter()
+                .map(|property| Value::String(display(&property.name)))
+                .collect(),
+        ),
+    );
+    for key in ["action_coverage", "reachables"] {
+        if let Some(value) = base.get(key) {
+            output.insert(key.to_owned(), value.clone());
+        }
+    }
+    let warnings = base
+        .get("warnings")
+        .and_then(Value::as_array)
+        .map(|warnings| {
+            warnings
+                .iter()
+                .filter(|warning| {
+                    !warning
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .is_some_and(|message| message.contains("deadlock"))
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    output.insert("warnings".to_owned(), Value::Array(warnings));
+    if let Some(leads_to) = base.get("leads_to") {
+        let mut leads_to = leads_to.as_object().cloned().unwrap_or_default();
+        for proof in &ranked.proofs {
+            let entry = leads_to
+                .entry(display(&proof.name))
+                .or_insert_with(|| json!({"checked_to_depth": depth}));
+            if let Value::Object(entry) = entry {
+                entry.insert("proved".to_owned(), json!(true));
+                entry.insert("completeness".to_owned(), json!("unbounded"));
+                entry.insert("proof".to_owned(), json!("ranking"));
+                entry.insert(
+                    "decreases".to_owned(),
+                    json!(ranking_measure_text(&proof.measure)),
+                );
+            }
+        }
+        output.insert("leads_to".to_owned(), Value::Object(leads_to));
+        let note = if ranked.proofs.is_empty() {
+            format!("invariants proved for all depths; leadsTo checked to depth {depth} only")
+        } else if ranked.proofs.len() == model.leadstos.len() {
+            "invariants and ranked leadsTo proved for all depths".to_owned()
+        } else {
+            format!(
+                "invariants and ranked leadsTo proved for all depths; unranked leadsTo checked to depth {depth} only"
+            )
+        };
+        output.insert("note".to_owned(), json!(note));
+    }
+    output.insert(
+        "cost".to_owned(),
+        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+    );
+    (Value::Object(output), 0)
+}
+
+fn ranking_measure_text(expr: &KernelExpr) -> String {
+    let text = fslc_rust::expr_text(expr);
+    if matches!(expr, KernelExpr::Binary { .. }) {
+        format!("({text})")
+    } else {
+        text
+    }
+}
+
+fn duplicate_statement_write(
+    statements: &[fsl_core::KernelStatement],
+) -> Option<fsl_core::KernelLValue> {
+    fn writes(
+        statements: &[fsl_core::KernelStatement],
+    ) -> Result<Vec<fsl_core::KernelLValue>, Box<fsl_core::KernelLValue>> {
+        let mut seen = Vec::new();
+        for statement in statements {
+            let candidates = match statement {
+                fsl_core::KernelStatement::Assign { target, .. } => vec![target.clone()],
+                fsl_core::KernelStatement::If {
+                    then_statements,
+                    else_statements,
+                    ..
+                } => {
+                    let mut branch = writes(then_statements)?;
+                    for target in writes(else_statements)? {
+                        if !branch.contains(&target) {
+                            branch.push(target);
+                        }
+                    }
+                    branch
+                }
+                fsl_core::KernelStatement::ForAll { statements, .. } => writes(statements)?,
+            };
+            for target in candidates {
+                if seen.contains(&target) {
+                    return Err(Box::new(target));
+                }
+                seen.push(target);
+            }
+        }
+        Ok(seen)
+    }
+    writes(statements).err().map(|target| *target)
+}
+
+fn statement_location(statements: &[fsl_core::KernelStatement]) -> Value {
+    statements.first().map_or(Value::Null, |statement| {
+        let span = match statement {
+            fsl_core::KernelStatement::Assign { span, .. }
+            | fsl_core::KernelStatement::If { span, .. }
+            | fsl_core::KernelStatement::ForAll { span, .. } => span,
+        };
+        span.python_loc()
+    })
+}
+
+fn concrete_boundary_output(
+    model: &KernelModel,
+    violation: &fsl_runtime::Violation,
+    trace: &[fsl_core::TraceStep],
+    started: Instant,
+) -> (Value, i32) {
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("violated"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("violation_kind".to_owned(), json!(violation.kind));
+    output.insert("invariant".to_owned(), json!(display(&violation.name)));
+    let action = trace.last().and_then(|entry| entry.action.as_ref());
+    let definition = action.and_then(|action| {
+        model
+            .actions
+            .iter()
+            .find(|definition| definition.name == action.name)
+    });
+    output.insert(
+        "loc".to_owned(),
+        if violation.kind == "partial_op" {
+            definition.map_or(Value::Null, |action| statement_location(&action.statements))
+        } else {
+            Value::Null
+        },
+    );
+    if violation.kind == "partial_op" {
+        output.insert(
+            "hint".to_owned(),
+            json!("guard the action with requires q.size() > 0 (or bound the index)"),
+        );
+    }
+    output.insert("violated_at_step".to_owned(), json!(violation.step));
+    let violating = if violation.kind == "type_bound" {
+        let detected = violation_bindings_json(
+            model,
+            &violation.kind,
+            &violation.name,
+            None,
+            trace.last().map(|entry| &entry.state),
+        );
+        if detected.is_null() {
+            json!([{}])
+        } else {
+            detected
+        }
+    } else {
+        Value::Null
+    };
+    output.insert("violating_bindings".to_owned(), violating.clone());
+    if violation.kind == "type_bound" {
+        output.insert(
+            "blame".to_owned(),
+            violation_blame_json(&violation.kind, &violation.name, None, violating),
+        );
+    }
+    output.insert(
+        "last_action".to_owned(),
+        action.map_or(Value::Null, |action| {
+            json!({
+                "name": display(&action.name),
+                "params": action.params.iter().map(|(name, value)| (
+                    name.clone(), fslc_rust::fsl_value_json(value)
+                )).collect::<Map<_, _>>(),
+                "loc": definition.map(|definition| definition.span.python_loc()),
+            })
+        }),
+    );
+    let mut rendered_trace = fslc_rust::trace_json(model, trace);
+    if let Value::Array(entries) = &mut rendered_trace {
+        for entry in entries.iter_mut().skip(1) {
+            if let Value::Object(entry) = entry {
+                entry.insert("blame".to_owned(), json!({"guards": [], "effects": []}));
+            }
+        }
+    }
+    output.insert("trace".to_owned(), rendered_trace);
+    finish(&mut output, violation.step, started);
+    if violation.kind == "partial_op" {
+        output.insert(
+            "faithfulness_class".to_owned(),
+            json!("partial_op_unguarded"),
+        );
+        output.insert(
+            "recommended_action".to_owned(),
+            json!("add the missing guard / run bounded Monitor (replay)"),
+        );
+    }
+    output.insert("trace_type".to_owned(), json!(violation.kind));
+    (Value::Object(output), 1)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_verify(
+    path: &Path,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    k_ind: usize,
+) -> (Value, i32) {
+    if let Err(error) = validate_specialized_document(path) {
+        return (semantic_error_output(&error), 2);
+    }
+    let mut has_trace_contract = false;
+    if let Ok(model) = load_model(path) {
+        match validate_requirement_traces(path, &model) {
+            Ok((Some(failure), _)) => return (failure, 2),
+            Ok((None, has_contract)) => has_trace_contract = has_contract,
+            Err(error) => return (semantic_error_output(&error), 2),
+        }
+    }
+    let (mut output, status) = run_verify_inner(path, depth, deadlock_mode, engine, k_ind, None);
+    if let Value::Object(envelope) = &mut output
+        && envelope.get("result").and_then(Value::as_str) != Some("error")
+        && let Ok(model) = load_model(path)
+        && let Ok(Some(implements)) = implements_result(path, &model, depth)
+    {
+        envelope.insert("implements".to_owned(), implements);
+        if let Some(Value::Array(warnings)) = envelope.get_mut("warnings") {
+            warnings.retain(|warning| {
+                warning.get("message").and_then(Value::as_str)
+                    != Some(
+                        "spec declares no user invariants (only implicit type bounds are checked)",
+                    )
+            });
+        }
+    }
+    if has_trace_contract
+        && let Value::Object(envelope) = &mut output
+        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
+    {
+        warnings.retain(|warning| {
+            warning.get("message").and_then(Value::as_str)
+                != Some("spec declares no user invariants (only implicit type bounds are checked)")
+        });
+    }
+    (output, status)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_verify_inner(
+    path: &Path,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    k_ind: usize,
+    scope: Option<&ScopeBounds>,
+) -> (Value, i32) {
+    if engine == "induction" {
+        if scope.is_some() {
+            return (
+                error_output("semantics", "induction scope sweep is not yet supported"),
+                2,
+            );
+        }
+        return run_induction(path, depth, deadlock_mode, k_ind);
+    }
+    let started = Instant::now();
+    let model = match scope.map_or_else(|| load_model(path), |scope| load_model_scoped(path, scope))
+    {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    if model
+        .actions
+        .iter()
+        .any(|action| duplicate_statement_write(&action.statements).is_some())
+    {
+        return (
+            error_output(
+                "semantics",
+                "an action may not assign the same state location more than once",
+            ),
+            2,
+        );
+    }
+    match fsl_runtime::find_boundary_violation(model.clone(), depth) {
+        Ok(Some((violation, trace))) => {
+            return concrete_boundary_output(&model, &violation, &trace, started);
+        }
+        Ok(None) => {}
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    }
+    let mut solver = match fsl_solver_z3::Z3Solver::new() {
+        Ok(solver) => solver,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    let result = match block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
+        Ok(result) => result,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    if let Err(error) = replay_all(&model, &result) {
+        return (error_output("internal", &error), 2);
+    }
+
+    let mut output = envelope();
+    output.insert("spec".to_owned(), json!(model.name));
+    if let Some(violation) = &result.violation {
+        output.insert("result".to_owned(), json!("violated"));
+        output.insert("violation_kind".to_owned(), json!(violation.kind));
+        if violation.kind == "trans" {
+            output.insert("trans".to_owned(), json!(display(&violation.name)));
+        }
+        output.insert("invariant".to_owned(), json!(display(&violation.name)));
+        let property = model
+            .invariants
+            .iter()
+            .find(|property| property.name == violation.name);
+        output.insert(
+            "loc".to_owned(),
+            property.map_or(Value::Null, |property| property.span.python_loc()),
+        );
+        output.insert("violated_at_step".to_owned(), json!(violation.step));
+        let final_state = violation.trace.last().map(|entry| &entry.state);
+        let violating = violation_bindings_json(
+            &model,
+            violation.kind.as_str(),
+            violation.name.as_str(),
+            property.map(|property| &property.expr),
+            final_state,
+        );
+        output.insert("violating_bindings".to_owned(), violating.clone());
+        output.insert(
+            "blame".to_owned(),
+            violation_blame_json(
+                violation.kind.as_str(),
+                violation.name.as_str(),
+                property.map(|property| &property.expr),
+                violating,
+            ),
+        );
+        output.insert(
+            "last_action".to_owned(),
+            violation
+                .trace
+                .last()
+                .and_then(|entry| entry.action.as_ref())
+                .map_or(Value::Null, |action| {
+                    let definition = model
+                        .actions
+                        .iter()
+                        .find(|definition| definition.name == action.name);
+                    json!({
+                        "name": display(&action.name),
+                        "params": action.params.iter().map(|(name, value)| (
+                            name.clone(), fslc_rust::fsl_value_json(value)
+                        )).collect::<Map<_, _>>(),
+                        "loc": definition.map(|definition| definition.span.python_loc()),
+                    })
+                }),
+        );
+        let mut trace = fslc_rust::trace_json(&model, &violation.trace);
+        if let Value::Array(entries) = &mut trace {
+            for entry in entries.iter_mut().skip(1) {
+                if let Value::Object(entry) = entry {
+                    entry.insert("blame".to_owned(), json!({"guards": [], "effects": []}));
+                }
+            }
+        }
+        output.insert("trace".to_owned(), trace);
+        finish(&mut output, violation.step, started);
+        output.insert("trace_type".to_owned(), json!(violation.kind.as_str()));
+        return (Value::Object(output), 1);
+    }
+
+    let unreached = result
+        .reachables
+        .iter()
+        .filter(|(_, witness)| witness.is_none())
+        .filter_map(|(name, _)| {
+            model
+                .reachables
+                .iter()
+                .find(|property| property.name == *name)
+        })
+        .collect::<Vec<_>>();
+    if !unreached.is_empty() {
+        output.insert("result".to_owned(), json!("reachable_failed"));
+        output.insert(
+            "unreached".to_owned(),
+            Value::Array(
+                unreached
+                    .iter()
+                    .map(|property| {
+                        json!({
+                            "name": display(&property.name),
+                            "loc": property.span.python_loc(),
+                            "classification": "insufficient_depth",
+                            "hint": format!("not witnessed within depth {depth}; try a larger --depth"),
+                            "faithfulness_class": "intent_unexercised",
+                            "recommended_action": "add a single-shot reachable for the action / raise --depth",
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+        add_common_verification(&mut output, &model, &result, depth);
+        output.remove("reachables");
+        output.remove("deadlock");
+        output.insert(
+            "hint".to_owned(),
+            json!(format!(
+                "within depth {depth} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth"
+            )),
+        );
+        output.insert("faithfulness_class".to_owned(), json!("intent_unexercised"));
+        output.insert(
+            "recommended_action".to_owned(),
+            json!("add a single-shot reachable for the action / raise --depth"),
+        );
+        finish(&mut output, depth, started);
+        output.insert("trace_type".to_owned(), json!("reachable"));
+        return (Value::Object(output), 1);
+    }
+
+    if deadlock_mode == "error" {
+        if let Some(step) = result.deadlock_step {
+            output.insert("result".to_owned(), json!("violated"));
+            output.insert("violation_kind".to_owned(), json!("deadlock"));
+            output.insert("invariant".to_owned(), json!("deadlock"));
+            output.insert("violated_at_step".to_owned(), json!(step));
+            if let Some(trace) = &result.deadlock_trace {
+                output.insert("trace".to_owned(), fslc_rust::trace_json(&model, trace));
+                output.insert(
+                    "last_action".to_owned(),
+                    trace
+                        .last()
+                        .and_then(|entry| entry.action.as_ref())
+                        .map_or(Value::Null, |action| json!({"name": display(&action.name)})),
+                );
+            }
+            finish(&mut output, step, started);
+            output.insert("trace_type".to_owned(), json!("deadlock"));
+            return (Value::Object(output), 1);
+        }
+    }
+
+    if let Some(violation) = &result.leadsto_violation {
+        let Some(details) = &violation.leads_to else {
+            return (error_output("internal", "missing leadsTo diagnostics"), 2);
+        };
+        let property = model
+            .leadstos
+            .iter()
+            .find(|property| property.name == violation.name);
+        output.insert("result".to_owned(), json!("violated"));
+        output.insert("violation_kind".to_owned(), json!("leadsTo"));
+        output.insert("invariant".to_owned(), json!(display(&violation.name)));
+        output.insert(
+            "loc".to_owned(),
+            property.map_or(Value::Null, |property| property.span.python_loc()),
+        );
+        output.insert(
+            "bindings".to_owned(),
+            Value::Object(
+                details
+                    .bindings
+                    .iter()
+                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                    .collect(),
+            ),
+        );
+        output.insert("pending_since".to_owned(), json!(details.pending_since));
+        if let Some(loop_start) = details.loop_start {
+            output.insert("loop_start".to_owned(), json!(loop_start));
+        }
+        if let Some(deadline) = details.deadline {
+            output.insert("deadline".to_owned(), json!(deadline));
+        }
+        if let Some(within) = details.within {
+            output.insert("within".to_owned(), json!(within));
+        }
+        output.insert("stutter".to_owned(), json!(details.stutter));
+        output.insert(
+            "trace".to_owned(),
+            fslc_rust::trace_json(&model, &violation.trace),
+        );
+        output.insert("hint".to_owned(), json!(details.hint));
+        finish(&mut output, depth, started);
+        output.insert("trace_type".to_owned(), json!("leadsTo"));
+        return (Value::Object(output), 1);
+    }
+
+    output.insert("result".to_owned(), json!("verified"));
+    add_common_verification(&mut output, &model, &result, depth);
+    if deadlock_mode == "ignore" {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    if !model.leadstos.is_empty() {
+        output.insert(
+            "leads_to".to_owned(),
+            Value::Object(
+                model
+                    .leadstos
+                    .iter()
+                    .map(|property| {
+                        let mut checked = json!({"checked_to_depth": depth});
+                        if let Some(within) = property.within
+                            && let Value::Object(entry) = &mut checked
+                        {
+                            entry.insert("within".to_owned(), json!(within));
+                        }
+                        (display(&property.name), checked)
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    let mut warnings = check_warnings(&model);
+    for property in &model.invariants {
+        let KernelExpr::Binary { op, left, .. } = &property.expr else {
+            continue;
+        };
+        if op != "=>" {
+            continue;
+        }
+        if matches!(
+            fsl_runtime::expression_reachable(model.clone(), left, depth),
+            Ok(false)
+        ) {
+            let mut warning = json!({
+                "kind": "vacuous_implication",
+                "name": display(&property.name),
+                "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display(&property.name)),
+                "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
+                "loc": property.span.python_loc(),
+                "classification": "insufficient_depth",
+                "blocking": [],
+                "faithfulness_class": "intent_unexercised",
+                "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            });
+            if let Some(metadata) = &property.meta
+                && let Value::Object(warning) = &mut warning
+            {
+                warning.insert(
+                    "requirement".to_owned(),
+                    json!({"id": metadata.id, "text": metadata.text}),
+                );
+            }
+            warnings.push(warning);
+        }
+    }
+    if deadlock_mode == "warn" {
+        if let Some(step) = result.deadlock_step {
+            let state_summary = result
+                .deadlock_trace
+                .as_ref()
+                .and_then(|trace| trace.last())
+                .map(|entry| format_state_summary(&model, &entry.state))
+                .unwrap_or_default();
+            warnings.push(json!({
+                "message": format!("deadlock reachable at step {step} (state: {state_summary})"),
+                "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional",
+            }));
+        }
+    }
+    for (name, covered) in &result.action_coverage {
+        if !covered {
+            warnings.push(json!({
+                "message": format!("action '{}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)", display(name)),
+                "hint": coverage_hint(depth),
+            }));
+        }
+    }
+    output.insert("warnings".to_owned(), Value::Array(warnings));
+    output.insert(
+        "note".to_owned(),
+        json!(format!(
+            "bounded verification: no violation within depth {depth}"
+        )),
+    );
+    if result.frontier_progress {
+        output.insert(
+            "hint".to_owned(),
+            json!(format!(
+                "state space not saturated at depth {depth}; a violation could exist beyond depth {depth}; consider a larger --depth or the induction engine"
+            )),
+        );
+    }
+    output.insert(
+        "cost".to_owned(),
+        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+    );
+    (Value::Object(output), 0)
+}
+
+fn add_common_verification(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_verifier::BmcResult,
+    depth: usize,
+) {
+    output.insert("depth".to_owned(), json!(depth));
+    output.insert("checked_to_depth".to_owned(), json!(depth));
+    output.insert("completeness".to_owned(), json!("bounded"));
+    output.insert(
+        "invariants_checked".to_owned(),
+        Value::Array(
+            invariant_names(model)
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    output.insert(
+        "transitions_checked".to_owned(),
+        Value::Array(
+            model
+                .transitions
+                .iter()
+                .map(|property| Value::String(display(&property.name)))
+                .collect(),
+        ),
+    );
+    output.insert(
+        "reachables".to_owned(),
+        Value::Object(
+            result
+                .reachables
+                .iter()
+                .filter_map(|(name, witness)| {
+                    witness.as_ref().map(|witness| {
+                        (
+                            display(name),
+                            json!({
+                                "witnessed_at_step": witness.step,
+                                "witness": fslc_rust::trace_json(model, &witness.trace),
+                            }),
+                        )
+                    })
+                })
+                .collect(),
+        ),
+    );
+    output.insert(
+        "action_coverage".to_owned(),
+        Value::Object(
+            result
+                .action_coverage
+                .iter()
+                .map(|(name, covered)| {
+                    (
+                        display(name),
+                        if *covered {
+                            json!(true)
+                        } else {
+                            let requirement = model
+                                .actions
+                                .iter()
+                                .find(|action| action.name == *name)
+                                .and_then(|action| action.meta.as_ref())
+                                .map(|meta| json!({"id": meta.id, "text": meta.text}));
+                            let mut diagnostic = json!({
+                                "covered": false,
+                                "blocking_requires": [],
+                                "hint": coverage_hint(depth),
+                                "faithfulness_class": "intent_unexercised",
+                                "recommended_action": "add a single-shot reachable for the action / raise --depth",
+                            });
+                            if let Some(requirement) = requirement
+                                && let Value::Object(entry) = &mut diagnostic
+                            {
+                                entry.insert("requirement".to_owned(), requirement);
+                            }
+                            diagnostic
+                        },
+                    )
+                })
+                .collect(),
+        ),
+    );
+    output.insert(
+        "deadlock".to_owned(),
+        result.deadlock_step.map_or_else(
+            || json!({"found": false}),
+            |step| {
+                json!({
+                    "found": true,
+                    "at_step": step,
+                    "trace": result.deadlock_trace.as_ref().map(|trace| fslc_rust::trace_json(model, trace)),
+                })
+            },
+        ),
+    );
+}
+
+fn coverage_hint(depth: usize) -> String {
+    format!(
+        "these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"
+    )
+}
+
+fn invariant_names(model: &KernelModel) -> Vec<String> {
+    let mut names = model
+        .state
+        .iter()
+        .filter(|(_, ty)| has_bounds(model, ty))
+        .map(|(name, _)| format!("_bounds_{}", display(name)))
+        .collect::<Vec<_>>();
+    names.extend(
+        model
+            .invariants
+            .iter()
+            .map(|property| display(&property.name)),
+    );
+    names
+}
+
+fn bindings_json(bindings: &[std::collections::BTreeMap<String, FslValue>]) -> Value {
+    Value::Array(
+        bindings
+            .iter()
+            .map(|binding| {
+                Value::Object(
+                    binding
+                        .iter()
+                        .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn violation_bindings_json(
+    model: &KernelModel,
+    kind: &str,
+    name: &str,
+    expr: Option<&KernelExpr>,
+    state: Option<&std::collections::BTreeMap<String, FslValue>>,
+) -> Value {
+    let Some(state) = state else {
+        return Value::Null;
+    };
+    if kind == "type_bound" {
+        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let Some((_, TypeRef::Map(_, value_ty))) = model
+            .state
+            .iter()
+            .find(|(candidate, _)| candidate == state_name)
+        else {
+            return Value::Null;
+        };
+        let Some(FslValue::Map(entries)) = state.get(state_name) else {
+            return Value::Null;
+        };
+        let bad = entries
+            .iter()
+            .filter(|(_, value)| {
+                !fsl_runtime::value_conforms(value, value_ty, model).unwrap_or(false)
+            })
+            .map(|(key, _)| {
+                let mut binding = std::collections::BTreeMap::new();
+                binding.insert("key".to_owned(), key.clone());
+                binding
+            })
+            .collect::<Vec<_>>();
+        return if bad.is_empty() {
+            Value::Null
+        } else {
+            bindings_json(&bad)
+        };
+    }
+    let Some(expr) = expr else {
+        return Value::Null;
+    };
+    fsl_runtime::violating_bindings(expr, state, model)
+        .ok()
+        .flatten()
+        .map_or(Value::Null, |bindings| bindings_json(&bindings))
+}
+
+fn violation_blame_json(
+    kind: &str,
+    name: &str,
+    expr: Option<&KernelExpr>,
+    violating_bindings: Value,
+) -> Value {
+    if kind == "type_bound" {
+        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        return json!({
+            "conjuncts": [{
+                "index": 0,
+                "text": format!("{} stays within its declared type bounds", display(state_name)),
+                "holds": false,
+            }]
+        });
+    }
+    let Some(expr) = expr else {
+        return json!({"conjuncts": []});
+    };
+    let mut conjunct = json!({
+        "index": 0,
+        "text": fslc_rust::expr_text(expr),
+        "holds": false,
+    });
+    if !violating_bindings.is_null()
+        && let Value::Object(entry) = &mut conjunct
+    {
+        entry.insert("violating_bindings".to_owned(), violating_bindings);
+    }
+    json!({"conjuncts": [conjunct]})
+}
+
+fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
+        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
+        TypeRef::Option(inner) => has_bounds(model, inner),
+        TypeRef::Map(_, value) => has_bounds(model, value),
+        TypeRef::Named(name) => match model.types.get(name) {
+            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
+            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
+            None => false,
+        },
+    }
+}
+
+fn check_warnings(model: &KernelModel) -> Vec<Value> {
+    let mut warnings = model
+        .state
+        .iter()
+        .filter(|(_, ty)| {
+            matches!(ty, TypeRef::Map(key, _) if matches!(key.as_ref(), TypeRef::Int))
+        })
+        .map(|(name, _)| {
+            json!({
+                "message": format!("Map<Int, ...> on '{}' is deprecated; use a bounded domain type as key", display(name)),
+                "hint": "declare `type K = 0..<max>` and use `Map<K, ...>`",
+            })
+        })
+        .collect::<Vec<_>>();
+    if model.invariants.is_empty()
+        && model.transitions.is_empty()
+        && model.reachables.is_empty()
+        && model.leadstos.is_empty()
+    {
+        warnings.push(json!({
+            "message": "spec declares no user invariants (only implicit type bounds are checked)",
+        }));
+    }
+    warnings
+}
+
+fn parse_params(
+    model: &KernelModel,
+    action: &fsl_core::ActionDef,
+    values: &Map<String, Value>,
+) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
+    if values.len() != action.params.len() {
+        return Err(format!(
+            "parameter mismatch for action '{}'",
+            display(&action.name)
+        ));
+    }
+    action
+        .params
+        .iter()
+        .map(|param| {
+            let value = values
+                .get(param.name())
+                .ok_or_else(|| format!("missing parameter '{}'", param.name()))?;
+            Ok((
+                param.name().to_owned(),
+                parse_param_value(model, param, value)?,
+            ))
+        })
+        .collect()
+}
+
+fn parse_param_value(
+    model: &KernelModel,
+    param: &ParamDef,
+    value: &Value,
+) -> Result<FslValue, String> {
+    match param {
+        ParamDef::Range { .. } => value
+            .as_i64()
+            .map(FslValue::Int)
+            .ok_or_else(|| format!("parameter '{}' must be an integer", param.name())),
+        ParamDef::Typed { ty, .. } => match ty {
+            TypeRef::Bool => value
+                .as_bool()
+                .map(FslValue::Bool)
+                .or_else(|| value.as_i64().map(|value| FslValue::Bool(value != 0)))
+                .ok_or_else(|| format!("parameter '{}' must be Boolean", param.name())),
+            TypeRef::Int | TypeRef::Range(_, _) => value
+                .as_i64()
+                .map(FslValue::Int)
+                .ok_or_else(|| format!("parameter '{}' must be an integer", param.name())),
+            TypeRef::Named(type_name) => match model.types.get(type_name) {
+                Some(TypeDef::Domain { .. }) => value
+                    .as_i64()
+                    .map(FslValue::Int)
+                    .ok_or_else(|| format!("parameter '{}' must be an integer", param.name())),
+                Some(TypeDef::Enum { members, .. }) => {
+                    let member = value.as_str().ok_or_else(|| {
+                        format!("parameter '{}' must be an enum member", param.name())
+                    })?;
+                    if !members.iter().any(|candidate| candidate == member) {
+                        return Err(format!("unknown enum member '{member}'"));
+                    }
+                    Ok(FslValue::Enum {
+                        type_name: type_name.clone(),
+                        member: member.to_owned(),
+                    })
+                }
+                Some(TypeDef::Struct { .. }) | None => {
+                    Err(format!("parameter '{}' has unsupported type", param.name()))
+                }
+            },
+            _ => Err(format!("parameter '{}' has non-scalar type", param.name())),
+        },
+    }
+}
+
+fn load_model(path: &Path) -> Result<KernelModel, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| {
+        if error.message == "top-level document has not reached the kernel lowering gate" {
+            "spec has no state block".to_owned()
+        } else {
+            error.to_string()
+        }
+    })?;
+    fsl_core::build_model(kernel).map_err(|error| error.to_string())
+}
+
+fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let kernel =
+        fsl_core::parse_kernel_source_with_bounds(&source, &scope.instances, &scope.values)
+            .map_err(|error| error.to_string())?;
+    fsl_core::build_model(kernel).map_err(|error| error.to_string())
+}
+
+fn replay_all(model: &KernelModel, result: &fsl_verifier::BmcResult) -> Result<(), String> {
+    if let Some(violation) = &result.violation {
+        fsl_runtime::replay_trace(model.clone(), &violation.trace)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(violation) = &result.leadsto_violation {
+        fsl_runtime::replay_trace(model.clone(), &violation.trace)
+            .map_err(|error| error.to_string())?;
+    }
+    for witness in result.reachables.values().flatten() {
+        fsl_runtime::replay_trace(model.clone(), &witness.trace)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(trace) = &result.deadlock_trace {
+        fsl_runtime::replay_trace(model.clone(), trace).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn envelope() -> Map<String, Value> {
+    let mut output = Map::new();
+    output.insert("fsl".to_owned(), json!("1.0"));
+    output
+}
+
+fn error_output(kind: &str, message: &str) -> Value {
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!(kind));
+    output.insert("message".to_owned(), json!(message));
+    Value::Object(output)
+}
+
+fn semantic_error_output(message: &str) -> Value {
+    let kind = if message == "init constraints are unsatisfiable" {
+        "vacuous"
+    } else if message.starts_with("unknown type '")
+        || message.starts_with("cannot coerce symbolic value")
+        || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
+    {
+        "type"
+    } else {
+        "semantics"
+    };
+    let mut output = error_output(kind, message);
+    if message.starts_with("struct field '")
+        && message.ends_with(" has non-scalar type")
+        && let Value::Object(envelope) = &mut output
+    {
+        envelope.insert(
+            "hint".to_owned(),
+            json!("struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"),
+        );
+    }
+    output
+}
+
+fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
+    output.insert("checked_to_depth".to_owned(), json!(checked));
+    output.insert("completeness".to_owned(), json!("bounded"));
+    output.insert(
+        "cost".to_owned(),
+        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+    );
+}
+
+fn display(name: &str) -> String {
+    fslc_rust::display_name(name)
+}
+
+fn block_on_native<F: Future>(future: F) -> F::Output {
+    let mut future = pin!(future);
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+    match future.as_mut().poll(&mut context) {
+        Poll::Ready(result) => result,
+        Poll::Pending => panic!("native Z3 backend unexpectedly yielded Pending"),
+    }
+}

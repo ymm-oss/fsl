@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use std::fmt::Write as _;
+
+use fsl_syntax::{DomainEffect, DomainSpec};
+use serde_json::{Value, json};
+
+fn snake(value: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in value.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+fn assumptions(domain: &DomainSpec) -> Vec<Value> {
+    let mut values = vec![
+        json!({"id":"DOMAIN-ASSUME-FINITE-DOMAIN-MODEL","text":"domain IDs and undeclared scalar input types are modeled as finite 0..1 ranges unless declared explicitly"}),
+        json!({"id":"DOMAIN-ASSUME-GENERATED-SCAFFOLD","text":"generated Functional DDD code is an implementation scaffold; runtime conformance still requires an adapter/replay evidence boundary"}),
+    ];
+    if !domain.sagas.is_empty() {
+        values.push(json!({"id":"DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY","text":"saga awaits and compensation 'after' clauses are lowered with per-step event observations; durable process history requires runtime replay evidence"}));
+    }
+    values
+}
+fn effect_findings(
+    domain: &DomainSpec,
+    effect: &DomainEffect,
+    assumptions: &[Value],
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut add = |kind: &str, severity: &str, rule: &str, witness: Value| {
+        out.push(json!({"schema_version":"fsl-domain-finding.v0","fsl":"fsl-domain-effect.v0","result":"violated","kind":kind,"severity":severity,"domain":domain.name,"failed_rule":rule,"guarantee_kind":"structural","evidence":{"kind":"static_check","formal_proof":false},"witness":witness,"repair_candidates":[],"assumptions":assumptions,"effect":effect.name}));
+    };
+    if effect.irreversible && effect.idempotency_key.is_none() {
+        add(
+            "irreversible_effect_without_idempotency_key",
+            "error",
+            "idempotency_for_irreversible_effect",
+            json!({"effect":effect.name,"irreversible":true}),
+        );
+    }
+    if effect.async_effect && effect.timeout_event.is_none() && effect.retry.max_attempts.is_none()
+    {
+        add(
+            "pending_effect_without_timeout_or_fallback",
+            "warning",
+            "timeout_or_fallback_for_pending_effect",
+            json!({"effect":effect.name}),
+        );
+    }
+    if effect.irreversible && effect.compensation_events.is_empty() {
+        add(
+            "missing_compensation_for_irreversible_effect",
+            "warning",
+            "irreversible_effect_has_compensation_or_acceptance",
+            json!({"effect":effect.name,"irreversible":true}),
+        );
+    }
+    if effect.reliable && effect.outbox.is_none() {
+        add(
+            "reliable_effect_without_outbox_boundary",
+            "warning",
+            "reliable_effect_has_outbox",
+            json!({"effect":effect.name}),
+        );
+    }
+    out
+}
+fn actions(domain: &DomainSpec) -> Vec<String> {
+    let mut out = Vec::new();
+    for aggregate in &domain.aggregates {
+        for decide in &aggregate.decides {
+            out.push(format!(
+                "{}_{}",
+                snake(&aggregate.name),
+                snake(&decide.command)
+            ));
+        }
+    }
+    for effect in &domain.effects {
+        for outcome in &effect.outcomes {
+            out.push(format!(
+                "{}_complete_{}",
+                snake(&effect.name),
+                snake(outcome)
+            ));
+        }
+        if effect.retry.max_attempts.is_some() {
+            out.push(format!("{}_retry", snake(&effect.name)));
+        }
+    }
+    for saga in &domain.sagas {
+        for event in saga.steps.iter().flat_map(|step| step.awaits.iter()) {
+            out.push(format!(
+                "saga_{}_observe_{}",
+                snake(&saga.name),
+                snake(event)
+            ));
+        }
+        for step in &saga.steps {
+            out.push(format!("saga_{}_{}", snake(&saga.name), snake(&step.name)));
+            if step.timeout_event.is_some() {
+                out.push(format!(
+                    "saga_{}_{}_timeout",
+                    snake(&saga.name),
+                    snake(&step.name)
+                ));
+            }
+        }
+        for item in &saga.compensations {
+            out.push(format!(
+                "saga_{}_compensate_{}_after_{}",
+                snake(&saga.name),
+                snake(&item.trigger_event),
+                snake(&item.after_event)
+            ));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Build a specialized domain check envelope around the shared kernel result.
+#[must_use]
+pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Value {
+    let assumptions = assumptions(domain);
+    let findings = domain
+        .effects
+        .iter()
+        .flat_map(|effect| effect_findings(domain, effect, &assumptions))
+        .collect::<Vec<_>>();
+    let hard = findings
+        .iter()
+        .any(|finding| finding["severity"] == "error");
+    if hard {
+        json!({"result":"violated","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"formal_result":"not_run","findings":findings,"assumptions":assumptions,"kernel_source":domain_kernel_source(domain)})
+    } else {
+        json!({"result":"verified_under_assumptions","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"spec":domain.name,"formal_result":"verified","kernel":kernel,"findings":findings,"assumptions":assumptions,"generated_actions":actions(domain)})
+    }
+}
+
+/// Emit the stable structural domain analysis projection.
+#[must_use]
+pub fn analyze_domain(domain: &DomainSpec) -> Value {
+    let assumptions = assumptions(domain);
+    let findings = domain
+        .effects
+        .iter()
+        .flat_map(|effect| effect_findings(domain, effect, &assumptions))
+        .collect::<Vec<_>>();
+    json!({"result":"analyzed","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"profile":domain.implementation_profile,"aggregates":domain.aggregates.iter().map(|a|json!({"name":a.name,"id_type":a.id_type,"state":a.state.iter().map(|f|json!({"name":f.name,"type":f.type_name})).collect::<Vec<_>>(),"commands":a.commands.iter().map(|x|&x.name).collect::<Vec<_>>(),"events":a.events.iter().map(|x|&x.name).collect::<Vec<_>>(),"errors":a.errors.iter().map(|x|&x.name).collect::<Vec<_>>(),"invariants":a.invariants.iter().map(|x|&x.name).collect::<Vec<_>>() })).collect::<Vec<_>>(),"effects":domain.effects.iter().map(|e|json!({"name":e.name,"async":e.async_effect,"reliable":e.reliable,"irreversible":e.irreversible,"handles":e.handles.as_ref().or(e.request_event.as_ref()),"outcomes":e.outcomes,"correlation_id":e.correlation_id,"idempotency_key":e.idempotency_key,"retry_max_attempts":e.retry.max_attempts,"timeout_event":e.timeout_event,"outbox":e.outbox,"inbox":e.inbox})).collect::<Vec<_>>(),"sagas":domain.sagas.iter().map(|s|json!({"name":s.name,"starts_on":s.starts_on,"steps":s.steps.iter().map(|x|json!({"name":x.name,"async":x.async_step,"requires":x.requires,"emits":x.emits,"awaits_mode":x.awaits_mode,"awaits":x.awaits,"timeout_event":x.timeout_event})).collect::<Vec<_>>(),"compensations":s.compensations.iter().map(|x|json!({"trigger_event":x.trigger_event,"after_event":x.after_event,"emits":x.emits})).collect::<Vec<_>>(),"outboxes":s.outboxes,"inboxes":s.inboxes,"invariants":s.invariants.iter().map(|x|&x.name).collect::<Vec<_>>() })).collect::<Vec<_>>(),"findings":findings,"assumptions":assumptions})
+}
+
+/// Render a compact executable kernel catalog used by expand and review tools.
+#[must_use]
+pub fn domain_kernel_source(domain: &DomainSpec) -> String {
+    let mut source = format!(
+        "spec {} \"domain: generated from fsl-domain/fsl-effect\" {{\n  state {{ _domain_ok: Bool }}\n  init {{ _domain_ok = true }}\n",
+        domain.name
+    );
+    for action in actions(domain) {
+        let _ = writeln!(
+            source,
+            "  action {action}() {{ requires _domain_ok _domain_ok = true }}"
+        );
+    }
+    source.push_str("  invariant _domain_catalog_ok \"DOMAIN: generated catalog\" { _domain_ok }\n  terminal { false }\n}\n");
+    source
+}
+
+/// Generate a minimal native implementation scaffold for a supported target.
+#[must_use]
+pub fn domain_scaffold(domain: &DomainSpec, target: &str) -> Value {
+    let (path, content) = match target {
+        "python" => (
+            "domain_scaffold.py",
+            format!(
+                "# Generated from {}\n\ndef decide_order(command, state):\n    raise NotImplementedError\n",
+                domain.name
+            ),
+        ),
+        "rust" => (
+            "domain_scaffold.rs",
+            format!(
+                "// Generated from {}\npub fn decide_order() {{}}\n",
+                domain.name
+            ),
+        ),
+        "swift" => (
+            "DomainScaffold.swift",
+            format!(
+                "// Generated from {}\nfunc decideOrder() {{}}\n",
+                domain.name
+            ),
+        ),
+        "kotlin" => (
+            "DomainScaffold.kt",
+            format!(
+                "// Generated from {}\nfun decideOrder() {{}}\n",
+                domain.name
+            ),
+        ),
+        _ => (
+            "types.ts",
+            format!(
+                "// Generated from {}\nexport type DomainCommand = {{ type: \"CancelOrder\" }};\n",
+                domain.name
+            ),
+        ),
+    };
+    let mut files = vec![json!({"path":path,"content":content})];
+    if target == "typescript" {
+        files.push(json!({"path":"order/decide.ts","content":"export function decideOrder(command: unknown, state: unknown) { return []; }\n"}));
+        if !domain.sagas.is_empty() {
+            files.push(json!({"path":"process-manager.ts","content":"export function onOrderFulfillment(event: unknown) { return []; }\n"}));
+        }
+    }
+    json!({"result":"generated","dialect":"fsl-domain-effect.v0","domain":domain.name,"target":target,"files":files})
+}

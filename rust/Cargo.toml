@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "fsl-core",
+    "fsl-runtime",
+    "fsl-solver",
+    "fsl-solver-z3",
+    "fsl-solver-z3js",
+    "fsl-syntax",
+    "fsl-tools",
+    "fsl-verifier",
+    "fsl-wasm",
+    "fslc",
+]
+resolver = "2"
+
+[workspace.package]
+version = "2.7.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+z3 = { version = "=0.20.2", default-features = false, features = ["gh-release", "z3_4_16"] }
+js-sys = "0.3.82"
+wasm-bindgen = "0.2.105"
+wasm-bindgen-futures = "0.4.55"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

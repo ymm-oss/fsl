@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * Auto-generated FSL conformance tests (Vitest).
+ * Source: __SOURCE__
+ *
+ * Wire `makeAdapter()` to your implementation. Until it is wired, every test is
+ * skipped (mirroring the pytest scaffold's skip-when-unwired behaviour).
+ *
+ * The random-walk trace below was baked at generation time by the FSL Monitor
+ * (the spec's concrete interpreter) under a fixed seed, so these tests need no
+ * `fslc`/Python at runtime — they replay the baked oracle states and assert.
+ */
+import { test, expect } from "vitest";
+
+export interface StepResult {
+  ok: boolean;
+  kind?: string;
+}
+
+/**
+ * Connect your implementation to the spec actions/state.
+ *  - reset(): put the implementation in the same initial state as spec `init`
+ *  - step(action, params): drive one spec action on the implementation
+ *  - observe(): project implementation state onto the spec's logical-state shape
+ *    (enum = name string, Option = null|value, Seq = array, Map = object with
+ *     string keys, struct = object)
+ */
+export interface Adapter {
+  reset(): void;
+  step(action: string, params: Record<string, unknown>): StepResult | void;
+  observe(): Record<string, unknown>;
+}
+
+// Wire your implementation here. Throwing leaves the suite skipped (not failed).
+function makeAdapter(): Adapter {
+  throw new Error("wire your implementation: implement makeAdapter()");
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct) shapes.
+function assertPartial(observed: Record<string, unknown>, expected: Record<string, unknown>): void {
+  for (const [key, val] of Object.entries(expected)) {
+    const seen = observed[key];
+    if (isPlainObject(val) && isPlainObject(seen)) {
+      assertPartial(seen, val);
+    } else {
+      expect(seen).toStrictEqual(val);
+    }
+  }
+}
+
+function assertRejected(result: StepResult | void, expectedKind: string | null): void {
+  expect(isPlainObject(result), "forbidden step must return a result object").toBe(true);
+  const r = result as StepResult;
+  expect(r.ok).toBe(false);
+  if (expectedKind !== null) {
+    expect(r.kind).toBe(expectedKind);
+  }
+}
+
+let adapter: Adapter;
+let wired = false;
+try {
+  adapter = makeAdapter();
+  adapter.reset();
+  adapter.observe();
+  wired = true;
+} catch {
+  // Adapter not wired yet — every test below is skipped.
+}
+const scenario = wired ? test : test.skip;

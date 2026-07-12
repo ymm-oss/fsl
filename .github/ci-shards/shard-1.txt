@@ -17,3 +17,4 @@ tests/test_external_mutants.py
 tests/test_induction_lemmas.py
 tests/test_from_state.py
 tests/test_log_replay.py
+tests/test_rust_port_ast.py

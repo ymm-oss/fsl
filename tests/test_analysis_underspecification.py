@@ -18,6 +18,7 @@ SCHEMA = (
     / "analysis"
     / "analysis-findings.v0.schema.json"
 )
+ORDER_WORKFLOW = Path(__file__).resolve().parents[1] / "specs" / "order_workflow.fsl"
 
 
 def _write(tmp_path, source):
@@ -82,6 +83,15 @@ def test_mutually_exclusive_actions_do_not_report_divergent_choice(tmp_path):
     )
     out = run_analyze(str(_write(tmp_path, determined)), profile="ai-review")
 
+    assert _findings(out, "divergent_choice") == []
+
+
+def test_successor_cache_does_not_reuse_short_lived_state_ids():
+    out = run_analyze(str(ORDER_WORKFLOW), profile="ai-review")
+
+    # Every same-state choice in this model preserves all three invariants.
+    # A process-wide cache keyed only by id(successor_state) used to report
+    # false XORs when CPython recycled a short-lived successor dictionary id.
     assert _findings(out, "divergent_choice") == []
 
 

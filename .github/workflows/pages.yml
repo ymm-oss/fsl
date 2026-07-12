@@ -1,0 +1,51 @@
+name: deploy-docs-playground
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "rust/fsl-*/**"
+      - "rust/Cargo.toml"
+      - "rust/Cargo.lock"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rust/fsl-wasm/package-lock.json
+      - name: Build browser verifier into docs
+        working-directory: rust/fsl-wasm
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked
+          npm ci
+          node publish-docs.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

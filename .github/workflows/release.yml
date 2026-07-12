@@ -1,8 +1,7 @@
 name: release-binaries
 
-# When a v* tag is pushed, build standalone single-file binaries for each
-# OS/architecture with PyInstaller and attach them to the GitHub Release.
-# The artifacts are "download and run" with no Python required (the native z3 lib is bundled).
+# When a v* tag is pushed, build the native Rust fslc binary for each supported
+# OS/architecture and attach it to the GitHub Release.
 #
 #   git tag v1.1.0 && git push origin v1.1.0
 #
@@ -45,30 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          # z3-solver / lark / the project itself are all wheels or pure Python.
-          # Use 3.12, for which a wide range of wheels is available.
-          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install build dependencies
-        # z3-solver is wheel-only (--only-binary). If the latest version lacks a wheel
-        # for the given OS/arch (e.g. 4.16.0.0 has no macOS arm64 wheel), pip automatically
-        # falls back to the most recent version that has a wheel. Without this, it falls back
-        # to a source build of the sdist and fails with "Unable to build Z3".
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --only-binary=z3-solver . pyinstaller
-
-      - name: Build standalone binary
-        # --collect-all z3   : bundle z3's native libz3 (.so/.dylib/.dll)
-        # --copy-metadata fslc: preserve version resolution via importlib.metadata
-        run: >
-          pyinstaller --onefile --name fslc
-          --collect-all z3
-          --copy-metadata fslc
-          --distpath dist
-          packaging/fslc_entry.py
+      - name: Build native Rust binary
+        working-directory: rust
+        env:
+          Z3_SYS_Z3_VERSION: "4.16.0"
+        run: cargo build --release --locked -p fslc-rust
 
       # Use a fixed, known spec that is verified and has no counterexample.
       # Picking an arbitrary .fsl via find|head can grab a demo spec that contains a
@@ -77,29 +59,31 @@ jobs:
       - name: Smoke test (binary must self-contain Python + z3)
         if: runner.os != 'Windows'
         run: |
-          ./dist/fslc --version
-          ./dist/fslc verify examples/pm/cancel_flow.fsl > /dev/null
+          ./rust/target/release/fslc --version
+          ./rust/target/release/fslc verify examples/pm/cancel_flow.fsl > /dev/null
           echo "ok"
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          ./dist/fslc.exe --version
-          ./dist/fslc.exe verify examples/pm/cancel_flow.fsl > $null
+          ./rust/target/release/fslc.exe --version
+          ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl > $null
           echo "ok"
 
       - name: Rename + checksum (unix)
         if: runner.os != 'Windows'
         run: |
-          mv dist/fslc "dist/${{ matrix.asset }}"
+          mkdir -p dist
+          mv rust/target/release/fslc "dist/${{ matrix.asset }}"
           ( cd dist && shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256" )
 
       - name: Rename + checksum (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Move-Item dist/fslc.exe "dist/${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force -Path dist
+          Move-Item rust/target/release/fslc.exe "dist/${{ matrix.asset }}"
           $hash = (Get-FileHash "dist/${{ matrix.asset }}" -Algorithm SHA256).Hash.ToLower()
           "$hash  ${{ matrix.asset }}" | Out-File -Encoding ascii "dist/${{ matrix.asset }}.sha256"
 

@@ -1,0 +1,24 @@
+[package]
+name = "fslc-rust"
+description = "Native FSL command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "fslc"
+path = "src/main.rs"
+
+[dependencies]
+fsl-core = { path = "../fsl-core" }
+fsl-runtime = { path = "../fsl-runtime" }
+fsl-solver-z3 = { path = "../fsl-solver-z3" }
+fsl-syntax = { path = "../fsl-syntax" }
+fsl-tools = { path = "../fsl-tools" }
+fsl-verifier = { path = "../fsl-verifier" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

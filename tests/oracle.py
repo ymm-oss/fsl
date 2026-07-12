@@ -49,6 +49,7 @@ class OracleResult:
     deadlock: dict[str, Any] | None = None
     states_explored: int = 0
     phys_snapshots: list[dict] = field(default_factory=list)
+    action_coverage: set[str] = field(default_factory=set)
 
 
 class UnsupportedOracle(RuntimeError):
@@ -140,6 +141,7 @@ def bfs_oracle(source_or_path: str | Path, depth: int, collect_phys: int = 0) ->
             enabled = sorted(mon.enabled(), key=action_key)
         except Exception as exc:
             raise UnsupportedOracle(f"Monitor.enabled() could not enumerate this state: {exc}") from exc
+        out.action_coverage.update(action["action"] for action in enabled)
         if not enabled and (out.deadlock is None or d < out.deadlock["depth"]):
             out.deadlock = {"depth": d, "trace": list(trace), "state": mon.state}
         if d >= depth:

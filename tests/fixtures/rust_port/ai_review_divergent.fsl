@@ -1,0 +1,20 @@
+requirements ReviewChoice {
+  state { ready: Bool, approved: Bool }
+  init { ready = true  approved = false }
+  requirement REQ-1 "review can approve or reject" {
+    action approve() {
+      requires ready
+      ready = false
+      approved = true
+    }
+    action reject() {
+      requires ready
+      ready = false
+      approved = false
+    }
+  }
+  acceptance AC-1 "approval path ends approved" {
+    approve()
+    expect approved
+  }
+}

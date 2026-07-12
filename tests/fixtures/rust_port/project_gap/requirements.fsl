@@ -1,0 +1,11 @@
+requirements ReqLayer {
+  type Item = 0..0
+  state { x: Map<Item, Bool> }
+  init { forall i: Item { x[i] = false } }
+  requirement REQ-LOST "must finish" {
+    action finish(i: Item) {
+      requires not x[i]
+      x[i] = true
+    }
+  }
+}

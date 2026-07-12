@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+spec Guarded {
+  type Count = 0..1
+  state { x: Count }
+  init { x = 0 }
+  action inc() {
+    requires x == 0
+    x = 1
+  }
+  invariant Bound { x <= 1 }
+}
+
+// duplicate marker
+// duplicate marker

@@ -1,0 +1,14 @@
+[package]
+name = "fsl-runtime"
+description = "Solver-independent FSL concrete monitor and BFS oracle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fsl-core = { path = "../fsl-core" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

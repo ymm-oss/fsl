@@ -1,0 +1,7 @@
+[requirements]
+file = "requirements.fsl"
+
+[design]
+file = "design.fsl"
+refine_against = "requirements"
+mapping = "map.fsl"
