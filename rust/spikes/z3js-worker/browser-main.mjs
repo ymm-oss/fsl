@@ -3,22 +3,14 @@
 
 const output = document.querySelector("#result");
 const worker = new Worker("./worker.js");
-const timeout = setTimeout(() => {
-  output.dataset.done = "true";
-  output.dataset.ok = "false";
-  output.textContent = "browser Worker timed out";
-  worker.terminate();
-}, 45_000);
 
 worker.onmessage = ({ data }) => {
-  clearTimeout(timeout);
   output.dataset.done = "true";
   output.dataset.ok = String(Boolean(data.ok && data.result?.crossOriginIsolated));
   output.textContent = JSON.stringify(data);
   worker.terminate();
 };
 worker.onerror = (event) => {
-  clearTimeout(timeout);
   output.dataset.done = "true";
   output.dataset.ok = "false";
   output.textContent = event.message;
