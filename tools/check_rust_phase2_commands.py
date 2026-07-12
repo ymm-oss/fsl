@@ -87,6 +87,7 @@ def _invoke(executable: list[str], arguments: list[str]) -> tuple[dict[str, Any]
     environment["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + environment.get(
         "PYTHONPATH", ""
     )
+    environment["FSLC_CACHE_VERIFY"] = "1"
     process = subprocess.run(
         [*executable, *arguments],
         cwd=ROOT,

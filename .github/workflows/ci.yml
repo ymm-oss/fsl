@@ -22,6 +22,10 @@ jobs:
     timeout-minutes: 25
     env:
       Z3_SYS_Z3_VERSION: "4.16.0"
+      # Parity gates compare fresh implementation envelopes. Persistent cache
+      # metadata is covered separately and must not leak between sequential
+      # comparison scripts in this job.
+      FSLC_CACHE_VERIFY: "1"
     steps:
       - uses: actions/checkout@v4
 
