@@ -63,6 +63,10 @@ def normalized_raw(name: str, content: str) -> str:
 def invoke(executable: list[str], arguments: list[str], *, raw: bool = False) -> tuple[Any, int]:
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + environment.get("PYTHONPATH", "")
+    # Earlier parity scripts populate the persistent verifier cache. Phase 3
+    # compares generated artifacts byte-for-byte, so cache-hit metadata must
+    # not leak into their embedded raw envelopes.
+    environment["FSLC_CACHE_VERIFY"] = "1"
     process = subprocess.run([*executable, *arguments], cwd=ROOT, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     return (process.stdout if raw else json.loads(process.stdout), process.returncode)
 
