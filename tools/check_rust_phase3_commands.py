@@ -60,13 +60,20 @@ def normalized_raw(name: str, content: str) -> str:
     return content
 
 
-def invoke(executable: list[str], arguments: list[str], *, raw: bool = False) -> tuple[Any, int]:
+def invoke(
+    executable: list[str],
+    arguments: list[str],
+    *,
+    raw: bool = False,
+    fresh: bool = False,
+) -> tuple[Any, int]:
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + environment.get("PYTHONPATH", "")
-    # Earlier parity scripts populate the persistent verifier cache. Phase 3
-    # compares generated artifacts byte-for-byte, so cache-hit metadata must
-    # not leak into their embedded raw envelopes.
-    environment["FSLC_CACHE_VERIFY"] = "1"
+    if fresh:
+        # Earlier parity scripts populate the persistent verifier cache. HTML
+        # comparisons include the raw verifier envelope, so cache-hit metadata
+        # must not leak into the byte-for-byte generated artifact contract.
+        environment["FSLC_CACHE_VERIFY"] = "1"
     process = subprocess.run([*executable, *arguments], cwd=ROOT, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     return (process.stdout if raw else json.loads(process.stdout), process.returncode)
 
@@ -138,8 +145,9 @@ def run(binary: Path = RUST) -> dict[str, Any]:
             py_out = Path(directory) / f"py-{name}"
             rs_out = Path(directory) / f"rs-{name}"
             arguments = [command_name, "specs/cart_v1.fsl", "--depth", "3", "-o"]
-            python, python_status = invoke([sys.executable, "-m", "fslc"], [*arguments, str(py_out)])
-            rust, rust_status = invoke([str(binary)], [*arguments, str(rs_out)])
+            fresh = name == "html"
+            python, python_status = invoke([sys.executable, "-m", "fslc"], [*arguments, str(py_out)], fresh=fresh)
+            rust, rust_status = invoke([str(binary)], [*arguments, str(rs_out)], fresh=fresh)
             left, right = project(name, python), project(name, rust)
             if left != right or python_status != rust_status:
                 failures.append({"case": name, "python": left, "rust": right, "exit_codes": [python_status, rust_status]})
@@ -179,8 +187,8 @@ def run(binary: Path = RUST) -> dict[str, Any]:
             py_out = Path(directory) / f"py-html-{stem}"
             rs_out = Path(directory) / f"rs-html-{stem}"
             arguments = ["html", spec, "--depth", "3", "-o"]
-            python, python_status = invoke([sys.executable, "-m", "fslc"], [*arguments, str(py_out)])
-            rust, rust_status = invoke([str(binary)], [*arguments, str(rs_out)])
+            python, python_status = invoke([sys.executable, "-m", "fslc"], [*arguments, str(py_out)], fresh=True)
+            rust, rust_status = invoke([str(binary)], [*arguments, str(rs_out)], fresh=True)
             if project("html", python) != project("html", rust) or python_status != rust_status:
                 failures.append({"case": f"html:broad:{stem}", "python": project("html", python), "rust": project("html", rust), "exit_codes": [python_status, rust_status]})
             elif html_shape(py_out) != html_shape(rs_out):
@@ -330,8 +338,9 @@ def run(binary: Path = RUST) -> dict[str, Any]:
         ("domain-testgen", ["domain", "testgen", "examples/domain/order_async_effect.fsl", "--depth", "3"]),
     ]
     for name, arguments in raw_cases:
-        python, python_status = invoke([sys.executable, "-m", "fslc"], arguments, raw=True)
-        rust, rust_status = invoke([str(binary)], arguments, raw=True)
+        fresh = name == "html-stdout"
+        python, python_status = invoke([sys.executable, "-m", "fslc"], arguments, raw=True, fresh=fresh)
+        rust, rust_status = invoke([str(binary)], arguments, raw=True, fresh=fresh)
         if normalized_raw(name, python) != normalized_raw(name, rust) or python_status != rust_status:
             failures.append({"case":name,"python":"different bytes","rust":"different bytes","exit_codes":[python_status,rust_status]})
     total=len(cases)+3+5+5+4+len(db_cases)+2+len(typestate_specs)+len(analysis_specs)+len(analysis_projections)+len(analysis_exports)+len(mutation_cases)+len(refinement_analysis_cases)+3+len(project_analysis_cases)+len(ai_review_cases)+len(raw_cases)
