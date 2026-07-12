@@ -39,12 +39,12 @@ def _load_tool():
 def test_argparse_help_normalization_is_python_version_independent():
     mod = _load_tool()
     older = """usage: tool [-h] [--profile PROFILE]
-            -o OUTPUT file
+            -o OUTPUT file {check,verify}
 
 optional arguments:
   -o OUTPUT, --output OUTPUT  destination
 """
-    newer = """usage: tool [-h] [--profile PROFILE] -o OUTPUT file
+    newer = """usage: tool [-h] [--profile PROFILE] -o OUTPUT file {check,verify} ...
 
 options:
   -o, --output OUTPUT  destination

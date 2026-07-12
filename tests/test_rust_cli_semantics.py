@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -446,7 +447,7 @@ def test_rust_domain_generate_matches_python_for_every_target():
         for target in targets:
             python = subprocess.run(
                 [
-                    str(ROOT / ".venv" / "bin" / "python"),
+                    sys.executable,
                     "-m",
                     "fslc",
                     "domain",

@@ -3,7 +3,7 @@
   "root": {
     "path": [],
     "prog": "fslc",
-    "help": "usage: fslc [-h] [-V]\n            {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain} ...\n\npositional arguments:\n  {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "help": "usage: fslc [-h] [-V] {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
     "actions": [
       {
         "dest": "help",
@@ -32,7 +32,7 @@
           "ai"
         ],
         "prog": "fslc ai",
-        "help": "usage: fslc ai [-h] {check,replay,eval,regress,compare,drift,compat} ...\n\npositional arguments:\n  {check,replay,eval,regress,compare,drift,compat}\n    check               check an ai_component hard contract or recursive agent\n                        structure\n    replay              compare AI runtime JSONL events to ai_component\n                        declarations\n    eval                evaluate precomputed AI eval JSONL against\n                        statistical_property thresholds\n    regress             check ai_migration no_regression metrics\n    compare             compare two precomputed AI eval JSONL files\n    drift               check observed_property thresholds and drift from\n                        runtime telemetry\n    compat              generate an AI artifact capability profile for\n                        dbsystem\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "help": "usage: fslc ai [-h] {check,replay,eval,regress,compare,drift,compat}\n\npositional arguments:\n  {check,replay,eval,regress,compare,drift,compat}\n    check               check an ai_component hard contract or recursive agent\n                        structure\n    replay              compare AI runtime JSONL events to ai_component\n                        declarations\n    eval                evaluate precomputed AI eval JSONL against\n                        statistical_property thresholds\n    regress             check ai_migration no_regression metrics\n    compare             compare two precomputed AI eval JSONL files\n    drift               check observed_property thresholds and drift from\n                        runtime telemetry\n    compat              generate an AI artifact capability profile for dbsystem\n\noptions:\n  -h, --help            show this help message and exit\n",
         "actions": [
           {
             "dest": "help",
@@ -52,7 +52,7 @@
               "check"
             ],
             "prog": "fslc ai check",
-            "help": "usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}]\n                     [--deadlock {warn,error,ignore}]\n                     file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "help": "usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
             "actions": [
               {
                 "dest": "help",
@@ -115,7 +115,7 @@
               "compare"
             ],
             "prog": "fslc ai compare",
-            "help": "usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS\n                       [--from-label FROM_LABEL] [--to-label TO_LABEL]\n                       [--dataset DATASET]\n\noptions:\n  -h, --help            show this help message and exit\n  --from FROM_RECORDS\n  --to TO_RECORDS\n  --from-label FROM_LABEL\n  --to-label TO_LABEL\n  --dataset DATASET\n",
+            "help": "usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS [--from-label FROM_LABEL] [--to-label TO_LABEL] [--dataset DATASET]\n\noptions:\n  -h, --help            show this help message and exit\n  --from FROM_RECORDS\n  --to TO_RECORDS\n  --from-label FROM_LABEL\n  --to-label TO_LABEL\n  --dataset DATASET\n",
             "actions": [
               {
                 "dest": "help",
@@ -211,7 +211,7 @@
               "drift"
             ],
             "prog": "fslc ai drift",
-            "help": "usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS]\n                     [--window WINDOW] [--baseline BASELINE]\n                     [--property PROPERTY_NAME]\n                     file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --logs LOGS\n  --baseline-logs BASELINE_LOGS\n  --window WINDOW\n  --baseline BASELINE\n  --property PROPERTY_NAME\n",
+            "help": "usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS] [--window WINDOW] [--baseline BASELINE] [--property PROPERTY_NAME] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --logs LOGS\n  --baseline-logs BASELINE_LOGS\n  --window WINDOW\n  --baseline BASELINE\n  --property PROPERTY_NAME\n",
             "actions": [
               {
                 "dest": "help",
@@ -278,7 +278,7 @@
               "eval"
             ],
             "prog": "fslc ai eval",
-            "help": "usage: fslc ai eval [-h] [--records RECORDS] [--dataset DATASET]\n                    [--slice SLICE_NAME] [--property PROPERTY_NAME]\n                    file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --records RECORDS\n  --dataset DATASET\n  --slice SLICE_NAME\n  --property PROPERTY_NAME\n",
+            "help": "usage: fslc ai eval [-h] [--records RECORDS] [--dataset DATASET] [--slice SLICE_NAME] [--property PROPERTY_NAME] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --records RECORDS\n  --dataset DATASET\n  --slice SLICE_NAME\n  --property PROPERTY_NAME\n",
             "actions": [
               {
                 "dest": "help",
@@ -337,7 +337,7 @@
               "regress"
             ],
             "prog": "fslc ai regress",
-            "help": "usage: fslc ai regress [-h] [--migration MIGRATION]\n                       --before-records BEFORE_RECORDS\n                       --after-records AFTER_RECORDS [--dataset DATASET]\n                       file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --migration MIGRATION\n  --before-records BEFORE_RECORDS\n  --after-records AFTER_RECORDS\n  --dataset DATASET\n",
+            "help": "usage: fslc ai regress [-h] [--migration MIGRATION] --before-records BEFORE_RECORDS --after-records AFTER_RECORDS [--dataset DATASET] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --migration MIGRATION\n  --before-records BEFORE_RECORDS\n  --after-records AFTER_RECORDS\n  --dataset DATASET\n",
             "actions": [
               {
                 "dest": "help",
@@ -396,7 +396,7 @@
               "replay"
             ],
             "prog": "fslc ai replay",
-            "help": "usage: fslc ai replay [-h] --logs LOGS [--component COMPONENT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --logs LOGS\n  --component COMPONENT\n                        ai_component to replay when FILE is a project-level\n                        fsl-ai file\n",
+            "help": "usage: fslc ai replay [-h] --logs LOGS [--component COMPONENT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --logs LOGS\n  --component COMPONENT\n                        ai_component to replay when FILE is a project-level fsl-\n                        ai file\n",
             "actions": [
               {
                 "dest": "help",
@@ -440,7 +440,7 @@
           "analyze"
         ],
         "prog": "fslc analyze",
-        "help": "usage: fslc analyze [-h]\n                    [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}]\n                    [--profile {ai-review}] [--export {tag-review}]\n                    [--focus FOCUS] [--format {dot,json,mermaid}]\n                    file [file ...]\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}\n                        structural projection to emit\n  --profile {ai-review}\n                        emit AI-readable structural review findings\n  --export {tag-review}\n                        export declaration-level tag/formula review tuples\n  --focus FOCUS         node id for --projection impact_graph, e.g.\n                        state:stock or action:checkout\n  --format {dot,json,mermaid}\n",
+        "help": "usage: fslc analyze [-h] [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}] [--profile {ai-review}] [--export {tag-review}] [--focus FOCUS] [--format {dot,json,mermaid}] file [file ...]\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}\n                        structural projection to emit\n  --profile {ai-review}\n                        emit AI-readable structural review findings\n  --export {tag-review}\n                        export declaration-level tag/formula review tuples\n  --focus FOCUS         node id for --projection impact_graph, e.g. state:stock\n                        or action:checkout\n  --format {dot,json,mermaid}\n",
         "actions": [
           {
             "dest": "help",
@@ -612,7 +612,7 @@
           "compat"
         ],
         "prog": "fslc compat",
-        "help": "usage: fslc compat [-h] {check} ...\n\npositional arguments:\n  {check}\n    check     check dbsystem compatibility, optionally including AI capability\n              profiles\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "help": "usage: fslc compat [-h] {check}\n\npositional arguments:\n  {check}\n    check     check dbsystem compatibility, optionally including AI capability\n              profiles\n\noptions:\n  -h, --help  show this help message and exit\n",
         "actions": [
           {
             "dest": "help",
@@ -670,7 +670,7 @@
           "db"
         ],
         "prog": "fslc db",
-        "help": "usage: fslc db [-h] {check,observe,import} ...\n\npositional arguments:\n  {check,observe,import}\n    check               check a dbsystem and emit fsl-db findings\n    observe             compare runtime observation logs to dbsystem\n                        declarations\n    import              import SQL DDL or a minimal ORM schema into dbsystem\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "help": "usage: fslc db [-h] {check,observe,import}\n\npositional arguments:\n  {check,observe,import}\n    check               check a dbsystem and emit fsl-db findings\n    observe             compare runtime observation logs to dbsystem\n                        declarations\n    import              import SQL DDL or a minimal ORM schema into dbsystem\n\noptions:\n  -h, --help            show this help message and exit\n",
         "actions": [
           {
             "dest": "help",
@@ -690,7 +690,7 @@
               "check"
             ],
             "prog": "fslc db check",
-            "help": "usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}]\n                     [--deadlock {warn,error,ignore}]\n                     file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "help": "usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
             "actions": [
               {
                 "dest": "help",
@@ -753,7 +753,7 @@
               "import"
             ],
             "prog": "fslc db import",
-            "help": "usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}]\n                      [-o OUTPUT]\n                      file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --name NAME\n  --source {auto,sql,prisma}\n                        source format to import (default: auto by extension)\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --name NAME\n  --source {auto,sql,prisma}\n                        source format to import (default: auto by extension)\n  -o, --output OUTPUT\n",
             "actions": [
               {
                 "dest": "help",
@@ -848,7 +848,7 @@
           "diff"
         ],
         "prog": "fslc diff",
-        "help": "usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING]\n                 [--forbid FORBID]\n                 [old] [new]\n\npositional arguments:\n  old\n  new\n\noptions:\n  -h, --help         show this help message and exit\n  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two\n                     Git revisions\n  --depth DEPTH\n  --mapping MAPPING  optional refinement mapping for one comparison direction\n  --forbid FORBID    comma-separated finding kinds that should fail the gate\n",
+        "help": "usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING] [--forbid FORBID] [old] [new]\n\npositional arguments:\n  old\n  new\n\noptions:\n  -h, --help         show this help message and exit\n  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two Git\n                     revisions\n  --depth DEPTH\n  --mapping MAPPING  optional refinement mapping for one comparison direction\n  --forbid FORBID    comma-separated finding kinds that should fail the gate\n",
         "actions": [
           {
             "dest": "help",
@@ -916,7 +916,7 @@
           "domain"
         ],
         "prog": "fslc domain",
-        "help": "usage: fslc domain [-h] {check,analyze,expand,generate,replay,testgen} ...\n\npositional arguments:\n  {check,analyze,expand,generate,replay,testgen}\n    check               check domain/effect structure and verify generated\n                        kernel\n    analyze             emit aggregate/effect ownership findings\n    expand              expand domain/effect dialect to kernel FSL\n    generate            generate Functional DDD implementation scaffold\n    replay              replay runtime command/event/effect logs\n    testgen             generate domain adapter/conformance scaffold\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "help": "usage: fslc domain [-h] {check,analyze,expand,generate,replay,testgen}\n\npositional arguments:\n  {check,analyze,expand,generate,replay,testgen}\n    check               check domain/effect structure and verify generated\n                        kernel\n    analyze             emit aggregate/effect ownership findings\n    expand              expand domain/effect dialect to kernel FSL\n    generate            generate Functional DDD implementation scaffold\n    replay              replay runtime command/event/effect logs\n    testgen             generate domain adapter/conformance scaffold\n\noptions:\n  -h, --help            show this help message and exit\n",
         "actions": [
           {
             "dest": "help",
@@ -963,7 +963,7 @@
               "check"
             ],
             "prog": "fslc domain check",
-            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}]\n                         [--deadlock {warn,error,ignore}]\n                         file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
             "actions": [
               {
                 "dest": "help",
@@ -1062,7 +1062,7 @@
               "generate"
             ],
             "prog": "fslc domain generate",
-            "help": "usage: fslc domain generate [-h] [--profile {functional-ddd}]\n                            [--target {typescript,kotlin,swift,python,rust}]\n                            [-o OUTPUT]\n                            file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --profile {functional-ddd}\n  --target {typescript,kotlin,swift,python,rust}\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc domain generate [-h] [--profile {functional-ddd}] [--target {typescript,kotlin,swift,python,rust}] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --profile {functional-ddd}\n  --target {typescript,kotlin,swift,python,rust}\n  -o, --output OUTPUT\n",
             "actions": [
               {
                 "dest": "help",
@@ -1161,7 +1161,7 @@
               "testgen"
             ],
             "prog": "fslc domain testgen",
-            "help": "usage: fslc domain testgen [-h] [--depth DEPTH]\n                           [--target {vitest,pytest,swift,kotlin,dart,phpunit}]\n                           [--deadlock {warn,error,ignore}] [--strict]\n                           [-o OUTPUT]\n                           file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  -o, --output OUTPUT\n",
             "actions": [
               {
                 "dest": "help",
@@ -1293,7 +1293,7 @@
           "html"
         ],
         "prog": "fslc html",
-        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT]\n                 [--deadlock {warn,error,ignore}] [--engine {bmc,induction}]\n                 file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n",
+        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n",
         "actions": [
           {
             "dest": "help",
@@ -1364,7 +1364,7 @@
           "ledger"
         ],
         "prog": "fslc ledger",
-        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT]\n                   [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG]\n                   [--engine {bmc,induction}] [--evidence EVIDENCE]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score\n                        conformance (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an\n                        external-evidence producer (fslc ai eval/replay/drift,\n                        fslc db observe, fslc domain replay, ...); repeatable\n",
+        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance\n                        (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-\n                        evidence producer (fslc ai eval/replay/drift, fslc db\n                        observe, fslc domain replay, ...); repeatable\n",
         "actions": [
           {
             "dest": "help",
@@ -1452,7 +1452,7 @@
           "mutate"
         ],
         "prog": "fslc mutate",
-        "help": "usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement]\n                   [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --by-requirement\n  --max-mutants MAX_MUTANTS\n  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the\n                        built-in catalog\n",
+        "help": "usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --by-requirement\n  --max-mutants MAX_MUTANTS\n  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the\n                        built-in catalog\n",
         "actions": [
           {
             "dest": "help",
@@ -1514,7 +1514,7 @@
           "refine"
         ],
         "prog": "fslc refine",
-        "help": "usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]\n\npositional arguments:\n  impl\n  abs\n  mapping\n  rest           chain check: appending more (abs map) pairs runs an end-to-\n                 end composed check\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n",
+        "help": "usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]\n\npositional arguments:\n  impl\n  abs\n  mapping\n  rest           chain check: appending more (abs map) pairs runs an end-to-end\n                 composed check\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n",
         "actions": [
           {
             "dest": "help",
@@ -1568,7 +1568,7 @@
           "replay"
         ],
         "prog": "fslc replay",
-        "help": "usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG)\n                   [--mapping MAPPING]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help           show this help message and exit\n  --trace TRACE\n  --from-log FROM_LOG  production JSONL records to map and replay\n  --mapping MAPPING    refinement-syntax log mapping (required with --from-\n                       log)\n",
+        "help": "usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG) [--mapping MAPPING] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help           show this help message and exit\n  --trace TRACE\n  --from-log FROM_LOG  production JSONL records to map and replay\n  --mapping MAPPING    refinement-syntax log mapping (required with --from-log)\n",
         "actions": [
           {
             "dest": "help",
@@ -1618,7 +1618,7 @@
           "scenarios"
         ],
         "prog": "fslc scenarios",
-        "help": "usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}]\n                      file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --deadlock {warn,error,ignore}\n",
+        "help": "usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --deadlock {warn,error,ignore}\n",
         "actions": [
           {
             "dest": "help",
@@ -1667,7 +1667,7 @@
           "sweep"
         ],
         "prog": "fslc sweep",
-        "help": "usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]\n                  [--deadlock {warn,error,ignore}]\n                  [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]\n                  [--instances INSTANCES] [--values VALUES] [--strict-tags]\n                  [--requirements REQUIREMENTS]\n                  file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation\n  --instances INSTANCES\n                        sweep an entity bound (NAME=LO..HI; repeatable)\n  --values VALUES       sweep a number upper bound as LO..LO through LO..HI\n  --strict-tags\n  --requirements REQUIREMENTS\n",
+        "help": "usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation\n  --instances INSTANCES\n                        sweep an entity bound (NAME=LO..HI; repeatable)\n  --values VALUES       sweep a number upper bound as LO..LO through LO..HI\n  --strict-tags\n  --requirements REQUIREMENTS\n",
         "actions": [
           {
             "dest": "help",
@@ -1796,7 +1796,7 @@
           "testgen"
         ],
         "prog": "fslc testgen",
-        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT]\n                    [--target {pytest,vitest,swift,kotlin,dart,phpunit}]\n                    [--deadlock {warn,error,ignore}] [--strict]\n                    file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n",
+        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n",
         "actions": [
           {
             "dest": "help",
@@ -1881,7 +1881,7 @@
           "typestate"
         ],
         "prog": "fslc typestate",
-        "help": "usage: fslc typestate [-h] [--ts] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help  show this help message and exit\n  --ts        emit only the derivable entities' TypeScript to stdout instead\n              of JSON\n",
+        "help": "usage: fslc typestate [-h] [--ts] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help  show this help message and exit\n  --ts        emit only the derivable entities' TypeScript to stdout instead of\n              JSON\n",
         "actions": [
           {
             "dest": "help",
@@ -1917,7 +1917,7 @@
           "verify"
         ],
         "prog": "fslc verify",
-        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]\n                   [--deadlock {warn,error,ignore}]\n                   [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]\n                   [--exclude-property EXCLUDE_PROPERTY_NAMES]\n                   [--instances INSTANCES] [--values VALUES] [--strict-tags]\n                   [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS]\n                   [--from-state FROM_STATE]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation; resolves\n                        across invariant/trans/leadsTo/reachable declarations\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run\n                        (neither reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n",
+        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation; resolves\n                        across invariant/trans/leadsTo/reachable declarations\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n",
         "actions": [
           {
             "dest": "help",

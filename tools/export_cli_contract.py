@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fslc.cli import _build_arg_parser
+from fslc.cli_help import canonical_help
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,7 +66,7 @@ def _parser_contract(parser: argparse.ArgumentParser, path: tuple[str, ...]) -> 
     return {
         "path": list(path),
         "prog": parser.prog,
-        "help": parser.format_help(),
+        "help": canonical_help(parser),
         "actions": [_action_contract(action) for action in actions],
         "commands": [
             _parser_contract(child, (*path, name))
