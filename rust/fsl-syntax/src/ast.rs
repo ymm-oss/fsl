@@ -20,7 +20,10 @@ pub struct Span {
 impl Span {
     #[must_use]
     pub fn python_loc(self) -> Value {
-        json!({"column": self.start.column, "line": self.start.line})
+        // Python preserves insertion order when serializing this public shape.
+        // Keep the same order so byte-oriented reports such as `ledger` remain
+        // identical across the Python and Rust implementations.
+        json!({"line": self.start.line, "column": self.start.column})
     }
 }
 
@@ -287,4 +290,25 @@ impl Expr {
 
 fn ast_list(items: &[Expr]) -> Vec<Value> {
     items.iter().map(Expr::python_ast).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SourcePos, Span};
+
+    #[test]
+    fn python_location_uses_python_key_order() {
+        let position = SourcePos {
+            offset: 0,
+            line: 34,
+            column: 3,
+        };
+        let location = Span {
+            start: position,
+            end: position,
+        }
+        .python_loc();
+
+        assert_eq!(location.to_string(), r#"{"line":34,"column":3}"#);
+    }
 }
