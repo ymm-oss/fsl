@@ -59,7 +59,7 @@ jobs:
       # Picking an arbitrary .fsl via find|head can grab a demo spec that contains a
       # counterexample, causing verify to exit non-zero and making the run flaky
       # depending on the runner's file ordering.
-      - name: Smoke test (binary must self-contain Python + z3)
+      - name: Smoke test (native binary must self-contain z3)
         if: runner.os != 'Windows'
         run: |
           ./rust/target/release/fslc --version

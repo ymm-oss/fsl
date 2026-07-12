@@ -116,6 +116,9 @@ async fn verify_bounded_config<S: SmtSolver>(
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
 ) -> Result<BmcResult, VerifyError> {
+    if model.actions.is_empty() {
+        return Err(VerifyError::new("spec has no actions"));
+    }
     let instances = action_instances(solver, model)?;
     let initial = symbolic_state(solver, model, 0)?;
     if let Some(snapshot) = initial_state {

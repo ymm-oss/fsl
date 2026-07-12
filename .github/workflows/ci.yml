@@ -75,6 +75,7 @@ jobs:
           python tools/check_rust_phase3_commands.py
           python tools/check_rust_scenarios_parity.py --depth 5
           python tools/check_rust_replay_parity.py
+          python tools/check_rust_corpus_cli_parity.py --depth 3
 
       - uses: actions/setup-node@v4
         with:

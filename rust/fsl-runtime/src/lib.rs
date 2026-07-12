@@ -290,7 +290,9 @@ pub fn eval(
                     matches += 1;
                 }
             }
-            if name == "unique" || name == "exactly_one" {
+            if name == "unique" {
+                Ok(Value::Bool(matches <= 1))
+            } else if name == "exactly_one" {
                 Ok(Value::Bool(matches == 1))
             } else {
                 Err(runtime_error(format!(

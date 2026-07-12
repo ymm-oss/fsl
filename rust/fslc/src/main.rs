@@ -772,13 +772,17 @@ fn command() -> Result<(Value, i32), String> {
                 }
                 "generate" => {
                     let mut target = "typescript".to_owned();
+                    let mut profile = "functional-ddd".to_owned();
                     let mut output = None;
                     while let Some(option) = args.next() {
                         match option.as_str() {
                             "--profile" => {
-                                let _ = args
+                                profile = args
                                     .next()
                                     .ok_or_else(|| "--profile requires a value".to_owned())?;
+                                if profile != "functional-ddd" {
+                                    return Err("--profile must be functional-ddd".to_owned());
+                                }
                             }
                             "--target" => {
                                 target = args
@@ -794,7 +798,12 @@ fn command() -> Result<(Value, i32), String> {
                             _ => return Err(format!("unknown domain generate option '{option}'")),
                         }
                     }
-                    Ok(run_domain_generate(&path, &target, output.as_deref()))
+                    Ok(run_domain_generate(
+                        &path,
+                        &profile,
+                        &target,
+                        output.as_deref(),
+                    ))
                 }
                 "replay" => {
                     if args.next().as_deref() != Some("--logs") {
@@ -942,6 +951,8 @@ fn command() -> Result<(Value, i32), String> {
             let mut output = None;
             let mut target = "pytest".to_owned();
             let mut engine = "bmc".to_owned();
+            let mut impl_log = None;
+            let mut evidence = Vec::new();
             let mut deadlock = if command == "ledger" {
                 "ignore".to_owned()
             } else {
@@ -984,9 +995,15 @@ fn command() -> Result<(Value, i32), String> {
                             return Err("--deadlock must be warn, error, or ignore".to_owned());
                         }
                     }
-                    "--evidence" | "--impl-log" => {
-                        let _ = required_option_value(&mut args, &option)?;
+                    "--impl-log" if command == "ledger" => {
+                        impl_log = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--impl-log",
+                        )?));
                     }
+                    "--evidence" if command == "ledger" => evidence.push(PathBuf::from(
+                        required_option_value(&mut args, "--evidence")?,
+                    )),
                     "--strict" => strict = true,
                     _ => return Err(format!("unknown {command} option '{option}'")),
                 }
@@ -996,7 +1013,15 @@ fn command() -> Result<(Value, i32), String> {
                     run_testgen(&path, depth, &target, &deadlock, strict, output.as_deref())
                 }
                 "html" => run_html_report(&path, depth, &deadlock, &engine, output.as_deref()),
-                "ledger" => run_ledger_report(&path, depth, &deadlock, &engine, output.as_deref()),
+                "ledger" => run_ledger_report(
+                    &path,
+                    depth,
+                    &deadlock,
+                    &engine,
+                    impl_log.as_deref(),
+                    &evidence,
+                    output.as_deref(),
+                ),
                 _ => unreachable!(),
             };
             if output.is_none()
@@ -2730,6 +2755,14 @@ fn run_scenarios_mode(
         scenario.insert("kind".to_owned(), json!("reachable"));
         scenario.insert("property".to_owned(), json!(display(name)));
         scenario.insert("final_check".to_owned(), json!(display(name)));
+        if let Some(meta) = model
+            .reachables
+            .iter()
+            .find(|property| property.name == *name)
+            .and_then(|property| property.meta.as_ref())
+        {
+            scenario.insert("requirement".to_owned(), metadata(Some(meta)));
+        }
         scenarios.push(Value::Object(scenario));
     }
     let responses = match fsl_runtime::leadsto_response_traces(&model, depth) {
@@ -2768,6 +2801,14 @@ fn run_scenarios_mode(
         );
         scenario.insert("kind".to_owned(), json!("leadsTo"));
         scenario.insert("property".to_owned(), json!(display(&response.property)));
+        if let Some(meta) = model
+            .leadstos
+            .iter()
+            .find(|property| property.name == response.property)
+            .and_then(|property| property.meta.as_ref())
+        {
+            scenario.insert("requirement".to_owned(), metadata(Some(meta)));
+        }
         scenario.insert(
             "bindings".to_owned(),
             Value::Object(
@@ -3093,20 +3134,43 @@ fn format_fsl_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> Stri
 
 fn run_check(path: &Path) -> (Value, i32) {
     if let Ok(source) = std::fs::read_to_string(path)
+        && source.trim_start().starts_with("agent ")
+    {
+        let name = declaration_name(source.trim_start(), "agent ").unwrap_or_default();
+        let mut output = envelope();
+        output.insert("result".to_owned(), json!("ok"));
+        output.insert("spec".to_owned(), json!(name));
+        output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
+        output.insert("warnings".to_owned(), json!([]));
+        output.insert("ai_analysis_result".to_owned(), json!("agent_analyzed"));
+        output.insert("agent_analysis_result".to_owned(), json!("agent_analyzed"));
+        return (Value::Object(output), 0);
+    }
+    if let Ok(source) = std::fs::read_to_string(path)
         && is_ai_project(&source)
     {
         let mut output = envelope();
         output.insert("result".to_owned(), json!("ok"));
         output.insert(
             "spec".to_owned(),
-            json!(ai_project_summary(&source).component),
+            json!(
+                path.file_stem()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .unwrap_or("AiProject")
+            ),
         );
+        output.insert("dialect".to_owned(), json!("fsl-ai-project.v0"));
         output.insert("warnings".to_owned(), json!([]));
         output.insert(
             "ai_analysis_result".to_owned(),
             json!("ai_project_analyzed"),
         );
         return (Value::Object(output), 0);
+    }
+    if let Ok(source) = std::fs::read_to_string(path)
+        && let Err(error) = fsl_syntax::parse_surface_document(&source)
+    {
+        return (error_output("parse", &error.to_string()), 2);
     }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -4068,12 +4132,29 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
     wrap_specialized(result)
 }
 
-fn run_domain_generate(path: &Path, target: &str, output_path: Option<&Path>) -> (Value, i32) {
+fn run_domain_generate(
+    path: &Path,
+    profile: &str,
+    target: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let mut result = fsl_tools::domain_scaffold(&domain, target);
+    if profile != "functional-ddd" {
+        return (
+            error_output(
+                "semantics",
+                &format!("unsupported domain profile: {profile}"),
+            ),
+            2,
+        );
+    }
+    let mut result = match fsl_tools::domain_scaffold(&domain, target) {
+        Ok(result) => result,
+        Err(error) => return (error_output("semantics", &error), 2),
+    };
     if let Some(output_path) = output_path {
         let Value::Object(object) = &mut result else {
             return (error_output("internal", "invalid scaffold result"), 2);
@@ -7500,6 +7581,8 @@ fn run_ledger_report(
     depth: usize,
     deadlock_mode: &str,
     engine: &str,
+    impl_log: Option<&Path>,
+    evidence_paths: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     let model = match load_model(path) {
@@ -7507,62 +7590,45 @@ fn run_ledger_report(
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let (verification, _) = run_verify(path, depth, deadlock_mode, engine, 1);
-    let verdict = verification
-        .get("result")
-        .and_then(Value::as_str)
-        .unwrap_or("error");
-    let assurance = if engine == "induction" && verdict == "proved" {
-        "proved(induction)"
-    } else {
-        "bounded(BMC depth)"
-    };
-    let mark = if matches!(verdict, "verified" | "proved") {
-        "🟢"
-    } else {
-        "🔴 要確認"
-    };
-    let unreached = verification
-        .get("unreached")
-        .and_then(Value::as_array)
-        .filter(|items| !items.is_empty());
-    let content = if let Some(unreached) = unreached {
-        let first = &unreached[0];
-        let name = first["name"].as_str().unwrap_or("reachable");
-        let hint = first["hint"].as_str().unwrap_or("increase --depth");
-        let mut raw_findings = serde_json::to_string_pretty(unreached).unwrap_or_default();
-        for finding in unreached {
-            if let (Some(line), Some(column)) = (
-                finding["loc"]["line"].as_u64(),
-                finding["loc"]["column"].as_u64(),
-            ) {
-                raw_findings = raw_findings.replace(
-                    &format!(
-                        "\"loc\": {{\n      \"column\": {column},\n      \"line\": {line}\n    }}"
-                    ),
-                    &format!(
-                        "\"loc\": {{\n      \"line\": {line},\n      \"column\": {column}\n    }}"
-                    ),
-                );
+    let replay = impl_log.map(|trace| run_replay(path, trace).0);
+    let evidence = match evidence_paths
+        .iter()
+        .map(|evidence_path| {
+            let source = std::fs::read_to_string(evidence_path)
+                .map_err(|error| error_output("io", &error.to_string()))?;
+            let value = serde_json::from_str::<Value>(&source)
+                .map_err(|error| error_output("io", &format!("invalid JSON: {error}")))?;
+            if !value.is_object() {
+                return Err(error_output(
+                    "io",
+                    "evidence JSON must contain an object envelope",
+                ));
             }
-        }
-        format!(
-            "# 意図ずれ監査台帳: {}\n\n- 対象: `{}`\n- 保証限界: BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth {depth}) | reachable | 要確認 | ____ | 下記詳細 |\n\n## 要件ID別詳細\n\n### （仕様全体）\n- **検出**: `reachable` — {name}\n  - 反例要約: 深さ {depth} までに到達 trace なし（より深い探索が必要かもしれない）\n  - 業務翻訳: 業務経路『{name}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。\n  - 次アクション: {hint}\n- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: ____　期限: ____\n\n## 付録: 生 JSON 反例（証跡）\n\n<details><summary>raw findings</summary>\n\n```json\n{}\n```\n\n</details>\n",
-            model.name,
-            path.display(),
-            raw_findings
-        )
-    } else {
-        format!(
-            "# 意図ずれ監査台帳 — {}\n\n## リスク一覧\n\n| 要件 | 状態 | 保証クラス | 観測 |\n|---|---|---|---|\n| （仕様全体） | {mark} | {assurance} | {verdict} |\n\n## 要件ID別詳細\n\n- 内部整合を深さ {depth} まで検査。全実行を証明するには induction を利用。\n- ☐ 承認 ☐ 差戻し ☐ リスク受容\n\n## 付録\n\n<details><summary>検証 JSON</summary>\n\n```json\n{}\n```\n</details>\n\n保証クラス: docs/DESIGN-assurance-classes.md\n",
-            model.name,
-            serde_json::to_string_pretty(&verification).unwrap_or_default()
-        )
+            Ok((evidence_path.clone(), value))
+        })
+        .collect::<Result<Vec<_>, Value>>()
+    {
+        Ok(evidence) => evidence,
+        Err(error) => return (error, 2),
     };
+    let (scenarios, _) = run_scenarios(path, depth, deadlock_mode);
+    let evidence = evidence
+        .into_iter()
+        .map(|(source, value)| (source.display().to_string(), value))
+        .collect::<Vec<_>>();
+    let content = fsl_tools::render_ledger(
+        &path.display().to_string(),
+        &model,
+        &verification,
+        &scenarios,
+        replay.as_ref(),
+        &evidence,
+    );
     generated_content_result(
         "audit_ledger",
         &model.name,
         format!(
-            "{}.ledger.md",
+            "{}_ledger.md",
             path.file_stem()
                 .and_then(std::ffi::OsStr::to_str)
                 .unwrap_or("audit")
@@ -11849,6 +11915,11 @@ fn run_verify(
     engine: &str,
     k_ind: usize,
 ) -> (Value, i32) {
+    if let Ok(source) = std::fs::read_to_string(path)
+        && let Err(error) = fsl_syntax::parse_surface_document(&source)
+    {
+        return (error_output("parse", &error.to_string()), 2);
+    }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
     }
@@ -12204,6 +12275,11 @@ fn run_verify_cli(path: &Path, options: &CliVerifyOptions) -> (Value, i32) {
     if !options.lemmas.is_empty() {
         return run_induction_with_lemmas(path, options);
     }
+    if let Ok(source) = std::fs::read_to_string(path)
+        && let Err(error) = fsl_syntax::parse_surface_document(&source)
+    {
+        return (error_output("parse", &error.to_string()), 2);
+    }
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -12507,6 +12583,9 @@ fn run_verify_inner(
             .invariants
             .iter()
             .find(|property| property.name == violation.name);
+        if let Some(meta) = property.and_then(|property| property.meta.as_ref()) {
+            output.insert("requirement".to_owned(), metadata(Some(meta)));
+        }
         output.insert(
             "loc".to_owned(),
             property.map_or(Value::Null, |property| property.span.python_loc()),
@@ -12560,7 +12639,14 @@ fn run_verify_inner(
         }
         output.insert("trace".to_owned(), trace);
         finish(&mut output, violation.step, started);
-        output.insert("trace_type".to_owned(), json!(violation.kind.as_str()));
+        output.insert(
+            "trace_type".to_owned(),
+            json!(if violation.name.starts_with("_deadline_") {
+                "sla"
+            } else {
+                violation.kind.as_str()
+            }),
+        );
         return (Value::Object(output), 1);
     }
 
@@ -12583,14 +12669,20 @@ fn run_verify_inner(
                 unreached
                     .iter()
                     .map(|property| {
-                        json!({
+                        let mut item = json!({
                             "name": display(&property.name),
                             "loc": property.span.python_loc(),
                             "classification": "insufficient_depth",
                             "hint": format!("not witnessed within depth {depth}; try a larger --depth"),
                             "faithfulness_class": "intent_unexercised",
                             "recommended_action": "add a single-shot reachable for the action / raise --depth",
-                        })
+                        });
+                        if let Some(meta) = property.meta.as_ref()
+                            && let Value::Object(item) = &mut item
+                        {
+                            item.insert("requirement".to_owned(), metadata(Some(meta)));
+                        }
+                        item
                     })
                     .collect(),
             ),

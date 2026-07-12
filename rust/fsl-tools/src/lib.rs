@@ -9,7 +9,9 @@ mod analysis_graph;
 mod db;
 mod db_import;
 mod domain;
+mod domain_codegen;
 mod html;
+mod ledger;
 mod mutate;
 mod refinement_analysis;
 mod testgen;
@@ -24,6 +26,7 @@ pub use domain::{
     analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
 };
 pub use html::render_html_report;
+pub use ledger::render_ledger;
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;
 pub use testgen::{emit_dart, emit_kotlin, emit_phpunit, emit_swift, emit_vitest};

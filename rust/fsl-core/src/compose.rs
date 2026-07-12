@@ -57,7 +57,7 @@ pub fn parse_kernel_source(
         SurfaceDocument::Business(business) => crate::lower_business(business),
         SurfaceDocument::Requirements(requirements) => crate::lower_requirements(requirements),
         SurfaceDocument::Governance(governance) => crate::lower_governance(governance),
-        SurfaceDocument::Db(system) => crate::lower_db(system),
+        SurfaceDocument::Db(system) => crate::lower_db(&system),
         SurfaceDocument::Domain(domain) => crate::lower_domain(&domain),
         SurfaceDocument::AiComponent(component) => crate::lower_ai_component(component),
         SurfaceDocument::Compose(compose) => lower_compose(compose, resolver),

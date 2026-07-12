@@ -18,6 +18,7 @@ pub use fsl_syntax::{
 };
 
 mod compose;
+mod db;
 mod dialect;
 mod domain;
 mod model;
@@ -25,6 +26,7 @@ mod refinement;
 mod trace;
 
 pub use compose::{FileResolver, FsResolver, lower_compose, parse_kernel_source};
+pub use db::db_kernel_source;
 pub use dialect::{
     GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, RequirementsTraceStep,

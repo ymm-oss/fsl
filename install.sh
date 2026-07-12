@@ -30,16 +30,6 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if ! command -v python3 >/dev/null 2>&1; then
-  fail "Python 3.9 or later is required. Install Python 3 from https://www.python.org/ and re-run."
-fi
-
-PYTHON_BIN=$(command -v python3)
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
-  PY_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' 2>/dev/null || echo "unknown")
-  fail "Python 3.9 or later is required (current: ${PY_VERSION}). Update from https://www.python.org/ and re-run."
-fi
-
 is_fsl_repo() {
   repo="$1"
   [ -f "$repo/pyproject.toml" ] || return 1
@@ -129,59 +119,69 @@ else
   fi
 fi
 
-VENV_DIR="$REPO_DIR/.venv"
-VENV_PYTHON="$VENV_DIR/bin/python"
-FSL_BIN="$VENV_DIR/bin/fslc"
-FSL_LSP_BIN="$VENV_DIR/bin/fslc-lsp"
+NATIVE_DIR="$REPO_DIR/.native/bin"
+FSL_BIN="$NATIVE_DIR/fslc"
+mkdir -p "$NATIVE_DIR"
 
-echo "Preparing the Python virtual environment: $VENV_DIR"
-PYTHONPATH= "$PYTHON_BIN" -m venv "$VENV_DIR" || fail "Failed to create the Python virtual environment. On Linux where python3-venv is required, install it via your OS package manager and re-run."
-
-[ -x "$VENV_PYTHON" ] || fail "$VENV_PYTHON not found. Remove $VENV_DIR and re-run."
-
-echo "Upgrading pip."
-PYTHONPATH= "$VENV_PYTHON" -m pip install --upgrade pip || fail "Failed to upgrade pip. Check your network connection or Python environment and re-run."
-
-echo "Installing fslc (with the LSP server)."
-PIP_INSTALL_LOG=$(mktemp)
-# Use a relative spec via a subshell cd: pip silently no-ops on an absolute
-# path combined with extras ("/abs/path[lsp]"), whereas ".[lsp]" is reliable.
-if ( cd "$REPO_DIR" && PYTHONPATH= "$VENV_PYTHON" -m pip install ".[lsp]" ) >"$PIP_INSTALL_LOG" 2>&1; then
-  rm -f "$PIP_INSTALL_LOG"
-else
-  rm -f "$PIP_INSTALL_LOG"
-  echo "pip install . failed, so falling back to a local placement using the existing dependencies."
-  if ! PYTHONPATH= "$VENV_PYTHON" -c 'import lark, z3' >/dev/null 2>&1; then
-    fail "The dependencies lark and z3-solver are required. Check your network connection and re-run."
-  fi
-  SITE_PACKAGES=$(PYTHONPATH= "$VENV_PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
-  case "$SITE_PACKAGES" in
-    "$VENV_DIR"/*)
-      ;;
-    *)
-      fail "Cannot safely determine the site-packages location. Check $VENV_DIR and re-run."
-      ;;
+native_asset() {
+  os=$(uname -s)
+  arch=$(uname -m)
+  case "$os:$arch" in
+    Darwin:arm64|Darwin:aarch64) echo "fslc-macos-arm64" ;;
+    Darwin:x86_64|Darwin:amd64) echo "fslc-macos-x64" ;;
+    Linux:x86_64|Linux:amd64) echo "fslc-linux-x64" ;;
+    Linux:aarch64|Linux:arm64) echo "fslc-linux-arm64" ;;
+    *) fail "No native fslc release is available for $os/$arch." ;;
   esac
-  rm -rf "$SITE_PACKAGES/fslc" "$SITE_PACKAGES/fslc-1.1.0.dist-info"
-  cp -R "$REPO_DIR/src/fslc" "$SITE_PACKAGES/fslc"
-  mkdir -p "$SITE_PACKAGES/fslc-1.1.0.dist-info"
-  {
-    echo "Metadata-Version: 2.1"
-    echo "Name: fslc"
-    echo "Version: 1.1.0"
-  } > "$SITE_PACKAGES/fslc-1.1.0.dist-info/METADATA"
-  {
-    echo "fslc"
-  } > "$SITE_PACKAGES/fslc-1.1.0.dist-info/top_level.txt"
-  cat > "$FSL_BIN" <<EOF
-#!$VENV_PYTHON
-from fslc.cli import main
-raise SystemExit(main())
-EOF
-  chmod +x "$FSL_BIN"
-fi
+}
 
-[ -x "$FSL_BIN" ] || fail "$FSL_BIN not found. Check the result of pip install and re-run."
+download_file() {
+  url="$1"
+  destination="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$destination"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$url" -O "$destination"
+  else
+    fail "curl or wget is required to download the native fslc binary."
+  fi
+}
+
+ASSET=$(native_asset)
+RELEASE_URL="https://github.com/ymm-oss/fsl/releases/latest/download"
+echo "Installing the native Rust fslc binary: $ASSET"
+download_file "$RELEASE_URL/$ASSET" "$FSL_BIN.download" || fail "Failed to download $ASSET from the latest GitHub Release."
+download_file "$RELEASE_URL/$ASSET.sha256" "$FSL_BIN.sha256.download" || fail "Failed to download the checksum for $ASSET."
+EXPECTED_HASH=$(awk '{print $1}' "$FSL_BIN.sha256.download")
+if command -v shasum >/dev/null 2>&1; then
+  ACTUAL_HASH=$(shasum -a 256 "$FSL_BIN.download" | awk '{print $1}')
+elif command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL_HASH=$(sha256sum "$FSL_BIN.download" | awk '{print $1}')
+else
+  fail "shasum or sha256sum is required to verify the native binary."
+fi
+[ "$EXPECTED_HASH" = "$ACTUAL_HASH" ] || fail "Checksum verification failed for $ASSET."
+mv "$FSL_BIN.download" "$FSL_BIN"
+rm -f "$FSL_BIN.sha256.download"
+chmod +x "$FSL_BIN"
+
+# Python remains the reference implementation and provides the optional LSP.
+# It is deliberately not placed on the public `fslc` command path.
+FSL_LSP_BIN=""
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+  PYTHON_BIN=$(command -v python3)
+  VENV_DIR="$REPO_DIR/.venv"
+  VENV_PYTHON="$VENV_DIR/bin/python"
+  echo "Python 3.9+ found; installing the optional fslc-lsp server."
+  if PYTHONPATH='' "$PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1 \
+    && ( cd "$REPO_DIR" && PYTHONPATH='' "$VENV_PYTHON" -m pip install ".[lsp]" >/dev/null 2>&1 ); then
+    FSL_LSP_BIN="$VENV_DIR/bin/fslc-lsp"
+  else
+    echo "Warning: optional fslc-lsp installation failed; the native fslc CLI is installed and usable."
+  fi
+else
+  echo "Python 3.9+ not found; skipping the optional fslc-lsp server."
+fi
 
 LOCAL_BIN="$HOME/.local/bin"
 mkdir -p "$LOCAL_BIN"
@@ -194,6 +194,9 @@ link_command() {
     link_target=$(readlink "$link_path" || true)
     if [ "$link_target" = "$target" ]; then
       echo "The $cmd_name command link is already set up: $link_path"
+    elif [ "$cmd_name" = "fslc" ] && [ "$link_target" = "$REPO_DIR/.venv/bin/fslc" ]; then
+      ln -sfn "$target" "$link_path"
+      echo "Migrated the fslc command link from the Python reference to the native binary: $link_path"
     else
       echo "Warning: $link_path points to a different location (${link_target}). Not overwriting."
     fi
@@ -208,7 +211,9 @@ link_command() {
 link_command fslc "$FSL_BIN"
 # The VSCode extension launches `fslc-lsp` from PATH; link it when present
 # (the offline fallback above installs fslc only, without the LSP server).
-[ -x "$FSL_LSP_BIN" ] && link_command fslc-lsp "$FSL_LSP_BIN"
+if [ -n "$FSL_LSP_BIN" ] && [ -x "$FSL_LSP_BIN" ]; then
+  link_command fslc-lsp "$FSL_LSP_BIN"
+fi
 
 case ":$PATH:" in
   *":$LOCAL_BIN:"*)
@@ -244,7 +249,7 @@ else
 fi
 
 echo "Running a smoke test."
-CHECK_OUTPUT=$(PYTHONPATH= "$FSL_BIN" check "$REPO_DIR/specs/cart_v1.fsl") || fail "Smoke test failed. Check the result of $FSL_BIN check $REPO_DIR/specs/cart_v1.fsl."
+CHECK_OUTPUT=$("$FSL_BIN" check "$REPO_DIR/specs/cart_v1.fsl") || fail "Smoke test failed. Check the result of $FSL_BIN check $REPO_DIR/specs/cart_v1.fsl."
 case "$CHECK_OUTPUT" in
   *'"result": "ok"'*|*'"result":"ok"'*)
     echo "Smoke test ok: fslc check specs/cart_v1.fsl"

@@ -300,7 +300,11 @@ impl ModelBuilder {
                         state.push((name.clone(), self.resolve_type(ty)?));
                     }
                 }
-                SpecItem::Init(statements) => init.clone_from(statements),
+                // Dialect lowering can append generated init fragments (for
+                // example an NFR age counter) after the user's init block.
+                // Every fragment is part of the same logical initialization;
+                // replacing the earlier fragment leaves user state unconstrained.
+                SpecItem::Init(statements) => init.extend(statements.clone()),
                 SpecItem::Action {
                     name,
                     params,

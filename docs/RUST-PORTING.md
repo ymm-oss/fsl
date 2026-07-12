@@ -115,6 +115,7 @@ Status as of 2026-07-12:
 | public replay command | native `replay --trace` accepts array and `{events:[...]}` forms and reports first rejection | **3/3 conformant/nonconformant contract cases** |
 | Phase-2 command surface | sweep, direct refinement chains, and project manifests including short-circuit/keep-going | **5/5 focused full-envelope parity** |
 | Phase-3 native surface | DB/AI/domain engines plus mutate, explain, testgen, typestate, HTML, ledger, analyze, and semantic diff | **107/107 command cases; exact typestate, full direct/requirements-profile built-in and external mutation adjudication with acceptance/forbidden/refinement and by-requirement attribution, native invariant/reachable counterfactual diagnostics with source-backed blame, byte-identical pytest plus five alternate testgen targets (positive and forbidden cases), core/standalone-refinement/project traceability graph JSON plus DOT/Mermaid exports, declaration-level tag-review export, mixed spec/refinement and AI-review batch analysis, project missing-anchor and structural/progress-cycle/unconstrained-effect/conservation/acceptance-divergence AI-review findings, byte-identical focused HTML/ledger artifacts, broad HTML static/structural parity, and byte-identical raw stdout for version, typestate, testgen, HTML, ledger, readable explain, domain expansion, and domain conformance generation; solver-selected dynamic witnesses are checked by bidirectional replay rather than unstable raw bytes** |
+| full surface corpus | generic `check` and `verify --depth 3` over every `.fsl` in `specs/` and `examples/` | **181/181 stable verdict projections and exit statuses match; no Python command fallback** |
 | production browser Worker | Rust WASM + official npm Z3 bridge, isolated Worker, in-memory files, progress, forced cancellation, and playground assets | **verified and violated samples match native CLI; cancellation recreates a healthy solver context** |
 | npm Worker round trip | disposable Node Worker returns `sat`, model `x=42`, and can terminate Emscripten threads | **proved for Node Worker** |
 | browser Worker asset loading / COOP+COEP | isolated Chrome loaded the bundled Worker, separate Emscripten JS/WASM and pthread script with no console errors; `crossOriginIsolated=true`, `sat`, model `x=42` | **proved in browser** |
@@ -131,6 +132,8 @@ declared corpora. Phase 2 is complete without changing these Phase-1 contracts.
 Phase 4's production Worker and cancellation/native-verdict gates are also
 complete. Phase 3 is complete: its large raw-output/report bodies and stable
 projections pass command-by-command parity without a Python command fallback.
+The native release binary is the primary `fslc` distribution; the Python package
+remains available as the parity oracle and optional LSP implementation.
 
 The batching decision is evidence-driven: retain per-term calls unless profiling
 representative Phase-1 corpus verification shows that JS term construction is at
@@ -172,6 +175,7 @@ PYTHONPATH=src python tools/check_rust_induction_parity.py
 PYTHONPATH=src python tools/check_rust_refinement_parity.py
 PYTHONPATH=src python tools/check_rust_scenarios_parity.py --depth 5
 PYTHONPATH=src python tools/check_rust_replay_parity.py
+PYTHONPATH=src python tools/check_rust_corpus_cli_parity.py --depth 3
 
 # Official npm backend spike.
 cd rust/spikes/z3js-worker

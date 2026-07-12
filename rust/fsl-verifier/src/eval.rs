@@ -239,10 +239,13 @@ pub(crate) fn eval<S: SmtSolver>(
                         .map_err(VerifyError::from)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(bool_value(
-                solver,
-                solver.equal(&sum_terms(solver, &counts)?, &solver.int_value(1))?,
-            ))
+            let count = sum_terms(solver, &counts)?;
+            let condition = if name == "unique" {
+                solver.le(&count, &solver.int_value(1))?
+            } else {
+                solver.equal(&count, &solver.int_value(1))?
+            };
+            Ok(bool_value(solver, condition))
         }
     }
 }
@@ -548,19 +551,24 @@ fn eval_quantified<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    let candidates = binder_values(solver, model, binder)?;
+    let candidates = binder_candidates(solver, model, binder, state, bindings, old_state)?;
     let mut terms = Vec::new();
-    for (name, value) in candidates {
+    for (name, value, membership) in candidates {
         let mut local = bindings.clone();
         local.insert(name, value);
         let body = eval(solver, model, body, state, &mut local, old_state)?;
         let body = bool_term(&body)?.clone();
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
-        terms.push(if let Some(where_term) = where_term {
+        let condition = match (membership, where_term) {
+            (Some(membership), Some(where_term)) => Some(solver.and(&[membership, where_term])?),
+            (Some(condition), None) | (None, Some(condition)) => Some(condition),
+            (None, None) => None,
+        };
+        terms.push(if let Some(condition) = condition {
             if quantifier == "forall" {
-                solver.implies(&where_term, &body)?
+                solver.implies(&condition, &body)?
             } else {
-                solver.and(&[where_term, body])?
+                solver.and(&[condition, body])?
             }
         } else {
             body
@@ -582,17 +590,75 @@ fn binder_conditions<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<Vec<S::Term>, VerifyError> {
-    let candidates = binder_values(solver, model, binder)?;
+    let candidates = binder_candidates(solver, model, binder, state, bindings, old_state)?;
     let mut terms = Vec::new();
-    for (name, value) in candidates {
+    for (name, value, membership) in candidates {
         let mut local = bindings.clone();
         local.insert(name, value);
-        terms.push(
-            binder_where(solver, model, binder, state, &mut local, old_state)?
-                .unwrap_or_else(|| solver.bool_value(true)),
-        );
+        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
+        terms.push(match (membership, where_term) {
+            (Some(membership), Some(where_term)) => solver.and(&[membership, where_term])?,
+            (Some(condition), None) | (None, Some(condition)) => condition,
+            (None, None) => solver.bool_value(true),
+        });
     }
     Ok(terms)
+}
+
+type ConditionalBinderCandidates<T> = Vec<(String, SymbolicValue<T>, Option<T>)>;
+
+fn binder_candidates<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<ConditionalBinderCandidates<S::Term>, VerifyError> {
+    let Binder::Collection {
+        name, collection, ..
+    } = binder
+    else {
+        return binder_values(solver, model, binder).map(|values| {
+            values
+                .into_iter()
+                .map(|(name, value)| (name, value, None))
+                .collect()
+        });
+    };
+    let mut local = bindings.clone();
+    let collection = eval(solver, model, collection, state, &mut local, old_state)?;
+    match collection {
+        SymbolicValue::Set { ty, entries } => {
+            let TypeRef::Set(element_ty) = ty else {
+                unreachable!();
+            };
+            entries
+                .into_iter()
+                .map(|(element, present)| {
+                    Ok((
+                        name.clone(),
+                        concrete_value(solver, model, &element_ty, &element)?,
+                        Some(present),
+                    ))
+                })
+                .collect()
+        }
+        SymbolicValue::Seq { slots, len, .. } => slots
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                Ok((
+                    name.clone(),
+                    value,
+                    Some(solver.lt(&solver.int_value(i64_index(index)?), &len)?),
+                ))
+            })
+            .collect(),
+        _ => Err(VerifyError::new(
+            "collection binder expects a Set or Seq expression",
+        )),
+    }
 }
 
 pub(crate) fn binder_values<S: SmtSolver>(

@@ -281,52 +281,19 @@ pub fn domain_adapter_files(domain: &DomainSpec) -> Vec<(String, String)> {
     files
 }
 
-/// Generate a minimal native implementation scaffold for a supported target.
-#[must_use]
-pub fn domain_scaffold(domain: &DomainSpec, target: &str) -> Value {
-    let (path, content) = match target {
-        "python" => (
-            "domain_scaffold.py",
-            format!(
-                "# Generated from {}\n\ndef decide_order(command, state):\n    raise NotImplementedError\n",
-                domain.name
-            ),
-        ),
-        "rust" => (
-            "domain_scaffold.rs",
-            format!(
-                "// Generated from {}\npub fn decide_order() {{}}\n",
-                domain.name
-            ),
-        ),
-        "swift" => (
-            "DomainScaffold.swift",
-            format!(
-                "// Generated from {}\nfunc decideOrder() {{}}\n",
-                domain.name
-            ),
-        ),
-        "kotlin" => (
-            "DomainScaffold.kt",
-            format!(
-                "// Generated from {}\nfun decideOrder() {{}}\n",
-                domain.name
-            ),
-        ),
-        _ => (
-            "types.ts",
-            format!(
-                "// Generated from {}\nexport type DomainCommand = {{ type: \"CancelOrder\" }};\n",
-                domain.name
-            ),
-        ),
-    };
-    let mut files = vec![json!({"path":path,"content":content})];
-    if target == "typescript" {
-        files.push(json!({"path":"order/decide.ts","content":"export function decideOrder(command: unknown, state: unknown) { return []; }\n"}));
-        if !domain.sagas.is_empty() {
-            files.push(json!({"path":"process-manager.ts","content":"export function onOrderFulfillment(event: unknown) { return []; }\n"}));
-        }
-    }
-    json!({"result":"generated","dialect":"fsl-domain-effect.v0","domain":domain.name,"target":target,"files":files})
+/// Generate the native implementation scaffold for a supported target.
+///
+/// # Errors
+///
+/// Returns an error for an unsupported target instead of silently treating it
+/// as TypeScript.
+pub fn domain_scaffold(domain: &DomainSpec, target: &str) -> Result<Value, String> {
+    let files = crate::domain_codegen::generate(domain, target)?;
+    Ok(json!({
+        "result":"generated",
+        "dialect":"fsl-domain-effect.v0",
+        "domain":domain.name,
+        "target":target,
+        "files":files.into_iter().map(|(path, content)| json!({"path":path,"content":content})).collect::<Vec<_>>()
+    }))
 }

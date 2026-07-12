@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 #[must_use]
 pub fn display_name(name: &str) -> String {
-    name.replacen("__", ".", 1)
+    name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")
 }
 
 #[must_use]

@@ -1024,9 +1024,13 @@ fn project_scalar<S: SmtSolver>(
         if let Some(TypeDef::Enum { members, .. }) = model.types.get(name) {
             let index = usize::try_from(value)
                 .map_err(|_| VerifyError::new("negative enum ordinal in solver model"))?;
-            let member = members
-                .get(index)
-                .ok_or_else(|| VerifyError::new("enum ordinal outside declared range"))?;
+            let Some(member) = members.get(index) else {
+                // A type-bound counterexample deliberately assigns an invalid
+                // ordinal. Preserve that raw value so the verifier can emit the
+                // witness instead of turning a valid finding into a projection
+                // error.
+                return Ok(FslValue::Int(value));
+            };
             return Ok(FslValue::Enum {
                 type_name: name.clone(),
                 member: member.clone(),

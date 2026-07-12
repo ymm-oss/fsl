@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Complete the native Rust migration for issue #195: generic `check` and bounded
+  `verify` now agree with the Python reference across all 181 FSL corpus files,
+  database documents lower to executable compatibility kernels, collection
+  binders and `unique` preserve language semantics, multi-fragment initialization
+  is retained, and AI project/agent routing plus parse-error classification match
+  the public CLI contract. Port full domain scaffolding and requirement-oriented
+  ledger rendering (including implementation logs and external evidence) without
+  a Python command fallback. The installer now places the checksummed native Rust
+  release on the public `fslc` path; Python remains an optional LSP and reference
+  implementation.
 - Rust port Phase 0 (issue #195): add a deterministic Python AST JSON exporter
   that serves as the reference oracle for cross-language parser differential
   tests. It covers every `.fsl` file under `specs/` and `examples/`, records
