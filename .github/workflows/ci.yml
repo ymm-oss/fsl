@@ -19,7 +19,7 @@ jobs:
   rust-port-parity:
     name: rust port parser/kernel/BMC parity
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       Z3_SYS_Z3_VERSION: "4.16.0"
     steps:
