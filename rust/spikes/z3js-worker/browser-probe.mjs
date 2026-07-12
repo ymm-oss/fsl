@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import "./build-browser.mjs";
 
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
+let resolveBrowserResult;
+const browserResult = new Promise((resolve) => { resolveBrowserResult = resolve; });
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -19,6 +21,21 @@ const mime = {
   ".wasm": "application/wasm",
 };
 const server = createServer((request, response) => {
+  if (request.method === "POST" && request.url === "/result") {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      try {
+        const result = JSON.parse(body);
+        response.writeHead(204).end();
+        resolveBrowserResult(result);
+      } catch (error) {
+        response.writeHead(400).end(String(error));
+      }
+    });
+    return;
+  }
   const relative = request.url === "/" ? "index.html" : request.url.slice(1).split("?")[0];
   const path = join(dist, relative);
   if (!path.startsWith(dist) || !existsSync(path) || !statSync(path).isFile()) {
@@ -55,50 +72,42 @@ const child = spawn(
     "--disable-gpu",
     "--disable-background-networking",
     "--no-sandbox",
-    "--dump-dom",
-    "--virtual-time-budget=60000",
     `--user-data-dir=${profile}`,
     `http://127.0.0.1:${port}/`,
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  { stdio: ["ignore", "ignore", "pipe"] },
 );
-let stdout = "";
 let stderr = "";
-child.stdout.setEncoding("utf8");
 child.stderr.setEncoding("utf8");
-child.stdout.on("data", (chunk) => { stdout += chunk; });
 child.stderr.on("data", (chunk) => { stderr += chunk; });
-let status;
+const closed = new Promise((resolve, reject) => {
+  child.once("error", reject);
+  child.once("close", resolve);
+});
+let timeout;
+let result;
 try {
-  status = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`Chrome browser probe timed out after 75s: ${stderr}`));
-    }, 75_000);
-    child.once("error", reject);
-    child.once("close", (code) => {
-      clearTimeout(timeout);
-      resolve(code);
-    });
-  });
+  result = await Promise.race([
+    browserResult,
+    closed.then((code) => {
+      throw new Error(`Chrome exited before reporting a result (${code}): ${stderr}`);
+    }),
+    new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error(`Chrome browser probe timed out after 75s: ${stderr}`));
+      }, 75_000);
+    }),
+  ]);
 } finally {
-  server.close();
+  clearTimeout(timeout);
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  await closed.catch(() => {});
+  await new Promise((resolve) => server.close(resolve));
   await rm(profile, { recursive: true, force: true });
 }
 
-if (status !== 0) {
-  throw new Error(`Chrome failed (${status}): ${stderr}`);
+if (!result.ok) {
+  throw new Error(`browser Worker round trip failed: ${JSON.stringify(result)}`);
 }
-const match = stdout.match(/<pre id="result" data-done="true" data-ok="(true|false)">([^<]*)<\/pre>/);
-if (!match) {
-  throw new Error(`browser probe did not finish:\n${stdout}\n${stderr}`);
-}
-const details = match[2]
-  .replaceAll("&quot;", '"')
-  .replaceAll("&amp;", "&")
-  .replaceAll("&lt;", "<")
-  .replaceAll("&gt;", ">");
-if (match[1] !== "true") {
-  throw new Error(`browser Worker round trip failed: ${details}`);
-}
-console.log(JSON.stringify({ schema: "fsl-z3js-browser-spike.v1", ok: true, details: JSON.parse(details) }, null, 2));
+console.log(JSON.stringify({ schema: "fsl-z3js-browser-spike.v1", ok: true, details: result.details }, null, 2));
