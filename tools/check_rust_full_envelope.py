@@ -138,7 +138,18 @@ def run(root: Path, binary: Path, depth: int) -> dict[str, Any]:
             run_verify(path, depth, "warn", use_cache=False)
         )
         rust_verify = _normalize(
-            _invoke(binary, ["verify", str(path), "--depth", str(depth), "--deadlock", "warn"])
+            _invoke(
+                binary,
+                [
+                    "verify",
+                    str(path),
+                    "--depth",
+                    str(depth),
+                    "--deadlock",
+                    "warn",
+                    "--no-cache",
+                ],
+            )
         )
         comparisons += 1
         differences = _diff(python_verify, rust_verify)

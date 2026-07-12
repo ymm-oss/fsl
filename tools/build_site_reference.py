@@ -193,6 +193,23 @@ def get_subparsers_action(parser: argparse.ArgumentParser):
     return None
 
 
+class _StableHelpFormatter(argparse.HelpFormatter):
+    """Freeze argparse presentation across supported Python releases."""
+
+    def __init__(self, prog: str):
+        super().__init__(prog, width=80, max_help_position=24)
+
+    def _format_action_invocation(self, action):
+        if not action.option_strings:
+            return super()._format_action_invocation(action)
+        if action.nargs == 0:
+            return ", ".join(action.option_strings)
+        default = self._get_default_metavar_for_optional(action)
+        arguments = self._format_args(action, default)
+        aliases = [*action.option_strings[:-1], f"{action.option_strings[-1]} {arguments}"]
+        return ", ".join(aliases)
+
+
 # argparse's own group heading changed from "optional arguments:" to
 # "options:" in Python 3.10 (bpo-9694) — purely cosmetic, but it makes
 # format_help() output depend on which Python generated this page. CI runs
@@ -201,7 +218,32 @@ def get_subparsers_action(parser: argparse.ArgumentParser):
 # rather than letting the committed page's exact bytes depend on which
 # interpreter happened to regenerate it last.
 def _normalize_argparse_help(text: str) -> str:
-    return text.replace("optional arguments:", "options:")
+    text = text.replace("optional arguments:", "options:")
+    lines = text.splitlines()
+    try:
+        usage_end = lines.index("")
+    except ValueError:
+        usage_end = len(lines)
+    if usage_end:
+        # argparse has changed both terminal-width wrapping and required-option
+        # wrapping across supported Python releases. The tokens are stable, so
+        # keep the generated reference independent of the interpreter by
+        # rendering the complete usage synopsis on one line.
+        lines[:usage_end] = [" ".join(line.strip() for line in lines[:usage_end])]
+    # Python 3.14 stopped repeating a shared metavar for every alias
+    # (`-o OUTPUT, --output OUTPUT` -> `-o, --output OUTPUT`). Canonicalize the
+    # older rendering to the newer, less repetitive form.
+    alias = re.compile(
+        r"^(\s+)(-[A-Za-z0-9]) (\S+), (--[A-Za-z0-9-]+) \3(\s{2,}.*)?$"
+    )
+    normalized = []
+    for line in lines:
+        match = alias.match(line)
+        if match:
+            indent, short, metavar, long, description = match.groups()
+            line = f"{indent}{short}, {long} {metavar}{description or ''}"
+        normalized.append(line)
+    return "\n".join(normalized) + ("\n" if text.endswith("\n") else "")
 
 
 def render_cli_tree() -> str:
@@ -217,6 +259,7 @@ def render_cli_tree() -> str:
         if nested:
             children = []
             for name2, sub2 in nested.choices.items():
+                sub2.formatter_class = _StableHelpFormatter
                 help_text = html.escape(_normalize_argparse_help(sub2.format_help()))
                 children.append(
                     f'<details><summary>fslc {html.escape(name)} {html.escape(name2)}</summary>'
@@ -229,6 +272,7 @@ def render_cli_tree() -> str:
                 f'<div class="tree-body">{body}</div></details>'
             )
         else:
+            sub.formatter_class = _StableHelpFormatter
             help_text = html.escape(_normalize_argparse_help(sub.format_help()))
             nodes.append(
                 f'<details><summary>fslc {html.escape(name)}</summary>'

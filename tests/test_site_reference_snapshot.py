@@ -36,6 +36,23 @@ def _load_tool():
     return mod
 
 
+def test_argparse_help_normalization_is_python_version_independent():
+    mod = _load_tool()
+    older = """usage: tool [-h] [--profile PROFILE]
+            -o OUTPUT file
+
+optional arguments:
+  -o OUTPUT, --output OUTPUT  destination
+"""
+    newer = """usage: tool [-h] [--profile PROFILE] -o OUTPUT file
+
+options:
+  -o, --output OUTPUT  destination
+"""
+
+    assert mod._normalize_argparse_help(older) == mod._normalize_argparse_help(newer)
+
+
 @pytest.mark.parametrize("page_id", ["language", "cli"])
 def test_generated_reference_pages_are_fresh(page_id):
     mod = _load_tool()
