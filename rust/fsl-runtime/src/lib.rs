@@ -1488,6 +1488,28 @@ pub fn expression_reachable(
 /// Returns [`RuntimeError`] for an empty/malformed trace, a disabled action, or
 /// any state/change mismatch.
 pub fn replay_trace(model: KernelModel, trace: &[TraceStep]) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, None)
+}
+
+/// Replay a trace whose step zero is a caller-provided complete logical state.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] under the same malformed/disabled/mismatch
+/// conditions as [`replay_trace`].
+pub fn replay_trace_from_state(
+    model: KernelModel,
+    trace: &[TraceStep],
+    initial_state: &State,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, Some(initial_state))
+}
+
+fn replay_trace_with_initial(
+    model: KernelModel,
+    trace: &[TraceStep],
+    initial_state: Option<&State>,
+) -> Result<(), RuntimeError> {
     let first = trace
         .first()
         .ok_or_else(|| runtime_error("cannot replay an empty trace"))?;
@@ -1495,6 +1517,9 @@ pub fn replay_trace(model: KernelModel, trace: &[TraceStep]) -> Result<(), Runti
         return Err(runtime_error("trace must begin with an action-free step 0"));
     }
     let mut monitor = Monitor::new(model)?;
+    if let Some(initial_state) = initial_state {
+        monitor.state.clone_from(initial_state);
+    }
     if monitor.state != first.state {
         return Err(runtime_error(
             "trace initial state does not match Monitor init",

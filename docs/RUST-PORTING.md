@@ -83,7 +83,7 @@ never allowlisted.
 
 ## 4. Phase-0 decisions and evidence
 
-Status as of 2026-07-11:
+Status as of 2026-07-12:
 
 | Decision / spike | Evidence | Status |
 |---|---|---|
@@ -114,7 +114,7 @@ Status as of 2026-07-11:
 | scenarios | reachable, leadsTo response, action-cover, and deadlock scenarios with concrete replay | **20/20 identity parity; 86 Rust scenarios replayed by Python and Python scenarios replayed by Rust at depth 5** |
 | public replay command | native `replay --trace` accepts array and `{events:[...]}` forms and reports first rejection | **3/3 conformant/nonconformant contract cases** |
 | Phase-2 command surface | sweep, direct refinement chains, and project manifests including short-circuit/keep-going | **5/5 focused full-envelope parity** |
-| Phase-3 native surface | DB/AI/domain engines plus mutate, explain, testgen, typestate, HTML, ledger, analyze, and diff command entry points | **99/99 command cases; exact typestate, full direct/requirements-profile built-in and external mutation adjudication with acceptance/forbidden/refinement and by-requirement attribution, native invariant/reachable counterfactual diagnostics with source-backed blame, byte-identical pytest plus five alternate testgen targets (positive and forbidden cases), core/standalone-refinement/project traceability graph JSON plus DOT/Mermaid exports, declaration-level tag-review export, mixed spec/refinement and AI-review batch analysis, project missing-anchor and structural/progress-cycle/unconstrained-effect/conservation/acceptance-divergence AI-review findings (including the order-workflow stale-cache regression), focused byte-identical HTML/ledger artifacts, and broad HTML byte-identical static content plus complete tag/attribute structure parity for workflow, inventory, vending, and forbidden reports; solver-selected dynamic witnesses are checked by bidirectional replay rather than unstable raw bytes** |
+| Phase-3 native surface | DB/AI/domain engines plus mutate, explain, testgen, typestate, HTML, ledger, analyze, and semantic diff | **107/107 command cases; exact typestate, full direct/requirements-profile built-in and external mutation adjudication with acceptance/forbidden/refinement and by-requirement attribution, native invariant/reachable counterfactual diagnostics with source-backed blame, byte-identical pytest plus five alternate testgen targets (positive and forbidden cases), core/standalone-refinement/project traceability graph JSON plus DOT/Mermaid exports, declaration-level tag-review export, mixed spec/refinement and AI-review batch analysis, project missing-anchor and structural/progress-cycle/unconstrained-effect/conservation/acceptance-divergence AI-review findings, byte-identical focused HTML/ledger artifacts, broad HTML static/structural parity, and byte-identical raw stdout for version, typestate, testgen, HTML, ledger, readable explain, domain expansion, and domain conformance generation; solver-selected dynamic witnesses are checked by bidirectional replay rather than unstable raw bytes** |
 | production browser Worker | Rust WASM + official npm Z3 bridge, isolated Worker, in-memory files, progress, forced cancellation, and playground assets | **verified and violated samples match native CLI; cancellation recreates a healthy solver context** |
 | npm Worker round trip | disposable Node Worker returns `sat`, model `x=42`, and can terminate Emscripten threads | **proved for Node Worker** |
 | browser Worker asset loading / COOP+COEP | isolated Chrome loaded the bundled Worker, separate Emscripten JS/WASM and pthread script with no console errors; `crossOriginIsolated=true`, `sat`, model `x=42` | **proved in browser** |
@@ -129,8 +129,8 @@ and liveness verification, full native CLI envelopes, replay, scenarios,
 snapshot projection, and bidirectional counterexample gates all pass their
 declared corpora. Phase 2 is complete without changing these Phase-1 contracts.
 Phase 4's production Worker and cancellation/native-verdict gates are also
-complete. Phase 3 remains open until its large raw-output/report bodies—not
-only their stable projections—pass command-by-command parity.
+complete. Phase 3 is complete: its large raw-output/report bodies and stable
+projections pass command-by-command parity without a Python command fallback.
 
 The batching decision is evidence-driven: retain per-term calls unless profiling
 representative Phase-1 corpus verification shows that JS term construction is at

@@ -1884,8 +1884,8 @@ impl Parser {
                     Ok(Expr::Seq(items))
                 }
             }
-            TokenKind::Ident(name) if name == "count" => self.count(),
-            TokenKind::Ident(name) if name == "sum" => self.sum(),
+            TokenKind::Ident(name) if name == "count" && self.peek_symbol("(") => self.count(),
+            TokenKind::Ident(name) if name == "sum" && self.peek_symbol("(") => self.sum(),
             TokenKind::Ident(name) if name == "unique" || name == "exactlyOne" => {
                 self.expect_symbol("(")?;
                 let binder = self.binder()?;

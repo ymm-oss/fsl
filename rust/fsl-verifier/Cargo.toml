@@ -10,5 +10,9 @@ rust-version.workspace = true
 fsl-core = { path = "../fsl-core" }
 fsl-solver = { path = "../fsl-solver" }
 
+[dev-dependencies]
+fsl-runtime = { path = "../fsl-runtime" }
+fsl-solver-z3 = { path = "../fsl-solver-z3" }
+
 [lints]
 workspace = true

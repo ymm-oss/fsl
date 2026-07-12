@@ -19,6 +19,7 @@ pub use fsl_syntax::{
 
 mod compose;
 mod dialect;
+mod domain;
 mod model;
 mod refinement;
 mod trace;
@@ -30,6 +31,7 @@ pub use dialect::{
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
     lower_governance, lower_requirements, requirements_trace_contract,
 };
+pub use domain::domain_kernel_source;
 pub use model::{
     ActionDef, ActionGuard, KernelModel, LeadsToDef, ModelError, ParamDef, PropertyDef, TypeDef,
     TypeRef, Value as FslValue, build_model,
@@ -124,6 +126,53 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
     lower_direct_spec(spec)
 }
 
+fn validate_direct_scope_overrides(
+    spec: &SurfaceSpec,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<(), CoreError> {
+    let entities = spec
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            SpecItem::Entity(name, _) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let numbers = spec
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            SpecItem::Number(name, _) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let error = |message| CoreError {
+        message,
+        line: 1,
+        column: 1,
+    };
+    if (!instances.is_empty() || !values.is_empty()) && entities.is_empty() && numbers.is_empty() {
+        return Err(error(
+            "--instances/--values only apply to specs with entity/number declarations; this spec declares neither".to_owned(),
+        ));
+    }
+    if let Some(name) = instances
+        .keys()
+        .find(|name| !entities.contains(name.as_str()))
+    {
+        return Err(error(format!(
+            "verify instances references undeclared entity '{name}'"
+        )));
+    }
+    if let Some(name) = values.keys().find(|name| !numbers.contains(name.as_str())) {
+        return Err(error(format!(
+            "verify values references undeclared number '{name}'"
+        )));
+    }
+    Ok(())
+}
+
 /// Parse a direct spec/business/requirements document with temporary verify-bound overrides.
 ///
 /// This is the semantic seam used by the `sweep` driver; it does not mutate
@@ -170,6 +219,7 @@ pub fn parse_kernel_source_with_bounds(
 
     match parse_surface_document(source)? {
         SurfaceDocument::Spec(mut spec) => {
+            validate_direct_scope_overrides(&spec, instances, values)?;
             for item in &mut spec.items {
                 update(item, instances, values);
             }

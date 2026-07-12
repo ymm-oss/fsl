@@ -2,6 +2,7 @@
 
 //! Backend-neutral symbolic semantics and bounded verification for FSL.
 
+mod agreement;
 mod bmc;
 mod eval;
 mod induction;
@@ -15,7 +16,11 @@ use std::fmt;
 use fsl_core::ModelError;
 use fsl_solver::SolverError;
 
-pub use bmc::{BmcResult, BmcViolation, LeadsToViolation, ReachableWitness, verify_bounded};
+pub use agreement::{ImplicationResult, expression_matches_value, invariant_implication};
+pub use bmc::{
+    BmcResult, BmcViolation, LeadsToViolation, ReachableWitness, verify_bounded,
+    verify_bounded_from_state, verify_bounded_selected,
+};
 pub use induction::{
     InductionCti, InductionResult, RankFailure, RankProof, RankedLeadstoResult, prove_induction,
     prove_ranked_leadstos,

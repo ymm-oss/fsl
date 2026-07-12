@@ -54,6 +54,12 @@ def artifact_bytes(name: str, path: Path) -> bytes:
     return content
 
 
+def normalized_raw(name: str, content: str) -> str:
+    if name == "html-stdout":
+        content = re.sub(r'(&quot;elapsed_s&quot;: )[0-9.]+', r'\1<TIMING>', content)
+    return content
+
+
 def invoke(executable: list[str], arguments: list[str], *, raw: bool = False) -> tuple[Any, int]:
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + environment.get("PYTHONPATH", "")
@@ -309,7 +315,22 @@ def run(binary: Path = RUST) -> dict[str, Any]:
         args=["db","import",f"examples/db/{source}","--name","ImportedDb"]
         python,_=invoke([sys.executable,"-m","fslc"],args,raw=True);rust,_=invoke([str(binary)],args,raw=True)
         if python!=rust: failures.append({"case":f"db-import:{source}","python":"different bytes","rust":"different bytes"})
-    total=len(cases)+3+5+5+4+len(db_cases)+2+len(typestate_specs)+len(analysis_specs)+len(analysis_projections)+len(analysis_exports)+len(mutation_cases)+len(refinement_analysis_cases)+3+len(project_analysis_cases)+len(ai_review_cases)
+    raw_cases = [
+        ("version", ["--version"]),
+        ("typestate-ts", ["typestate", "specs/order_workflow.fsl", "--ts"]),
+        ("testgen-stdout", ["testgen", "specs/cart_v1.fsl", "--depth", "3"]),
+        ("html-stdout", ["html", "specs/cart_v1.fsl", "--depth", "3"]),
+        ("ledger-stdout", ["ledger", "specs/cart_v1.fsl", "--depth", "3"]),
+        ("explain-readable", ["explain", "specs/cart_v1.fsl", "--depth", "3", "--readable"]),
+        ("domain-expand", ["domain", "expand", "examples/domain/order_async_effect.fsl"]),
+        ("domain-testgen", ["domain", "testgen", "examples/domain/order_async_effect.fsl", "--depth", "3"]),
+    ]
+    for name, arguments in raw_cases:
+        python, python_status = invoke([sys.executable, "-m", "fslc"], arguments, raw=True)
+        rust, rust_status = invoke([str(binary)], arguments, raw=True)
+        if normalized_raw(name, python) != normalized_raw(name, rust) or python_status != rust_status:
+            failures.append({"case":name,"python":"different bytes","rust":"different bytes","exit_codes":[python_status,rust_status]})
+    total=len(cases)+3+5+5+4+len(db_cases)+2+len(typestate_specs)+len(analysis_specs)+len(analysis_projections)+len(analysis_exports)+len(mutation_cases)+len(refinement_analysis_cases)+3+len(project_analysis_cases)+len(ai_review_cases)+len(raw_cases)
     return {"schema":"fsl-rust-phase3-command-parity.v1","cases":total,"matched":total-len(failures),"failures":failures}
 
 

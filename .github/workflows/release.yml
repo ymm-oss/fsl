@@ -31,6 +31,9 @@ jobs:
           - os: macos-14        # Apple Silicon
             target: macos-arm64
             asset: fslc-macos-arm64
+          - os: macos-15-intel  # Intel
+            target: macos-x64
+            asset: fslc-macos-x64
           - os: ubuntu-latest
             target: linux-x64
             asset: fslc-linux-x64

@@ -20,7 +20,9 @@ pub use analysis::{analyze_model, build_tsg};
 pub use analysis_export::export_analysis_graph;
 pub use db::{DbToolError, check_db, observe_db, validate_db};
 pub use db_import::{DbImport, import_db};
-pub use domain::{analyze_domain, check_domain, domain_kernel_source, domain_scaffold};
+pub use domain::{
+    analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
+};
 pub use html::render_html_report;
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;

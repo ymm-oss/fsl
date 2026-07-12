@@ -68,6 +68,8 @@ def _normalize(value: Any, path: str = "$") -> Any:
         return "<elapsed>"
     if path.endswith(".trace") or path.endswith(".impl_trace") or path.endswith(".witness"):
         return "<replayed-witness>"
+    if path.endswith(".last_action"):
+        return "<replayed-witness-action>"
     if path.endswith(".blame"):
         return "<witness-blame>"
     if isinstance(value, dict):
@@ -128,6 +130,7 @@ def run(binary: Path) -> dict[str, Any]:
         "allowlist": {
             "*.cost.elapsed_s": "wall-clock timing",
             "*.trace|impl_trace|witness": "covered by bidirectional replay gates",
+            "*.last_action": "derived from the same replayed nondeterministic witness",
             "*.blame": "derived from nondeterministic witness",
         },
         "failures": failures,

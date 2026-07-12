@@ -13,8 +13,8 @@ use crate::transition::{
     ActionInstance, action_guards, action_instances, init_constraints, transition_constraint,
 };
 use crate::value::{
-    Bindings, SymbolicState, bool_term, bounds, i64_index, logical_equal, project_state,
-    project_value, symbolic_state,
+    Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
+    project_state, project_value, symbolic_state,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,10 +72,72 @@ pub async fn verify_bounded<S: SmtSolver>(
     solver: &mut S,
     depth: usize,
 ) -> Result<BmcResult, VerifyError> {
+    verify_bounded_selected(model, solver, depth, None).await
+}
+
+/// Verify with an optional explicit set of implicit type-bound property names.
+/// `None` checks every state bound; `Some` is used by CLI property selection.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] for the same solver, model, and projection failures as
+/// [`verify_bounded`].
+#[allow(clippy::too_many_lines)]
+pub async fn verify_bounded_selected<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    depth: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<BmcResult, VerifyError> {
+    verify_bounded_config(model, solver, depth, checked_bounds, None).await
+}
+
+/// Verify from a complete concrete logical-state snapshot instead of spec init.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] when the snapshot is incomplete, contains unknown
+/// state, has an incompatible value, or the ordinary verifier fails.
+pub async fn verify_bounded_from_state<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    depth: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    initial_state: &BTreeMap<String, FslValue>,
+) -> Result<BmcResult, VerifyError> {
+    verify_bounded_config(model, solver, depth, checked_bounds, Some(initial_state)).await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn verify_bounded_config<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    depth: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    initial_state: Option<&BTreeMap<String, FslValue>>,
+) -> Result<BmcResult, VerifyError> {
     let instances = action_instances(solver, model)?;
     let initial = symbolic_state(solver, model, 0)?;
-    for constraint in init_constraints(solver, model, &initial)? {
-        solver.assert(&constraint)?;
+    if let Some(snapshot) = initial_state {
+        for name in snapshot.keys() {
+            if !model.state.iter().any(|(candidate, _)| candidate == name) {
+                return Err(VerifyError::new(format!("unknown state variable '{name}'")));
+            }
+        }
+        for (name, ty) in &model.state {
+            let value = snapshot
+                .get(name)
+                .ok_or_else(|| VerifyError::new(format!("missing state variable '{name}'")))?;
+            let symbolic = initial
+                .get(name)
+                .ok_or_else(|| VerifyError::new(format!("missing symbolic state '{name}'")))?;
+            let concrete = concrete_value(solver, model, ty, value)?;
+            solver.assert(&logical_equal(solver, model, symbolic, &concrete)?)?;
+        }
+    } else {
+        for constraint in init_constraints(solver, model, &initial)? {
+            solver.assert(&constraint)?;
+        }
     }
     match solver.check().await? {
         SatResult::Sat => {}
@@ -111,8 +173,16 @@ pub async fn verify_bounded<S: SmtSolver>(
     let mut choices = Vec::new();
 
     for step in 0..=depth {
-        if let Some(violation) =
-            check_state_properties(solver, model, &states, &choices, &instances, step).await?
+        if let Some(violation) = check_state_properties(
+            solver,
+            model,
+            &states,
+            &choices,
+            &instances,
+            step,
+            checked_bounds,
+        )
+        .await?
         {
             result.violation = Some(violation);
             return Ok(result);
@@ -178,8 +248,13 @@ async fn check_state_properties<S: SmtSolver>(
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
     step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     for (name, _) in &model.state {
+        let property_name = format!("_bounds_{name}");
+        if checked_bounds.is_some_and(|selected| !selected.contains(&property_name)) {
+            continue;
+        }
         let valid = bounds(
             solver,
             model,
@@ -194,7 +269,7 @@ async fn check_state_properties<S: SmtSolver>(
                     solver,
                     model,
                     "type_bound",
-                    format!("_bounds_{name}"),
+                    property_name,
                     &failure,
                     states,
                     choices,

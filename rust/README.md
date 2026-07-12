@@ -32,7 +32,7 @@ Current covered slice:
 - native induction, refinement, sweep, project-chain, database compatibility,
   SQL/Prisma import, AI hard-contract/stochastic evidence, domain structural
   checks/replay/scaffolds, and the report-tool command surface; the committed
-  Phase-3 differential matches 99/99 command cases. It covers complete
+  Phase-3 differential matches 107/107 command cases. It covers complete
   typestate, full built-in/external mutation adjudication, invariant and
   reachable counterfactuals with source-backed blame, all five alternate
   testgen targets, core/refinement/project analysis projections and exports,

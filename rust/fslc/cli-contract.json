@@ -1,0 +1,2102 @@
+{
+  "schema": "fsl-cli-contract.v1",
+  "root": {
+    "path": [],
+    "prog": "fslc",
+    "help": "usage: fslc [-h] [-V]\n            {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain} ...\n\npositional arguments:\n  {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "actions": [
+      {
+        "dest": "help",
+        "required": false,
+        "flags": [
+          "-h",
+          "--help"
+        ],
+        "nargs": 0,
+        "action": "store"
+      },
+      {
+        "dest": "version",
+        "required": false,
+        "flags": [
+          "-V",
+          "--version"
+        ],
+        "nargs": 0,
+        "action": "version"
+      }
+    ],
+    "commands": [
+      {
+        "path": [
+          "ai"
+        ],
+        "prog": "fslc ai",
+        "help": "usage: fslc ai [-h] {check,replay,eval,regress,compare,drift,compat} ...\n\npositional arguments:\n  {check,replay,eval,regress,compare,drift,compat}\n    check               check an ai_component hard contract or recursive agent\n                        structure\n    replay              compare AI runtime JSONL events to ai_component\n                        declarations\n    eval                evaluate precomputed AI eval JSONL against\n                        statistical_property thresholds\n    regress             check ai_migration no_regression metrics\n    compare             compare two precomputed AI eval JSONL files\n    drift               check observed_property thresholds and drift from\n                        runtime telemetry\n    compat              generate an AI artifact capability profile for\n                        dbsystem\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": [
+              "ai",
+              "check"
+            ],
+            "prog": "fslc ai check",
+            "help": "usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}]\n                     [--deadlock {warn,error,ignore}]\n                     file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "depth",
+                "required": false,
+                "flags": [
+                  "--depth"
+                ],
+                "default": 8,
+                "action": "store"
+              },
+              {
+                "dest": "engine",
+                "required": false,
+                "flags": [
+                  "--engine"
+                ],
+                "choices": [
+                  "bmc",
+                  "induction"
+                ],
+                "default": "bmc",
+                "action": "store"
+              },
+              {
+                "dest": "deadlock",
+                "required": false,
+                "flags": [
+                  "--deadlock"
+                ],
+                "choices": [
+                  "warn",
+                  "error",
+                  "ignore"
+                ],
+                "default": "warn",
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "ai",
+              "compare"
+            ],
+            "prog": "fslc ai compare",
+            "help": "usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS\n                       [--from-label FROM_LABEL] [--to-label TO_LABEL]\n                       [--dataset DATASET]\n\noptions:\n  -h, --help            show this help message and exit\n  --from FROM_RECORDS\n  --to TO_RECORDS\n  --from-label FROM_LABEL\n  --to-label TO_LABEL\n  --dataset DATASET\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "from_records",
+                "required": true,
+                "flags": [
+                  "--from"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "to_records",
+                "required": true,
+                "flags": [
+                  "--to"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "from_label",
+                "required": false,
+                "flags": [
+                  "--from-label"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "to_label",
+                "required": false,
+                "flags": [
+                  "--to-label"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "dataset",
+                "required": false,
+                "flags": [
+                  "--dataset"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "ai",
+              "compat"
+            ],
+            "prog": "fslc ai compat",
+            "help": "usage: fslc ai compat [-h] [--environment ENVIRONMENT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --environment ENVIRONMENT\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "environment",
+                "required": false,
+                "flags": [
+                  "--environment"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "ai",
+              "drift"
+            ],
+            "prog": "fslc ai drift",
+            "help": "usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS]\n                     [--window WINDOW] [--baseline BASELINE]\n                     [--property PROPERTY_NAME]\n                     file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --logs LOGS\n  --baseline-logs BASELINE_LOGS\n  --window WINDOW\n  --baseline BASELINE\n  --property PROPERTY_NAME\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "logs",
+                "required": true,
+                "flags": [
+                  "--logs"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "baseline_logs",
+                "required": false,
+                "flags": [
+                  "--baseline-logs"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "window",
+                "required": false,
+                "flags": [
+                  "--window"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "baseline",
+                "required": false,
+                "flags": [
+                  "--baseline"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "property_name",
+                "required": false,
+                "flags": [
+                  "--property"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "ai",
+              "eval"
+            ],
+            "prog": "fslc ai eval",
+            "help": "usage: fslc ai eval [-h] [--records RECORDS] [--dataset DATASET]\n                    [--slice SLICE_NAME] [--property PROPERTY_NAME]\n                    file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --records RECORDS\n  --dataset DATASET\n  --slice SLICE_NAME\n  --property PROPERTY_NAME\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "records",
+                "required": false,
+                "flags": [
+                  "--records"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "dataset",
+                "required": false,
+                "flags": [
+                  "--dataset"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "slice_name",
+                "required": false,
+                "flags": [
+                  "--slice"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "property_name",
+                "required": false,
+                "flags": [
+                  "--property"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "ai",
+              "regress"
+            ],
+            "prog": "fslc ai regress",
+            "help": "usage: fslc ai regress [-h] [--migration MIGRATION]\n                       --before-records BEFORE_RECORDS\n                       --after-records AFTER_RECORDS [--dataset DATASET]\n                       file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --migration MIGRATION\n  --before-records BEFORE_RECORDS\n  --after-records AFTER_RECORDS\n  --dataset DATASET\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "migration",
+                "required": false,
+                "flags": [
+                  "--migration"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "before_records",
+                "required": true,
+                "flags": [
+                  "--before-records"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "after_records",
+                "required": true,
+                "flags": [
+                  "--after-records"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "dataset",
+                "required": false,
+                "flags": [
+                  "--dataset"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "ai",
+              "replay"
+            ],
+            "prog": "fslc ai replay",
+            "help": "usage: fslc ai replay [-h] --logs LOGS [--component COMPONENT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --logs LOGS\n  --component COMPONENT\n                        ai_component to replay when FILE is a project-level\n                        fsl-ai file\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "logs",
+                "required": true,
+                "flags": [
+                  "--logs"
+                ],
+                "action": "store"
+              },
+              {
+                "dest": "component",
+                "required": false,
+                "flags": [
+                  "--component"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "analyze"
+        ],
+        "prog": "fslc analyze",
+        "help": "usage: fslc analyze [-h]\n                    [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}]\n                    [--profile {ai-review}] [--export {tag-review}]\n                    [--focus FOCUS] [--format {dot,json,mermaid}]\n                    file [file ...]\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}\n                        structural projection to emit\n  --profile {ai-review}\n                        emit AI-readable structural review findings\n  --export {tag-review}\n                        export declaration-level tag/formula review tuples\n  --focus FOCUS         node id for --projection impact_graph, e.g.\n                        state:stock or action:checkout\n  --format {dot,json,mermaid}\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "nargs": "+",
+            "action": "store"
+          },
+          {
+            "dest": "projection",
+            "required": false,
+            "flags": [
+              "--projection"
+            ],
+            "choices": [
+              "tsg",
+              "action_dependency_graph",
+              "action_state_graph",
+              "impact_graph",
+              "property_state_graph",
+              "requirement_property_graph",
+              "refinement_graph",
+              "traceability_graph"
+            ],
+            "default": "tsg",
+            "action": "store"
+          },
+          {
+            "dest": "profile",
+            "required": false,
+            "flags": [
+              "--profile"
+            ],
+            "choices": [
+              "ai-review"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "export_kind",
+            "required": false,
+            "flags": [
+              "--export"
+            ],
+            "choices": [
+              "tag-review"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "focus",
+            "required": false,
+            "flags": [
+              "--focus"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "output_format",
+            "required": false,
+            "flags": [
+              "--format"
+            ],
+            "choices": [
+              "dot",
+              "json",
+              "mermaid"
+            ],
+            "default": "json",
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "chain"
+        ],
+        "prog": "fslc chain",
+        "help": "usage: fslc chain [-h] [--keep-going] [path]\n\npositional arguments:\n  path\n\noptions:\n  -h, --help    show this help message and exit\n  --keep-going\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "path",
+            "required": false,
+            "positional": true,
+            "nargs": "?",
+            "default": "fsl-project.toml",
+            "action": "store"
+          },
+          {
+            "dest": "keep_going",
+            "required": false,
+            "flags": [
+              "--keep-going"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "check"
+        ],
+        "prog": "fslc check",
+        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "strict_tags",
+            "required": false,
+            "flags": [
+              "--strict-tags"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "requirements",
+            "required": false,
+            "flags": [
+              "--requirements"
+            ],
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "compat"
+        ],
+        "prog": "fslc compat",
+        "help": "usage: fslc compat [-h] {check} ...\n\npositional arguments:\n  {check}\n    check     check dbsystem compatibility, optionally including AI capability\n              profiles\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": [
+              "compat",
+              "check"
+            ],
+            "prog": "fslc compat check",
+            "help": "usage: fslc compat check [-h] [--include-ai] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help    show this help message and exit\n  --include-ai\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "include_ai",
+                "required": false,
+                "flags": [
+                  "--include-ai"
+                ],
+                "nargs": 0,
+                "default": false,
+                "action": "store_true"
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "db"
+        ],
+        "prog": "fslc db",
+        "help": "usage: fslc db [-h] {check,observe,import} ...\n\npositional arguments:\n  {check,observe,import}\n    check               check a dbsystem and emit fsl-db findings\n    observe             compare runtime observation logs to dbsystem\n                        declarations\n    import              import SQL DDL or a minimal ORM schema into dbsystem\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": [
+              "db",
+              "check"
+            ],
+            "prog": "fslc db check",
+            "help": "usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}]\n                     [--deadlock {warn,error,ignore}]\n                     file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "depth",
+                "required": false,
+                "flags": [
+                  "--depth"
+                ],
+                "default": 8,
+                "action": "store"
+              },
+              {
+                "dest": "engine",
+                "required": false,
+                "flags": [
+                  "--engine"
+                ],
+                "choices": [
+                  "bmc",
+                  "induction"
+                ],
+                "default": "bmc",
+                "action": "store"
+              },
+              {
+                "dest": "deadlock",
+                "required": false,
+                "flags": [
+                  "--deadlock"
+                ],
+                "choices": [
+                  "warn",
+                  "error",
+                  "ignore"
+                ],
+                "default": "warn",
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "db",
+              "import"
+            ],
+            "prog": "fslc db import",
+            "help": "usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}]\n                      [-o OUTPUT]\n                      file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --name NAME\n  --source {auto,sql,prisma}\n                        source format to import (default: auto by extension)\n  -o, --output OUTPUT\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "name",
+                "required": false,
+                "flags": [
+                  "--name"
+                ],
+                "default": "ImportedDb",
+                "action": "store"
+              },
+              {
+                "dest": "source",
+                "required": false,
+                "flags": [
+                  "--source"
+                ],
+                "choices": [
+                  "auto",
+                  "sql",
+                  "prisma"
+                ],
+                "default": "auto",
+                "action": "store"
+              },
+              {
+                "dest": "output",
+                "required": false,
+                "flags": [
+                  "-o",
+                  "--output"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "db",
+              "observe"
+            ],
+            "prog": "fslc db observe",
+            "help": "usage: fslc db observe [-h] --trace TRACE file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help     show this help message and exit\n  --trace TRACE\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "trace",
+                "required": true,
+                "flags": [
+                  "--trace"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "diff"
+        ],
+        "prog": "fslc diff",
+        "help": "usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING]\n                 [--forbid FORBID]\n                 [old] [new]\n\npositional arguments:\n  old\n  new\n\noptions:\n  -h, --help         show this help message and exit\n  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two\n                     Git revisions\n  --depth DEPTH\n  --mapping MAPPING  optional refinement mapping for one comparison direction\n  --forbid FORBID    comma-separated finding kinds that should fail the gate\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "old",
+            "required": false,
+            "positional": true,
+            "nargs": "?",
+            "action": "store"
+          },
+          {
+            "dest": "new",
+            "required": false,
+            "positional": true,
+            "nargs": "?",
+            "action": "store"
+          },
+          {
+            "dest": "git_range",
+            "required": false,
+            "flags": [
+              "--git"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "mapping",
+            "required": false,
+            "flags": [
+              "--mapping"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "forbid",
+            "required": false,
+            "flags": [
+              "--forbid"
+            ],
+            "default": "",
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "domain"
+        ],
+        "prog": "fslc domain",
+        "help": "usage: fslc domain [-h] {check,analyze,expand,generate,replay,testgen} ...\n\npositional arguments:\n  {check,analyze,expand,generate,replay,testgen}\n    check               check domain/effect structure and verify generated\n                        kernel\n    analyze             emit aggregate/effect ownership findings\n    expand              expand domain/effect dialect to kernel FSL\n    generate            generate Functional DDD implementation scaffold\n    replay              replay runtime command/event/effect logs\n    testgen             generate domain adapter/conformance scaffold\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": [
+              "domain",
+              "analyze"
+            ],
+            "prog": "fslc domain analyze",
+            "help": "usage: fslc domain analyze [-h] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help  show this help message and exit\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "domain",
+              "check"
+            ],
+            "prog": "fslc domain check",
+            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}]\n                         [--deadlock {warn,error,ignore}]\n                         file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "depth",
+                "required": false,
+                "flags": [
+                  "--depth"
+                ],
+                "default": 8,
+                "action": "store"
+              },
+              {
+                "dest": "engine",
+                "required": false,
+                "flags": [
+                  "--engine"
+                ],
+                "choices": [
+                  "bmc",
+                  "induction"
+                ],
+                "default": "bmc",
+                "action": "store"
+              },
+              {
+                "dest": "deadlock",
+                "required": false,
+                "flags": [
+                  "--deadlock"
+                ],
+                "choices": [
+                  "warn",
+                  "error",
+                  "ignore"
+                ],
+                "default": "warn",
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "domain",
+              "expand"
+            ],
+            "prog": "fslc domain expand",
+            "help": "usage: fslc domain expand [-h] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help           show this help message and exit\n  -o, --output OUTPUT\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "output",
+                "required": false,
+                "flags": [
+                  "-o",
+                  "--output"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "domain",
+              "generate"
+            ],
+            "prog": "fslc domain generate",
+            "help": "usage: fslc domain generate [-h] [--profile {functional-ddd}]\n                            [--target {typescript,kotlin,swift,python,rust}]\n                            [-o OUTPUT]\n                            file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --profile {functional-ddd}\n  --target {typescript,kotlin,swift,python,rust}\n  -o, --output OUTPUT\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "profile",
+                "required": false,
+                "flags": [
+                  "--profile"
+                ],
+                "choices": [
+                  "functional-ddd"
+                ],
+                "default": "functional-ddd",
+                "action": "store"
+              },
+              {
+                "dest": "target",
+                "required": false,
+                "flags": [
+                  "--target"
+                ],
+                "choices": [
+                  "typescript",
+                  "kotlin",
+                  "swift",
+                  "python",
+                  "rust"
+                ],
+                "default": "typescript",
+                "action": "store"
+              },
+              {
+                "dest": "output",
+                "required": false,
+                "flags": [
+                  "-o",
+                  "--output"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "domain",
+              "replay"
+            ],
+            "prog": "fslc domain replay",
+            "help": "usage: fslc domain replay [-h] --logs LOGS file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help   show this help message and exit\n  --logs LOGS\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "logs",
+                "required": true,
+                "flags": [
+                  "--logs"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          },
+          {
+            "path": [
+              "domain",
+              "testgen"
+            ],
+            "prog": "fslc domain testgen",
+            "help": "usage: fslc domain testgen [-h] [--depth DEPTH]\n                           [--target {vitest,pytest,swift,kotlin,dart,phpunit}]\n                           [--deadlock {warn,error,ignore}] [--strict]\n                           [-o OUTPUT]\n                           file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  -o, --output OUTPUT\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": [
+                  "-h",
+                  "--help"
+                ],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "depth",
+                "required": false,
+                "flags": [
+                  "--depth"
+                ],
+                "default": 8,
+                "action": "store"
+              },
+              {
+                "dest": "target",
+                "required": false,
+                "flags": [
+                  "--target"
+                ],
+                "choices": [
+                  "vitest",
+                  "pytest",
+                  "swift",
+                  "kotlin",
+                  "dart",
+                  "phpunit"
+                ],
+                "default": "vitest",
+                "action": "store"
+              },
+              {
+                "dest": "deadlock",
+                "required": false,
+                "flags": [
+                  "--deadlock"
+                ],
+                "choices": [
+                  "warn",
+                  "error",
+                  "ignore"
+                ],
+                "default": "warn",
+                "action": "store"
+              },
+              {
+                "dest": "strict",
+                "required": false,
+                "flags": [
+                  "--strict"
+                ],
+                "nargs": 0,
+                "default": false,
+                "action": "store_true"
+              },
+              {
+                "dest": "output",
+                "required": false,
+                "flags": [
+                  "-o",
+                  "--output"
+                ],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "explain"
+        ],
+        "prog": "fslc explain",
+        "help": "usage: fslc explain [-h] [--depth DEPTH] [--readable] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n  --readable\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "readable",
+            "required": false,
+            "flags": [
+              "--readable"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "html"
+        ],
+        "prog": "fslc html",
+        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT]\n                 [--deadlock {warn,error,ignore}] [--engine {bmc,induction}]\n                 file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "output",
+            "required": false,
+            "flags": [
+              "-o",
+              "--output"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "deadlock",
+            "required": false,
+            "flags": [
+              "--deadlock"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          },
+          {
+            "dest": "engine",
+            "required": false,
+            "flags": [
+              "--engine"
+            ],
+            "choices": [
+              "bmc",
+              "induction"
+            ],
+            "default": "bmc",
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "ledger"
+        ],
+        "prog": "fslc ledger",
+        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT]\n                   [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG]\n                   [--engine {bmc,induction}] [--evidence EVIDENCE]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score\n                        conformance (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an\n                        external-evidence producer (fslc ai eval/replay/drift,\n                        fslc db observe, fslc domain replay, ...); repeatable\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "output",
+            "required": false,
+            "flags": [
+              "-o",
+              "--output"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "deadlock",
+            "required": false,
+            "flags": [
+              "--deadlock"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "ignore",
+            "action": "store"
+          },
+          {
+            "dest": "impl_log",
+            "required": false,
+            "flags": [
+              "--impl-log"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "engine",
+            "required": false,
+            "flags": [
+              "--engine"
+            ],
+            "choices": [
+              "bmc",
+              "induction"
+            ],
+            "default": "bmc",
+            "action": "store"
+          },
+          {
+            "dest": "evidence",
+            "required": false,
+            "flags": [
+              "--evidence"
+            ],
+            "repeatable": true,
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "mutate"
+        ],
+        "prog": "fslc mutate",
+        "help": "usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement]\n                   [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --by-requirement\n  --max-mutants MAX_MUTANTS\n  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the\n                        built-in catalog\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "by_requirement",
+            "required": false,
+            "flags": [
+              "--by-requirement"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "max_mutants",
+            "required": false,
+            "flags": [
+              "--max-mutants"
+            ],
+            "default": 200,
+            "action": "store"
+          },
+          {
+            "dest": "mutants_from",
+            "required": false,
+            "flags": [
+              "--from"
+            ],
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "refine"
+        ],
+        "prog": "fslc refine",
+        "help": "usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]\n\npositional arguments:\n  impl\n  abs\n  mapping\n  rest           chain check: appending more (abs map) pairs runs an end-to-\n                 end composed check\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "impl",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "abs",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "mapping",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "rest",
+            "required": false,
+            "positional": true,
+            "nargs": "*",
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "replay"
+        ],
+        "prog": "fslc replay",
+        "help": "usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG)\n                   [--mapping MAPPING]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help           show this help message and exit\n  --trace TRACE\n  --from-log FROM_LOG  production JSONL records to map and replay\n  --mapping MAPPING    refinement-syntax log mapping (required with --from-\n                       log)\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "trace",
+            "required": false,
+            "flags": [
+              "--trace"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "from_log",
+            "required": false,
+            "flags": [
+              "--from-log"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "mapping",
+            "required": false,
+            "flags": [
+              "--mapping"
+            ],
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "scenarios"
+        ],
+        "prog": "fslc scenarios",
+        "help": "usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}]\n                      file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --deadlock {warn,error,ignore}\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "deadlock",
+            "required": false,
+            "flags": [
+              "--deadlock"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "sweep"
+        ],
+        "prog": "fslc sweep",
+        "help": "usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]\n                  [--deadlock {warn,error,ignore}]\n                  [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]\n                  [--instances INSTANCES] [--values VALUES] [--strict-tags]\n                  [--requirements REQUIREMENTS]\n                  file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation\n  --instances INSTANCES\n                        sweep an entity bound (NAME=LO..HI; repeatable)\n  --values VALUES       sweep a number upper bound as LO..LO through LO..HI\n  --strict-tags\n  --requirements REQUIREMENTS\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": "0..8",
+            "action": "store"
+          },
+          {
+            "dest": "engine",
+            "required": false,
+            "flags": [
+              "--engine"
+            ],
+            "choices": [
+              "bmc",
+              "induction"
+            ],
+            "default": "bmc",
+            "action": "store"
+          },
+          {
+            "dest": "k_ind",
+            "required": false,
+            "flags": [
+              "--k"
+            ],
+            "default": 1,
+            "action": "store"
+          },
+          {
+            "dest": "deadlock",
+            "required": false,
+            "flags": [
+              "--deadlock"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          },
+          {
+            "dest": "vacuity",
+            "required": false,
+            "flags": [
+              "--vacuity"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          },
+          {
+            "dest": "property_name",
+            "required": false,
+            "flags": [
+              "--property"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "instances",
+            "required": false,
+            "flags": [
+              "--instances"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "values",
+            "required": false,
+            "flags": [
+              "--values"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "strict_tags",
+            "required": false,
+            "flags": [
+              "--strict-tags"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "requirements",
+            "required": false,
+            "flags": [
+              "--requirements"
+            ],
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "testgen"
+        ],
+        "prog": "fslc testgen",
+        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT]\n                    [--target {pytest,vitest,swift,kotlin,dart,phpunit}]\n                    [--deadlock {warn,error,ignore}] [--strict]\n                    file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "output",
+            "required": false,
+            "flags": [
+              "-o",
+              "--output"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "target",
+            "required": false,
+            "flags": [
+              "--target"
+            ],
+            "choices": [
+              "pytest",
+              "vitest",
+              "swift",
+              "kotlin",
+              "dart",
+              "phpunit"
+            ],
+            "default": "pytest",
+            "action": "store"
+          },
+          {
+            "dest": "deadlock",
+            "required": false,
+            "flags": [
+              "--deadlock"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          },
+          {
+            "dest": "strict",
+            "required": false,
+            "flags": [
+              "--strict"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "typestate"
+        ],
+        "prog": "fslc typestate",
+        "help": "usage: fslc typestate [-h] [--ts] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help  show this help message and exit\n  --ts        emit only the derivable entities' TypeScript to stdout instead\n              of JSON\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "ts",
+            "required": false,
+            "flags": [
+              "--ts"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "verify"
+        ],
+        "prog": "fslc verify",
+        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]\n                   [--deadlock {warn,error,ignore}]\n                   [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]\n                   [--exclude-property EXCLUDE_PROPERTY_NAMES]\n                   [--instances INSTANCES] [--values VALUES] [--strict-tags]\n                   [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS]\n                   [--from-state FROM_STATE]\n                   file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation; resolves\n                        across invariant/trans/leadsTo/reachable declarations\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run\n                        (neither reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": [
+              "--depth"
+            ],
+            "default": 8,
+            "action": "store"
+          },
+          {
+            "dest": "engine",
+            "required": false,
+            "flags": [
+              "--engine"
+            ],
+            "choices": [
+              "bmc",
+              "induction"
+            ],
+            "default": "bmc",
+            "action": "store"
+          },
+          {
+            "dest": "k_ind",
+            "required": false,
+            "flags": [
+              "--k"
+            ],
+            "default": 1,
+            "action": "store"
+          },
+          {
+            "dest": "deadlock",
+            "required": false,
+            "flags": [
+              "--deadlock"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          },
+          {
+            "dest": "vacuity",
+            "required": false,
+            "flags": [
+              "--vacuity"
+            ],
+            "choices": [
+              "warn",
+              "error",
+              "ignore"
+            ],
+            "default": "warn",
+            "action": "store"
+          },
+          {
+            "dest": "property_name",
+            "required": false,
+            "flags": [
+              "--property"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "exclude_property_names",
+            "required": false,
+            "flags": [
+              "--exclude-property"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "instances",
+            "required": false,
+            "flags": [
+              "--instances"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "values",
+            "required": false,
+            "flags": [
+              "--values"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "strict_tags",
+            "required": false,
+            "flags": [
+              "--strict-tags"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "requirements",
+            "required": false,
+            "flags": [
+              "--requirements"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "no_cache",
+            "required": false,
+            "flags": [
+              "--no-cache"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "lemmas",
+            "required": false,
+            "flags": [
+              "--lemma"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "from_state",
+            "required": false,
+            "flags": [
+              "--from-state"
+            ],
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": [
+          "version"
+        ],
+        "prog": "fslc version",
+        "help": "usage: fslc version [-h]\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": [
+              "-h",
+              "--help"
+            ],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": []
+      }
+    ]
+  }
+}
