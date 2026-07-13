@@ -992,6 +992,9 @@ first failed layer and later layers are marked `skipped`.
   An entity's `applicability` is `full` only when all transitions are
   derivable/branching. `relational` ones carry a reason (diagnostics) and a
   requirement ID. `--ts` outputs only the TypeScript for the derivable portion.
+  The native Rust path consumes public Kernel JSON v1 and rejects unsupported
+  schema versions; private Rust AST/model shapes are not a generator API. The
+  Python reference implementation remains frozen.
 - Counterexample trace: `[{step, state, action{name,params,loc}, changes{path:{from,to}}}]`.
   Shortest guaranteed. State is the logical representation (enum name / Option as
   null|value / Seq as an array / composition as `alias.var` keys). Internal names

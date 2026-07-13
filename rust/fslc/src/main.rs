@@ -3227,13 +3227,21 @@ fn run_check(path: &Path) -> (Value, i32) {
 fn run_kernel_contract(path: &Path) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
         Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => {
+            let message =
+                if error.message == "top-level document has not reached the kernel lowering gate" {
+                    "spec has no state block".to_owned()
+                } else {
+                    error.to_string()
+                };
+            return (semantic_error_output(&message), 2);
+        }
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
@@ -7029,12 +7037,36 @@ fn run_mutate(
 }
 
 fn run_typestate(path: &Path) -> (Value, i32) {
-    let model = match load_model(path) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let path_text = path.to_string_lossy();
+    let contract = match fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path_text,
+        source_dialect(&source),
+    ) {
+        Ok(contract) => contract,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let report = match fsl_tools::analyze_typestate(&contract) {
+        Ok(report) => report,
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let mut output = envelope();
-    if let Value::Object(report) = fsl_tools::analyze_typestate(&model) {
+    if let Value::Object(report) = report {
         output.extend(report);
     }
     (Value::Object(output), 0)
