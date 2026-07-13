@@ -5,6 +5,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- Rust CLI contract validation (issue #220) now preserves exact compatibility
+  with the frozen Python surface while checking native-only commands and
+  options against an explicit structural allowlist. CI runs the focused
+  contract and help-parity suite, including a mutation regression that rejects
+  unlisted choice drift and runtime probes for invalid choices and help paths.
+
 ### Added
 - Explicit-state exploration engine (issue #212): native Rust
   `fslc verify --engine explicit` enumerates the concrete state space on the
