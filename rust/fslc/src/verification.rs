@@ -100,7 +100,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
     let Value::Object(base) = &base_value else {
         return (
             error_output("internal", "BMC returned a non-object envelope"),
-            2,
+            3,
         );
     };
     if base.get("result").and_then(Value::as_str) != Some("verified") {
@@ -113,7 +113,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
     };
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return (error_output("internal", &error.to_string()), 2),
+        Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
     let induction = match block_on_native(fsl_verifier::prove_induction(&model, &mut solver, k)) {
         Ok(result) => result,
@@ -453,7 +453,7 @@ fn solve_bmc(
 ) -> Result<fsl_verifier::BmcResult, CommandResult> {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return Err((error_output("internal", &error.to_string()), 2)),
+        Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
     };
     let verification = if let Some(initial_state) = request.initial_state {
         block_on_native(fsl_verifier::verify_bounded_from_state(
@@ -476,7 +476,7 @@ fn solve_bmc(
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
     };
     if let Err(error) = replay_all(&prepared.model, &result, request.initial_state) {
-        return Err((error_output("internal", &error), 2));
+        return Err((error_output("internal", &error), 3));
     }
     Ok(result)
 }
@@ -705,7 +705,7 @@ fn render_leadsto_failure(
     started: Instant,
 ) -> (Value, i32) {
     let Some(details) = &violation.leads_to else {
-        return (error_output("internal", "missing leadsTo diagnostics"), 2);
+        return (error_output("internal", "missing leadsTo diagnostics"), 3);
     };
     let property = model
         .leadstos

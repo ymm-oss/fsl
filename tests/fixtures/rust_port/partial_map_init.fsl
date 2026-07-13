@@ -1,0 +1,19 @@
+spec ProbePartialMap {
+  enum Key { A, B }
+
+  state {
+    values: Map<Key, Bool>
+  }
+
+  init {
+    values[A] = false
+  }
+
+  action noop() {
+    values[A] = values[A]
+  }
+
+  invariant NotB {
+    not values[B]
+  }
+}

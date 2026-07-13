@@ -61,6 +61,28 @@ fn native_cli_preserves_bmc_outcomes() {
 }
 
 #[test]
+fn native_cli_replays_witnesses_from_partially_initialized_state() {
+    let (violated, status) = run_cli(&[
+        "verify",
+        "tests/fixtures/rust_port/partial_map_init.fsl",
+        "--depth",
+        "4",
+        "--engine",
+        "bmc",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 1);
+    assert_eq!(violated["result"], "violated");
+    assert_eq!(violated["violation_kind"], "invariant");
+    assert_eq!(violated["invariant"], "NotB");
+    assert_eq!(violated["violated_at_step"], 0);
+    assert_eq!(violated["trace"][0]["state"]["values"]["A"], false);
+    assert_eq!(violated["trace"][0]["state"]["values"]["B"], true);
+}
+
+#[test]
 fn native_cli_preserves_induction_outcomes() {
     let (proved, status) = run_cli(&[
         "verify",
