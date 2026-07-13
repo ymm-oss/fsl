@@ -134,3 +134,38 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: editors/vscode/fsl-vscode.vsix
+
+  kernel-contract:
+    name: package public Kernel contract v1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package schemas, vectors, and integration guide
+        run: |
+          mkdir -p dist/fsl-kernel-contract-v1/schemas
+          mkdir -p dist/fsl-kernel-contract-v1/fixtures
+          cp schemas/fslc/kernel/*.json dist/fsl-kernel-contract-v1/schemas/
+          cp rust/fslc/tests/fixtures/kernel_contract.fsl dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/kernel_contract.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/conformance_failures.fsl dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/conformance_failures.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v1/README.md
+          tar -czf dist/fsl-kernel-contract-v1.tar.gz -C dist fsl-kernel-contract-v1
+          ( cd dist && shasum -a 256 fsl-kernel-contract-v1.tar.gz > fsl-kernel-contract-v1.tar.gz.sha256 )
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-kernel-contract-v1
+          path: |
+            dist/fsl-kernel-contract-v1.tar.gz
+            dist/fsl-kernel-contract-v1.tar.gz.sha256
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/fsl-kernel-contract-v1.tar.gz
+            dist/fsl-kernel-contract-v1.tar.gz.sha256

@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: Apache-2.0
+// Public Kernel contract coverage fixture for issue #208.
+spec KernelContract {
+  const CAP = 2
+  type Id = 0..1
+  type Qty = 0..2
+  enum Status { Open, Closed }
+  struct Slot { status: Status, qty: Qty, owner: Option<Id> }
+
+  state {
+    slots: Map<Id, Slot>,
+    active: Option<Id>,
+    seen: Set<Id>,
+    queue: Seq<Id, CAP>,
+    total: Qty
+  }
+  init {
+    forall i: Id {
+      slots[i] = Slot { status: Open, qty: 0, owner: none }
+    }
+    active = none
+    seen = Set {}
+    queue = Seq {}
+    total = 0
+  }
+
+  action add(i: Id) "REQ-208-ADD: additions are atomic" {
+    requires total < 2
+    requires not seen.contains(i)
+    active = some(i)
+    seen = seen.add(i)
+    queue = queue.push(i)
+    total = total + 1
+    ensures total == old(total) + 1
+  }
+
+  fair action remove() "REQ-208-REMOVE: queue removal is guarded" {
+    requires queue.size() > 0
+    active = some(queue.head())
+    queue = queue.pop()
+  }
+
+  invariant Capacity "REQ-208-CAP: total stays within capacity" { total <= CAP }
+  trans Monotone "REQ-208-MONO: total never decreases" { total >= old(total) }
+  reachable Full "REQ-208-FULL: capacity can be reached" { total == CAP }
+  leadsTo Drained "REQ-208-DRAIN: queued work is eventually selected" {
+    queue.size() > 0 ~> active != none
+  }
+  unless EmptyUntilAdd "REQ-208-UNLESS: empty remains empty until an add" {
+    total == 0 unless total > 0
+  }
+  terminal { total == CAP }
+}

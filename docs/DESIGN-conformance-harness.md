@@ -111,6 +111,13 @@ longer run by `.github/workflows/ci.yml`. It remains available for manual
 historical/reference checks; active CI coverage is provided by the Rust
 workspace tests and WASM browser validation.
 
+The external-compiler conformance surface introduced by issue #208 is separate
+from this historical corpus gate. Native `fslc conformance` emits versioned,
+language-neutral Monitor vectors from any checked/lowered model, including
+disabled and rollback-failure outcomes. Its schema and golden corpus are defined
+in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md) and are active Rust CI
+inputs.
+
 ## Exclusion policy
 
 - No `pytest.skip` anywhere in the harness. Every non-conformance file is a

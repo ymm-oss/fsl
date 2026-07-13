@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Versioned normalized public Kernel contract (issue #208): native Rust
+  `fslc kernel` exports checked/lowered models as typed, source-traceable JSON
+  without the Python AST, while `fslc conformance` emits deterministic
+  language-neutral success/disabled/rollback vectors. Add v1 JSON Schemas,
+  requirement/lowering origins, explicit partial-operation conditions, atomic
+  Monitor rollback for all failed steps, a Monitor↔symbolic transition agreement
+  gate, golden fixtures, compatibility policy, release bundle, and external
+  compiler guidance. The frozen Python reference remains unchanged.
 - Digest-bound approval records (issue #190): add native Rust `fslc approval
   create|check|diff` for reviewed ledger, HTML, and scenario artifacts. Versioned
   sidecars bind a location-insensitive lowered-kernel digest, normalized rendered

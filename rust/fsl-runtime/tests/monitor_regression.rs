@@ -80,3 +80,34 @@ fn replay_rejects_a_trace_that_is_not_enabled() {
     invalid.push(invalid[1].clone());
     assert!(fsl_runtime::replay_trace(model, &invalid).is_err());
 }
+
+#[test]
+fn failed_steps_leave_the_monitor_state_unchanged() {
+    for (suffix, expected_kind) in [
+        ("invariant Safe { x == 0 }", "invariant"),
+        ("trans Stable { x == old(x) }", "trans"),
+        ("", "ensures"),
+    ] {
+        let ensures = if expected_kind == "ensures" {
+            "ensures x == 0"
+        } else {
+            ""
+        };
+        let model = model(format!(
+            "spec Rollback {{ state {{ x: Int }} init {{ x = 0 }} action break_it() {{ x = 1 {ensures} }} {suffix} }}"
+        ));
+        let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+        let before = monitor.state.clone();
+        let action = monitor.enabled().expect("enabled actions")[0].clone();
+        let result = monitor.step(&action).expect("step monitor");
+        assert_eq!(
+            result
+                .violation
+                .as_ref()
+                .map(|violation| violation.kind.as_str()),
+            Some(expected_kind)
+        );
+        assert_eq!(result.state, before);
+        assert_eq!(monitor.state, before);
+    }
+}

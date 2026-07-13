@@ -16,7 +16,10 @@ use std::fmt;
 use fsl_core::ModelError;
 use fsl_solver::SolverError;
 
-pub use agreement::{ImplicationResult, expression_matches_value, invariant_implication};
+pub use agreement::{
+    ImplicationResult, expression_matches_value, invariant_implication, transition_matches_step,
+    transition_outcome_matches_step,
+};
 pub use bmc::{
     BmcResult, BmcViolation, LeadsToViolation, ReachableWitness, verify_bounded,
     verify_bounded_from_state, verify_bounded_selected,

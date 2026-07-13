@@ -296,6 +296,34 @@ fn command() -> Result<(Value, i32), String> {
                 requirements.as_deref(),
             ))
         }
+        "kernel" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "usage: fslc kernel SPEC".to_owned())?,
+            );
+            if let Some(argument) = args.next() {
+                return Err(format!("unexpected kernel argument '{argument}'"));
+            }
+            Ok(run_kernel_contract(&path))
+        }
+        "conformance" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "usage: fslc conformance SPEC [--depth N]".to_owned())?,
+            );
+            let mut depth = 4_usize;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = required_option_value(&mut args, "--depth")?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    _ => return Err(format!("unknown conformance option '{option}'")),
+                }
+            }
+            Ok(run_conformance(&path, depth))
+        }
         "approval" => {
             let subcommand = args.next().ok_or_else(|| {
                 "usage: fslc approval <create|check|diff> SPEC [options]".to_owned()
@@ -3158,6 +3186,65 @@ fn run_check(path: &Path) -> (Value, i32) {
             (Value::Object(output), 0)
         }
         Err(error) => (semantic_error_output(&error), 2),
+    }
+}
+
+fn run_kernel_contract(path: &Path) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let path = path.to_string_lossy();
+    match fsl_core::public_kernel_contract(&kernel, &model, &path, source_dialect(&source)) {
+        Ok(mut contract) => {
+            let object = contract.as_object_mut().expect("public Kernel object");
+            object.insert("fsl".to_owned(), json!("1.0"));
+            object.insert("result".to_owned(), json!("kernel"));
+            (contract, 0)
+        }
+        Err(error) => (semantic_error_output(&error.to_string()), 2),
+    }
+}
+
+fn run_conformance(path: &Path, depth: usize) -> (Value, i32) {
+    match load_model(path).and_then(|model| fslc_rust::conformance_vectors(&model, depth)) {
+        Ok(mut vectors) => {
+            vectors
+                .as_object_mut()
+                .expect("conformance object")
+                .insert("fsl".to_owned(), json!("1.0"));
+            (vectors, 0)
+        }
+        Err(error) => (semantic_error_output(&error), 2),
+    }
+}
+
+fn source_dialect(source: &str) -> &str {
+    let first = source
+        .lines()
+        .map(str::trim_start)
+        .find(|line| !line.is_empty() && !line.starts_with("//"))
+        .and_then(|line| line.split_whitespace().next());
+    match first {
+        Some("spec") => "kernel",
+        Some("requirements") => "requirements",
+        Some("business") => "business",
+        Some("domain") => "domain",
+        Some("database" | "db") => "db",
+        Some("governance") => "governance",
+        Some("component") => "ai-component",
+        Some(other) => other,
+        None => "unknown",
     }
 }
 
@@ -8968,8 +9055,8 @@ fn bounded_semantic_review(
                         else {
                             continue;
                         };
-                        let left_state = left_step.state;
-                        let right_state = right_step.state;
+                        let left_state = left_step.attempted_state.unwrap_or(left_step.state);
+                        let right_state = right_step.attempted_state.unwrap_or(right_step.state);
                         let divergent_state = model
                             .state
                             .iter()

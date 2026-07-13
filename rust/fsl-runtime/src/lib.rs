@@ -702,6 +702,7 @@ pub struct StepResult {
     pub action: String,
     pub params: BTreeMap<String, Value>,
     pub state: State,
+    pub attempted_state: Option<State>,
     pub violation: Option<Violation>,
 }
 
@@ -713,6 +714,27 @@ pub struct Monitor {
 }
 
 impl Monitor {
+    fn failed_step(
+        &mut self,
+        action: &str,
+        params: &BTreeMap<String, Value>,
+        kind: &str,
+        attempted_state: Option<State>,
+    ) -> StepResult {
+        self.step += 1;
+        StepResult {
+            action: action.to_owned(),
+            params: params.clone(),
+            state: self.state.clone(),
+            attempted_state,
+            violation: Some(Violation {
+                kind: kind.to_owned(),
+                name: format!("_{kind}_{action}"),
+                step: self.step,
+            }),
+        }
+    }
+
     /// Initialize a solver-independent concrete monitor.
     ///
     /// # Errors
@@ -775,12 +797,83 @@ impl Monitor {
         Ok(enabled)
     }
 
+    /// Evaluate and execute one bounded action call, including disabled and
+    /// partial guard outcomes. This is the concrete conformance entry point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] for an unknown action, invalid parameters, or
+    /// a non-partial evaluation failure.
+    pub fn attempt(
+        &mut self,
+        action_name: &str,
+        params: &BTreeMap<String, Value>,
+    ) -> Result<StepResult, RuntimeError> {
+        let action = self
+            .model
+            .actions
+            .iter()
+            .find(|action| action.name == action_name)
+            .cloned()
+            .ok_or_else(|| runtime_error(format!("unknown action '{action_name}'")))?;
+        if action.params.len() != params.len()
+            || action
+                .params
+                .iter()
+                .any(|parameter| !params.contains_key(parameter.name()))
+        {
+            return Err(runtime_error(format!(
+                "parameters do not match action '{action_name}'"
+            )));
+        }
+        let mut bindings = params.clone();
+        for guard in &action.guards {
+            match guard {
+                ActionGuard::Let(name, expression) => {
+                    match eval(expression, &self.state, &mut bindings, &self.model, None) {
+                        Ok(value) => {
+                            bindings.insert(name.clone(), value);
+                        }
+                        Err(error) if is_partial_operation_error(&error.message) => {
+                            return Ok(self.failed_step(action_name, params, "partial_op", None));
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                ActionGuard::Requires(expression) => {
+                    let value =
+                        match eval(expression, &self.state, &mut bindings, &self.model, None) {
+                            Ok(value) => value,
+                            Err(error) if is_partial_operation_error(&error.message) => {
+                                return Ok(self.failed_step(
+                                    action_name,
+                                    params,
+                                    "partial_op",
+                                    None,
+                                ));
+                            }
+                            Err(error) => return Err(error),
+                        };
+                    if !as_bool(value)? {
+                        return Ok(self.failed_step(action_name, params, "requires_failed", None));
+                    }
+                }
+            }
+        }
+        self.step(&EnabledAction {
+            action: action_name.to_owned(),
+            params: params.clone(),
+            bindings,
+        })
+    }
+
     /// Execute one previously enumerated enabled instance.
     ///
     /// # Errors
     ///
     /// Returns [`RuntimeError`] for stale/unknown instances, update errors, or
     /// expression/type failures.
+    #[allow(clippy::too_many_lines)]
     pub fn step(&mut self, enabled: &EnabledAction) -> Result<StepResult, RuntimeError> {
         let action = self
             .model
@@ -801,12 +894,13 @@ impl Monitor {
                 &mut bindings,
                 &self.model,
             ) {
-                if error.message.contains(" on empty sequence") {
+                if is_partial_operation_error(&error.message) {
                     self.step += 1;
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
                         state: old_state,
+                        attempted_state: None,
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
                             name: format!("_partial_{}", action.name),
@@ -820,28 +914,63 @@ impl Monitor {
         let mut next = old_state.clone();
         next.extend(pending);
         self.step += 1;
-        let violation = check_state(&next, Some(&old_state), &self.model, self.step)?;
-        if violation.is_none() {
-            for ensure in &action.ensures {
-                if !as_bool(eval(
-                    ensure,
-                    &next,
-                    &mut bindings,
-                    &self.model,
-                    Some(&old_state),
-                )?)? {
-                    self.state = next.clone();
+        let violation = match check_state(&next, Some(&old_state), &self.model, self.step) {
+            Ok(violation) => violation,
+            Err(error) if is_partial_operation_error(&error.message) => {
+                return Ok(StepResult {
+                    action: enabled.action.clone(),
+                    params: enabled.params.clone(),
+                    state: old_state,
+                    attempted_state: Some(next),
+                    violation: Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: format!("_partial_{}", action.name),
+                        step: self.step,
+                    }),
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(violation) = violation {
+            return Ok(StepResult {
+                action: enabled.action.clone(),
+                params: enabled.params.clone(),
+                state: old_state,
+                attempted_state: Some(next),
+                violation: Some(violation),
+            });
+        }
+        for ensure in &action.ensures {
+            let evaluated = eval(ensure, &next, &mut bindings, &self.model, Some(&old_state));
+            let value = match evaluated {
+                Ok(value) => value,
+                Err(error) if is_partial_operation_error(&error.message) => {
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
-                        state: next,
+                        state: old_state,
+                        attempted_state: Some(next),
                         violation: Some(Violation {
-                            kind: "ensures".to_owned(),
-                            name: action.name.clone(),
+                            kind: "partial_op".to_owned(),
+                            name: format!("_partial_{}", action.name),
                             step: self.step,
                         }),
                     });
                 }
+                Err(error) => return Err(error),
+            };
+            if !as_bool(value)? {
+                return Ok(StepResult {
+                    action: enabled.action.clone(),
+                    params: enabled.params.clone(),
+                    state: old_state,
+                    attempted_state: Some(next),
+                    violation: Some(Violation {
+                        kind: "ensures".to_owned(),
+                        name: action.name.clone(),
+                        step: self.step,
+                    }),
+                });
             }
         }
         self.state = next.clone();
@@ -849,7 +978,8 @@ impl Monitor {
             action: enabled.action.clone(),
             params: enabled.params.clone(),
             state: next,
-            violation,
+            attempted_state: None,
+            violation: None,
         })
     }
 
@@ -861,6 +991,18 @@ impl Monitor {
     pub fn current_violation(&self) -> Result<Option<Violation>, RuntimeError> {
         check_state(&self.state, None, &self.model, self.step)
     }
+}
+
+fn is_partial_operation_error(message: &str) -> bool {
+    matches!(
+        message,
+        "pop() on empty sequence"
+            | "head() on empty sequence"
+            | "at() index out of range"
+            | "sequence index out of range"
+            | "division by zero"
+            | "remainder by zero"
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1550,13 +1692,13 @@ fn replay_trace_with_initial(
             })?;
         let before = monitor.state.clone();
         let stepped = monitor.step(instance)?;
-        if stepped.state != entry.state {
+        let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
+        if observed_state != &entry.state {
             return Err(runtime_error(format!(
                 "trace state mismatch at step {expected_step}"
             )));
         }
-        let changes = stepped
-            .state
+        let changes = observed_state
             .iter()
             .filter_map(|(name, value)| {
                 let old = &before[name];
@@ -1806,8 +1948,8 @@ fn trace_step_from_result(
     instance: &EnabledAction,
     result: &StepResult,
 ) -> TraceStep {
-    let changes = result
-        .state
+    let observed_state = result.attempted_state.as_ref().unwrap_or(&result.state);
+    let changes = observed_state
         .iter()
         .filter_map(|(name, value)| {
             let old = &before[name];
@@ -1824,7 +1966,7 @@ fn trace_step_from_result(
         .collect();
     TraceStep {
         step,
-        state: result.state.clone(),
+        state: observed_state.clone(),
         action: Some(TraceAction {
             name: instance.action.clone(),
             params: instance.params.clone(),

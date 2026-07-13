@@ -589,6 +589,8 @@ variable.
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc kernel    <file.fsl>                        # normalized typed Kernel JSON for external compilers
+fslc conformance <file.fsl> [--depth K]          # language-neutral Monitor vectors (default K=4)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--lemma "<expr>"]...             # independently prove auxiliary candidates,
@@ -636,6 +638,19 @@ fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DD
 fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
+
+The native Rust-only `kernel` command runs after dialect lowering and semantic
+checking. Its versioned JSON contains structural types for every expression,
+source spans, requirement/lowering origin, simultaneous-update semantics, and
+explicit partial-operation failure conditions; an external compiler never needs
+the Python AST or an FSL expression parser. `conformance` emits bounded concrete
+success, disabled, and rollback-failure vectors under the companion schema.
+Nested options use tagged `none`/`some` objects so no reachable states collapse.
+Public Kernel v1 explicitly rejects `compose` export because current lowering
+does not retain truthful per-component filenames; direct and other lowered
+dialects remain supported.
+Compatibility rules, schemas, fixtures, and Rust API entry points are specified
+in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md).
 
 `verify --from-state state.json` replaces the declared `init` for one bounded
 run and asks what can happen from that complete current state. The JSON shape is

@@ -682,6 +682,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 
 ```
 fslc check <f>                                  # syntax / names / types only
+fslc kernel <f>                                 # normalized typed Kernel JSON for external compilers
+fslc conformance <f> [--depth K=4]              # language-neutral Monitor success/failure vectors
 fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property in isolation
@@ -742,6 +744,15 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+Use native `fslc kernel` as the stable compiler boundary after dialect lowering
+and type checking. Do not consume the frozen Python AST JSON or reparse expression
+strings: every exported expression has a structural type and span, actions and
+properties carry requirement/lowering origin, and partial failures declare
+rollback conditions. Use `fslc conformance` plus
+`schemas/fslc/kernel/conformance.v1.schema.json` to test an independent runtime.
+The compatibility policy and field contract are in
+`docs/DESIGN-kernel-contract.md`.
 
 For an induction `unknown_cti`, pass candidate auxiliary invariants with
 repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
