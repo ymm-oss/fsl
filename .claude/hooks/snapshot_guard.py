@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
-"""PreToolUse hook: block hand-edits to the corpus snapshot.
+"""PreToolUse hook: block hand-edits to the frozen Python corpus snapshot.
 
 ``tests/snapshots/corpus_snapshot.json`` is a generated golden file and the repo's
 core behavior-preservation safety net. It must only change via
@@ -27,7 +27,7 @@ def main() -> int:
     if os.path.normpath(path).endswith(TARGET):
         sys.stderr.write(
             "Refusing to hand-edit the corpus snapshot ({}).\n".format(TARGET)
-            + "Regenerate it only after an intended behavior change (review the diff first):\n"
+            + "Regenerate it only for an intended compatibility-contract change (review the diff first):\n"
             + "  FSLC_SNAPSHOT_UPDATE=1 .venv/bin/python -m pytest tests/test_corpus_snapshot.py -q\n"
         )
         return 2
