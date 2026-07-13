@@ -30,6 +30,8 @@ editors/vscode/package-lock.json
 .claude/worktrees/
 .claude/work/active.md
 .claude/artifacts/
+tasks/active.md
+.codex-artifacts/
 
 # Generated docs search index (bleve) — regenerable, not tracked
 docs/index.bleve/

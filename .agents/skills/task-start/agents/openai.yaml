@@ -1,0 +1,7 @@
+interface:
+  display_name: "Start FSL task"
+  short_description: "Create a verified, resumable task packet before implementation"
+  default_prompt: "Create or refresh tasks/active.md for the requested work, then stop before implementation."
+
+policy:
+  allow_implicit_invocation: false

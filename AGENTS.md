@@ -29,7 +29,7 @@ When sources disagree, stop and resolve the contract conflict instead of silentl
 - `src/fslc`: frozen Python compatibility reference and LSP.
 - `tests`: Python-driven Rust contract, parity, and compatibility tests.
 - `specs` and `examples`: FSL corpus and reproducing cases.
-- `skills`: canonical agent skills; `.claude/skills/fsl*` symlink to these copies.
+- `skills`: canonical agent skills; `.claude/skills/fsl*` and `.agents/skills/fsl*` symlink here.
 
 ## Build and verification commands
 
@@ -80,6 +80,22 @@ changes must run the `rust/fsl-wasm` npm/browser gate described by that workflow
 Use `cargo fmt` and keep Clippy warning-free. The workspace forbids unsafe Rust. Python code follows
 standard four-space style, but changes to the frozen implementation require an explicit reason.
 New source files must carry the repository's Apache-2.0 SPDX header.
+
+## Codex task state and context discipline
+
+- In Codex sessions, `tasks/active.md` is the worktree-local current task packet. It is ignored by Git
+  and must be reconciled with the branch, working tree, implementation, and observed command results.
+- Use `$task-start` before substantial Codex work and `$checkpoint` before compaction, clearing,
+  handoff, independent review, or ending the task.
+- Keep durable decisions in accepted `docs/DESIGN-*.md`; task packets, conversations, plans, and Codex
+  memories are not architectural authority.
+- Delegate broad read-heavy exploration to `evidence_explorer` and independent final review to
+  `independent_reviewer`. Keep iterative implementation in the main thread unless work can be isolated
+  without shared write coordination.
+- Do not return raw search output or full build logs to the main thread. Preserve exact paths, symbols,
+  commands, exit codes, failing test names, and a full-log path when one exists.
+- Use `/compact` at investigation, implementation, and verification boundaries. Use `/clear` only after
+  checkpointing when switching to unrelated work.
 
 For non-trivial changes, use a dedicated branch/worktree so unrelated local state is not mixed into
 the task. Use repository-relative paths in committed files and delegation briefs; never embed a

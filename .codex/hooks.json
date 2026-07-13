@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/session_context.py\"",
+            "timeout": 10,
+            "statusMessage": "Loading FSL task context"
+          }
+        ]
+      }
+    ]
+  }
+}
