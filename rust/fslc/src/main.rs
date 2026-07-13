@@ -12,6 +12,7 @@ use fsl_core::{
 };
 use serde_json::{Map, Value, json};
 
+mod approval;
 mod verification;
 
 use verification::{
@@ -294,6 +295,125 @@ fn command() -> Result<(Value, i32), String> {
                 strict_tags,
                 requirements.as_deref(),
             ))
+        }
+        "approval" => {
+            let subcommand = args.next().ok_or_else(|| {
+                "usage: fslc approval <create|check|diff> SPEC [options]".to_owned()
+            })?;
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| format!("fslc approval {subcommand} requires a spec"))?,
+            );
+            match subcommand.as_str() {
+                "create" => {
+                    let mut kind = None;
+                    let mut artifact = None;
+                    let mut approver = None;
+                    let mut requirements = Vec::new();
+                    let mut depth = 8_usize;
+                    let mut deadlock = "ignore".to_owned();
+                    let mut engine = "bmc".to_owned();
+                    let mut output = None;
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--kind" => kind = Some(required_option_value(&mut args, "--kind")?),
+                            "--artifact" => {
+                                artifact = Some(PathBuf::from(required_option_value(
+                                    &mut args,
+                                    "--artifact",
+                                )?));
+                            }
+                            "--approver" => {
+                                approver = Some(required_option_value(&mut args, "--approver")?);
+                            }
+                            "--requirement" => requirements
+                                .push(required_option_value(&mut args, "--requirement")?),
+                            "--depth" => {
+                                depth = required_option_value(&mut args, "--depth")?
+                                    .parse()
+                                    .map_err(|_| {
+                                        "--depth must be a non-negative integer".to_owned()
+                                    })?;
+                            }
+                            "--deadlock" => {
+                                deadlock = required_option_value(&mut args, "--deadlock")?;
+                                if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                                    return Err(
+                                        "--deadlock must be warn, error, or ignore".to_owned()
+                                    );
+                                }
+                            }
+                            "--engine" => {
+                                engine = required_option_value(&mut args, "--engine")?;
+                                if !matches!(engine.as_str(), "bmc" | "induction") {
+                                    return Err("--engine must be bmc or induction".to_owned());
+                                }
+                            }
+                            "-o" | "--output" => {
+                                output = Some(PathBuf::from(required_option_value(
+                                    &mut args, "--output",
+                                )?));
+                            }
+                            _ => return Err(format!("unknown approval create option '{option}'")),
+                        }
+                    }
+                    Ok(run_approval_create(
+                        &path,
+                        &kind.ok_or_else(|| "approval create requires --kind".to_owned())?,
+                        &artifact
+                            .ok_or_else(|| "approval create requires --artifact".to_owned())?,
+                        &approver
+                            .ok_or_else(|| "approval create requires --approver".to_owned())?,
+                        &requirements,
+                        &approval::GenerationInputs {
+                            depth,
+                            deadlock,
+                            engine,
+                        },
+                        output.as_deref(),
+                    ))
+                }
+                "check" => {
+                    if args.next().as_deref() != Some("--record") {
+                        return Err("approval check requires --record RECORD.json".to_owned());
+                    }
+                    let record = PathBuf::from(
+                        args.next()
+                            .ok_or_else(|| "--record requires a path".to_owned())?,
+                    );
+                    if args.next().is_some() {
+                        return Err("unexpected approval check argument".to_owned());
+                    }
+                    Ok(run_approval_check(&path, &record))
+                }
+                "diff" => {
+                    let mut record = None;
+                    let mut depth = 8_usize;
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--record" => {
+                                record = Some(PathBuf::from(required_option_value(
+                                    &mut args, "--record",
+                                )?));
+                            }
+                            "--depth" => {
+                                depth = required_option_value(&mut args, "--depth")?
+                                    .parse()
+                                    .map_err(|_| {
+                                        "--depth must be a non-negative integer".to_owned()
+                                    })?;
+                            }
+                            _ => return Err(format!("unknown approval diff option '{option}'")),
+                        }
+                    }
+                    Ok(run_approval_diff(
+                        &path,
+                        &record.ok_or_else(|| "approval diff requires --record".to_owned())?,
+                        depth,
+                    ))
+                }
+                _ => Err(format!("unknown approval subcommand '{subcommand}'")),
+            }
         }
         "db" => {
             let subcommand = args
@@ -776,6 +896,7 @@ fn command() -> Result<(Value, i32), String> {
             let mut engine = "bmc".to_owned();
             let mut impl_log = None;
             let mut evidence = Vec::new();
+            let mut approval_records = Vec::new();
             let mut deadlock = if command == "ledger" {
                 "ignore".to_owned()
             } else {
@@ -827,6 +948,9 @@ fn command() -> Result<(Value, i32), String> {
                     "--evidence" if command == "ledger" => evidence.push(PathBuf::from(
                         required_option_value(&mut args, "--evidence")?,
                     )),
+                    "--approval" if command == "ledger" => approval_records.push(PathBuf::from(
+                        required_option_value(&mut args, "--approval")?,
+                    )),
                     "--strict" => strict = true,
                     _ => return Err(format!("unknown {command} option '{option}'")),
                 }
@@ -843,6 +967,7 @@ fn command() -> Result<(Value, i32), String> {
                     &engine,
                     impl_log.as_deref(),
                     &evidence,
+                    &approval_records,
                     output.as_deref(),
                 ),
                 _ => unreachable!(),
@@ -7403,6 +7528,243 @@ fn run_html_report(
     )
 }
 
+fn approval_artifact(
+    path: &Path,
+    kind: &str,
+    inputs: &approval::GenerationInputs,
+) -> Result<Vec<u8>, Value> {
+    let (result, status) = match kind {
+        "ledger" => run_ledger_report(
+            path,
+            inputs.depth,
+            &inputs.deadlock,
+            &inputs.engine,
+            None,
+            &[],
+            &[],
+            None,
+        ),
+        "html" => run_html_report(path, inputs.depth, &inputs.deadlock, &inputs.engine, None),
+        "scenarios" => run_scenarios(path, inputs.depth, &inputs.deadlock),
+        _ => {
+            return Err(error_output(
+                "usage",
+                &format!("unsupported approval target '{kind}'"),
+            ));
+        }
+    };
+    if status != 0 {
+        return Err(result);
+    }
+    if matches!(kind, "ledger" | "html") {
+        result
+            .get("content")
+            .and_then(Value::as_str)
+            .map(|content| content.as_bytes().to_vec())
+            .ok_or_else(|| error_output("internal", "generated artifact has no content"))
+    } else {
+        let mut encoded = serde_json::to_vec_pretty(&result)
+            .map_err(|error| error_output("internal", &error.to_string()))?;
+        encoded.push(b'\n');
+        Ok(encoded)
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn run_approval_create(
+    path: &Path,
+    kind: &str,
+    artifact_path: &Path,
+    approver: &str,
+    selected_requirements: &[String],
+    inputs: &approval::GenerationInputs,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    if !matches!(kind, "ledger" | "html" | "scenarios") {
+        return (
+            error_output("usage", "--kind must be ledger, html, or scenarios"),
+            2,
+        );
+    }
+    if approver.trim().is_empty() {
+        return (error_output("usage", "--approver must not be empty"), 2);
+    }
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let (_repo, relative_path, git_commit) = match approval::git_binding(path) {
+        Ok(binding) => binding,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    let digest = match approval::spec_digest(path) {
+        Ok(digest) => digest,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let expected_artifact = match approval_artifact(path, kind, inputs) {
+        Ok(artifact) => artifact,
+        Err(error) => return (error, 2),
+    };
+    let reviewed_artifact = match std::fs::read(artifact_path) {
+        Ok(artifact) => artifact,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
+        Ok(artifact) => artifact,
+        Err(error) => return (error_output("semantics", &error), 2),
+    };
+    let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
+        Ok(artifact) => artifact,
+        Err(error) => return (error_output("internal", &error), 3),
+    };
+    if normalized_reviewed != normalized_expected {
+        return (
+            error_output(
+                "semantics",
+                "reviewed artifact does not match a fresh rendering with the recorded inputs",
+            ),
+            2,
+        );
+    }
+    let available = approval::requirement_ids(&model);
+    if available.is_empty() {
+        return (
+            error_output(
+                "semantics",
+                "approval creation requires at least one requirement ID in the specification",
+            ),
+            2,
+        );
+    }
+    let mut requirements = if selected_requirements.is_empty() {
+        available.clone()
+    } else {
+        selected_requirements.to_vec()
+    };
+    requirements.sort();
+    requirements.dedup();
+    if let Some(unknown) = requirements
+        .iter()
+        .find(|requirement| !available.contains(*requirement))
+    {
+        return (
+            error_output(
+                "semantics",
+                &format!("approval references unknown requirement '{unknown}'"),
+            ),
+            2,
+        );
+    }
+    let record = approval::ApprovalRecord {
+        schema: approval::APPROVAL_SCHEMA.to_owned(),
+        spec: approval::SpecBinding {
+            path: relative_path,
+            digest_algorithm: approval::SPEC_DIGEST_ALGORITHM.to_owned(),
+            digest,
+            git_commit,
+        },
+        target: approval::TargetBinding {
+            kind: kind.to_owned(),
+            path: artifact_path.display().to_string(),
+            digest_algorithm: approval::ARTIFACT_DIGEST_ALGORITHM.to_owned(),
+            digest: approval::sha256_bytes(&normalized_reviewed),
+            generator: "fslc".to_owned(),
+            generator_version: env!("CARGO_PKG_VERSION").to_owned(),
+            inputs: inputs.clone(),
+        },
+        approval: approval::ApprovalMetadata {
+            approver: approver.to_owned(),
+            approved_at: approval::now_rfc3339(),
+            requirements,
+        },
+    };
+    let destination = output_path.map_or_else(
+        || {
+            let stem = path
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("spec");
+            path.with_file_name(format!("{stem}.approval.json"))
+        },
+        Path::to_path_buf,
+    );
+    if let Err(error) = approval::write_record(&destination, &record) {
+        return (error_output("io", &error), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("created"));
+    output.insert("kind".to_owned(), json!("approval_record"));
+    output.insert("output".to_owned(), json!(destination));
+    output.insert(
+        "record".to_owned(),
+        serde_json::to_value(record).unwrap_or(Value::Null),
+    );
+    (Value::Object(output), 0)
+}
+
+fn approval_evaluation(path: &Path, record_path: &Path) -> Result<Value, Value> {
+    let record = approval::read_record(record_path).map_err(|error| error_output("io", &error))?;
+    let (repo, relative_path, _head) =
+        approval::git_location(path).map_err(|error| error_output("io", &error))?;
+    if record.spec.path != relative_path {
+        return Err(error_output(
+            "semantics",
+            &format!(
+                "approval record targets '{}' but current spec is '{relative_path}'",
+                record.spec.path
+            ),
+        ));
+    }
+    approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
+        .map_err(|error| error_output("io", &error))?;
+    let current_spec_digest =
+        approval::spec_digest(path).map_err(|error| semantic_error_output(&error))?;
+    let artifact = approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+    let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
+        .map_err(|error| error_output("internal", &error))?;
+    let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
+    Ok(approval::evaluate(
+        &record,
+        record_path,
+        &current_spec_digest,
+        &current_artifact_digest,
+        env!("CARGO_PKG_VERSION"),
+    ))
+}
+
+fn run_approval_check(path: &Path, record_path: &Path) -> (Value, i32) {
+    let evaluation = match approval_evaluation(path, record_path) {
+        Ok(evaluation) => evaluation,
+        Err(error) => return (error, 2),
+    };
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("approval_check"));
+    if let Some(fields) = evaluation.as_object() {
+        output.extend(fields.clone());
+    }
+    (Value::Object(output), 0)
+}
+
+fn approval_overlay(path: &Path, record_paths: &[PathBuf]) -> Result<Value, Value> {
+    let mut requirements = Map::new();
+    let mut records = Vec::new();
+    for record_path in record_paths {
+        let evaluation = approval_evaluation(path, record_path)?;
+        for requirement in evaluation
+            .get("requirements")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            requirements.insert(requirement.to_owned(), evaluation.clone());
+        }
+        records.push(evaluation);
+    }
+    Ok(json!({"requirements": requirements, "records": records}))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_ledger_report(
     path: &Path,
     depth: usize,
@@ -7410,6 +7772,7 @@ fn run_ledger_report(
     engine: &str,
     impl_log: Option<&Path>,
     evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     let model = match load_model(path) {
@@ -7443,13 +7806,22 @@ fn run_ledger_report(
         .into_iter()
         .map(|(source, value)| (source.display().to_string(), value))
         .collect::<Vec<_>>();
-    let content = fsl_tools::render_ledger(
+    let approvals = if approval_paths.is_empty() {
+        None
+    } else {
+        match approval_overlay(path, approval_paths) {
+            Ok(approvals) => Some(approvals),
+            Err(error) => return (error, 2),
+        }
+    };
+    let content = fsl_tools::render_ledger_with_approvals(
         &path.display().to_string(),
         &model,
         &verification,
         &scenarios,
         replay.as_ref(),
         &evidence,
+        approvals.as_ref(),
     );
     generated_content_result(
         "audit_ledger",
@@ -10356,6 +10728,89 @@ fn materialize_git_tree(repo: &Path, revision: &str, destination: &Path) -> Resu
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
     Ok(())
+}
+
+fn run_approval_diff(path: &Path, record_path: &Path, depth: usize) -> (Value, i32) {
+    let record = match approval::read_record(record_path) {
+        Ok(record) => record,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    let (repo, relative_path, _head) = match approval::git_location(path) {
+        Ok(location) => location,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    if relative_path != record.spec.path {
+        return (
+            error_output(
+                "semantics",
+                &format!(
+                    "approval record targets '{}' but current spec is '{relative_path}'",
+                    record.spec.path
+                ),
+            ),
+            2,
+        );
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let root =
+        std::env::temp_dir().join(format!("fslc-approval-diff-{}-{nonce}", std::process::id()));
+    let base_tree = root.join("base");
+    if let Err(error) = materialize_git_tree(&repo, &record.spec.git_commit, &base_tree) {
+        let _ = std::fs::remove_dir_all(&root);
+        return (error_output("io", &error), 2);
+    }
+    let old = base_tree.join(&record.spec.path);
+    if !old.is_file() {
+        let _ = std::fs::remove_dir_all(&root);
+        return (
+            error_output(
+                "io",
+                &format!(
+                    "approved spec '{}' is missing from baseline {}",
+                    record.spec.path, record.spec.git_commit
+                ),
+            ),
+            2,
+        );
+    }
+    let materialized_digest = match approval::spec_digest(&old) {
+        Ok(digest) => digest,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&root);
+            return (semantic_error_output(&error), 2);
+        }
+    };
+    if materialized_digest != record.spec.digest {
+        let _ = std::fs::remove_dir_all(&root);
+        return (
+            error_output(
+                "semantics",
+                "approval baseline commit does not match the recorded specification digest",
+            ),
+            2,
+        );
+    }
+    let (mut result, status) = run_diff(&old, path, depth, None, &[]);
+    if let Value::Object(output) = &mut result {
+        if let Some(Value::Object(old)) = output.get_mut("old") {
+            old.insert(
+                "file".to_owned(),
+                json!(format!("{}:{}", record.spec.git_commit, record.spec.path)),
+            );
+        }
+        output.insert(
+            "approval".to_owned(),
+            json!({
+                "record": record_path.display().to_string(),
+                "baseline_digest": record.spec.digest,
+                "baseline_commit": record.spec.git_commit,
+            }),
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+    (result, status)
 }
 
 #[allow(clippy::too_many_lines)]

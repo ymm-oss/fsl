@@ -3,7 +3,7 @@
   "root": {
     "path": [],
     "prog": "fslc",
-    "help": "usage: fslc [-h] [-V] {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "help": "usage: fslc [-h] [-V] {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
     "actions": [
       {
         "dest": "help",
@@ -1361,10 +1361,69 @@
       },
       {
         "path": [
+          "approval"
+        ],
+        "prog": "fslc approval",
+        "help": "usage: fslc approval [-h] {create,check,diff}\n\npositional arguments:\n  {create,check,diff}\n    create              bind a reviewed artifact to the normalized spec digest\n    check               compare a spec and regenerated artifact to an approval record\n    diff                run semantic diff from the approved Git baseline\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": ["approval", "create"],
+            "prog": "fslc approval create",
+            "help": "usage: fslc approval create [-h] --kind {ledger,html,scenarios} --artifact ARTIFACT --approver APPROVER [--requirement ID] [--depth DEPTH] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kind {ledger,html,scenarios}\n  --artifact ARTIFACT   reviewed artifact generated with the recorded inputs\n  --approver APPROVER\n  --requirement ID      requirement ID to approve; repeatable, defaults to all\n  --depth DEPTH\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n  -o, --output OUTPUT\n",
+            "actions": [
+              {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
+              {"dest":"file","required":true,"positional":true,"action":"store"},
+              {"dest":"kind","required":true,"flags":["--kind"],"choices":["ledger","html","scenarios"],"action":"store"},
+              {"dest":"artifact","required":true,"flags":["--artifact"],"action":"store"},
+              {"dest":"approver","required":true,"flags":["--approver"],"action":"store"},
+              {"dest":"requirement","required":false,"flags":["--requirement"],"repeatable":true,"action":"store"},
+              {"dest":"depth","required":false,"flags":["--depth"],"default":8,"action":"store"},
+              {"dest":"deadlock","required":false,"flags":["--deadlock"],"choices":["warn","error","ignore"],"default":"ignore","action":"store"},
+              {"dest":"engine","required":false,"flags":["--engine"],"choices":["bmc","induction"],"default":"bmc","action":"store"},
+              {"dest":"output","required":false,"flags":["-o","--output"],"action":"store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["approval", "check"],
+            "prog": "fslc approval check",
+            "help": "usage: fslc approval check [-h] --record RECORD file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help       show this help message and exit\n  --record RECORD\n",
+            "actions": [
+              {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
+              {"dest":"file","required":true,"positional":true,"action":"store"},
+              {"dest":"record","required":true,"flags":["--record"],"action":"store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["approval", "diff"],
+            "prog": "fslc approval diff",
+            "help": "usage: fslc approval diff [-h] --record RECORD [--depth DEPTH] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help       show this help message and exit\n  --record RECORD\n  --depth DEPTH\n",
+            "actions": [
+              {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
+              {"dest":"file","required":true,"positional":true,"action":"store"},
+              {"dest":"record","required":true,"flags":["--record"],"action":"store"},
+              {"dest":"depth","required":false,"flags":["--depth"],"default":8,"action":"store"}
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
+        "path": [
           "ledger"
         ],
         "prog": "fslc ledger",
-        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance\n                        (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-\n                        evidence producer (fslc ai eval/replay/drift, fslc db\n                        observe, fslc domain replay, ...); repeatable\n",
+        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] [--approval RECORD] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance\n                        (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-\n                        evidence producer (fslc ai eval/replay/drift, fslc db\n                        observe, fslc domain replay, ...); repeatable\n  --approval RECORD     digest-bound approval record to check; repeatable\n",
         "actions": [
           {
             "dest": "help",
@@ -1440,6 +1499,15 @@
             "required": false,
             "flags": [
               "--evidence"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "approval",
+            "required": false,
+            "flags": [
+              "--approval"
             ],
             "repeatable": true,
             "action": "store"

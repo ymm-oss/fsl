@@ -712,8 +712,13 @@ fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> r
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
-fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]...
+fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
+fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]
+                                                        # bind the reviewed artifact to normalized spec + Git baseline
+fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
+fslc approval diff <f> --record <record.json> [--depth K]
+                                                        # semantic diff from approved commit to current working spec
 fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / effect findings
 fslc domain analyze <f>                                      # aggregate/effect ownership summary
 fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
@@ -848,6 +853,19 @@ business translation, governance columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
 positive form. Raw JSON is demoted to a collapsed appendix. See
 `docs/DESIGN-ledger.md`.
+
+Digest-bound approvals (issue #190) are separate from assurance class and from
+the ledger's empty human-decision checkbox. `approval create` must be run from a
+clean tracked Git baseline and only accepts a reviewed artifact that matches a
+fresh rendering under the recorded inputs. The sidecar uses a lowered-kernel
+digest that ignores source locations plus a normalized artifact digest for
+`ledger`, `html`, or `scenarios`. `approval check` and `ledger --approval`
+report `approved` or `drifted`; drift reasons distinguish spec, rendering, and
+renderer changes. A drifted row carries the complete baseline digest and an
+`approval diff` command, which compares the approved commit to the current
+working spec. Treat `approver` as attribution; authenticity comes from the
+repository's signed-commit/review/branch-protection policy. See
+`docs/DESIGN-approval.md`.
 
 Every requirement id in the ledger (and every property row in `fslc html`)
 carries an **assurance class** (issue #171): `proved(induction)` (k-induction,
