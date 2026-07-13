@@ -1,0 +1,89 @@
+domain DomainExpressionCharacterization {
+  // SPDX-License-Identifier: Apache-2.0
+  implementation_profile functional_ddd
+
+  type OrderId = 0..1
+  type Quantity = 0..2
+  type OrderStatus = Draft | Approved | Cancelled
+
+  value_object AuditStamp {
+    status: OrderStatus = Draft;
+    attempts: Quantity = 0;
+    invariant nonNegative { attempts >= 0 }
+  }
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      status: OrderStatus = Draft;
+      previous_status: OrderStatus = Draft;
+      quantity: Quantity = 0;
+      audit: AuditStamp;
+    }
+
+    command Approve {
+      quantity: Quantity
+    }
+    command Cancel {}
+
+    event Approved {
+      quantity: Quantity
+    }
+    event Cancelled {}
+    event ApprovalRejected {}
+
+    error NotDraft
+    error AlreadyCancelled
+
+    decide Approve {
+      requires status == Draft and not (status == Cancelled)
+      requires status != Cancelled and quantity >= 0
+      rejects NotDraft when status in [Approved, Cancelled]
+      emits Approved
+    }
+
+    decide Cancel {
+      requires status == Draft or status == Approved
+      rejects AlreadyCancelled when status == Cancelled
+      emits Cancelled
+    }
+
+    evolve Approved {
+      requires status == Draft
+      previous_status = status
+      status = Approved
+      audit.status = status
+      quantity = quantity
+    }
+
+    evolve Cancelled {
+      previous_status = status
+      status = Cancelled
+    }
+
+    evolve ApprovalRejected {
+      previous_status = status
+    }
+
+    on_stale Approved when status == Approved and previous_status != Cancelled {
+      emits ApprovalRejected
+    }
+
+    invariant canonicalImplication {
+      status == Approved => previous_status == Draft or previous_status == Approved
+    }
+
+    invariant legacyImplication {
+      status == Cancelled -> not can(Cancel)
+    }
+
+    invariant legacyDisjunction {
+      status == Draft || status == Approved || status == Cancelled
+    }
+
+    invariant finiteMembership {
+      status in [Draft, Approved, Cancelled]
+    }
+  }
+}

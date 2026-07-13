@@ -1,0 +1,12 @@
+domain InvalidUnknownMember {
+  // SPDX-License-Identifier: Apache-2.0
+  type Status = Draft | Approved
+  aggregate Order {
+    state { status: Status = Draft; }
+    command Touch {}
+    event Touched {}
+    decide Touch { emits Touched }
+    evolve Touched { status = status }
+    invariant unknownMember { status == Cancelled }
+  }
+}

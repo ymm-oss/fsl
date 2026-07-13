@@ -13,6 +13,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Domain-expression characterization corpus (issue #235): Rust CI now freezes
+  pre-typed-AST surface expressions and locations, normalized semantic model
+  structure, representative public Kernel expression/origin output, generated
+  Kernel fragments, CLI diagnostics and verification traces, and concrete
+  Monitor-to-symbolic agreement. The corpus covers logical operators, enums,
+  membership, `can`, aggregate state, root/index/field lvalues, defaults,
+  invariants, stale policies, effects, sagas, invalid expressions, and a
+  deterministic AI-native prompt/spec attempt baseline. This is migration
+  evidence only and intentionally changes no language semantics.
 - Codex CLI, IDE, and desktop environment: bounded repository instructions, worktree-local
   task packets, explicit checkpoint/task-start skills, shared FSL skill discovery,
   read-only exploration and review agents, concise SessionStart context, and CI-tested
