@@ -12,6 +12,13 @@ use fsl_core::{
     ModelError, ParamDef, Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
 };
 
+mod explicit;
+
+pub use explicit::{
+    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, verify_explicit,
+    verify_explicit_selected,
+};
+
 pub type State = BTreeMap<String, Value>;
 pub type Bindings = BTreeMap<String, Value>;
 
@@ -873,8 +880,26 @@ impl Monitor {
     ///
     /// Returns [`RuntimeError`] for stale/unknown instances, update errors, or
     /// expression/type failures.
-    #[allow(clippy::too_many_lines)]
     pub fn step(&mut self, enabled: &EnabledAction) -> Result<StepResult, RuntimeError> {
+        self.step_selected(enabled, None)
+    }
+
+    /// Execute one enabled instance while checking an optional selection of
+    /// implicit state-bound properties.
+    ///
+    /// `None` checks every implicit bound. `Some` is used by the explicit
+    /// verifier when `--property` or `--exclude-property` narrows verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] for stale/unknown instances, update errors, or
+    /// expression/type failures.
+    #[allow(clippy::too_many_lines)]
+    pub fn step_selected(
+        &mut self,
+        enabled: &EnabledAction,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<StepResult, RuntimeError> {
         let action = self
             .model
             .actions
@@ -914,7 +939,13 @@ impl Monitor {
         let mut next = old_state.clone();
         next.extend(pending);
         self.step += 1;
-        let violation = match check_state(&next, Some(&old_state), &self.model, self.step) {
+        let violation = match check_state_selected(
+            &next,
+            Some(&old_state),
+            &self.model,
+            self.step,
+            checked_bounds,
+        ) {
             Ok(violation) => violation,
             Err(error) if is_partial_operation_error(&error.message) => {
                 return Ok(StepResult {
@@ -990,6 +1021,19 @@ impl Monitor {
     /// Returns [`RuntimeError`] when a property cannot be evaluated.
     pub fn current_violation(&self) -> Result<Option<Violation>, RuntimeError> {
         check_state(&self.state, None, &self.model, self.step)
+    }
+
+    /// Check the current state while honoring an optional selection of
+    /// implicit state-bound properties.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when a property cannot be evaluated.
+    pub fn current_violation_selected(
+        &self,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<Option<Violation>, RuntimeError> {
+        check_state_selected(&self.state, None, &self.model, self.step, checked_bounds)
     }
 }
 
@@ -2006,7 +2050,21 @@ fn check_state(
     model: &KernelModel,
     step: usize,
 ) -> Result<Option<Violation>, RuntimeError> {
+    check_state_selected(state, old_state, model, step, None)
+}
+
+fn check_state_selected(
+    state: &State,
+    old_state: Option<&State>,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<Option<Violation>, RuntimeError> {
     for (name, ty) in &model.state {
+        let property_name = format!("_bounds_{name}");
+        if checked_bounds.is_some_and(|selected| !selected.contains(&property_name)) {
+            continue;
+        }
         if !value_conforms(
             state
                 .get(name)
@@ -2016,7 +2074,7 @@ fn check_state(
         )? {
             return Ok(Some(Violation {
                 kind: "type_bound".to_owned(),
-                name: format!("_bounds_{name}"),
+                name: property_name,
                 step,
             }));
         }

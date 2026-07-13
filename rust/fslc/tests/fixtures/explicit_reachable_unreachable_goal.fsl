@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// count can only ever reach 5 (the `requires count < 5` guard on inc()
+// forbids the last step past that), so HitSix is genuinely unreachable. The
+// finite state space {0,1,2,3,4,5} lets explicit-state exploration close
+// and prove that definitively, given enough depth/budget.
+spec ExplicitReachableUnreachableGoal {
+  type Count = 0..5
+
+  state { count: Count }
+  init { count = 0 }
+
+  action inc() {
+    requires count < 5
+    count = count + 1
+  }
+
+  reachable HitSix { count == 6 }
+}

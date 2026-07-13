@@ -6,6 +6,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Explicit-state exploration engine (issue #212): native Rust
+  `fslc verify --engine explicit` enumerates the concrete state space on the
+  Z3-free path (`fsl-runtime` BFS with `BTreeSet` dedup and parent-link
+  traces). Closure — no new states within `--depth` — returns `proved`
+  (`closure: true`), a complete unbounded proof that needs no lemmas even for
+  true-but-not-inductive invariants where k-induction reports `unknown_cti`;
+  depth exhaustion returns bounded `verified`; exceeding `--explicit-budget`
+  (default 1,000,000 visited states) returns the new `unknown_budget` verdict
+  (exit 1), never a silent `verified`. Violations reuse the BMC
+  shortest-counterexample trace schema, and results carry `states_explored`,
+  `max_frontier_width`, and `depth_reached`. Fail-closed rejections keep the
+  engine sound: `leadsTo` properties, nondeterministic `init`, and
+  `init forall` binder domains referencing state variables (both reference
+  engines require compile-time-constant domains). Verdict-cache keys include
+  the engine and budget. Includes corpus verdict-agreement and trace-replay
+  integration tests, `docs/DESIGN-explicit-engine.md`, shared FSL skill
+  guidance, and `tools/bench_explicit.py`; the frozen Python reference
+  implementation is intentionally unchanged.
 - Versioned normalized public Kernel contract (issue #208): native Rust
   `fslc kernel` exports checked/lowered models as typed, source-traceable JSON
   without the Python AST, while `fslc conformance` emits deterministic

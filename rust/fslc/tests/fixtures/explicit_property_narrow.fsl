@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitPropertyNarrow {
+  state { flag: Bool }
+  init { flag = false }
+
+  action toggle() {
+    flag = not flag
+  }
+
+  invariant AlwaysBoolean { flag or not flag }
+  invariant NeverTrue { not flag }
+}

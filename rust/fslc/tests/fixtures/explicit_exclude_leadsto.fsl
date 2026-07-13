@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitExcludeLeadsTo {
+  state { flag: Bool, done: Bool }
+  init {
+    flag = false
+    done = false
+  }
+
+  action raise() {
+    requires not flag
+    flag = true
+  }
+
+  action finish() {
+    requires flag
+    requires not done
+    done = true
+  }
+
+  invariant DoneImpliesFlag { done => flag }
+
+  leadsTo FlagLeadsToDone {
+    flag ~> done
+  }
+}
