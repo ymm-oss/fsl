@@ -56,6 +56,19 @@
         "do_not_assume": { "type": "array", "items": { "type": "string" } },
         "spec_question": { "type": "string", "pattern": "\\?$" },
         "evidence_basis": { "enum": ["structural", "bounded_bmc"] },
+        "acknowledged": { "type": "boolean" },
+        "acknowledged_by": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["declaration", "reason"],
+            "properties": {
+              "declaration": { "type": "string" },
+              "reason": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
         "loc": { "$ref": "#/$defs/loc" }
       },
       "additionalProperties": true

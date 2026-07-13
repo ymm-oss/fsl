@@ -114,6 +114,11 @@ Other findings are not duplicates. For example, `progressless_cycle` asks about
 eventual progress, while `divergent_choice` asks which immediate contract
 outcome is intended.
 
+An exact involved-node match with an `undecided:` declaration is retained and
+adds `acknowledged:true` plus `acknowledged_by`; an unmatched semantic finding
+has no acknowledgement fields. Acknowledgement never suppresses the finding. See
+`DESIGN-undecided.md`.
+
 ## Non-goals
 
 - Proving determinism or completeness at all depths.

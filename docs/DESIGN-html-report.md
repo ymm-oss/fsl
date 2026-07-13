@@ -59,6 +59,10 @@ the verifier's verdict on it:
   `reachable`), plus an automatic-checks table that also holds anything
   dialect-generated (type-bound checks, partial-op checks, generated actions,
   deadline invariants)
+- when present, an **Intentional Undecided Decisions** table listing each
+  `undecided:` declaration, its reason, and state-dependency-derived affected
+  requirement IDs; the section explicitly says the marker is metadata rather
+  than a verification condition
 - verification status and warnings
 - counterexample or reachable trace timeline, including relation edge summaries
   when trace state contains `relation A -> B` values

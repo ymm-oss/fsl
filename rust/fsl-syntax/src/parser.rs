@@ -1299,8 +1299,12 @@ impl Parser {
         }
         if self.peek_ident("init") {
             self.bump();
+            let meta = self.take_meta();
             self.expect_symbol("{")?;
-            return Ok(SpecItem::Init(self.statement_list()?));
+            return Ok(SpecItem::Init {
+                statements: self.statement_list()?,
+                meta,
+            });
         }
         if self.peek_ident("fair") || self.peek_ident("action") {
             return self.action_item();

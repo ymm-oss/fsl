@@ -4713,10 +4713,13 @@ fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidat
     let mut candidates = Vec::new();
     for (item_index, item) in spec.items.iter().enumerate() {
         match item {
-            fsl_syntax::SpecItem::Init(statements) => {
+            fsl_syntax::SpecItem::Init { statements, meta } => {
                 for (replacement, span) in statement_removals(statements) {
                     let mut mutated = spec.clone();
-                    mutated.items[item_index] = fsl_syntax::SpecItem::Init(replacement);
+                    mutated.items[item_index] = fsl_syntax::SpecItem::Init {
+                        statements: replacement,
+                        meta: meta.clone(),
+                    };
                     candidates.push(WeakeningCandidate {
                         spec: mutated,
                         op: "assignment-removal",
@@ -5682,7 +5685,7 @@ fn builtin_mutant_count(spec: &fsl_syntax::SurfaceSpec) -> usize {
             fsl_syntax::SpecItem::Const { value, .. } => {
                 expression_mutant_count(value, &enum_siblings)
             }
-            fsl_syntax::SpecItem::Init(statements) => statements
+            fsl_syntax::SpecItem::Init { statements, .. } => statements
                 .iter()
                 .map(|statement| statement_mutant_count(statement, &enum_siblings))
                 .sum(),
@@ -6108,7 +6111,7 @@ fn init_assignment_roots(
 ) -> std::collections::BTreeMap<String, usize> {
     let mut roots = std::collections::BTreeMap::new();
     for item in &spec.items {
-        if let fsl_syntax::SpecItem::Init(statements) = item {
+        if let fsl_syntax::SpecItem::Init { statements, .. } = item {
             collect_assignment_roots(statements, &mut roots);
         }
     }
@@ -7384,6 +7387,7 @@ fn run_html_report(
         &source,
         &explained,
         &verification,
+        &fsl_tools::undecided_declarations(&model),
     );
     generated_content_result(
         "html_report",
@@ -8786,6 +8790,45 @@ fn semantic_review_findings(review: &SemanticReview) -> Vec<Value> {
     findings
 }
 
+fn acknowledge_undecided_findings(model: &KernelModel, findings: &mut [Value]) {
+    let undecided = fsl_tools::undecided_declarations(model);
+    for finding in findings {
+        if !matches!(
+            finding["finding_type"].as_str(),
+            Some("divergent_choice" | "unconstrained_effect")
+        ) {
+            continue;
+        }
+        let involved = finding["involved_nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let acknowledged_by = undecided
+            .iter()
+            .filter(|declaration| {
+                declaration["node"]
+                    .as_str()
+                    .is_some_and(|node| involved.contains(node))
+            })
+            .map(|declaration| {
+                json!({
+                    "declaration": declaration["declaration"],
+                    "reason": declaration["reason"],
+                })
+            })
+            .collect::<Vec<_>>();
+        if acknowledged_by.is_empty() {
+            continue;
+        }
+        if let Value::Object(object) = finding {
+            object.insert("acknowledged".to_owned(), json!(true));
+            object.insert("acknowledged_by".to_owned(), json!(acknowledged_by));
+        }
+    }
+}
+
 fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) -> Value {
     let tsg = fsl_tools::build_tsg(model);
     let mut findings = ai_structural_findings(&tsg);
@@ -8835,6 +8878,7 @@ fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) ->
         ));
     }
     findings.extend(semantic_review_findings(&semantic));
+    acknowledge_undecided_findings(model, &mut findings);
     findings.sort_by_key(|finding| {
         (
             finding["finding_type"]

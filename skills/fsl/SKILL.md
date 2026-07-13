@@ -136,17 +136,21 @@ why weakening the upper layer to make a lower one pass defeats the point.
 ## Prerequisite: the fslc verifier
 
 This skill only supplies language knowledge; verification is done by the `fslc`
-CLI. If it is not installed, run `pip install -e .` from the FSL repository (the
-root containing `pyproject.toml`) — the only dependencies are lark and z3-solver,
-and no native build is required. In environments where `fslc` is not on PATH,
-`python -m fslc ...` works identically.
+CLI. If it is not installed, run `bash install.sh` from the FSL repository (or
+`bash ~/.fsl/install.sh` after cloning there). The installer places the
+checksummed native Rust binary on the public `fslc` path; Python is optional and
+used only for the frozen reference/LSP development surface.
 
 ## How to run
 
 ```bash
-fslc <subcommand> ...            # if installed as editable
-python -m fslc <subcommand> ...  # or via the venv python
+fslc <subcommand> ...            # authoritative native Rust CLI
 ```
+
+The Python implementation is a frozen compatibility reference and optional LSP
+support surface. New language/CLI features are not backported to it. In
+particular, use the native `fslc` binary for `undecided:` syntax and its
+ledger/HTML/analyze output; do not route new work through `python -m fslc`.
 
 Output is always a single JSON document on stdout. exit: 0=success
 (verified/proved/generated/analyzed), 1=property not satisfied
@@ -217,6 +221,37 @@ This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
 "unfounded fabrications (untagged)."
 
+### Preserve intentionally deferred decisions with `undecided:`
+
+When the specification owner has explicitly decided to leave a choice open,
+record that review decision on the declaration instead of inventing a guard or
+property:
+
+```fsl
+init "undecided: initial operating mode will be selected at rollout" {
+  mode = Manual
+}
+action route() "undecided: routing policy is pending owner approval" {
+  ...
+}
+```
+
+`undecided:` is metadata, not a verification condition. Verification still
+checks every behavior allowed by the spec. `fslc ledger` and `fslc html` list
+the declaration, reason, and state-dependency-derived affected requirement IDs.
+`analyze --profile ai-review` keeps matching `divergent_choice` /
+`unconstrained_effect` findings visible and marks them `acknowledged:true` with
+`acknowledged_by`; an unmatched finding has no acknowledgement fields and stays
+in the unresolved review queue.
+
+Use this marker only after a human owner deliberately accepts the deferral. Do
+not use it to hide an agent's uncertainty, a missing source requirement, or a
+failed formalization guess. The declaration has one tag slot, so an
+`undecided:` declaration cannot simultaneously carry an `ID: text` tag; reports
+derive affected IDs from state dependencies. Full syntax and limits are in
+`reference.md` and `docs/DESIGN-undecided.md`. This feature belongs to the
+native Rust CLI and is intentionally not added to the frozen Python reference.
+
 ## Natural language → syntax mapping (from the formalization memo to the spec)
 
 Map the sentences extracted during requirement normalization (the memo above) to
@@ -280,7 +315,9 @@ the formalization memo.**
    unwritten state, and unguarded actions, plus depth-4 BMC-backed
    `divergent_choice` / `unconstrained_effect` questions. Present
    `spec_question` to the specification owner instead of choosing a branch or
-   inventing a constraint. `analyze` also supports batch
+   inventing a constraint. If `acknowledged:true`, retain the finding and show
+   its `acknowledged_by` declaration/reason as an intentional deferral; if
+   the fields are absent, keep it in the unresolved review queue. `analyze` also supports batch
    file/directory review, standalone `refinement_graph`, project
    `traceability_graph`, DOT/Mermaid graph exports, and JSON schemas under
    `schemas/fslc/analysis/`. These are review signals with

@@ -291,8 +291,8 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 })
                 .collect(),
         ));
-        items.push(SpecItem::Init(
-            processes
+        items.push(SpecItem::Init {
+            statements: processes
                 .iter()
                 .map(|process| Statement::ForAll {
                     binder: typed_binder("c", &process.name),
@@ -307,7 +307,8 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     span: process.span,
                 })
                 .collect(),
-        ));
+            meta: None,
+        });
     }
     for process in &processes {
         for transition in &process.transitions {
@@ -887,7 +888,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     }
     if !state.is_empty() {
         items.push(SpecItem::State(state));
-        items.push(SpecItem::Init(init));
+        items.push(SpecItem::Init {
+            statements: init,
+            meta: None,
+        });
     }
     for process in &processes {
         let replacements = process
@@ -1100,7 +1104,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 ),
             };
             items.push(SpecItem::State(vec![(name.clone(), state_type)]));
-            items.push(SpecItem::Init(vec![init_statement]));
+            items.push(SpecItem::Init {
+                statements: vec![init_statement],
+                meta: None,
+            });
             age_info.insert(
                 name,
                 (binder, condition, span, cap, reference, target, type_name),
@@ -1240,11 +1247,14 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                 symmetric: false,
             },
             SpecItem::State(vec![("_governance_ok".to_owned(), TypeExpr::Bool)]),
-            SpecItem::Init(vec![Statement::Assign {
-                target: LValue::Var("_governance_ok".to_owned()),
-                value: Expr::Bool(true),
-                span,
-            }]),
+            SpecItem::Init {
+                statements: vec![Statement::Assign {
+                    target: LValue::Var("_governance_ok".to_owned()),
+                    value: Expr::Bool(true),
+                    span,
+                }],
+                meta: None,
+            },
             SpecItem::Action {
                 name: "_governance_noop".to_owned(),
                 params: Vec::new(),
@@ -1283,11 +1293,14 @@ fn lower_catalog_sentinel(name: String, prefix: &str, id: &str) -> Result<Kernel
         meta: None,
         items: vec![
             SpecItem::State(vec![(state_name.clone(), TypeExpr::Bool)]),
-            SpecItem::Init(vec![Statement::Assign {
-                target: LValue::Var(state_name.clone()),
-                value: Expr::Bool(true),
-                span,
-            }]),
+            SpecItem::Init {
+                statements: vec![Statement::Assign {
+                    target: LValue::Var(state_name.clone()),
+                    value: Expr::Bool(true),
+                    span,
+                }],
+                meta: None,
+            },
             SpecItem::Action {
                 name: action_name,
                 params: Vec::new(),

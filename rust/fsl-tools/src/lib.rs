@@ -16,6 +16,7 @@ mod mutate;
 mod refinement_analysis;
 mod testgen;
 mod typestate;
+mod undecided;
 
 pub use ai::{check_ai, replay_ai};
 pub use analysis::{analyze_model, build_tsg};
@@ -31,6 +32,7 @@ pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;
 pub use testgen::{emit_dart, emit_kotlin, emit_phpunit, emit_swift, emit_vitest};
 pub use typestate::analyze_typestate;
+pub use undecided::undecided_declarations;
 
 /// Complete a deterministic graph envelope from already normalized nodes and edges.
 #[must_use]

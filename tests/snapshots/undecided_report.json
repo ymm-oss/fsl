@@ -1,0 +1,14 @@
+{
+  "ledger_section": "## 未決定一覧\n\n`undecided:` は意図的な未決定を記録するメタデータであり、検証条件には含まれません。\n\n| 宣言 | 未決定の理由 | 影響する要件ID |\n|---|---|---|\n| `init` | initial review mode is pending | REQ-1 |\n| `action approve` | approval versus rejection policy is pending | REQ-1 |",
+  "finding": {
+    "finding_type": "divergent_choice",
+    "formal_status": "not_a_violation",
+    "acknowledged": true,
+    "acknowledged_by": [
+      {
+        "declaration": "action approve",
+        "reason": "approval versus rejection policy is pending"
+      }
+    ]
+  }
+}

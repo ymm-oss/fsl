@@ -10,6 +10,8 @@ use fsl_core::KernelModel;
 use fsl_syntax::MetaTag;
 use serde_json::Value;
 
+use crate::undecided_declarations;
+
 #[derive(Clone, Default)]
 struct RequirementEntry {
     text: Option<String>,
@@ -35,6 +37,9 @@ fn add_requirement(
     metadata: Option<&MetaTag>,
 ) {
     let Some(metadata) = metadata else { return };
+    if metadata.id.eq_ignore_ascii_case("undecided") {
+        return;
+    }
     if !registry.contains_key(&metadata.id) {
         order.push(metadata.id.clone());
     }
@@ -98,6 +103,13 @@ fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, R
 
 fn requirement(value: &Value) -> (Option<String>, Option<String>) {
     let requirement = value.get("requirement").and_then(Value::as_object);
+    if requirement
+        .and_then(|item| item.get("id"))
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.eq_ignore_ascii_case("undecided"))
+    {
+        return (None, None);
+    }
     (
         requirement
             .and_then(|item| item.get("id"))
@@ -111,7 +123,7 @@ fn requirement(value: &Value) -> (Option<String>, Option<String>) {
 }
 
 fn metadata_for<'a>(model: &'a KernelModel, group: &str, name: &str) -> Option<&'a MetaTag> {
-    match group {
+    let metadata = match group {
         "invariants" => model
             .invariants
             .iter()
@@ -138,7 +150,8 @@ fn metadata_for<'a>(model: &'a KernelModel, group: &str, name: &str) -> Option<&
             .find(|action| action.name == name)
             .and_then(|action| action.meta.as_ref()),
         _ => None,
-    }
+    };
+    metadata.filter(|metadata| !metadata.id.eq_ignore_ascii_case("undecided"))
 }
 
 fn finding_requirement(
@@ -611,6 +624,7 @@ pub fn render_ledger(
     evidence: &[(String, Value)],
 ) -> String {
     let (mut requirement_order, registry) = requirement_registry(model);
+    let undecided = undecided_declarations(model);
     let findings = collect_findings(model, verification);
     let mut by_requirement: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     let mut spec_level = Vec::new();
@@ -689,6 +703,31 @@ pub fn render_ledger(
                 );
             }
             _ => {}
+        }
+    }
+    if !undecided.is_empty() {
+        output.push_str(
+            "\n## 未決定一覧\n\n`undecided:` は意図的な未決定を記録するメタデータであり、検証条件には含まれません。\n\n| 宣言 | 未決定の理由 | 影響する要件ID |\n|---|---|---|\n",
+        );
+        for item in &undecided {
+            let ids = item["requirement_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(
+                output,
+                "| `{}` | {} | {} |",
+                escape(item["declaration"].as_str().unwrap_or_default()),
+                escape(item["reason"].as_str().unwrap_or_default()),
+                if ids.is_empty() {
+                    "—".to_owned()
+                } else {
+                    escape(&ids)
+                },
+            );
         }
     }
     output.push_str(

@@ -185,6 +185,10 @@ These are trend and review-priority signals for downstream tooling.
 The underspecification findings add a question-form `spec_question`,
 `evidence_basis:"bounded_bmc"`, and explicit depth/reachability metadata. See
 `DESIGN-underspecification.md` for the fixed bound, cost cap, and overlap rules.
+An exact `involved_nodes` match with an `undecided:` declaration remains in the
+output and adds `acknowledged:true` plus `acknowledged_by`; unmatched semantic
+findings retain the existing schema shape with no acknowledgement fields. This is deterministic node
+matching, not natural-language interpretation. See `DESIGN-undecided.md`.
 
 Every finding has:
 
@@ -200,6 +204,7 @@ Every finding has:
 - `candidate_repairs`
 - `do_not_assume`
 - optional `spec_question` and `evidence_basis`
+- optional `acknowledged` and `acknowledged_by` on semantic underspecification findings
 
 `progressless_cycle` is deliberately conservative in naming. It does not use
 `H1`, `Betti`, or `homology` in public output, and it does not rely on
@@ -256,6 +261,8 @@ The analysis package is in `src/fslc/analysis/`:
 - `export.py`: DOT and Mermaid formatting.
 - `findings.py`: AI-readable review findings.
 
-The implementation does not call Z3 and does not perform bounded reachability.
-If a future finding needs proof status, it should explicitly call or consume the
+Most structural projections do not call Z3. The bounded underspecification probe
+is the explicit exception: it reuses the verifier's BMC machinery at a fixed
+depth and still reports `formal_status:"not_a_violation"`. If another future
+finding needs proof status, it should explicitly call or consume the
 existing verifier/refinement/replay result and state that evidence in the JSON.

@@ -517,9 +517,10 @@ impl PredicateExpander {
                     .map(|(name, ty)| Ok((name, self.expand_type(ty)?)))
                     .collect::<Result<_, CoreError>>()?,
             ),
-            SpecItem::Init(statements) => {
-                SpecItem::Init(self.expand_statements(statements, &mut Vec::new())?)
-            }
+            SpecItem::Init { statements, meta } => SpecItem::Init {
+                statements: self.expand_statements(statements, &mut Vec::new())?,
+                meta,
+            },
             SpecItem::Action {
                 name,
                 params,
