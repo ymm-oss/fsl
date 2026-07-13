@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Digest-bound approval records (issue #190): add native Rust `fslc approval
+  create|check|diff` for reviewed ledger, HTML, and scenario artifacts. Versioned
+  sidecars bind a location-insensitive lowered-kernel digest, normalized rendered
+  artifact digest, generation inputs, requirement IDs, approver, timestamp, and
+  reconstructable Git baseline. `fslc ledger --approval` now shows per-requirement
+  `approved` / `drifted` state with the complete baseline digest and a direct
+  semantic-diff command. Includes JSON Schema, snapshot/integration coverage, and
+  `docs/DESIGN-approval.md`; the frozen Python reference remains unchanged.
 - Intentional undecided declarations (issue #189): reserve the
   `"undecided: reason"` metadata tag, including tagged `init`, and add
   dependency-derived affected requirement IDs to new ledger and HTML undecided

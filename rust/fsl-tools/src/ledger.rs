@@ -612,9 +612,30 @@ fn guarantee_line(verification: &Value) -> String {
     )
 }
 
+fn approval_entry<'a>(approvals: Option<&'a Value>, requirement_id: &str) -> Option<&'a Value> {
+    approvals?.get("requirements")?.get(requirement_id)
+}
+
+fn approval_cell(approvals: Option<&Value>, requirement_id: &str) -> String {
+    let Some(entry) = approval_entry(approvals, requirement_id) else {
+        return "— unapproved".to_owned();
+    };
+    match entry.get("status").and_then(Value::as_str) {
+        Some("approved") => "✅ approved".to_owned(),
+        Some("drifted") => format!(
+            "⚠ drifted (since {})",
+            entry
+                .get("baseline_digest")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ),
+        Some(status) => format!("❌ {status}"),
+        None => "❌ invalid".to_owned(),
+    }
+}
+
 /// Render the complete requirement-oriented Markdown audit ledger.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn render_ledger(
     file: &str,
     model: &KernelModel,
@@ -622,6 +643,21 @@ pub fn render_ledger(
     scenarios: &Value,
     replay: Option<&Value>,
     evidence: &[(String, Value)],
+) -> String {
+    render_ledger_with_approvals(file, model, verification, scenarios, replay, evidence, None)
+}
+
+/// Render the audit ledger with optional digest-bound approval decisions.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn render_ledger_with_approvals(
+    file: &str,
+    model: &KernelModel,
+    verification: &Value,
+    scenarios: &Value,
+    replay: Option<&Value>,
+    evidence: &[(String, Value)],
+    approvals: Option<&Value>,
 ) -> String {
     let (mut requirement_order, registry) = requirement_registry(model);
     let undecided = undecided_declarations(model);
@@ -639,6 +675,16 @@ pub fn render_ledger(
             }
         } else {
             spec_level.push(finding);
+        }
+    }
+    if let Some(approved_requirements) = approvals
+        .and_then(|value| value.get("requirements"))
+        .and_then(Value::as_object)
+    {
+        for requirement_id in approved_requirements.keys() {
+            if !requirement_order.contains(requirement_id) {
+                requirement_order.push(requirement_id.clone());
+            }
         }
     }
     let mut confirmed = BTreeSet::new();
@@ -705,6 +751,11 @@ pub fn render_ledger(
             _ => {}
         }
     }
+    if approvals.is_some() {
+        output.push_str(
+            "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n",
+        );
+    }
     if !undecided.is_empty() {
         output.push_str(
             "\n## 未決定一覧\n\n`undecided:` は意図的な未決定を記録するメタデータであり、検証条件には含まれません。\n\n| 宣言 | 未決定の理由 | 影響する要件ID |\n|---|---|---|\n",
@@ -730,9 +781,15 @@ pub fn render_ledger(
             );
         }
     }
-    output.push_str(
-        "\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n",
-    );
+    if approvals.is_some() {
+        output.push_str(
+            "\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 承認状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|---|\n",
+        );
+    } else {
+        output.push_str(
+            "\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n",
+        );
+    }
     for requirement_id in &requirement_order {
         let entry = registry.get(requirement_id);
         let requirement_findings = by_requirement
@@ -745,7 +802,18 @@ pub fn render_ledger(
         let purpose = entry
             .and_then(|entry| entry.text.as_deref())
             .unwrap_or(fallback_text);
-        let (status, types, risk, owner, action) = if requirement_findings.is_empty() {
+        let (status, types, risk, owner, action) = if requirement_findings.is_empty()
+            && entry.is_none()
+            && approval_entry(approvals, requirement_id).is_some()
+        {
+            (
+                "🟡 現行仕様に要件IDなし",
+                "—".to_owned(),
+                "要確認",
+                "____",
+                "要件IDの削除または変更を確認".to_owned(),
+            )
+        } else if requirement_findings.is_empty() {
             (
                 if confirmed.contains(requirement_id) {
                     "🟢 確認済（承認可）"
@@ -774,20 +842,38 @@ pub fn render_ledger(
                 .join(" / ");
             ("🔴 要確認", types, "要確認", "____", action)
         };
-        let _ = writeln!(
-            output,
-            "| {} | {} | {status} | {} | {} | {risk} | {owner} | {} |",
-            escape(requirement_id),
-            escape(purpose),
-            escape(&assurance_cell(
-                requirement_id,
-                &registry,
-                verification,
-                evidence
-            )),
-            escape(&types),
-            escape(&action),
-        );
+        if approvals.is_some() {
+            let _ = writeln!(
+                output,
+                "| {} | {} | {status} | {} | {} | {} | {risk} | {owner} | {} |",
+                escape(requirement_id),
+                escape(purpose),
+                escape(&approval_cell(approvals, requirement_id)),
+                escape(&assurance_cell(
+                    requirement_id,
+                    &registry,
+                    verification,
+                    evidence
+                )),
+                escape(&types),
+                escape(&action),
+            );
+        } else {
+            let _ = writeln!(
+                output,
+                "| {} | {} | {status} | {} | {} | {risk} | {owner} | {} |",
+                escape(requirement_id),
+                escape(purpose),
+                escape(&assurance_cell(
+                    requirement_id,
+                    &registry,
+                    verification,
+                    evidence
+                )),
+                escape(&types),
+                escape(&action),
+            );
+        }
     }
     if !spec_level.is_empty() {
         let types = spec_level
@@ -798,12 +884,21 @@ pub fn render_ledger(
             .collect::<Vec<_>>()
             .join(", ");
         let depth = verification.get("checked_to_depth").and_then(Value::as_u64);
-        let _ = writeln!(
-            output,
-            "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {} | {} | 要確認 | ____ | 下記詳細 |",
-            escape(&assurance_label(assurance_token(verification), depth)),
-            escape(&types)
-        );
+        if approvals.is_some() {
+            let _ = writeln!(
+                output,
+                "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | — unapproved | {} | {} | 要確認 | ____ | 下記詳細 |",
+                escape(&assurance_label(assurance_token(verification), depth)),
+                escape(&types)
+            );
+        } else {
+            let _ = writeln!(
+                output,
+                "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {} | {} | 要確認 | ____ | 下記詳細 |",
+                escape(&assurance_label(assurance_token(verification), depth)),
+                escape(&types)
+            );
+        }
     }
     output.push_str("\n## 要件ID別詳細\n\n");
     let mut detail_ids = requirement_order
@@ -859,6 +954,46 @@ pub fn render_ledger(
             );
         }
         output.push_str("- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: ____　期限: ____\n\n");
+    }
+    if let Some(approvals) = approvals {
+        output.push_str(
+            "## 承認照合\n\n| 要件ID | 承認状態 | 承認基準 digest | 承認対象 | drift理由 | semantic diff |\n|---|---|---|---|---|---|\n",
+        );
+        for requirement_id in &requirement_order {
+            let entry = approval_entry(Some(approvals), requirement_id);
+            let baseline = entry
+                .and_then(|item| item.get("baseline_digest"))
+                .and_then(Value::as_str)
+                .unwrap_or("—");
+            let target = entry
+                .and_then(|item| item.get("target_kind"))
+                .and_then(Value::as_str)
+                .unwrap_or("—");
+            let reasons = entry
+                .and_then(|item| item.get("reasons"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let command = entry
+                .filter(|item| item.get("status").and_then(Value::as_str) == Some("drifted"))
+                .and_then(|item| item.get("semantic_diff_command"))
+                .and_then(Value::as_str)
+                .unwrap_or("—");
+            let _ = writeln!(
+                output,
+                "| {} | {} | `{}` | {} | {} | `{}` |",
+                escape(requirement_id),
+                escape(&approval_cell(Some(approvals), requirement_id)),
+                escape(baseline),
+                escape(target),
+                escape(if reasons.is_empty() { "—" } else { &reasons }),
+                escape(command),
+            );
+        }
+        output.push('\n');
     }
     if !evidence.is_empty() {
         output.push_str(
