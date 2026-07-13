@@ -1,0 +1,479 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json",
+  "title": "FSL normalized public Kernel contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "language_version",
+    "spec",
+    "semantics",
+    "constants",
+    "types",
+    "state",
+    "init",
+    "actions",
+    "properties"
+  ],
+  "properties": {
+    "$schema": { "const": "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json" },
+    "schema_version": { "const": "1.0.0" },
+    "language_version": { "type": "string", "minLength": 1 },
+    "fsl": { "type": "string" },
+    "result": { "const": "kernel" },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "dialect"],
+          "properties": {
+            "file": { "type": "string" },
+            "dialect": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignment",
+        "reads",
+        "requires_false",
+        "failure_state",
+        "old",
+        "integer_division",
+        "terminal_deadlock",
+        "fairness"
+      ],
+      "properties": {
+        "assignment": { "const": "simultaneous" },
+        "reads": { "const": "pre_state" },
+        "requires_false": { "const": "not_enabled" },
+        "failure_state": { "const": "rollback" },
+        "old": { "const": "pre_state" },
+        "integer_division": { "const": "euclidean" },
+        "terminal_deadlock": { "const": "terminal_states_excluded" },
+        "fairness": { "const": "weak" }
+      }
+    },
+    "constants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "value", "span", "origin"],
+        "properties": {
+          "name": { "$ref": "#/$defs/name" },
+          "type": { "$ref": "#/$defs/type" },
+          "value": { "type": ["integer", "boolean"] },
+          "span": { "$ref": "#/$defs/nullableSpan" },
+          "origin": { "$ref": "#/$defs/origin" }
+        }
+      }
+    },
+    "types": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "span", "symmetric", "definition", "origin"],
+        "properties": {
+          "name": { "$ref": "#/$defs/name" },
+          "span": { "$ref": "#/$defs/nullableSpan" },
+          "symmetric": { "type": "boolean" },
+          "origin": { "$ref": "#/$defs/origin" },
+          "definition": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "lo", "hi"],
+                "properties": {
+                  "kind": { "const": "domain" },
+                  "lo": { "type": "integer" },
+                  "hi": { "type": "integer" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "members"],
+                "properties": {
+                  "kind": { "const": "enum" },
+                  "members": { "type": "array", "items": { "$ref": "#/$defs/name" } }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "fields"],
+                "properties": {
+                  "kind": { "const": "struct" },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["name", "type"],
+                      "properties": {
+                        "name": { "$ref": "#/$defs/name" },
+                        "type": { "$ref": "#/$defs/type" }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/declaration" }
+    },
+    "init": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statements", "requirement", "origin", "span"],
+      "properties": {
+        "statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } },
+        "requirement": { "$ref": "#/$defs/nullableRequirement" },
+        "origin": { "$ref": "#/$defs/origin" },
+        "span": { "$ref": "#/$defs/nullableSpan" }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "parameters",
+          "fair",
+          "guards",
+          "requires",
+          "lets",
+          "updates",
+          "update_semantics",
+          "ensures",
+          "partial_operations",
+          "requirement",
+          "origin",
+          "span"
+        ],
+        "properties": {
+          "name": { "$ref": "#/$defs/name" },
+          "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+          "fair": { "type": "boolean" },
+          "guards": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "expression"],
+                  "properties": {
+                    "kind": { "const": "requires" },
+                    "expression": { "$ref": "#/$defs/expression" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "name", "value"],
+                  "properties": {
+                    "kind": { "const": "let" },
+                    "name": { "$ref": "#/$defs/name" },
+                    "value": { "$ref": "#/$defs/expression" }
+                  }
+                }
+              ]
+            }
+          },
+          "requires": { "type": "array", "items": { "$ref": "#/$defs/expression" } },
+          "lets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "value"],
+              "properties": {
+                "name": { "$ref": "#/$defs/name" },
+                "value": { "$ref": "#/$defs/expression" }
+              }
+            }
+          },
+          "updates": { "type": "array", "items": { "$ref": "#/$defs/statement" } },
+          "update_semantics": { "const": "simultaneous" },
+          "ensures": { "type": "array", "items": { "$ref": "#/$defs/expression" } },
+          "partial_operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["operation", "failure_condition", "state_effect_on_failure", "span"],
+              "properties": {
+                "operation": { "type": "string", "minLength": 1 },
+                "failure_condition": { "$ref": "#/$defs/expression" },
+                "state_effect_on_failure": { "const": "rollback" },
+                "span": { "$ref": "#/$defs/span" }
+              }
+            }
+          },
+          "requirement": { "$ref": "#/$defs/nullableRequirement" },
+          "origin": { "$ref": "#/$defs/origin" },
+          "span": { "$ref": "#/$defs/span" }
+        }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invariants", "transitions", "reachables", "leads_to", "terminal"],
+      "properties": {
+        "invariants": { "type": "array", "items": { "$ref": "#/$defs/property" } },
+        "transitions": { "type": "array", "items": { "$ref": "#/$defs/property" } },
+        "reachables": { "type": "array", "items": { "$ref": "#/$defs/property" } },
+        "leads_to": { "type": "array", "items": { "$ref": "#/$defs/leadsTo" } },
+        "terminal": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_kind", "expression", "span"],
+              "properties": {
+                "source_kind": { "const": "terminal" },
+                "expression": { "$ref": "#/$defs/expression" },
+                "span": { "$ref": "#/$defs/span" }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": { "type": "string", "minLength": 1 },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "line", "column", "end_line", "end_column"],
+      "properties": {
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "end_column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "nullableSpan": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] },
+    "type": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "int" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "bool" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "statement" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": { "kind": { "const": "named" }, "name": { "$ref": "#/$defs/name" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "lo", "hi"], "properties": { "kind": { "const": "domain" }, "lo": { "type": "integer" }, "hi": { "type": "integer" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "key", "value"], "properties": { "kind": { "const": "map" }, "key": { "$ref": "#/$defs/type" }, "value": { "$ref": "#/$defs/type" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "source", "target"], "properties": { "kind": { "const": "relation" }, "source": { "$ref": "#/$defs/type" }, "target": { "$ref": "#/$defs/type" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "item"], "properties": { "kind": { "const": "set" }, "item": { "$ref": "#/$defs/type" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "item", "capacity"], "properties": { "kind": { "const": "seq" }, "item": { "$ref": "#/$defs/type" }, "capacity": { "type": "integer", "minimum": 0 } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "item"], "properties": { "kind": { "const": "option" }, "item": { "$ref": "#/$defs/type" } } }
+      ]
+    },
+    "declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "span", "origin"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "type": { "$ref": "#/$defs/type" },
+        "span": { "$ref": "#/$defs/nullableSpan" },
+        "origin": { "$ref": "#/$defs/origin" }
+      }
+    },
+    "expression": {
+      "type": "object",
+      "required": ["kind", "type", "span"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "num", "bool", "none", "some", "set_lit", "seq_lit", "struct_lit",
+            "var", "index", "field", "method", "binary", "neg", "not", "ite",
+            "is", "forall", "exists", "count", "sum", "old", "abs", "min", "max",
+            "rel_acyclic", "rel_functional", "rel_injective", "rel_domain", "rel_range",
+            "rel_reachable", "unique", "exactly_one"
+          ]
+        },
+        "type": { "$ref": "#/$defs/type" },
+        "span": { "$ref": "#/$defs/span" },
+        "value": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "boolean" },
+            { "$ref": "#/$defs/expression" }
+          ]
+        },
+        "operand": { "$ref": "#/$defs/expression" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/expression" } },
+        "fields": { "type": "object", "additionalProperties": { "$ref": "#/$defs/expression" } },
+        "name": { "$ref": "#/$defs/name" },
+        "collection": { "$ref": "#/$defs/expression" },
+        "index": { "$ref": "#/$defs/expression" },
+        "field": { "$ref": "#/$defs/name" },
+        "receiver": { "$ref": "#/$defs/expression" },
+        "method": { "$ref": "#/$defs/name" },
+        "arguments": { "type": "array", "items": { "$ref": "#/$defs/expression" } },
+        "operator": { "enum": ["and", "or", "=>", "==", "!=", "+", "-", "*", "/", "%", "<", "<=", ">", ">="] },
+        "left": { "$ref": "#/$defs/expression" },
+        "right": { "$ref": "#/$defs/expression" },
+        "condition": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/expression" }]
+        },
+        "then": { "$ref": "#/$defs/expression" },
+        "else": { "$ref": "#/$defs/expression" },
+        "pattern": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "binding"],
+          "properties": {
+            "kind": { "enum": ["none", "some"] },
+            "binding": { "type": ["string", "null"] }
+          }
+        },
+        "quantifier": { "enum": ["forall", "exists"] },
+        "binder": { "type": "object" },
+        "body": { "$ref": "#/$defs/expression" },
+        "binding": { "$ref": "#/$defs/name" },
+        "domain": { "$ref": "#/$defs/name" },
+        "relation": { "$ref": "#/$defs/expression" },
+        "source": { "$ref": "#/$defs/expression" },
+        "target": { "$ref": "#/$defs/expression" }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["num", "bool"] } } }, "then": { "required": ["value"] } },
+        { "if": { "properties": { "kind": { "const": "some" } } }, "then": { "required": ["operand"] } },
+        { "if": { "properties": { "kind": { "enum": ["set_lit", "seq_lit"] } } }, "then": { "required": ["items"] } },
+        { "if": { "properties": { "kind": { "const": "struct_lit" } } }, "then": { "required": ["name", "fields"] } },
+        { "if": { "properties": { "kind": { "const": "var" } } }, "then": { "required": ["name"] } },
+        { "if": { "properties": { "kind": { "const": "index" } } }, "then": { "required": ["collection", "index"] } },
+        { "if": { "properties": { "kind": { "const": "field" } } }, "then": { "required": ["value", "field"] } },
+        { "if": { "properties": { "kind": { "const": "method" } } }, "then": { "required": ["receiver", "method", "arguments"] } },
+        { "if": { "properties": { "kind": { "const": "binary" } } }, "then": { "required": ["operator", "left", "right"] } },
+        { "if": { "properties": { "kind": { "enum": ["neg", "not", "old", "abs", "rel_acyclic", "rel_functional", "rel_injective", "rel_domain", "rel_range"] } } }, "then": { "required": ["operand"] } },
+        { "if": { "properties": { "kind": { "const": "ite" } } }, "then": { "required": ["condition", "then", "else"] } },
+        { "if": { "properties": { "kind": { "const": "is" } } }, "then": { "required": ["operand", "pattern"] } },
+        { "if": { "properties": { "kind": { "enum": ["forall", "exists"] } } }, "then": { "required": ["quantifier", "binder", "body"] } },
+        { "if": { "properties": { "kind": { "const": "count" } } }, "then": { "required": ["binding", "domain", "condition"] } },
+        { "if": { "properties": { "kind": { "const": "sum" } } }, "then": { "required": ["binding", "domain", "value", "condition"] } },
+        { "if": { "properties": { "kind": { "enum": ["min", "max"] } } }, "then": { "required": ["arguments"] } },
+        { "if": { "properties": { "kind": { "const": "rel_reachable" } } }, "then": { "required": ["relation", "source", "target"] } }
+        ,{ "if": { "properties": { "kind": { "enum": ["unique", "exactly_one"] } } }, "then": { "required": ["binder"] } }
+      ]
+    },
+    "statement": {
+      "type": "object",
+      "required": ["kind", "type", "span"],
+      "properties": {
+        "kind": { "enum": ["assign", "if", "forall"] },
+        "type": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "statement" } } },
+        "span": { "$ref": "#/$defs/span" },
+        "target": { "type": "object" },
+        "value": { "$ref": "#/$defs/expression" },
+        "condition": { "$ref": "#/$defs/expression" },
+        "then": { "type": "array", "items": { "$ref": "#/$defs/statement" } },
+        "else": { "type": "array", "items": { "$ref": "#/$defs/statement" } },
+        "binder": { "type": "object" },
+        "statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "assign" } } }, "then": { "required": ["target", "value"] } },
+        { "if": { "properties": { "kind": { "const": "if" } } }, "then": { "required": ["condition", "then", "else"] } },
+        { "if": { "properties": { "kind": { "const": "forall" } } }, "then": { "required": ["binder", "statements"] } }
+      ]
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "finite_domain"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "type": { "$ref": "#/$defs/type" },
+        "finite_domain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lo", "hi"],
+          "properties": { "lo": { "type": "integer" }, "hi": { "type": "integer" } }
+        }
+      }
+    },
+    "nullableRequirement": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "text"],
+          "properties": {
+            "id": { "$ref": "#/$defs/name" },
+            "text": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dialect", "declaration", "lowered", "generated"],
+      "properties": {
+        "dialect": { "type": "string", "minLength": 1 },
+        "declaration": { "$ref": "#/$defs/name" },
+        "lowered": { "type": "boolean" },
+        "generated": { "type": "boolean" }
+      }
+    },
+    "property": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source_kind", "expression", "requirement", "origin", "span"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "source_kind": { "type": "string", "minLength": 1 },
+        "expression": { "$ref": "#/$defs/expression" },
+        "requirement": { "$ref": "#/$defs/nullableRequirement" },
+        "origin": { "$ref": "#/$defs/origin" },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    },
+    "leadsTo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source_kind", "binders", "before", "after", "within", "decreases", "requirement", "origin", "span"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "source_kind": { "type": "string", "minLength": 1 },
+        "binders": { "type": "array", "items": { "type": "object" } },
+        "before": { "$ref": "#/$defs/expression" },
+        "after": { "$ref": "#/$defs/expression" },
+        "within": { "type": ["integer", "null"] },
+        "decreases": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/expression" }] },
+        "requirement": { "$ref": "#/$defs/nullableRequirement" },
+        "origin": { "$ref": "#/$defs/origin" },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    }
+  }
+}

@@ -60,6 +60,11 @@ behavior.**
   `src/fslc/lsp/index.py` and mapped to a `docs/DESIGN-<feature>.md` in
   `docs/README.md`, or recorded in the test's allowlist with an explicit
   reason (see `docs/DESIGN-coupled-change-metatest.md`).
+- **Changing the normalized public Kernel contract**: update
+  `schemas/fslc/kernel/`, the Rust exporter and Monitor/verifier agreement tests,
+  checked-in conformance vectors, `docs/DESIGN-kernel-contract.md`,
+  `docs/LANGUAGE.md`, `skills/fsl/reference.md`, and `CHANGELOG.md` together.
+  Never silently drop an unsupported node; return an explicit semantic error.
 - **Adding a dialect or a new `examples/` corpus directory**: register the
   dialect's top-level construct (and a `min_files` floor for its example
   corpus) in `tests/dialect_registry.py`. `tests/test_dialect_conformance.py`

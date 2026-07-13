@@ -253,14 +253,17 @@ Phase 0 produces a concrete counterexample.
 
 ## 9. Migration policy
 
-The Python implementation remains the reference implementation and parity
-arbiter through Phase 3. Kernel semantic changes during the port require an
-equivalent change in both implementations and a passing cross-implementation
-gate. This minimizes the risk of two evolving definitions of FSL.
+Phases 0-3 are complete. The native Rust implementation is now authoritative;
+Python is a frozen compatibility/reference and optional LSP surface, as enforced
+by `.github/workflows/ci.yml`. New CLI and semantic work is not backported to
+Python. Cross-implementation fixtures remain useful historical evidence but no
+longer define the evolving compiler boundary.
 
-Moving Python to maintenance mode requires a separate decision after Phase 3 has
-passed and multiple releases have maintained parity. Phase 4 browser completion
-does not by itself retire Python.
+External tools must depend on the versioned normalized Kernel JSON described in
+[`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md), not either
+implementation's private AST. Rust Monitor/symbolic transition agreement and the
+language-neutral conformance vectors replace dual active implementation as the
+mechanical semantic gate for this boundary.
 
 The following conditions block migration rather than being accepted as temporary
 drift:
@@ -270,7 +273,8 @@ drift:
 - a non-replayable cross-implementation counterexample;
 - browser cancellation leaving subsequent requests in a corrupt solver state;
 - an unreviewed parity allowlist expansion; or
-- adding a new language feature to only one implementation.
+- changing public Kernel semantics without updating its schema, conformance
+  vectors, Monitor/verifier agreement gate, and compatibility documentation.
 
 ## 10. Risk controls
 

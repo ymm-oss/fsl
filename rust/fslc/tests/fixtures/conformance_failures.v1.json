@@ -1,0 +1,186 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/conformance.v1.schema.json",
+  "schema_version": "1.0.0",
+  "kernel_schema_version": "1.0.0",
+  "result": "conformance",
+  "spec": "ConformanceFailures",
+  "depth": 0,
+  "states": [
+    {
+      "id": "s0",
+      "depth": 0,
+      "state": {
+        "x": 0,
+        "queue": []
+      }
+    }
+  ],
+  "vectors": [
+    {
+      "state": "s0",
+      "action": {
+        "name": "at_out_of_range",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "partial_op",
+        "name": "_partial_at_out_of_range",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "bad_ensure",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "ensures",
+        "name": "bad_ensure",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": {
+          "x": 0,
+          "queue": []
+        }
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "break_invariant",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "invariant",
+        "name": "Safe",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": {
+          "x": 1,
+          "queue": []
+        }
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "divide_zero",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "partial_op",
+        "name": "_partial_divide_zero",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "index_out_of_range",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "partial_op",
+        "name": "_partial_index_out_of_range",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "partial",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "partial_op",
+        "name": "_partial_partial",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "rejected",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "requires_failed",
+        "name": "_requires_failed_rejected",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "remainder_zero",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "partial_op",
+        "name": "_partial_remainder_zero",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "type_bound",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "type_bound",
+        "name": "_bounds_queue",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": []
+        },
+        "attempted_state": {
+          "x": 0,
+          "queue": [
+            0,
+            0
+          ]
+        }
+      }
+    }
+  ],
+  "fsl": "1.0"
+}

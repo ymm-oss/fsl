@@ -152,6 +152,11 @@ support surface. New language/CLI features are not backported to it. In
 particular, use the native `fslc` binary for `undecided:` syntax and its
 ledger/HTML/analyze output; do not route new work through `python -m fslc`.
 
+External compilers and generators must use `fslc kernel <spec>` rather than the
+Python AST or source re-parsing. Validate independent implementations with
+`fslc conformance <spec> --depth N`; versioning and rollback semantics are in
+`docs/DESIGN-kernel-contract.md`.
+
 Output is always a single JSON document on stdout. exit: 0=success
 (verified/proved/generated/analyzed), 1=property not satisfied
 (violated/reachable_failed/unknown_cti/nonconformant), 2=spec error

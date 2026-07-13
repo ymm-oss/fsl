@@ -22,6 +22,7 @@ mod db;
 mod dialect;
 mod domain;
 mod model;
+mod public_kernel;
 mod refinement;
 mod trace;
 
@@ -37,6 +38,9 @@ pub use domain::domain_kernel_source;
 pub use model::{
     ActionDef, ActionGuard, KernelModel, LeadsToDef, ModelError, ParamDef, PropertyDef, TypeDef,
     TypeRef, Value as FslValue, build_model,
+};
+pub use public_kernel::{
+    KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, PublicKernelError, public_kernel_contract,
 };
 pub use refinement::{
     ActionMap, ActionMapTarget, ImplementsContract, ProgressMap, Refinement, RefinementError,
