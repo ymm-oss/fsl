@@ -593,6 +593,8 @@ fslc kernel    <file.fsl>                        # normalized typed Kernel JSON 
 fslc conformance <file.fsl> [--depth K]          # language-neutral Monitor vectors (default K=4)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
+               [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
                [--lemma "<expr>"]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
@@ -747,8 +749,8 @@ Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
-`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
-sweep_failed / observed_mismatch,
+`1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
+refinement_failed / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s.
@@ -758,10 +760,11 @@ result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 | result | Meaning | Next move |
 |---|---|---|
 | `verified` | No violation up to depth K (+ all reachable satisfied); `completeness:"bounded"` | To raise confidence, use `--engine induction` |
-| `proved` | **The invariant holds in all executions** (unbounded depth); `completeness:"unbounded"` | Done |
+| `proved` | **The invariant holds in all executions** (unbounded depth); `completeness:"unbounded"`. From `--engine induction`, or from `--engine explicit` when exploration closes (`closure:true`) | Done |
 | `violated` | A counterexample exists. Comes with `violation_kind` and the shortest trace | Read the trace and fix the spec |
 | `reachable_failed` | reachable not reached within depth K | Read each `unreached[].classification`: raise `--depth` for `insufficient_depth`, or fix the blocking constraint for `over_constrained` |
-| `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8) |
+| `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
+| `unknown_budget` | `--engine explicit` exceeded `--explicit-budget` before closing | Raise the budget, or use `--engine bmc`/`induction` for this spec |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.

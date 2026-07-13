@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitInitStateCollection {
+  type Slot = 0..2
+
+  state {
+    s: Set<Slot>,
+    m: Map<Slot, Bool>
+  }
+  init {
+    s = Set { 0, 1 }
+    forall i in s { m[i] = true }
+  }
+
+  action stay() { s = s }
+}

@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitPartialMapKey {
+  enum Key { A, B }
+
+  state { values: Map<Key, Bool> }
+  init { values[A] = false }
+
+  action stay() {
+    values[A] = values[A]
+  }
+
+  invariant NotB { not values[B] }
+}

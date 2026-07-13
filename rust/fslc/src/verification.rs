@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 pub(super) enum VerificationEngine {
     Bmc,
     Induction,
+    Explicit,
 }
 
 impl VerificationEngine {
@@ -14,7 +15,8 @@ impl VerificationEngine {
         match value {
             "bmc" => Ok(Self::Bmc),
             "induction" => Ok(Self::Induction),
-            _ => Err("--engine must be bmc or induction".to_owned()),
+            "explicit" => Ok(Self::Explicit),
+            _ => Err("--engine must be bmc, induction, or explicit".to_owned()),
         }
     }
 }
@@ -60,6 +62,14 @@ pub(super) struct InductionRequest<'a> {
     pub(super) deadlock: DeadlockMode,
     pub(super) k: usize,
     pub(super) auxiliary: &'a [(String, KernelExpr)],
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ExplicitRequest<'a> {
+    pub(super) selection: ModelSelection<'a>,
+    pub(super) depth: usize,
+    pub(super) deadlock: DeadlockMode,
+    pub(super) budget: usize,
 }
 
 type CommandResult = (Value, i32);
@@ -394,6 +404,300 @@ fn ranking_measure_text(expr: &KernelExpr) -> String {
     } else {
         text
     }
+}
+
+pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
+    let started = Instant::now();
+    let model = match load_selected_model(request.selection) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    if model.actions.is_empty() {
+        return (semantic_error_output("spec has no actions"), 2);
+    }
+    if model
+        .actions
+        .iter()
+        .any(|action| duplicate_statement_write(&action.statements).is_some())
+    {
+        return (
+            error_output(
+                "semantics",
+                "an action may not assign the same state location more than once",
+            ),
+            2,
+        );
+    }
+    let checked_bounds = selected_implicit_bounds(
+        &model,
+        request.selection.property,
+        request.selection.excluded,
+    );
+    let result = match fsl_runtime::verify_explicit_selected(
+        model.clone(),
+        request.depth,
+        request.budget,
+        checked_bounds.as_ref(),
+    ) {
+        Ok(result) => result,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    render_explicit_result(
+        &model,
+        &result,
+        checked_bounds.as_ref(),
+        request.deadlock,
+        started,
+    )
+}
+
+fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult) -> fsl_verifier::BmcResult {
+    fsl_verifier::BmcResult {
+        spec: result.spec.clone(),
+        depth: result.depth,
+        violation: result
+            .violation
+            .as_ref()
+            .map(|violation| fsl_verifier::BmcViolation {
+                kind: violation.violation.kind.clone(),
+                name: violation.violation.name.clone(),
+                step: violation.violation.step,
+                last_action: violation
+                    .trace
+                    .last()
+                    .and_then(|entry| entry.action.as_ref())
+                    .map(|action| action.name.clone()),
+                trace: violation.trace.clone(),
+                leads_to: None,
+            }),
+        leadsto_violation: None,
+        reachables: result
+            .reachables
+            .iter()
+            .map(|(name, witness)| {
+                (
+                    name.clone(),
+                    witness
+                        .as_ref()
+                        .map(|witness| fsl_verifier::ReachableWitness {
+                            step: witness.step,
+                            trace: witness.trace.clone(),
+                        }),
+                )
+            })
+            .collect(),
+        deadlock_step: result.deadlock_step,
+        deadlock_trace: result.deadlock_trace.clone(),
+        action_coverage: result.action_coverage.clone(),
+        frontier_progress: !result.closure && !result.budget_exceeded,
+    }
+}
+
+fn render_explicit_result(
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    started: Instant,
+) -> CommandResult {
+    let compatible = explicit_as_bmc(result);
+    if let Some(violation) = &compatible.violation {
+        let (mut output, status) = render_bmc_violation(model, violation, started);
+        add_explicit_metadata(&mut output, result);
+        return (output, status);
+    }
+
+    if deadlock == DeadlockMode::Error
+        && let Some(step) = result.deadlock_step
+    {
+        let (mut output, status) = render_deadlock_failure(model, &compatible, step, started);
+        add_explicit_metadata(&mut output, result);
+        return (output, status);
+    }
+
+    if result.budget_exceeded {
+        return render_explicit_budget(
+            model,
+            result,
+            &compatible,
+            checked_bounds,
+            deadlock,
+            started,
+        );
+    }
+
+    let unreached = compatible
+        .reachables
+        .iter()
+        .filter(|(_, witness)| witness.is_none())
+        .filter_map(|(name, _)| {
+            model
+                .reachables
+                .iter()
+                .find(|property| property.name == *name)
+        })
+        .collect::<Vec<_>>();
+    if !unreached.is_empty() {
+        let (mut output, status) = render_reachable_failure(
+            model,
+            &compatible,
+            &unreached,
+            result.depth_reached,
+            checked_bounds,
+            started,
+        );
+        if result.closure {
+            mark_reachables_definitively_unreachable(&mut output);
+        }
+        add_explicit_metadata(&mut output, result);
+        return (output, status);
+    }
+
+    render_explicit_success(
+        model,
+        result,
+        &compatible,
+        checked_bounds,
+        deadlock,
+        started,
+    )
+}
+
+fn render_explicit_budget(
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    compatible: &fsl_verifier::BmcResult,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    started: Instant,
+) -> CommandResult {
+    let mut output = envelope();
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("result".to_owned(), json!("unknown_budget"));
+    add_common_verification(
+        &mut output,
+        model,
+        compatible,
+        result.depth_reached,
+        checked_bounds,
+    );
+    output.insert("depth".to_owned(), json!(result.depth));
+    output.insert("completeness".to_owned(), json!("unknown"));
+    if deadlock == DeadlockMode::Ignore {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    output.insert(
+        "hint".to_owned(),
+        json!(format!(
+            "explicit-state exploration reached its {}-state budget; increase --explicit-budget or use --engine bmc",
+            result.states_explored
+        )),
+    );
+    output.insert(
+        "cost".to_owned(),
+        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+    );
+    let mut value = Value::Object(output);
+    add_explicit_metadata(&mut value, result);
+    (value, 1)
+}
+
+fn render_explicit_success(
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    compatible: &fsl_verifier::BmcResult,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    started: Instant,
+) -> CommandResult {
+    if !result.closure {
+        let (mut output, status) = render_bmc_success(
+            model,
+            compatible,
+            result.depth,
+            checked_bounds,
+            deadlock,
+            started,
+        );
+        add_explicit_metadata(&mut output, result);
+        return (output, status);
+    }
+
+    let mut output = envelope();
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("result".to_owned(), json!("proved"));
+    add_common_verification(
+        &mut output,
+        model,
+        compatible,
+        result.depth_reached,
+        checked_bounds,
+    );
+    output.insert("depth".to_owned(), json!(result.depth));
+    output.insert("engine".to_owned(), json!("explicit"));
+    output.insert("completeness".to_owned(), json!("unbounded"));
+    if deadlock == DeadlockMode::Ignore {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    output.insert(
+        "warnings".to_owned(),
+        Value::Array(verification_warnings(
+            model,
+            compatible,
+            result.depth_reached,
+            deadlock,
+        )),
+    );
+    output.insert(
+        "note".to_owned(),
+        json!(
+            "explicit-state exploration reached closure; invariants hold in every reachable state"
+        ),
+    );
+    output.insert(
+        "cost".to_owned(),
+        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+    );
+    let mut value = Value::Object(output);
+    add_explicit_metadata(&mut value, result);
+    (value, 0)
+}
+
+fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResult) {
+    let Some(output) = output.as_object_mut() else {
+        return;
+    };
+    output.insert("engine".to_owned(), json!("explicit"));
+    output.insert("closure".to_owned(), json!(result.closure));
+    output.insert("states_explored".to_owned(), json!(result.states_explored));
+    output.insert(
+        "max_frontier_width".to_owned(),
+        json!(result.max_frontier_width),
+    );
+    output.insert("depth_reached".to_owned(), json!(result.depth_reached));
+}
+
+fn mark_reachables_definitively_unreachable(output: &mut Value) {
+    let Some(output) = output.as_object_mut() else {
+        return;
+    };
+    if let Some(unreached) = output.get_mut("unreached").and_then(Value::as_array_mut) {
+        for item in unreached {
+            if let Value::Object(item) = item {
+                item.insert("classification".to_owned(), json!("unreachable"));
+                item.insert(
+                    "hint".to_owned(),
+                    json!(
+                        "not witnessed before explicit state-space closure; the goal is unreachable"
+                    ),
+                );
+            }
+        }
+    }
+    output.insert(
+        "hint".to_owned(),
+        json!("explicit state-space closure proves that the requested reachable goal cannot be reached"),
+    );
 }
 
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
@@ -1262,7 +1566,11 @@ fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String,
     let mut digest = Sha256::new();
     digest.update(b"fslc-rust-verify-cache-v1\0");
     digest.update(env!("CARGO_PKG_VERSION").as_bytes());
-    digest.update(b"\0backend=native-z3\0solver=4.16.0\0");
+    if options.engine == "explicit" {
+        digest.update(b"\0backend=native-explicit\0");
+    } else {
+        digest.update(b"\0backend=native-z3\0solver=4.16.0\0");
+    }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     digest.update(b"executable\0");
     digest.update(std::fs::read(executable).map_err(|error| error.to_string())?);
@@ -1287,6 +1595,7 @@ fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String,
         "path": canonical,
         "deadlock": options.deadlock,
         "engine": options.engine,
+        "explicit_budget": options.explicit_budget,
         "k": options.k_ind,
         "vacuity": options.vacuity,
         "property": options.property,
@@ -1348,7 +1657,14 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
 fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if !matches!(
         output.get("result").and_then(Value::as_str),
-        Some("verified" | "proved" | "violated" | "reachable_failed" | "unknown_cti")
+        Some(
+            "verified"
+                | "proved"
+                | "violated"
+                | "reachable_failed"
+                | "unknown_cti"
+                | "unknown_budget"
+        )
     ) {
         return;
     }
@@ -1362,11 +1678,12 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         return;
     }
     let temporary = parent.join(format!(".{}.{}.tmp", key, std::process::id()));
+    let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
     let entry = json!({
         "schema": "fslc-rust-cache.v1",
         "key": key,
-        "backend": "native-z3",
-        "solver_version": "4.16.0",
+        "backend": if explicit { "native-explicit" } else { "native-z3" },
+        "solver_version": if explicit { Value::Null } else { json!("4.16.0") },
         "output": output,
     });
     if serde_json::to_vec(&entry)
@@ -1411,7 +1728,7 @@ pub(super) fn run_verify_cli(path: &Path, options: &CliVerifyOptions) -> Command
         return (
             error_output(
                 "semantics",
-                "--from-state is available only with the BMC engine; induction proves the spec init contract and cannot start from one snapshot",
+                "--from-state is available only with the BMC engine; induction and explicit verification start from the spec init contract",
             ),
             2,
         );
@@ -1547,7 +1864,7 @@ fn cached_verification(
     }
     let output = verify_cache_lookup(key, xdepth, options.depth)?;
     let status = match output.get("result").and_then(Value::as_str) {
-        Some("violated" | "reachable_failed" | "unknown_cti") => 1,
+        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
         _ => 0,
     };
     Some((output, status))
@@ -1587,6 +1904,12 @@ fn execute_cli_verification(
                 k: options.k_ind,
                 auxiliary: &[],
             }),
+            Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
+                selection,
+                depth: options.depth,
+                deadlock,
+                budget: options.explicit_budget,
+            }),
             Err(error) => (error_output("usage", &error), 2),
         };
     }
@@ -1595,6 +1918,7 @@ fn execute_cli_verification(
         options.depth,
         &options.deadlock,
         &options.engine,
+        options.explicit_budget,
         options.k_ind,
     )
 }
@@ -1749,5 +2073,23 @@ mod tests {
         assert_eq!(status, 1);
         assert_eq!(output["result"], "unknown_cti");
         assert_eq!(output["invariant"], "Sync");
+    }
+
+    #[test]
+    fn explicit_cache_keys_include_the_engine_and_state_budget() {
+        let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
+        let bmc = CliVerifyOptions::default();
+        let mut explicit = bmc.clone();
+        explicit.engine = "explicit".to_owned();
+        let mut smaller_budget = explicit.clone();
+        smaller_budget.explicit_budget -= 1;
+
+        let bmc_keys = verify_cache_keys(&path, &bmc).expect("BMC cache keys");
+        let explicit_keys = verify_cache_keys(&path, &explicit).expect("explicit cache keys");
+        let smaller_keys =
+            verify_cache_keys(&path, &smaller_budget).expect("budget-specific cache keys");
+
+        assert_ne!(bmc_keys, explicit_keys);
+        assert_ne!(explicit_keys, smaller_keys);
     }
 }

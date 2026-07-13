@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitNondeterministicInit {
+  state { initialized: Bool, omitted: Bool }
+  init { initialized = true }
+
+  action stay() {
+    initialized = initialized
+    omitted = omitted
+  }
+}

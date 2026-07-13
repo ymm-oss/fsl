@@ -669,8 +669,12 @@ variable.</p></div></details>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+fslc kernel    &lt;file.fsl&gt;                        # normalized typed Kernel JSON for external compilers
+fslc conformance &lt;file.fsl&gt; [--depth K]          # language-neutral Monitor vectors (default K=4)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
+               [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
                [--lemma &quot;&lt;expr&gt;&quot;]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
@@ -699,7 +703,10 @@ fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
-fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [-o record.json]
+fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt;       # approved | drifted
+fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K]
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze &lt;file.fsl&gt;                                  # aggregate/effect ownership summary
@@ -713,6 +720,18 @@ fslc db import &lt;file.sql&gt; [--name Name] [-o out.fsl]            # minimal 
 fslc ai check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runtime event replay evidence
 </code></pre>
+<p>The native Rust-only <code>kernel</code> command runs after dialect lowering and semantic
+checking. Its versioned JSON contains structural types for every expression,
+source spans, requirement/lowering origin, simultaneous-update semantics, and
+explicit partial-operation failure conditions; an external compiler never needs
+the Python AST or an FSL expression parser. <code>conformance</code> emits bounded concrete
+success, disabled, and rollback-failure vectors under the companion schema.
+Nested options use tagged <code>none</code>/<code>some</code> objects so no reachable states collapse.
+Public Kernel v1 explicitly rejects <code>compose</code> export because current lowering
+does not retain truthful per-component filenames; direct and other lowered
+dialects remain supported.
+Compatibility rules, schemas, fixtures, and Rust API entry points are specified
+in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>.</p>
 <p><code>verify --from-state state.json</code> replaces the declared <code>init</code> for one bounded
 run and asks what can happen from that complete current state. The JSON shape is
 exactly <code>Monitor.state</code> / replay logical state: all variables and Map keys are
@@ -784,12 +803,23 @@ and returns <code>semantic_diff_batch</code>; supplying one spec preserves
 <code>semantic_diff</code>. Both forms include <code>vcs.materialization:
 "git_archive_full_tree"</code>. The ordinary two-path form never invokes Git and
 works outside a repository.</p>
+<p><code>approval create</code> binds a reviewed <code>ledger</code>, <code>html</code>, or <code>scenarios</code> artifact to
+the fully lowered, location-insensitive kernel digest and the current clean Git
+commit. The versioned JSON sidecar also records the normalized artifact digest,
+generator/version/options, approved requirement IDs, approver, and UTC time.
+Creation regenerates the artifact and rejects a stale review file. <code>approval
+check</code> returns <code>approved</code> only while the spec, rendering, and renderer bindings
+all match; otherwise it returns <code>drifted</code> with <code>spec_changed</code>,
+<code>rendering_changed</code>, and/or <code>renderer_changed</code>. <code>ledger --approval</code> adds the
+same status per requirement and includes the full baseline digest. <code>approval
+diff</code> materializes the approved commit and invokes the ordinary bounded semantic
+diff against the current working file. See <code>docs/DESIGN-approval.md</code>.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
-<code>1</code> = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed /
-sweep_failed / observed_mismatch,
+<code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
+refinement_failed / sweep_failed / observed_mismatch,
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s.</p>
@@ -810,7 +840,7 @@ result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc 
 </tr>
 <tr>
 <td><code>proved</code></td>
-<td><strong>The invariant holds in all executions</strong> (unbounded depth); <code>completeness:"unbounded"</code></td>
+<td><strong>The invariant holds in all executions</strong> (unbounded depth); <code>completeness:"unbounded"</code>. From <code>--engine induction</code>, or from <code>--engine explicit</code> when exploration closes (<code>closure:true</code>)</td>
 <td>Done</td>
 </tr>
 <tr>
@@ -826,7 +856,12 @@ result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc 
 <tr>
 <td><code>unknown_cti</code></td>
 <td>The invariant is not violated but is not inductive</td>
-<td><strong>Read the CTI and add an auxiliary invariant</strong> (§8)</td>
+<td><strong>Read the CTI and add an auxiliary invariant</strong> (§8), or try <code>--engine explicit</code> (closure proves without lemmas)</td>
+</tr>
+<tr>
+<td><code>unknown_budget</code></td>
+<td><code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing</td>
+<td>Raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec</td>
 </tr>
 <tr>
 <td><code>error</code></td>

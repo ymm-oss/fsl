@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitInitRangeUnassigned {
+  type Slot = 0..2
+
+  state {
+    n: Slot,
+    m: Map<Slot, Bool>
+  }
+  init {
+    forall i in 0..n { m[i] = true }
+    n = 0
+  }
+
+  action stay() { n = n }
+}

@@ -684,7 +684,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 fslc check <f>                                  # syntax / names / types only
 fslc kernel <f>                                 # normalized typed Kernel JSON for external compilers
 fslc conformance <f> [--depth K=4]              # language-neutral Monitor success/failure vectors
-fslc verify <f> [--depth K=8] [--engine bmc|induction] [--k N=1]
+fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit] [--k N=1]
+               [--explicit-budget N=1000000]        # explicit only; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property in isolation
                                                     #   (invariant / trans / leadsTo / reachable)
@@ -754,8 +755,11 @@ rollback conditions. Use `fslc conformance` plus
 The compatibility policy and field contract are in
 `docs/DESIGN-kernel-contract.md`.
 
-For an induction `unknown_cti`, pass candidate auxiliary invariants with
-repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
+For an induction `unknown_cti`, first try `--engine explicit` — if exploration
+closes it returns `proved` with **no lemmas at all** (the invariant being
+non-inductive is irrelevant to exhaustive search). Only when explicit is
+rejected or returns `unknown_budget`, fall back to lemma hunting: pass
+candidate auxiliary invariants with repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
 init/actions + implicit bounds, without original user invariants), rejects
 false/non-inductive/invalid candidates with their own evidence, and makes only
 `proved` candidates available to the target proof. A candidate is used only
@@ -764,6 +768,22 @@ CTI, and violated steps. On final `proved`, copy the declarations from
 `auxiliary_invariant_recommendation` into the spec and review that source edit.
 There is no flag for injecting an unverified assumption, and `--lemma` is an
 error with the BMC engine.
+
+`--engine explicit` enumerates the concrete state space (Z3-free BFS). It is
+the fastest route on small-state-space specs and, when exploration **closes**
+(no new states within `--depth`), returns `result:"proved"` with
+`closure:true` — a complete, unbounded proof that needs no lemmas, including
+for true-but-not-inductive invariants where induction returns `unknown_cti`.
+Depth exhaustion without closure returns bounded `verified` (same strength as
+BMC); exceeding `--explicit-budget` returns `unknown_budget` (exit 1) — never
+a silent `verified`. Violations return the same shortest-counterexample trace
+schema as BMC. Results carry `states_explored`, `max_frontier_width`, and
+`depth_reached`. Fail-closed rejections (kind `semantics`, exit 2): `leadsTo`
+properties, nondeterministic `init` (every state variable must be definitely
+assigned), and `init forall` binder domains that reference state variables
+(range bounds and collections must be compile-time constants) — use
+`--engine bmc` for those specs. `--from-state`, `--lemma`, and `--k` do not
+apply to this engine.
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
@@ -977,7 +997,9 @@ first failed layer and later layers are marked `skipped`.
   null|value / Seq as an array / composition as `alias.var` keys). Internal names
   (`__`) do not appear.
 - `unknown_cti`: `cti.states` (k+1 states) + `violated_at`. The starting state is an
-  unreachable phantom — add an auxiliary invariant to exclude it. For invariant
+  unreachable phantom — before hunting for an auxiliary invariant, try
+  `--engine explicit` (closure proves without lemmas); if that is rejected or
+  exceeds budget, add an auxiliary invariant to exclude the phantom. For invariant
   CTIs (not `leadsTo_rank`), a monotone `Int`/`Map<K, Int>` counter whose CTI
   start lies on the unreachable side of its concrete init value gets a concrete
   candidate in `suggested_invariants: [<expr>, ...]` (also appended to `hint`) —
@@ -991,6 +1013,9 @@ first failed layer and later layers are marked `skipped`.
   `cost`, and `k_used` (the k used per invariant); reachables/coverage come from
   the base case. Ranked leadsTo entries add
   `{proved: true, completeness: "unbounded", proof: "ranking", decreases: ...}`.
+  From `--engine explicit`, `proved` instead carries `closure: true` plus
+  exploration stats (`states_explored`, `max_frontier_width`, `depth_reached`)
+  and no `k_used`; reachables/coverage are definitive (full reachable set).
 - `reachable_failed`: each `unreached[]` has `classification`:
   `insufficient_depth` (target satisfiable as a state predicate, no witness by K)
   or `over_constrained` (target unsat under type bounds/invariants, with

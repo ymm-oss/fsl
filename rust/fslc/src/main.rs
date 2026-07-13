@@ -16,11 +16,13 @@ mod approval;
 mod verification;
 
 use verification::{
-    BmcRequest, DeadlockMode, InductionRequest, ModelSelection, VerificationEngine,
-    run_bmc_filtered, run_induction_filtered, run_verify_cli,
+    BmcRequest, DeadlockMode, ExplicitRequest, InductionRequest, ModelSelection,
+    VerificationEngine, run_bmc_filtered, run_explicit_filtered, run_induction_filtered,
+    run_verify_cli,
 };
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
+const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ScopeBounds {
@@ -33,6 +35,7 @@ struct CliVerifyOptions {
     depth: usize,
     deadlock: String,
     engine: String,
+    explicit_budget: usize,
     k_ind: usize,
     vacuity: String,
     property: Option<String>,
@@ -51,6 +54,7 @@ impl Default for CliVerifyOptions {
             depth: 8,
             deadlock: "warn".to_owned(),
             engine: "bmc".to_owned(),
+            explicit_budget: DEFAULT_EXPLICIT_BUDGET,
             k_ind: 1,
             vacuity: "warn".to_owned(),
             property: None,
@@ -107,8 +111,16 @@ fn parse_verify_options(
             }
             "--engine" => {
                 options.engine = required_option_value(args, "--engine")?;
-                if !matches!(options.engine.as_str(), "bmc" | "induction") {
-                    return Err("--engine must be bmc or induction".to_owned());
+                if !matches!(options.engine.as_str(), "bmc" | "induction" | "explicit") {
+                    return Err("--engine must be bmc, induction, or explicit".to_owned());
+                }
+            }
+            "--explicit-budget" => {
+                options.explicit_budget = required_option_value(args, "--explicit-budget")?
+                    .parse()
+                    .map_err(|_| "--explicit-budget must be a positive integer".to_owned())?;
+                if options.explicit_budget == 0 {
+                    return Err("--explicit-budget must be a positive integer".to_owned());
                 }
             }
             "--k" => {
@@ -182,6 +194,9 @@ fn parse_specialized_verify_options(
                 engine = args
                     .next()
                     .ok_or_else(|| "--engine requires a value".to_owned())?;
+                if !matches!(engine.as_str(), "bmc" | "induction") {
+                    return Err("--engine must be bmc or induction".to_owned());
+                }
             }
             _ => return Err(format!("unknown specialized check option '{option}'")),
         }
@@ -475,6 +490,9 @@ fn command() -> Result<(Value, i32), String> {
                                 engine = args
                                     .next()
                                     .ok_or_else(|| "--engine requires a value".to_owned())?;
+                                if !matches!(engine.as_str(), "bmc" | "induction") {
+                                    return Err("--engine must be bmc or induction".to_owned());
+                                }
                             }
                             _ => return Err(format!("unknown db check option '{option}'")),
                         }
@@ -1361,6 +1379,7 @@ fn command() -> Result<(Value, i32), String> {
                 run_verify_cli(&path, &options)
             } else {
                 if options.engine != "bmc"
+                    || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
                     || options.k_ind != 1
                     || options.vacuity != "warn"
                     || options.property.is_some()
@@ -1516,6 +1535,7 @@ fn run_sweep(
                     depth,
                     deadlock: deadlock_mode.to_owned(),
                     engine: engine.to_owned(),
+                    explicit_budget: DEFAULT_EXPLICIT_BUDGET,
                     k_ind,
                     vacuity: vacuity_mode.to_owned(),
                     property: property.map(str::to_owned),
@@ -1784,6 +1804,7 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
                                 .get("deadlock")
                                 .map_or("warn", String::as_str),
                             "bmc",
+                            DEFAULT_EXPLICIT_BUDGET,
                             1,
                         );
                         (detail, status, "verify", Some(depth))
@@ -2688,7 +2709,14 @@ fn run_scenarios_mode(
         || result.leadsto_violation.is_some()
         || (!allow_unreached && result.reachables.values().any(Option::is_none))
     {
-        return run_verify(path, depth, deadlock_mode, "bmc", 1);
+        return run_verify(
+            path,
+            depth,
+            deadlock_mode,
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
     }
     if let Err(error) = replay_all(&model, &result, None) {
         return (error_output("internal", &error), 2);
@@ -3464,7 +3492,8 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
         1
     } else {
-        let (kernel, kernel_status) = run_verify(path, depth, deadlock, engine, 1);
+        let (kernel, kernel_status) =
+            run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
         if kernel_status == 2 {
             return (kernel, kernel_status);
         }
@@ -3641,7 +3670,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
         }
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let (kernel, status) = run_verify(path, depth, deadlock, engine, 1);
+    let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
     if status == 2 {
         return (kernel, status);
     }
@@ -4129,7 +4158,7 @@ fn run_domain_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> 
         Ok(domain) => domain,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let (kernel, status) = run_verify(path, depth, deadlock, engine, 1);
+    let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
     if status == 2 {
         return (kernel, status);
     }
@@ -5931,7 +5960,7 @@ fn run_mutate_legacy(
     max_mutants: usize,
     by_requirement: bool,
 ) -> (Value, i32) {
-    let (baseline, status) = run_verify(path, depth, "warn", "bmc", 1);
+    let (baseline, status) = run_verify(path, depth, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1);
     if status == 2
         || !matches!(
             baseline.get("result").and_then(Value::as_str),
@@ -6712,7 +6741,7 @@ fn run_mutate(
     by_requirement: bool,
     external_mutants: Option<&Path>,
 ) -> (Value, i32) {
-    let (baseline, status) = run_verify(path, depth, "warn", "bmc", 1);
+    let (baseline, status) = run_verify(path, depth, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1);
     if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
         return (baseline, 0);
     }
@@ -7578,7 +7607,14 @@ fn run_html_report(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let (verification, _) = run_verify(path, depth, deadlock_mode, engine, 1);
+    let (verification, _) = run_verify(
+        path,
+        depth,
+        deadlock_mode,
+        engine,
+        DEFAULT_EXPLICIT_BUDGET,
+        1,
+    );
     let (mut explained, explain_status) = run_explain(path, depth, false);
     if explain_status != 0 {
         return (explained, explain_status);
@@ -7866,7 +7902,14 @@ fn run_ledger_report(
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let (verification, _) = run_verify(path, depth, deadlock_mode, engine, 1);
+    let (verification, _) = run_verify(
+        path,
+        depth,
+        deadlock_mode,
+        engine,
+        DEFAULT_EXPLICIT_BUDGET,
+        1,
+    );
     let replay = impl_log.map(|trace| run_replay(path, trace).0);
     let evidence = match evidence_paths
         .iter()
@@ -12035,6 +12078,7 @@ fn run_verify(
     depth: usize,
     deadlock_mode: &str,
     engine: &str,
+    explicit_budget: usize,
     k_ind: usize,
 ) -> (Value, i32) {
     if let Ok(source) = std::fs::read_to_string(path)
@@ -12076,6 +12120,12 @@ fn run_verify(
             deadlock,
             k: k_ind,
             auxiliary: &[],
+        }),
+        Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
+            selection,
+            depth,
+            deadlock,
+            budget: explicit_budget,
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };

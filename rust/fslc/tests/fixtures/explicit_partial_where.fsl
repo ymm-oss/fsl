@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitPartialWhere {
+  type Slot = 0..2
+
+  state { m: Map<Slot, Bool> }
+  init { forall k: Slot where k < 2 { m[k] = true } }
+
+  action stay() {
+    m[0] = m[0]
+  }
+}

@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// A true-but-not-inductive invariant: x steps by 2 from 0, so only even
+// values are reachable and NeverFive holds. k-induction reports unknown_cti
+// (an unreachable odd state like x = 3 satisfies the premise but steps to 5);
+// explicit closure over {0, 2, 4, 6, 8} proves it without lemmas.
+spec ExplicitNonInductive {
+  type Counter = 0..8
+
+  state { x: Counter }
+  init { x = 0 }
+
+  action step() {
+    requires x <= 6
+    x = x + 2
+  }
+
+  invariant NeverFive { x != 5 }
+}

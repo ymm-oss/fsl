@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitDeadlock {
+  state { done: Bool }
+  init { done = false }
+
+  action finish() {
+    requires not done
+    done = true
+  }
+}

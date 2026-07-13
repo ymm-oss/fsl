@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitInitConstRange {
+  const CAP = 2
+  type Slot = 0..2
+
+  state { m: Map<Slot, Bool> }
+  init { forall i in 0..CAP { m[i] = true } }
+
+  action stay() { m[0] = m[0] }
+}

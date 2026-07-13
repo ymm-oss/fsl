@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The fsl-db "per-column" pattern: a map over an enum key type initialized
+// by one statement per key rather than a single forall. Each statement only
+// covers one concrete key, but together they cover the whole key domain and
+// must be recognized as fully initialized.
+spec ExplicitFullEnumKeys {
+  enum Key { A, B }
+
+  state { values: Map<Key, Bool> }
+  init {
+    values[A] = false
+    values[B] = false
+  }
+
+  action flipA() {
+    values[A] = not values[A]
+  }
+
+  invariant AlwaysBoolean { values[A] or not values[A] }
+}
