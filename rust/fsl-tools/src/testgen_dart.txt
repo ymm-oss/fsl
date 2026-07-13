@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (package:test).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired every test is
+// skipped (a top-level probe sets `skip:` on each test), mirroring the other
+// targets' skip-when-unwired behaviour.
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+import 'package:test/test.dart';
+
+class StepResult {
+  final bool ok;
+  final String? kind;
+  StepResult(this.ok, [this.kind]);
+}
+
+/// Connect your implementation to the spec actions/state.
+///  - reset(): put the implementation in the same initial state as spec `init`
+///  - step(action, params): drive one spec action; return a StepResult for
+///    forbidden-rejection scenarios (null is fine for ordinary steps)
+///  - observe(): project implementation state onto the spec's logical-state shape
+///    (enum = name string, Option = null|value, Seq = List, Map = Map with string
+///     keys, struct = Map)
+abstract class Adapter {
+  void reset();
+  StepResult? step(String action, Map<String, dynamic> params);
+  Map<String, dynamic> observe();
+}
+
+// Wire your implementation here. Return your adapter instead of throwing.
+Adapter makeAdapter() =>
+    throw UnimplementedError('wire your implementation: implement makeAdapter()');
+
+bool _adapterWired() {
+  try {
+    final a = makeAdapter();
+    a.reset();
+    a.observe();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct)
+// shapes. `equals` (from package:test's matcher) is deep on List/Map, so leaves
+// and sequences are compared structurally with the generated file depending only
+// on package:test.
+void assertPartial(Map<String, dynamic> observed, Map<String, dynamic> expected) {
+  expected.forEach((key, value) {
+    expect(observed.containsKey(key), isTrue, reason: 'missing state key $key');
+    final seen = observed[key];
+    if (value is Map && seen is Map) {
+      assertPartial(
+        Map<String, dynamic>.from(seen),
+        Map<String, dynamic>.from(value),
+      );
+    } else {
+      expect(seen, equals(value), reason: 'state $key');
+    }
+  });
+}
+
+void assertRejected(StepResult? result, String? expectedKind) {
+  expect(result, isNotNull, reason: 'forbidden step must return a StepResult');
+  expect(result!.ok, isFalse);
+  if (expectedKind != null) {
+    expect(result.kind, equals(expectedKind));
+  }
+}

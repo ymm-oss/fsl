@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FSL browser playground</title>
+  <script src="./coi-serviceworker.js"></script>
+  <style>
+    body { max-width: 72rem; margin: 2rem auto; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; }
+    textarea, pre { box-sizing: border-box; width: 100%; min-height: 22rem; padding: 1rem; font: 14px/1.45 ui-monospace, monospace; }
+    pre { background: #111827; color: #e5e7eb; overflow: auto; }
+    button { margin: .75rem .5rem .75rem 0; padding: .55rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>FSL browser playground</h1>
+  <p>Verification runs locally in a disposable Web Worker. Cancel terminates the Worker and its Z3 instance.</p>
+  <textarea id="fsl-source" spellcheck="false">spec BrowserCounter {
+  type K = 0..1
+  state { x: K }
+  init { x = 0 }
+  action increment() { requires x == 0 x = 1 }
+  invariant Bounded { x &gt;= 0 and x &lt;= 1 }
+}</textarea>
+  <div><button id="fsl-verify">Verify</button><button id="fsl-cancel" disabled>Cancel</button><span id="fsl-progress">idle</span></div>
+  <pre id="fsl-output" aria-live="polite"></pre>
+  <script type="module" src="./playground.js"></script>
+</body>
+</html>

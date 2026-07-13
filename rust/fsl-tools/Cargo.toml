@@ -1,0 +1,15 @@
+[package]
+name = "fsl-tools"
+description = "Native FSL report generators and specialized dialect engines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fsl-core = { path = "../fsl-core" }
+fsl-syntax = { path = "../fsl-syntax" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

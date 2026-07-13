@@ -6,6 +6,65 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Complete the native Rust migration for issue #195: generic `check` and bounded
+  `verify` now agree with the Python reference across all 181 FSL corpus files,
+  database documents lower to executable compatibility kernels, collection
+  binders and `unique` preserve language semantics, multi-fragment initialization
+  is retained, and AI project/agent routing plus parse-error classification match
+  the public CLI contract. Port full domain scaffolding and requirement-oriented
+  ledger rendering (including implementation logs and external evidence) without
+  a Python command fallback. The installer now places the checksummed native Rust
+  release on the public `fslc` path; Python remains an optional LSP and reference
+  implementation.
+- Rust port Phase 0 (issue #195): add a deterministic Python AST JSON exporter
+  that serves as the reference oracle for cross-language parser differential
+  tests. It covers every `.fsl` file under `specs/` and `examples/`, records
+  evidence-only frontends explicitly, preserves source-relative resolution, and
+  never silently drops parse/lowering failures. Add the initial typed Rust
+  expression parser, typed kernel `spec` and refinement surface parsers with
+  178/178 parseable surface-corpus AST parity, and `fsl-core` spec/compose
+  lowering with 81/81 kernel AST parity. Add a typed kernel model, independent
+  concrete Monitor/BFS, backend-neutral async-check solver interface, pinned
+  native Z3 4.16.0 backend, and incremental symbolic BMC. Python BFS, Rust BFS,
+  and Rust BMC agree on the decision surface for all 20 monitorable `specs/`
+  programs at depth 3. Native `check`/`verify` match the existing stable snapshot
+  projection for all 23 `specs/` files at depth 5; native scenario identities
+  match 20/20 and all 86 generated scenarios cross-replay. BMC witnesses are
+  replayed in both implementation directions. Full `check`/`verify` envelopes
+  match 43/43 command cases with a reviewed witness-only allowlist, and bounded
+  `leadsTo` checking covers deadlock stutter, deadlines, and fair lassos with
+  3/3 focused liveness-envelope and cross-replay parity. Phase 2 starts with
+  native k-induction (11/11 focused base/CTI/ranking envelopes) and bounded
+  refinement including progress preservation (6/6 focused envelopes). Add exact Python↔Rust differential runners, plus a
+  pinned `z3-solver` 4.16.0 disposable-Worker round-trip/throughput spike and CI
+  gate. Add native Phase-2 sweep/refinement-chain/project-chain commands, typed
+  DB/AI/domain tooling and Phase-3 report command entry points with a 107/107
+  differential gate covering exact typestate and full built-in/external mutation
+  adjudication (including requirement and refinement attribution), full
+  explain/counterfactual output, byte-identical pytest and five alternate
+  testgen targets (including forbidden rejection cases), core analysis graph
+  JSON plus DOT/Mermaid exports (including standalone refinement mappings),
+  declaration-level tag-review export, mixed spec/refinement batch analysis,
+  project traceability and missing-anchor findings, structural AI-review
+  findings (tag drift, unanchored properties, unread/unwritten state, and
+  unguarded actions, progress-cycle detection/suppression, bounded unconstrained
+  effects, conservation candidates, and acceptance-backed divergent choices),
+  focused byte-identical HTML/ledger artifacts, raw CLI output parity for
+  version, typestate, testgen, explain, domain expansion/test generation,
+  HTML, and ledger output, and broad HTML tag/attribute
+  structure parity across workflow, inventory, vending, and forbidden specs. Add
+  the production Rust WASM Worker, official npm Z3
+  bridge, COOP/COEP playground assets, and a headless-browser gate that proves
+  forced cancellation recovery and native/WASM verdict parity. Fix stale
+  successor-expression caching that produced false-positive divergent-choice
+  findings when CPython reused short-lived state-object ids. Broad HTML parity
+  compares byte-identical static content plus complete tag/attribute structure;
+  solver-selected dynamic witnesses remain covered by bidirectional replay. See
+  `docs/RUST-PORTING.md` for the repeatable rewrite method and current evidence.
+  Complete the native CLI option contract, persistent verification cache,
+  snapshot and implementation-log replay, auxiliary-lemma proofs, semantic
+  diff (including Git tree inputs), expression fuzz agreement, and native
+  runtime/tool/CLI regressions. Release artifacts now include Intel macOS.
 - Rust port architecture (issue #195): an accepted, phased design for a
   repository-local Cargo workspace that targets a native single-binary CLI and a
   browser Web Worker/WASM kernel backed by the official `z3-solver` npm package.
@@ -489,13 +548,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   high-risk-first as adoption sequencing, not the end state; `concept`,
   `guide`, and `when-to-use` add the living-corpus/CI framing — the spec
   corpus stays continuously re-verified, not proved once.
-- PR CI's `pr-full` job now splits the full pytest run into 3 balanced shards
-  (`.github/ci-shards/shard-{1,2,3}.txt`, weight-balanced by measured test
-  duration) run under a `shard: [1, 2, 3]` matrix, replacing the single
-  serial job that ran within a few minutes of its 30-minute timeout and was
-  occasionally cancelled on CI runner variance. A `pr-shard-coverage` job
-  fails fast if the shard lists ever drift out of an exact partition of
-  `tests/test_*.py` (e.g. a new test file not added to any shard).
+- CI now treats Python as a frozen reference implementation and validates only
+  the primary Rust workspace, dependency boundary, native Z3 matrix, official
+  `z3-solver` Worker probe, and production WASM browser surface. Remove the
+  Python pytest matrices, Python/Rust differential gate, and obsolete shard
+  manifests; differential tools remain available for manual migration audits.
 
 ## [2.7.0] - 2026-07-04
 

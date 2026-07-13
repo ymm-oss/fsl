@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FSL ブラウザプレイグラウンド</title>
+  <script src="./coi-serviceworker.js"></script>
+  <style>
+    body { max-width: 72rem; margin: 2rem auto; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; }
+    textarea, pre { box-sizing: border-box; width: 100%; min-height: 22rem; padding: 1rem; font: 14px/1.45 ui-monospace, monospace; }
+    pre { background: #111827; color: #e5e7eb; overflow: auto; }
+    button { margin: .75rem .5rem .75rem 0; padding: .55rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>FSL ブラウザプレイグラウンド</h1>
+  <p>検証は破棄可能な Web Worker 内でローカル実行します。キャンセルすると Worker と Z3 インスタンスを終了します。</p>
+  <textarea id="fsl-source" spellcheck="false">spec BrowserCounter {
+  type K = 0..1
+  state { x: K }
+  init { x = 0 }
+  action increment() { requires x == 0 x = 1 }
+  invariant Bounded { x &gt;= 0 and x &lt;= 1 }
+}</textarea>
+  <div><button id="fsl-verify">検証</button><button id="fsl-cancel" disabled>キャンセル</button><span id="fsl-progress">待機中</span></div>
+  <pre id="fsl-output" aria-live="polite"></pre>
+  <script type="module" src="./playground.js"></script>
+</body>
+</html>

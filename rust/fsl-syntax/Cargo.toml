@@ -1,0 +1,14 @@
+[package]
+name = "fsl-syntax"
+description = "FSL lexer, parser, AST, and source locations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

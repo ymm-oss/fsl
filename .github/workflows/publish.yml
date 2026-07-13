@@ -1,6 +1,7 @@
-name: publish-pypi
+name: publish-python-reference
 
-# Publish to PyPI when a GitHub Release is published.
+# Publish the retained Python reference implementation to PyPI when a GitHub
+# Release is published. Native Rust binaries are the primary CLI distribution.
 #
 # One-time setup (performed once by a repository admin):
 #   1. Register a "Trusted Publisher" for the fslc project on PyPI
@@ -19,7 +20,7 @@ permissions:
 
 jobs:
   build-and-publish:
-    name: build + publish to PyPI
+    name: build + publish Python reference to PyPI
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

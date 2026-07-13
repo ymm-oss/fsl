@@ -116,6 +116,7 @@ and it runs.
 | OS / arch | File to download |
 | --- | --- |
 | macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
+| macOS (Intel) | `fslc-macos-x64` |
 | Linux (x86_64) | `fslc-linux-x64` |
 | Linux (ARM64) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |
@@ -162,9 +163,9 @@ the Claude Code skills in `~/.claude/skills/`
 
 What gets installed:
 
-- the `fslc` command (used from `~/.local/bin/fslc`)
-- the `fslc-lsp` language server (`~/.local/bin/fslc-lsp`) — the VSCode extension in
-  `editors/vscode/` launches it from `PATH`
+- the native Rust `fslc` command (used from `~/.local/bin/fslc`; Python is not required)
+- the optional Python `fslc-lsp` language server when Python 3.9+ is available
+  (`~/.local/bin/fslc-lsp`) — the VSCode extension in `editors/vscode/` launches it from `PATH`
 - the Claude Code skills (`~/.claude/skills/fsl*`)
 - samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
 
@@ -184,7 +185,8 @@ First get the repository:
 git clone https://github.com/ymm-oss/fsl && cd fsl
 ```
 
-There are only two dependencies: `lark` (pure Python) and `z3-solver`
+The commands below install the retained Python reference implementation for differential
+testing and LSP development. There are only two runtime dependencies: `lark` (pure Python) and `z3-solver`
 (a prebuilt wheel that bundles the native libz3). **No C++ compiler or separate Z3 install is needed**,
 and on Mac / Windows / Linux it is all done with just `pip install` (requires Python 3.9+).
 

@@ -89,14 +89,7 @@ options:
   --strict-tags
   --requirements REQUIREMENTS
 </pre></div></details>
-<details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
-                   [--deadlock {warn,error,ignore}]
-                   [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]
-                   [--exclude-property EXCLUDE_PROPERTY_NAMES]
-                   [--instances INSTANCES] [--values VALUES] [--strict-tags]
-                   [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS]
-                   [--from-state FROM_STATE]
-                   file
+<details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] file
 
 positional arguments:
   file
@@ -122,20 +115,15 @@ options:
                         (NAME=LO..HI; repeatable)
   --strict-tags
   --requirements REQUIREMENTS
-  --no-cache            skip the persistent verdict cache for this run
-                        (neither reads nor writes it)
+  --no-cache            skip the persistent verdict cache for this run (neither
+                        reads nor writes it)
   --lemma LEMMAS        candidate auxiliary invariant expression (induction
                         only; repeatable)
   --from-state FROM_STATE
                         replace spec init with a complete Monitor/replay
                         logical-state JSON snapshot (BMC only)
 </pre></div></details>
-<details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND]
-                  [--deadlock {warn,error,ignore}]
-                  [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME]
-                  [--instances INSTANCES] [--values VALUES] [--strict-tags]
-                  [--requirements REQUIREMENTS]
-                  file
+<details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file
 
 positional arguments:
   file
@@ -155,8 +143,7 @@ options:
   --strict-tags
   --requirements REQUIREMENTS
 </pre></div></details>
-<details><summary>fslc scenarios</summary><div class="tree-body"><pre>usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}]
-                      file
+<details><summary>fslc scenarios</summary><div class="tree-body"><pre>usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}] file
 
 positional arguments:
   file
@@ -166,9 +153,7 @@ options:
   --depth DEPTH
   --deadlock {warn,error,ignore}
 </pre></div></details>
-<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG)
-                   [--mapping MAPPING]
-                   file
+<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG) [--mapping MAPPING] file
 
 positional arguments:
   file
@@ -177,13 +162,9 @@ options:
   -h, --help           show this help message and exit
   --trace TRACE
   --from-log FROM_LOG  production JSONL records to map and replay
-  --mapping MAPPING    refinement-syntax log mapping (required with --from-
-                       log)
+  --mapping MAPPING    refinement-syntax log mapping (required with --from-log)
 </pre></div></details>
-<details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT]
-                    [--target {pytest,vitest,swift,kotlin,dart,phpunit}]
-                    [--deadlock {warn,error,ignore}] [--strict]
-                    file
+<details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file
 
 positional arguments:
   file
@@ -191,15 +172,13 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --depth DEPTH
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
   --target {pytest,vitest,swift,kotlin,dart,phpunit}
                         test harness to emit (default: pytest)
   --deadlock {warn,error,ignore}
   --strict
 </pre></div></details>
-<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement]
-                   [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM]
-                   file
+<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file
 
 positional arguments:
   file
@@ -222,9 +201,7 @@ options:
   --depth DEPTH
   --readable
 </pre></div></details>
-<details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT]
-                 [--deadlock {warn,error,ignore}] [--engine {bmc,induction}]
-                 file
+<details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file
 
 positional arguments:
   file
@@ -232,16 +209,13 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --depth DEPTH
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
   --deadlock {warn,error,ignore}
   --engine {bmc,induction}
                         use k-induction so a proved report can show assurance
                         class &#x27;proved&#x27;
 </pre></div></details>
-<details><summary>fslc ledger</summary><div class="tree-body"><pre>usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT]
-                   [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG]
-                   [--engine {bmc,induction}] [--evidence EVIDENCE]
-                   file
+<details><summary>fslc ledger</summary><div class="tree-body"><pre>usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] file
 
 positional arguments:
   file
@@ -249,16 +223,16 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --depth DEPTH
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
   --deadlock {warn,error,ignore}
-  --impl-log IMPL_LOG   optional implementation trace JSON to score
-                        conformance (fslc replay)
+  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance
+                        (fslc replay)
   --engine {bmc,induction}
                         use k-induction so a requirement&#x27;s assurance class can
                         reach &#x27;proved&#x27; (#171)
-  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an
-                        external-evidence producer (fslc ai eval/replay/drift,
-                        fslc db observe, fslc domain replay, ...); repeatable
+  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-
+                        evidence producer (fslc ai eval/replay/drift, fslc db
+                        observe, fslc domain replay, ...); repeatable
 </pre></div></details>
 <details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
 
@@ -266,16 +240,14 @@ positional arguments:
   impl
   abs
   mapping
-  rest           chain check: appending more (abs map) pairs runs an end-to-
-                 end composed check
+  rest           chain check: appending more (abs map) pairs runs an end-to-end
+                 composed check
 
 options:
   -h, --help     show this help message and exit
   --depth DEPTH
 </pre></div></details>
-<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING]
-                 [--forbid FORBID]
-                 [old] [new]
+<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING] [--forbid FORBID] [old] [new]
 
 positional arguments:
   old
@@ -283,8 +255,8 @@ positional arguments:
 
 options:
   -h, --help         show this help message and exit
-  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two
-                     Git revisions
+  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two Git
+                     revisions
   --depth DEPTH
   --mapping MAPPING  optional refinement mapping for one comparison direction
   --forbid FORBID    comma-separated finding kinds that should fail the gate
@@ -305,14 +277,10 @@ positional arguments:
 
 options:
   -h, --help  show this help message and exit
-  --ts        emit only the derivable entities&#x27; TypeScript to stdout instead
-              of JSON
+  --ts        emit only the derivable entities&#x27; TypeScript to stdout instead of
+              JSON
 </pre></div></details>
-<details><summary>fslc analyze</summary><div class="tree-body"><pre>usage: fslc analyze [-h]
-                    [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}]
-                    [--profile {ai-review}] [--export {tag-review}]
-                    [--focus FOCUS] [--format {dot,json,mermaid}]
-                    file [file ...]
+<details><summary>fslc analyze</summary><div class="tree-body"><pre>usage: fslc analyze [-h] [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}] [--profile {ai-review}] [--export {tag-review}] [--focus FOCUS] [--format {dot,json,mermaid}] file [file ...]
 
 positional arguments:
   file
@@ -325,13 +293,11 @@ options:
                         emit AI-readable structural review findings
   --export {tag-review}
                         export declaration-level tag/formula review tuples
-  --focus FOCUS         node id for --projection impact_graph, e.g.
-                        state:stock or action:checkout
+  --focus FOCUS         node id for --projection impact_graph, e.g. state:stock
+                        or action:checkout
   --format {dot,json,mermaid}
 </pre></div></details>
-<details><summary>fslc db <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc db check</summary><div class="tree-body"><pre>usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}]
-                     [--deadlock {warn,error,ignore}]
-                     file
+<details><summary>fslc db <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc db check</summary><div class="tree-body"><pre>usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
 
 positional arguments:
   file
@@ -351,9 +317,7 @@ options:
   -h, --help     show this help message and exit
   --trace TRACE
 </pre></div></details>
-<details><summary>fslc db import</summary><div class="tree-body"><pre>usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}]
-                      [-o OUTPUT]
-                      file
+<details><summary>fslc db import</summary><div class="tree-body"><pre>usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}] [-o OUTPUT] file
 
 positional arguments:
   file
@@ -363,7 +327,7 @@ options:
   --name NAME
   --source {auto,sql,prisma}
                         source format to import (default: auto by extension)
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
 </pre></div></details></div></div></details>
 <details><summary>fslc compat <span class="tree-blurb">— 1 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc compat check</summary><div class="tree-body"><pre>usage: fslc compat check [-h] [--include-ai] file
 
@@ -374,9 +338,7 @@ options:
   -h, --help    show this help message and exit
   --include-ai
 </pre></div></details></div></div></details>
-<details><summary>fslc ai <span class="tree-blurb">— 7 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc ai check</summary><div class="tree-body"><pre>usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}]
-                     [--deadlock {warn,error,ignore}]
-                     file
+<details><summary>fslc ai <span class="tree-blurb">— 7 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc ai check</summary><div class="tree-body"><pre>usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
 
 positional arguments:
   file
@@ -396,12 +358,10 @@ options:
   -h, --help            show this help message and exit
   --logs LOGS
   --component COMPONENT
-                        ai_component to replay when FILE is a project-level
-                        fsl-ai file
+                        ai_component to replay when FILE is a project-level fsl-
+                        ai file
 </pre></div></details>
-<details><summary>fslc ai eval</summary><div class="tree-body"><pre>usage: fslc ai eval [-h] [--records RECORDS] [--dataset DATASET]
-                    [--slice SLICE_NAME] [--property PROPERTY_NAME]
-                    file
+<details><summary>fslc ai eval</summary><div class="tree-body"><pre>usage: fslc ai eval [-h] [--records RECORDS] [--dataset DATASET] [--slice SLICE_NAME] [--property PROPERTY_NAME] file
 
 positional arguments:
   file
@@ -413,10 +373,7 @@ options:
   --slice SLICE_NAME
   --property PROPERTY_NAME
 </pre></div></details>
-<details><summary>fslc ai regress</summary><div class="tree-body"><pre>usage: fslc ai regress [-h] [--migration MIGRATION] --before-records
-                       BEFORE_RECORDS --after-records AFTER_RECORDS
-                       [--dataset DATASET]
-                       file
+<details><summary>fslc ai regress</summary><div class="tree-body"><pre>usage: fslc ai regress [-h] [--migration MIGRATION] --before-records BEFORE_RECORDS --after-records AFTER_RECORDS [--dataset DATASET] file
 
 positional arguments:
   file
@@ -428,9 +385,7 @@ options:
   --after-records AFTER_RECORDS
   --dataset DATASET
 </pre></div></details>
-<details><summary>fslc ai compare</summary><div class="tree-body"><pre>usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS
-                       [--from-label FROM_LABEL] [--to-label TO_LABEL]
-                       [--dataset DATASET]
+<details><summary>fslc ai compare</summary><div class="tree-body"><pre>usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS [--from-label FROM_LABEL] [--to-label TO_LABEL] [--dataset DATASET]
 
 options:
   -h, --help            show this help message and exit
@@ -440,10 +395,7 @@ options:
   --to-label TO_LABEL
   --dataset DATASET
 </pre></div></details>
-<details><summary>fslc ai drift</summary><div class="tree-body"><pre>usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS]
-                     [--window WINDOW] [--baseline BASELINE]
-                     [--property PROPERTY_NAME]
-                     file
+<details><summary>fslc ai drift</summary><div class="tree-body"><pre>usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS] [--window WINDOW] [--baseline BASELINE] [--property PROPERTY_NAME] file
 
 positional arguments:
   file
@@ -465,9 +417,7 @@ options:
   -h, --help            show this help message and exit
   --environment ENVIRONMENT
 </pre></div></details></div></div></details>
-<details><summary>fslc domain <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc domain check</summary><div class="tree-body"><pre>usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}]
-                         [--deadlock {warn,error,ignore}]
-                         file
+<details><summary>fslc domain <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc domain check</summary><div class="tree-body"><pre>usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
 
 positional arguments:
   file
@@ -492,13 +442,10 @@ positional arguments:
   file
 
 options:
-  -h, --help            show this help message and exit
-  -o OUTPUT, --output OUTPUT
+  -h, --help           show this help message and exit
+  -o, --output OUTPUT
 </pre></div></details>
-<details><summary>fslc domain generate</summary><div class="tree-body"><pre>usage: fslc domain generate [-h] [--profile {functional-ddd}]
-                            [--target {typescript,kotlin,swift,python,rust}]
-                            [-o OUTPUT]
-                            file
+<details><summary>fslc domain generate</summary><div class="tree-body"><pre>usage: fslc domain generate [-h] [--profile {functional-ddd}] [--target {typescript,kotlin,swift,python,rust}] [-o OUTPUT] file
 
 positional arguments:
   file
@@ -507,7 +454,7 @@ options:
   -h, --help            show this help message and exit
   --profile {functional-ddd}
   --target {typescript,kotlin,swift,python,rust}
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
 </pre></div></details>
 <details><summary>fslc domain replay</summary><div class="tree-body"><pre>usage: fslc domain replay [-h] --logs LOGS file
 
@@ -518,11 +465,7 @@ options:
   -h, --help   show this help message and exit
   --logs LOGS
 </pre></div></details>
-<details><summary>fslc domain testgen</summary><div class="tree-body"><pre>usage: fslc domain testgen [-h] [--depth DEPTH]
-                           [--target {vitest,pytest,swift,kotlin,dart,phpunit}]
-                           [--deadlock {warn,error,ignore}] [--strict]
-                           [-o OUTPUT]
-                           file
+<details><summary>fslc domain testgen</summary><div class="tree-body"><pre>usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [-o OUTPUT] file
 
 positional arguments:
   file
@@ -533,7 +476,7 @@ options:
   --target {vitest,pytest,swift,kotlin,dart,phpunit}
   --deadlock {warn,error,ignore}
   --strict
-  -o OUTPUT, --output OUTPUT
+  -o, --output OUTPUT
 </pre></div></details></div></div></details></div>
   </div>
 </section>

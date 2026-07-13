@@ -1,0 +1,3 @@
+{"id":"llm-killed","op":"weaken_guard_and_increment","replace":{"target":"    requires x == 0\n    x = 1","replacement":"    x = x + 1"},"description":"allow repeat increments beyond Count"}
+{"id":"llm-survived","op":"remove_guard","replace":{"target":"    requires x == 0\n","replacement":""},"description":"repeat assignment remains inside the bound"}
+{"id":"llm-invalid","op":"broken_syntax","mutated_spec":"spec Broken {"}

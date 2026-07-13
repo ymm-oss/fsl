@@ -1,0 +1,6 @@
+refinement DesignRefinesReq {
+  impl DesignLayer
+  abs ReqLayer
+  map x[i: Item] = y[i]
+  action noop(i) -> stutter
+}

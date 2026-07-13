@@ -53,6 +53,32 @@ def parse_expr(src):
     return Ast().transform(tree)
 
 
+def parse_surface_src(src):
+    """Parse the shared FSL grammar without applying frontend lowering.
+
+    This is the differential seam used by the Rust parser port. Specialized
+    db/AI/domain grammars have their own typed surface IR and are intentionally
+    rejected here; :func:`parse_src` remains the public all-frontend entrypoint.
+    """
+    if (
+        is_dbsystem_source(src)
+        or is_ai_component_source(src)
+        or is_domain_source(src)
+    ):
+        from .model import FslError
+
+        raise FslError(
+            "specialized frontend source has no shared-grammar surface AST",
+            kind="semantics",
+        )
+    try:
+        tree = PARSER.parse(src)
+    except UnexpectedInput as exc:
+        exc.source = src
+        raise
+    return Ast().transform(tree)
+
+
 def parse_src(src, base_dir=None, bounds_overrides=None):
     """Parse FSL source; expand compose specs when ``base_dir`` is set.
 
@@ -105,12 +131,7 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
         expanded = expand_domain(domain)
         return expanded.ast, expanded.display_names
 
-    try:
-        tree = PARSER.parse(src)
-    except UnexpectedInput as e:
-        e.source = src
-        raise
-    ast = Ast().transform(tree)
+    ast = parse_surface_src(src)
     ast = expand_named_predicates(ast)
     if bounds_overrides:
         ast = apply_verify_bounds_overrides(ast, bounds_overrides)

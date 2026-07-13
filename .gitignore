@@ -5,6 +5,9 @@ __pycache__/
 .eggs/
 build/
 dist/
+rust/target/
+rust/fsl-wasm/pkg/
+docs/intro/fsl-wasm/
 
 # Environments
 .venv/

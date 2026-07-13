@@ -106,12 +106,10 @@ with pinning and the covered files the whole harness projects to ≈ 3 min
 single-threaded. Bounds are explicit constants (`depth` per dialect,
 `EXPR_STATES`) — raising coverage is a registry diff, not a hidden loop change.
 
-The test file joins `.github/ci-shards/shard-1.txt` (the few-heavy-files shard
-that already hosts the analogous corpus-wide gate `test_corpus_snapshot.py`;
-shards were balanced to ~9.5 min each in `a771407`, and +3 min stays well inside
-the 20-min job timeout — rebalance from measured durations if it drifts).
-`pr-shard-coverage` already fails if the file is added without a shard entry;
-`full-matrix` picks it up unsharded.
+This harness belongs to the frozen Python reference implementation and is no
+longer run by `.github/workflows/ci.yml`. It remains available for manual
+historical/reference checks; active CI coverage is provided by the Rust
+workspace tests and WASM browser validation.
 
 ## Exclusion policy
 

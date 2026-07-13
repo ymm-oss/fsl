@@ -1,0 +1,49 @@
+    private ?Adapter $adapter = null;
+
+    // Wire your implementation here: return your adapter instead of throwing.
+    protected function makeAdapter(): Adapter
+    {
+        throw new \RuntimeException('wire your implementation: implement makeAdapter()');
+    }
+
+    protected function setUp(): void
+    {
+        try {
+            $a = $this->makeAdapter();
+            $a->reset();
+            $a->observe();
+            $this->adapter = $a;
+        } catch (\Throwable $e) {
+            $this->markTestSkipped('Adapter not wired: ' . $e->getMessage());
+        }
+    }
+
+    // Compare the spec's expected state against the observed state. Recurse into
+    // arrays by the EXPECTED keys (so maps match by key — order-independent, and
+    // only the fields the spec mentions are asserted; PHP coerces numeric string
+    // keys like '0' to int consistently on both sides). A list-shaped expected
+    // also pins the length, so sequences are exact. Leaves use assertSame (===),
+    // so int/float, bool and null never coerce — the point of the PHP target.
+    private function assertPartial(mixed $expected, mixed $observed, string $path = 'state'): void
+    {
+        if (is_array($expected) && is_array($observed)) {
+            if (array_is_list($expected)) {
+                $this->assertCount(count($expected), $observed, "length at $path");
+            }
+            foreach ($expected as $key => $value) {
+                $this->assertArrayHasKey($key, $observed, "missing $path.$key");
+                $this->assertPartial($value, $observed[$key], "$path.$key");
+            }
+        } else {
+            $this->assertSame($expected, $observed, "at $path");
+        }
+    }
+
+    private function assertRejected(?array $result, ?string $expectedKind): void
+    {
+        $this->assertIsArray($result, 'forbidden step must return a result array');
+        $this->assertFalse($result['ok']);
+        if ($expectedKind !== null) {
+            $this->assertSame($expectedKind, $result['kind']);
+        }
+    }

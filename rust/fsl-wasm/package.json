@@ -1,0 +1,15 @@
+{
+  "name": "fsl-wasm-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test:browser": "node test-browser.mjs"
+  },
+  "dependencies": {
+    "z3-solver": "4.16.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.6"
+  }
+}
