@@ -51,6 +51,7 @@ const child = spawn(chrome, [
   "--remote-debugging-port=0", `--user-data-dir=${profile}`,
   `http://127.0.0.1:${port}/`,
 ], { stdio: ["ignore", "pipe", "pipe"] });
+const childClosed = new Promise((resolve) => child.once("close", resolve));
 let stderr = "";
 child.stderr.setEncoding("utf8");
 child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -106,9 +107,12 @@ try {
   socket.close();
   if (details?.done !== "true") throw new Error(`browser probe timed out: ${stderr}`);
 } finally {
-  child.kill("SIGKILL");
-  server.close();
-  await rm(profile, { recursive: true, force: true });
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  await childClosed;
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 if (details.ok !== "true") {
   throw new Error(`FSL WASM Worker smoke failed: ${details.text}\n${stderr}`);
