@@ -1,0 +1,16 @@
+# Shared Codex defaults for this trusted repository. Personal model and provider choices stay global.
+
+project_doc_max_bytes = 32768
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+
+[features]
+hooks = true
+multi_agent = true
+memories = false
+goals = true
+
+[agents]
+max_threads = 4
+max_depth = 1

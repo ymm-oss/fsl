@@ -36,7 +36,12 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Validate Rust CLI compatibility and Rust-only surface
-        run: python -m pytest tests/test_rust_cli_contract.py -q
+        run: >-
+          python -m pytest
+          tests/test_rust_cli_contract.py
+          tests/test_claude_environment.py
+          tests/test_codex_environment.py
+          -q
 
   rust-workspace-wasm:
     name: rust workspace and WASM

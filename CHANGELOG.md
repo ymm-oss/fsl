@@ -13,6 +13,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Codex CLI, IDE, and desktop environment: bounded repository instructions, worktree-local
+  task packets, explicit checkpoint/task-start skills, shared FSL skill discovery,
+  read-only exploration and review agents, concise SessionStart context, and CI-tested
+  configuration contracts.
+- Rust-authoritative Claude Code environment: concise shared instructions, path-scoped rules,
+  worktree-local task packets, checkpoint/task-start skills, native verifier hooks, focused
+  exploration/diagnostic/review agents, publication permission prompts, and CI-tested hook contracts.
 - Conformance corpus feature coverage matrix (issue #223): native Rust
   `fslc_rust::coverage::coverage_matrix()` structurally cross-references the
   fixed `kernel_contract.fsl`/`conformance_failures.fsl` fixture manifest
