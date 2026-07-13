@@ -739,6 +739,48 @@ fn status_section(verification: &Value) -> String {
     )
 }
 
+fn undecided_section(items: &[Value]) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let rows = items
+        .iter()
+        .map(|item| {
+            let ids = item["requirement_ids"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>",
+                escape(item["declaration"].as_str().unwrap_or_default()),
+                escape(item["reason"].as_str().unwrap_or_default()),
+                if ids.is_empty() {
+                    "—".to_owned()
+                } else {
+                    escape(&ids)
+                },
+            )
+        })
+        .collect::<String>();
+    format!(
+        r#"
+      <section class="section" id="undecided">
+        <div class="section-head"><div>
+          <h2>Intentional Undecided Decisions</h2>
+          <p><code>undecided:</code> declarations are review metadata and are not verification conditions.</p>
+        </div></div>
+        <div class="panel table-wrap"><table>
+          <thead><tr><th>Declaration</th><th>Reason</th><th>Affected requirement IDs</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table></div>
+      </section>
+"#
+    )
+}
+
 fn params(params: &Value) -> String {
     let Some(params) = params.as_object() else {
         return String::new();
@@ -1054,6 +1096,7 @@ pub fn render_html_report(
     source: &str,
     explained: &Value,
     verification: &Value,
+    undecided: &[Value],
 ) -> String {
     let skeleton = &explained["skeleton"];
     let spec = explained["spec"]
@@ -1086,7 +1129,7 @@ pub fn render_html_report(
     );
     let status = verification["result"].as_str().unwrap_or("unknown");
     let warnings = verification["warnings"].as_array().map_or(0, Vec::len);
-    let body = [
+    let mut sections = vec![
         hero(
             spec,
             file,
@@ -1111,6 +1154,11 @@ pub fn render_html_report(
         ),
         actions_section(&actions, coverage),
         properties_section(&properties, &checks, verification),
+    ];
+    if !undecided.is_empty() {
+        sections.push(undecided_section(undecided));
+    }
+    sections.extend([
         status_section(verification),
         String::new(),
         trace_section(verification),
@@ -1122,8 +1170,8 @@ pub fn render_html_report(
         ),
         source_section(source),
         raw_section(explained, verification),
-    ]
-    .join("\n");
+    ]);
+    let body = sections.join("\n");
     [
         "<!doctype html>".to_owned(),
         "<html lang=\"en\">".to_owned(),

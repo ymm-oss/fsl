@@ -173,16 +173,22 @@ pub fn lower_compose(
 
     let mut static_items = Vec::new();
     let mut init = Vec::new();
+    let mut init_meta = None;
     let mut actions = Vec::new();
     for alias in &order {
         let component = &components[alias];
         for item in &component.spec.items {
             match item {
-                SpecItem::Init(statements) => init.extend(rewrite_statements(
-                    statements.clone(),
-                    component,
-                    &HashSet::new(),
-                )),
+                SpecItem::Init { statements, meta } => {
+                    init.extend(rewrite_statements(
+                        statements.clone(),
+                        component,
+                        &HashSet::new(),
+                    ));
+                    if init_meta.is_none() {
+                        init_meta.clone_from(meta);
+                    }
+                }
                 SpecItem::Action { name, .. } => {
                     if !internal.contains(&(alias.clone(), name.clone())) {
                         actions.push(rewrite_component_item(item.clone(), component));
@@ -198,8 +204,11 @@ pub fn lower_compose(
             ComposeItem::Common(SpecItem::State(fields)) => {
                 static_items.push(SpecItem::State(fields.clone()));
             }
-            ComposeItem::Common(SpecItem::Init(statements)) => {
+            ComposeItem::Common(SpecItem::Init { statements, meta }) => {
                 init.extend(rewrite_compose_statements(statements.clone(), &components));
+                if init_meta.is_none() {
+                    init_meta.clone_from(meta);
+                }
             }
             ComposeItem::Common(item) => {
                 static_items.push(rewrite_compose_item(item.clone(), &components)?);
@@ -210,7 +219,10 @@ pub fn lower_compose(
             ComposeItem::Use { .. } | ComposeItem::Internal { .. } => {}
         }
     }
-    static_items.push(SpecItem::Init(init));
+    static_items.push(SpecItem::Init {
+        statements: init,
+        meta: init_meta,
+    });
     static_items.extend(actions);
     Ok(KernelSpec {
         spec: SurfaceSpec {
@@ -274,9 +286,10 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                 .map(|(name, ty)| (prefix(alias, &name), rewrite_type(ty, component)))
                 .collect(),
         ),
-        SpecItem::Init(statements) => {
-            SpecItem::Init(rewrite_statements(statements, component, &HashSet::new()))
-        }
+        SpecItem::Init { statements, meta } => SpecItem::Init {
+            statements: rewrite_statements(statements, component, &HashSet::new()),
+            meta,
+        },
         SpecItem::Action {
             name,
             params,

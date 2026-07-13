@@ -82,7 +82,7 @@
   def &lt;name&gt;(&lt;p&gt;: &lt;type name&gt;, ...) = &lt;expr&gt; // non-recursive named predicate; frontend-inlined
 
   state { &lt;var&gt;: &lt;type&gt;, ... }
-  init  { &lt;stmt&gt;... }
+  init  [&quot;undecided: reason&quot;] { &lt;stmt&gt;... }
 
   [fair] action &lt;name&gt;(&lt;p&gt;: &lt;type name&gt;, ...) {
     requires &lt;expr&gt;                     // guard. multiple allowed (conjunction)
@@ -1317,6 +1317,19 @@ scenarios carry <code>requirement: {id, text}</code>:</p>
 <pre><code class="language-fsl">invariant PaidLedger &quot;REQ-3: the ledger matches the number of payments&quot; { ... }
 action submit(c: Case, a: Amount) &quot;REQ-1: amounts at or below the threshold are auto-approved&quot; { ... }
 </code></pre>
+<p>The reserved <code>"undecided: reason"</code> tag marks a reviewed, intentionally deferred
+decision. It is metadata and is never verified as a property. It may be attached
+to <code>init</code>, <code>action</code>, <code>invariant</code>, <code>trans</code>, <code>reachable</code>, or <code>leadsTo</code>; for example:</p>
+<pre><code class="language-fsl">init &quot;undecided: initial operating mode is pending&quot; { mode = Manual }
+action route() &quot;undecided: routing policy is pending&quot; { ... }
+</code></pre>
+<p><code>fslc ledger</code> and <code>fslc html</code> list these declarations and the requirement IDs
+whose state dependencies overlap them. <code>analyze --profile ai-review</code> keeps an
+underspecification finding but marks an exact declaration match as
+<code>acknowledged:true</code>. Because the declaration-tag slot is singular, an
+<code>undecided</code> declaration does not also carry an <code>ID: text</code> tag. See
+<code>DESIGN-undecided.md</code>. This feature is implemented by the authoritative native
+Rust CLI and is not backported to the frozen Python reference implementation.</p>
 <h3 id="132-requirements-layer-requirements-the-fsl-req-dialect">13.2 Requirements layer: <code>requirements</code> (the fsl-req dialect)</h3>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }
@@ -1960,7 +1973,9 @@ DESIGN-*.md).</p>
   <code>divergent_choice</code>, and <code>unconstrained_effect</code>. The last two use a fixed
   depth-4 BMC probe: they include <code>evidence_basis:"bounded_bmc"</code>, the reachable
   branch witness, and a question-form <code>spec_question</code> asking which outcome is
-  intended. A BMC-backed <code>unconstrained_effect</code> suppresses the same state's
+  intended. Exact matches with <code>undecided:</code> declarations remain visible with
+  <code>acknowledged:true</code> and <code>acknowledged_by</code>; unmatched semantic findings carry
+  no acknowledgement fields. A BMC-backed <code>unconstrained_effect</code> suppresses the same state's
   structural <code>unread_state</code>; semantic action witnesses similarly suppress a
   duplicate <code>unguarded_action</code>. Absence is not proof of determinism beyond the
   bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.

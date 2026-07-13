@@ -16,7 +16,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive predicate, frontend-inlined
 
   state { <var>: <type>, ... }
-  init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
+  init  ["undecided: reason"] { <stmt>... } // assign exactly once per variable/Map-key (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                        // 0 or more. conjunction. enabled condition
@@ -1136,6 +1136,15 @@ leadsTo / action:
 `invariant PaidLedger "REQ-3: ledger consistency" { ... }` →
 `requirement: {id, text}` in violated / unknown_cti / coverage diagnostic /
 scenarios / `refinement_failed` (root).
+
+Reserved intentional-undecided metadata uses the same single tag slot:
+`init "undecided: initial mode pending" { ... }` or
+`action choose() "undecided: selection policy pending" { ... }`. It is not a
+verification condition or requirement ID. `ledger` / `html` list the marker and
+state-dependency-derived affected requirement IDs; `analyze --profile ai-review`
+retains matching underspecification findings with `acknowledged:true`. See
+`docs/DESIGN-undecided.md`. This syntax and its report surfaces are native Rust
+CLI features; the frozen Python reference is not extended.
 
 ### Authoring specs as readable documentation (requirements + design)
 

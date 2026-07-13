@@ -45,13 +45,16 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 1. **Header** — the guarantee limit in positive form ("BMC: depth N までの全実行を
    網羅" / "k帰納法で全実行を証明") + the honesty line ("保証するのは内部整合;
    intent fidelity is borne by the per-row 判断").
-2. **リスク一覧** — one row per requirement id: 業務目的 / 状態 (🔴 要確認 / 🟢
+2. **未決定一覧** — when `undecided:` metadata exists, declaration / reason /
+   state-dependency-derived affected requirement IDs. The marker is explicitly
+   identified as metadata, not a verification condition.
+3. **リスク一覧** — one row per requirement id: 業務目的 / 状態 (🔴 要確認 / 🟢
    確認済) / 検出種別 (`trace_type`) / リスク (`control.severity`) / 判断者
    (`control.owner`) / 次アクション.
-3. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
+4. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).
-4. **付録** — the raw JSON findings, collapsed (`<details>`), demoted off page 1.
+5. **付録** — the raw JSON findings, collapsed (`<details>`), demoted off page 1.
 
 ## Column → source map
 

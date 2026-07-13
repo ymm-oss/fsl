@@ -32,7 +32,7 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
 
   state { <var>: <type>, ... }
-  init  { <stmt>... }
+  init  ["undecided: reason"] { <stmt>... }
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                     // guard. multiple allowed (conjunction)
@@ -1282,6 +1282,23 @@ invariant PaidLedger "REQ-3: the ledger matches the number of payments" { ... }
 action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are auto-approved" { ... }
 ```
 
+The reserved `"undecided: reason"` tag marks a reviewed, intentionally deferred
+decision. It is metadata and is never verified as a property. It may be attached
+to `init`, `action`, `invariant`, `trans`, `reachable`, or `leadsTo`; for example:
+
+```fsl
+init "undecided: initial operating mode is pending" { mode = Manual }
+action route() "undecided: routing policy is pending" { ... }
+```
+
+`fslc ledger` and `fslc html` list these declarations and the requirement IDs
+whose state dependencies overlap them. `analyze --profile ai-review` keeps an
+underspecification finding but marks an exact declaration match as
+`acknowledged:true`. Because the declaration-tag slot is singular, an
+`undecided` declaration does not also carry an `ID: text` tag. See
+`DESIGN-undecided.md`. This feature is implemented by the authoritative native
+Rust CLI and is not backported to the frozen Python reference implementation.
+
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
 ```fsl
@@ -1968,7 +1985,9 @@ DESIGN-*.md).
   `divergent_choice`, and `unconstrained_effect`. The last two use a fixed
   depth-4 BMC probe: they include `evidence_basis:"bounded_bmc"`, the reachable
   branch witness, and a question-form `spec_question` asking which outcome is
-  intended. A BMC-backed `unconstrained_effect` suppresses the same state's
+  intended. Exact matches with `undecided:` declarations remain visible with
+  `acknowledged:true` and `acknowledged_by`; unmatched semantic findings carry
+  no acknowledgement fields. A BMC-backed `unconstrained_effect` suppresses the same state's
   structural `unread_state`; semantic action witnesses similarly suppress a
   duplicate `unguarded_action`. Absence is not proof of determinism beyond the
   bound. See [`DESIGN-underspecification.md`](DESIGN-underspecification.md).

@@ -124,6 +124,7 @@ pub struct KernelModel {
     pub enum_members: BTreeMap<String, Value>,
     pub state: Vec<(String, TypeRef)>,
     pub init: Vec<Statement>,
+    pub init_meta: Option<MetaTag>,
     pub actions: Vec<ActionDef>,
     pub invariants: Vec<PropertyDef>,
     pub transitions: Vec<PropertyDef>,
@@ -284,6 +285,7 @@ impl ModelBuilder {
         self.collect_types()?;
         let mut state = Vec::new();
         let mut init = Vec::new();
+        let mut init_meta = None;
         let mut actions = Vec::new();
         let mut invariants = Vec::new();
         let mut transitions = Vec::new();
@@ -304,7 +306,12 @@ impl ModelBuilder {
                 // example an NFR age counter) after the user's init block.
                 // Every fragment is part of the same logical initialization;
                 // replacing the earlier fragment leaves user state unconstrained.
-                SpecItem::Init(statements) => init.extend(statements.clone()),
+                SpecItem::Init { statements, meta } => {
+                    init.extend(statements.clone());
+                    if init_meta.is_none() {
+                        init_meta.clone_from(meta);
+                    }
+                }
                 SpecItem::Action {
                     name,
                     params,
@@ -425,6 +432,7 @@ impl ModelBuilder {
             enum_members: self.enum_members,
             state,
             init,
+            init_meta,
             actions,
             invariants,
             transitions,

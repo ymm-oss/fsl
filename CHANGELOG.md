@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Intentional undecided declarations (issue #189): reserve the
+  `"undecided: reason"` metadata tag, including tagged `init`, and add
+  dependency-derived affected requirement IDs to new ledger and HTML undecided
+  sections. Bounded underspecification findings remain visible and now distinguish
+  exact declaration matches with additive `acknowledged` / `acknowledged_by`
+  fields. Includes native Rust integration/snapshot coverage and
+  `docs/DESIGN-undecided.md`, shared FSL skill guidance, and bilingual manual-site
+  coverage for the syntax and acknowledged-review workflow. The frozen Python
+  reference implementation is intentionally unchanged.
 - Complete the native Rust migration for issue #195: generic `check` and bounded
   `verify` now agree with the Python reference across all 181 FSL corpus files,
   database documents lower to executable compatibility kernels, collection

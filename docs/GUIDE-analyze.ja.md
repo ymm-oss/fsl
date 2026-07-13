@@ -182,6 +182,13 @@ findings は**決定的なヒューリスティック**で、すべて `severity
 BMC witness がある場合、同じ state/action の `unread_state` / `unguarded_action` は
 二重表示せず、強い意味論所見へ一本化する。
 
+さらに、所見の `involved_nodes` が `"undecided: 理由"` タグ付き宣言と一致すると、
+所見は抑制されず `acknowledged: true` と `acknowledged_by`（宣言名・理由）を持つ。
+一致しない所見には acknowledgement フィールドを追加しない。前者は
+「意図的に先送り済み」、フィールドのない後者は「未処理」としてレビューキューを分ける。
+`undecided:` は検証条件ではなく、通常の `verify` は引き続き全ての解決に対して
+安全性を検査する。設計詳細は `DESIGN-undecided.md` を参照。
+
 ### 6.1 実例
 
 デモ仕様 `OrderReview`（`submit()` に guard なし、`audit_ready` を誰も書かない）を

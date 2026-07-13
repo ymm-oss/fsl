@@ -108,7 +108,10 @@ pub enum SpecItem {
     Entity(String, Span),
     Number(String, Span),
     State(Vec<(String, TypeExpr)>),
-    Init(Vec<Statement>),
+    Init {
+        statements: Vec<Statement>,
+        meta: Option<MetaTag>,
+    },
     Action {
         name: String,
         params: Vec<Param>,
@@ -783,7 +786,13 @@ impl SpecItem {
                     .map(|(name, ty)| json!(["decl", name, ty.python_ast()]))
                     .collect::<Vec<_>>()
             ]),
-            Self::Init(statements) => json!(["init", statements_ast(statements)]),
+            Self::Init { statements, meta } => {
+                let mut values = vec![json!("init"), Value::Array(statements_ast(statements))];
+                if let Some(meta) = meta {
+                    values.push(meta.python_ast());
+                }
+                Value::Array(values)
+            }
             Self::Action {
                 name,
                 params,
