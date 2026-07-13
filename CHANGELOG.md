@@ -423,6 +423,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   enveloped result tree reserves `kind` for the diagnostic discriminator.)
 
 ### Fixed
+- Rust BMC witness replay now starts from the solver-projected step-zero state,
+  so partially initialized aggregate components remain legitimately free and
+  invariant counterexamples return `violated` instead of an internal Monitor
+  init mismatch. Explicit `--from-state` snapshots remain authoritative, and
+  top-level `kind: "internal"` envelopes now consistently exit 3 per the CLI
+  contract. The frozen Python reference is unchanged. (#219)
 - **CI**: `tests/test_site_reference_snapshot.py` (added with the doc-site
   rebuild) was missing from every `.github/ci-shards/shard-*.txt`, so
   `pr-shard-coverage` was failing on any PR touching the test suite. Added it
