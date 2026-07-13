@@ -1,19 +1,112 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Typestate derivation from the typed FSL kernel.
+//! Typestate derivation from the versioned public FSL Kernel JSON.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{
-    KernelExpr as Expr, KernelLValue as LValue, KernelModel, KernelStatement as Statement,
-    ParamDef, Pattern, TypeDef, TypeRef,
-};
+use fsl_core::{KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION};
 use serde_json::{Map, Value, json};
 
 const EMPTY: &str = "Empty";
 const FILLED: &str = "Filled";
 
 type StateMap = BTreeMap<String, BTreeSet<String>>;
+
+#[derive(Clone)]
+enum TypeRef {
+    Int,
+    Bool,
+    Range,
+    Named(String),
+    Option(Box<Self>),
+    Set(Box<Self>),
+    Map(Box<Self>),
+    Other,
+}
+
+#[derive(Clone)]
+enum TypeDef {
+    Domain,
+    Enum { members: Vec<String> },
+    Struct { fields: Vec<(String, TypeRef)> },
+}
+
+#[derive(Clone)]
+enum Pattern {
+    None,
+    Some,
+}
+
+#[derive(Clone)]
+enum Expr {
+    Var(String),
+    Num(i64),
+    Bool(bool),
+    None,
+    Binary {
+        op: String,
+        left: Box<Self>,
+        right: Box<Self>,
+    },
+    Not(Box<Self>),
+    Neg(Box<Self>),
+    Field(Box<Self>, String),
+    Index(Box<Self>, Box<Self>),
+    Method {
+        receiver: Box<Self>,
+        name: String,
+    },
+    Some(Box<Self>),
+    Is {
+        expr: Box<Self>,
+        pattern: Pattern,
+    },
+    Set,
+    Seq,
+    Struct {
+        fields: Vec<(String, Self)>,
+    },
+    Placeholder(String),
+}
+
+#[derive(Clone)]
+enum LValue {
+    Var(String),
+    Index(String, Expr),
+    Field(Box<Self>, String),
+}
+
+#[derive(Clone)]
+enum Statement {
+    Assign {
+        target: LValue,
+        value: Expr,
+    },
+    If {
+        condition: Expr,
+        then_statements: Vec<Self>,
+        else_statements: Vec<Self>,
+    },
+    ForAll {
+        statements: Vec<Self>,
+    },
+}
+
+struct Action {
+    name: String,
+    params: Vec<String>,
+    requires: Vec<Expr>,
+    statements: Vec<Statement>,
+    requirement: Option<Value>,
+    source_order: (String, u64, u64),
+}
+
+struct PublicKernelView {
+    name: String,
+    types: BTreeMap<String, TypeDef>,
+    state: Vec<(String, TypeRef)>,
+    actions: Vec<Action>,
+}
 
 #[derive(Clone, Copy)]
 enum EnumLocation<'a> {
@@ -40,6 +133,401 @@ struct Entity {
     data_fields: Vec<(String, TypeRef)>,
 }
 
+fn required_object<'a>(value: &'a Value, context: &str) -> Result<&'a Map<String, Value>, String> {
+    value
+        .as_object()
+        .ok_or_else(|| format!("public Kernel {context} must be an object"))
+}
+
+fn required_array<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+    context: &str,
+) -> Result<&'a [Value], String> {
+    object
+        .get(key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .ok_or_else(|| format!("public Kernel {context}.{key} must be an array"))
+}
+
+fn required_str<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+    context: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("public Kernel {context}.{key} must be a string"))
+}
+
+fn parse_type(value: &Value, context: &str) -> Result<TypeRef, String> {
+    let object = required_object(value, context)?;
+    let kind = required_str(object, "kind", context)?;
+    match kind {
+        "int" => Ok(TypeRef::Int),
+        "bool" => Ok(TypeRef::Bool),
+        "domain" => Ok(TypeRef::Range),
+        "named" => Ok(TypeRef::Named(
+            required_str(object, "name", context)?.to_owned(),
+        )),
+        "option" => Ok(TypeRef::Option(Box::new(parse_type(
+            object
+                .get("item")
+                .ok_or_else(|| format!("public Kernel {context}.item is required"))?,
+            &format!("{context}.item"),
+        )?))),
+        "set" => Ok(TypeRef::Set(Box::new(parse_type(
+            object
+                .get("item")
+                .ok_or_else(|| format!("public Kernel {context}.item is required"))?,
+            &format!("{context}.item"),
+        )?))),
+        "map" => {
+            parse_type(
+                object
+                    .get("key")
+                    .ok_or_else(|| format!("public Kernel {context}.key is required"))?,
+                &format!("{context}.key"),
+            )?;
+            Ok(TypeRef::Map(Box::new(parse_type(
+                object
+                    .get("value")
+                    .ok_or_else(|| format!("public Kernel {context}.value is required"))?,
+                &format!("{context}.value"),
+            )?)))
+        }
+        _ => Ok(TypeRef::Other),
+    }
+}
+
+fn parse_expr(value: &Value, context: &str) -> Result<Expr, String> {
+    let object = required_object(value, context)?;
+    let kind = required_str(object, "kind", context)?;
+    let child = |key: &str| -> Result<Expr, String> {
+        parse_expr(
+            object
+                .get(key)
+                .ok_or_else(|| format!("public Kernel {context}.{key} is required"))?,
+            &format!("{context}.{key}"),
+        )
+    };
+    match kind {
+        "var" => Ok(Expr::Var(required_str(object, "name", context)?.to_owned())),
+        "num" => Ok(Expr::Num(
+            object
+                .get("value")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| format!("public Kernel {context}.value must be an integer"))?,
+        )),
+        "bool" => Ok(Expr::Bool(
+            object
+                .get("value")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| format!("public Kernel {context}.value must be a boolean"))?,
+        )),
+        "none" => Ok(Expr::None),
+        "binary" => Ok(Expr::Binary {
+            op: required_str(object, "operator", context)?.to_owned(),
+            left: Box::new(child("left")?),
+            right: Box::new(child("right")?),
+        }),
+        "not" => Ok(Expr::Not(Box::new(child("operand")?))),
+        "neg" => Ok(Expr::Neg(Box::new(child("operand")?))),
+        "field" => Ok(Expr::Field(
+            Box::new(child("value")?),
+            required_str(object, "field", context)?.to_owned(),
+        )),
+        "index" => Ok(Expr::Index(
+            Box::new(child("collection")?),
+            Box::new(child("index")?),
+        )),
+        "method" => Ok(Expr::Method {
+            receiver: Box::new(child("receiver")?),
+            name: required_str(object, "method", context)?.to_owned(),
+        }),
+        "some" => Ok(Expr::Some(Box::new(child("operand")?))),
+        "is" => {
+            let pattern = required_object(
+                object
+                    .get("pattern")
+                    .ok_or_else(|| format!("public Kernel {context}.pattern is required"))?,
+                &format!("{context}.pattern"),
+            )?;
+            Ok(Expr::Is {
+                expr: Box::new(child("operand")?),
+                pattern: if required_str(pattern, "kind", &format!("{context}.pattern"))? == "none"
+                {
+                    Pattern::None
+                } else {
+                    Pattern::Some
+                },
+            })
+        }
+        "set_lit" => Ok(Expr::Set),
+        "seq_lit" => Ok(Expr::Seq),
+        "struct_lit" => {
+            let fields = required_object(
+                object
+                    .get("fields")
+                    .ok_or_else(|| format!("public Kernel {context}.fields is required"))?,
+                &format!("{context}.fields"),
+            )?
+            .iter()
+            .map(|(name, value)| {
+                Ok((
+                    name.clone(),
+                    parse_expr(value, &format!("{context}.fields.{name}"))?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+            Ok(Expr::Struct { fields })
+        }
+        "ite" => Ok(Expr::Placeholder("if_expr".to_owned())),
+        "forall" | "exists" => Ok(Expr::Placeholder("quant".to_owned())),
+        _ => Ok(Expr::Placeholder(kind.to_owned())),
+    }
+}
+
+fn parse_lvalue(value: &Value, context: &str) -> Result<LValue, String> {
+    let object = required_object(value, context)?;
+    match required_str(object, "kind", context)? {
+        "var" => Ok(LValue::Var(
+            required_str(object, "name", context)?.to_owned(),
+        )),
+        "index" => Ok(LValue::Index(
+            required_str(object, "name", context)?.to_owned(),
+            parse_expr(
+                object
+                    .get("index")
+                    .ok_or_else(|| format!("public Kernel {context}.index is required"))?,
+                &format!("{context}.index"),
+            )?,
+        )),
+        "field_lv" => Ok(LValue::Field(
+            Box::new(parse_lvalue(
+                object
+                    .get("target")
+                    .ok_or_else(|| format!("public Kernel {context}.target is required"))?,
+                &format!("{context}.target"),
+            )?),
+            required_str(object, "field", context)?.to_owned(),
+        )),
+        kind => Err(format!(
+            "unsupported public Kernel lvalue kind '{kind}' at {context}"
+        )),
+    }
+}
+
+fn parse_statement(value: &Value, context: &str) -> Result<Statement, String> {
+    let object = required_object(value, context)?;
+    match required_str(object, "kind", context)? {
+        "assign" => Ok(Statement::Assign {
+            target: parse_lvalue(
+                object
+                    .get("target")
+                    .ok_or_else(|| format!("public Kernel {context}.target is required"))?,
+                &format!("{context}.target"),
+            )?,
+            value: parse_expr(
+                object
+                    .get("value")
+                    .ok_or_else(|| format!("public Kernel {context}.value is required"))?,
+                &format!("{context}.value"),
+            )?,
+        }),
+        "if" => Ok(Statement::If {
+            condition: parse_expr(
+                object
+                    .get("condition")
+                    .ok_or_else(|| format!("public Kernel {context}.condition is required"))?,
+                &format!("{context}.condition"),
+            )?,
+            then_statements: parse_statements(object, "then", context)?,
+            else_statements: parse_statements(object, "else", context)?,
+        }),
+        "forall" => Ok(Statement::ForAll {
+            statements: parse_statements(object, "statements", context)?,
+        }),
+        kind => Err(format!(
+            "unsupported public Kernel statement kind '{kind}' at {context}"
+        )),
+    }
+}
+
+fn parse_statements(
+    object: &Map<String, Value>,
+    key: &str,
+    context: &str,
+) -> Result<Vec<Statement>, String> {
+    required_array(object, key, context)?
+        .iter()
+        .enumerate()
+        .map(|(index, value)| parse_statement(value, &format!("{context}.{key}[{index}]")))
+        .collect()
+}
+
+fn action_source_order(object: &Map<String, Value>) -> (String, u64, u64) {
+    object.get("span").and_then(Value::as_object).map_or_else(
+        || (String::new(), u64::MAX, u64::MAX),
+        |span| {
+            (
+                span.get("file")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                span.get("line").and_then(Value::as_u64).unwrap_or(u64::MAX),
+                span.get("column")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(u64::MAX),
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn adapt_public_kernel(kernel: &Value) -> Result<PublicKernelView, String> {
+    let root = required_object(kernel, "root")?;
+    let schema = required_str(root, "$schema", "root")?;
+    if schema != KERNEL_SCHEMA_ID {
+        return Err(format!(
+            "unsupported public Kernel $schema '{schema}'; expected '{KERNEL_SCHEMA_ID}'"
+        ));
+    }
+    let version = required_str(root, "schema_version", "root")?;
+    if version != KERNEL_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported public Kernel schema_version '{version}'; expected '{KERNEL_SCHEMA_VERSION}'"
+        ));
+    }
+    let spec = required_object(
+        root.get("spec")
+            .ok_or_else(|| "public Kernel root.spec is required".to_owned())?,
+        "root.spec",
+    )?;
+
+    let mut types = BTreeMap::new();
+    for (index, value) in required_array(root, "types", "root")?.iter().enumerate() {
+        let context = format!("root.types[{index}]");
+        let object = required_object(value, &context)?;
+        let name = required_str(object, "name", &context)?.to_owned();
+        let definition = required_object(
+            object
+                .get("definition")
+                .ok_or_else(|| format!("public Kernel {context}.definition is required"))?,
+            &format!("{context}.definition"),
+        )?;
+        let definition_context = format!("{context}.definition");
+        let definition = match required_str(definition, "kind", &definition_context)? {
+            "domain" => TypeDef::Domain,
+            "enum" => TypeDef::Enum {
+                members: required_array(definition, "members", &definition_context)?
+                    .iter()
+                    .map(|member| {
+                        member.as_str().map(str::to_owned).ok_or_else(|| {
+                            format!("public Kernel {definition_context}.members must be strings")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?,
+            },
+            "struct" => TypeDef::Struct {
+                fields: required_array(definition, "fields", &definition_context)?
+                    .iter()
+                    .enumerate()
+                    .map(|(field_index, field)| {
+                        let field_context = format!("{definition_context}.fields[{field_index}]");
+                        let field = required_object(field, &field_context)?;
+                        Ok((
+                            required_str(field, "name", &field_context)?.to_owned(),
+                            parse_type(
+                                field.get("type").ok_or_else(|| {
+                                    format!("public Kernel {field_context}.type is required")
+                                })?,
+                                &format!("{field_context}.type"),
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?,
+            },
+            kind => {
+                return Err(format!(
+                    "unsupported public Kernel type definition kind '{kind}' at {definition_context}"
+                ));
+            }
+        };
+        types.insert(name, definition);
+    }
+
+    let state = required_array(root, "state", "root")?
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let context = format!("root.state[{index}]");
+            let object = required_object(value, &context)?;
+            Ok((
+                required_str(object, "name", &context)?.to_owned(),
+                parse_type(
+                    object
+                        .get("type")
+                        .ok_or_else(|| format!("public Kernel {context}.type is required"))?,
+                    &format!("{context}.type"),
+                )?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let mut actions = required_array(root, "actions", "root")?
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let context = format!("root.actions[{index}]");
+            let object = required_object(value, &context)?;
+            Ok(Action {
+                name: required_str(object, "name", &context)?.to_owned(),
+                params: required_array(object, "parameters", &context)?
+                    .iter()
+                    .enumerate()
+                    .map(|(parameter_index, parameter)| {
+                        let parameter_context = format!("{context}.parameters[{parameter_index}]");
+                        required_str(
+                            required_object(parameter, &parameter_context)?,
+                            "name",
+                            &parameter_context,
+                        )
+                        .map(str::to_owned)
+                    })
+                    .collect::<Result<Vec<_>, String>>()?,
+                requires: required_array(object, "requires", &context)?
+                    .iter()
+                    .enumerate()
+                    .map(|(require_index, expression)| {
+                        parse_expr(expression, &format!("{context}.requires[{require_index}]"))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?,
+                statements: parse_statements(object, "updates", &context)?,
+                requirement: object
+                    .get("requirement")
+                    .filter(|value| !value.is_null())
+                    .cloned(),
+                source_order: action_source_order(object),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    actions.sort_by(|left, right| {
+        left.source_order
+            .cmp(&right.source_order)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+
+    Ok(PublicKernelView {
+        name: required_str(spec, "name", "root.spec")?.to_owned(),
+        types,
+        state,
+        actions,
+    })
+}
+
 fn display_name(name: &str) -> String {
     name.replacen("__", ".", 1)
 }
@@ -57,28 +545,20 @@ fn expr_source(expr: &Expr) -> String {
         Expr::Neg(value) => format!("-{}", expr_source(value)),
         Expr::Field(base, field) => format!("{}.{field}", expr_source(base)),
         Expr::Index(base, index) => format!("{}[{}]", expr_source(base), expr_source(index)),
-        Expr::Method { receiver, name, .. } => format!("{}.{name}(...)", expr_source(receiver)),
+        Expr::Method { receiver, name } => format!("{}.{name}(...)", expr_source(receiver)),
         Expr::Some(value) => format!("some({})", expr_source(value)),
         Expr::Is { expr, pattern } => format!(
             "{} is {}",
             expr_source(expr),
             match pattern {
                 Pattern::None => "none",
-                Pattern::Some(_) => "some(...)",
+                Pattern::Some => "some(...)",
             }
         ),
-        Expr::Set(_) => "set_lit".to_owned(),
-        Expr::Seq(_) => "seq_lit".to_owned(),
+        Expr::Set => "set_lit".to_owned(),
+        Expr::Seq => "seq_lit".to_owned(),
         Expr::Struct { .. } => "struct_lit".to_owned(),
-        Expr::Call { .. } => "call".to_owned(),
-        Expr::IfThenElse { .. } => "if_expr".to_owned(),
-        Expr::Quantified { .. } => "quant".to_owned(),
-        Expr::Count { .. } => "count".to_owned(),
-        Expr::Sum { .. } => "sum".to_owned(),
-        Expr::UnaryNamed { name, .. }
-        | Expr::BinaryNamed { name, .. }
-        | Expr::TernaryNamed { name, .. }
-        | Expr::BinderNamed { name, .. } => name.clone(),
+        Expr::Placeholder(name) => name.clone(),
     }
 }
 
@@ -400,15 +880,12 @@ fn option_assignments(statements: &[Statement], var: &str) -> Vec<Assignment> {
     output
 }
 
-fn requirement(action: &fsl_core::ActionDef) -> Option<Value> {
-    action
-        .meta
-        .as_ref()
-        .map(|meta| json!({"id": meta.id, "text": meta.text}))
+fn requirement(action: &Action) -> Option<Value> {
+    action.requirement.clone()
 }
 
 fn classify_action(
-    action: &fsl_core::ActionDef,
+    action: &Action,
     guard_states: impl Fn(&Expr) -> StateMap,
     assignments: Vec<Assignment>,
     is_state_only: impl Fn(&Expr) -> bool,
@@ -461,10 +938,7 @@ fn classify_action(
     let mut output = Map::new();
     output.insert("action".to_owned(), json!(display_name(&action.name)));
     output.insert("verdict".to_owned(), json!(verdict));
-    output.insert(
-        "params".to_owned(),
-        json!(action.params.iter().map(ParamDef::name).collect::<Vec<_>>()),
-    );
+    output.insert("params".to_owned(), json!(action.params));
     output.insert("transitions".to_owned(), Value::Array(transitions));
     output.insert(
         "value_preconditions".to_owned(),
@@ -486,12 +960,12 @@ fn classify_action(
     Some(Value::Object(output))
 }
 
-fn ts_type(model: &KernelModel, ty: &TypeRef) -> String {
+fn ts_type(model: &PublicKernelView, ty: &TypeRef) -> String {
     match ty {
-        TypeRef::Int | TypeRef::Range(_, _) => "number".to_owned(),
+        TypeRef::Int | TypeRef::Range => "number".to_owned(),
         TypeRef::Bool => "boolean".to_owned(),
         TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. }) => "number".to_owned(),
+            Some(TypeDef::Domain) => "number".to_owned(),
             Some(TypeDef::Enum { .. } | TypeDef::Struct { .. }) => display_name(name),
             None => "unknown".to_owned(),
         },
@@ -502,7 +976,12 @@ fn ts_type(model: &KernelModel, ty: &TypeRef) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-fn emit_typescript(model: &KernelModel, entity: &Entity, actions: &[Value], note: &str) -> String {
+fn emit_typescript(
+    model: &PublicKernelView,
+    entity: &Entity,
+    actions: &[Value],
+    note: &str,
+) -> String {
     let state_type = format!("{}State", entity.type_name);
     let mut lines = vec![
         format!(
@@ -641,7 +1120,7 @@ fn camel(name: &str) -> String {
         .collect()
 }
 
-fn discover_entities(model: &KernelModel) -> Vec<Entity> {
+fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
     let mut entities = Vec::new();
     for (type_name, definition) in &model.types {
         let TypeDef::Struct { fields } = definition else {
@@ -651,7 +1130,7 @@ fn discover_entities(model: &KernelModel) -> Vec<Entity> {
             let TypeRef::Named(enum_name) = ty else {
                 continue;
             };
-            let Some(TypeDef::Enum { members, .. }) = model.types.get(enum_name) else {
+            let Some(TypeDef::Enum { members }) = model.types.get(enum_name) else {
                 continue;
             };
             entities.push(Entity {
@@ -675,7 +1154,7 @@ fn discover_entities(model: &KernelModel) -> Vec<Entity> {
             TypeRef::Named(name) if matches!(model.types.get(name), Some(TypeDef::Enum { .. })) => {
                 Some(name)
             }
-            TypeRef::Map(_, value) => match value.as_ref() {
+            TypeRef::Map(value) => match value.as_ref() {
                 TypeRef::Named(name)
                     if matches!(model.types.get(name), Some(TypeDef::Enum { .. })) =>
                 {
@@ -686,7 +1165,7 @@ fn discover_entities(model: &KernelModel) -> Vec<Entity> {
             _ => None,
         };
         if let Some(enum_name) = enum_name
-            && let Some(TypeDef::Enum { members, .. }) = model.types.get(enum_name)
+            && let Some(TypeDef::Enum { members }) = model.types.get(enum_name)
         {
             entities.push(Entity {
                 kind: "enum",
@@ -703,7 +1182,7 @@ fn discover_entities(model: &KernelModel) -> Vec<Entity> {
     for (var, ty) in &model.state {
         let inner = match ty {
             TypeRef::Option(inner) => Some(inner.as_ref()),
-            TypeRef::Map(_, value) => match value.as_ref() {
+            TypeRef::Map(value) => match value.as_ref() {
                 TypeRef::Option(inner) => Some(inner.as_ref()),
                 _ => None,
             },
@@ -729,12 +1208,17 @@ fn discover_entities(model: &KernelModel) -> Vec<Entity> {
     entities
 }
 
-/// Derive sound host-language typestate slices from a checked FSL model.
-#[must_use]
+/// Derive sound host-language typestate slices from public Kernel JSON v1.
+///
+/// # Errors
+///
+/// Returns an error when the input is not the supported public Kernel schema or
+/// when a required normalized field cannot be decoded.
 #[allow(clippy::too_many_lines)]
-pub fn analyze_typestate(model: &KernelModel) -> Value {
+pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
+    let model = adapt_public_kernel(kernel)?;
     let mut report_entities = Vec::new();
-    for entity in discover_entities(model) {
+    for entity in discover_entities(&model) {
         let (actions, key, note) = if entity.kind == "enum" {
             let location = entity.field.as_deref().map_or_else(
                 || EnumLocation::Var(entity.var.as_deref().unwrap_or_default()),
@@ -815,7 +1299,7 @@ pub fn analyze_typestate(model: &KernelModel) -> Value {
         } else {
             "partial"
         };
-        let typescript = emit_typescript(model, &entity, &actions, &note);
+        let typescript = emit_typescript(&model, &entity, &actions, &note);
         report_entities.push(json!({
             "entity": key,
             "kind": entity.kind,
@@ -853,5 +1337,5 @@ pub fn analyze_typestate(model: &KernelModel) -> Value {
             json!("no enum-field or Option state machine found — nothing to derive."),
         );
     }
-    Value::Object(report)
+    Ok(Value::Object(report))
 }

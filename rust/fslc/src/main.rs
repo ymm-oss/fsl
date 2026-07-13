@@ -227,10 +227,11 @@ fn main() {
     if print_cli_metadata() {
         return;
     }
-    let (output, status) = match command() {
+    let (output, reported_status) = match command() {
         Ok(result) => result,
         Err(error) => (error_output("usage", &error), 2),
     };
+    let status = normalized_exit_status(&output, reported_status);
     println!(
         "{}",
         serde_json::to_string_pretty(&output).expect("serialize CLI output")
@@ -267,6 +268,12 @@ fn print_cli_metadata() -> bool {
                     == Some(segment)
             })
         }) else {
+            if node["commands"]
+                .as_array()
+                .is_some_and(|commands| !commands.is_empty())
+            {
+                return false;
+            }
             break;
         };
         node = next;
@@ -2140,7 +2147,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         };
         let enabled = match monitor.enabled() {
             Ok(enabled) => enabled,
-            Err(error) => return (error_output("internal", &error.to_string()), 2),
+            Err(error) => return (error_output("internal", &error.to_string()), 3),
         };
         let Some(instance) = enabled
             .iter()
@@ -2159,7 +2166,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         };
         let stepped = match monitor.step(instance) {
             Ok(stepped) => stepped,
-            Err(error) => return (error_output("internal", &error.to_string()), 2),
+            Err(error) => return (error_output("internal", &error.to_string()), 3),
         };
         if let Some(violation) = stepped.violation {
             return replay_failure(
@@ -2699,7 +2706,7 @@ fn run_scenarios_mode(
     }
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return (error_output("internal", &error.to_string()), 2),
+        Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
     let result = match block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
         Ok(result) => result,
@@ -2719,11 +2726,11 @@ fn run_scenarios_mode(
         );
     }
     if let Err(error) = replay_all(&model, &result, None) {
-        return (error_output("internal", &error), 2);
+        return (error_output("internal", &error), 3);
     }
     let covers = match fsl_runtime::action_cover_traces(model.clone(), depth) {
         Ok(covers) => covers,
-        Err(error) => return (error_output("internal", &error.to_string()), 2),
+        Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
     let mut scenario_warnings = result
         .reachables
@@ -2771,7 +2778,7 @@ fn run_scenarios_mode(
     }
     let responses = match fsl_runtime::leadsto_response_traces(&model, depth) {
         Ok(responses) => responses,
-        Err(error) => return (error_output("internal", &error.to_string()), 2),
+        Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
     let response_names = responses
         .iter()
@@ -3220,13 +3227,21 @@ fn run_check(path: &Path) -> (Value, i32) {
 fn run_kernel_contract(path: &Path) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
         Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => {
+            let message =
+                if error.message == "top-level document has not reached the kernel lowering gate" {
+                    "spec has no state block".to_owned()
+                } else {
+                    error.to_string()
+                };
+            return (semantic_error_output(&message), 2);
+        }
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
@@ -3486,7 +3501,7 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     };
     let mut result = match fsl_tools::check_db(&system) {
         Ok(Value::Object(result)) => result,
-        Ok(_) => return (error_output("internal", "invalid database result"), 2),
+        Ok(_) => return (error_output("internal", "invalid database result"), 3),
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
     let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
@@ -3548,7 +3563,7 @@ fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
         }
         Ok(_) => (
             error_output("internal", "invalid database observation result"),
-            2,
+            3,
         ),
         Err(error) => (semantic_error_output(&error.to_string()), 2),
     }
@@ -3633,7 +3648,7 @@ fn stable_kernel_projection(kernel: Value) -> Value {
 
 fn wrap_specialized(result: Value) -> (Value, i32) {
     let Value::Object(mut result) = result else {
-        return (error_output("internal", "invalid specialized result"), 2);
+        return (error_output("internal", "invalid specialized result"), 3);
     };
     result.retain(|_, value| !value.is_null());
     let status = match result.get("result").and_then(Value::as_str) {
@@ -4221,7 +4236,7 @@ fn run_domain_generate(
     };
     if let Some(output_path) = output_path {
         let Value::Object(object) = &mut result else {
-            return (error_output("internal", "invalid scaffold result"), 2);
+            return (error_output("internal", "invalid scaffold result"), 3);
         };
         if let Err(error) = std::fs::create_dir_all(output_path) {
             return (error_output("io", &error.to_string()), 2);
@@ -7022,12 +7037,36 @@ fn run_mutate(
 }
 
 fn run_typestate(path: &Path) -> (Value, i32) {
-    let model = match load_model(path) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let path_text = path.to_string_lossy();
+    let contract = match fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path_text,
+        source_dialect(&source),
+    ) {
+        Ok(contract) => contract,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let report = match fsl_tools::analyze_typestate(&contract) {
+        Ok(report) => report,
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let mut output = envelope();
-    if let Value::Object(report) = fsl_tools::analyze_typestate(&model) {
+    if let Value::Object(report) = report {
         output.extend(report);
     }
     (Value::Object(output), 0)
@@ -11536,7 +11575,7 @@ fn run_refine(
     let progress = if checked.failure.is_none() && !mapping.progress.is_empty() {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
-            Err(error) => return (error_output("internal", &error.to_string()), 2),
+            Err(error) => return (error_output("internal", &error.to_string()), 3),
         };
         match block_on_native(fsl_verifier::check_refinement_progress(
             &implementation,
@@ -11620,11 +11659,11 @@ fn run_refine(
         let Some(details) = &violation.leads_to else {
             return (
                 error_output("internal", "missing refinement progress diagnostics"),
-                2,
+                3,
             );
         };
         if let Err(error) = fsl_runtime::replay_trace(implementation.clone(), &violation.trace) {
-            return (error_output("internal", &error.to_string()), 2);
+            return (error_output("internal", &error.to_string()), 3);
         }
         let declaration = mapping
             .progress
@@ -12708,10 +12747,15 @@ fn replay_all(
     initial_state: Option<&std::collections::BTreeMap<String, FslValue>>,
 ) -> Result<(), String> {
     let replay = |trace: &[fsl_core::TraceStep]| {
-        initial_state.map_or_else(
-            || fsl_runtime::replay_trace(model.clone(), trace),
-            |state| fsl_runtime::replay_trace_from_state(model.clone(), trace, state),
-        )
+        // Symbolic init may leave individual state components unconstrained.
+        // The witness state is the concrete seed for that chosen model;
+        // Monitor::new uses defaults and cannot reproduce those free values.
+        initial_state
+            .or_else(|| trace.first().map(|entry| &entry.state))
+            .map_or_else(
+                || fsl_runtime::replay_trace(model.clone(), trace),
+                |state| fsl_runtime::replay_trace_from_state(model.clone(), trace, state),
+            )
     };
     if let Some(violation) = &result.violation {
         replay(&violation.trace).map_err(|error| error.to_string())?;
@@ -12740,6 +12784,16 @@ fn error_output(kind: &str, message: &str) -> Value {
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
     Value::Object(output)
+}
+
+fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
+    if output.get("result").and_then(Value::as_str) == Some("error")
+        && output.get("kind").and_then(Value::as_str) == Some("internal")
+    {
+        3
+    } else {
+        reported_status
+    }
 }
 
 fn semantic_error_output(message: &str) -> Value {
@@ -12786,5 +12840,22 @@ fn block_on_native<F: Future>(future: F) -> F::Output {
     match future.as_mut().poll(&mut context) {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("native Z3 backend unexpectedly yielded Pending"),
+    }
+}
+
+#[cfg(test)]
+mod exit_status_tests {
+    use super::*;
+
+    #[test]
+    fn internal_error_envelopes_always_exit_three() {
+        assert_eq!(
+            normalized_exit_status(&error_output("internal", "fault"), 2),
+            3
+        );
+        assert_eq!(
+            normalized_exit_status(&error_output("semantics", "bad spec"), 2),
+            2
+        );
     }
 }

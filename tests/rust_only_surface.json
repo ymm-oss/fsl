@@ -1,0 +1,372 @@
+{
+  "rust_only_nodes": [
+    {
+      "path": [
+        "approval"
+      ],
+      "parent_index": 10,
+      "prog": "fslc approval",
+      "help_sha256": "032a95ef0586ed63999c1554167f31a295a7cc64adcf3346bba9dd57bbdd1618",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        }
+      ],
+      "commands": [
+        "create",
+        "check",
+        "diff"
+      ]
+    },
+    {
+      "path": [
+        "approval",
+        "check"
+      ],
+      "parent_index": 1,
+      "prog": "fslc approval check",
+      "help_sha256": "4d6712f7502b3fa1ed3961330d467dcc5a3d07a78d05c5a92f17b84650dc013e",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "file",
+          "required": true,
+          "positional": true,
+          "action": "store"
+        },
+        {
+          "dest": "record",
+          "required": true,
+          "flags": [
+            "--record"
+          ],
+          "action": "store"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "path": [
+        "approval",
+        "create"
+      ],
+      "parent_index": 0,
+      "prog": "fslc approval create",
+      "help_sha256": "581f1401ef342238de077018d64efe62b754b57de8719fdd0cb19abea181761e",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "file",
+          "required": true,
+          "positional": true,
+          "action": "store"
+        },
+        {
+          "dest": "kind",
+          "required": true,
+          "flags": [
+            "--kind"
+          ],
+          "choices": [
+            "ledger",
+            "html",
+            "scenarios"
+          ],
+          "action": "store"
+        },
+        {
+          "dest": "artifact",
+          "required": true,
+          "flags": [
+            "--artifact"
+          ],
+          "action": "store"
+        },
+        {
+          "dest": "approver",
+          "required": true,
+          "flags": [
+            "--approver"
+          ],
+          "action": "store"
+        },
+        {
+          "dest": "requirement",
+          "required": false,
+          "flags": [
+            "--requirement"
+          ],
+          "repeatable": true,
+          "action": "store"
+        },
+        {
+          "dest": "depth",
+          "required": false,
+          "flags": [
+            "--depth"
+          ],
+          "default": 8,
+          "action": "store"
+        },
+        {
+          "dest": "deadlock",
+          "required": false,
+          "flags": [
+            "--deadlock"
+          ],
+          "choices": [
+            "warn",
+            "error",
+            "ignore"
+          ],
+          "default": "ignore",
+          "action": "store"
+        },
+        {
+          "dest": "engine",
+          "required": false,
+          "flags": [
+            "--engine"
+          ],
+          "choices": [
+            "bmc",
+            "induction"
+          ],
+          "default": "bmc",
+          "action": "store"
+        },
+        {
+          "dest": "output",
+          "required": false,
+          "flags": [
+            "-o",
+            "--output"
+          ],
+          "action": "store"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "path": [
+        "approval",
+        "diff"
+      ],
+      "parent_index": 2,
+      "prog": "fslc approval diff",
+      "help_sha256": "4168a8172ca50a3c84ac5113a6c02944e2322169716cd8c72c0af7cf3efab9f0",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "file",
+          "required": true,
+          "positional": true,
+          "action": "store"
+        },
+        {
+          "dest": "record",
+          "required": true,
+          "flags": [
+            "--record"
+          ],
+          "action": "store"
+        },
+        {
+          "dest": "depth",
+          "required": false,
+          "flags": [
+            "--depth"
+          ],
+          "default": 8,
+          "action": "store"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "path": [
+        "conformance"
+      ],
+      "parent_index": 20,
+      "prog": "fslc conformance",
+      "help_sha256": "0dc0b72607b492b1e610226d4bf0e4bb8b12567c0878bcaab08cd7170a9685fc",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "file",
+          "required": true,
+          "positional": true,
+          "action": "store"
+        },
+        {
+          "dest": "depth",
+          "required": false,
+          "flags": [
+            "--depth"
+          ],
+          "default": 4,
+          "action": "store"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "path": [
+        "kernel"
+      ],
+      "parent_index": 21,
+      "prog": "fslc kernel",
+      "help_sha256": "36be1eae907ad5f6395027d2d9fbc3a6cff9023dced823760ea878a4d8cdee70",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "file",
+          "required": true,
+          "positional": true,
+          "action": "store"
+        }
+      ],
+      "commands": []
+    }
+  ],
+  "rust_only_actions": [
+    {
+      "path": [
+        "ledger"
+      ],
+      "index": 8,
+      "action": {
+        "dest": "approval",
+        "required": false,
+        "flags": [
+          "--approval"
+        ],
+        "repeatable": true,
+        "action": "store"
+      }
+    },
+    {
+      "path": [
+        "verify"
+      ],
+      "index": 5,
+      "action": {
+        "dest": "explicit_budget",
+        "required": false,
+        "flags": [
+          "--explicit-budget"
+        ],
+        "default": 1000000,
+        "action": "store"
+      }
+    }
+  ],
+  "action_overrides": [
+    {
+      "path": [
+        "verify"
+      ],
+      "index": 3,
+      "python": {
+        "dest": "engine",
+        "required": false,
+        "flags": [
+          "--engine"
+        ],
+        "choices": [
+          "bmc",
+          "induction"
+        ],
+        "default": "bmc",
+        "action": "store"
+      },
+      "rust": {
+        "dest": "engine",
+        "required": false,
+        "flags": [
+          "--engine"
+        ],
+        "choices": [
+          "bmc",
+          "induction",
+          "explicit"
+        ],
+        "default": "bmc",
+        "action": "store"
+      }
+    }
+  ],
+  "help_overrides": [
+    {
+      "path": [],
+      "python_sha256": "731a3fd77cc65de2bd63dbf5fe84d72edd9361089f618aa0998fd294bd6f4392",
+      "rust_sha256": "cc7761e0e5839fa09423b77dba131e92100dfdca3b04c9e1c1316aff5b469949"
+    },
+    {
+      "path": [
+        "ledger"
+      ],
+      "python_sha256": "9bc531a1d829f7e1da5b9deaba1e36c57005357cb54be9715f2f601582b6ed9e",
+      "rust_sha256": "ba5dc8215863e6b2c4f81ade041a09fd9413647746e67e5b6ab841d6b11b44b3"
+    },
+    {
+      "path": [
+        "verify"
+      ],
+      "python_sha256": "6616a6b36c0b9694b571449e9100c0507018b84c35aab1f2918024f8754cc948",
+      "rust_sha256": "120d39603796ab9509bddb97aa5ee23f251e344bbf0e2763524c437ecefb5981"
+    }
+  ]
+}

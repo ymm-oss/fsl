@@ -5,6 +5,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- Rust CLI contract validation (issue #220) now preserves exact compatibility
+  with the frozen Python surface while checking native-only commands and
+  options against an explicit structural allowlist. CI runs the focused
+  contract and help-parity suite, including a mutation regression that rejects
+  unlisted choice drift and runtime probes for invalid choices and help paths.
+
 ### Added
 - Conformance corpus feature coverage matrix (issue #223): native Rust
   `fslc_rust::coverage::coverage_matrix()` structurally cross-references the
@@ -33,6 +40,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   sync), a release-bundle update, and a "Conformance coverage matrix"
   section in `docs/DESIGN-kernel-contract.md`. No new CLI surface; the
   frozen Python reference remains unchanged.
+- Public-Kernel-backed native typestate generation (issue #215): Rust
+  `fslc typestate` now performs applicability analysis and TypeScript scaffold
+  generation from versioned public Kernel JSON v1 instead of private
+  `KernelModel` structures. The adapter validates schema identity/version,
+  restores declaration order from public spans, and preserves existing report
+  and `--ts` bytes with golden tests. The old private-model adapter is retired
+  from the native CLI path; the frozen Python reference remains unchanged.
 - Explicit-state exploration engine (issue #212): native Rust
   `fslc verify --engine explicit` enumerates the concrete state space on the
   Z3-free path (`fsl-runtime` BFS with `BTreeSet` dedup and parent-link
@@ -450,6 +464,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   enveloped result tree reserves `kind` for the diagnostic discriminator.)
 
 ### Fixed
+- Rust BMC witness replay now starts from the solver-projected step-zero state,
+  so partially initialized aggregate components remain legitimately free and
+  invariant counterexamples return `violated` instead of an internal Monitor
+  init mismatch. Explicit `--from-state` snapshots remain authoritative, and
+  top-level `kind: "internal"` envelopes now consistently exit 3 per the CLI
+  contract. The frozen Python reference is unchanged. (#219)
 - **CI**: `tests/test_site_reference_snapshot.py` (added with the doc-site
   rebuild) was missing from every `.github/ci-shards/shard-*.txt`, so
   `pr-shard-coverage` was failing on any PR touching the test suite. Added it
