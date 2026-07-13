@@ -134,38 +134,59 @@ fn disabled_and_failed_monitor_outcomes_agree_and_rollback() {
     let model = build_model(kernel).expect("build model");
     let initial = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
 
+    // Most actions in this fixture are deliberate failures (its purpose is
+    // to fix v1 failure semantics), but a few (e.g. `euclid_divide`,
+    // `flip`) are genuine successful transitions added by issue #223 as
+    // coverage-matrix evidence. Check each outcome with the agreement path
+    // that matches what actually happened, exactly like
+    // `collection_and_option_transitions_agree_across_bounded_reachable_states`
+    // does for `kernel_contract.fsl`.
     for action in &model.actions {
         let current = initial.state.clone();
         let mut monitor = initial.clone();
         let params = std::collections::BTreeMap::new();
         let result = monitor
             .attempt(&action.name, &params)
-            .expect("evaluate failure outcome");
-        let violation = result
-            .violation
-            .as_ref()
-            .expect("failure fixture action must fail");
-        assert_eq!(
-            result.state, current,
-            "{} committed a failed step",
-            action.name
-        );
-        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
-        assert!(
-            block_on(fsl_verifier::transition_outcome_matches_step(
-                &model,
-                &mut solver,
-                &current,
-                &action.name,
-                &params,
-                &result.state,
-                result.attempted_state.as_ref(),
-                &violation.kind,
-            ))
-            .expect("check failure agreement"),
-            "{} {} disagreed",
-            action.name,
-            violation.kind
-        );
+            .expect("evaluate action outcome");
+
+        if let Some(violation) = result.violation.as_ref() {
+            assert_eq!(
+                result.state, current,
+                "{} committed a failed step",
+                action.name
+            );
+            let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+            assert!(
+                block_on(fsl_verifier::transition_outcome_matches_step(
+                    &model,
+                    &mut solver,
+                    &current,
+                    &action.name,
+                    &params,
+                    &result.state,
+                    result.attempted_state.as_ref(),
+                    &violation.kind,
+                ))
+                .expect("check failure agreement"),
+                "{} {} disagreed",
+                action.name,
+                violation.kind
+            );
+        } else {
+            let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+            assert!(
+                block_on(fsl_verifier::transition_matches_step(
+                    &model,
+                    &mut solver,
+                    &current,
+                    &action.name,
+                    &params,
+                    &result.state,
+                ))
+                .expect("check success agreement"),
+                "{} disagreed from {current:?}",
+                action.name
+            );
+        }
     }
 }

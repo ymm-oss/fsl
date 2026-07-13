@@ -13,6 +13,33 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Conformance corpus feature coverage matrix (issue #223): native Rust
+  `fslc_rust::coverage::coverage_matrix()` structurally cross-references the
+  fixed `kernel_contract.fsl`/`conformance_failures.fsl` fixture manifest
+  against their generated contracts and conformance vectors, reporting for
+  every kernel `semantics` key, `outcome.kind`, value encoding, partial
+  operation, quantifier, finite parameter domain, and requirement ID whether
+  it is `exercised` (a real vector demonstrates it) or `declared` (the
+  contract states it but no vector in the corpus can fire it — reserved for
+  `terminal_deadlock`, `fairness_weak`, and the six `partial_op_*` rows). No
+  row is hardcoded; `coverage_matrix()` itself returns `Err` naming every
+  feature that falls short of its required level, so a newly uncovered
+  feature fails CI loudly instead of shipping silently. Closes real gaps the
+  matrix caught: the corpus never fired a `trans` violation, never
+  distinguished Euclidean from truncating integer division, and never
+  carried a `Bool` value — `conformance_failures.fsl` gained a
+  `regress`/`Monotone` pair, a literal negative-operand `euclid_divide`
+  action, and a `flag`/`flip` pair, and its golden vectors were
+  regenerated (also updating `fsl-verifier`'s failure-fixture agreement test
+  to check the new successful transitions with the same Monitor↔symbolic
+  path used for `kernel_contract.fsl`, since not every action in the fixture
+  is a deliberate failure anymore). Add
+  `schemas/fslc/kernel/conformance-coverage.v1.schema.json`, golden JSON/
+  Markdown fixtures, `rust/fslc/tests/conformance_coverage.rs` (schema/
+  outcome-kind sync, required-level enforcement, golden equality, schema ID
+  sync), a release-bundle update, and a "Conformance coverage matrix"
+  section in `docs/DESIGN-kernel-contract.md`. No new CLI surface; the
+  frozen Python reference remains unchanged.
 - Public-Kernel-backed native typestate generation (issue #215): Rust
   `fslc typestate` now performs applicability analysis and TypeScript scaffold
   generation from versioned public Kernel JSON v1 instead of private
