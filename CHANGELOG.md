@@ -548,13 +548,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   high-risk-first as adoption sequencing, not the end state; `concept`,
   `guide`, and `when-to-use` add the living-corpus/CI framing — the spec
   corpus stays continuously re-verified, not proved once.
-- PR CI's `pr-full` job now splits the full pytest run into 3 balanced shards
-  (`.github/ci-shards/shard-{1,2,3}.txt`, weight-balanced by measured test
-  duration) run under a `shard: [1, 2, 3]` matrix, replacing the single
-  serial job that ran within a few minutes of its 30-minute timeout and was
-  occasionally cancelled on CI runner variance. A `pr-shard-coverage` job
-  fails fast if the shard lists ever drift out of an exact partition of
-  `tests/test_*.py` (e.g. a new test file not added to any shard).
+- CI now treats Python as a frozen reference implementation and validates only
+  the primary Rust workspace, dependency boundary, native Z3 matrix, official
+  `z3-solver` Worker probe, and production WASM browser surface. Remove the
+  Python pytest matrices, Python/Rust differential gate, and obsolete shard
+  manifests; differential tools remain available for manual migration audits.
 
 ## [2.7.0] - 2026-07-04
 

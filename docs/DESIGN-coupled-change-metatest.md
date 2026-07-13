@@ -147,6 +147,7 @@ keys / missing files / stale entries, nothing else.
 
 ## CI placement
 
-`tests/test_coupled_change_meta.py` joins one `.github/ci-shards/shard-N.txt`
-(the `pr-shard-coverage` job fails if a test file is in no shard — the same
-"exact partition" discipline this test applies to grammar/docs).
+`tests/test_coupled_change_meta.py` belongs to the frozen Python reference
+implementation and is no longer run by `.github/workflows/ci.yml`. Run it
+manually only if the retained reference must be inspected; active CI coverage
+is provided by the Rust workspace tests.

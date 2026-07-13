@@ -1,8 +1,7 @@
 name: ci
 
-# PRs run the full suite split into 3 balanced shards (.github/ci-shards/) plus a
-# smaller cross-version smoke suite for fast feedback. main, scheduled, and manual
-# runs keep the full Python 3.9-3.12 matrix, unsharded.
+# Python is a frozen reference implementation. CI validates the primary Rust
+# workspace, solver boundary, and browser/WASM distribution surfaces.
 
 on:
   push:
@@ -16,24 +15,14 @@ permissions:
   contents: read
 
 jobs:
-  rust-port-parity:
-    name: rust port parser/kernel/BMC parity
+  rust-workspace-wasm:
+    name: rust workspace and WASM
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       Z3_SYS_Z3_VERSION: "4.16.0"
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install Python reference implementation
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -55,27 +44,6 @@ jobs:
             echo "::error::fsl-wasm must not depend on the native Z3 backend"
             exit 1
           fi
-
-      - name: Compare Rust and Python expression ASTs
-        run: |
-          python tools/inventory_rust_port.py --check rust/phase0-inventory.json
-          python tools/check_rust_ast_parity.py
-          python tools/check_rust_grammar_fuzz.py
-          python tools/check_rust_surface_parity.py
-          python tools/check_rust_kernel_parity.py
-          python tools/check_rust_bfs_parity.py --depth 3
-          python tools/check_rust_bmc_parity.py --depth 3
-          python tools/check_rust_cli_snapshot.py
-          python tools/check_rust_full_envelope.py --depth 5
-          python tools/check_rust_leadsto_parity.py --depth 5
-          python tools/check_rust_induction_parity.py
-          python tools/check_rust_refinement_parity.py
-          python tools/check_rust_dialect_parity.py
-          python tools/check_rust_phase2_commands.py
-          python tools/check_rust_phase3_commands.py
-          python tools/check_rust_scenarios_parity.py --depth 5
-          python tools/check_rust_replay_parity.py
-          python tools/check_rust_corpus_cli_parity.py --depth 3
 
       - uses: actions/setup-node@v4
         with:
@@ -120,100 +88,3 @@ jobs:
       - name: Test pinned native solver and BMC crates
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
-
-  pr-shard-coverage:
-    name: shard coverage check
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Verify shard file lists exactly partition tests/test_*.py
-        run: |
-          cat .github/ci-shards/shard-*.txt | sort > /tmp/covered.txt
-          ls tests/test_*.py | sort > /tmp/actual.txt
-          if ! diff -u /tmp/actual.txt /tmp/covered.txt; then
-            echo "::error::.github/ci-shards/shard-*.txt no longer exactly partitions tests/test_*.py (missing, extra, or duplicated file). Add new test files to exactly one shard-N.txt."
-            exit 1
-          fi
-
-  pr-full:
-    name: full pytest (py3.12, shard ${{ matrix.shard }})
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install (editable + dev deps)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run test shard
-        run: pytest -q $(cat .github/ci-shards/shard-${{ matrix.shard }}.txt)
-
-  pr-compat-smoke:
-    name: compat smoke (py${{ matrix.python-version }})
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install (editable + dev deps)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run compatibility smoke tests
-        run: >
-          pytest -q
-          tests/test_version.py
-          tests/test_v1.py
-          tests/test_temporal.py
-          tests/test_logic_temporal_sugar.py
-
-  full-matrix:
-    name: full pytest (py${{ matrix.python-version }})
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install (editable + dev deps)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run full test suite
-        run: pytest -q
