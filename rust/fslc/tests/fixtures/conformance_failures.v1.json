@@ -11,7 +11,10 @@
       "depth": 0,
       "state": {
         "x": 0,
-        "queue": []
+        "queue": [],
+        "counter": 0,
+        "signed": 0,
+        "flag": false
       }
     }
   ],
@@ -28,7 +31,10 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": null
       }
@@ -45,11 +51,17 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         }
       }
     },
@@ -65,11 +77,17 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": {
           "x": 1,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         }
       }
     },
@@ -85,9 +103,60 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "euclid_divide",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "ok",
+        "state_changed": true,
+        "state": {
+          "x": 0,
+          "queue": [],
+          "counter": 0,
+          "signed": -4,
+          "flag": false
+        },
+        "changes": {
+          "signed": {
+            "from": 0,
+            "to": -4
+          }
+        }
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "flip",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "ok",
+        "state_changed": true,
+        "state": {
+          "x": 0,
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": true
+        },
+        "changes": {
+          "flag": {
+            "from": false,
+            "to": true
+          }
+        }
       }
     },
     {
@@ -102,7 +171,10 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": null
       }
@@ -119,9 +191,38 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": null
+      }
+    },
+    {
+      "state": "s0",
+      "action": {
+        "name": "regress",
+        "params": {}
+      },
+      "outcome": {
+        "kind": "trans",
+        "name": "Monotone",
+        "state_changed": false,
+        "state": {
+          "x": 0,
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
+        },
+        "attempted_state": {
+          "x": 0,
+          "queue": [],
+          "counter": -1,
+          "signed": 0,
+          "flag": false
+        }
       }
     },
     {
@@ -136,7 +237,10 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": null
       }
@@ -153,7 +257,10 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": null
       }
@@ -170,14 +277,20 @@
         "state_changed": false,
         "state": {
           "x": 0,
-          "queue": []
+          "queue": [],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         },
         "attempted_state": {
           "x": 0,
           "queue": [
             0,
             0
-          ]
+          ],
+          "counter": 0,
+          "signed": 0,
+          "flag": false
         }
       }
     }

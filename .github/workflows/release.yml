@@ -150,6 +150,8 @@ jobs:
           cp rust/fslc/tests/fixtures/kernel_contract.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.fsl dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/conformance_coverage.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/conformance_coverage.v1.md dist/fsl-kernel-contract-v1/fixtures/
           cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v1/README.md
           tar -czf dist/fsl-kernel-contract-v1.tar.gz -C dist fsl-kernel-contract-v1
           ( cd dist && shasum -a 256 fsl-kernel-contract-v1.tar.gz > fsl-kernel-contract-v1.tar.gz.sha256 )

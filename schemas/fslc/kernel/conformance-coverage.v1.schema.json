@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/kernel/conformance-coverage.v1.schema.json",
+  "title": "FSL conformance corpus feature coverage matrix v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "kernel_schema_version",
+    "conformance_schema_version",
+    "result",
+    "fixtures",
+    "features"
+  ],
+  "properties": {
+    "$schema": { "const": "https://fsl.dev/schemas/fslc/kernel/conformance-coverage.v1.schema.json" },
+    "schema_version": { "const": "1.0.0" },
+    "kernel_schema_version": { "type": "string", "minLength": 1 },
+    "conformance_schema_version": { "type": "string", "minLength": 1 },
+    "fsl": { "type": "string" },
+    "result": { "const": "conformance_coverage" },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "depth", "states", "vectors"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "depth": { "type": "integer", "minimum": 0 },
+          "states": { "type": "integer", "minimum": 0 },
+          "vectors": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "description", "level", "evidence"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "level": { "enum": ["declared", "exercised"] },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["fixture", "detail", "count"],
+              "properties": {
+                "fixture": { "type": "string", "minLength": 1 },
+                "detail": { "type": "string", "minLength": 1 },
+                "count": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
