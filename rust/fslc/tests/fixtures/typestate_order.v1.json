@@ -1,0 +1,105 @@
+{
+  "fsl": "1.0",
+  "result": "typestate",
+  "spec": "OrderWorkflow",
+  "entities": [
+    {
+      "entity": "Order.status",
+      "kind": "enum",
+      "enum": "Status",
+      "states": [
+        "Draft",
+        "Placed",
+        "Paid",
+        "Shipped",
+        "Cancelled"
+      ],
+      "applicability": "full",
+      "actions": [
+        {
+          "action": "place",
+          "verdict": "derivable",
+          "params": [
+            "o",
+            "q"
+          ],
+          "transitions": [
+            {
+              "entity": "orders[o]",
+              "from": [
+                "Draft"
+              ],
+              "to": "Placed",
+              "conditional": false
+            }
+          ],
+          "value_preconditions": [
+            "(q > 0)"
+          ]
+        },
+        {
+          "action": "pay",
+          "verdict": "derivable",
+          "params": [
+            "o"
+          ],
+          "transitions": [
+            {
+              "entity": "orders[o]",
+              "from": [
+                "Placed"
+              ],
+              "to": "Paid",
+              "conditional": false
+            }
+          ],
+          "value_preconditions": []
+        },
+        {
+          "action": "ship",
+          "verdict": "derivable",
+          "params": [
+            "o"
+          ],
+          "transitions": [
+            {
+              "entity": "orders[o]",
+              "from": [
+                "Paid"
+              ],
+              "to": "Shipped",
+              "conditional": false
+            }
+          ],
+          "value_preconditions": []
+        },
+        {
+          "action": "cancel",
+          "verdict": "derivable",
+          "params": [
+            "o"
+          ],
+          "transitions": [
+            {
+              "entity": "orders[o]",
+              "from": [
+                "Paid",
+                "Placed"
+              ],
+              "to": "Cancelled",
+              "conditional": false
+            }
+          ],
+          "value_preconditions": []
+        }
+      ],
+      "typescript": "// Typestate skeleton for `Order` from spec `OrderWorkflow`.\n// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\nexport type OrderState = \"Draft\" | \"Placed\" | \"Paid\" | \"Shipped\" | \"Cancelled\";\n\ndeclare const __state: unique symbol;\nexport interface Order<S extends OrderState> {\n  qty: number;\n  readonly [__state]: S;\n}\n\n  // runtime precondition (not in type): (q > 0)\nexport function place(self: Order<\"Draft\">, o: number, q: number): Order<\"Placed\">;\nexport function pay(self: Order<\"Placed\">, o: number): Order<\"Paid\">;\nexport function ship(self: Order<\"Paid\">, o: number): Order<\"Shipped\">;\nexport function cancel(self: Order<\"Paid\" | \"Placed\">, o: number): Order<\"Cancelled\">;"
+    }
+  ],
+  "summary": {
+    "entities": 1,
+    "full": 1,
+    "partial": 0,
+    "none": 0
+  }
+}

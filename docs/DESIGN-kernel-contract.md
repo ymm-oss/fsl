@@ -151,6 +151,9 @@ the golden failure vectors, and this guide. Target-specific generators remain
 supported, but their next versions
 should consume public Kernel JSON rather than internal model/AST shapes. Their
 migration/deprecation is intentionally tracked as separate follow-up issues:
-domain scaffolds [#213](https://github.com/ymm-oss/fsl/issues/213), general test
-generators [#214](https://github.com/ymm-oss/fsl/issues/214), and typestate
-TypeScript output [#215](https://github.com/ymm-oss/fsl/issues/215).
+domain scaffolds [#213](https://github.com/ymm-oss/fsl/issues/213) and general
+test generators [#214](https://github.com/ymm-oss/fsl/issues/214). Native Rust
+typestate analysis and TypeScript output completed this migration in
+[#215](https://github.com/ymm-oss/fsl/issues/215): the CLI now feeds public
+Kernel JSON v1 to the generator, rejects incompatible schema versions, and no
+longer uses the private-model adapter. The frozen Python reference is unchanged.

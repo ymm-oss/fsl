@@ -2057,4 +2057,8 @@ guard, and the precondition lives in an external structure — cannot be express
 in the type and remains as a runtime/verification obligation). An entity's
 `applicability` is `full` only when all transitions are derivable/branching.
 With `--ts`, it outputs a TypeScript scaffold for the derivable portion.
+The native Rust command performs this judgment from the versioned public Kernel
+JSON v1 contract, not private parser/model structures, and fails closed on an
+unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
+compatible with the frozen reference output.
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)

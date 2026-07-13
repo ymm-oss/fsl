@@ -13,6 +13,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Public-Kernel-backed native typestate generation (issue #215): Rust
+  `fslc typestate` now performs applicability analysis and TypeScript scaffold
+  generation from versioned public Kernel JSON v1 instead of private
+  `KernelModel` structures. The adapter validates schema identity/version,
+  restores declaration order from public spans, and preserves existing report
+  and `--ts` bytes with golden tests. The old private-model adapter is retired
+  from the native CLI path; the frozen Python reference remains unchanged.
 - Explicit-state exploration engine (issue #212): native Rust
   `fslc verify --engine explicit` enumerates the concrete state space on the
   Z3-free path (`fsl-runtime` BFS with `BTreeSet` dedup and parent-link

@@ -38,17 +38,27 @@ dropping a transition it could not understand** (it errs on the sound side). If 
 
 ## 5. Ripple / implementation
 
-- New `src/fslc/typestate.py`. Spec-dict traversal only, **verification engine and Z3
-  unmodified**. The enum form is judged by the pair `_enum_guard_states` / `_enum_assignments`
-  / `_enum_is_status_only`, the Option form by the `_opt_*` pair, and `_classify` produces the
-  three-way classification and per-entity applicability. Reserved-word collisions for TS
-  identifiers are avoided with `RESERVED_TS`.
-- cli.py: the `typestate` subcommand (`run_typestate`). Add `"typestate"` to the success set of
-  `exit_code`.
+- The frozen Python reference remains in `src/fslc/typestate.py`; it is not the
+  implementation path for native Rust releases.
+- The native Rust CLI parses and checks the source once, projects it through
+  `fsl_core::public_kernel_contract`, and passes only public Kernel JSON v1 to
+  `fsl_tools::analyze_typestate`. The adapter validates `$schema` and
+  `schema_version` before constructing the small typestate-specific view.
+- The old native adapter that accepted `KernelModel` directly is deprecated and
+  retired from the CLI path. Rust callers should export public Kernel JSON and
+  call the JSON adapter; private AST/model shapes are not a generator contract.
+- Public Kernel actions are normalized by name. Typestate restores declaration
+  order from public source spans so the report and `--ts` output remain byte
+  compatible with the established CLI contract.
+- The verification engine and solver are unmodified. Reserved-word collisions
+  for TypeScript identifiers remain escaped by the existing emitter.
 
 ## 6. Tests / related
 
-tests/test_typestate.py. Originates from a separate PR (#10 phantom-gen-experiment). In bridging
-formal specs to the implementation side's type system it is the same family as DESIGN-bridge
-(testgen / Monitor) — whereas bridge emits "behavioral conformance tests," typestate judges
-"the promotability of state premises into **types**."
+The frozen reference behavior remains covered by `tests/test_typestate.py`.
+Native coverage additionally checks the public-Kernel adapter, rejects unknown
+schema versions, and compares both JSON and `--ts` bytes with v1 golden files.
+In bridging formal specs to the implementation side's type system it is the same
+family as DESIGN-bridge (testgen / Monitor) — whereas bridge emits "behavioral
+conformance tests," typestate judges "the promotability of state premises into
+**types**."

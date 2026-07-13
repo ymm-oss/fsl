@@ -95,6 +95,75 @@ spec Binding {
 }
 
 #[test]
+fn typestate_consumes_the_versioned_public_kernel_contract() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let path = workspace.join("specs/order_workflow.fsl");
+    let (kernel, model) = load(&path);
+    let contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        path.to_str().expect("UTF-8 path"),
+        "kernel",
+    )
+    .expect("export public Kernel");
+
+    let report = fsl_tools::analyze_typestate(&contract).expect("analyze public Kernel");
+
+    assert_eq!(report["result"], "typestate");
+    assert_eq!(report["spec"], "OrderWorkflow");
+    assert_eq!(report["summary"]["full"], 1);
+    assert_eq!(report["entities"][0]["actions"][0]["action"], "place");
+    assert_eq!(report["entities"][0]["actions"][3]["action"], "cancel");
+}
+
+#[test]
+fn typestate_rejects_an_incompatible_public_kernel_version() {
+    let path = fixture("kernel_contract.fsl");
+    let (kernel, model) = load(&path);
+    let mut contract = fsl_core::public_kernel_contract(&kernel, &model, "fixture.fsl", "kernel")
+        .expect("export public Kernel");
+    contract["schema_version"] = Value::String("2.0.0".to_owned());
+
+    let error = fsl_tools::analyze_typestate(&contract)
+        .expect_err("unknown public Kernel versions must fail closed");
+
+    assert!(error.contains("unsupported public Kernel schema_version"));
+}
+
+#[test]
+fn native_cli_typestate_outputs_match_the_v1_golden_files() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let binary = env!("CARGO_BIN_EXE_fslc");
+
+    for (extra, expected) in [
+        (
+            Vec::<&str>::new(),
+            include_bytes!("fixtures/typestate_order.v1.json").as_slice(),
+        ),
+        (
+            vec!["--ts"],
+            include_bytes!("fixtures/typestate_order.v1.ts").as_slice(),
+        ),
+    ] {
+        let output = Command::new(binary)
+            .current_dir(workspace)
+            .args(["typestate", "specs/order_workflow.fsl"])
+            .args(extra)
+            .output()
+            .expect("run native typestate CLI");
+
+        assert!(output.status.success());
+        assert_eq!(output.stdout, expected);
+    }
+}
+
+#[test]
 fn conformance_distinguishes_nested_options_and_guard_partials() {
     let source = r"
 spec NestedOption {
