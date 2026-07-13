@@ -268,6 +268,12 @@ fn print_cli_metadata() -> bool {
                     == Some(segment)
             })
         }) else {
+            if node["commands"]
+                .as_array()
+                .is_some_and(|commands| !commands.is_empty())
+            {
+                return false;
+            }
             break;
         };
         node = next;
