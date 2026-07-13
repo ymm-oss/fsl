@@ -92,6 +92,96 @@ Conformance values preserve nested option identity with tagged
 `none` distinct from `some(none)` during reachable-state deduplication. Other
 scalar and collection values retain their ordinary JSON representation.
 
+## Conformance coverage matrix
+
+Status: implemented by issue #223. The fixed fixture manifest
+(`kernel_contract.fsl` at depth 2, `conformance_failures.fsl` at depth 1) is
+comprehensive by construction, not by inspection: an external implementer
+reading only the golden vectors has no mechanical way to tell which
+documented kernel semantic, outcome kind, value encoding, or structural
+feature the corpus actually demonstrates versus merely declares. The
+coverage matrix answers that question directly.
+
+`fslc_rust::coverage::coverage_matrix()` parses both fixtures, builds their
+public Kernel contracts and conformance vectors in memory, and structurally
+detects, for a fixed list of feature rows, whether each is:
+
+- **exercised** — a concrete vector or state snapshot in the generated
+  corpus demonstrates the feature (e.g. an `outcome.kind == "trans"` vector,
+  a state snapshot encoding a `Map` value, a literal negative-operand
+  division whose recorded result matches Euclidean, not truncating,
+  division); or
+- **declared** — the contract states the feature exists (a
+  `partial_operations` entry, `fair: true`, a `terminal` expression) but no
+  vector in the fixed fixture manifest can fire it. This level is reserved
+  for features that are structurally unobservable in a single bounded
+  transition vector — `terminal_deadlock` and `fairness_weak` are liveness/
+  whole-trace properties with no finite-vector witness — and for the six
+  `partial_op_*` rows, where a `partial_operations` declaration is the
+  required bar and a firing vector is additional, non-required evidence.
+
+No row is ever hardcoded to a fixed level: every detector inspects the
+generated JSON (expression trees, `outcome.kind`, state snapshots) directly.
+`coverage_matrix()` is itself the enforcement gate: if any feature row falls
+short of its required level, it returns `Err` naming every shortfall instead
+of producing a matrix that silently under-reports coverage. This is how
+issue #223's "warn about newly uncovered features" requirement is
+implemented — as a loud test failure, matching this repository's existing
+snapshot-test discipline, rather than a warning that can be ignored.
+
+The feature rows cover: the eight `semantics` keys in
+`kernel.v1.schema.json`; the seven `outcome.kind` values
+`fsl_runtime::Monitor` can emit; eight value-encoding rows (int range, bool,
+enum, struct, option, map, set, seq — a nested `Option<Option<_>>` tagged
+`some(none)` is additional, non-required evidence for the `value_option` row,
+since the fixed fixture manifest does not carry one; that shape is instead
+covered by the dedicated `conformance_distinguishes_nested_options_and_guard_partials`
+unit test); the six partial operations (`head`, `pop`, `at`, `index`, `divide`,
+`remainder`); and `quantification` (`forall`/`exists`), `param_finite_domains`,
+and `requirement_traceability`.
+
+Outputs:
+
+- `schemas/fslc/kernel/conformance-coverage.v1.schema.json` — the JSON Schema
+  for the matrix, following the same draft 2020-12 / closed-object
+  conventions as the Kernel and conformance schemas.
+- `rust/fslc/tests/fixtures/conformance_coverage.v1.json` — the golden
+  matrix.
+- `rust/fslc/tests/fixtures/conformance_coverage.v1.md` — the same data
+  rendered as a Markdown feature-by-fixture table
+  (`fslc_rust::coverage::coverage_matrix_markdown`), for humans skimming
+  which fixture backs which feature.
+
+Regenerate both after an intended change:
+
+```bash
+FSLC_COVERAGE_UPDATE=1 cargo test -p fslc-rust --test conformance_coverage
+```
+
+`rust/fslc/tests/conformance_coverage.rs` enforces the coupled-change
+discipline this matrix depends on:
+
+- every `kernel.v1.schema.json` `semantics` key has a matching feature row
+  (`semantics_schema_keys_are_all_registered_as_feature_rows`);
+- every `outcome.kind` the corpus emits — independently regenerated from the
+  fixtures, not read back from the matrix — is registered and exercised
+  (`every_outcome_kind_the_corpus_emits_is_registered_and_exercised`);
+- every feature row meets its required level
+  (`every_feature_row_meets_its_required_coverage_level`, via
+  `coverage_matrix()`'s own `Err`);
+- the golden JSON/Markdown match (`coverage_matrix_matches_the_v1_golden_json_and_markdown`);
+- the schema's `$id` matches `fslc_rust::coverage::COVERAGE_SCHEMA_ID`
+  (`published_coverage_schema_id_matches_the_rust_api_constant`).
+
+**Coupled-change rule**: adding a new `semantics` key, a new
+`fsl_runtime::Monitor` violation kind, a new partial operation, or a new
+value kind to the kernel/conformance contract requires adding a matching
+feature row (with a real, non-hardcoded detector) to
+`rust/fslc/src/coverage.rs`, adding fixture evidence for it if the required
+level is `exercised`, and regenerating the golden matrix above — in the same
+change, the same way a kernel-contract shape change requires regenerating
+`kernel_contract.v1.json`.
+
 Concrete/symbolic agreement is a separate mechanical gate:
 `fsl_verifier::transition_matches_step` pins a Monitor pre-state, action
 parameters, and successor into the symbolic transition relation. Tests require
@@ -118,7 +208,10 @@ dialect and requirement origin.
 Rust callers can use:
 
 - `fsl_core::public_kernel_contract(&KernelSpec, &KernelModel, path, dialect)`;
-- `fslc_rust::conformance_vectors(&KernelModel, depth)`; and
+- `fslc_rust::conformance_vectors(&KernelModel, depth)`;
+- `fslc_rust::coverage::coverage_matrix()` and `coverage_matrix_markdown(&Value)`
+  for the fixture corpus's feature coverage matrix (no CLI subcommand in v1;
+  see "Conformance coverage matrix" above); and
 - `fsl_verifier::transition_matches_step(...)` and
   `transition_outcome_matches_step(...)` for semantic agreement.
 
@@ -146,8 +239,9 @@ and `CHANGELOG.md`.
 ## Distribution and downstream migration
 
 Native releases attach a checksummed `fsl-kernel-contract-v1` bundle containing
-both schemas, the comprehensive input fixture and its golden public Kernel JSON,
-the golden failure vectors, and this guide. Target-specific generators remain
+all three schemas, the comprehensive input fixture and its golden public Kernel
+JSON, the golden failure vectors, the golden conformance coverage matrix
+(JSON and Markdown), and this guide. Target-specific generators remain
 supported, but their next versions
 should consume public Kernel JSON rather than internal model/AST shapes. Their
 migration/deprecation is intentionally tracked as separate follow-up issues:

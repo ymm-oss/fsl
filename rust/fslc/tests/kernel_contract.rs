@@ -238,6 +238,7 @@ fn conformance_vectors_cover_failures_without_state_changes() {
     assert!(kinds.contains("type_bound"));
     assert!(kinds.contains("invariant"));
     assert!(kinds.contains("ensures"));
+    assert!(kinds.contains("trans"));
     assert!(vectors.iter().all(|vector| {
         vector["outcome"]["kind"] == "ok"
             || vector["outcome"]["state_changed"] == Value::Bool(false)

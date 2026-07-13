@@ -8,6 +8,8 @@ use fsl_core::{
 };
 use serde_json::{Value, json};
 
+pub mod coverage;
+
 #[must_use]
 pub fn display_name(name: &str) -> String {
     name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")

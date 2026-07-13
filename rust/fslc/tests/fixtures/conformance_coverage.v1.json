@@ -1,0 +1,451 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/conformance-coverage.v1.schema.json",
+  "schema_version": "1.0.0",
+  "kernel_schema_version": "1.0.0",
+  "conformance_schema_version": "1.0.0",
+  "result": "conformance_coverage",
+  "fixtures": [
+    {
+      "file": "kernel_contract.fsl",
+      "depth": 2,
+      "states": 7,
+      "vectors": 21
+    },
+    {
+      "file": "conformance_failures.fsl",
+      "depth": 1,
+      "states": 3,
+      "vectors": 36
+    }
+  ],
+  "features": [
+    {
+      "key": "assignment_simultaneous",
+      "description": "An action commits >=2 state-field changes atomically in one fired transition (kernel semantics: assignment=simultaneous).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "ok vectors whose `changes` touch >=2 state fields in one atomic step",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "key": "reads_pre_state",
+      "description": "An action's update right-hand side self-references a variable it also writes, proving updates read the pre-state (kernel semantics: reads=pre_state).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "action `add` updates a field using its own pre-update value and fired an ok vector",
+          "count": 1
+        },
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "action `remove` updates a field using its own pre-update value and fired an ok vector",
+          "count": 1
+        },
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "action `flip` updates a field using its own pre-update value and fired an ok vector",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "key": "requires_false_not_enabled",
+      "description": "A false `requires` clause reports the action instance as not enabled instead of raising an error (kernel semantics: requires_false=not_enabled).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "vectors with outcome.kind == \"requires_failed\"",
+          "count": 11
+        },
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"requires_failed\"",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "failure_rollback",
+      "description": "A violated action leaves the committed state unchanged, retaining only `attempted_state` for diagnostics (kernel semantics: failure_state=rollback).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "violation vectors that roll back to the unchanged committed state",
+          "count": 11
+        },
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "violation vectors that roll back to the unchanged committed state",
+          "count": 30
+        }
+      ]
+    },
+    {
+      "key": "old_pre_state",
+      "description": "An `old(...)` expression is declared and reached by a real fired transition or the violation it causes (kernel semantics: old=pre_state).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "4 `old(...)` expression(s) reached by a checked transition or the violation it causes",
+          "count": 10
+        },
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "1 `old(...)` expression(s) reached by a checked transition or the violation it causes",
+          "count": 18
+        }
+      ]
+    },
+    {
+      "key": "integer_division_euclidean",
+      "description": "A literal integer division with a negative operand fires a successful transition whose recorded value matches Euclidean division, not truncating division (kernel semantics: integer_division=euclidean).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "-7 / 2 == -4 (Euclidean; truncating division would give -3)",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "key": "terminal_deadlock",
+      "description": "The contract declares a `terminal` expression excluding matching states from deadlock reporting (kernel semantics: terminal_deadlock=terminal_states_excluded). Reaching a state with zero enabled actions at the declared terminal condition needs a BFS depth beyond the coverage corpus's chosen fixture depths, so only declared (not fired) evidence is required.",
+      "level": "declared",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "contract declares a `terminal` expression excluding matching states from deadlock reporting",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "key": "fairness_weak",
+      "description": "The contract marks at least one action `fair` (kernel semantics: fairness=weak). Weak fairness is a liveness property over infinite/untaken traces with no finite-vector witness, so only declared evidence is required.",
+      "level": "declared",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "1 action(s) declared `fair`",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "key": "outcome_ok",
+      "description": "A conformance vector with outcome.kind == \"ok\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"ok\"",
+          "count": 6
+        },
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "vectors with outcome.kind == \"ok\"",
+          "count": 10
+        }
+      ]
+    },
+    {
+      "key": "outcome_requires_failed",
+      "description": "A conformance vector with outcome.kind == \"requires_failed\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"requires_failed\"",
+          "count": 3
+        },
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "vectors with outcome.kind == \"requires_failed\"",
+          "count": 11
+        }
+      ]
+    },
+    {
+      "key": "outcome_partial_op",
+      "description": "A conformance vector with outcome.kind == \"partial_op\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"partial_op\"",
+          "count": 15
+        }
+      ]
+    },
+    {
+      "key": "outcome_type_bound",
+      "description": "A conformance vector with outcome.kind == \"type_bound\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"type_bound\"",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "outcome_invariant",
+      "description": "A conformance vector with outcome.kind == \"invariant\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"invariant\"",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "outcome_trans",
+      "description": "A conformance vector with outcome.kind == \"trans\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"trans\"",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "outcome_ensures",
+      "description": "A conformance vector with outcome.kind == \"ensures\" is generated by the fixture corpus.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "vectors with outcome.kind == \"ensures\"",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "value_int_range",
+      "description": "A domain/range-typed state field's concrete value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "state snapshots encoding a `value_int_range` value",
+          "count": 3
+        },
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_int_range` value",
+          "count": 30
+        }
+      ]
+    },
+    {
+      "key": "value_bool",
+      "description": "A `Bool`-typed state field's concrete value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "state snapshots encoding a `value_bool` value",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "value_enum",
+      "description": "An enum-typed value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_enum` value",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "key": "value_struct",
+      "description": "A struct-typed value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_struct` value",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "key": "value_option",
+      "description": "An `Option` value appears tagged `{\"kind\":\"none\"}`/`{\"kind\":\"some\",\"value\":...}` in a generated state snapshot. A nested `Option<Option<_>>` tagged `some(none)` is additional, non-required evidence (see also the dedicated `conformance_distinguishes_nested_options_and_guard_partials` unit test, which is not part of the fixed fixture manifest this matrix scans).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_option` value",
+          "count": 14
+        }
+      ]
+    },
+    {
+      "key": "value_map",
+      "description": "A `Map` value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_map` value",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "key": "value_set",
+      "description": "A `Set` value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_set` value",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "key": "value_seq",
+      "description": "A `Seq` value appears in a generated state snapshot.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "state snapshots encoding a `value_seq` value",
+          "count": 3
+        },
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "state snapshots encoding a `value_seq` value",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "key": "partial_op_head",
+      "description": "The contract declares a `partial_operations` entry for `head` (a firing outcome.kind == \"partial_op\" vector unambiguously attributable to it is additional, non-required evidence).",
+      "level": "declared",
+      "evidence": []
+    },
+    {
+      "key": "partial_op_pop",
+      "description": "The contract declares a `partial_operations` entry for `pop` (a firing outcome.kind == \"partial_op\" vector unambiguously attributable to it is additional, non-required evidence).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "action `partial` fired outcome.kind == \"partial_op\" (declares only `pop`)",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "partial_op_at",
+      "description": "The contract declares a `partial_operations` entry for `at` (a firing outcome.kind == \"partial_op\" vector unambiguously attributable to it is additional, non-required evidence).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "action `at_out_of_range` fired outcome.kind == \"partial_op\" (declares only `at`)",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "partial_op_index",
+      "description": "The contract declares a `partial_operations` entry for `index` (a firing outcome.kind == \"partial_op\" vector unambiguously attributable to it is additional, non-required evidence).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "action `index_out_of_range` fired outcome.kind == \"partial_op\" (declares only `index`)",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "partial_op_divide",
+      "description": "The contract declares a `partial_operations` entry for `divide` (a firing outcome.kind == \"partial_op\" vector unambiguously attributable to it is additional, non-required evidence).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "action `divide_zero` fired outcome.kind == \"partial_op\" (declares only `divide`)",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "partial_op_remainder",
+      "description": "The contract declares a `partial_operations` entry for `remainder` (a firing outcome.kind == \"partial_op\" vector unambiguously attributable to it is additional, non-required evidence).",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "action `remainder_zero` fired outcome.kind == \"partial_op\" (declares only `remainder`)",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "key": "quantification",
+      "description": "A `forall`/`exists` quantified expression is declared and evaluated across a real fired transition.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "conformance_failures.fsl",
+          "detail": "1 forall/exists expression(s) evaluated across 6 ok vector(s)",
+          "count": 6
+        }
+      ]
+    },
+    {
+      "key": "param_finite_domains",
+      "description": "A typed/range action parameter's finite domain is declared and enumerated across >=2 distinct fired parameter bindings.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "action `add` fired 2 distinct typed/range parameter bindings",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "key": "requirement_traceability",
+      "description": "An action retains its requirement ID in the contract and fires at least one conformance vector.",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "action `add` retains requirement id `REQ-208-ADD` and fired 14 vector(s)",
+          "count": 14
+        },
+        {
+          "fixture": "kernel_contract.fsl",
+          "detail": "action `remove` retains requirement id `REQ-208-REMOVE` and fired 7 vector(s)",
+          "count": 7
+        }
+      ]
+    }
+  ]
+}
