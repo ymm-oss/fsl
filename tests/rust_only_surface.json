@@ -316,26 +316,6 @@
   "action_overrides": [
     {
       "path": [
-        "refine"
-      ],
-      "index": 4,
-      "python": {
-        "dest": "rest",
-        "required": true,
-        "positional": true,
-        "nargs": "*",
-        "action": "store"
-      },
-      "rust": {
-        "dest": "rest",
-        "required": false,
-        "positional": true,
-        "nargs": "*",
-        "action": "store"
-      }
-    },
-    {
-      "path": [
         "verify"
       ],
       "index": 3,

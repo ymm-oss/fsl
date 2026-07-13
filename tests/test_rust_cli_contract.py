@@ -38,6 +38,16 @@ def _help_sha256(node: dict) -> str:
     return hashlib.sha256(node["help"].encode()).hexdigest()
 
 
+def _normalize_python_contract(contract: dict) -> dict:
+    """Remove argparse-version artifacts that do not change CLI semantics."""
+    normalized = copy.deepcopy(contract)
+    for node in _walk(normalized["root"]):
+        for action in node["actions"]:
+            if action.get("positional") and action.get("nargs") == "*":
+                action["required"] = False
+    return normalized
+
+
 def _rust_only_node(path: tuple[str, ...], nodes: dict[tuple[str, ...], dict]) -> dict:
     node = nodes[path]
     parent = nodes[path[:-1]]
@@ -57,6 +67,7 @@ def _rust_only_node(path: tuple[str, ...], nodes: dict[tuple[str, ...], dict]) -
 
 def _surface_delta(python_contract: dict, rust_contract: dict) -> dict:
     """Return the complete structural surface added or changed by Rust."""
+    python_contract = _normalize_python_contract(python_contract)
     assert set(rust_contract) == set(python_contract) == {"schema", "root"}
     assert rust_contract["schema"] == python_contract["schema"]
     python_nodes = _nodes(python_contract)
@@ -196,6 +207,18 @@ def test_unlisted_help_drift_is_rejected(rust_contract):
 
     with pytest.raises(AssertionError):
         _assert_rust_surface_is_allowed(export_contract(), mutant)
+
+
+def test_argparse_star_positional_required_artifact_is_normalized(rust_contract):
+    for required in (False, True):
+        python_contract = export_contract()
+        rest = next(
+            action
+            for action in _nodes(python_contract)[("refine",)]["actions"]
+            if action["dest"] == "rest"
+        )
+        rest["required"] = required
+        _assert_rust_surface_is_allowed(python_contract, rust_contract)
 
 
 def test_duplicate_rust_only_command_path_is_rejected(rust_contract):
