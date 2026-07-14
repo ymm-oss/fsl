@@ -38,6 +38,7 @@ impl FileResolver for FsResolver {
             message: error.to_string(),
             line: 1,
             column: 1,
+            origin: None,
         })
     }
 }
@@ -65,8 +66,27 @@ pub fn parse_kernel_source(
             message: "top-level document has not reached the kernel lowering gate".to_owned(),
             line: 1,
             column: 1,
+            origin: None,
         }),
     }
+}
+
+/// Parse and lower source while attaching the caller-known root file identity
+/// to internal origins and diagnostics.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] with the same language contract as
+/// [`parse_kernel_source`], enriched with the supplied source identity.
+pub fn parse_kernel_source_with_file(
+    source: &str,
+    resolver: &dyn FileResolver,
+    source_file: impl AsRef<str>,
+) -> Result<KernelSpec, CoreError> {
+    let source_file = source_file.as_ref();
+    parse_kernel_source(source, resolver)
+        .map(|kernel| kernel.with_source_file(source_file))
+        .map_err(|error| error.with_source_file(source_file))
 }
 
 #[derive(Clone)]
@@ -230,6 +250,7 @@ pub fn lower_compose(
             meta: None,
             items: static_items,
         },
+        origins: crate::OriginRegistry::default(),
     })
 }
 
@@ -242,6 +263,7 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
         message: message.into(),
         line: span.start.line,
         column: span.start.column,
+        origin: None,
     }
 }
 
@@ -861,6 +883,7 @@ fn sync_action(
             message: format!("unknown alias '{}'", reference.alias),
             line: action.span.start.line,
             column: action.span.start.column,
+            origin: None,
         })?;
         let source = component
             .spec
@@ -872,6 +895,7 @@ fn sync_action(
                 message: format!("unknown action '{}.{}'", reference.alias, reference.action),
                 line: action.span.start.line,
                 column: action.span.start.column,
+                origin: None,
             })?;
         let SpecItem::Action {
             params: source_params,
@@ -954,6 +978,7 @@ fn resolve_alias_qualified_name(
                 message: format!("unknown alias '{alias}'"),
                 line: 1,
                 column: 1,
+                origin: None,
             });
         }
         Ok(QualifiedName {

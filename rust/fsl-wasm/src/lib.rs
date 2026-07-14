@@ -54,6 +54,7 @@ impl FileResolver for MemoryResolver {
             message: format!("file not found: {path}"),
             line: 1,
             column: 1,
+            origin: None,
         })
     }
 }

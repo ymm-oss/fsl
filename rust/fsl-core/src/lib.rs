@@ -23,11 +23,14 @@ mod dialect;
 mod domain;
 mod domain_lowering;
 mod model;
+mod origin;
 mod public_kernel;
 mod refinement;
 mod trace;
 
-pub use compose::{FileResolver, FsResolver, lower_compose, parse_kernel_source};
+pub use compose::{
+    FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
+};
 pub use db::db_kernel_source;
 pub use dialect::{
     GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,
@@ -39,6 +42,11 @@ pub use domain::domain_kernel_source;
 pub use model::{
     ActionDef, ActionGuard, KernelModel, LeadsToDef, ModelError, ParamDef, PropertyDef, TypeDef,
     TypeRef, Value as FslValue, build_model,
+};
+pub use origin::{
+    LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET, TERMINAL_TARGET,
+    TraceabilityRegistry, action_guard_target, action_statement_target, action_target,
+    init_statement_target, property_target, state_target, type_target,
 };
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, PublicKernelError, public_kernel_contract,
@@ -54,15 +62,39 @@ pub struct CoreError {
     pub message: String,
     pub line: u32,
     pub column: u32,
+    pub origin: Option<Box<OriginChain>>,
+}
+
+impl CoreError {
+    #[must_use]
+    pub fn with_source_file(mut self, source_file: impl AsRef<str>) -> Self {
+        if let Some(origin) = &mut self.origin {
+            origin.set_source_file(source_file.as_ref());
+        }
+        self
+    }
 }
 
 impl fmt::Display for CoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} at {}:{}",
-            self.message, self.line, self.column
-        )
+        if let Some(source_file) = self
+            .origin
+            .as_ref()
+            .and_then(|origin| origin.primary.as_ref())
+            .and_then(|site| site.source_file.as_deref())
+        {
+            write!(
+                formatter,
+                "{} at {}:{}:{}",
+                self.message, source_file, self.line, self.column
+            )
+        } else {
+            write!(
+                formatter,
+                "{} at {}:{}",
+                self.message, self.line, self.column
+            )
+        }
     }
 }
 
@@ -74,6 +106,22 @@ impl From<ParseError> for CoreError {
             message: error.message,
             line: error.span.start.line,
             column: error.span.start.column,
+            origin: Some(Box::new(OriginChain {
+                id: OriginId(format!(
+                    "parse:{}:{}",
+                    error.span.start.offset, error.span.end.offset
+                )),
+                dialect: "unknown".to_owned(),
+                primary: Some(OriginSite {
+                    source_file: None,
+                    span: Some(error.span),
+                    dialect: "unknown".to_owned(),
+                    declaration_path: Vec::new(),
+                }),
+                secondary: Vec::new(),
+                lowering_steps: Vec::new(),
+                generated: false,
+            })),
         }
     }
 }
@@ -81,6 +129,7 @@ impl From<ParseError> for CoreError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KernelSpec {
     spec: SurfaceSpec,
+    origins: OriginRegistry,
 }
 
 /// Build a checked kernel model from an already parsed surface specification.
@@ -92,7 +141,10 @@ pub struct KernelSpec {
 ///
 /// Returns [`ModelError`] when the mutated surface is not semantically valid.
 pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError> {
-    build_model(KernelSpec { spec })
+    build_model(KernelSpec {
+        spec,
+        origins: OriginRegistry::default(),
+    })
 }
 
 impl KernelSpec {
@@ -109,6 +161,17 @@ impl KernelSpec {
     #[must_use]
     pub fn into_syntax(self) -> SurfaceSpec {
         self.spec
+    }
+
+    #[must_use]
+    pub fn origins(&self) -> &OriginRegistry {
+        &self.origins
+    }
+
+    #[must_use]
+    pub fn with_source_file(mut self, source_file: impl AsRef<str>) -> Self {
+        self.origins.set_source_file(source_file.as_ref());
+        self
     }
 }
 
@@ -128,6 +191,7 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
             message: "expected direct kernel spec".to_owned(),
             line: 1,
             column: 1,
+            origin: None,
         });
     };
     lower_direct_spec(spec)
@@ -158,6 +222,7 @@ fn validate_direct_scope_overrides(
         message,
         line: 1,
         column: 1,
+        origin: None,
     };
     if (!instances.is_empty() || !values.is_empty()) && entities.is_empty() && numbers.is_empty() {
         return Err(error(
@@ -252,6 +317,7 @@ pub fn parse_kernel_source_with_bounds(
             message: "scope overrides only support spec, business, or requirements".to_owned(),
             line: 1,
             column: 1,
+            origin: None,
         }),
     }
 }
@@ -262,9 +328,16 @@ pub fn parse_kernel_source_with_bounds(
 ///
 /// Returns [`CoreError`] when named predicate validation or expansion fails.
 pub fn lower_direct_spec(spec: SurfaceSpec) -> Result<KernelSpec, CoreError> {
+    lower_direct_spec_with_origins(spec, OriginRegistry::default())
+}
+
+fn lower_direct_spec_with_origins(
+    spec: SurfaceSpec,
+    origins: OriginRegistry,
+) -> Result<KernelSpec, CoreError> {
     let spec = PredicateExpander::new(&spec)?.expand(spec)?;
     let spec = expand_spec_domains(spec)?;
-    Ok(KernelSpec { spec })
+    Ok(KernelSpec { spec, origins })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -448,6 +521,7 @@ impl PredicateExpander {
                 ),
                 line: definition.line,
                 column: definition.column,
+                origin: None,
             });
         }
         stack.push(name.to_owned());
@@ -991,6 +1065,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         message,
         line: span.start.line,
         column: span.start.column,
+        origin: None,
     }
 }
 

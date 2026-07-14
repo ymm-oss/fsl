@@ -121,6 +121,15 @@ debug/interop view, but that text is not semantic input. This separation also
 lets public Kernel diagnostics and origins use domain declaration/expression
 coordinates rather than generated-source coordinates.
 
+The Rust path records those coordinates in the non-serialized origin graph described
+by [`DESIGN-origin-chain.md`](DESIGN-origin-chain.md). Checked state, action,
+guard, statement, and property targets retain source identity, full span,
+declaration path, and lowering steps. `can()` and membership expansions share
+the source expression's stable identity across generated targets; merged
+actions retain the decision as primary and the command as secondary. Synthetic
+event flags and terminal nodes are explicitly generated-only. Requirement tags
+remain a separate traceability relation.
+
 ## Effects
 
 An async `effect` declares the request event, completion events, correlation id,

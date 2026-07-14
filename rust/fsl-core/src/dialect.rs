@@ -487,6 +487,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         message,
         line: span.start.line,
         column: span.start.column,
+        origin: None,
     }
 }
 
@@ -1341,7 +1342,8 @@ pub fn lower_db(system: &fsl_syntax::DbSystem) -> Result<KernelSpec, CoreError> 
 ///
 /// Returns [`CoreError`] if the generated kernel catalog is invalid.
 pub fn lower_domain(domain: &fsl_syntax::DomainSpec) -> Result<KernelSpec, CoreError> {
-    lower_direct_spec(crate::domain_lowering::lower_domain_surface(domain)?)
+    let (surface, origins) = crate::domain_lowering::lower_domain_surface(domain)?;
+    crate::lower_direct_spec_with_origins(surface, origins)
 }
 
 /// Lower an AI hard-contract document to its executable catalog kernel.

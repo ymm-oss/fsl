@@ -1,0 +1,17 @@
+domain Orders { // SPDX-License-Identifier: Apache-2.0
+  type Status = Pending | Approved
+  aggregate Order {
+    state { status: Status = Pending; }
+
+    // 多言語のコメント and a blank line exercise UTF-8 source tracking.
+    command Approve {}
+    event Approved {}
+    decide Approve {
+      requires status == Pending
+      emits Approved
+    }
+    evolve Approved { status = Approved }
+
+    invariant mustBeApproved { status == Approved }
+  }
+}
