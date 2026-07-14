@@ -23,6 +23,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- Windows native CI now keeps the conformance coverage and approval Markdown
+  snapshots on LF and canonicalizes both the specification and repository-root
+  paths before binding approval records to Git, avoiding false snapshot drift
+  and false "outside its Git repository" errors without weakening exact checks.
 - Rust CLI contract validation (issue #220) now preserves exact compatibility
   with the frozen Python surface while checking native-only commands and
   options against an explicit structural allowlist. CI runs the focused

@@ -236,7 +236,9 @@ pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     let root = PathBuf::from(git_output(
         absolute.parent().unwrap_or_else(|| Path::new(".")),
         &["rev-parse", "--show-toplevel"],
-    )?);
+    )?)
+    .canonicalize()
+    .map_err(|error| error.to_string())?;
     let relative = absolute
         .strip_prefix(&root)
         .map_err(|_| "spec is outside its Git repository".to_owned())?
