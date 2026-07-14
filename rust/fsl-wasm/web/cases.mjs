@@ -96,6 +96,35 @@ verify {
 }`,
   },
   {
+    // Same spec as "business-leadsto" but unrolled past the deadlock step:
+    // the leadsTo-via-deadlock-stagnation violation must still be reported,
+    // not only when --depth lands exactly on the stalling step (issue #260).
+    id: "business-leadsto-beyond-horizon",
+    expected: "violated",
+    expect: { kind: "leadsTo", trace: true },
+    options: { depth: 4, deadlock: "ignore" },
+    source: `business BrowserLeak {
+  actor System
+  entity Job
+
+  process Job {
+    stages Idle, Pending, Done, Dropped
+    initial Idle
+
+    transition submit Idle    -> Pending by System
+    transition finish Pending -> Done    by System
+    transition drop   Pending -> Dropped by System
+  }
+
+  policy POL-DONE "every submitted job must eventually complete"
+    every Job in Pending must eventually be Done
+}
+
+verify {
+  instances Job = 1
+}`,
+  },
+  {
     // A `must eventually` obligation whose only path deadlocks: both
     // `deadlock_step` and `leadsto_violation` are set on the same BmcResult,
     // and with --deadlock error the Worker must report "deadlock" (matching

@@ -606,7 +606,7 @@ variable.
 | action coverage | Each action is enabled at least once within depth K | diagnosis of the blocking requires in `action_coverage` |
 | Deadlock | Reaching a state where all actions become disabled | warning (`violated` with `--deadlock error`) |
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |
-| leadsTo | A P ~> Q violation via a lasso up to depth K or via deadlock stagnation | `violated` / `leadsTo` / `bindings` + trace |
+| leadsTo | A P ~> Q violation via a lasso up to depth K or via deadlock stagnation (detected as soon as `--depth` reaches the stalling step, and at every larger depth after that, not only when it lands exactly on that step) | `violated` / `leadsTo` / `bindings` + trace |
 
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.

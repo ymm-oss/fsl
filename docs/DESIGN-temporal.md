@@ -278,15 +278,22 @@ failure is a transition-progress failure.
   - `_logical_eq(spec, s1, s2)` — a helper that returns the logical equality of
     §2.3 (built using the phys_vars metadata — Option's present/value, Seq's
     data/len).
-  - The leadsTo check, after `_bmc_explore` (like verify's reachable handling),
-    runs on the shared solver per leadsTo × binding with push/pop:
-    `s.add(Or over (i,j,p) of [loop ∧ P ∧ ¬Q sequence ∧ fairness_ok])` → if sat,
-    identify (i, j, p) from the model (attach a selector Bool to each (i,j,p)
-    candidate and read it from the model) and build the trace.
+  - The lasso/fairness leadsTo check, after `_bmc_explore` (like verify's
+    reachable handling), runs on the shared solver per leadsTo × binding with
+    push/pop: `s.add(Or over (i,j,p) of [loop ∧ P ∧ ¬Q sequence ∧
+    fairness_ok])` → if sat, identify (i, j, p) from the model (attach a
+    selector Bool to each (i,j,p) candidate and read it from the model) and
+    build the trace.
   - enabled_a reuses the same `_eval_requires` conjunction as the coverage check
     (expr_cache works).
-  - The deadlock stall (§2.4) reuses the enabled expression of the existing
-    deadlock check.
+  - The deadlock stall (§2.4) is checked *inside* `_bmc_explore`, per step,
+    before that step's forward-transition assertion is added to the shared
+    solver (`_check_leadsto_stutter_at_step`, alongside the existing deadlock
+    check) — not after the loop like the lasso check above. This ordering is
+    load-bearing: the per-step BMC unrolling permanently asserts "some action
+    fires" for every non-final step, so a deadlock-stall probe issued only
+    after the full trace is built can never be satisfiable below the depth
+    horizon. Reuses the enabled expression of the existing deadlock check.
   - Symmetry reduction (§2.5.1) adds canonical row-order constraints only inside
     the lasso/stall push/pop queries. It is not asserted on the shared path
     solver, so safety/reachability behavior and finite transition construction

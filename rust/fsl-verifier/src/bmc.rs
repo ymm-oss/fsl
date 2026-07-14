@@ -223,6 +223,13 @@ async fn verify_bounded_config<S: SmtSolver>(
             }
         }
 
+        if result.leadsto_violation.is_none() && !model.leadstos.is_empty() {
+            result.leadsto_violation = check_leadsto_stagnation(
+                solver, model, &states, &choices, &instances, step, &enabled,
+            )
+            .await?;
+        }
+
         if step == depth || instances.is_empty() {
             continue;
         }
@@ -238,8 +245,10 @@ async fn verify_bounded_config<S: SmtSolver>(
         states.push(next);
         choices.push(choice);
     }
-    result.leadsto_violation =
-        check_leadstos(solver, model, &states, &choices, &instances, depth).await?;
+    if result.leadsto_violation.is_none() {
+        result.leadsto_violation =
+            check_leadstos(solver, model, &states, &choices, &instances, depth).await?;
+    }
     Ok(result)
 }
 
@@ -777,6 +786,82 @@ async fn leadsto_violation<S: SmtSolver>(
     })
 }
 
+/// Check whether `states[step]` is a deadlock with a pending leadsTo obligation.
+///
+/// Must run before the BMC unrolling loop asserts a mandatory forward
+/// transition out of `states[step]` (see `verify_bounded_config`); once that
+/// assertion is committed, a deadlock at `step` becomes globally unsatisfiable
+/// for any later query in the same solver session, regardless of whether the
+/// deadlock is actually reachable. Running this inline, per step, mirrors the
+/// timing of the general deadlock probe in the same loop and the frozen
+/// Python reference's `_check_leadsto_stutter_at_step`.
+#[allow(clippy::too_many_arguments)]
+async fn check_leadsto_stagnation<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+    enabled: &[S::Term],
+) -> Result<Option<BmcViolation>, VerifyError> {
+    let deadlock = solver.not(&solver.or(enabled)?)?;
+    for property in &model.leadstos {
+        for binding in leadsto_bindings(solver, model, property)? {
+            for pending in 0..=step {
+                let mut terms = vec![
+                    deadlock.clone(),
+                    leadsto_condition(
+                        solver,
+                        model,
+                        &property.before,
+                        &states[pending],
+                        &binding.symbolic,
+                    )?,
+                ];
+                for state in states.iter().take(step + 1).skip(pending) {
+                    terms.push(solver.not(&leadsto_condition(
+                        solver,
+                        model,
+                        &property.after,
+                        state,
+                        &binding.symbolic,
+                    )?)?);
+                }
+                let condition = solver.and(&terms)?;
+                if probe(solver, &condition).await? {
+                    return Ok(Some(
+                        leadsto_violation(
+                            solver,
+                            model,
+                            property,
+                            &binding,
+                            &condition,
+                            states,
+                            choices,
+                            instances,
+                            step,
+                            LeadsToViolation {
+                                bindings: BTreeMap::new(),
+                                pending_since: pending,
+                                loop_start: None,
+                                deadline: None,
+                                within: property.within,
+                                stutter: true,
+                                hint: format!(
+                                    "P held at step {pending} but execution deadlocks at step {step} without Q"
+                                ),
+                            },
+                        )
+                        .await?,
+                    ));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[allow(clippy::too_many_lines)]
 async fn check_leadstos<S: SmtSolver>(
     solver: &mut S,
@@ -786,64 +871,6 @@ async fn check_leadstos<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     depth: usize,
 ) -> Result<Option<BmcViolation>, VerifyError> {
-    for step in 0..=depth {
-        let enabled = enabled_terms(solver, model, instances, &states[step])?;
-        let deadlock = solver.not(&solver.or(&enabled)?)?;
-        for property in &model.leadstos {
-            for binding in leadsto_bindings(solver, model, property)? {
-                for pending in 0..=step {
-                    let mut terms = vec![
-                        deadlock.clone(),
-                        leadsto_condition(
-                            solver,
-                            model,
-                            &property.before,
-                            &states[pending],
-                            &binding.symbolic,
-                        )?,
-                    ];
-                    for state in states.iter().take(step + 1).skip(pending) {
-                        terms.push(solver.not(&leadsto_condition(
-                            solver,
-                            model,
-                            &property.after,
-                            state,
-                            &binding.symbolic,
-                        )?)?);
-                    }
-                    let condition = solver.and(&terms)?;
-                    if probe(solver, &condition).await? {
-                        return Ok(Some(
-                            leadsto_violation(
-                                solver,
-                                model,
-                                property,
-                                &binding,
-                                &condition,
-                                states,
-                                choices,
-                                instances,
-                                step,
-                                LeadsToViolation {
-                                    bindings: BTreeMap::new(),
-                                    pending_since: pending,
-                                    loop_start: None,
-                                    deadline: None,
-                                    within: property.within,
-                                    stutter: true,
-                                    hint: format!(
-                                        "P held at step {pending} but execution deadlocks at step {step} without Q"
-                                    ),
-                                },
-                            )
-                            .await?,
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
     for property in &model.leadstos {
         for binding in leadsto_bindings(solver, model, property)? {
             if let Some(within) = property.within {

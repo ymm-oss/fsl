@@ -172,9 +172,9 @@ fn render_verify(model: &KernelModel, options: &Options, result: fsl_verifier::B
         return Value::Object(output);
     }
     // Native CLI (rust/fslc/src/verification.rs render_bmc_result) checks
-    // deadlock-as-error before leadsto_violation: both can legitimately be
-    // `Some` at once (deadlock_step is set inside the per-step loop,
-    // leadsto_violation only after it ends), so this order is the contract.
+    // deadlock-as-error before leadsto_violation: both are populated inside
+    // the same per-step loop and can legitimately be `Some` at once, so this
+    // order is the contract.
     if options.deadlock == "error"
         && let Some(step) = result.deadlock_step
     {
