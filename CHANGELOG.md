@@ -52,6 +52,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Opt-in Public Kernel v2 publishes the internal domain origin chain as a
+  deterministic provenance graph with portable typed source identities,
+  UTF-8 byte and Unicode-scalar coordinates, primary/secondary origins,
+  lowering steps, generated-only/unknown assurance, exact-revision source-node
+  IDs, target bindings, reverse lookup, and machine-readable completeness.
+  Rust and CLI callers explicitly negotiate `PublicKernelVersion::V2` /
+  `--kernel-version 2`; unsupported majors fail closed. Add matching v2 Kernel,
+  conformance, and provenance-coverage schemas/goldens plus an independently
+  checksummed v2 release bundle. Public Kernel v1, its goldens, default CLI,
+  and compose rejection remain unchanged (issue #256).
 - Kernel state fields now accept deterministic inline initializers and normalize
   them to the existing `init` assignment semantics across Monitor, explicit
   exploration, BMC, induction, and Public Kernel v1. State-reading/order-dependent

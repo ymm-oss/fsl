@@ -50,7 +50,9 @@ pub use origin::{
     init_statement_target, property_target, state_target, type_target,
 };
 pub use public_kernel::{
-    KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, PublicKernelError, public_kernel_contract,
+    KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,
+    KERNEL_V2_SCHEMA_ID, KERNEL_V2_SCHEMA_VERSION, PublicKernelError, PublicKernelVersion,
+    public_kernel_contract, public_kernel_contract_for_version,
 };
 pub use refinement::{
     ActionMap, ActionMapTarget, ImplementsContract, ProgressMap, Refinement, RefinementError,

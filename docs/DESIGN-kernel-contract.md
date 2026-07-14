@@ -225,6 +225,8 @@ dialect and requirement origin.
 Rust callers can use:
 
 - `fsl_core::public_kernel_contract(&KernelSpec, &KernelModel, path, dialect)`;
+- `fsl_core::public_kernel_contract_for_version(..., PublicKernelVersion)` for
+  explicit v1/v2 negotiation (the legacy entrypoint remains v1);
 - `fslc_rust::conformance_vectors(&KernelModel, depth)`;
 - `fslc_rust::coverage::coverage_matrix()` and `coverage_matrix_markdown(&Value)`
   for the fixture corpus's feature coverage matrix (no CLI subcommand in v1;
@@ -253,11 +255,21 @@ they exercise. A schema change requires coupled updates to both schema files,
 golden vectors, Rust tests, this document, `docs/LANGUAGE.md`, the shared skill,
 and `CHANGELOG.md`.
 
+Public Kernel v2 is the separately negotiated provenance publication contract
+defined by [`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md). Use
+`fslc kernel SPEC --kernel-version 2`; omission remains v1. Its companion
+conformance and coverage schemas also report `2.0.0`. A v2 schema does not imply
+complete provenance: `provenance.completeness` and assurance counts expose gaps.
+Both majors continue to reject compose until component file identities are
+truthfully retained.
+
 ## Distribution and downstream migration
 
-Native releases attach a checksummed `fsl-kernel-contract-v1` bundle containing
-all three schemas, the comprehensive input fixture and its golden public Kernel
-JSON, the golden failure vectors, the golden conformance coverage matrix
+Native releases attach independently checksummed `fsl-kernel-contract-v1` and
+`fsl-kernel-contract-v2` bundles. The v1 bundle contains only v1 artifacts and
+continues to contain all three v1 schemas, the comprehensive input fixture and
+its golden public Kernel JSON, the golden failure vectors, the golden
+conformance coverage matrix
 (JSON and Markdown), and this guide. Target-specific generators remain
 supported, but their next versions
 should consume public Kernel JSON rather than internal model/AST shapes. Their

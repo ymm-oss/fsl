@@ -1,0 +1,125 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/conformance-coverage.v2.schema.json",
+  "schema_version": "2.0.0",
+  "kernel_schema_version": "2.0.0",
+  "conformance_schema_version": "2.0.0",
+  "result": "conformance_coverage",
+  "fixtures": [
+    {
+      "file": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+      "depth": 0,
+      "states": 1,
+      "vectors": 4
+    }
+  ],
+  "features": [
+    {
+      "key": "portable_source_identity",
+      "description": "source sites use typed repository-relative identities",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "origin.primary.source.kind == repository_path",
+          "count": 127
+        }
+      ]
+    },
+    {
+      "key": "utf8_byte_and_unicode_coordinates",
+      "description": "source sites publish UTF-8 bytes and Unicode line/column coordinates",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "primary span has byte and line coordinates",
+          "count": 127
+        }
+      ]
+    },
+    {
+      "key": "one_to_many_reverse_lookup",
+      "description": "one source node maps to multiple Kernel targets",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "reverse-index entry has multiple targets",
+          "count": 17
+        }
+      ]
+    },
+    {
+      "key": "many_to_one_secondary_origins",
+      "description": "one Kernel target retains secondary source sites",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "origin record has secondary sites",
+          "count": 62
+        }
+      ]
+    },
+    {
+      "key": "generated_from_source",
+      "description": "generated Kernel targets retain source-backed assurance",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "assurance == generated_from_source",
+          "count": 64
+        }
+      ]
+    },
+    {
+      "key": "generated_only",
+      "description": "source-less generated targets remain explicit",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "assurance == generated_only and primary == null",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "key": "lowering_step_can",
+      "description": "can() rewrites remain queryable",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "lowering steps include expand_can",
+          "count": 18
+        }
+      ]
+    },
+    {
+      "key": "lowering_step_membership",
+      "description": "finite-membership rewrites remain queryable",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "lowering steps include expand_membership",
+          "count": 21
+        }
+      ]
+    },
+    {
+      "key": "requirement_provenance_separation",
+      "description": "requirement relations and provenance references are distinct fields",
+      "level": "exercised",
+      "evidence": [
+        {
+          "fixture": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+          "detail": "property has requirement object and origin target only",
+          "count": 4
+        }
+      ]
+    }
+  ]
+}

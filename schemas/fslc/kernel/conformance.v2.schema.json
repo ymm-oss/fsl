@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/kernel/conformance.v2.schema.json",
+  "title": "FSL public Kernel conformance vectors v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "kernel_schema_version",
+    "result",
+    "spec",
+    "depth",
+    "states",
+    "vectors"
+  ],
+  "properties": {
+    "$schema": { "const": "https://fsl.dev/schemas/fslc/kernel/conformance.v2.schema.json" },
+    "schema_version": { "const": "2.0.0" },
+    "kernel_schema_version": { "const": "2.0.0" },
+    "fsl": { "type": "string" },
+    "result": { "const": "conformance" },
+    "spec": { "type": "string", "minLength": 1 },
+    "depth": { "type": "integer", "minimum": 0 },
+    "states": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "depth", "state"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^s[0-9]+$" },
+          "depth": { "type": "integer", "minimum": 0 },
+          "state": { "$ref": "#/$defs/state" }
+        }
+      }
+    },
+    "vectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "action", "outcome"],
+        "properties": {
+          "state": { "type": "string", "pattern": "^s[0-9]+$" },
+          "action": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "params"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "params": { "type": "object" }
+            }
+          },
+          "outcome": {
+            "type": "object",
+            "required": ["kind", "state_changed", "state"],
+            "properties": {
+              "kind": { "type": "string", "minLength": 1 },
+              "name": { "type": "string" },
+              "state_changed": { "type": "boolean" },
+              "state": { "$ref": "#/$defs/state" },
+              "attempted_state": {
+                "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/state" }]
+              },
+              "changes": { "type": "object" }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "state": { "type": "object" }
+  }
+}

@@ -2,16 +2,56 @@
 
 //! Versioned normalized Kernel JSON for external compilers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{Binder, Expr, LValue, MetaTag, Pattern, Span, SpecItem, Statement};
 use serde_json::{Map, Value, json};
 
-use crate::{ActionGuard, KernelModel, KernelSpec, ParamDef, TypeDef, TypeRef};
+use crate::{
+    ActionGuard, KernelModel, KernelSpec, OriginChain, OriginSite, ParamDef, TypeDef, TypeRef,
+    action_target, property_target, state_target, type_target,
+};
 
-pub const KERNEL_SCHEMA_VERSION: &str = "1.0.0";
-pub const KERNEL_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json";
+pub const KERNEL_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const KERNEL_V1_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json";
+pub const KERNEL_V2_SCHEMA_VERSION: &str = "2.0.0";
+pub const KERNEL_V2_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json";
+
+/// Backwards-compatible aliases for the default Public Kernel v1 contract.
+pub const KERNEL_SCHEMA_VERSION: &str = KERNEL_V1_SCHEMA_VERSION;
+pub const KERNEL_SCHEMA_ID: &str = KERNEL_V1_SCHEMA_ID;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicKernelVersion {
+    V1,
+    V2,
+}
+
+impl PublicKernelVersion {
+    /// Parse an explicitly negotiated Public Kernel major.
+    ///
+    /// # Errors
+    ///
+    /// Returns a fail-closed error for an unsupported major or malformed value.
+    pub fn parse(value: &str) -> Result<Self, PublicKernelError> {
+        match value {
+            "1" => Ok(Self::V1),
+            "2" => Ok(Self::V2),
+            _ => Err(error(format!(
+                "unsupported public Kernel major '{value}'; supported majors are 1 and 2"
+            ))),
+        }
+    }
+
+    #[must_use]
+    pub const fn schema_version(self) -> &'static str {
+        match self {
+            Self::V1 => KERNEL_V1_SCHEMA_VERSION,
+            Self::V2 => KERNEL_V2_SCHEMA_VERSION,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublicKernelError {
@@ -1142,6 +1182,269 @@ fn source_property_kinds(kernel: &KernelSpec) -> BTreeMap<String, String> {
     kinds
 }
 
+fn portable_source_identity(raw: &str) -> Result<(String, &'static str), PublicKernelError> {
+    let normalized = raw.replace('\\', "/");
+    let windows_drive = normalized
+        .as_bytes()
+        .get(1)
+        .is_some_and(|separator| *separator == b':');
+    let uri = normalized.split_once(':').is_some_and(|(scheme, _)| {
+        !windows_drive
+            && scheme
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
+    });
+    if uri {
+        if normalized.to_ascii_lowercase().starts_with("file:") {
+            return Err(error(
+                "public Kernel v2 source identity must not be a developer-local file URI",
+            ));
+        }
+        return Ok((normalized, "uri"));
+    }
+    if normalized.starts_with('/') || windows_drive {
+        return Err(error(format!(
+            "public Kernel v2 source identity '{raw}' must be repository-relative or a portable URI"
+        )));
+    }
+    let mut parts = Vec::new();
+    for part in normalized.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                return Err(error(format!(
+                    "public Kernel v2 source identity '{raw}' must not escape its repository"
+                )));
+            }
+            value => parts.push(value),
+        }
+    }
+    if parts.is_empty() {
+        return Err(error("public Kernel v2 source identity must not be empty"));
+    }
+    Ok((parts.join("/"), "repository_path"))
+}
+
+fn v2_span_json(span: Span) -> Value {
+    json!({
+        "byte_start":span.start.offset,
+        "byte_end":span.end.offset,
+        "line":span.start.line,
+        "column":span.start.column,
+        "end_line":span.end.line,
+        "end_column":span.end.column,
+    })
+}
+
+fn origin_site_v2_json(site: &OriginSite) -> Result<Value, PublicKernelError> {
+    let source = site
+        .source_file
+        .as_deref()
+        .map(portable_source_identity)
+        .transpose()?
+        .map_or(
+            Value::Null,
+            |(value, kind)| json!({"kind":kind,"value":value}),
+        );
+    Ok(json!({
+        "source":source,
+        "span":site.span.map_or(Value::Null,v2_span_json),
+        "dialect":site.dialect,
+        "declaration_path":site.declaration_path,
+    }))
+}
+
+fn public_origin_id(origin: &OriginChain) -> Result<String, PublicKernelError> {
+    let prefix = origin
+        .primary
+        .as_ref()
+        .and_then(|site| site.source_file.as_deref())
+        .map(portable_source_identity)
+        .transpose()?
+        .map_or_else(
+            || "source:unknown".to_owned(),
+            |(value, kind)| format!("source:{kind}:{value}"),
+        );
+    Ok(format!("{prefix}#{}", origin.id.0))
+}
+
+fn origin_assurance(origin: &OriginChain) -> &'static str {
+    let source_backed = origin
+        .primary
+        .as_ref()
+        .is_some_and(|site| site.source_file.as_ref().is_some() && site.span.is_some());
+    match (origin.generated, source_backed) {
+        (true, true) => "generated_from_source",
+        (true, false) => "generated_only",
+        (false, true) => "source_backed",
+        (false, false) => "unknown",
+    }
+}
+
+fn origin_v2_json(origin: &OriginChain) -> Result<Value, PublicKernelError> {
+    let assurance = origin_assurance(origin);
+    let mut secondary = origin
+        .secondary
+        .iter()
+        .map(origin_site_v2_json)
+        .collect::<Result<Vec<_>, _>>()?;
+    secondary.sort_by_key(|site| serde_json::to_string(site).unwrap_or_default());
+    secondary.dedup();
+    let mut seen_steps = BTreeSet::new();
+    let lowering_steps = origin
+        .lowering_steps
+        .iter()
+        .filter_map(|step| {
+            let value = json!({"kind":step.kind,"detail":step.detail});
+            let key = serde_json::to_string(&value).ok()?;
+            seen_steps.insert(key).then_some(value)
+        })
+        .collect::<Vec<_>>();
+    let primary = if assurance == "unknown" || assurance == "generated_only" {
+        Value::Null
+    } else {
+        origin
+            .primary
+            .as_ref()
+            .map(origin_site_v2_json)
+            .transpose()?
+            .unwrap_or(Value::Null)
+    };
+    Ok(json!({
+        "kind":"source_chain",
+        "id":public_origin_id(origin)?,
+        "dialect":origin.dialect,
+        "assurance":assurance,
+        "primary":primary,
+        "secondary":secondary,
+        "lowering_steps":lowering_steps,
+        "generated":origin.generated,
+        "extensions":{},
+    }))
+}
+
+fn unknown_origin(target: &str, dialect: &str) -> OriginChain {
+    OriginChain {
+        id: crate::OriginId(format!("unknown:{target}")),
+        dialect: dialect.to_owned(),
+        primary: None,
+        secondary: Vec::new(),
+        lowering_steps: Vec::new(),
+        generated: false,
+    }
+}
+
+fn set_origin_target(value: &mut Value, target: &str, required: &mut BTreeSet<String>) {
+    required.insert(target.to_owned());
+    value
+        .as_object_mut()
+        .expect("public Kernel node object")
+        .insert("origin".to_owned(), json!({"target":target}));
+}
+
+fn retarget_v2_origins(contract: &mut Value) -> BTreeSet<String> {
+    let root = contract.as_object_mut().expect("public Kernel object");
+    let mut required = BTreeSet::new();
+    for item in root["constants"].as_array_mut().expect("constants") {
+        let name = item["name"].as_str().expect("constant name");
+        set_origin_target(item, &format!("constant:{name}"), &mut required);
+    }
+    for item in root["types"].as_array_mut().expect("types") {
+        let name = item["name"].as_str().expect("type name").to_owned();
+        set_origin_target(item, &type_target(&name), &mut required);
+    }
+    for item in root["state"].as_array_mut().expect("state") {
+        let name = item["name"].as_str().expect("state name").to_owned();
+        set_origin_target(item, &state_target(&name), &mut required);
+    }
+    set_origin_target(&mut root["init"], "init", &mut required);
+    for item in root["actions"].as_array_mut().expect("actions") {
+        let name = item["name"].as_str().expect("action name").to_owned();
+        set_origin_target(item, &action_target(&name), &mut required);
+    }
+    let properties = root["properties"].as_object_mut().expect("properties");
+    for (field, kind) in [
+        ("invariants", "invariant"),
+        ("transitions", "trans"),
+        ("reachables", "reachable"),
+        ("leads_to", "leadsto"),
+    ] {
+        for item in properties[field].as_array_mut().expect("property list") {
+            let name = item["name"].as_str().expect("property name").to_owned();
+            set_origin_target(item, &property_target(kind, &name), &mut required);
+        }
+    }
+    required
+}
+
+fn provenance_v2_json(
+    model: &KernelModel,
+    required_targets: &BTreeSet<String>,
+    dialect: &str,
+) -> Result<Value, PublicKernelError> {
+    let mut target_origins = model
+        .origins()
+        .targets()
+        .map(|(target, origins)| (target.to_owned(), origins.to_vec()))
+        .collect::<BTreeMap<_, _>>();
+    for target in required_targets {
+        target_origins
+            .entry(target.clone())
+            .or_insert_with(|| vec![unknown_origin(target, dialect)]);
+    }
+
+    let mut origins = BTreeMap::<String, Value>::new();
+    let mut bindings = Vec::new();
+    let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
+    for (target, chains) in target_origins {
+        let mut ids = BTreeSet::new();
+        for (index, chain) in chains.iter().enumerate() {
+            let source_node_id = public_origin_id(chain)?;
+            let id = format!("{source_node_id}@{target}:{index}");
+            let mut record = origin_v2_json(chain)?;
+            record["id"] = json!(id);
+            record["source_node_id"] = json!(source_node_id);
+            origins.insert(id.clone(), record);
+            reverse
+                .entry(source_node_id)
+                .or_default()
+                .insert(target.clone());
+            ids.insert(id);
+        }
+        bindings.push(json!({"target":target,"origin_ids":ids.into_iter().collect::<Vec<_>>()}));
+    }
+    let origin_values = origins.into_values().collect::<Vec<_>>();
+    let known = origin_values
+        .iter()
+        .filter(|origin| origin["assurance"] != "unknown")
+        .count();
+    let unknown = origin_values.len() - known;
+    let completeness = match (known, unknown) {
+        (0, _) => "unknown",
+        (_, 0) => "complete",
+        _ => "partial",
+    };
+    Ok(json!({
+        "schema_version":"2.0.0",
+        "identity_stability":"exact_source_revision",
+        "completeness":completeness,
+        "assurance_counts":{"known":known,"unknown":unknown},
+        "coordinates":{
+            "bytes":"utf8_zero_based_half_open",
+            "lines":"unicode_scalar_one_based_end_exclusive"
+        },
+        "origins":origin_values,
+        "bindings":bindings,
+        "reverse_index":reverse.into_iter().map(|(source_node_id,targets)|json!({
+            "source_node_id":source_node_id,"targets":targets.into_iter().collect::<Vec<_>>()
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 /// Project a checked, lowered model into the stable public Kernel JSON value.
 ///
 /// # Errors
@@ -1442,6 +1745,43 @@ pub fn public_kernel_contract(
             "leads_to":leads,"terminal":terminal,
         }
     }))
+}
+
+/// Project a checked model into an explicitly negotiated Public Kernel major.
+///
+/// The legacy [`public_kernel_contract`] entrypoint remains a v1-only alias so
+/// existing Rust callers and the default CLI output cannot change silently.
+///
+/// # Errors
+///
+/// Returns [`PublicKernelError`] when the selected major cannot truthfully
+/// represent the model or a source identity is not portable.
+pub fn public_kernel_contract_for_version(
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    source_path: &str,
+    dialect: &str,
+    version: PublicKernelVersion,
+) -> Result<Value, PublicKernelError> {
+    if version == PublicKernelVersion::V1 {
+        return public_kernel_contract(kernel, model, source_path, dialect);
+    }
+    if dialect == "compose" {
+        return Err(error(
+            "public Kernel v2 cannot preserve component source filenames after compose lowering",
+        ));
+    }
+    let (source_path, _) = portable_source_identity(source_path)?;
+    let mut contract = public_kernel_contract(kernel, model, &source_path, dialect)?;
+    let required_targets = retarget_v2_origins(&mut contract);
+    let provenance = provenance_v2_json(model, &required_targets, dialect)?;
+    let root = contract
+        .as_object_mut()
+        .ok_or_else(|| error("public Kernel v1 projection did not produce an object"))?;
+    root.insert("$schema".to_owned(), json!(KERNEL_V2_SCHEMA_ID));
+    root.insert("schema_version".to_owned(), json!(KERNEL_V2_SCHEMA_VERSION));
+    root.insert("provenance".to_owned(), provenance);
+    Ok(contract)
 }
 
 #[cfg(test)]
