@@ -29,15 +29,23 @@ async function initialize() {
 }
 
 self.addEventListener("message", async ({ data }) => {
-  const { id, cmd, source, files, options } = data ?? {};
+  const { id, batch, cmd, source, source_file, files, options } = data ?? {};
   let ready = false;
   try {
     self.postMessage({ id, progress: { phase: "initializing" } });
     await initialize();
     ready = true;
+    if (Array.isArray(batch)) {
+      const envelopes = [];
+      for (const request of batch) {
+        envelopes.push(JSON.parse(await run(JSON.stringify(request))));
+      }
+      self.postMessage({ id, envelopes });
+      return;
+    }
     self.postMessage({ id, progress: { phase: "verifying", depth: options?.depth ?? 8 } });
     const envelope = JSON.parse(
-      await run(JSON.stringify({ cmd, source, files, options })),
+      await run(JSON.stringify({ cmd, source, source_file, files, options })),
     );
     self.postMessage({ id, envelope });
   } catch (error) {

@@ -7,9 +7,10 @@ use fsl_solver::{
     SolverResult, Sort, VerificationStatistics,
 };
 use z3::ast::{Array, Ast, Bool, Dynamic, Int};
-use z3::{Model, Solver, StatisticsValue};
+use z3::{Model, Params, Solver, StatisticsValue};
 
 const REQUIRED_Z3_VERSION: &str = "4.16.0";
+const RANDOM_SEED: u32 = 0;
 
 /// Return the version reported by the linked Z3 library.
 #[must_use]
@@ -65,8 +66,13 @@ impl Z3Solver {
                 "expected Z3 {REQUIRED_Z3_VERSION}, loaded {version}"
             )));
         }
+        let solver = Solver::new();
+        let mut params = Params::new();
+        params.set_u32("random_seed", RANDOM_SEED);
+        params.set_u32("smt.random_seed", RANDOM_SEED);
+        solver.set_params(&params);
         Ok(Self {
-            solver: Solver::new(),
+            solver,
             version,
             stack_depth: 0,
             metrics: SolverMetrics::default(),

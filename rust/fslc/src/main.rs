@@ -2807,7 +2807,8 @@ fn run_scenarios_mode(
             1,
         );
     }
-    if let Err(error) = replay_all(&model, &result, None) {
+    if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
+    {
         return (error_output("internal", &error), 3);
     }
     let covers = match fsl_runtime::action_cover_traces(model.clone(), depth) {
@@ -3124,25 +3125,13 @@ fn display_binding(value: &fsl_core::FslValue) -> String {
 
 fn run_check(path: &Path) -> (Value, i32) {
     if let Ok(source) = std::fs::read_to_string(path)
-        && is_ai_project(&source)
+        && let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+            &source,
+            &path.to_string_lossy(),
+            envelope(),
+        )
     {
-        let mut output = envelope();
-        output.insert("result".to_owned(), json!("ok"));
-        output.insert(
-            "spec".to_owned(),
-            json!(
-                path.file_stem()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .unwrap_or("AiProject")
-            ),
-        );
-        output.insert("dialect".to_owned(), json!("fsl-ai-project.v0"));
-        output.insert("warnings".to_owned(), json!([]));
-        output.insert(
-            "ai_analysis_result".to_owned(),
-            json!("ai_project_analyzed"),
-        );
-        return (Value::Object(output), 0);
+        return (output, 0);
     }
     if let Ok(source) = std::fs::read_to_string(path) {
         match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
@@ -3492,171 +3481,10 @@ fn domain_enum_union_warnings(path: &Path) -> Vec<Value> {
 }
 
 fn implicit_initial_value_warnings(path: &Path) -> Vec<Value> {
-    let Ok(document) = parse_surface_document(path) else {
+    let Ok(source) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    match document {
-        fsl_syntax::SurfaceDocument::Domain(domain) => domain_implicit_warnings(path, &domain),
-        fsl_syntax::SurfaceDocument::Requirements(requirements) => {
-            requirements_implicit_warnings(path, &requirements)
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn domain_implicit_warnings(path: &Path, domain: &fsl_syntax::DomainSpec) -> Vec<Value> {
-    let declared = domain
-        .types
-        .iter()
-        .map(|ty| (ty.name.as_str(), ty))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    domain
-        .aggregates
-        .iter()
-        .flat_map(|aggregate| {
-            aggregate.state.iter().filter_map(|field| {
-                let type_name = field.type_name.render_source();
-                let selected = omitted_domain_value(&type_name, field.default.as_ref(), &declared)?;
-                Some(implicit_initial_value_warning(
-                    path,
-                    &format!("{}.{}", aggregate.name, field.name.text),
-                    field.span,
-                    field.type_name.span.end.offset,
-                    &selected.0,
-                    &selected.1,
-                ))
-            })
-        })
-        .collect()
-}
-
-fn omitted_domain_value(
-    type_name: &str,
-    default: Option<&fsl_syntax::SyntaxExpr>,
-    declared: &std::collections::BTreeMap<&str, &fsl_syntax::DomainType>,
-) -> Option<(String, String)> {
-    if default.is_some() {
-        return None;
-    }
-    if type_name == "Bool" {
-        return Some(("false".to_owned(), "Bool defaults to false".to_owned()));
-    }
-    if type_name == "Int" {
-        return None;
-    }
-    if let Some(definition) = declared.get(type_name) {
-        return match definition.kind.as_str() {
-            "enum" => definition.members.first().map(|member| {
-                (
-                    member.clone(),
-                    format!(
-                        "the first declared member of enum '{}' is selected",
-                        definition.name
-                    ),
-                )
-            }),
-            "range" => definition.lo.as_ref().map(|lo| {
-                (
-                    lo.render_source(),
-                    format!("the lower bound of range '{}' is selected", definition.name),
-                )
-            }),
-            _ => None,
-        };
-    }
-    (!type_name.contains('<')).then(|| {
-        (
-            "0".to_owned(),
-            format!("external placeholder type '{type_name}' defaults to 0"),
-        )
-    })
-}
-
-fn requirements_implicit_warnings(
-    path: &Path,
-    requirements: &fsl_syntax::SurfaceRequirements,
-) -> Vec<Value> {
-    let mut lower_bounds = std::collections::BTreeMap::new();
-    for item in &requirements.items {
-        if let fsl_syntax::RequirementsItem::Common(fsl_syntax::SpecItem::VerifyBounds {
-            items,
-            ..
-        }) = item
-        {
-            for bound in items {
-                if let fsl_syntax::VerifyItem::Values(name, lo, _, _) = bound {
-                    lower_bounds.insert(name.as_str(), fslc_rust::expr_text(lo));
-                }
-            }
-        }
-    }
-    requirements
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            fsl_syntax::RequirementsItem::Process(fsl_syntax::BusinessItem::Process {
-                name,
-                fields: Some(fields),
-                ..
-            }) => Some((name, fields)),
-            _ => None,
-        })
-        .flat_map(|(process, fields)| {
-            let lower_bounds = &lower_bounds;
-            fields.fields.iter().filter_map(move |field| {
-                if field.initial.is_some() {
-                    return None;
-                }
-                let selected = lower_bounds.get(field.type_name.name.as_str())?;
-                Some(implicit_initial_value_warning(
-                    path,
-                    &format!("{process}.{}", field.name),
-                    field.span,
-                    field.type_span.end.offset,
-                    selected,
-                    &format!(
-                        "the lower bound of number '{}' is selected",
-                        field.type_name.name
-                    ),
-                ))
-            })
-        })
-        .collect()
-}
-
-fn implicit_initial_value_warning(
-    path: &Path,
-    field: &str,
-    span: fsl_syntax::Span,
-    insertion_offset: usize,
-    selected: &str,
-    reason: &str,
-) -> Value {
-    let replacement = format!(" = {selected}");
-    json!({
-        "kind": "implicit_initial_value",
-        "code": "implicit_initial_value",
-        "severity": "warning",
-        "edition_severity": {"current": "warning", "next": "error"},
-        "message": format!("field '{field}' implicitly selects {selected}; add an explicit initializer"),
-        "field": field,
-        "selected_value": selected,
-        "reason": reason,
-        "loc": {
-            "file": path,
-            "line": span.start.line,
-            "column": span.start.column,
-            "end_line": span.end.line,
-            "end_column": span.end.column,
-        },
-        "canonical_replacement": replacement,
-        "suggestion": {
-            "kind": "insert",
-            "replacement": replacement,
-            "span": {"start": insertion_offset, "end": insertion_offset},
-            "machine_applicable": true,
-        },
-    })
+    fslc_rust::frontend_output::implicit_initial_value_warnings(&source, &path.to_string_lossy())
 }
 
 fn apply_domain_edition(
@@ -3929,7 +3757,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    if is_ai_project(&source) {
+    if fslc_rust::frontend_output::is_ai_project(&source) {
         return run_ai_project_check(&source);
     }
     let component = match parse_surface_document(path) {
@@ -3974,7 +3802,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    if is_ai_project(&source) {
+    if fslc_rust::frontend_output::is_ai_project(&source) {
         let summary = ai_project_summary(&source);
         if selected_component.is_some_and(|selected| selected != summary.component) {
             return (
@@ -4047,28 +3875,6 @@ struct AiProjectSummary {
     observed: Vec<String>,
     migrations: Vec<String>,
     raw_blocks: Vec<String>,
-}
-fn is_ai_project(source: &str) -> bool {
-    const PROJECT_BLOCKS: &[&str] = &[
-        "ai_action",
-        "ai_component",
-        "ai_contract",
-        "ai_migration",
-        "authority",
-        "dataset",
-        "evaluator",
-        "failure_mode",
-        "observed_property",
-        "retriever",
-        "statistical_property",
-        "trust_boundary",
-    ];
-    source.lines().any(|line| {
-        line.trim_start().starts_with("statistical_property ")
-            || line.trim_start().starts_with("ai_migration ")
-            || line.trim_start().starts_with("observed_property ")
-    }) && fsl_syntax::declaration_keyword(source)
-        .is_ok_and(|keyword| PROJECT_BLOCKS.contains(&keyword.as_str()))
 }
 fn declaration_name(line: &str, prefix: &str) -> Option<String> {
     line.trim()
@@ -11694,71 +11500,6 @@ fn run_diff_git(
     )
 }
 
-fn requirement_step_match(
-    monitor: &fsl_runtime::Monitor,
-    step: &fsl_core::RequirementsTraceStep,
-) -> Result<(Vec<FslValue>, Option<fsl_runtime::EnabledAction>), String> {
-    let mut arguments = Vec::new();
-    for argument in &step.args {
-        arguments.push(
-            fsl_runtime::eval(
-                argument,
-                &monitor.state,
-                &mut std::collections::BTreeMap::new(),
-                &monitor.model,
-                None,
-            )
-            .map_err(|error| error.to_string())?,
-        );
-    }
-    let enabled = monitor.enabled().map_err(|error| error.to_string())?;
-    let branch_prefix = format!("{}__b", step.name);
-    for action in &monitor.model.actions {
-        if action.name != step.name
-            && !action.name.starts_with(&branch_prefix)
-            && display(&action.name) != step.name
-        {
-            continue;
-        }
-        if action.params.len() != arguments.len() {
-            continue;
-        }
-        let params = action
-            .params
-            .iter()
-            .zip(&arguments)
-            .map(|(param, value)| (param.name().to_owned(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if let Some(instance) = enabled
-            .iter()
-            .find(|instance| instance.action == action.name && instance.params == params)
-        {
-            return Ok((arguments, Some(instance.clone())));
-        }
-    }
-    Ok((arguments, None))
-}
-
-fn requirement_step_json(step: &fsl_core::RequirementsTraceStep, arguments: &[FslValue]) -> Value {
-    json!({
-        "action": step.name,
-        "args": arguments.iter().map(fslc_rust::fsl_value_json).collect::<Vec<_>>(),
-    })
-}
-
-fn requirement_failure_base(
-    kind: &str,
-    case: &fsl_core::RequirementsTraceCase,
-) -> Map<String, Value> {
-    let mut output = envelope();
-    output.insert("result".to_owned(), json!("error"));
-    output.insert("kind".to_owned(), json!(kind));
-    output.insert("id".to_owned(), json!(case.id));
-    output.insert("text".to_owned(), json!(case.text));
-    output
-}
-
-#[allow(clippy::too_many_lines)]
 fn validate_requirement_traces(
     path: &Path,
     model: &KernelModel,
@@ -11767,226 +11508,35 @@ fn validate_requirement_traces(
     validate_requirement_trace_source(&source, model)
 }
 
-#[allow(clippy::too_many_lines)]
+fn requirement_step_match(
+    monitor: &fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+) -> Result<(Vec<FslValue>, Option<fsl_runtime::EnabledAction>), String> {
+    fslc_rust::verification_output::requirement_step_match(monitor, step)
+}
+
 fn validate_requirement_trace_source(
     source: &str,
     model: &KernelModel,
 ) -> Result<(Option<Value>, bool), String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
-    else {
-        return Ok((None, false));
-    };
-    let has_contract = !contract.acceptance.is_empty() || !contract.forbidden.is_empty();
-    for case in &contract.acceptance {
-        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
-        for (index, step) in case.steps.iter().enumerate() {
-            let (arguments, instance) = requirement_step_match(&monitor, step)?;
-            let Some(instance) = instance else {
-                let mut output = requirement_failure_base("acceptance", case);
-                output.insert("failed_step".to_owned(), json!(index));
-                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
-                output.insert("step_results".to_owned(), json!([]));
-                output.insert(
-                    "loc".to_owned(),
-                    json!({"line": step.line, "column": step.column}),
-                );
-                output.insert("trace_type".to_owned(), json!("acceptance"));
-                return Ok((Some(Value::Object(output)), has_contract));
-            };
-            let result = monitor.step(&instance).map_err(|error| error.to_string())?;
-            if result.violation.is_some() {
-                let mut output = requirement_failure_base("acceptance", case);
-                output.insert("failed_step".to_owned(), json!(index));
-                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
-                output.insert("step_results".to_owned(), json!([]));
-                output.insert(
-                    "loc".to_owned(),
-                    json!({"line": step.line, "column": step.column}),
-                );
-                output.insert("trace_type".to_owned(), json!("acceptance"));
-                return Ok((Some(Value::Object(output)), has_contract));
-            }
-        }
-        let expectation = case
-            .expectation
-            .as_ref()
-            .expect("acceptance contract always has an expectation");
-        let expression = match expectation {
-            fsl_core::RequirementsTraceExpectation::Expr(expression) => expression.clone(),
-            fsl_core::RequirementsTraceExpectation::Stage {
-                entity,
-                instance,
-                stage,
-            } => KernelExpr::Binary {
-                op: "==".to_owned(),
-                left: Box::new(KernelExpr::Index(
-                    Box::new(KernelExpr::Var(format!("{}_stage", entity.to_lowercase()))),
-                    Box::new(KernelExpr::Num(*instance)),
-                )),
-                right: Box::new(KernelExpr::Var(stage.clone())),
-            },
-        };
-        let value = fsl_runtime::eval(
-            &expression,
-            &monitor.state,
-            &mut std::collections::BTreeMap::new(),
-            &monitor.model,
-            None,
-        )
-        .map_err(|error| error.to_string())?;
-        if value != FslValue::Bool(true) {
-            let mut output = requirement_failure_base("acceptance", case);
-            output.insert("failed_step".to_owned(), json!(case.steps.len()));
-            output.insert("expect".to_owned(), expression.python_ast());
-            output.insert("state".to_owned(), fslc_rust::state_json(&monitor.state));
-            output.insert(
-                "loc".to_owned(),
-                json!({"line": case.line, "column": case.column}),
-            );
-            output.insert("trace_type".to_owned(), json!("acceptance"));
-            return Ok((Some(Value::Object(output)), has_contract));
-        }
-    }
-    for case in &contract.forbidden {
-        if case.steps.is_empty() {
-            return Err(format!(
-                "forbidden '{}' must have at least one step",
-                case.id
-            ));
-        }
-        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
-        let mut accepted_trace = Vec::new();
-        for (index, step) in case.steps.iter().enumerate() {
-            let (arguments, instance) = requirement_step_match(&monitor, step)?;
-            let is_final = index + 1 == case.steps.len();
-            let Some(instance) = instance else {
-                if is_final {
-                    break;
-                }
-                let mut output = requirement_failure_base("forbidden_setup", case);
-                output.insert("failed_step".to_owned(), json!(index));
-                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
-                output.insert("step_results".to_owned(), json!([]));
-                output.insert(
-                    "loc".to_owned(),
-                    json!({"line": step.line, "column": step.column}),
-                );
-                output.insert(
-                    "hint".to_owned(),
-                    json!("the setup steps of a forbidden case must be enabled and ok (the trace is broken)."),
-                );
-                output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
-            };
-            let params = Value::Object(
-                instance
-                    .params
-                    .iter()
-                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
-                    .collect(),
-            );
-            let result = monitor.step(&instance).map_err(|error| error.to_string())?;
-            if result.violation.is_some() {
-                if is_final {
-                    break;
-                }
-                let mut output = requirement_failure_base("forbidden_setup", case);
-                output.insert("failed_step".to_owned(), json!(index));
-                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
-                output.insert("step_results".to_owned(), json!([]));
-                output.insert(
-                    "loc".to_owned(),
-                    json!({"line": step.line, "column": step.column}),
-                );
-                output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
-            }
-            accepted_trace.push(json!({
-                "action": display(&instance.action),
-                "params": params,
-            }));
-            if is_final {
-                let mut output = requirement_failure_base("forbidden", case);
-                output.insert("accepted_step".to_owned(), json!(index));
-                output.insert("step".to_owned(), requirement_step_json(step, &arguments));
-                output.insert("accepted_trace".to_owned(), Value::Array(accepted_trace));
-                output.insert("state".to_owned(), fslc_rust::state_json(&monitor.state));
-                output.insert(
-                    "loc".to_owned(),
-                    json!({"line": case.line, "column": case.column}),
-                );
-                output.insert(
-                    "hint".to_owned(),
-                    json!("this operation should have been rejected but was accepted. A guard or invariant may be missing."),
-                );
-                output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
-            }
-        }
-    }
-    Ok((None, has_contract))
+    fslc_rust::verification_output::validate_requirement_trace_source(&envelope(), source, model)
 }
 
 fn governance_result(path: &Path, depth: usize) -> Result<Option<Value>, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let Some(contract) =
-        fsl_core::governance_contract(&source).map_err(|error| error.to_string())?
-    else {
-        return Ok(None);
-    };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let delegates = contract
-        .delegates
-        .iter()
-        .map(|delegate| {
-            let satisfied = delegate
-                .satisfied
-                .iter()
-                .map(|(control, artifacts)| {
-                    (
-                        control.clone(),
-                        Value::Array(
-                            artifacts
-                                .iter()
-                                .map(|(kind, id)| json!({"kind": kind, "id": id}))
-                                .collect(),
-                        ),
-                    )
-                })
-                .collect::<Map<_, _>>();
-            json!({
-                "business": delegate.business,
-                "required": delegate.required,
-                "satisfied": satisfied,
-            })
-        })
-        .collect::<Vec<_>>();
-    let preservations = contract
-        .preservations
-        .iter()
-        .map(|preservation| {
-            let (result, _) = run_refine(
-                &base.join(&preservation.after_path),
-                &base.join(&preservation.before_path),
-                &base.join(&preservation.refinement_path),
-                depth,
-            );
-            json!({
-                "name": preservation.name,
-                "before": preservation.before_name,
-                "after": preservation.after_name,
-                "preserve": preservation.preserve,
-                "result": result.get("result").cloned().unwrap_or_else(|| json!("error")),
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(Some(json!({
-        "name": contract.name,
-        "controls": contract.controls,
-        "delegates": delegates,
-        "preservations": preservations,
-    })))
+    fslc_rust::verification_output::governance_output(&source, |preservation| {
+        let (result, _) = run_refine(
+            &base.join(&preservation.after_path),
+            &base.join(&preservation.before_path),
+            &base.join(&preservation.refinement_path),
+            depth,
+        );
+        Ok(result
+            .get("result")
+            .cloned()
+            .unwrap_or_else(|| json!("error")))
+    })
 }
 
 fn implements_result(
@@ -11996,26 +11546,7 @@ fn implements_result(
 ) -> Result<Option<Value>, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    let Some(contract) = fsl_core::requirements_implements(&source, &resolver, model)
-        .map_err(|error| error.to_string())?
-    else {
-        return Ok(None);
-    };
-    let checked =
-        fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
-            .map_err(|error| error.to_string())?;
-    Ok(Some(if let Some(failure) = checked.failure {
-        json!({
-            "abs": contract.abstraction.name,
-            "result": "refinement_failed",
-            "violation": {
-                "result": "refinement_failed",
-                "kind": failure.kind,
-            },
-        })
-    } else {
-        json!({"abs": contract.abstraction.name, "result": "refines"})
-    }))
+    fslc_rust::verification_output::requirements_implements_output(&source, &resolver, model, depth)
 }
 
 fn mismatch_paths(
@@ -12422,149 +11953,6 @@ fn run_refine_chain(
     );
     output.insert("chain".to_owned(), json!(names));
     (Value::Object(output), 0)
-}
-
-fn statement_location(statements: &[fsl_core::KernelStatement]) -> Value {
-    statements.first().map_or(Value::Null, |statement| {
-        let span = match statement {
-            fsl_core::KernelStatement::Assign { span, .. }
-            | fsl_core::KernelStatement::If { span, .. }
-            | fsl_core::KernelStatement::ForAll { span, .. } => span,
-        };
-        span.python_loc()
-    })
-}
-
-#[allow(clippy::too_many_lines)]
-fn concrete_boundary_output(
-    model: &KernelModel,
-    violation: &fsl_runtime::Violation,
-    trace: &[fsl_core::TraceStep],
-    started: Instant,
-) -> (Value, i32) {
-    let mut output = envelope();
-    output.insert("result".to_owned(), json!("violated"));
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("violation_kind".to_owned(), json!(violation.kind));
-    let action = trace.last().and_then(|entry| entry.action.as_ref());
-    let definition = action.and_then(|action| {
-        model
-            .actions
-            .iter()
-            .find(|definition| definition.name == action.name)
-    });
-    let origin = match violation.kind.as_str() {
-        "invariant" => model.property_origin("invariant", &violation.name),
-        "trans" => model.property_origin("trans", &violation.name),
-        "type_bound" => violation
-            .name
-            .strip_prefix("_bounds_")
-            .and_then(|name| model.state_origin(name)),
-        _ => action.and_then(|action| model.action_origin(&action.name)),
-    };
-    output.insert(
-        "invariant".to_owned(),
-        json!(
-            origin
-                .and_then(fslc_rust::origin_display_name)
-                .map_or_else(|| display(&violation.name), str::to_owned)
-        ),
-    );
-    if let Some(origin) = origin {
-        output.insert("generated_name".to_owned(), json!(display(&violation.name)));
-        output.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
-    }
-    output.insert(
-        "loc".to_owned(),
-        origin
-            .and_then(|origin| origin.primary.as_ref())
-            .and_then(|site| site.span)
-            .map_or_else(
-                || {
-                    if violation.kind == "partial_op" {
-                        definition
-                            .map_or(Value::Null, |action| statement_location(&action.statements))
-                    } else {
-                        Value::Null
-                    }
-                },
-                fsl_syntax::Span::python_loc,
-            ),
-    );
-    if violation.kind == "partial_op" {
-        output.insert(
-            "hint".to_owned(),
-            json!("guard the action with requires q.size() > 0 (or bound the index)"),
-        );
-    }
-    output.insert("violated_at_step".to_owned(), json!(violation.step));
-    let violating = if violation.kind == "type_bound" {
-        let detected = violation_bindings_json(
-            model,
-            &violation.kind,
-            &violation.name,
-            None,
-            trace.last().map(|entry| &entry.state),
-        );
-        if detected.is_null() {
-            json!([{}])
-        } else {
-            detected
-        }
-    } else {
-        Value::Null
-    };
-    output.insert("violating_bindings".to_owned(), violating.clone());
-    if violation.kind == "type_bound" {
-        output.insert(
-            "blame".to_owned(),
-            violation_blame_json(&violation.kind, &violation.name, None, violating),
-        );
-    }
-    output.insert(
-        "last_action".to_owned(),
-        action.map_or(Value::Null, |action| {
-            let action_origin = model.action_origin(&action.name);
-            let mut value = json!({
-                "name": action_origin
-                    .and_then(fslc_rust::origin_display_name)
-                    .map_or_else(|| display(&action.name), str::to_owned),
-                "params": action.params.iter().map(|(name, value)| (
-                    name.clone(), fslc_rust::fsl_value_json(value)
-                )).collect::<Map<_, _>>(),
-                "loc": definition.map(|definition| definition.span.python_loc()),
-            });
-            if let Some(origin) = action_origin
-                && let Value::Object(value) = &mut value
-            {
-                value.insert("generated_name".to_owned(), json!(display(&action.name)));
-                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
-            }
-            value
-        }),
-    );
-    let mut rendered_trace = fslc_rust::trace_json(model, trace);
-    if let Value::Array(entries) = &mut rendered_trace {
-        for entry in entries.iter_mut().skip(1) {
-            if let Value::Object(entry) = entry {
-                entry.insert("blame".to_owned(), json!({"guards": [], "effects": []}));
-            }
-        }
-    }
-    output.insert("trace".to_owned(), rendered_trace);
-    finish(&mut output, violation.step, started);
-    if violation.kind == "partial_op" {
-        output.insert(
-            "faithfulness_class".to_owned(),
-            json!("partial_op_unguarded"),
-        );
-        output.insert(
-            "recommended_action".to_owned(),
-            json!("add the missing guard / run bounded Monitor (replay)"),
-        );
-    }
-    output.insert("trace_type".to_owned(), json!(violation.kind));
-    (Value::Object(output), 1)
 }
 
 fn select_properties(
@@ -13280,37 +12668,6 @@ fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, St
     fsl_core::build_model(kernel).map_err(|error| error.to_string())
 }
 
-fn replay_all(
-    model: &KernelModel,
-    result: &fsl_verifier::BmcResult,
-    initial_state: Option<&std::collections::BTreeMap<String, FslValue>>,
-) -> Result<(), String> {
-    let replay = |trace: &[fsl_core::TraceStep]| {
-        // Symbolic init may leave individual state components unconstrained.
-        // The witness state is the concrete seed for that chosen model;
-        // Monitor::new uses defaults and cannot reproduce those free values.
-        initial_state
-            .or_else(|| trace.first().map(|entry| &entry.state))
-            .map_or_else(
-                || fsl_runtime::replay_trace(model.clone(), trace),
-                |state| fsl_runtime::replay_trace_from_state(model.clone(), trace, state),
-            )
-    };
-    if let Some(violation) = &result.violation {
-        replay(&violation.trace).map_err(|error| error.to_string())?;
-    }
-    if let Some(violation) = &result.leadsto_violation {
-        replay(&violation.trace).map_err(|error| error.to_string())?;
-    }
-    for witness in result.reachables.values().flatten() {
-        replay(&witness.trace).map_err(|error| error.to_string())?;
-    }
-    if let Some(trace) = &result.deadlock_trace {
-        replay(trace).map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 fn envelope() -> Map<String, Value> {
     let mut output = Map::new();
     output.insert("fsl".to_owned(), json!("1.0"));
@@ -13342,20 +12699,7 @@ fn error_output(kind: &str, message: &str) -> Value {
 }
 
 fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {
-    let mut output = error_output("parse", &error.to_string());
-    let object = output.as_object_mut().expect("error envelope");
-    object.insert("diagnostic_code".to_owned(), json!(error.code()));
-    object.insert("loc".to_owned(), error.span.python_loc());
-    if matches!(
-        error.code(),
-        "FSL-DIALECT-EMPTY" | "FSL-DIALECT-ANNOTATION-TARGET" | "FSL-DIALECT-UNKNOWN"
-    ) {
-        object.insert(
-            "supported_dialects".to_owned(),
-            json!(fsl_syntax::DIALECT_KEYWORDS),
-        );
-    }
-    output
+    fslc_rust::frontend_output::render_surface_parse_error(envelope(), error)
 }
 
 fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
@@ -13369,27 +12713,7 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 }
 
 fn semantic_error_output(message: &str) -> Value {
-    let kind = if message == "init constraints are unsatisfiable" {
-        "vacuous"
-    } else if message.starts_with("unknown type '")
-        || message.starts_with("cannot coerce symbolic value")
-        || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
-    {
-        "type"
-    } else {
-        "semantics"
-    };
-    let mut output = error_output(kind, message);
-    if message.starts_with("struct field '")
-        && message.ends_with(" has non-scalar type")
-        && let Value::Object(envelope) = &mut output
-    {
-        envelope.insert(
-            "hint".to_owned(),
-            json!("struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"),
-        );
-    }
-    output
+    fslc_rust::verification_output::render_semantic_error(envelope(), message)
 }
 
 fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {

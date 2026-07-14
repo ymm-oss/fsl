@@ -213,9 +213,32 @@ Snapshot parity alone is not enough because corpus snapshots intentionally omit
 non-deterministic traces. The migration harness therefore has three layers:
 
 1. exact existing snapshot projection;
-2. full-envelope structural diff, with a small reviewed allowlist for trace
-   content and parser wording; and
+2. full-envelope structural diff across every surface-parseable `specs/` and
+   `examples/` check/verify document supported by the Worker (Agent and
+   standalone Refinement documents are different commands); and
 3. bidirectional trace replay to validate non-unique Z3 witnesses semantically.
+
+The structural diff first validates the public `versions` and `cost` schemas,
+then normalizes only elapsed time, raw backend statistics, verifier/backend
+runtime identity, replay-validated witness contents, and the concrete state
+embedded in a deadlock warning. Verdicts, property identity, locations,
+assurance fields, exit semantics, warning kinds, and missing fields remain
+exact. Native and browser solvers both set Z3 `random_seed=0` and
+`smt.random_seed=0`; fixed seeds reduce drift but do not make different Z3
+build targets choose the same valid witness.
+
+Replayed witness normalization retains each entry's field set, nested state
+keys, action identity and source metadata, parameter types, and normalized
+change targets/shapes. It ignores concrete state values and the order of
+commuting action-bearing steps, because symmetric bindings and commuting
+actions can produce different valid traces across Z3 build targets.
+
+Failures use `fsl-native-wasm-parity-failure.v1`: each record contains the
+case path/command/options, machine-readable JSON paths with native and Worker
+values, both complete envelopes, and their `versions` environment metadata.
+The harness always includes the duplicate-assignment fixture and its comparator
+self-test models the pre-#267 Worker verdict, so removing the shared semantic
+guard makes the parity job fail.
 
 ### Shared semantic diagnostics
 

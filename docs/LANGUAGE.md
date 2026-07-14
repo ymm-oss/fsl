@@ -876,6 +876,12 @@ depth first witnesses a reachable/vacuity/coverage fact during normal
 exploration, `verified` also includes a `hint` that the state space is not
 obviously saturated at that depth and suggests a larger `--depth` or induction.
 
+Native and browser BMC set Z3 `random_seed` and `smt.random_seed` to `0`.
+This makes each backend deterministic under a fixed Z3 build, but concrete
+counterexamples and reachable/deadlock witnesses remain non-unique across
+native and WebAssembly builds. Consumers must use the verdict and replayable
+witness contract, not a particular satisfying assignment.
+
 When a leadsTo is declared and the result is `verified` / `proved`,
 `leads_to: { "<Name>": { "checked_to_depth": K } }` is attached
 (no counterexample is a bounded guarantee up to depth K, the same standing as a
