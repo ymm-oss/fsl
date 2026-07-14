@@ -28,4 +28,42 @@ export const cases = [
   invariant StayZero { x == 0 }
 }`,
   },
+  {
+    // Bool constants go through fslZ3Constant's bool branch.
+    id: "bool-state",
+    expected: "verified",
+    options: { depth: 2, deadlock: "ignore" },
+    source: `spec BrowserToggle {
+  state { armed: Bool }
+  init { armed = false }
+  action arm() { requires armed == false armed = true }
+  invariant ArmedOnce { armed == true or armed == false }
+}`,
+  },
+  {
+    // count aggregation lowers to if-then-else terms (fslZ3Ite).
+    id: "business-kpi",
+    expected: "verified",
+    options: { depth: 2, deadlock: "ignore" },
+    source: `business BrowserFlow {
+  actor System
+  entity Job
+
+  process Job {
+    stages Pending, Done
+    initial Pending
+
+    transition finish Pending -> Done by System
+  }
+
+  kpi done = count Job in Done
+
+  policy POL-DONE "every pending job must eventually complete"
+    every Job in Pending must eventually be Done
+}
+
+verify {
+  instances Job = 1
+}`,
+  },
 ];

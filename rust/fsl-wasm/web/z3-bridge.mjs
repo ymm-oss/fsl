@@ -8,11 +8,12 @@ export async function installZ3Bridge() {
   const initialized = await initZ3();
   em = initialized.em;
   const ctx = new initialized.Context("fsl-wasm");
-  const { Array: Z3Array, Bool, Int, Solver } = ctx;
+  const { Array: Z3Array, Bool, If, Int, Solver } = ctx;
   const solver = new Solver();
   solver.set("unsat_core", true);
   const terms = [null];
   const sorts = [null];
+  const sortDescriptors = [null];
   const sortHandles = new Map();
 
   const register = (term) => {
@@ -50,6 +51,7 @@ export async function installZ3Bridge() {
   globalThis.fslZ3Sort = (descriptor) => {
     if (sortHandles.has(descriptor)) return sortHandles.get(descriptor);
     sorts.push(makeSort(descriptor));
+    sortDescriptors.push(descriptor);
     const handle = sorts.length - 1;
     sortHandles.set(descriptor, handle);
     return handle;
@@ -58,9 +60,10 @@ export async function installZ3Bridge() {
   globalThis.fslZ3IntValue = (value) => register(Int.val(value.toString()));
   globalThis.fslZ3Constant = (name, sortHandle) => {
     const sort = sorts[Number(sortHandle)];
-    if (sort.__typename === "BoolSort") return register(Bool.const(name));
-    if (ctx.isIntSort(sort)) return register(Int.const(name));
-    if (ctx.isArraySort(sort)) {
+    const descriptor = sortDescriptors[Number(sortHandle)];
+    if (descriptor === "bool") return register(Bool.const(name));
+    if (descriptor === "int") return register(Int.const(name));
+    if (descriptor?.startsWith("array(")) {
       return register(Z3Array.const(name, sort.domain(), sort.range()));
     }
     throw new Error(`unsupported constant sort for ${name}`);
@@ -102,7 +105,7 @@ export async function installZ3Bridge() {
     throw new Error(`unknown n-ary Z3 operation ${operation}`);
   };
   globalThis.fslZ3Ite = (condition, thenTerm, elseTerm) =>
-    register(term(condition).ite(term(thenTerm), term(elseTerm)));
+    register(If(term(condition), term(thenTerm), term(elseTerm)));
   globalThis.fslZ3ConstArray = (domain, value) =>
     register(Z3Array.K(sorts[Number(domain)], term(value)));
   globalThis.fslZ3Substitute = (handle, rawFrom, rawTo) => {

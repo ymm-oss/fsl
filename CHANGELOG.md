@@ -23,6 +23,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- The browser Z3 bridge now builds if-then-else terms through the z3-solver
+  `If` API and resolves constant sorts from their FSL sort descriptors instead
+  of a TypeScript-only `__typename` marker that does not exist at runtime.
+  Previously any spec with `Bool` state or `count` aggregation failed in the
+  browser Worker with an internal error while verifying natively.
 - Windows native CI now keeps the conformance coverage and approval Markdown
   snapshots on LF and canonicalizes both the specification and repository-root
   paths before binding approval records to Git, avoiding false snapshot drift
