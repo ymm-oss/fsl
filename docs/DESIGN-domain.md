@@ -16,7 +16,7 @@ Implemented top-level shape:
 domain OrderDomain {
   implementation_profile functional_ddd
 
-  type OrderStatus = Pending | Approved | Cancelled
+  enum OrderStatus { Pending, Approved, Cancelled }
 
   aggregate Order {
     id OrderId
@@ -78,6 +78,16 @@ logical type and lowers `in [A, B]` to a finite equality disjunction; empty
 membership lowers to `false`. A bare member with multiple candidates and no
 expected type is rejected as ambiguous.
 
+Canonical enum declarations use `enum Name { Member, ... }`; bounded numeric
+types continue to use `type Name = lo..hi`. The 2.x parser retains
+`type Name = A | B` as a loss-aware legacy source form so migration tooling can
+replace the complete original declaration without changing the checked domain
+model. Current-edition checks emit `deprecated_domain_enum_union`; checks with
+`--edition next` reject that form. Empty and duplicate-member enums fail before
+lowering, with the duplicate diagnostic attached to the repeated member.
+Canonical and legacy non-empty declarations lower to the same public Kernel
+enum contract.
+
 `can(Command)` is a domain-only expression helper. It lowers to that command's
 decide preconditions: all `requires` clauses and the negation of every
 `rejects ... when ...` condition.
@@ -120,6 +130,15 @@ parses it again. `fslc domain expand` may still render generated source as a
 debug/interop view, but that text is not semantic input. This separation also
 lets public Kernel diagnostics and origins use domain declaration/expression
 coordinates rather than generated-source coordinates.
+
+The Rust path records those coordinates in the non-serialized origin graph described
+by [`DESIGN-origin-chain.md`](DESIGN-origin-chain.md). Checked state, action,
+guard, statement, and property targets retain source identity, full span,
+declaration path, and lowering steps. `can()` and membership expansions share
+the source expression's stable identity across generated targets; merged
+actions retain the decision as primary and the command as secondary. Synthetic
+event flags and terminal nodes are explicitly generated-only. Requirement tags
+remain a separate traceability relation.
 
 ## Effects
 

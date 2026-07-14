@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 
 pub mod coverage;
 
-pub use fsl_core::{display_name, fsl_value_json, state_json, trace_json};
+pub use fsl_core::{
+    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json, trace_json,
+};
 
 /// Diff two already-JSON-rendered values into a native `trace_json`-style
 /// nested-path `changes` map, for `conformance_vectors`' before/after pair.

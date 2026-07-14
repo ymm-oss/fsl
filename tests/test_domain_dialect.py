@@ -6,7 +6,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from fslc.cli import (
+    main,
     run_check,
     run_domain_analyze,
     run_domain_check,
@@ -280,3 +283,77 @@ def test_domain_duplicate_enum_members_are_namespaced_before_kernel(tmp_path):
     out = run_check(str(path))
 
     assert out["result"] == "ok"
+
+
+def test_domain_canonical_enum_parser_matches_legacy_union(tmp_path):
+    canonical = tmp_path / "canonical.fsl"
+    legacy = tmp_path / "legacy.fsl"
+    body = """
+  aggregate Order {
+    state { status: Status = Pending; }
+    command Approve {}
+    event ApprovedEvent {}
+    decide Approve { emits ApprovedEvent }
+    evolve ApprovedEvent { status = Approved }
+  }
+}
+"""
+    canonical.write_text(
+        "domain Orders {\n  enum Status { Pending, Approved }\n" + body,
+        encoding="utf-8",
+    )
+    legacy.write_text(
+        "domain Orders {\n  type Status = Pending | Approved\n" + body,
+        encoding="utf-8",
+    )
+    canonical_result = run_check(str(canonical))
+    legacy_result = run_check(str(legacy))
+    assert canonical_result["result"] == legacy_result["result"] == "ok"
+
+
+def test_python_compatibility_cli_enforces_domain_edition(tmp_path, capsys):
+    legacy = tmp_path / "legacy.fsl"
+    legacy.write_text(
+        """domain Orders {
+  type Status = Pending | Approved
+  aggregate Order { state { status: Status = Pending; } }
+}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as stopped:
+        main(["check", str(legacy)])
+    assert stopped.value.code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert any(
+        warning.get("code") == "deprecated_domain_enum_union"
+        for warning in output["warnings"]
+    )
+
+    for arguments in (
+        ["check", str(legacy), "--edition", "next"],
+        ["verify", str(legacy), "--edition", "next", "--no-cache"],
+        ["domain", "check", str(legacy), "--edition", "next"],
+    ):
+        with pytest.raises(SystemExit) as stopped:
+            main(arguments)
+        assert stopped.value.code == 2
+        output = json.loads(capsys.readouterr().out)
+        assert output["kind"] == "deprecated_domain_enum_union"
+        assert output["findings"][0]["severity"] == "error"
+
+    canonical = tmp_path / "canonical.fsl"
+    canonical.write_text(
+        legacy.read_text(encoding="utf-8").replace(
+            "type Status = Pending | Approved",
+            "enum Status { Pending, Approved }",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit) as stopped:
+        main(["check", str(canonical), "--edition", "next"])
+    assert stopped.value.code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["result"] == "ok"
+    assert output["edition"] == "next"

@@ -169,10 +169,17 @@ DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
 Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
 
+Use `enum Name { Member, ... }` for finite domain variants and
+`type Name = lo..hi` for bounded numeric ranges. The legacy
+`type Name = A | B` spelling is accepted by the current 2.x edition with the
+stable `deprecated_domain_enum_union` warning and a canonical replacement.
+Pass `--edition next` to `check`, `verify`, or `domain check` to reject legacy
+enum unions during migration.
+
 ```fsl
 domain <Name> {
   implementation_profile functional_ddd
-  type OrderStatus = Pending | Approved | Cancelled
+  enum OrderStatus { Pending, Approved, Cancelled }
 
   aggregate Order {
     id OrderId
@@ -241,6 +248,16 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
+
+The Rust frontend keeps an internal origin chain across direct domain lowering,
+checked-model construction, verification, counterexamples, and `explain`.
+Diagnostics prefer the original domain declaration/expression, expose generated
+Kernel names only as machine detail, preserve primary/secondary origins and
+expansion steps (`can()`, membership, legacy operators), and represent
+source-less nodes as generated-only. Requirement tags are a separate
+traceability relation, not origin identities. Public Kernel v1 remains
+byte-compatible and does not expose the internal chain; publication belongs to
+v2 (#256).
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):

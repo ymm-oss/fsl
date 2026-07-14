@@ -25,6 +25,7 @@ class DomainType:
     hi: Optional[str] = None
     fields: Tuple[DomainField, ...] = ()
     invariants: Tuple["DomainInvariant", ...] = ()
+    source_form: str = "canonical"
     loc: Optional[dict] = None
 
 

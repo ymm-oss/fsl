@@ -80,8 +80,8 @@
       <pre><code>domain OrderAsyncEffect {
   implementation_profile functional_ddd
 
-  type OrderStatus = Pending | Approved | Cancelled
-  type PaymentStatus = NotRequested | PaymentPending | Captured | Failed | TimedOut
+  enum OrderStatus { Pending, Approved, Cancelled }
+  enum PaymentStatus { NotRequested, PaymentPending, Captured, Failed, TimedOut }
 
   aggregate Order {
     id OrderId

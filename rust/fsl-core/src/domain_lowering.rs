@@ -4,13 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
     ActionItem, Binder, DomainAggregate, DomainDecide, DomainEffect, DomainField, DomainLoc,
-    DomainSaga, DomainSagaStep, DomainSpec, DomainType, Expr, LValue, MetaTag, Param, Pattern,
-    QualifiedName, SourcePos, Span, SpecItem, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr,
-    SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr,
+    DomainSaga, DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, Expr, LValue,
+    MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, Statement, SurfaceSpec, SyntaxBinder,
+    SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr,
     SyntaxTypeExprKind, TypeExpr,
 };
 
 use crate::CoreError;
+use crate::{
+    LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET, TERMINAL_TARGET,
+    action_guard_target, action_statement_target, action_target, init_statement_target,
+    property_target, state_target, type_target,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LogicalType {
@@ -43,19 +48,30 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
         message: message.into(),
         line: span.start.line,
         column: span.start.column,
+        origin: Some(Box::new(OriginChain {
+            id: OriginId(format!(
+                "domain:error:{}:{}",
+                span.start.offset, span.end.offset
+            )),
+            dialect: "domain".to_owned(),
+            primary: Some(OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "domain".to_owned(),
+                declaration_path: Vec::new(),
+            }),
+            secondary: Vec::new(),
+            lowering_steps: vec![LoweringStep {
+                kind: "resolve_domain_expression".to_owned(),
+                detail: None,
+            }],
+            generated: false,
+        })),
     }
 }
 
 fn span_at(loc: DomainLoc) -> Span {
-    let position = SourcePos {
-        offset: 0,
-        line: loc.line,
-        column: loc.column,
-    };
-    Span {
-        start: position,
-        end: position,
-    }
+    loc.span()
 }
 
 fn safe(name: &str) -> String {
@@ -247,10 +263,13 @@ impl<'a> Resolver<'a> {
                     name,
                     kind: "external".to_owned(),
                     members: Vec::new(),
+                    member_spans: Vec::new(),
                     lo: None,
                     hi: None,
                     fields: Vec::new(),
                     invariants: Vec::new(),
+                    source_form: DomainTypeSourceForm::External,
+                    span: domain.loc.span(),
                     loc: domain.loc,
                 });
             }
@@ -536,10 +555,25 @@ impl<'a> Resolver<'a> {
                     ));
                 };
                 if expanding_can.contains(&command.text) {
-                    return Err(error_at(
+                    let mut error = error_at(
                         format!("recursive can({}) expansion", command.text),
                         expression.span,
-                    ));
+                    );
+                    if let Some(origin) = &mut error.origin {
+                        origin.secondary.push(OriginSite {
+                            source_file: None,
+                            span: Some(span_at(decide.loc)),
+                            dialect: "domain".to_owned(),
+                            declaration_path: vec![
+                                self.domain.name.clone(),
+                                "aggregate".to_owned(),
+                                aggregate.name.clone(),
+                                "decide".to_owned(),
+                                decide.command.clone(),
+                            ],
+                        });
+                    }
+                    return Err(error);
                 }
                 expanding_can.push(command.text.clone());
                 let result = self.resolve_can(decide, scope, aggregate, expanding_can);
@@ -1806,6 +1840,26 @@ impl<'a> Resolver<'a> {
 
     fn validate_document_expressions(&self) -> Result<(), CoreError> {
         for ty in &self.types {
+            if ty.kind != "enum" {
+                continue;
+            }
+            if ty.members.is_empty() {
+                return Err(error_at(
+                    format!("enum '{}' has no members", ty.name),
+                    ty.span,
+                ));
+            }
+            let mut seen = BTreeSet::new();
+            for (index, member) in ty.members.iter().enumerate() {
+                if !seen.insert(member) {
+                    return Err(error_at(
+                        format!("duplicate enum member '{member}' in '{}'", ty.name),
+                        ty.member_spans.get(index).copied().unwrap_or(ty.span),
+                    ));
+                }
+            }
+        }
+        for ty in &self.types {
             if ty.kind != "value_object" {
                 continue;
             }
@@ -1973,7 +2027,9 @@ fn field_params(resolver: &Resolver<'_>, fields: &[DomainField]) -> Result<Vec<P
 
 /// Resolve a parsed domain document and lower it directly into Kernel surface AST.
 #[allow(clippy::too_many_lines)]
-pub(crate) fn lower_domain_surface(domain: &DomainSpec) -> Result<SurfaceSpec, CoreError> {
+pub(crate) fn lower_domain_surface(
+    domain: &DomainSpec,
+) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
     let resolver = Resolver::new(domain);
     resolver.validate_document_expressions()?;
     let mut items = Vec::new();
@@ -2194,14 +2250,16 @@ pub(crate) fn lower_domain_surface(domain: &DomainSpec) -> Result<SurfaceSpec, C
         span: span_at(domain.loc),
     });
 
-    Ok(SurfaceSpec {
+    let surface = SurfaceSpec {
         name: domain.name.clone(),
         meta: Some(metadata(
             "DOMAIN",
             "domain: generated from fsl-domain/fsl-effect",
         )),
         items,
-    })
+    };
+    let origins = domain_origin_registry(domain, &surface);
+    Ok((surface, origins))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -2722,4 +2780,647 @@ fn lower_properties(
         });
     }
     Ok(())
+}
+
+#[derive(Clone)]
+struct DomainSourceRecord {
+    span: Span,
+    path: Vec<String>,
+    steps: Vec<LoweringStep>,
+    secondary: Vec<OriginSite>,
+}
+
+fn source_site(path: Vec<String>, span: Span) -> OriginSite {
+    OriginSite {
+        source_file: None,
+        span: Some(span),
+        dialect: "domain".to_owned(),
+        declaration_path: path,
+    }
+}
+
+fn expression_lowering_steps(expression: &SyntaxExpr) -> Vec<LoweringStep> {
+    fn visit(expression: &SyntaxExpr, output: &mut Vec<LoweringStep>) {
+        match &expression.kind {
+            SyntaxExprKind::Call { callee, args } => {
+                if callee.text == "can" {
+                    output.push(LoweringStep {
+                        kind: "expand_can".to_owned(),
+                        detail: Some("command preconditions and rejections".to_owned()),
+                    });
+                }
+                for argument in args {
+                    visit(argument, output);
+                }
+            }
+            SyntaxExprKind::Membership { value, members } => {
+                output.push(LoweringStep {
+                    kind: "expand_membership".to_owned(),
+                    detail: Some(format!("{} equality predicate(s)", members.len())),
+                });
+                visit(value, output);
+                for member in members {
+                    visit(member, output);
+                }
+            }
+            SyntaxExprKind::Binary { op, left, right } => {
+                if op.spelling != op.canonical {
+                    output.push(LoweringStep {
+                        kind: "normalize_legacy_operator".to_owned(),
+                        detail: Some(format!("{} -> {}", op.spelling, op.canonical)),
+                    });
+                }
+                visit(left, output);
+                visit(right, output);
+            }
+            SyntaxExprKind::Some(value)
+            | SyntaxExprKind::Neg(value)
+            | SyntaxExprKind::Not(value)
+            | SyntaxExprKind::Group(value) => visit(value, output),
+            SyntaxExprKind::Set(values) | SyntaxExprKind::Seq(values) => {
+                for value in values {
+                    visit(value, output);
+                }
+            }
+            SyntaxExprKind::Struct { fields, .. } => {
+                for (_, value) in fields {
+                    visit(value, output);
+                }
+            }
+            SyntaxExprKind::Index { receiver, index } => {
+                visit(receiver, output);
+                visit(index, output);
+            }
+            SyntaxExprKind::Field { receiver, .. } => visit(receiver, output),
+            SyntaxExprKind::Method { receiver, args, .. } => {
+                visit(receiver, output);
+                for argument in args {
+                    visit(argument, output);
+                }
+            }
+            SyntaxExprKind::IfThenElse {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                visit(condition, output);
+                visit(then_expr, output);
+                visit(else_expr, output);
+            }
+            SyntaxExprKind::Is { expr, .. } => visit(expr, output),
+            SyntaxExprKind::Quantified { body, .. } => visit(body, output),
+            SyntaxExprKind::Count { condition, .. } => visit(condition, output),
+            SyntaxExprKind::Sum {
+                body, condition, ..
+            } => {
+                visit(body, output);
+                if let Some(condition) = condition {
+                    visit(condition, output);
+                }
+            }
+            SyntaxExprKind::Num(_)
+            | SyntaxExprKind::Bool(_)
+            | SyntaxExprKind::None
+            | SyntaxExprKind::Name(_)
+            | SyntaxExprKind::BinderNamed { .. } => {}
+        }
+    }
+
+    let mut output = vec![LoweringStep {
+        kind: "resolve_domain_expression".to_owned(),
+        detail: None,
+    }];
+    visit(expression, &mut output);
+    output
+}
+
+#[allow(clippy::too_many_lines)]
+fn domain_source_records(domain: &DomainSpec) -> Vec<DomainSourceRecord> {
+    let mut records = vec![DomainSourceRecord {
+        span: span_at(domain.loc),
+        path: vec![domain.name.clone()],
+        steps: Vec::new(),
+        secondary: Vec::new(),
+    }];
+    for ty in &domain.types {
+        records.push(DomainSourceRecord {
+            span: span_at(ty.loc),
+            path: vec![domain.name.clone(), "type".to_owned(), ty.name.clone()],
+            steps: Vec::new(),
+            secondary: Vec::new(),
+        });
+    }
+    for aggregate in &domain.aggregates {
+        let aggregate_path = vec![
+            domain.name.clone(),
+            "aggregate".to_owned(),
+            aggregate.name.clone(),
+        ];
+        records.push(DomainSourceRecord {
+            span: span_at(aggregate.loc),
+            path: aggregate_path.clone(),
+            steps: Vec::new(),
+            secondary: Vec::new(),
+        });
+        for field in &aggregate.state {
+            records.push(DomainSourceRecord {
+                span: field.span,
+                path: [
+                    aggregate_path.clone(),
+                    vec!["state".to_owned(), field.name.text.clone()],
+                ]
+                .concat(),
+                steps: Vec::new(),
+                secondary: Vec::new(),
+            });
+        }
+        for decide in &aggregate.decides {
+            let command = aggregate
+                .commands
+                .iter()
+                .find(|command| command.name == decide.command);
+            records.push(DomainSourceRecord {
+                span: span_at(decide.loc),
+                path: [
+                    aggregate_path.clone(),
+                    vec!["decide".to_owned(), decide.command.clone()],
+                ]
+                .concat(),
+                steps: vec![LoweringStep {
+                    kind: "lower_decision_to_action".to_owned(),
+                    detail: None,
+                }],
+                secondary: command
+                    .into_iter()
+                    .map(|command| {
+                        source_site(
+                            [
+                                aggregate_path.clone(),
+                                vec!["command".to_owned(), command.name.clone()],
+                            ]
+                            .concat(),
+                            span_at(command.loc),
+                        )
+                    })
+                    .collect(),
+            });
+            for (index, requirement) in decide.requires.iter().enumerate() {
+                records.push(DomainSourceRecord {
+                    span: requirement.span,
+                    path: [
+                        aggregate_path.clone(),
+                        vec![
+                            "decide".to_owned(),
+                            decide.command.clone(),
+                            "requires".to_owned(),
+                            index.to_string(),
+                        ],
+                    ]
+                    .concat(),
+                    steps: expression_lowering_steps(requirement),
+                    secondary: Vec::new(),
+                });
+            }
+            for reject in &decide.rejects {
+                records.push(DomainSourceRecord {
+                    span: reject.condition.span,
+                    path: [
+                        aggregate_path.clone(),
+                        vec![
+                            "decide".to_owned(),
+                            decide.command.clone(),
+                            "reject".to_owned(),
+                            reject.error.clone(),
+                        ],
+                    ]
+                    .concat(),
+                    steps: expression_lowering_steps(&reject.condition),
+                    secondary: Vec::new(),
+                });
+            }
+        }
+        for evolve in &aggregate.evolves {
+            for (index, requirement) in evolve.requires.iter().enumerate() {
+                records.push(DomainSourceRecord {
+                    span: requirement.span,
+                    path: [
+                        aggregate_path.clone(),
+                        vec![
+                            "evolve".to_owned(),
+                            evolve.event.clone(),
+                            "requires".to_owned(),
+                            index.to_string(),
+                        ],
+                    ]
+                    .concat(),
+                    steps: expression_lowering_steps(requirement),
+                    secondary: Vec::new(),
+                });
+            }
+            for assignment in &evolve.assignments {
+                records.push(DomainSourceRecord {
+                    span: assignment.span,
+                    path: [
+                        aggregate_path.clone(),
+                        vec![
+                            "evolve".to_owned(),
+                            evolve.event.clone(),
+                            assignment.target.render_source(),
+                        ],
+                    ]
+                    .concat(),
+                    steps: expression_lowering_steps(&assignment.value),
+                    secondary: Vec::new(),
+                });
+            }
+        }
+        for invariant in &aggregate.invariants {
+            let invariant_path = [
+                aggregate_path.clone(),
+                vec!["invariant".to_owned(), invariant.name.text.clone()],
+            ]
+            .concat();
+            records.push(DomainSourceRecord {
+                span: invariant.span,
+                path: invariant_path.clone(),
+                steps: Vec::new(),
+                secondary: Vec::new(),
+            });
+            records.push(DomainSourceRecord {
+                span: invariant.expr.span,
+                path: invariant_path.clone(),
+                steps: expression_lowering_steps(&invariant.expr),
+                secondary: vec![source_site(invariant_path, invariant.span)],
+            });
+        }
+    }
+    for saga in &domain.sagas {
+        for invariant in &saga.invariants {
+            let invariant_path = vec![
+                domain.name.clone(),
+                "saga".to_owned(),
+                saga.name.clone(),
+                "invariant".to_owned(),
+                invariant.name.text.clone(),
+            ];
+            records.push(DomainSourceRecord {
+                span: invariant.span,
+                path: invariant_path.clone(),
+                steps: Vec::new(),
+                secondary: Vec::new(),
+            });
+            records.push(DomainSourceRecord {
+                span: invariant.expr.span,
+                path: invariant_path.clone(),
+                steps: expression_lowering_steps(&invariant.expr),
+                secondary: vec![source_site(invariant_path, invariant.span)],
+            });
+        }
+    }
+    for effect in &domain.effects {
+        records.push(DomainSourceRecord {
+            span: span_at(effect.loc),
+            path: vec![
+                domain.name.clone(),
+                "effect".to_owned(),
+                effect.name.clone(),
+            ],
+            steps: vec![LoweringStep {
+                kind: "lower_effect_lifecycle".to_owned(),
+                detail: None,
+            }],
+            secondary: Vec::new(),
+        });
+    }
+    records
+}
+
+fn same_origin_position(left: Span, right: Span) -> bool {
+    left.start.line == right.start.line && left.start.column == right.start.column
+}
+
+fn origin_chain_for_span(
+    target: &str,
+    span: Span,
+    records: &[DomainSourceRecord],
+    generated: bool,
+) -> OriginChain {
+    let matches = records
+        .iter()
+        .filter(|record| same_origin_position(record.span, span))
+        .collect::<Vec<_>>();
+    let Some(primary) = matches.first() else {
+        return OriginChain::generated_only(format!("domain:generated:{target}"), "domain");
+    };
+    let id = format!(
+        "domain:{}:{}:{}:{}:{}",
+        primary.path.join("/"),
+        primary.span.start.offset,
+        primary.span.end.offset,
+        primary.span.start.line,
+        primary.span.start.column
+    );
+    let mut secondary = primary.secondary.clone();
+    secondary.extend(
+        matches
+            .iter()
+            .skip(1)
+            .map(|record| source_site(record.path.clone(), record.span)),
+    );
+    OriginChain {
+        id: OriginId(id),
+        dialect: "domain".to_owned(),
+        primary: Some(source_site(primary.path.clone(), primary.span)),
+        secondary,
+        lowering_steps: primary.steps.clone(),
+        generated,
+    }
+}
+
+fn statement_span(statement: &Statement) -> Span {
+    match statement {
+        Statement::Assign { span, .. }
+        | Statement::If { span, .. }
+        | Statement::ForAll { span, .. } => *span,
+    }
+}
+
+fn action_item_span(item: &ActionItem) -> Span {
+    match item {
+        ActionItem::Requires(_, span)
+        | ActionItem::Ensures(_, span)
+        | ActionItem::Let(_, _, span) => *span,
+        ActionItem::Statement(statement) => statement_span(statement),
+    }
+}
+
+fn bind_expression_tree(
+    registry: &mut OriginRegistry,
+    target: &str,
+    expression: &Expr,
+    origin: &OriginChain,
+) {
+    registry.bind(target, origin.clone());
+    let child = |suffix: &str| format!("{target}:expr:{suffix}");
+    match expression {
+        Expr::Some(value) | Expr::Neg(value) | Expr::Not(value) => {
+            bind_expression_tree(registry, &child("operand"), value, origin);
+        }
+        Expr::Set(values) | Expr::Seq(values) => {
+            for (index, value) in values.iter().enumerate() {
+                bind_expression_tree(registry, &child(&index.to_string()), value, origin);
+            }
+        }
+        Expr::Struct { fields, .. } => {
+            for (name, value) in fields {
+                bind_expression_tree(registry, &child(name), value, origin);
+            }
+        }
+        Expr::Call { args, .. } => {
+            for (index, value) in args.iter().enumerate() {
+                bind_expression_tree(registry, &child(&index.to_string()), value, origin);
+            }
+        }
+        Expr::Index(base, index) => {
+            bind_expression_tree(registry, &child("base"), base, origin);
+            bind_expression_tree(registry, &child("index"), index, origin);
+        }
+        Expr::Field(base, _) => {
+            bind_expression_tree(registry, &child("base"), base, origin);
+        }
+        Expr::Method { receiver, args, .. } => {
+            bind_expression_tree(registry, &child("receiver"), receiver, origin);
+            for (index, value) in args.iter().enumerate() {
+                bind_expression_tree(registry, &child(&index.to_string()), value, origin);
+            }
+        }
+        Expr::Binary { left, right, .. } | Expr::BinaryNamed { left, right, .. } => {
+            bind_expression_tree(registry, &child("left"), left, origin);
+            bind_expression_tree(registry, &child("right"), right, origin);
+        }
+        Expr::IfThenElse {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            bind_expression_tree(registry, &child("condition"), condition, origin);
+            bind_expression_tree(registry, &child("then"), then_expr, origin);
+            bind_expression_tree(registry, &child("else"), else_expr, origin);
+        }
+        Expr::Is { expr, .. } | Expr::UnaryNamed { expr, .. } => {
+            bind_expression_tree(registry, &child("operand"), expr, origin);
+        }
+        Expr::Quantified { body, .. }
+        | Expr::Count {
+            condition: body, ..
+        } => {
+            bind_expression_tree(registry, &child("body"), body, origin);
+        }
+        Expr::Sum {
+            body, condition, ..
+        } => {
+            bind_expression_tree(registry, &child("body"), body, origin);
+            if let Some(condition) = condition {
+                bind_expression_tree(registry, &child("condition"), condition, origin);
+            }
+        }
+        Expr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => {
+            bind_expression_tree(registry, &child("first"), first, origin);
+            bind_expression_tree(registry, &child("second"), second, origin);
+            bind_expression_tree(registry, &child("third"), third, origin);
+        }
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::BinderNamed { .. } => {}
+    }
+}
+
+fn domain_property_expression_span(domain: &DomainSpec, kind: &str, name: &str) -> Option<Span> {
+    if kind != "invariant" {
+        return None;
+    }
+    domain
+        .aggregates
+        .iter()
+        .find_map(|aggregate| {
+            aggregate.invariants.iter().find_map(|invariant| {
+                (format!("{}_{}", safe(&aggregate.name), safe(&invariant.name)) == name)
+                    .then_some(invariant.expr.span)
+            })
+        })
+        .or_else(|| {
+            domain.sagas.iter().find_map(|saga| {
+                saga.invariants.iter().find_map(|invariant| {
+                    (format!("{}_{}", safe(&saga.name), safe(&invariant.name)) == name)
+                        .then_some(invariant.expr.span)
+                })
+            })
+        })
+}
+
+#[allow(clippy::too_many_lines)]
+fn domain_origin_registry(domain: &DomainSpec, surface: &SurfaceSpec) -> OriginRegistry {
+    let records = domain_source_records(domain);
+    let mut registry = OriginRegistry::default();
+
+    registry.bind(
+        SPEC_TARGET,
+        origin_chain_for_span(SPEC_TARGET, span_at(domain.loc), &records, false),
+    );
+    for item in &surface.items {
+        let (SpecItem::Type { name, .. }
+        | SpecItem::Enum { name, .. }
+        | SpecItem::Struct { name, .. }) = item
+        else {
+            continue;
+        };
+        let target = type_target(name);
+        let matches = domain
+            .types
+            .iter()
+            .filter(|ty| ty.name == *name)
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            registry.bind(
+                target,
+                OriginChain::generated_only(format!("domain:generated:type:{name}"), "domain"),
+            );
+        } else {
+            for ty in matches {
+                registry.bind(
+                    target.clone(),
+                    origin_chain_for_span(&target, span_at(ty.loc), &records, false),
+                );
+            }
+        }
+    }
+
+    for aggregate in &domain.aggregates {
+        for field in &aggregate.state {
+            let target = state_target(&state_name(aggregate, &field.name));
+            registry.bind(
+                target.clone(),
+                origin_chain_for_span(&target, field.span, &records, false),
+            );
+        }
+    }
+    for effect in &domain.effects {
+        for name in [status_var(effect), attempt_var(effect)] {
+            let target = state_target(&name);
+            registry.bind(
+                target.clone(),
+                origin_chain_for_span(&target, span_at(effect.loc), &records, true),
+            );
+        }
+    }
+    for aggregate in &domain.aggregates {
+        for event in &aggregate.events {
+            let target = state_target(&event_flag(&event.name));
+            registry.bind(
+                target.clone(),
+                OriginChain::generated_only(
+                    format!("domain:generated:event-flag:{}", event.name),
+                    "domain",
+                ),
+            );
+        }
+    }
+
+    let mut init_index = 0;
+    for item in &surface.items {
+        match item {
+            SpecItem::Init { statements, .. } => {
+                for statement in statements {
+                    let target = init_statement_target(init_index);
+                    registry.bind(
+                        target.clone(),
+                        origin_chain_for_span(&target, statement_span(statement), &records, true),
+                    );
+                    init_index += 1;
+                }
+            }
+            SpecItem::Action {
+                name, items, span, ..
+            } => {
+                let target = action_target(name);
+                registry.bind(
+                    target.clone(),
+                    origin_chain_for_span(&target, *span, &records, true),
+                );
+                let mut guard_index = 0;
+                let mut statement_index = 0;
+                for item in items {
+                    let target = match item {
+                        ActionItem::Requires(..) | ActionItem::Let(..) => {
+                            let target = action_guard_target(name, guard_index);
+                            guard_index += 1;
+                            target
+                        }
+                        ActionItem::Ensures(..) => {
+                            let target = format!("action:{name}:ensure:{guard_index}");
+                            guard_index += 1;
+                            target
+                        }
+                        ActionItem::Statement(..) => {
+                            let target = action_statement_target(name, statement_index);
+                            statement_index += 1;
+                            target
+                        }
+                    };
+                    let origin =
+                        origin_chain_for_span(&target, action_item_span(item), &records, true);
+                    registry.bind(target.clone(), origin.clone());
+                    match item {
+                        ActionItem::Requires(expression, _)
+                        | ActionItem::Ensures(expression, _)
+                        | ActionItem::Let(_, expression, _) => bind_expression_tree(
+                            &mut registry,
+                            &format!("{target}:expr:root"),
+                            expression,
+                            &origin,
+                        ),
+                        ActionItem::Statement(..) => {}
+                    }
+                }
+            }
+            SpecItem::Invariant {
+                name, expr, span, ..
+            } => {
+                let target = property_target("invariant", name);
+                let source_span =
+                    domain_property_expression_span(domain, "invariant", name).unwrap_or(*span);
+                let origin = origin_chain_for_span(&target, source_span, &records, false);
+                registry.bind(target.clone(), origin.clone());
+                bind_expression_tree(&mut registry, &format!("{target}:expr:root"), expr, &origin);
+            }
+            SpecItem::Trans {
+                name, expr, span, ..
+            } => {
+                let target = property_target("trans", name);
+                let origin = origin_chain_for_span(&target, *span, &records, true);
+                registry.bind(target.clone(), origin.clone());
+                bind_expression_tree(&mut registry, &format!("{target}:expr:root"), expr, &origin);
+            }
+            SpecItem::Reachable {
+                name, expr, span, ..
+            } => {
+                let target = property_target("reachable", name);
+                let origin = origin_chain_for_span(&target, *span, &records, false);
+                registry.bind(target.clone(), origin.clone());
+                bind_expression_tree(&mut registry, &format!("{target}:expr:root"), expr, &origin);
+            }
+            SpecItem::Terminal { .. } => registry.bind(
+                TERMINAL_TARGET,
+                OriginChain::generated_only(
+                    format!("domain:generated:terminal:{}", domain.name),
+                    "domain",
+                ),
+            ),
+            _ => {}
+        }
+    }
+    registry
 }

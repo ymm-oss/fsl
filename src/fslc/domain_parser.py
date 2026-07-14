@@ -35,7 +35,7 @@ DOMAIN_GRAMMAR = r"""
 start: domain_def
 
 domain_def: "domain" NAME "{" domain_item* "}"
-?domain_item: implementation_profile_def | type_def | value_object_def
+?domain_item: implementation_profile_def | type_def | enum_def | value_object_def
             | aggregate_def | effect_def | await_def | saga_def | projection_def
 
 implementation_profile_def: "implementation_profile" NAME profile_block? ";"?
@@ -43,6 +43,9 @@ profile_block: "{" profile_item* "}"
 profile_item: NAME NAME ";"?
 
 type_def: "type" NAME "=" TYPE_BODY ";"?
+enum_def: "enum" NAME "{" domain_enum_members? "}" ";"?
+domain_enum_members: domain_enum_member ("," domain_enum_member)* ","?
+domain_enum_member: NAME
 
 value_object_def: "value_object" NAME "{" value_object_item* "}"
 ?value_object_item: field_def | invariant_def
@@ -256,12 +259,40 @@ class DomainAst(Transformer):
         body = _clean(body)
         if "|" in body:
             members = tuple(_clean(part) for part in body.split("|") if _clean(part))
-            return DomainType(name=name, kind="enum", members=members, loc=_loc(meta))
+            return DomainType(
+                name=name,
+                kind="enum",
+                members=members,
+                source_form="legacy_enum_union",
+                loc=_loc(meta),
+            )
         if ".." in body:
             lo, hi = body.split("..", 1)
-            return DomainType(name=name, kind="range", lo=_clean(lo), hi=_clean(hi), loc=_loc(meta))
+            return DomainType(
+                name=name,
+                kind="range",
+                lo=_clean(lo),
+                hi=_clean(hi),
+                source_form="canonical_range",
+                loc=_loc(meta),
+            )
         raise FslError(
             f"domain type '{name}' must be an enum union (A | B) or a bounded range (lo..hi)",
+            loc=_loc(meta),
+        )
+
+    def domain_enum_member(self, meta, name):
+        return name
+
+    def domain_enum_members(self, meta, *members):
+        return tuple(members)
+
+    def enum_def(self, meta, name, members=()):
+        return DomainType(
+            name=name,
+            kind="enum",
+            members=tuple(members),
+            source_form="canonical_enum",
             loc=_loc(meta),
         )
 
@@ -278,6 +309,7 @@ class DomainAst(Transformer):
             kind="value_object",
             fields=tuple(fields),
             invariants=tuple(invariants),
+            source_form="value_object",
             loc=_loc(meta),
         )
 

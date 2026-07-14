@@ -8,7 +8,10 @@ use fsl_syntax::{
     ActionItem, Binder, Expr, MetaTag, Param, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
 };
 
-use crate::KernelSpec;
+use crate::{
+    KernelSpec, OriginRegistry, SPEC_TARGET, TraceabilityRegistry, action_target, property_target,
+    state_target, type_target,
+};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Value {
@@ -131,6 +134,8 @@ pub struct KernelModel {
     pub reachables: Vec<PropertyDef>,
     pub leadstos: Vec<LeadsToDef>,
     pub terminal: Option<Expr>,
+    origins: OriginRegistry,
+    traceability: TraceabilityRegistry,
 }
 
 impl KernelModel {
@@ -237,16 +242,66 @@ impl KernelModel {
             _ => None,
         }
     }
+
+    #[must_use]
+    pub fn action_origin(&self, name: &str) -> Option<&crate::OriginChain> {
+        self.origins.primary_for(&action_target(name))
+    }
+
+    #[must_use]
+    pub fn origins(&self) -> &OriginRegistry {
+        &self.origins
+    }
+
+    #[must_use]
+    pub fn requirement_for(&self, target: &str) -> Option<&MetaTag> {
+        self.traceability.requirement_for(target)
+    }
+
+    #[must_use]
+    pub fn property_origin(&self, kind: &str, name: &str) -> Option<&crate::OriginChain> {
+        self.origins.primary_for(&property_target(kind, name))
+    }
+
+    #[must_use]
+    pub fn state_origin(&self, name: &str) -> Option<&crate::OriginChain> {
+        self.origins.primary_for(&crate::state_target(name))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModelError {
     pub message: String,
+    pub origin: Option<Box<crate::OriginChain>>,
+}
+
+impl ModelError {
+    fn with_origin(mut self, origin: Option<crate::OriginChain>) -> Self {
+        self.origin = origin.map(Box::new);
+        self
+    }
 }
 
 impl fmt::Display for ModelError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+        let location = self
+            .origin
+            .as_ref()
+            .and_then(|origin| origin.primary.as_ref())
+            .and_then(|site| site.span.map(|span| (site.source_file.as_deref(), span)));
+        match location {
+            Some((Some(file), span)) => write!(
+                formatter,
+                "{} at {}:{}:{}",
+                self.message, file, span.start.line, span.start.column
+            ),
+            Some((None, span)) => write!(
+                formatter,
+                "{} at {}:{}",
+                self.message, span.start.line, span.start.column
+            ),
+            None => formatter.write_str(&self.message),
+        }
     }
 }
 
@@ -259,20 +314,23 @@ impl std::error::Error for ModelError {}
 /// Returns [`ModelError`] for duplicate declarations, unresolved types,
 /// non-constant bounds, invalid capacities, or a missing state block.
 pub fn build_model(kernel: KernelSpec) -> Result<KernelModel, ModelError> {
-    ModelBuilder::new(kernel.into_syntax()).build()
+    ModelBuilder::new(kernel).build()
 }
 
 struct ModelBuilder {
     spec: SurfaceSpec,
+    origins: OriginRegistry,
     consts: BTreeMap<String, Value>,
     types: BTreeMap<String, TypeDef>,
     enum_members: BTreeMap<String, Value>,
 }
 
 impl ModelBuilder {
-    fn new(spec: SurfaceSpec) -> Self {
+    fn new(kernel: KernelSpec) -> Self {
+        let KernelSpec { spec, origins } = kernel;
         Self {
             spec,
+            origins,
             consts: BTreeMap::new(),
             types: BTreeMap::new(),
             enum_members: BTreeMap::new(),
@@ -292,14 +350,21 @@ impl ModelBuilder {
         let mut reachables = Vec::new();
         let mut leadstos = Vec::new();
         let mut terminal = None;
+        let mut traceability = TraceabilityRegistry::default();
         for item in &self.spec.items {
             match item {
                 SpecItem::State(fields) => {
                     for (name, ty) in fields {
                         if state.iter().any(|(existing, _)| existing == name) {
-                            return Err(model_error(format!("duplicate state variable '{name}'")));
+                            return Err(model_error(format!("duplicate state variable '{name}'"))
+                                .with_origin(self.origins.diagnostic_origin(&state_target(name))));
                         }
-                        state.push((name.clone(), self.resolve_type(ty)?));
+                        let origin = self.origins.diagnostic_origin(&state_target(name));
+                        state.push((
+                            name.clone(),
+                            self.resolve_type(ty)
+                                .map_err(|error| error.with_origin(origin))?,
+                        ));
                     }
                 }
                 // Dialect lowering can append generated init fragments (for
@@ -320,43 +385,67 @@ impl ModelBuilder {
                     meta,
                     span,
                     ..
-                } => actions.push(self.action(name, params, items, *span, *fair, meta.clone())?),
+                } => {
+                    if let Some(meta) = meta {
+                        traceability.bind(action_target(name), meta.clone());
+                    }
+                    let origin = self.origins.diagnostic_origin(&action_target(name));
+                    actions.push(
+                        self.action(name, params, items, *span, *fair, meta.clone())
+                            .map_err(|error| error.with_origin(origin))?,
+                    );
+                }
                 SpecItem::Invariant {
                     name,
                     expr,
                     span,
                     meta,
                     ..
-                } => invariants.push(PropertyDef {
-                    name: name.clone(),
-                    expr: expr.as_ref().clone(),
-                    span: *span,
-                    meta: meta.clone(),
-                }),
+                } => {
+                    if let Some(meta) = meta {
+                        traceability.bind(property_target("invariant", name), meta.clone());
+                    }
+                    invariants.push(PropertyDef {
+                        name: name.clone(),
+                        expr: expr.as_ref().clone(),
+                        span: *span,
+                        meta: meta.clone(),
+                    });
+                }
                 SpecItem::Trans {
                     name,
                     expr,
                     span,
                     meta,
                     ..
-                } => transitions.push(PropertyDef {
-                    name: name.clone(),
-                    expr: expr.as_ref().clone(),
-                    span: *span,
-                    meta: meta.clone(),
-                }),
+                } => {
+                    if let Some(meta) = meta {
+                        traceability.bind(property_target("trans", name), meta.clone());
+                    }
+                    transitions.push(PropertyDef {
+                        name: name.clone(),
+                        expr: expr.as_ref().clone(),
+                        span: *span,
+                        meta: meta.clone(),
+                    });
+                }
                 SpecItem::Reachable {
                     name,
                     expr,
                     span,
                     meta,
                     ..
-                } => reachables.push(PropertyDef {
-                    name: name.clone(),
-                    expr: expr.as_ref().clone(),
-                    span: *span,
-                    meta: meta.clone(),
-                }),
+                } => {
+                    if let Some(meta) = meta {
+                        traceability.bind(property_target("reachable", name), meta.clone());
+                    }
+                    reachables.push(PropertyDef {
+                        name: name.clone(),
+                        expr: expr.as_ref().clone(),
+                        span: *span,
+                        meta: meta.clone(),
+                    });
+                }
                 SpecItem::Terminal { expr, .. } => terminal = Some(expr.as_ref().clone()),
                 SpecItem::Unless {
                     name,
@@ -406,24 +495,31 @@ impl ModelBuilder {
                     decreases,
                     within,
                     ..
-                } => leadstos.push(LeadsToDef {
-                    name: name.clone(),
-                    span: *span,
-                    binders: binders.clone(),
-                    before: before.as_ref().clone(),
-                    after: after.as_ref().clone(),
-                    meta: meta.clone(),
-                    decreases: decreases.as_deref().cloned(),
-                    within: within
-                        .as_deref()
-                        .map(|expr| self.const_int(expr))
-                        .transpose()?,
-                }),
+                } => {
+                    let origin = self
+                        .origins
+                        .diagnostic_origin(&property_target("leadsTo", name));
+                    leadstos.push(LeadsToDef {
+                        name: name.clone(),
+                        span: *span,
+                        binders: binders.clone(),
+                        before: before.as_ref().clone(),
+                        after: after.as_ref().clone(),
+                        meta: meta.clone(),
+                        decreases: decreases.as_deref().cloned(),
+                        within: within
+                            .as_deref()
+                            .map(|expr| self.const_int(expr))
+                            .transpose()
+                            .map_err(|error| error.with_origin(origin))?,
+                    });
+                }
                 _ => {}
             }
         }
         if state.is_empty() {
-            return Err(model_error("spec has no state block"));
+            return Err(model_error("spec has no state block")
+                .with_origin(self.origins.diagnostic_origin(SPEC_TARGET)));
         }
         Ok(KernelModel {
             name: self.spec.name,
@@ -439,6 +535,8 @@ impl ModelBuilder {
             reachables,
             leadstos,
             terminal,
+            origins: self.origins,
+            traceability,
         })
     }
 
@@ -465,30 +563,39 @@ impl ModelBuilder {
                     hi,
                     symmetric,
                 } => {
+                    let origin = self.origins.diagnostic_origin(&type_target(name));
                     self.insert_type(
                         name,
                         TypeDef::Domain {
-                            lo: self.const_int(lo)?,
-                            hi: self.const_int(hi)?,
+                            lo: self
+                                .const_int(lo)
+                                .map_err(|error| error.with_origin(origin.clone()))?,
+                            hi: self
+                                .const_int(hi)
+                                .map_err(|error| error.with_origin(origin.clone()))?,
                             symmetric: *symmetric,
                         },
-                    )?;
+                    )
+                    .map_err(|error| error.with_origin(origin))?;
                 }
                 SpecItem::Enum {
                     name,
                     members,
                     symmetric,
                 } => {
+                    let origin = self.origins.diagnostic_origin(&type_target(name));
                     self.insert_type(
                         name,
                         TypeDef::Enum {
                             members: members.clone(),
                             symmetric: *symmetric,
                         },
-                    )?;
+                    )
+                    .map_err(|error| error.with_origin(origin.clone()))?;
                     for member in members {
                         if self.enum_members.contains_key(member) {
-                            return Err(model_error(format!("duplicate enum member '{member}'")));
+                            return Err(model_error(format!("duplicate enum member '{member}'"))
+                                .with_origin(origin));
                         }
                         self.enum_members.insert(
                             member.clone(),
@@ -504,18 +611,22 @@ impl ModelBuilder {
         }
         for item in &items {
             if let SpecItem::Struct { name, fields } = item {
+                let origin = self.origins.diagnostic_origin(&type_target(name));
                 let resolved = fields
                     .iter()
                     .map(|(field, ty)| Ok((field.clone(), self.resolve_type(ty)?)))
-                    .collect::<Result<Vec<_>, ModelError>>()?;
+                    .collect::<Result<Vec<_>, ModelError>>()
+                    .map_err(|error| error.with_origin(origin.clone()))?;
                 for (field, ty) in &resolved {
                     if !self.is_scalar_struct_field(ty) {
                         return Err(model_error(format!(
                             "struct field '{name}.{field}' has non-scalar type"
-                        )));
+                        ))
+                        .with_origin(origin));
                     }
                 }
-                self.insert_type(name, TypeDef::Struct { fields: resolved })?;
+                self.insert_type(name, TypeDef::Struct { fields: resolved })
+                    .map_err(|error| error.with_origin(origin))?;
             }
         }
         Ok(())
@@ -797,5 +908,6 @@ fn as_bool(value: &Value) -> Result<bool, ModelError> {
 fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
+        origin: None,
     }
 }

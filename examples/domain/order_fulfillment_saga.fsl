@@ -1,9 +1,9 @@
 domain OrderFulfillmentSaga {
   implementation_profile functional_ddd
 
-  type OrderStatus = Pending | Approved | Cancelled
-  type InventoryStatus = NotRequested | ReservationPending | Reserved | Failed | ReleaseRequested
-  type PaymentStatus = NotRequested | PaymentPending | Captured | Failed | TimedOut
+  enum OrderStatus { Pending, Approved, Cancelled }
+  enum InventoryStatus { NotRequested, ReservationPending, Reserved, Failed, ReleaseRequested }
+  enum PaymentStatus { NotRequested, PaymentPending, Captured, Failed, TimedOut }
 
   aggregate Order {
     id OrderId

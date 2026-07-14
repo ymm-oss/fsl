@@ -14,6 +14,8 @@ use crate::{ParseError, Span, Token, TokenKind, lex};
 pub struct DomainLoc {
     pub line: u32,
     pub column: u32,
+    #[serde(skip)]
+    span: Span,
 }
 
 impl From<Span> for DomainLoc {
@@ -21,7 +23,15 @@ impl From<Span> for DomainLoc {
         Self {
             line: span.start.line,
             column: span.start.column,
+            span,
         }
+    }
+}
+
+impl DomainLoc {
+    #[must_use]
+    pub fn span(self) -> Span {
+        self.span
     }
 }
 
@@ -35,14 +45,26 @@ pub struct DomainField {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DomainTypeSourceForm {
+    CanonicalRange,
+    CanonicalEnum,
+    LegacyEnumUnion,
+    ValueObject,
+    External,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainType {
     pub name: String,
     pub kind: String,
     pub members: Vec<String>,
+    pub member_spans: Vec<Span>,
     pub lo: Option<SyntaxExpr>,
     pub hi: Option<SyntaxExpr>,
     pub fields: Vec<DomainField>,
     pub invariants: Vec<DomainInvariant>,
+    pub source_form: DomainTypeSourceForm,
+    pub span: Span,
     pub loc: DomainLoc,
 }
 
@@ -475,6 +497,8 @@ impl DomainParser {
                 self.eat_symbol(";");
             } else if self.peek_ident("type") {
                 types.push(self.domain_type()?);
+            } else if self.peek_ident("enum") {
+                types.push(self.domain_enum()?);
             } else if self.peek_ident("value_object") {
                 types.push(self.value_object()?);
             } else if self.peek_ident("aggregate") {
@@ -513,36 +537,81 @@ impl DomainParser {
         self.expect_symbol("=")?;
         let first = self.expression(true)?;
         if self.eat_symbol("|") {
-            let mut members = vec![expression_name(first)?];
+            let first = expression_name(first)?;
+            let mut member_spans = vec![first.span];
+            let mut members = vec![first.text];
             loop {
-                members.push(self.expect_ident()?);
+                let member = self.expect_syntax_ident()?;
+                member_spans.push(member.span);
+                members.push(member.text);
                 if !self.eat_symbol("|") {
                     break;
                 }
             }
             self.eat_symbol(";");
+            let span = join(loc.span(), self.previous_span());
             return Ok(DomainType {
                 name,
                 kind: "enum".to_owned(),
                 members,
+                member_spans,
                 lo: None,
                 hi: None,
                 fields: Vec::new(),
                 invariants: Vec::new(),
+                source_form: DomainTypeSourceForm::LegacyEnumUnion,
+                span,
                 loc,
             });
         }
         self.expect_symbol("..")?;
         let hi = self.expression(true)?;
         self.eat_symbol(";");
+        let span = join(loc.span(), self.previous_span());
         Ok(DomainType {
             name,
             kind: "range".to_owned(),
             members: Vec::new(),
+            member_spans: Vec::new(),
             lo: Some(first),
             hi: Some(hi),
             fields: Vec::new(),
             invariants: Vec::new(),
+            source_form: DomainTypeSourceForm::CanonicalRange,
+            span,
+            loc,
+        })
+    }
+
+    fn domain_enum(&mut self) -> Result<DomainType, ParseError> {
+        let loc = self.loc();
+        self.bump();
+        let name = self.expect_ident()?;
+        self.expect_symbol("{")?;
+        let mut members = Vec::new();
+        let mut member_spans = Vec::new();
+        while !self.eat_symbol("}") {
+            let member = self.expect_syntax_ident()?;
+            member_spans.push(member.span);
+            members.push(member.text);
+            if self.eat_symbol("}") {
+                break;
+            }
+            self.expect_symbol(",")?;
+        }
+        self.eat_symbol(";");
+        let span = join(loc.span(), self.previous_span());
+        Ok(DomainType {
+            name,
+            kind: "enum".to_owned(),
+            members,
+            member_spans,
+            lo: None,
+            hi: None,
+            fields: Vec::new(),
+            invariants: Vec::new(),
+            source_form: DomainTypeSourceForm::CanonicalEnum,
+            span,
             loc,
         })
     }
@@ -561,14 +630,18 @@ impl DomainParser {
                 fields.push(self.field(false, true)?);
             }
         }
+        let span = join(loc.span(), self.previous_span());
         Ok(DomainType {
             name,
             kind: "value_object".to_owned(),
             members: Vec::new(),
+            member_spans: Vec::new(),
             lo: None,
             hi: None,
             fields,
             invariants,
+            source_form: DomainTypeSourceForm::ValueObject,
+            span,
             loc,
         })
     }
@@ -1309,10 +1382,10 @@ impl DomainParser {
     }
 }
 
-fn expression_name(expression: SyntaxExpr) -> Result<String, ParseError> {
+fn expression_name(expression: SyntaxExpr) -> Result<SyntaxIdent, ParseError> {
     let span = expression.span;
     match expression.kind {
-        SyntaxExprKind::Name(name) => Ok(name.text),
+        SyntaxExprKind::Name(name) => Ok(name),
         _ => Err(ParseError {
             message: "domain enum members must be identifiers".to_owned(),
             span,

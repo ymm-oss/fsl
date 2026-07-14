@@ -46,6 +46,7 @@ struct CliVerifyOptions {
     use_cache: bool,
     lemmas: Vec<String>,
     from_state: Option<PathBuf>,
+    edition: String,
 }
 
 impl Default for CliVerifyOptions {
@@ -65,6 +66,7 @@ impl Default for CliVerifyOptions {
             use_cache: true,
             lemmas: Vec::new(),
             from_state: None,
+            edition: "current".to_owned(),
         }
     }
 }
@@ -164,18 +166,30 @@ fn parse_verify_options(
                 options.from_state =
                     Some(PathBuf::from(required_option_value(args, "--from-state")?));
             }
+            "--edition" => options.edition = parse_edition(args)?,
             _ => return Err(format!("unknown verify option '{option}'")),
         }
     }
     Ok(options)
 }
 
+fn parse_edition(args: &mut impl Iterator<Item = String>) -> Result<String, String> {
+    let edition = required_option_value(args, "--edition")?;
+    if matches!(edition.as_str(), "current" | "next") {
+        Ok(edition)
+    } else {
+        Err("--edition must be current or next".to_owned())
+    }
+}
+
 fn parse_specialized_verify_options(
     args: &mut impl Iterator<Item = String>,
-) -> Result<(usize, String, String), String> {
+    allow_edition: bool,
+) -> Result<(usize, String, String, String), String> {
     let mut depth = 8_usize;
     let mut deadlock = "warn".to_owned();
     let mut engine = "bmc".to_owned();
+    let mut edition = "current".to_owned();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--depth" => {
@@ -198,10 +212,11 @@ fn parse_specialized_verify_options(
                     return Err("--engine must be bmc or induction".to_owned());
                 }
             }
+            "--edition" if allow_edition => edition = parse_edition(args)?,
             _ => return Err(format!("unknown specialized check option '{option}'")),
         }
     }
-    Ok((depth, deadlock, engine))
+    Ok((depth, deadlock, engine, edition))
 }
 
 fn parse_optional_output(
@@ -300,6 +315,7 @@ fn command() -> Result<(Value, i32), String> {
             );
             let mut strict_tags = false;
             let mut requirements = None;
+            let mut edition = "current".to_owned();
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--strict-tags" => strict_tags = true,
@@ -309,6 +325,7 @@ fn command() -> Result<(Value, i32), String> {
                             "--requirements",
                         )?));
                     }
+                    "--edition" => edition = parse_edition(&mut args)?,
                     _ => return Err(format!("unknown check option '{option}'")),
                 }
             }
@@ -316,6 +333,7 @@ fn command() -> Result<(Value, i32), String> {
                 &path,
                 strict_tags,
                 requirements.as_deref(),
+                &edition,
             ))
         }
         "kernel" => {
@@ -624,7 +642,8 @@ fn command() -> Result<(Value, i32), String> {
             );
             match subcommand.as_str() {
                 "check" => {
-                    let (depth, deadlock, engine) = parse_specialized_verify_options(&mut args)?;
+                    let (depth, deadlock, engine, _) =
+                        parse_specialized_verify_options(&mut args, false)?;
                     Ok(run_ai_check(&path, depth, &deadlock, &engine))
                 }
                 "replay" => {
@@ -751,8 +770,9 @@ fn command() -> Result<(Value, i32), String> {
             );
             match subcommand.as_str() {
                 "check" => {
-                    let (depth, deadlock, engine) = parse_specialized_verify_options(&mut args)?;
-                    Ok(run_domain_check(&path, depth, &deadlock, &engine))
+                    let (depth, deadlock, engine, edition) =
+                        parse_specialized_verify_options(&mut args, true)?;
+                    Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
                 }
                 "analyze" => Ok(run_domain_analyze(&path)),
                 "expand" => {
@@ -1383,7 +1403,8 @@ fn command() -> Result<(Value, i32), String> {
             );
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                run_verify_cli(&path, &options)
+                let result = run_verify_cli(&path, &options);
+                apply_domain_edition(result, &path, &options.edition)
             } else {
                 if options.engine != "bmc"
                     || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
@@ -1398,6 +1419,7 @@ fn command() -> Result<(Value, i32), String> {
                     || !options.use_cache
                     || !options.lemmas.is_empty()
                     || options.from_state.is_some()
+                    || options.edition != "current"
                 {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
@@ -1553,6 +1575,7 @@ fn run_sweep(
                     use_cache: true,
                     lemmas: Vec::new(),
                     from_state: None,
+                    edition: "current".to_owned(),
                 };
                 let (mut verification, _) = run_verify_cli(path, &options);
                 if let Value::Object(envelope) = &mut verification {
@@ -3439,6 +3462,7 @@ fn run_check_with_tags(
     path: &Path,
     strict_tags: bool,
     requirements: Option<&Path>,
+    edition: &str,
 ) -> (Value, i32) {
     let (mut output, status) = run_check(path);
     if status == 0 && strict_tags {
@@ -3450,12 +3474,97 @@ fn run_check_with_tags(
             return (error_output("io", &error), 2);
         }
     }
+    apply_domain_edition((output, status), path, edition)
+}
+
+fn domain_enum_union_warnings(path: &Path) -> Vec<Value> {
+    let Ok(fsl_syntax::SurfaceDocument::Domain(domain)) = parse_surface_document(path) else {
+        return Vec::new();
+    };
+    domain
+        .types
+        .iter()
+        .filter(|ty| ty.source_form == fsl_syntax::DomainTypeSourceForm::LegacyEnumUnion)
+        .map(|ty| {
+            let replacement = format!("enum {} {{ {} }}", ty.name, ty.members.join(", "));
+            json!({
+                "kind": "deprecated_domain_enum_union",
+                "code": "deprecated_domain_enum_union",
+                "severity": "warning",
+                "message": format!("domain enum union syntax for '{}' is deprecated; use `{replacement}`", ty.name),
+                "loc": {
+                    "file": path,
+                    "line": ty.span.start.line,
+                    "column": ty.span.start.column,
+                    "end_line": ty.span.end.line,
+                    "end_column": ty.span.end.column,
+                },
+                "canonical_replacement": replacement,
+                "suggestion": {
+                    "kind": "replace",
+                    "replacement": replacement,
+                    "span": {
+                        "start": ty.span.start.offset,
+                        "end": ty.span.end.offset,
+                    },
+                },
+            })
+        })
+        .collect()
+}
+
+fn apply_domain_edition(
+    (mut output, status): (Value, i32),
+    path: &Path,
+    edition: &str,
+) -> (Value, i32) {
+    let mut additions = domain_enum_union_warnings(path);
+    if edition == "next" && !additions.is_empty() {
+        for finding in &mut additions {
+            finding["severity"] = json!("error");
+            finding["message"] = json!(format!(
+                "{}; legacy domain enum unions are not accepted in the next edition",
+                finding["message"]
+                    .as_str()
+                    .unwrap_or("deprecated domain enum union")
+            ));
+        }
+        let mut error = envelope();
+        error.insert("result".to_owned(), json!("error"));
+        error.insert("kind".to_owned(), json!("deprecated_domain_enum_union"));
+        error.insert("edition".to_owned(), json!(edition));
+        error.insert("findings".to_owned(), Value::Array(additions));
+        return (Value::Object(error), 2);
+    }
+    if !additions.is_empty()
+        && let Value::Object(envelope) = &mut output
+    {
+        envelope
+            .entry("warnings")
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .expect("warnings is an array")
+            .extend(additions);
+    }
+    if edition == "next"
+        && let Value::Object(envelope) = &mut output
+    {
+        envelope.insert("edition".to_owned(), json!(edition));
+    }
     (output, status)
 }
 
 fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    fsl_syntax::parse_surface_document(&source).map_err(|error| error.to_string())
+    fsl_syntax::parse_surface_document(&source).map_err(|error| {
+        format!(
+            "{} at {}:{}:{}",
+            error.message,
+            path.display(),
+            error.span.start.line,
+            error.span.start.column
+        )
+    })
 }
 
 fn validate_specialized_document(path: &Path) -> Result<(), String> {
@@ -4168,19 +4277,31 @@ fn snake_case(value: &str) -> String {
     output
 }
 
-fn run_domain_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
+fn run_domain_check(
+    path: &Path,
+    depth: usize,
+    deadlock: &str,
+    engine: &str,
+    edition: &str,
+) -> (Value, i32) {
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => {
+            return apply_domain_edition((semantic_error_output(&error), 2), path, edition);
+        }
     };
     let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
     if status == 2 {
-        return (kernel, status);
+        return apply_domain_edition((kernel, status), path, edition);
     }
-    wrap_specialized(fsl_tools::check_domain(
-        &domain,
-        &stable_kernel_projection(kernel),
-    ))
+    apply_domain_edition(
+        wrap_specialized(fsl_tools::check_domain(
+            &domain,
+            &stable_kernel_projection(kernel),
+        )),
+        path,
+        edition,
+    )
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
@@ -4644,13 +4765,18 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
     flows
 }
 
+#[allow(clippy::too_many_lines)]
 fn model_skeleton(model: &KernelModel) -> Value {
     let actions = model
         .actions
         .iter()
         .map(|action| {
+            let origin = model.action_origin(&action.name);
             let mut value = json!({
-                "name": fslc_rust::display_name(&action.name),
+                "name": origin
+                    .and_then(|origin| origin.primary.as_ref())
+                    .and_then(|site| site.declaration_path.last())
+                    .map_or_else(|| fslc_rust::display_name(&action.name), String::clone),
                 "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
                 "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
                 "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
@@ -4660,6 +4786,18 @@ fn model_skeleton(model: &KernelModel) -> Value {
                 && let Value::Object(value) = &mut value
             {
                 value.insert("fair".to_owned(), json!(true));
+            }
+            if let Some(origin) = origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert(
+                    "generated_name".to_owned(),
+                    json!(fslc_rust::display_name(&action.name)),
+                );
+                value.insert(
+                    "origin".to_owned(),
+                    fslc_rust::internal_origin_json(origin),
+                );
             }
             value
         })
@@ -4671,7 +4809,26 @@ fn model_skeleton(model: &KernelModel) -> Value {
         ("reachable", &model.reachables),
     ] {
         properties.extend(items.iter().map(|property| {
-            json!({"name":fslc_rust::display_name(&property.name),"kind":kind,"body_text":fslc_rust::expr_text(&property.expr),"requirement":metadata(property.meta.as_ref())})
+            let origin = model.property_origin(kind, &property.name);
+            let mut value = json!({
+                "name": origin
+                    .and_then(|origin| origin.primary.as_ref())
+                    .and_then(|site| site.declaration_path.last())
+                    .map_or_else(|| fslc_rust::display_name(&property.name), String::clone),
+                "kind":kind,
+                "body_text":fslc_rust::expr_text(&property.expr),
+                "requirement":metadata(property.meta.as_ref())
+            });
+            if let Some(origin) = origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert(
+                    "generated_name".to_owned(),
+                    json!(fslc_rust::display_name(&property.name)),
+                );
+                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+            }
+            value
         }));
     }
     for property in &model.leadstos {
@@ -5471,21 +5628,52 @@ fn invariant_violation_explanation(
                 .actions
                 .iter()
                 .find(|definition| definition.name == action.name);
-            json!({
-                "name": display(&action.name),
+            let origin = model.action_origin(&action.name);
+            let mut value = json!({
+                "name": origin
+                    .and_then(fslc_rust::origin_display_name)
+                    .map_or_else(|| display(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
                 "loc": definition.map(|definition| definition.span.python_loc()),
-            })
+            });
+            if let Some(origin) = origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert("generated_name".to_owned(), json!(display(&action.name)));
+                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+                if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
+                    value.insert("loc".to_owned(), span.python_loc());
+                }
+            }
+            value
         });
     let mut explanation = Map::new();
     explanation.insert("violation_kind".to_owned(), json!(violation.kind));
-    explanation.insert("invariant".to_owned(), json!(display(&violation.name)));
+    let origin = model.property_origin("invariant", &violation.name);
+    explanation.insert(
+        "invariant".to_owned(),
+        json!(
+            origin
+                .and_then(fslc_rust::origin_display_name)
+                .map_or_else(|| display(&violation.name), str::to_owned)
+        ),
+    );
     explanation.insert(
         "loc".to_owned(),
-        property.map_or(Value::Null, |property| property.span.python_loc()),
+        origin
+            .and_then(|origin| origin.primary.as_ref())
+            .and_then(|site| site.span)
+            .map_or_else(
+                || property.map_or(Value::Null, |property| property.span.python_loc()),
+                fsl_syntax::Span::python_loc,
+            ),
     );
+    if let Some(origin) = origin {
+        explanation.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        explanation.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+    }
     explanation.insert("violated_at_step".to_owned(), json!(violation.step));
     explanation.insert("violating_bindings".to_owned(), violating.clone());
     explanation.insert(
@@ -11925,6 +12113,7 @@ fn statement_location(statements: &[fsl_core::KernelStatement]) -> Value {
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn concrete_boundary_output(
     model: &KernelModel,
     violation: &fsl_runtime::Violation,
@@ -11935,7 +12124,6 @@ fn concrete_boundary_output(
     output.insert("result".to_owned(), json!("violated"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
-    output.insert("invariant".to_owned(), json!(display(&violation.name)));
     let action = trace.last().and_then(|entry| entry.action.as_ref());
     let definition = action.and_then(|action| {
         model
@@ -11943,13 +12131,43 @@ fn concrete_boundary_output(
             .iter()
             .find(|definition| definition.name == action.name)
     });
+    let origin = match violation.kind.as_str() {
+        "invariant" => model.property_origin("invariant", &violation.name),
+        "trans" => model.property_origin("trans", &violation.name),
+        "type_bound" => violation
+            .name
+            .strip_prefix("_bounds_")
+            .and_then(|name| model.state_origin(name)),
+        _ => action.and_then(|action| model.action_origin(&action.name)),
+    };
+    output.insert(
+        "invariant".to_owned(),
+        json!(
+            origin
+                .and_then(fslc_rust::origin_display_name)
+                .map_or_else(|| display(&violation.name), str::to_owned)
+        ),
+    );
+    if let Some(origin) = origin {
+        output.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        output.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+    }
     output.insert(
         "loc".to_owned(),
-        if violation.kind == "partial_op" {
-            definition.map_or(Value::Null, |action| statement_location(&action.statements))
-        } else {
-            Value::Null
-        },
+        origin
+            .and_then(|origin| origin.primary.as_ref())
+            .and_then(|site| site.span)
+            .map_or_else(
+                || {
+                    if violation.kind == "partial_op" {
+                        definition
+                            .map_or(Value::Null, |action| statement_location(&action.statements))
+                    } else {
+                        Value::Null
+                    }
+                },
+                fsl_syntax::Span::python_loc,
+            ),
     );
     if violation.kind == "partial_op" {
         output.insert(
@@ -11984,13 +12202,23 @@ fn concrete_boundary_output(
     output.insert(
         "last_action".to_owned(),
         action.map_or(Value::Null, |action| {
-            json!({
-                "name": display(&action.name),
+            let action_origin = model.action_origin(&action.name);
+            let mut value = json!({
+                "name": action_origin
+                    .and_then(fslc_rust::origin_display_name)
+                    .map_or_else(|| display(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
                 "loc": definition.map(|definition| definition.span.python_loc()),
-            })
+            });
+            if let Some(origin) = action_origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert("generated_name".to_owned(), json!(display(&action.name)));
+                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+            }
+            value
         }),
     );
     let mut rendered_trace = fslc_rust::trace_json(model, trace);
@@ -12493,13 +12721,15 @@ fn load_model(path: &Path) -> Result<KernelModel, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| {
-        if error.message == "top-level document has not reached the kernel lowering gate" {
-            "spec has no state block".to_owned()
-        } else {
-            error.to_string()
-        }
-    })?;
+    let kernel =
+        fsl_core::parse_kernel_source_with_file(&source, &resolver, path.to_string_lossy())
+            .map_err(|error| {
+                if error.message == "top-level document has not reached the kernel lowering gate" {
+                    "spec has no state block".to_owned()
+                } else {
+                    error.to_string()
+                }
+            })?;
     fsl_core::build_model(kernel).map_err(|error| error.to_string())
 }
 

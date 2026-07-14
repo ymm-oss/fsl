@@ -6,6 +6,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Domain finite variants now use canonical `enum Name { Member, ... }` syntax,
+  while bounded numeric domains remain `type Name = lo..hi`. The 2.x legacy
+  union spelling remains compatible with a stable
+  `deprecated_domain_enum_union` diagnostic and loss-aware replacement;
+  `--edition next` rejects it. Canonical and legacy forms share the same typed
+  model, Kernel lowering, and verdict, and public examples now use the
+  canonical spelling (issue #244).
+- Native Rust domain lowering now carries a non-serialized origin chain from typed
+  domain nodes through Surface/Kernel models into validation, verification,
+  counterexamples, and `explain`. Source identity/full spans, declaration
+  paths, lowering steps, primary/secondary sources, one-to-many/many-to-one,
+  and generated-only nodes remain distinguishable; requirement traceability is
+  stored separately. Diagnostics prefer user declarations and retain generated
+  Kernel names as machine detail. Public Kernel v1 schema/version/goldens and
+  default `fslc kernel` output remain unchanged (issue #240; v2 publication is
+  tracked by #256). Rust consumers should construct parser/model values through
+  the supported parse/build APIs rather than struct literals because the
+  internal span and origin carriers add fields to those implementation types.
 - Native Rust domain lowering (issue #239) now resolves typed domain symbols,
   enum members, `can()`, finite membership, state reads, and nested lvalues
   structurally, then builds Kernel AST directly without generated-source

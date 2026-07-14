@@ -2,8 +2,8 @@
 // Copyright 2026 Ryoichi Izumita
 
 use fsl_syntax::{
-    SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxTypeExprKind,
-    parse_domain, parse_expr,
+    DomainTypeSourceForm, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern,
+    SyntaxTypeExprKind, parse_domain, parse_expr,
 };
 
 fn text<'a>(source: &'a str, expression: &SyntaxExpr) -> &'a str {
@@ -333,4 +333,44 @@ fn public_helper_nodes_retain_their_own_spans() {
     };
     assert_eq!(name.text, "value");
     assert_eq!(&source[span.start.offset..span.end.offset], "some(value)");
+}
+
+#[test]
+fn canonical_enum_and_legacy_union_retain_source_form_spans_and_comments() {
+    let source = r"domain Types {
+  enum Status {
+    Pending, // keep the pending comment
+    Approved,
+  }
+  type Legacy = Open | // keep legacy union trivia
+    Closed
+  type Quantity = 0..100
+}
+";
+    let domain = parse_domain(source).expect("parse canonical and legacy declarations");
+    let canonical = &domain.types[0];
+    assert_eq!(canonical.source_form, DomainTypeSourceForm::CanonicalEnum);
+    assert_eq!(canonical.members, ["Pending", "Approved"]);
+    assert_eq!(canonical.member_spans.len(), 2);
+    assert!(
+        source[canonical.span.start.offset..canonical.span.end.offset]
+            .contains("// keep the pending comment")
+    );
+    assert_eq!(
+        &source[canonical.member_spans[1].start.offset..canonical.member_spans[1].end.offset],
+        "Approved"
+    );
+
+    let legacy = &domain.types[1];
+    assert_eq!(legacy.source_form, DomainTypeSourceForm::LegacyEnumUnion);
+    assert_eq!(legacy.members, ["Open", "Closed"]);
+    assert_eq!(legacy.member_spans.len(), 2);
+    assert!(
+        source[legacy.span.start.offset..legacy.span.end.offset]
+            .contains("// keep legacy union trivia")
+    );
+
+    let range = &domain.types[2];
+    assert_eq!(range.source_form, DomainTypeSourceForm::CanonicalRange);
+    assert!(range.members.is_empty());
 }

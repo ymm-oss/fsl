@@ -74,6 +74,50 @@ pub(super) struct ExplicitRequest<'a> {
 
 type CommandResult = (Value, i32);
 
+fn origin_aware_property_name(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    kind: &str,
+    name: &str,
+) -> String {
+    let Some(origin) = model.property_origin(kind, name) else {
+        return display(name);
+    };
+    output.insert("generated_name".to_owned(), json!(display(name)));
+    output.insert(
+        "origin".to_owned(),
+        ::fslc_rust::internal_origin_json(origin),
+    );
+    if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
+        output.insert("loc".to_owned(), span.python_loc());
+    }
+    ::fslc_rust::origin_display_name(origin).map_or_else(|| display(name), str::to_owned)
+}
+
+fn origin_aware_action_json(
+    model: &KernelModel,
+    name: &str,
+    params: &Map<String, Value>,
+    fallback_loc: Value,
+) -> Value {
+    let Some(origin) = model.action_origin(name) else {
+        return json!({"name": display(name), "params": params, "loc": fallback_loc});
+    };
+    let loc = origin
+        .primary
+        .as_ref()
+        .and_then(|site| site.span)
+        .map_or(fallback_loc, fsl_syntax::Span::python_loc);
+    json!({
+        "name": ::fslc_rust::origin_display_name(origin)
+            .map_or_else(|| display(name), str::to_owned),
+        "generated_name": display(name),
+        "params": params,
+        "loc": loc,
+        "origin": ::fslc_rust::internal_origin_json(origin),
+    })
+}
+
 struct PreparedBmc {
     model: KernelModel,
     checked_bounds: Option<std::collections::BTreeSet<String>>,
@@ -170,10 +214,16 @@ fn render_induction_cti(
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("unknown_cti"));
+    let property_kind = if cti.kind == "trans" {
+        "trans"
+    } else {
+        "invariant"
+    };
+    let name = origin_aware_property_name(&mut output, model, property_kind, &cti.name);
     if cti.kind == "trans" {
-        output.insert("trans".to_owned(), json!(display(&cti.name)));
+        output.insert("trans".to_owned(), json!(name));
     }
-    output.insert("invariant".to_owned(), json!(display(&cti.name)));
+    output.insert("invariant".to_owned(), json!(name));
     output.insert("k".to_owned(), json!(cti.k));
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert("completeness".to_owned(), json!("bounded"));
@@ -231,11 +281,11 @@ fn render_rank_failure(
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("unknown_cti"));
     output.insert("violation_kind".to_owned(), json!("leadsTo_rank"));
-    output.insert("invariant".to_owned(), json!(display(&failure.name)));
-    output.insert(
-        "loc".to_owned(),
-        property.map_or(Value::Null, |property| property.span.python_loc()),
-    );
+    let name = origin_aware_property_name(&mut output, model, "leadsTo", &failure.name);
+    output.insert("invariant".to_owned(), json!(name));
+    output
+        .entry("loc".to_owned())
+        .or_insert_with(|| property.map_or(Value::Null, |property| property.span.python_loc()));
     output.insert(
         "bindings".to_owned(),
         Value::Object(
@@ -266,15 +316,23 @@ fn render_rank_failure(
             .actions
             .iter()
             .find(|definition| definition.name == *action_name);
+        let params = action
+            .map(|action| {
+                action
+                    .params
+                    .iter()
+                    .map(|(name, value)| (name.clone(), ::fslc_rust::fsl_value_json(value)))
+                    .collect::<Map<_, _>>()
+            })
+            .unwrap_or_default();
         output.insert(
             "last_action".to_owned(),
-            json!({
-                "name": display(action_name),
-                "params": action.map(|action| action.params.iter().map(|(name, value)| (
-                    name.clone(), ::fslc_rust::fsl_value_json(value)
-                )).collect::<Map<_, _>>()).unwrap_or_default(),
-                "loc": definition.map(|definition| definition.span.python_loc()),
-            }),
+            origin_aware_action_json(
+                model,
+                action_name,
+                &params,
+                definition.map_or(Value::Null, |definition| definition.span.python_loc()),
+            ),
         );
     }
     output.insert(
@@ -837,6 +895,7 @@ fn render_bmc_result(
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_bmc_violation(
     model: &KernelModel,
     violation: &fsl_verifier::BmcViolation,
@@ -846,14 +905,39 @@ fn render_bmc_violation(
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("violated"));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
+    let (property_kind, property) = if violation.kind == "trans" {
+        (
+            "trans",
+            model
+                .transitions
+                .iter()
+                .find(|property| property.name == violation.name),
+        )
+    } else {
+        (
+            "invariant",
+            model
+                .invariants
+                .iter()
+                .find(|property| property.name == violation.name),
+        )
+    };
+    let origin = model.property_origin(property_kind, &violation.name);
+    let display_name = origin
+        .and_then(|origin| origin.primary.as_ref())
+        .and_then(|site| site.declaration_path.last())
+        .map_or_else(|| display(&violation.name), String::clone);
     if violation.kind == "trans" {
-        output.insert("trans".to_owned(), json!(display(&violation.name)));
+        output.insert("trans".to_owned(), json!(display_name));
     }
-    output.insert("invariant".to_owned(), json!(display(&violation.name)));
-    let property = model
-        .invariants
-        .iter()
-        .find(|property| property.name == violation.name);
+    output.insert("invariant".to_owned(), json!(display_name));
+    if let Some(origin) = origin {
+        output.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        output.insert(
+            "origin".to_owned(),
+            ::fslc_rust::internal_origin_json(origin),
+        );
+    }
     if let Some(meta) = property.and_then(|property| property.meta.as_ref()) {
         output.insert("requirement".to_owned(), metadata(Some(meta)));
     }
@@ -891,13 +975,27 @@ fn render_bmc_violation(
                     .actions
                     .iter()
                     .find(|definition| definition.name == action.name);
-                json!({
-                    "name": display(&action.name),
+                let origin = model.action_origin(&action.name);
+                let mut rendered = json!({
+                    "name": origin
+                        .and_then(|origin| origin.primary.as_ref())
+                        .and_then(|site| site.declaration_path.last())
+                        .map_or_else(|| display(&action.name), String::clone),
                     "params": action.params.iter().map(|(name, value)| (
                         name.clone(), ::fslc_rust::fsl_value_json(value)
                     )).collect::<Map<_, _>>(),
                     "loc": definition.map(|definition| definition.span.python_loc()),
-                })
+                });
+                if let Some(origin) = origin
+                    && let Value::Object(rendered) = &mut rendered
+                {
+                    rendered.insert("generated_name".to_owned(), json!(display(&action.name)));
+                    rendered.insert(
+                        "origin".to_owned(),
+                        ::fslc_rust::internal_origin_json(origin),
+                    );
+                }
+                rendered
             }),
     );
     let mut trace = ::fslc_rust::trace_json(model, &violation.trace);
@@ -938,8 +1036,12 @@ fn render_reachable_failure(
             unreached
                 .iter()
                 .map(|property| {
+                    let origin = model.property_origin("reachable", &property.name);
                     let mut item = json!({
-                        "name": display(&property.name),
+                        "name": origin
+                            .and_then(|origin| origin.primary.as_ref())
+                            .and_then(|site| site.declaration_path.last())
+                            .map_or_else(|| display(&property.name), String::clone),
                         "loc": property.span.python_loc(),
                         "classification": "insufficient_depth",
                         "hint": format!("not witnessed within depth {depth}; try a larger --depth"),
@@ -950,6 +1052,15 @@ fn render_reachable_failure(
                         && let Value::Object(item) = &mut item
                     {
                         item.insert("requirement".to_owned(), metadata(Some(meta)));
+                    }
+                    if let Some(origin) = origin
+                        && let Value::Object(item) = &mut item
+                    {
+                        item.insert("generated_name".to_owned(), json!(display(&property.name)));
+                        item.insert(
+                            "origin".to_owned(),
+                            ::fslc_rust::internal_origin_json(origin),
+                        );
                     }
                     item
                 })
@@ -1019,11 +1130,11 @@ fn render_leadsto_failure(
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("violated"));
     output.insert("violation_kind".to_owned(), json!("leadsTo"));
-    output.insert("invariant".to_owned(), json!(display(&violation.name)));
-    output.insert(
-        "loc".to_owned(),
-        property.map_or(Value::Null, |property| property.span.python_loc()),
-    );
+    let name = origin_aware_property_name(&mut output, model, "leadsTo", &violation.name);
+    output.insert("invariant".to_owned(), json!(name));
+    output
+        .entry("loc".to_owned())
+        .or_insert_with(|| property.map_or(Value::Null, |property| property.span.python_loc()));
     output.insert(
         "bindings".to_owned(),
         Value::Object(
@@ -1604,6 +1715,7 @@ fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String,
         "values": options.scope.values,
         "strict_tags": options.strict_tags,
         "lemmas": options.lemmas,
+        "edition": options.edition,
     });
     digest.update(serde_json::to_vec(&base_options).map_err(|error| error.to_string())?);
     let xdepth = format!("{:x}", digest.clone().finalize());
@@ -2073,6 +2185,24 @@ mod tests {
         assert_eq!(status, 1);
         assert_eq!(output["result"], "unknown_cti");
         assert_eq!(output["invariant"], "Sync");
+    }
+
+    #[test]
+    fn induction_counterexample_renderer_uses_domain_origin() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/domain_origin_violation.fsl");
+        let model = load_model(&path).expect("domain model");
+        let cti = fsl_verifier::InductionCti {
+            kind: "invariant".to_owned(),
+            name: "Order_mustBeApproved".to_owned(),
+            k: 1,
+            trace: Vec::new(),
+        };
+        let (output, status) = render_induction_cti(&model, &cti, 1, Instant::now());
+        assert_eq!(status, 1);
+        assert_eq!(output["invariant"], "mustBeApproved");
+        assert_eq!(output["generated_name"], "Order_mustBeApproved");
+        assert_eq!(output["origin"]["dialect"], "domain");
     }
 
     #[test]
