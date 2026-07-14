@@ -671,8 +671,11 @@ cannot be assigned both inline and in `init`.
    For `Map<K, Struct>` values, the path includes the field: `m[k].f1 = ...`
    and `m[k].f2 = ...` in one action are allowed independent field writes
    (`check` and `verify --depth 1` succeed in the repro). Repeating the same
-   field, e.g. `m[k].f1 = 1; m[k].f1 = 2`, fails during verification with
-   `kind:"semantics"` and `double assignment to 'm' field 'f1' on the same path`.
+   field, e.g. `m[k].f1 = 1; m[k].f1 = 2`, is rejected while building the
+   checked Kernel model. Indexed writes are rejected unless their indices are
+   provably distinct constants; `requires k != j` and local constant bindings
+   do not establish distinctness. Native `check`/`verify` and the browser Worker all
+   return `kind:"semantics"` before a verifier backend runs.
 
    ```fsl
    struct Pair { f1: V, f2: V }
@@ -1086,7 +1089,11 @@ first failed layer and later layers are marked `skipped`.
   a heuristic from trace-monotonicity, not a proof; absent when no such counter
   is found.
 - `verified` / `reachable_failed` / `violated` from BMC are bounded and include
-  `completeness:"bounded"`, `checked_to_depth`, and `cost: {"elapsed_s": ...}`.
+  `completeness:"bounded"`, `checked_to_depth`, and fixed-shape `cost` with
+  total `elapsed_s`, solver check statistics, and deterministic per-property
+  check counts/times. Native/Worker keys and nullability match; Z3 counters are
+  maximum observed snapshots. Explicit verification emits zero/null solver
+  statistics in the same shape. See `docs/DESIGN-verification-cost.md`.
   Bounded `verified` may include a saturation `hint` when the depth-K frontier
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),

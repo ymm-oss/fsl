@@ -21,6 +21,7 @@ pub use fsl_syntax::{
 
 mod compose;
 mod db;
+mod diagnostics;
 mod dialect;
 mod domain;
 mod domain_lowering;
@@ -35,6 +36,9 @@ pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
 };
 pub use db::db_kernel_source;
+pub use diagnostics::{
+    insert_requirement_metadata, model_warnings, requirement_metadata, version_metadata,
+};
 pub use dialect::{
     GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, RequirementsTraceStep,
@@ -62,7 +66,8 @@ pub use refinement::{
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
-    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json, trace_json,
+    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json,
+    state_summary, trace_json,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

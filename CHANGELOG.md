@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Native, induction, explicit, and browser verification results now share one
+  fixed `cost` schema. Z3 backends report check count/time, nullable common
+  conflict/decision/propagation/memory statistics, and deterministic
+  per-property check attribution; native and Worker parity tests enforce the
+  same keys and nullability (issue #271).
+- Native CLI and browser Worker result envelopes now identify the verifier,
+  `fsl-core`, and loaded Z3 versions through one `versions` schema. Native
+  verdict-cache keys and entries use the linked Z3 runtime version instead of a
+  hard-coded release string (issue #268).
 - Domain finite variants now use canonical `enum Name { Member, ... }` syntax,
   while bounded numeric domains remain `type Name = lo..hi`. The 2.x legacy
   union spelling remains compatible with a stable
@@ -41,6 +50,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- Native and browser verification now share duplicate-write validation and
+  verification warning generation. Duplicate writes are rejected while building
+  the checked Kernel model for `check` and `verify`; model, vacuity, deadlock,
+  and action-coverage warnings come from solver-independent shared crates rather
+  than frontend-local implementations. The Worker no longer accepts ambiguous
+  write order or emits an unconditional empty warning list. Indexed writes that
+  may alias are rejected unless constant indexes prove them distinct, and
+  induction selects typed warning kinds instead of message substrings (issue
+  #267).
 - The bounded `leadsTo ... within N` deadline check no longer misses a
   violation when the path deadlocks after the deadline. The deadline probe ran
   as a single post-hoc pass after the BMC unrolling loop, by which point every
@@ -96,6 +114,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   JSON and `python_ast` projections remain unchanged; `domain`/`dbsystem`/
   `ai_component` nested declarations are not yet covered and are tracked by a
   follow-up issue (issue #241; follow-up #281).
+- Approval records can now opt into detached Ed25519 signatures with
+  `approval create --signing-key`. The strict v2 schema binds the complete
+  canonical record, while `approval check`, `approval diff`, and `ledger`
+  require explicit repeatable trust anchors and distinguish signed, unsigned,
+  and signature-invalid evidence. Unsigned v1 behavior is unchanged (issue
+  #269).
 - Native dialect selection now lexes each document once and dispatches through a
   duplicate-checked keyword registry shared by Kernel, CLI, WASM, and mirrored
   Python/LSP entrypoints. Leading BOM/comments/whitespace and typed top-level

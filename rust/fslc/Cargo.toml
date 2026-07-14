@@ -11,8 +11,11 @@ name = "fslc"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
+ed25519-dalek.workspace = true
 fsl-core = { path = "../fsl-core" }
 fsl-runtime = { path = "../fsl-runtime" }
+fsl-solver = { path = "../fsl-solver" }
 fsl-solver-z3 = { path = "../fsl-solver-z3" }
 fsl-syntax = { path = "../fsl-syntax" }
 fsl-tools = { path = "../fsl-tools" }

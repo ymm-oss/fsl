@@ -574,7 +574,11 @@ variable.
 - For `Map<K, Struct>` values, field writes are tracked per field. Updating two
   different fields of the same element in one action, such as `m[k].f1 = 1`
   followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same
-  path is a semantics error.
+  path is a semantics error. Indexed writes are rejected unless their indices
+  are provably distinct constants; guards such as `requires k != j` and local
+  constant bindings do not establish distinctness. The checked Kernel model rejects it before any
+  verifier backend runs, so native `check`/`verify` and the browser Worker
+  return the same `kind:"semantics"` classification.
 
   ```fsl
   type K = 0..1
@@ -590,8 +594,8 @@ variable.
   Observed result: `fslc check struct_fields_ok.fsl` returned `result:"ok"`,
   and `fslc verify struct_fields_ok.fsl --depth 1` returned
   `result:"verified"`. Changing the action to assign `m[k].f1` twice returned
-  `result:"error"`, `kind:"semantics"` from `fslc verify`, with message
-  `double assignment to 'm' field 'f1' on the same path`.
+  `result:"error"`, `kind:"semantics"` from both `fslc check` and
+  `fslc verify`.
 - **requires**: enabled only when all hold.
 - **ensures**: checked in the post-transition state. A violation is
   `violation_kind: "ensures"`.
@@ -671,10 +675,10 @@ fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
-fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [-o record.json]
-fslc approval check  <file.fsl> --record <record.json>       # approved | drifted
-fslc approval diff   <file.fsl> --record <record.json> [--depth K]
+fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
@@ -797,6 +801,15 @@ same status per requirement and includes the full baseline digest. `approval
 diff` materializes the approved commit and invokes the ordinary bounded semantic
 diff against the current working file. See `docs/DESIGN-approval.md`.
 
+Without `--signing-key`, `approval create` emits the unchanged unsigned
+`fslc.approval.v1` record. With an Ed25519 PKCS#8 PEM signing key it emits
+`fslc.approval.v2`; every check, diff, or ledger use of that record requires the
+matching SPKI PEM `--trust-key`. The v2 detached signature covers the full
+canonical record, and a cryptographic mismatch is `signature-invalid` rather
+than an approval. Trust-key possession authenticates a signer but authorization
+remains an organizational policy. The exact canonicalization and key formats
+are specified in `docs/DESIGN-approval.md`.
+
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
@@ -850,8 +863,15 @@ Progress-preserving refinement failures are reported as `refinement_failed` with
 `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
 `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
 
-`verify` / `verify --engine induction` results include `checked_to_depth` and
-`cost: {"elapsed_s": ...}`. BMC `verified` is explicitly bounded; when the final
+Every `verify` result includes `checked_to_depth` and one fixed `cost` object:
+total `elapsed_s`, `solver` check count/time plus nullable common Z3 statistics,
+and deterministic `properties` rows with per-property check counts and time.
+Native and browser Workers use the same keys and nullability. Z3 counters are
+the maximum snapshot observed across constituent checks rather than a sum of
+possibly cumulative snapshots; timing values are nondeterministic. The explicit
+engine uses the same shape with zero solver checks and null Z3 statistics. See
+[`DESIGN-verification-cost.md`](DESIGN-verification-cost.md). BMC `verified` is
+explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
 exploration, `verified` also includes a `hint` that the state space is not
 obviously saturated at that depth and suggests a larger `--depth` or induction.
@@ -2063,7 +2083,12 @@ result = prove(spec, k_ind=1, base_depth=8)   # k-induction
 ```
 
 Returns a dict with the same structure as the CLI (the CLI wraps it with a
-`"fsl": "1.0"` envelope).
+`"fsl": "1.0"` envelope). Native CLI and browser Worker `check`/`verify`
+envelopes also contain `versions.verifier`, `versions.core`, and
+`versions.solver` objects. Each object has `name` and `version`; the solver
+object additionally has `backend`. Solver versions come from the loaded native
+or browser Z3 runtime rather than a CLI constant. The machine-readable contract
+is `schemas/fslc/envelope.v1.schema.json`.
 
 ## 15. Validation suite (the spec ≠ intent gap)
 

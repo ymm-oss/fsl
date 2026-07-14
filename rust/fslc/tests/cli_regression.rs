@@ -28,6 +28,45 @@ fn native_cli_checks_a_repository_spec_without_python() {
     assert_eq!(value["fsl"], "1.0");
     assert_eq!(value["result"], "ok");
     assert_eq!(value["spec"], "ShoppingCart");
+    assert_eq!(value["versions"]["verifier"]["name"], "fslc-rust");
+    assert_eq!(
+        value["versions"]["verifier"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(value["versions"]["core"]["name"], "fsl-core");
+    assert_eq!(
+        value["versions"]["core"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(value["versions"]["solver"]["name"], "z3");
+    assert_eq!(value["versions"]["solver"]["backend"], "native-z3");
+    assert!(
+        value["versions"]["solver"]["version"]
+            .as_str()
+            .is_some_and(|version| version.starts_with("Z3 4.16.0"))
+    );
+}
+
+#[test]
+fn native_check_and_verify_share_the_core_duplicate_write_gate() {
+    let fixture = "rust/fslc/tests/fixtures/duplicate_write.fsl";
+
+    for args in [
+        vec!["check", fixture],
+        vec!["verify", fixture, "--no-cache"],
+    ] {
+        let command = args[0];
+        let (value, status) = run_cli(&args);
+        assert_eq!(status, 2, "{command}");
+        assert_eq!(value["result"], "error", "{command}");
+        assert_eq!(value["kind"], "semantics", "{command}");
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("same state location")),
+            "{command}: {value}"
+        );
+    }
 }
 
 #[test]
@@ -197,6 +236,13 @@ fn native_cli_preserves_induction_outcomes() {
     assert_eq!(proved["result"], "proved");
     assert_eq!(proved["engine"], "induction");
     assert_eq!(proved["completeness"], "unbounded");
+    assert!(proved["cost"]["solver"]["checks"].as_u64().unwrap_or(0) > 0);
+    assert!(
+        !proved["cost"]["properties"]
+            .as_array()
+            .expect("induction property cost")
+            .is_empty()
+    );
 
     let (cti, status) = run_cli(&[
         "verify",
@@ -213,4 +259,5 @@ fn native_cli_preserves_induction_outcomes() {
     assert_eq!(cti["result"], "unknown_cti");
     assert_eq!(cti["invariant"], "Sync");
     assert_eq!(cti["completeness"], "bounded");
+    assert!(cti["cost"]["solver"]["checks"].as_u64().unwrap_or(0) > 0);
 }

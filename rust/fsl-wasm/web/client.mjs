@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cases } from "./cases.mjs";
+import { workerMessageError } from "./worker-protocol.mjs";
 
 const output = document.querySelector("#result");
 const heartbeat = setInterval(() => {
@@ -11,7 +12,14 @@ function runCase(testCase) {
   return new Promise((resolve, reject) => {
     const worker = new Worker("./worker.js");
     worker.addEventListener("message", ({ data }) => {
-      if (data.id !== testCase.id || !data.envelope) return;
+      if (data.id !== testCase.id) return;
+      const error = workerMessageError(data);
+      if (error) {
+        worker.terminate();
+        reject(error);
+        return;
+      }
+      if (!data.envelope) return;
       worker.terminate();
       resolve(data.envelope);
     });
@@ -36,7 +44,15 @@ function cancelAndRecover() {
       reject(new Error("cancel probe did not initialize"));
     }, 30_000);
     worker.addEventListener("message", ({ data }) => {
-      if (data.id !== "cancel-probe" || !data.progress) return;
+      if (data.id !== "cancel-probe") return;
+      const error = workerMessageError(data);
+      if (error) {
+        clearTimeout(timeout);
+        worker.terminate();
+        reject(error);
+        return;
+      }
+      if (!data.progress) return;
       clearTimeout(timeout);
       worker.terminate();
       resolve(true);

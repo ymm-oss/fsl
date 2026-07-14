@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -276,3 +277,78 @@ def test_rust_help_matches_embedded_contract_at_every_command_path(rust_contract
         )
         assert proc.returncode == 0, (node["path"], proc.stdout, proc.stderr)
         assert proc.stdout == node["help"], node["path"]
+
+
+def test_native_check_and_verify_publish_versioned_envelopes(rust_contract):
+    del rust_contract
+    schema = json.loads(
+        (ROOT / "schemas/fslc/envelope.v1.schema.json").read_text(encoding="utf-8")
+    )
+    workspace = tomllib.loads((ROOT / "rust/Cargo.toml").read_text(encoding="utf-8"))
+    expected_version = workspace["workspace"]["package"]["version"]
+
+    for args in (
+        ["check", "specs/cart_v1.fsl"],
+        [
+            "verify",
+            "examples/gallery/valid/tiny_turnstile.fsl",
+            "--depth",
+            "2",
+            "--deadlock",
+            "ignore",
+            "--no-cache",
+        ],
+    ):
+        proc = subprocess.run(
+            [str(RUST), *args],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        envelope = json.loads(proc.stdout)
+        assert all(field in envelope for field in schema["required"])
+        versions_schema = schema["properties"]["versions"]
+        assert set(envelope["versions"]) == set(versions_schema["required"])
+        assert envelope["versions"]["verifier"] == {
+            "name": "fslc-rust",
+            "version": expected_version,
+        }
+        assert envelope["versions"]["core"] == {
+            "name": "fsl-core",
+            "version": expected_version,
+        }
+        assert envelope["versions"]["solver"]["name"] == "z3"
+        assert envelope["versions"]["solver"]["backend"] == "native-z3"
+        assert envelope["versions"]["solver"]["version"].startswith("Z3 4.16.0")
+        if args[0] == "verify":
+            cost = envelope["cost"]
+            assert set(cost) == {"elapsed_s", "solver", "properties"}
+            assert cost["elapsed_s"] >= 0
+            solver = cost["solver"]
+            assert set(solver) == {
+                "checks",
+                "check_elapsed_s",
+                "conflicts",
+                "decisions",
+                "propagations",
+                "memory_mb",
+            }
+            assert solver["checks"] > 0
+            assert 0 <= solver["check_elapsed_s"] <= cost["elapsed_s"]
+            for name in ("conflicts", "decisions", "propagations", "memory_mb"):
+                assert solver[name] is None or solver[name] >= 0
+            properties = cost["properties"]
+            assert properties == sorted(
+                properties, key=lambda item: (item["kind"], item["name"])
+            )
+            assert sum(item["checks"] for item in properties) == solver["checks"]
+            assert all(
+                set(item) == {"kind", "name", "checks", "elapsed_s"}
+                and item["kind"]
+                and item["name"]
+                and item["checks"] > 0
+                and item["elapsed_s"] >= 0
+                for item in properties
+            )

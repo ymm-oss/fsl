@@ -194,6 +194,14 @@ contract, including non-obvious details:
 
 - `"fsl":"1.0"` is first, JSON is indented by two spaces, and non-ASCII text is
   emitted without ASCII escaping;
+- `versions` identifies the verifier package, `fsl-core`, and the linked Z3
+  runtime using the version it reports; native and
+  Worker envelopes use the same component schema even though their verifier
+  and backend names differ. The check/verify envelope contract is published as
+  `schemas/fslc/envelope.v1.schema.json`;
+- a Worker failure before Z3 initialization is a transport-level
+  `transportError`, not a check/verify envelope, because no loaded solver
+  version exists to report;
 - `faithfulness` defaults are applied recursively to nested result dictionaries;
 - `trace_type` is a top-level trailing default;
 - exit codes 0/1/2/3 retain their current meaning;
@@ -208,6 +216,31 @@ non-deterministic traces. The migration harness therefore has three layers:
 2. full-envelope structural diff, with a small reviewed allowlist for trace
    content and parser wording; and
 3. bidirectional trace replay to validate non-unique Z3 witnesses semantically.
+
+### Shared semantic diagnostics
+
+Frontend code must not decide whether a specification is semantically valid or
+which verification warnings apply. Those decisions are shared in the same
+solver-independent crates used by both delivery surfaces:
+
+- `fsl-core::build_model` rejects duplicate writes on one action path. A model
+  that reaches either native verification or the Worker has therefore passed
+  the same semantic gate.
+- `fsl-core` owns model-only warnings, requirement metadata projection, and
+  deterministic state summaries.
+- `fsl-runtime::verification_warnings` owns vacuous-implication reachability,
+  deadlock warnings, and action-coverage warnings. It consumes only the checked
+  model and backend-neutral result facts.
+- Shared warnings use typed `kind` values for downstream selection. In
+  particular, induction removes bounded `kind:"deadlock"` warnings through
+  `fsl-runtime::induction_warnings`; frontends never classify a warning by
+  searching its human-readable message.
+
+The CLI and Worker may translate arguments and I/O, but they only call these
+shared functions. Warning order is model warnings, vacuity warnings, deadlock,
+then action coverage; this order is part of native/Worker parity. A regression
+test must fail if either frontend accepts a duplicate-write model or replaces
+shared warnings with a local empty/default list.
 
 Any new allowlist entry requires a reason tied to a known nondeterminism. Verdict,
 location, assurance, and exit-code differences are never allowlisted.

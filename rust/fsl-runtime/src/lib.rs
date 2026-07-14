@@ -10,7 +10,9 @@ use fsl_core::{
     ActionDef, ActionGuard, ActionMapTarget, FslValue as Value, KernelBinder as Binder,
     KernelExpr as Expr, KernelLValue as LValue, KernelModel, KernelStatement as Statement,
     ModelError, ParamDef, Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
+    display_name, insert_requirement_metadata, model_warnings, state_summary,
 };
+use serde_json::{Value as JsonValue, json};
 
 mod explicit;
 
@@ -1663,6 +1665,71 @@ pub fn expression_reachable(
         }
     }
     Ok(false)
+}
+
+/// Build solver-independent verification warnings shared by native and browser frontends.
+#[must_use]
+pub fn verification_warnings(
+    model: &KernelModel,
+    depth: usize,
+    warn_deadlock: bool,
+    deadlock_step: Option<usize>,
+    deadlock_state: Option<&State>,
+    action_coverage: &BTreeMap<String, bool>,
+) -> Vec<JsonValue> {
+    let mut warnings = model_warnings(model);
+    for property in &model.invariants {
+        let Expr::Binary { op, left, .. } = &property.expr else {
+            continue;
+        };
+        if op != "=>" {
+            continue;
+        }
+        if matches!(expression_reachable(model.clone(), left, depth), Ok(false)) {
+            let mut warning = json!({
+                "kind": "vacuous_implication",
+                "name": display_name(&property.name),
+                "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display_name(&property.name)),
+                "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
+                "loc": property.span.python_loc(),
+                "classification": "insufficient_depth",
+                "blocking": [],
+                "faithfulness_class": "intent_unexercised",
+                "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            });
+            if let JsonValue::Object(warning) = &mut warning {
+                insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
+            }
+            warnings.push(warning);
+        }
+    }
+    if warn_deadlock && let Some(step) = deadlock_step {
+        let summary = deadlock_state.map_or_else(String::new, |state| state_summary(model, state));
+        warnings.push(json!({
+            "kind": "deadlock",
+            "message": format!("deadlock reachable at step {step} (state: {summary})"),
+            "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional",
+        }));
+    }
+    for (name, covered) in action_coverage {
+        if !covered {
+            warnings.push(json!({
+                "message": format!("action '{}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)", display_name(name)),
+                "hint": format!("these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"),
+            }));
+        }
+    }
+    warnings
+}
+
+/// Remove bounded deadlock findings from warnings promoted to an induction proof.
+#[must_use]
+pub fn induction_warnings(warnings: &[JsonValue]) -> Vec<JsonValue> {
+    warnings
+        .iter()
+        .filter(|warning| warning.get("kind").and_then(JsonValue::as_str) != Some("deadlock"))
+        .cloned()
+        .collect()
 }
 
 /// Replay a symbolic trace through the independent concrete Monitor.

@@ -42,3 +42,4 @@ await cp(resolve(pkg, "fsl_wasm_bg.wasm"), resolve(dist, "fsl_wasm_bg.wasm"));
 await cp(resolve(root, "web/index.html"), resolve(dist, "index.html"));
 await cp(resolve(root, "web/client.mjs"), resolve(dist, "client.mjs"));
 await cp(resolve(root, "web/cases.mjs"), resolve(dist, "cases.mjs"));
+await cp(resolve(root, "web/worker-protocol.mjs"), resolve(dist, "worker-protocol.mjs"));

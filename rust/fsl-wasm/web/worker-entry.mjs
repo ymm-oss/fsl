@@ -11,7 +11,7 @@ globalThis.initZ3 = (options = {}) => rawInitZ3({
   locateFile: (path) => new URL(path, self.location.href).href,
 });
 
-import initWasm, { run } from "../pkg/fsl_wasm.js";
+import initWasm, { internal_error as internalError, run } from "../pkg/fsl_wasm.js";
 import { installZ3Bridge, terminateSolverThreads } from "./z3-bridge.mjs";
 
 let initialized;
@@ -30,24 +30,21 @@ async function initialize() {
 
 self.addEventListener("message", async ({ data }) => {
   const { id, cmd, source, files, options } = data ?? {};
+  let ready = false;
   try {
     self.postMessage({ id, progress: { phase: "initializing" } });
     await initialize();
+    ready = true;
     self.postMessage({ id, progress: { phase: "verifying", depth: options?.depth ?? 8 } });
     const envelope = JSON.parse(
       await run(JSON.stringify({ cmd, source, files, options })),
     );
     self.postMessage({ id, envelope });
   } catch (error) {
-    self.postMessage({
-      id,
-      envelope: {
-        fsl: "1.0",
-        result: "error",
-        kind: "internal",
-        message: error instanceof Error ? error.message : String(error),
-      },
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    self.postMessage(ready
+      ? { id, envelope: JSON.parse(internalError(message)) }
+      : { id, transportError: { kind: "initialization", message } });
   } finally {
     await terminateSolverThreads();
   }

@@ -1,6 +1,6 @@
 # Digest-bound approval records
 
-Issue: #190
+Issues: #190, #269
 
 ## Goal
 
@@ -26,6 +26,7 @@ fslc approval create specs/order.fsl \
   --artifact order-ledger.md \
   --approver alice \
   --depth 8 \
+  --signing-key alice-private.pem \
   -o order.approval.json
 ```
 
@@ -43,11 +44,23 @@ fslc approval check specs/order.fsl --record order.approval.json
 fslc ledger specs/order.fsl --approval order.approval.json
 ```
 
+Signed v2 records require an explicit trust anchor on every consuming command:
+
+```bash
+fslc approval check specs/order.fsl --record order.approval.json \
+  --trust-key alice-public.pem
+fslc ledger specs/order.fsl --approval order.approval.json \
+  --trust-key alice-public.pem
+```
+
 The direct result is `approval_check` with `status:"approved"` or
-`status:"drifted"`. Drift remains an analysis result and exits 0. A malformed,
+`status:"drifted"`. A signed record can instead report
+`status:"signature-invalid"`, which exits 1 and never grants approval. Drift
+remains an analysis result and exits 0. A malformed,
 unsupported, wrong-spec, or locally unavailable Git-baseline record is an error
-and exits 2. Unknown sidecar fields are rejected so schema changes cannot be
-silently ignored.
+and exits 2. A signed record without its matching trust key is also a
+configuration error and exits 2. Unknown sidecar fields are rejected so schema
+changes cannot be silently ignored.
 
 When drift is reported, compare the approved commit to the current working tree
 (including uncommitted edits) without manually materializing the baseline:
@@ -55,6 +68,8 @@ When drift is reported, compare the approved commit to the current working tree
 ```bash
 fslc approval diff specs/order.fsl --record order.approval.json --depth 8
 ```
+
+Pass the same repeatable `--trust-key` option when diffing a signed record.
 
 The result is the ordinary bounded `semantic_diff` envelope plus `approval`
 baseline metadata. Before comparison, the materialized specification is hashed
@@ -91,7 +106,35 @@ The committed sidecar follows
 }
 ```
 
-Supported target kinds are `ledger`, `html`, and `scenarios`.
+Supported target kinds are `ledger`, `html`, and `scenarios`. Omitting
+`--signing-key` continues to produce this exact unsigned v1 contract.
+
+Signed records use
+[`schemas/fslc/approval/approval-record.v2.schema.json`](../schemas/fslc/approval/approval-record.v2.schema.json).
+They preserve the v1 `spec`, `target`, and `approval` objects and add:
+
+```json
+{
+  "schema": "fslc.approval.v2",
+  "signature": {
+    "algorithm": "ed25519",
+    "key_id": "sha256:<64 hex>",
+    "value": "<base64url without padding>"
+  }
+}
+```
+
+`--signing-key` accepts an unencrypted PKCS#8 PEM Ed25519 private key.
+`--trust-key` accepts an SPKI PEM Ed25519 public key and is repeatable. The key
+ID is SHA-256 over the raw 32-byte public key. No other key encodings or
+algorithms are accepted.
+
+The detached signature covers
+`b"fslc.approval.v2\0" || canonical_json(record_without_signature.value)`.
+Canonical JSON recursively sorts object keys and emits compact UTF-8 JSON while
+preserving array order. This binds the schema, signature algorithm and key ID,
+specification, target, and approval fields while remaining insensitive to JSON
+object order and whitespace.
 
 ## Digest contracts
 
@@ -117,7 +160,10 @@ for shared state, actions, and cross-cutting properties.
 `fsl-rendered-artifact-v1+sha256` binds the reviewed presentation while removing
 execution-only noise. Scenario JSON omits only top-level execution metadata
 (`cost` and `cache`) before canonical serialization, preserving same-named
-fields inside reviewed domain state. HTML normalizes embedded `elapsed_s` values. Ledger
+fields inside reviewed domain state. HTML preserves its historical normalization
+of embedded `elapsed_s` values and normalizes solver check time, Z3 counters,
+and memory only in the top-level verify envelope. Property identities, check
+counts, and same-named fields in reviewed domain state remain bound. Ledger
 Markdown is hashed as rendered. This preserves review-visible content while
 preventing solver timing from producing false drift.
 
@@ -141,11 +187,14 @@ order; a later record replaces an earlier decision for the same requirement ID.
 
 ## Trust boundary
 
-The `approver` string is attribution, not a cryptographic identity. Authenticity
-and authorization remain repository controls: signed commits where required,
-CODEOWNERS/review policy, branch protection, and audit-log retention. Editing the
-sidecar is equivalent to editing other governed repository evidence. A future
-schema version may add detached signatures without changing v1 verification.
+For unsigned v1, the `approver` string is attribution rather than a
+cryptographic identity. For signed v2, successful verification proves that the
+holder of the matching private key signed the complete record. Supplying a
+public key as a trust anchor does not by itself establish that the signer is
+authorized to approve a requirement. Authorization remains repository and
+organizational policy: controlled trust-key distribution, CODEOWNERS/review
+policy, branch protection, and audit-log retention. v1 parsing and verification
+remain unchanged and are never used as a fallback for a v2 record.
 
 ## Tests
 
@@ -158,3 +207,8 @@ Native integration coverage proves:
 - `approval diff` materializes the approved commit and reports semantic change;
 - ledger output matches the approval snapshot;
 - ledger, HTML, and scenarios are valid review targets.
+- v1 remains unsigned and byte-shape compatible;
+- v2 signing is stable across JSON object reordering;
+- missing or mismatched trust anchors fail closed;
+- tampering reports `signature-invalid` and never appears approved in a ledger;
+- signed checks, semantic diffs, and ledgers report the signature status.

@@ -3,17 +3,23 @@
 
 //! Versioned approval records that bind reviewed artifacts to normalized FSL.
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
+use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use fsl_core::KernelModel;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 pub const APPROVAL_SCHEMA: &str = "fslc.approval.v1";
+pub const APPROVAL_SCHEMA_V2: &str = "fslc.approval.v2";
+pub const SIGNATURE_ALGORITHM: &str = "ed25519";
 pub const SPEC_DIGEST_ALGORITHM: &str = "fsl-kernel-ast-v1+sha256";
 pub const ARTIFACT_DIGEST_ALGORITHM: &str = "fsl-rendered-artifact-v1+sha256";
 
@@ -61,6 +67,84 @@ pub struct ApprovalRecord {
     pub spec: SpecBinding,
     pub target: TargetBinding,
     pub approval: ApprovalMetadata,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetachedSignature {
+    pub algorithm: String,
+    pub key_id: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalRecordV2 {
+    pub schema: String,
+    pub spec: SpecBinding,
+    pub target: TargetBinding,
+    pub approval: ApprovalMetadata,
+    pub signature: DetachedSignature,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VersionedApprovalRecord {
+    V1(ApprovalRecord),
+    V2(ApprovalRecordV2),
+}
+
+impl VersionedApprovalRecord {
+    #[must_use]
+    pub fn binding(&self) -> ApprovalRecord {
+        match self {
+            Self::V1(record) => record.clone(),
+            Self::V2(record) => ApprovalRecord {
+                schema: APPROVAL_SCHEMA.to_owned(),
+                spec: record.spec.clone(),
+                target: record.target.clone(),
+                approval: record.approval.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct TrustStore {
+    keys: BTreeMap<String, VerifyingKey>,
+}
+
+impl TrustStore {
+    pub fn load(paths: &[PathBuf]) -> Result<Self, String> {
+        let mut keys = BTreeMap::new();
+        for path in paths {
+            let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+            let key = VerifyingKey::from_public_key_pem(&source).map_err(|error| {
+                format!("invalid Ed25519 public key '{}': {error}", path.display())
+            })?;
+            keys.insert(key_id(&key), key);
+        }
+        Ok(Self { keys })
+    }
+
+    pub fn verify(&self, record: &ApprovalRecordV2) -> Result<bool, String> {
+        let key = self.keys.get(&record.signature.key_id).ok_or_else(|| {
+            format!(
+                "no trusted Ed25519 public key matches '{}'",
+                record.signature.key_id
+            )
+        })?;
+        let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&record.signature.value)
+            .map_err(|error| format!("invalid detached signature encoding: {error}"))?;
+        if base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw) != record.signature.value {
+            return Err("detached signature is not canonical base64url-no-pad".to_owned());
+        }
+        let signature = Signature::from_slice(&raw)
+            .map_err(|error| format!("invalid Ed25519 signature: {error}"))?;
+        Ok(key
+            .verify_strict(&signature_payload(record)?, &signature)
+            .is_ok())
+    }
 }
 
 fn is_location(value: &Map<String, Value>) -> bool {
@@ -120,6 +204,25 @@ fn stable_json(value: &Value, strip_execution_metadata: bool) -> Value {
     }
 }
 
+fn key_id(key: &VerifyingKey) -> String {
+    sha256_bytes(key.as_bytes())
+}
+
+fn signature_payload(record: &ApprovalRecordV2) -> Result<Vec<u8>, String> {
+    let mut value = serde_json::to_value(record).map_err(|error| error.to_string())?;
+    value
+        .get_mut("signature")
+        .and_then(Value::as_object_mut)
+        .expect("serialized v2 signature is an object")
+        .remove("value");
+    let mut payload = APPROVAL_SCHEMA_V2.as_bytes().to_vec();
+    payload.push(0);
+    payload.extend(
+        serde_json::to_vec(&stable_json(&value, false)).map_err(|error| error.to_string())?,
+    );
+    Ok(payload)
+}
+
 /// Remove execution-only noise before binding a human-facing artifact.
 pub fn normalized_artifact(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
     if kind == "scenarios" {
@@ -130,45 +233,130 @@ pub fn normalized_artifact(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, String> 
     if kind == "html" {
         let source = std::str::from_utf8(bytes)
             .map_err(|error| format!("HTML artifact is not UTF-8: {error}"))?;
-        let mut normalized = String::new();
-        for line in source.split_inclusive('\n') {
-            if let Some(normalized_line) =
-                normalize_elapsed(line, "&quot;elapsed_s&quot;:", "&lt;elapsed&gt;")
-            {
-                normalized.push_str(&normalized_line);
-            } else if let Some(normalized_line) =
-                normalize_elapsed(line, "\"elapsed_s\":", "\"<elapsed>\"")
-            {
-                normalized.push_str(&normalized_line);
-            } else {
-                normalized.push_str(line);
-            }
-        }
+        let normalized = normalize_verify_cost(
+            source,
+            "&quot;",
+            "&lt;elapsed&gt;",
+            "&quot;&lt;metric&gt;&quot;",
+        );
+        let normalized = normalize_verify_cost(&normalized, "\"", "\"<elapsed>\"", "\"<metric>\"");
+        let normalized =
+            normalize_number_key(&normalized, "&quot;", "elapsed_s", "&lt;elapsed&gt;");
+        let normalized = normalize_number_key(&normalized, "\"", "elapsed_s", "\"<elapsed>\"");
         return Ok(normalized.into_bytes());
     }
     Ok(bytes.to_vec())
 }
 
-fn normalize_elapsed(line: &str, marker: &str, replacement: &str) -> Option<String> {
-    let marker_start = line.find(marker)?;
-    let value_start = marker_start
-        + marker.len()
-        + line[marker_start + marker.len()..]
-            .len()
-            .saturating_sub(line[marker_start + marker.len()..].trim_start().len());
-    let value_len = line[value_start..]
-        .bytes()
-        .take_while(|byte| matches!(byte, b'0'..=b'9' | b'.' | b'-' | b'+' | b'e' | b'E'))
-        .count();
-    if value_len == 0 {
-        return None;
+fn normalize_verify_cost(
+    source: &str,
+    quote: &str,
+    elapsed_replacement: &str,
+    metric_replacement: &str,
+) -> String {
+    const VERIFY_JSON: &str = "<details><summary>verify JSON</summary>";
+    const PRE: &str = "<div class=\"code-block\"><pre>";
+    const PRE_END: &str = "</pre>";
+
+    let Some(section_start) = source.find(VERIFY_JSON) else {
+        return source.to_owned();
+    };
+    let Some(relative_pre_start) = source[section_start..].find(PRE) else {
+        return source.to_owned();
+    };
+    let json_start = section_start + relative_pre_start + PRE.len();
+    let Some(relative_json_end) = source[json_start..].find(PRE_END) else {
+        return source.to_owned();
+    };
+    let json_end = json_start + relative_json_end;
+    let json = &source[json_start..json_end];
+    let marker = format!("\n  {quote}cost{quote}: {{");
+    let Some(cost_start) = json.find(&marker) else {
+        return source.to_owned();
+    };
+    let cost_start = cost_start + 1;
+    let Some(cost_end) = cost_block_end(&json[cost_start..]) else {
+        return source.to_owned();
+    };
+    let cost_end = cost_start + cost_end;
+    let normalized_cost = normalize_performance_numbers(
+        &json[cost_start..cost_end],
+        quote,
+        elapsed_replacement,
+        metric_replacement,
+    );
+    format!(
+        "{}{}{}{}{}",
+        &source[..json_start],
+        &json[..cost_start],
+        normalized_cost,
+        &json[cost_end..],
+        &source[json_end..]
+    )
+}
+
+fn cost_block_end(text: &str) -> Option<usize> {
+    let mut depth = 0_i64;
+    for (index, byte) in text.bytes().enumerate() {
+        depth += match byte {
+            b'{' => 1,
+            b'}' => -1,
+            _ => 0,
+        };
+        if depth == 0 && byte == b'}' {
+            return Some(index + 1);
+        }
     }
-    Some(format!(
-        "{}{}{}",
-        &line[..value_start],
-        replacement,
-        &line[value_start + value_len..]
-    ))
+    None
+}
+
+fn normalize_performance_numbers(
+    line: &str,
+    quote: &str,
+    elapsed_replacement: &str,
+    metric_replacement: &str,
+) -> String {
+    let mut normalized = line.to_owned();
+    for key in [
+        "elapsed_s",
+        "check_elapsed_s",
+        "conflicts",
+        "decisions",
+        "propagations",
+        "memory_mb",
+    ] {
+        let replacement = if key == "elapsed_s" {
+            elapsed_replacement
+        } else {
+            metric_replacement
+        };
+        normalized = normalize_number_key(&normalized, quote, key, replacement);
+    }
+    normalized
+}
+
+fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str) -> String {
+    let marker = format!("{quote}{key}{quote}:");
+    let mut normalized = source.to_owned();
+    let mut cursor = 0;
+    while let Some(relative_start) = normalized[cursor..].find(&marker) {
+        let marker_end = cursor + relative_start + marker.len();
+        let value_start = marker_end
+            + normalized[marker_end..]
+                .len()
+                .saturating_sub(normalized[marker_end..].trim_start().len());
+        let value_len = normalized[value_start..]
+            .bytes()
+            .take_while(|byte| matches!(byte, b'0'..=b'9' | b'.' | b'-' | b'+' | b'e' | b'E'))
+            .count();
+        if value_len == 0 {
+            cursor = marker_end;
+            continue;
+        }
+        normalized.replace_range(value_start..value_start + value_len, replacement);
+        cursor = value_start + replacement.len();
+    }
+    normalized
 }
 
 /// Hash the fully lowered kernel AST while ignoring source locations.
@@ -285,6 +473,27 @@ pub fn read_record(path: &Path) -> Result<ApprovalRecord, String> {
     Ok(record)
 }
 
+pub fn read_versioned_record(path: &Path) -> Result<VersionedApprovalRecord, String> {
+    #[derive(Deserialize)]
+    struct SchemaHeader {
+        schema: String,
+    }
+
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let header: SchemaHeader = serde_json::from_str(&source)
+        .map_err(|error| format!("invalid approval record: {error}"))?;
+    match header.schema.as_str() {
+        APPROVAL_SCHEMA => read_record(path).map(VersionedApprovalRecord::V1),
+        APPROVAL_SCHEMA_V2 => {
+            let record: ApprovalRecordV2 = serde_json::from_str(&source)
+                .map_err(|error| format!("invalid approval record: {error}"))?;
+            validate_record_v2(&record)?;
+            Ok(VersionedApprovalRecord::V2(record))
+        }
+        schema => Err(format!("unsupported approval schema '{schema}'")),
+    }
+}
+
 pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
     if record.schema != APPROVAL_SCHEMA {
         return Err(format!("unsupported approval schema '{}'", record.schema));
@@ -353,6 +562,36 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_record_v2(record: &ApprovalRecordV2) -> Result<(), String> {
+    if record.schema != APPROVAL_SCHEMA_V2 {
+        return Err(format!("unsupported approval schema '{}'", record.schema));
+    }
+    validate_record(&ApprovalRecord {
+        schema: APPROVAL_SCHEMA.to_owned(),
+        spec: record.spec.clone(),
+        target: record.target.clone(),
+        approval: record.approval.clone(),
+    })?;
+    if record.signature.algorithm != SIGNATURE_ALGORITHM {
+        return Err(format!(
+            "unsupported approval signature algorithm '{}'",
+            record.signature.algorithm
+        ));
+    }
+    if !is_sha256(&record.signature.key_id) {
+        return Err("approval record contains an invalid signature key ID".to_owned());
+    }
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&record.signature.value)
+        .map_err(|error| format!("invalid detached signature encoding: {error}"))?;
+    if raw.len() != Signature::BYTE_SIZE
+        || base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&raw) != record.signature.value
+    {
+        return Err("approval record contains an invalid detached signature".to_owned());
+    }
+    Ok(())
+}
+
 fn is_sha256(value: &str) -> bool {
     value.len() == 71
         && value.starts_with("sha256:")
@@ -401,6 +640,39 @@ fn is_canonical_utc_timestamp(value: &str) -> bool {
 }
 
 pub fn write_record(path: &Path, record: &ApprovalRecord) -> Result<(), String> {
+    let mut encoded = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
+    encoded.push('\n');
+    std::fs::write(path, encoded).map_err(|error| error.to_string())
+}
+
+pub fn sign_record(record: ApprovalRecord, private_key: &Path) -> Result<ApprovalRecordV2, String> {
+    validate_record(&record)?;
+    let source = std::fs::read_to_string(private_key).map_err(|error| error.to_string())?;
+    let key = SigningKey::from_pkcs8_pem(&source).map_err(|error| {
+        format!(
+            "invalid Ed25519 private key '{}': {error}",
+            private_key.display()
+        )
+    })?;
+    let mut signed = ApprovalRecordV2 {
+        schema: APPROVAL_SCHEMA_V2.to_owned(),
+        spec: record.spec,
+        target: record.target,
+        approval: record.approval,
+        signature: DetachedSignature {
+            algorithm: SIGNATURE_ALGORITHM.to_owned(),
+            key_id: key_id(&key.verifying_key()),
+            value: String::new(),
+        },
+    };
+    let signature = key.sign(&signature_payload(&signed)?);
+    signed.signature.value =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.to_bytes());
+    Ok(signed)
+}
+
+pub fn write_record_v2(path: &Path, record: &ApprovalRecordV2) -> Result<(), String> {
+    validate_record_v2(record)?;
     let mut encoded = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
     encoded.push('\n');
     std::fs::write(path, encoded).map_err(|error| error.to_string())
@@ -550,6 +822,48 @@ mod tests {
         assert_eq!(
             shell_word("review specs/order.fsl"),
             "'review specs/order.fsl'"
+        );
+    }
+
+    #[test]
+    fn html_normalization_removes_every_performance_measurement() {
+        let first = br#"<details><summary>verify JSON</summary><div><div class="code-block"><pre>{
+  "cost": {"elapsed_s":0.1,"solver":{"checks":3,"check_elapsed_s":0.02,"conflicts":4,"decisions":5,"propagations":6,"memory_mb":18.2},"properties":[{"kind":"invariant","name":"Safe","checks":2,"elapsed_s":0.01}]},
+  "state": {"cost":{"conflicts":1},"violation":{"cost":{"elapsed_s":0.03}}}
+}</pre></div></div></details>"#;
+        let second = br#"<details><summary>verify JSON</summary><div><div class="code-block"><pre>{
+  "cost": {"elapsed_s":9.1,"solver":{"checks":3,"check_elapsed_s":7.02,"conflicts":40,"decisions":50,"propagations":60,"memory_mb":81.2},"properties":[{"kind":"invariant","name":"Safe","checks":2,"elapsed_s":7.01}]},
+  "state": {"cost":{"conflicts":1},"violation":{"cost":{"elapsed_s":8.03}}}
+}</pre></div></div></details>"#;
+        let domain_change = std::str::from_utf8(second)
+            .expect("HTML fixture is UTF-8")
+            .replace("\"cost\":{\"conflicts\":1}", "\"cost\":{\"conflicts\":2}");
+
+        assert_eq!(
+            normalized_artifact("html", first).expect("normalize first HTML"),
+            normalized_artifact("html", second).expect("normalize second HTML")
+        );
+        assert_ne!(
+            normalized_artifact("html", second).expect("normalize unchanged domain HTML"),
+            normalized_artifact("html", domain_change.as_bytes())
+                .expect("normalize changed domain HTML")
+        );
+
+        assert_eq!(
+            normalized_artifact(
+                "html",
+                b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  \"cost\": {\"elapsed_s\":0.25}\n}</pre></div></div></details>",
+            )
+            .expect("normalize legacy HTML"),
+            b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  \"cost\": {\"elapsed_s\":\"<elapsed>\"}\n}</pre></div></div></details>"
+        );
+        assert_eq!(
+            normalized_artifact(
+                "html",
+                b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  &quot;cost&quot;: {&quot;elapsed_s&quot;:0.25}\n}</pre></div></div></details>",
+            )
+            .expect("normalize escaped legacy HTML"),
+            b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  &quot;cost&quot;: {&quot;elapsed_s&quot;:&lt;elapsed&gt;}\n}</pre></div></div></details>"
         );
     }
 

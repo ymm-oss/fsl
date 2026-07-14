@@ -626,10 +626,17 @@ fn approval_cell(approvals: Option<&Value>, requirement_id: &str) -> String {
     let Some(entry) = approval_entry(approvals, requirement_id) else {
         return "— unapproved".to_owned();
     };
+    if entry.get("signature_status").and_then(Value::as_str) == Some("signature-invalid") {
+        return "❌ signature-invalid".to_owned();
+    }
+    let signature = match entry.get("signature_status").and_then(Value::as_str) {
+        Some("signed") => "signed",
+        _ => "unsigned",
+    };
     match entry.get("status").and_then(Value::as_str) {
-        Some("approved") => "✅ approved".to_owned(),
+        Some("approved") => format!("✅ approved ({signature})"),
         Some("drifted") => format!(
-            "⚠ drifted (since {})",
+            "⚠ drifted ({signature}; since {})",
             entry
                 .get("baseline_digest")
                 .and_then(Value::as_str)

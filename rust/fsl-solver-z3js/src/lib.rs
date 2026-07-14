@@ -10,13 +10,18 @@
 //! Browser implementation of the FSL SMT contract over an initialized
 //! `z3-solver` npm bridge installed on the current Web Worker global.
 
-use fsl_solver::{CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort};
-use js_sys::{Array, Promise, Uint32Array};
+use fsl_solver::{
+    BackendStatistics, CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverMetrics,
+    SolverResult, Sort, VerificationStatistics,
+};
+use js_sys::{Array, Float64Array, Promise, Uint32Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn js_performance_now() -> f64;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Sort)]
     fn js_sort(descriptor: &str) -> u32;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3BoolValue)]
@@ -47,10 +52,20 @@ extern "C" {
     fn js_assert_and_track(term: u32, tracker: u32);
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Check)]
     fn js_check(assumptions: &Uint32Array) -> Promise;
+    #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Statistics)]
+    fn js_statistics() -> Float64Array;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3UnsatCore)]
     fn js_unsat_core() -> Array;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3ModelEval)]
     fn js_model_eval(term: u32, boolean: bool) -> JsValue;
+    #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Version)]
+    fn js_version() -> String;
+}
+
+/// Return the version reported by the initialized browser Z3 runtime.
+#[must_use]
+pub fn version() -> String {
+    js_version()
 }
 
 #[derive(Clone, Debug)]
@@ -63,14 +78,16 @@ pub struct Z3JsTerm {
 pub struct Z3JsSolver {
     version: String,
     stack_depth: u32,
+    metrics: SolverMetrics,
 }
 
 impl Z3JsSolver {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            version: "Z3 4.16.0 (z3-solver npm)".to_owned(),
+            version: version(),
             stack_depth: 0,
+            metrics: SolverMetrics::default(),
         }
     }
 
@@ -124,11 +141,34 @@ fn js_error(value: JsValue) -> SolverError {
     )
 }
 
+fn backend_statistics() -> BackendStatistics {
+    let values = js_statistics();
+    let count = |index| {
+        let value = values.get_index(index);
+        (value.is_finite() && value >= 0.0).then_some(value as u64)
+    };
+    let memory = values.get_index(3);
+    BackendStatistics {
+        conflicts: count(0),
+        decisions: count(1),
+        propagations: count(2),
+        memory_mb: memory.is_finite().then_some(memory),
+    }
+}
+
 impl SmtSolver for Z3JsSolver {
     type Term = Z3JsTerm;
 
     fn version(&self) -> &str {
         &self.version
+    }
+
+    fn set_query_context(&mut self, kind: &str, name: &str) {
+        self.metrics.set_context(kind, name);
+    }
+
+    fn statistics(&self) -> VerificationStatistics {
+        self.metrics.statistics()
     }
 
     fn sort(&self, term: &Self::Term) -> Sort {
@@ -324,12 +364,32 @@ impl SmtSolver for Z3JsSolver {
     }
 
     fn check(&mut self) -> CheckFuture<'_> {
-        Box::pin(async move { map_check(js_check(&Uint32Array::new_with_length(0))).await })
+        Box::pin(async move {
+            let started = js_performance_now();
+            let result = map_check(js_check(&Uint32Array::new_with_length(0))).await;
+            if result.is_ok() {
+                self.metrics.record_check(
+                    (js_performance_now() - started) / 1000.0,
+                    backend_statistics(),
+                );
+            }
+            result
+        })
     }
 
     fn check_assuming(&mut self, assumptions: &[Self::Term]) -> CheckFuture<'_> {
         let assumptions = handles(assumptions);
-        Box::pin(async move { map_check(js_check(&assumptions)).await })
+        Box::pin(async move {
+            let started = js_performance_now();
+            let result = map_check(js_check(&assumptions)).await;
+            if result.is_ok() {
+                self.metrics.record_check(
+                    (js_performance_now() - started) / 1000.0,
+                    backend_statistics(),
+                );
+            }
+            result
+        })
     }
 
     fn unsat_core(&self) -> SolverResult<Vec<Self::Term>> {

@@ -2,11 +2,20 @@
 
 //! Native Z3 implementation of the backend-neutral FSL SMT contract.
 
-use fsl_solver::{CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverResult, Sort};
+use fsl_solver::{
+    BackendStatistics, CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverMetrics,
+    SolverResult, Sort, VerificationStatistics,
+};
 use z3::ast::{Array, Ast, Bool, Dynamic, Int};
-use z3::{Model, Solver};
+use z3::{Model, Solver, StatisticsValue};
 
 const REQUIRED_Z3_VERSION: &str = "4.16.0";
+
+/// Return the version reported by the linked Z3 library.
+#[must_use]
+pub fn version() -> &'static str {
+    z3::full_version()
+}
 
 #[derive(Clone, Debug)]
 pub enum Z3Term {
@@ -39,6 +48,7 @@ pub struct Z3Solver {
     solver: Solver,
     version: String,
     stack_depth: u32,
+    metrics: SolverMetrics,
 }
 
 impl Z3Solver {
@@ -48,7 +58,7 @@ impl Z3Solver {
     ///
     /// Returns an error when the loaded Z3 library is not version 4.16.0.
     pub fn new() -> SolverResult<Self> {
-        let version = z3::full_version().to_owned();
+        let version = version().to_owned();
         let required_prefix = format!("Z3 {REQUIRED_Z3_VERSION}.");
         if !version.starts_with(&required_prefix) {
             return Err(SolverError::new(format!(
@@ -59,7 +69,44 @@ impl Z3Solver {
             solver: Solver::new(),
             version,
             stack_depth: 0,
+            metrics: SolverMetrics::default(),
         })
+    }
+}
+
+fn statistic_value(solver: &Solver, names: &[&str]) -> Option<StatisticsValue> {
+    let statistics = solver.get_statistics();
+    names.iter().find_map(|name| statistics.value(name))
+}
+
+fn statistic_count(solver: &Solver, names: &[&str]) -> Option<u64> {
+    statistic_value(solver, names).and_then(|value| match value {
+        StatisticsValue::UInt(value) => Some(u64::from(value)),
+        StatisticsValue::Double(_) => None,
+    })
+}
+
+fn statistic_double(solver: &Solver, names: &[&str]) -> Option<f64> {
+    statistic_value(solver, names).map(|value| match value {
+        StatisticsValue::UInt(value) => f64::from(value),
+        StatisticsValue::Double(value) => value,
+    })
+}
+
+fn backend_statistics(solver: &Solver) -> BackendStatistics {
+    let propagations = statistic_count(solver, &["propagations"]).or_else(|| {
+        let binary = statistic_count(solver, &["sat propagations 2ary"]);
+        let nary = statistic_count(solver, &["sat propagations nary"]);
+        match (binary, nary) {
+            (Some(binary), Some(nary)) => Some(binary + nary),
+            (binary, nary) => binary.or(nary),
+        }
+    });
+    BackendStatistics {
+        conflicts: statistic_count(solver, &["conflicts", "sat conflicts"]),
+        decisions: statistic_count(solver, &["decisions", "sat decisions"]),
+        propagations,
+        memory_mb: statistic_double(solver, &["memory", "max memory"]),
     }
 }
 
@@ -156,6 +203,14 @@ impl SmtSolver for Z3Solver {
 
     fn version(&self) -> &str {
         &self.version
+    }
+
+    fn set_query_context(&mut self, kind: &str, name: &str) {
+        self.metrics.set_context(kind, name);
+    }
+
+    fn statistics(&self) -> VerificationStatistics {
+        self.metrics.statistics()
     }
 
     fn sort(&self, term: &Self::Term) -> Sort {
@@ -383,7 +438,15 @@ impl SmtSolver for Z3Solver {
     }
 
     fn check(&mut self) -> CheckFuture<'_> {
-        Box::pin(async move { Ok(map_sat(self.solver.check())) })
+        Box::pin(async move {
+            let started = std::time::Instant::now();
+            let result = map_sat(self.solver.check());
+            self.metrics.record_check(
+                started.elapsed().as_secs_f64(),
+                backend_statistics(&self.solver),
+            );
+            Ok(result)
+        })
     }
 
     fn check_assuming(&mut self, assumptions: &[Self::Term]) -> CheckFuture<'_> {
@@ -391,7 +454,15 @@ impl SmtSolver for Z3Solver {
             .iter()
             .map(|term| expect_bool(term).cloned())
             .collect::<SolverResult<Vec<_>>>();
-        Box::pin(async move { Ok(map_sat(self.solver.check_assumptions(&assumptions?))) })
+        Box::pin(async move {
+            let started = std::time::Instant::now();
+            let result = map_sat(self.solver.check_assumptions(&assumptions?));
+            self.metrics.record_check(
+                started.elapsed().as_secs_f64(),
+                backend_statistics(&self.solver),
+            );
+            Ok(result)
+        })
     }
 
     fn unsat_core(&self) -> SolverResult<Vec<Self::Term>> {
@@ -435,6 +506,7 @@ mod tests {
                 .version()
                 .starts_with(&format!("Z3 {REQUIRED_Z3_VERSION}."))
         );
+        assert_eq!(solver.version(), version());
         let x = solver.constant("x", &Sort::Int)?;
         let four = solver.int_value(4);
         let seven = solver.int_value(7);
@@ -442,8 +514,14 @@ mod tests {
         let upper = solver.lt(&x, &seven)?;
         let bounds = solver.and(&[lower, upper])?;
         solver.assert(&bounds)?;
+        solver.set_query_context("invariant", "Bounds");
         let result = block_on_ready(solver.check())?;
         assert_eq!(result, SatResult::Sat);
+        let statistics = solver.statistics();
+        assert_eq!(statistics.solver.checks, 1);
+        assert!(statistics.solver.memory_mb.is_some());
+        assert_eq!(statistics.properties[0].kind, "invariant");
+        assert_eq!(statistics.properties[0].name, "Bounds");
         let Some(ModelValue::Int(value)) = solver.model_eval(&x)? else {
             return Err(SolverError::new("integer model value was not available"));
         };

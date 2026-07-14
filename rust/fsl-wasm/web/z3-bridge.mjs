@@ -11,6 +11,7 @@ export async function installZ3Bridge() {
   const { Array: Z3Array, Bool, If, Int, Solver } = ctx;
   const solver = new Solver();
   solver.set("unsat_core", true);
+  globalThis.fslZ3Version = () => initialized.getFullVersion();
   const terms = [null];
   const sorts = [null];
   const sortDescriptors = [null];
@@ -122,6 +123,28 @@ export async function installZ3Bridge() {
     solver.addAndTrack(term(handle), term(tracker));
   globalThis.fslZ3Check = async (rawAssumptions) =>
     String(await solver.check(...[...rawAssumptions].map(term)));
+  globalThis.fslZ3Statistics = () => {
+    const values = new Map(
+      [...solver.statistics()].map(({ key, value }) => [key, value]),
+    );
+    const first = (...keys) => keys.map((key) => values.get(key)).find((value) => value !== undefined);
+    const directPropagations = first("propagations");
+    const satPropagations = [
+      first("sat propagations 2ary"),
+      first("sat propagations nary"),
+    ].filter((value) => value !== undefined);
+    const propagations =
+      directPropagations ??
+      (satPropagations.length > 0
+        ? satPropagations.reduce((sum, value) => sum + value, 0)
+        : Number.NaN);
+    return Float64Array.of(
+      first("conflicts", "sat conflicts") ?? Number.NaN,
+      first("decisions", "sat decisions") ?? Number.NaN,
+      propagations,
+      first("memory", "max memory") ?? Number.NaN,
+    );
+  };
   globalThis.fslZ3UnsatCore = () =>
     [...solver.unsatCore()].map((entry) => {
       const existing = terms.findIndex(

@@ -219,7 +219,11 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
   "engine": "induction",
   "completeness": "unbounded",
   "checked_to_depth": 8,
-  "cost": {"elapsed_s": 0.01},
+  "cost": {
+    "elapsed_s": 0.01,
+    "solver": {"checks": 12, "check_elapsed_s": 0.004, "conflicts": 2, "decisions": 8, "propagations": 21, "memory_mb": 18.2},
+    "properties": [{"kind": "invariant", "name": "ShippedWasPaid", "checks": 2, "elapsed_s": 0.001}]
+  },
   "k_used": { "ShippedWasPaid": 1, "RevenueConsistent": 2, "_bounds_orders": 1 },
   "base_depth": 8,
   "invariants_checked": [...],
