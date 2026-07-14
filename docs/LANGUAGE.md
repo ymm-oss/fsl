@@ -863,8 +863,15 @@ Progress-preserving refinement failures are reported as `refinement_failed` with
 `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
 `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
 
-`verify` / `verify --engine induction` results include `checked_to_depth` and
-`cost: {"elapsed_s": ...}`. BMC `verified` is explicitly bounded; when the final
+Every `verify` result includes `checked_to_depth` and one fixed `cost` object:
+total `elapsed_s`, `solver` check count/time plus nullable common Z3 statistics,
+and deterministic `properties` rows with per-property check counts and time.
+Native and browser Workers use the same keys and nullability. Z3 counters are
+the maximum snapshot observed across constituent checks rather than a sum of
+possibly cumulative snapshots; timing values are nondeterministic. The explicit
+engine uses the same shape with zero solver checks and null Z3 statistics. See
+[`DESIGN-verification-cost.md`](DESIGN-verification-cost.md). BMC `verified` is
+explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
 exploration, `verified` also includes a `hint` that the state space is not
 obviously saturated at that depth and suggests a larger `--depth` or induction.

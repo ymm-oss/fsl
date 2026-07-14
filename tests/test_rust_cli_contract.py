@@ -322,3 +322,33 @@ def test_native_check_and_verify_publish_versioned_envelopes(rust_contract):
         assert envelope["versions"]["solver"]["name"] == "z3"
         assert envelope["versions"]["solver"]["backend"] == "native-z3"
         assert envelope["versions"]["solver"]["version"].startswith("Z3 4.16.0")
+        if args[0] == "verify":
+            cost = envelope["cost"]
+            assert set(cost) == {"elapsed_s", "solver", "properties"}
+            assert cost["elapsed_s"] >= 0
+            solver = cost["solver"]
+            assert set(solver) == {
+                "checks",
+                "check_elapsed_s",
+                "conflicts",
+                "decisions",
+                "propagations",
+                "memory_mb",
+            }
+            assert solver["checks"] > 0
+            assert 0 <= solver["check_elapsed_s"] <= cost["elapsed_s"]
+            for name in ("conflicts", "decisions", "propagations", "memory_mb"):
+                assert solver[name] is None or solver[name] >= 0
+            properties = cost["properties"]
+            assert properties == sorted(
+                properties, key=lambda item: (item["kind"], item["name"])
+            )
+            assert sum(item["checks"] for item in properties) == solver["checks"]
+            assert all(
+                set(item) == {"kind", "name", "checks", "elapsed_s"}
+                and item["kind"]
+                and item["name"]
+                and item["checks"] > 0
+                and item["elapsed_s"] >= 0
+                for item in properties
+            )

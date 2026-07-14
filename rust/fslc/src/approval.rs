@@ -233,45 +233,130 @@ pub fn normalized_artifact(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, String> 
     if kind == "html" {
         let source = std::str::from_utf8(bytes)
             .map_err(|error| format!("HTML artifact is not UTF-8: {error}"))?;
-        let mut normalized = String::new();
-        for line in source.split_inclusive('\n') {
-            if let Some(normalized_line) =
-                normalize_elapsed(line, "&quot;elapsed_s&quot;:", "&lt;elapsed&gt;")
-            {
-                normalized.push_str(&normalized_line);
-            } else if let Some(normalized_line) =
-                normalize_elapsed(line, "\"elapsed_s\":", "\"<elapsed>\"")
-            {
-                normalized.push_str(&normalized_line);
-            } else {
-                normalized.push_str(line);
-            }
-        }
+        let normalized = normalize_verify_cost(
+            source,
+            "&quot;",
+            "&lt;elapsed&gt;",
+            "&quot;&lt;metric&gt;&quot;",
+        );
+        let normalized = normalize_verify_cost(&normalized, "\"", "\"<elapsed>\"", "\"<metric>\"");
+        let normalized =
+            normalize_number_key(&normalized, "&quot;", "elapsed_s", "&lt;elapsed&gt;");
+        let normalized = normalize_number_key(&normalized, "\"", "elapsed_s", "\"<elapsed>\"");
         return Ok(normalized.into_bytes());
     }
     Ok(bytes.to_vec())
 }
 
-fn normalize_elapsed(line: &str, marker: &str, replacement: &str) -> Option<String> {
-    let marker_start = line.find(marker)?;
-    let value_start = marker_start
-        + marker.len()
-        + line[marker_start + marker.len()..]
-            .len()
-            .saturating_sub(line[marker_start + marker.len()..].trim_start().len());
-    let value_len = line[value_start..]
-        .bytes()
-        .take_while(|byte| matches!(byte, b'0'..=b'9' | b'.' | b'-' | b'+' | b'e' | b'E'))
-        .count();
-    if value_len == 0 {
-        return None;
+fn normalize_verify_cost(
+    source: &str,
+    quote: &str,
+    elapsed_replacement: &str,
+    metric_replacement: &str,
+) -> String {
+    const VERIFY_JSON: &str = "<details><summary>verify JSON</summary>";
+    const PRE: &str = "<div class=\"code-block\"><pre>";
+    const PRE_END: &str = "</pre>";
+
+    let Some(section_start) = source.find(VERIFY_JSON) else {
+        return source.to_owned();
+    };
+    let Some(relative_pre_start) = source[section_start..].find(PRE) else {
+        return source.to_owned();
+    };
+    let json_start = section_start + relative_pre_start + PRE.len();
+    let Some(relative_json_end) = source[json_start..].find(PRE_END) else {
+        return source.to_owned();
+    };
+    let json_end = json_start + relative_json_end;
+    let json = &source[json_start..json_end];
+    let marker = format!("\n  {quote}cost{quote}: {{");
+    let Some(cost_start) = json.find(&marker) else {
+        return source.to_owned();
+    };
+    let cost_start = cost_start + 1;
+    let Some(cost_end) = cost_block_end(&json[cost_start..]) else {
+        return source.to_owned();
+    };
+    let cost_end = cost_start + cost_end;
+    let normalized_cost = normalize_performance_numbers(
+        &json[cost_start..cost_end],
+        quote,
+        elapsed_replacement,
+        metric_replacement,
+    );
+    format!(
+        "{}{}{}{}{}",
+        &source[..json_start],
+        &json[..cost_start],
+        normalized_cost,
+        &json[cost_end..],
+        &source[json_end..]
+    )
+}
+
+fn cost_block_end(text: &str) -> Option<usize> {
+    let mut depth = 0_i64;
+    for (index, byte) in text.bytes().enumerate() {
+        depth += match byte {
+            b'{' => 1,
+            b'}' => -1,
+            _ => 0,
+        };
+        if depth == 0 && byte == b'}' {
+            return Some(index + 1);
+        }
     }
-    Some(format!(
-        "{}{}{}",
-        &line[..value_start],
-        replacement,
-        &line[value_start + value_len..]
-    ))
+    None
+}
+
+fn normalize_performance_numbers(
+    line: &str,
+    quote: &str,
+    elapsed_replacement: &str,
+    metric_replacement: &str,
+) -> String {
+    let mut normalized = line.to_owned();
+    for key in [
+        "elapsed_s",
+        "check_elapsed_s",
+        "conflicts",
+        "decisions",
+        "propagations",
+        "memory_mb",
+    ] {
+        let replacement = if key == "elapsed_s" {
+            elapsed_replacement
+        } else {
+            metric_replacement
+        };
+        normalized = normalize_number_key(&normalized, quote, key, replacement);
+    }
+    normalized
+}
+
+fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str) -> String {
+    let marker = format!("{quote}{key}{quote}:");
+    let mut normalized = source.to_owned();
+    let mut cursor = 0;
+    while let Some(relative_start) = normalized[cursor..].find(&marker) {
+        let marker_end = cursor + relative_start + marker.len();
+        let value_start = marker_end
+            + normalized[marker_end..]
+                .len()
+                .saturating_sub(normalized[marker_end..].trim_start().len());
+        let value_len = normalized[value_start..]
+            .bytes()
+            .take_while(|byte| matches!(byte, b'0'..=b'9' | b'.' | b'-' | b'+' | b'e' | b'E'))
+            .count();
+        if value_len == 0 {
+            cursor = marker_end;
+            continue;
+        }
+        normalized.replace_range(value_start..value_start + value_len, replacement);
+        cursor = value_start + replacement.len();
+    }
+    normalized
 }
 
 /// Hash the fully lowered kernel AST while ignoring source locations.
@@ -737,6 +822,48 @@ mod tests {
         assert_eq!(
             shell_word("review specs/order.fsl"),
             "'review specs/order.fsl'"
+        );
+    }
+
+    #[test]
+    fn html_normalization_removes_every_performance_measurement() {
+        let first = br#"<details><summary>verify JSON</summary><div><div class="code-block"><pre>{
+  "cost": {"elapsed_s":0.1,"solver":{"checks":3,"check_elapsed_s":0.02,"conflicts":4,"decisions":5,"propagations":6,"memory_mb":18.2},"properties":[{"kind":"invariant","name":"Safe","checks":2,"elapsed_s":0.01}]},
+  "state": {"cost":{"conflicts":1},"violation":{"cost":{"elapsed_s":0.03}}}
+}</pre></div></div></details>"#;
+        let second = br#"<details><summary>verify JSON</summary><div><div class="code-block"><pre>{
+  "cost": {"elapsed_s":9.1,"solver":{"checks":3,"check_elapsed_s":7.02,"conflicts":40,"decisions":50,"propagations":60,"memory_mb":81.2},"properties":[{"kind":"invariant","name":"Safe","checks":2,"elapsed_s":7.01}]},
+  "state": {"cost":{"conflicts":1},"violation":{"cost":{"elapsed_s":8.03}}}
+}</pre></div></div></details>"#;
+        let domain_change = std::str::from_utf8(second)
+            .expect("HTML fixture is UTF-8")
+            .replace("\"cost\":{\"conflicts\":1}", "\"cost\":{\"conflicts\":2}");
+
+        assert_eq!(
+            normalized_artifact("html", first).expect("normalize first HTML"),
+            normalized_artifact("html", second).expect("normalize second HTML")
+        );
+        assert_ne!(
+            normalized_artifact("html", second).expect("normalize unchanged domain HTML"),
+            normalized_artifact("html", domain_change.as_bytes())
+                .expect("normalize changed domain HTML")
+        );
+
+        assert_eq!(
+            normalized_artifact(
+                "html",
+                b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  \"cost\": {\"elapsed_s\":0.25}\n}</pre></div></div></details>",
+            )
+            .expect("normalize legacy HTML"),
+            b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  \"cost\": {\"elapsed_s\":\"<elapsed>\"}\n}</pre></div></div></details>"
+        );
+        assert_eq!(
+            normalized_artifact(
+                "html",
+                b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  &quot;cost&quot;: {&quot;elapsed_s&quot;:0.25}\n}</pre></div></div></details>",
+            )
+            .expect("normalize escaped legacy HTML"),
+            b"<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>{\n  &quot;cost&quot;: {&quot;elapsed_s&quot;:&lt;elapsed&gt;}\n}</pre></div></div></details>"
         );
     }
 

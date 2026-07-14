@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Native, induction, explicit, and browser verification results now share one
+  fixed `cost` schema. Z3 backends report check count/time, nullable common
+  conflict/decision/propagation/memory statistics, and deterministic
+  per-property check attribution; native and Worker parity tests enforce the
+  same keys and nullability (issue #271).
 - Native CLI and browser Worker result envelopes now identify the verifier,
   `fsl-core`, and loaded Z3 versions through one `versions` schema. Native
   verdict-cache keys and entries use the linked Z3 runtime version instead of a

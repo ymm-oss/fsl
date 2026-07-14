@@ -71,6 +71,9 @@ fn explicit_cli_exit_codes_cover_bounded_proved_violated_budget_and_semantics() 
     assert_eq!(proved["engine"], "explicit");
     assert_eq!(proved["completeness"], "unbounded");
     assert_eq!(proved["closure"], true);
+    assert_eq!(proved["cost"]["solver"]["checks"], 0);
+    assert_eq!(proved["cost"]["solver"]["conflicts"], json!(null));
+    assert_eq!(proved["cost"]["properties"], json!([]));
 
     let (ignored_k, status) = verify(finite, "explicit", 4, &["--k", "99"]);
     assert_eq!(status, 0);

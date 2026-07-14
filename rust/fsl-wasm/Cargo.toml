@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 fsl-core = { path = "../fsl-core" }
 fsl-runtime = { path = "../fsl-runtime" }
+fsl-solver = { path = "../fsl-solver" }
 fsl-solver-z3js = { path = "../fsl-solver-z3js" }
 fsl-verifier = { path = "../fsl-verifier" }
 serde.workspace = true

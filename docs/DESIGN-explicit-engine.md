@@ -95,10 +95,12 @@ unchanged:
 | State budget exceeded | `unknown_budget` | 1 | Explicit truncation; never reported as verified |
 | Unsupported spec feature | `error` (kind `semantics`) | 2 | Fail closed, see §5 |
 
-Every result carries exploration stats alongside the standard
-`cost.elapsed_s`: states explored, maximum frontier width, and whether closure
-was reached. `unknown_budget` additionally reports the depth reached when the
-budget ran out.
+Every result carries exploration stats alongside the standard `cost` object:
+states explored, maximum frontier width, and whether closure was reached.
+Because this engine performs no SMT checks, `cost.solver` contains zero
+checks/time and null Z3 counters, while `cost.properties` is empty.
+`unknown_budget` additionally reports the depth reached when the budget ran
+out.
 
 ## 4. Property semantics
 

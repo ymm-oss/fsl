@@ -160,7 +160,10 @@ for shared state, actions, and cross-cutting properties.
 `fsl-rendered-artifact-v1+sha256` binds the reviewed presentation while removing
 execution-only noise. Scenario JSON omits only top-level execution metadata
 (`cost` and `cache`) before canonical serialization, preserving same-named
-fields inside reviewed domain state. HTML normalizes embedded `elapsed_s` values. Ledger
+fields inside reviewed domain state. HTML preserves its historical normalization
+of embedded `elapsed_s` values and normalizes solver check time, Z3 counters,
+and memory only in the top-level verify envelope. Property identities, check
+counts, and same-named fields in reviewed domain state remain bound. Ledger
 Markdown is hashed as rendered. This preserves review-visible content while
 preventing solver timing from producing false drift.
 
