@@ -68,7 +68,7 @@ entity_def: "entity" NAME
 number_def: "number" NAME
 
 state_def: "state" "{" var_decl ("," var_decl)* ","? "}"
-var_decl: NAME ":" type
+var_decl: NAME ":" type ["=" expr]
 ?type: "Int"  -> t_int
      | "Bool" -> t_bool
      | "relation" type "->" type -> t_relation
@@ -599,8 +599,10 @@ class Ast(Transformer):
     def t_name(self, meta, n):
         return ("name", n)
 
-    def var_decl(self, meta, n, ty):
-        return ("decl", n, ty)
+    def var_decl(self, meta, n, ty, initializer=None):
+        if initializer is None:
+            return ("decl", n, ty)
+        return ("decl", n, ty, initializer, _loc(meta))
 
     def entity_def(self, meta, name):
         return ("entity", name, _loc(meta))

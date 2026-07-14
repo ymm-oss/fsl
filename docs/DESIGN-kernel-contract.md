@@ -33,7 +33,7 @@ The top-level contract contains:
 | `spec` | Logical name plus source file and original dialect. |
 | `semantics` | Simultaneous updates, pre-state reads, disabled requires, rollback failures, `old`, Euclidean integer division, terminal handling, and weak fairness. |
 | `constants`, `types`, `state` | Fully normalized declarations with structural types and lowering origin. |
-| `init` | Typed normalized statements plus requirement/origin metadata. |
+| `init` | Typed normalized statements plus requirement/origin metadata. Kernel state inline initializers appear only as equivalent root assignments. |
 | `actions` | Finite typed parameters, ordered `guards` (requires/let binding scope), compatibility projections in `requires`/`lets`, simultaneous updates, ensures, partial-operation conditions, requirement IDs, origin, and span. |
 | `properties` | Invariants, transition properties, reachability, progress, and terminal expression. |
 
@@ -41,9 +41,11 @@ Every expression has a `kind`, structural `type`, and source `span`; consumers d
 not reparse expressions or infer types. Statement and declaration origins state
 the source dialect, originating declaration or requirement ID, whether lowering
 occurred, and whether the node was generated. Action/property/statement spans
-include start and end positions. The current internal syntax tree does not retain
-direct spans for scalar/type/state declarations, so those declaration spans are
-explicitly `null`; their origin remains present. This is an intentional v1
+include start and end positions. The internal surface tree retains inline state
+field and initializer spans for diagnostics and migration, but Public Kernel v1
+does not publish the sugar as a second declaration form. Direct scalar/type/state
+declaration spans in the v1 projection remain explicitly `null`; normalized
+initializer statements carry their source span. This is an intentional v1
 distinction, not a missing field.
 
 That v1 `origin` object is a frozen, lossy compatibility projection. The Rust

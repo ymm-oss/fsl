@@ -67,6 +67,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (per-step state, action, and changes) for invariant and type-bound
   violations, matching the native CLI trace shape. Browser clients previously
   only received the violated property name and step.
+- Kernel state fields now accept deterministic inline initializers and normalize
+  them to the existing `init` assignment semantics across Monitor, explicit
+  exploration, BMC, induction, and Public Kernel v1. State-reading/order-dependent
+  expressions and inline/explicit root overlap fail with source diagnostics.
+  Existing domain enum/Bool/range/external defaults and requirements number
+  lower-bound defaults now emit the edition-aware `implicit_initial_value`
+  warning with the selected value, reason, and machine-applicable insertion edit;
+  requirements Bool/enum fields remain explicitly initialized (issue #250).
 - Domain-expression characterization corpus (issue #235): Rust CI now freezes
   pre-typed-AST surface expressions and locations, normalized semantic model
   structure, representative public Kernel expression/origin output, generated

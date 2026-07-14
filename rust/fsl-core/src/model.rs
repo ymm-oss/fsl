@@ -5,12 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionItem, Binder, Expr, MetaTag, Param, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
+    ActionItem, Binder, Expr, LValue, MetaTag, Param, Span, SpecItem, Statement, SurfaceSpec,
+    TypeExpr,
 };
 
 use crate::{
-    KernelSpec, OriginRegistry, SPEC_TARGET, TraceabilityRegistry, action_target, property_target,
-    state_target, type_target,
+    KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
+    TraceabilityRegistry, action_target, property_target, state_target, type_target,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -301,7 +302,27 @@ impl fmt::Display for ModelError {
                 self.message, span.start.line, span.start.column
             ),
             None => formatter.write_str(&self.message),
+        }?;
+        if let Some(secondary) = self
+            .origin
+            .as_ref()
+            .and_then(|origin| origin.secondary.first())
+            .and_then(|site| site.span.map(|span| (site.source_file.as_deref(), span)))
+        {
+            match secondary {
+                (Some(file), span) => write!(
+                    formatter,
+                    "; conflicting assignment at {}:{}:{}",
+                    file, span.start.line, span.start.column
+                ),
+                (None, span) => write!(
+                    formatter,
+                    "; conflicting assignment at {}:{}",
+                    span.start.line, span.start.column
+                ),
+            }?;
         }
+        Ok(())
     }
 }
 
@@ -341,8 +362,30 @@ impl ModelBuilder {
     fn build(mut self) -> Result<KernelModel, ModelError> {
         self.collect_consts()?;
         self.collect_types()?;
+        let state_names = self
+            .spec
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                SpecItem::State(fields) => Some(fields.iter().map(|field| field.name.clone())),
+                _ => None,
+            })
+            .flatten()
+            .collect::<BTreeSet<_>>();
+        let explicit_init_writes = self
+            .spec
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                SpecItem::Init { statements, .. } => Some(statements),
+                _ => None,
+            })
+            .flat_map(|statements| statement_root_spans(statements))
+            .collect::<BTreeMap<_, _>>();
         let mut state = Vec::new();
+        let mut inline_init = Vec::new();
         let mut init = Vec::new();
+        let mut inline_initializers = Vec::new();
         let mut init_meta = None;
         let mut actions = Vec::new();
         let mut invariants = Vec::new();
@@ -354,15 +397,66 @@ impl ModelBuilder {
         for item in &self.spec.items {
             match item {
                 SpecItem::State(fields) => {
-                    for (name, ty) in fields {
-                        if state.iter().any(|(existing, _)| existing == name) {
-                            return Err(model_error(format!("duplicate state variable '{name}'"))
-                                .with_origin(self.origins.diagnostic_origin(&state_target(name))));
+                    for field in fields {
+                        if state.iter().any(|(existing, _)| existing == &field.name) {
+                            return Err(model_error(format!(
+                                "duplicate state variable '{}'",
+                                field.name
+                            ))
+                            .with_origin(
+                                self.origins.diagnostic_origin(&state_target(&field.name)),
+                            ));
                         }
-                        let origin = self.origins.diagnostic_origin(&state_target(name));
+                        if let Some(initializer) = &field.initializer {
+                            if let Some(form) = unsupported_inline_form(initializer) {
+                                return Err(model_error(format!(
+                                    "inline initializer for '{}' does not allow {form}; use init",
+                                    field.name
+                                ))
+                                .with_origin(Some(source_origin(
+                                    &field.name,
+                                    field.initializer_span.unwrap_or(field.span),
+                                    None,
+                                ))));
+                            }
+                            if let Some(name) = first_state_reference(initializer, &state_names) {
+                                return Err(model_error(format!(
+                                    "inline initializer for '{}' must not read state root '{name}'",
+                                    field.name
+                                ))
+                                .with_origin(Some(source_origin(
+                                    &field.name,
+                                    field.initializer_span.unwrap_or(field.span),
+                                    None,
+                                ))));
+                            }
+                            if let Some(conflict_span) = explicit_init_writes.get(&field.name) {
+                                return Err(model_error(format!(
+                                    "state root '{}' is assigned by both an inline initializer and init",
+                                    field.name
+                                ))
+                                .with_origin(Some(source_origin(
+                                    &field.name,
+                                    field.span,
+                                    Some(*conflict_span),
+                                ))));
+                            }
+                            let initializer_span = field.initializer_span.unwrap_or(field.span);
+                            inline_initializers.push((
+                                inline_init.len(),
+                                field.name.clone(),
+                                initializer_span,
+                            ));
+                            inline_init.push(Statement::Assign {
+                                target: LValue::Var(field.name.clone()),
+                                value: initializer.clone(),
+                                span: initializer_span,
+                            });
+                        }
+                        let origin = self.origins.diagnostic_origin(&state_target(&field.name));
                         state.push((
-                            name.clone(),
-                            self.resolve_type(ty)
+                            field.name.clone(),
+                            self.resolve_type(&field.ty)
                                 .map_err(|error| error.with_origin(origin))?,
                         ));
                     }
@@ -521,7 +615,9 @@ impl ModelBuilder {
             return Err(model_error("spec has no state block")
                 .with_origin(self.origins.diagnostic_origin(SPEC_TARGET)));
         }
-        Ok(KernelModel {
+        inline_init.extend(init);
+        let init = inline_init;
+        let model = KernelModel {
             name: self.spec.name,
             consts: self.consts,
             types: self.types,
@@ -537,7 +633,25 @@ impl ModelBuilder {
             terminal,
             origins: self.origins,
             traceability,
-        })
+        };
+        let inline_initializers = inline_initializers
+            .into_iter()
+            .map(|(index, name, span)| (index, (name, span)))
+            .collect::<BTreeMap<_, _>>();
+        for (index, statement) in model.init.iter().enumerate() {
+            crate::public_kernel::validate_statement_types(statement, &model).map_err(|error| {
+                if let Some((name, span)) = inline_initializers.get(&index) {
+                    model_error(format!(
+                        "invalid inline initializer for '{name}': {}",
+                        error.message
+                    ))
+                    .with_origin(Some(source_origin(name, *span, None)))
+                } else {
+                    model_error(format!("invalid init statement: {}", error.message))
+                }
+            })?;
+        }
+        Ok(model)
     }
 
     fn collect_consts(&mut self) -> Result<(), ModelError> {
@@ -759,6 +873,157 @@ impl ModelBuilder {
             Value::Int(value) => Ok(value),
             _ => Err(model_error("constant expression must be an integer")),
         }
+    }
+}
+
+fn source_origin(name: &str, primary: Span, secondary: Option<Span>) -> OriginChain {
+    OriginChain {
+        id: OriginId(format!(
+            "kernel:inline-initializer:{name}:{}:{}",
+            primary.start.offset, primary.end.offset
+        )),
+        dialect: "kernel".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(primary),
+            dialect: "kernel".to_owned(),
+            declaration_path: vec!["state".to_owned(), name.to_owned()],
+        }),
+        secondary: secondary
+            .map(|span| OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "kernel".to_owned(),
+                declaration_path: vec!["init".to_owned(), name.to_owned()],
+            })
+            .into_iter()
+            .collect(),
+        lowering_steps: vec![LoweringStep {
+            kind: "inline_initializer".to_owned(),
+            detail: Some("normalized to init assignment".to_owned()),
+        }],
+        generated: false,
+    }
+}
+
+fn lvalue_root(target: &LValue) -> &str {
+    match target {
+        LValue::Var(name) | LValue::Index(name, _) => name,
+        LValue::Field(base, _) => lvalue_root(base),
+    }
+}
+
+fn statement_root_spans(statements: &[Statement]) -> Vec<(String, Span)> {
+    let mut roots = Vec::new();
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, span, .. } => {
+                roots.push((lvalue_root(target).to_owned(), *span));
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                roots.extend(statement_root_spans(then_statements));
+                roots.extend(statement_root_spans(else_statements));
+            }
+            Statement::ForAll { statements, .. } => {
+                roots.extend(statement_root_spans(statements));
+            }
+        }
+    }
+    roots
+}
+
+fn first_state_reference(expr: &Expr, state_names: &BTreeSet<String>) -> Option<String> {
+    if let Expr::Var(name) = expr
+        && state_names.contains(name)
+    {
+        return Some(name.clone());
+    }
+    expr_children(expr)
+        .into_iter()
+        .find_map(|child| first_state_reference(child, state_names))
+}
+
+fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
+    let unsupported = match expr {
+        Expr::Quantified { .. } => Some("a quantified expression"),
+        Expr::Count { .. } | Expr::Sum { .. } | Expr::BinderNamed { .. } => {
+            Some("a binder or aggregate expression")
+        }
+        Expr::UnaryNamed { name, .. }
+            if name == "old" || name == "stage" || name.starts_with("rel_") =>
+        {
+            Some("a temporal or relational expression")
+        }
+        Expr::TernaryNamed { name, .. } if name.starts_with("rel_") => {
+            Some("a relational expression")
+        }
+        _ => None,
+    };
+    unsupported.or_else(|| {
+        expr_children(expr)
+            .into_iter()
+            .find_map(unsupported_inline_form)
+    })
+}
+
+fn expr_children(expr: &Expr) -> Vec<&Expr> {
+    match expr {
+        Expr::Some(expr)
+        | Expr::Neg(expr)
+        | Expr::Not(expr)
+        | Expr::UnaryNamed { expr, .. }
+        | Expr::Is { expr, .. }
+        | Expr::Field(expr, _) => vec![expr],
+        Expr::Set(items) | Expr::Seq(items) => items.iter().collect(),
+        Expr::Struct { fields, .. } => fields.iter().map(|(_, expr)| expr).collect(),
+        Expr::Call { args, .. } => args.iter().collect(),
+        Expr::Index(left, right)
+        | Expr::Binary { left, right, .. }
+        | Expr::BinaryNamed { left, right, .. } => vec![left, right],
+        Expr::Method { receiver, args, .. } => std::iter::once(receiver.as_ref())
+            .chain(args.iter())
+            .collect(),
+        Expr::IfThenElse {
+            condition,
+            then_expr,
+            else_expr,
+        } => vec![condition, then_expr, else_expr],
+        Expr::Quantified { binder, body, .. } => binder_exprs(binder)
+            .into_iter()
+            .chain(std::iter::once(body.as_ref()))
+            .collect(),
+        Expr::Count { condition, .. } => vec![condition],
+        Expr::Sum {
+            body, condition, ..
+        } => std::iter::once(body.as_ref())
+            .chain(condition.as_deref())
+            .collect(),
+        Expr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => vec![first, second, third],
+        Expr::BinderNamed { binder, .. } => binder_exprs(binder),
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => Vec::new(),
+    }
+}
+
+fn binder_exprs(binder: &Binder) -> Vec<&Expr> {
+    match binder {
+        Binder::Typed { where_expr, .. } => where_expr.iter().map(AsRef::as_ref).collect(),
+        Binder::Range { lo, hi, .. } => vec![lo, hi],
+        Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => std::iter::once(collection.as_ref())
+            .chain(where_expr.iter().map(AsRef::as_ref))
+            .collect(),
     }
 }
 

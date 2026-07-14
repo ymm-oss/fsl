@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use fsl_syntax::{
     ActionItem, Binder, DomainAggregate, DomainDecide, DomainEffect, DomainField, DomainLoc,
     DomainSaga, DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, Expr, LValue,
-    MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, Statement, SurfaceSpec, SyntaxBinder,
-    SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr,
-    SyntaxTypeExprKind, TypeExpr,
+    MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, StateField, Statement, SurfaceSpec,
+    SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName,
+    SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
 };
 
 use crate::CoreError;
@@ -2135,9 +2135,10 @@ pub(crate) fn lower_domain_surface(
         let scope = resolver.scope_for_aggregate(aggregate)?;
         for field in &aggregate.state {
             let logical_type = resolver.logical_type(&field.type_name)?;
-            state.push((
+            state.push(StateField::generated(
                 state_name(aggregate, &field.name),
                 resolver.surface_type(&field.type_name)?,
+                field.span,
             ));
             if let LogicalType::Map(key, value) = &logical_type {
                 if field.default.is_some() {
@@ -2183,7 +2184,11 @@ pub(crate) fn lower_domain_surface(
         .collect::<Vec<_>>();
     event_names.sort_unstable();
     for event in event_names {
-        state.push((event_flag(event), TypeExpr::Bool));
+        state.push(StateField::generated(
+            event_flag(event),
+            TypeExpr::Bool,
+            span_at(domain.loc),
+        ));
         init.push(Statement::Assign {
             target: LValue::Var(event_flag(event)),
             value: Expr::Bool(false),
@@ -2193,19 +2198,21 @@ pub(crate) fn lower_domain_surface(
     for effect in &domain.effects {
         let (_, correlation_type) = resolver.correlation(effect)?;
         let key_type = resolver.surface_type(&correlation_type)?;
-        state.push((
+        state.push(StateField::generated(
             status_var(effect),
             TypeExpr::Map(
                 Box::new(key_type.clone()),
                 Box::new(TypeExpr::Name(status_type(effect))),
             ),
+            span_at(effect.loc),
         ));
-        state.push((
+        state.push(StateField::generated(
             attempt_var(effect),
             TypeExpr::Map(
                 Box::new(key_type),
                 Box::new(TypeExpr::Name(attempt_type(effect))),
             ),
+            span_at(effect.loc),
         ));
         let span = span_at(effect.loc);
         init.push(Statement::ForAll {

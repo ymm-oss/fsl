@@ -16,6 +16,13 @@ use crate::{
     VerifyItem, lex,
 };
 
+fn join_span(start: Span, end: Span) -> Span {
+    Span {
+        start: start.start,
+        end: end.end,
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     pub message: String,
@@ -837,9 +844,12 @@ impl Parser {
             let fields_span = self.bump().span;
             let mut fields = Vec::new();
             loop {
+                let field_start = self.peek().span;
                 let field_name = self.expect_ident()?;
                 self.expect_symbol(":")?;
+                let type_start = self.peek().span;
                 let type_name = self.qualified_name()?;
+                let type_span = join_span(type_start, self.last_span());
                 let initial = if self.eat_symbol("=") {
                     Some(self.expression(0)?)
                 } else {
@@ -849,6 +859,8 @@ impl Parser {
                     name: field_name,
                     type_name,
                     initial,
+                    span: join_span(field_start, self.last_span()),
+                    type_span,
                 });
                 if !self.eat_symbol(",") {
                     break;
@@ -1295,7 +1307,7 @@ impl Parser {
         if self.peek_ident("state") {
             self.bump();
             self.expect_symbol("{")?;
-            let declarations = self.field_list()?;
+            let declarations = self.state_field_list()?;
             return Ok(SpecItem::State(declarations));
         }
         if self.peek_ident("init") {
@@ -1382,6 +1394,44 @@ impl Parser {
         }
     }
 
+    fn state_field_list(&mut self) -> Result<Vec<crate::StateField>, ParseError> {
+        let mut fields = Vec::new();
+        if self.eat_symbol("}") {
+            return Ok(fields);
+        }
+        loop {
+            let start = self.peek().span;
+            let name = self.expect_ident()?;
+            self.expect_symbol(":")?;
+            let ty = self.type_expr()?;
+            let (initializer, initializer_span) = if self.eat_symbol("=") {
+                let initializer_start = self.peek().span;
+                let initializer = self.expression(0)?;
+                let initializer_end = self.last_span();
+                (
+                    Some(initializer),
+                    Some(join_span(initializer_start, initializer_end)),
+                )
+            } else {
+                (None, None)
+            };
+            fields.push(crate::StateField {
+                name,
+                ty,
+                initializer,
+                span: join_span(start, self.last_span()),
+                initializer_span,
+            });
+            if self.eat_symbol("}") {
+                return Ok(fields);
+            }
+            self.expect_symbol(",")?;
+            if self.eat_symbol("}") {
+                return Ok(fields);
+            }
+        }
+    }
+
     fn type_expr(&mut self) -> Result<TypeExpr, ParseError> {
         if self.eat_ident("Int") {
             return Ok(TypeExpr::Int);
@@ -1438,7 +1488,7 @@ impl Parser {
     fn next_is_type_delimiter(&self) -> bool {
         matches!(
             &self.peek_n(1).kind,
-            TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ">" | "}" | "->")
+            TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ">" | "}" | "->" | "=")
         )
     }
 
@@ -1880,6 +1930,10 @@ impl Parser {
 
     fn peek(&self) -> &Token {
         &self.tokens[self.cursor]
+    }
+
+    fn last_span(&self) -> Span {
+        self.tokens[self.cursor.saturating_sub(1)].span
     }
 
     fn peek_n(&self, offset: usize) -> &Token {

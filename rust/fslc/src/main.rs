@@ -3513,14 +3513,182 @@ fn domain_enum_union_warnings(path: &Path) -> Vec<Value> {
         .collect()
 }
 
+fn implicit_initial_value_warnings(path: &Path) -> Vec<Value> {
+    let Ok(document) = parse_surface_document(path) else {
+        return Vec::new();
+    };
+    match document {
+        fsl_syntax::SurfaceDocument::Domain(domain) => domain_implicit_warnings(path, &domain),
+        fsl_syntax::SurfaceDocument::Requirements(requirements) => {
+            requirements_implicit_warnings(path, &requirements)
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn domain_implicit_warnings(path: &Path, domain: &fsl_syntax::DomainSpec) -> Vec<Value> {
+    let declared = domain
+        .types
+        .iter()
+        .map(|ty| (ty.name.as_str(), ty))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    domain
+        .aggregates
+        .iter()
+        .flat_map(|aggregate| {
+            aggregate.state.iter().filter_map(|field| {
+                let type_name = field.type_name.render_source();
+                let selected = omitted_domain_value(&type_name, field.default.as_ref(), &declared)?;
+                Some(implicit_initial_value_warning(
+                    path,
+                    &format!("{}.{}", aggregate.name, field.name.text),
+                    field.span,
+                    field.type_name.span.end.offset,
+                    &selected.0,
+                    &selected.1,
+                ))
+            })
+        })
+        .collect()
+}
+
+fn omitted_domain_value(
+    type_name: &str,
+    default: Option<&fsl_syntax::SyntaxExpr>,
+    declared: &std::collections::BTreeMap<&str, &fsl_syntax::DomainType>,
+) -> Option<(String, String)> {
+    if default.is_some() {
+        return None;
+    }
+    if type_name == "Bool" {
+        return Some(("false".to_owned(), "Bool defaults to false".to_owned()));
+    }
+    if type_name == "Int" {
+        return None;
+    }
+    if let Some(definition) = declared.get(type_name) {
+        return match definition.kind.as_str() {
+            "enum" => definition.members.first().map(|member| {
+                (
+                    member.clone(),
+                    format!(
+                        "the first declared member of enum '{}' is selected",
+                        definition.name
+                    ),
+                )
+            }),
+            "range" => definition.lo.as_ref().map(|lo| {
+                (
+                    lo.render_source(),
+                    format!("the lower bound of range '{}' is selected", definition.name),
+                )
+            }),
+            _ => None,
+        };
+    }
+    (!type_name.contains('<')).then(|| {
+        (
+            "0".to_owned(),
+            format!("external placeholder type '{type_name}' defaults to 0"),
+        )
+    })
+}
+
+fn requirements_implicit_warnings(
+    path: &Path,
+    requirements: &fsl_syntax::SurfaceRequirements,
+) -> Vec<Value> {
+    let mut lower_bounds = std::collections::BTreeMap::new();
+    for item in &requirements.items {
+        if let fsl_syntax::RequirementsItem::Common(fsl_syntax::SpecItem::VerifyBounds {
+            items,
+            ..
+        }) = item
+        {
+            for bound in items {
+                if let fsl_syntax::VerifyItem::Values(name, lo, _, _) = bound {
+                    lower_bounds.insert(name.as_str(), fslc_rust::expr_text(lo));
+                }
+            }
+        }
+    }
+    requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            fsl_syntax::RequirementsItem::Process(fsl_syntax::BusinessItem::Process {
+                name,
+                fields: Some(fields),
+                ..
+            }) => Some((name, fields)),
+            _ => None,
+        })
+        .flat_map(|(process, fields)| {
+            let lower_bounds = &lower_bounds;
+            fields.fields.iter().filter_map(move |field| {
+                if field.initial.is_some() {
+                    return None;
+                }
+                let selected = lower_bounds.get(field.type_name.name.as_str())?;
+                Some(implicit_initial_value_warning(
+                    path,
+                    &format!("{process}.{}", field.name),
+                    field.span,
+                    field.type_span.end.offset,
+                    selected,
+                    &format!(
+                        "the lower bound of number '{}' is selected",
+                        field.type_name.name
+                    ),
+                ))
+            })
+        })
+        .collect()
+}
+
+fn implicit_initial_value_warning(
+    path: &Path,
+    field: &str,
+    span: fsl_syntax::Span,
+    insertion_offset: usize,
+    selected: &str,
+    reason: &str,
+) -> Value {
+    let replacement = format!(" = {selected}");
+    json!({
+        "kind": "implicit_initial_value",
+        "code": "implicit_initial_value",
+        "severity": "warning",
+        "edition_severity": {"current": "warning", "next": "error"},
+        "message": format!("field '{field}' implicitly selects {selected}; add an explicit initializer"),
+        "field": field,
+        "selected_value": selected,
+        "reason": reason,
+        "loc": {
+            "file": path,
+            "line": span.start.line,
+            "column": span.start.column,
+            "end_line": span.end.line,
+            "end_column": span.end.column,
+        },
+        "canonical_replacement": replacement,
+        "suggestion": {
+            "kind": "insert",
+            "replacement": replacement,
+            "span": {"start": insertion_offset, "end": insertion_offset},
+            "machine_applicable": true,
+        },
+    })
+}
+
 fn apply_domain_edition(
     (mut output, status): (Value, i32),
     path: &Path,
     edition: &str,
 ) -> (Value, i32) {
-    let mut additions = domain_enum_union_warnings(path);
-    if edition == "next" && !additions.is_empty() {
-        for finding in &mut additions {
+    let mut legacy_additions = domain_enum_union_warnings(path);
+    if edition == "next" && !legacy_additions.is_empty() {
+        for finding in &mut legacy_additions {
             finding["severity"] = json!("error");
             finding["message"] = json!(format!(
                 "{}; legacy domain enum unions are not accepted in the next edition",
@@ -3533,9 +3701,11 @@ fn apply_domain_edition(
         error.insert("result".to_owned(), json!("error"));
         error.insert("kind".to_owned(), json!("deprecated_domain_enum_union"));
         error.insert("edition".to_owned(), json!(edition));
-        error.insert("findings".to_owned(), Value::Array(additions));
+        error.insert("findings".to_owned(), Value::Array(legacy_additions));
         return (Value::Object(error), 2);
     }
+    let mut additions = legacy_additions;
+    additions.extend(implicit_initial_value_warnings(path));
     if !additions.is_empty()
         && let Value::Object(envelope) = &mut output
     {

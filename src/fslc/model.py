@@ -1269,6 +1269,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
 
     state = {}
     init = []
+    inline_init = []
     actions = []
     invariants = []
     transitions = []
@@ -1281,12 +1282,17 @@ def build_spec(tree, display_names=None, semantic_check=True):
     for it in items:
         tag = it[0]
         if tag == "state":
-            for _, n, ty_ast in it[1]:
+            for declaration in it[1]:
+                _, n, ty_ast, *initializer = declaration
                 _check_reserved(n, "state variable")
                 if n in state:
                     _err(f"duplicate state variable '{n}'", kind="name")
                 state[n] = resolve_type(ty_ast, types_meta, consts)
                 state_type_refs[n] = resolve_type_ref(ty_ast, types_meta, consts)
+                if initializer:
+                    inline_init.append(
+                        ("assign", ("var", n), initializer[0], initializer[1])
+                    )
         elif tag == "init":
             init = it[1]
         elif tag == "action":
@@ -1373,6 +1379,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 _err("duplicate terminal block", kind="semantics")
             terminal = it[1]
             terminal_loc = it[2] if len(it) > 2 else None
+
+    init = inline_init + init
 
     if not state:
         _err("spec has no state block", kind="semantics")

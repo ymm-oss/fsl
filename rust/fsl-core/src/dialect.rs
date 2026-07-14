@@ -7,8 +7,8 @@ use fsl_syntax::{
     GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, LValue, MetaTag, Param,
     PreservationItem, ProcessField, ProcessItem, ProcessTransition, QualifiedName,
     RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementsItem, SpecItem,
-    Statement, SurfaceBusiness, SurfaceDocument, SurfaceGovernance, SurfaceRequirements,
-    SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
+    StateField, Statement, SurfaceBusiness, SurfaceDocument, SurfaceGovernance,
+    SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
 };
 
 use crate::{CoreError, KernelSpec, lower_direct_spec, substitute_expr};
@@ -281,12 +281,13 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             processes
                 .iter()
                 .map(|process| {
-                    (
+                    StateField::generated(
                         process_state(&process.name),
                         TypeExpr::Map(
                             Box::new(TypeExpr::Name(process.name.clone())),
                             Box::new(TypeExpr::Name(process_enum(&process.name))),
                         ),
+                        process.span,
                     )
                 })
                 .collect(),
@@ -842,12 +843,13 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     let mut init = Vec::new();
     for process in &processes {
         let process_name = &process.process.name;
-        state.push((
+        state.push(StateField::generated(
             process_state(process_name),
             TypeExpr::Map(
                 Box::new(TypeExpr::Name(process_name.clone())),
                 Box::new(TypeExpr::Name(process_enum(process_name))),
             ),
+            process.process.span,
         ));
         let mut init_body = vec![Statement::Assign {
             target: LValue::Index(process_state(process_name), Expr::Var("c".to_owned())),
@@ -860,12 +862,13 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             } else {
                 TypeExpr::Name(field.type_name.name.clone())
             };
-            state.push((
+            state.push(StateField::generated(
                 process_field_state(process_name, &field.name),
                 TypeExpr::Map(
                     Box::new(TypeExpr::Name(process_name.clone())),
                     Box::new(field_ty),
                 ),
+                process.process.span,
             ));
             let initial = field.initial.clone().unwrap_or_else(|| {
                 value_bounds
@@ -1104,7 +1107,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                     LValue::Var(name.clone()),
                 ),
             };
-            items.push(SpecItem::State(vec![(name.clone(), state_type)]));
+            items.push(SpecItem::State(vec![StateField::generated(
+                name.clone(),
+                state_type,
+                span,
+            )]));
             items.push(SpecItem::Init {
                 statements: vec![init_statement],
                 meta: None,
@@ -1247,7 +1254,11 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                 hi: Box::new(Expr::Num(0)),
                 symmetric: false,
             },
-            SpecItem::State(vec![("_governance_ok".to_owned(), TypeExpr::Bool)]),
+            SpecItem::State(vec![StateField::generated(
+                "_governance_ok",
+                TypeExpr::Bool,
+                span,
+            )]),
             SpecItem::Init {
                 statements: vec![Statement::Assign {
                     target: LValue::Var("_governance_ok".to_owned()),
@@ -1293,7 +1304,11 @@ fn lower_catalog_sentinel(name: String, prefix: &str, id: &str) -> Result<Kernel
         name,
         meta: None,
         items: vec![
-            SpecItem::State(vec![(state_name.clone(), TypeExpr::Bool)]),
+            SpecItem::State(vec![StateField::generated(
+                state_name.clone(),
+                TypeExpr::Bool,
+                span,
+            )]),
             SpecItem::Init {
                 statements: vec![Statement::Assign {
                     target: LValue::Var(state_name.clone()),

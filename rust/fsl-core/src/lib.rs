@@ -8,7 +8,8 @@ use std::fmt;
 
 use fsl_syntax::{
     ActionItem, Binder, BusinessItem, Expr, LValue, Param, ParseError, RequirementsItem, SpecItem,
-    Statement, SurfaceDocument, SurfaceSpec, TypeExpr, VerifyItem, parse_surface_document,
+    StateField, Statement, SurfaceDocument, SurfaceSpec, TypeExpr, VerifyItem,
+    parse_surface_document,
 };
 use serde_json::Value;
 
@@ -597,7 +598,18 @@ impl PredicateExpander {
             SpecItem::State(fields) => SpecItem::State(
                 fields
                     .into_iter()
-                    .map(|(name, ty)| Ok((name, self.expand_type(ty)?)))
+                    .map(|field| {
+                        Ok(StateField {
+                            name: field.name,
+                            ty: self.expand_type(field.ty)?,
+                            initializer: field
+                                .initializer
+                                .map(|expr| self.expand_expr(expr, &mut Vec::new()))
+                                .transpose()?,
+                            span: field.span,
+                            initializer_span: field.initializer_span,
+                        })
+                    })
                     .collect::<Result<_, CoreError>>()?,
             ),
             SpecItem::Init { statements, meta } => SpecItem::Init {

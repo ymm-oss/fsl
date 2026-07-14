@@ -1045,6 +1045,12 @@
       "warnings": []
     }
   },
+  "examples/kernel_inline_initializer.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/layers/return_impl.fsl": {
     "check": {
       "result": "ok",
