@@ -1,0 +1,23 @@
+spec KernelInlineInitializer {
+  enum Status { Pending, Done }
+  type Count = 0..2
+  type ItemId = 0..1
+  type JobId = 0..1
+
+  state {
+    status: Status = Pending,
+    count: Count = 0,
+    current: Option<ItemId> = none,
+    queue: Seq<JobId, 3> = Seq {},
+  }
+
+  action finish() {
+    requires count < 2
+    status = Done
+    count = count + 1
+  }
+
+  invariant ProgressCoupled "REQ-INIT-1: completion records positive progress" {
+    status == Done => count > 0
+  }
+}

@@ -31,7 +31,7 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
 
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
 
-  state { <var>: <type>, ... }
+  state { <var>: <type> [= <deterministic expr>], ... }
   init  ["undecided: reason"] { <stmt>... }
 
   [fair] action <name>(<p>: <type name>, ...) {
@@ -261,6 +261,12 @@ primary/secondary sources, and explicit generated-only nodes. Requirement IDs
 remain an independent traceability relation. Public Kernel v1 output is
 unchanged; publishing this chain is reserved for v2.
 
+When a domain aggregate state field omits its initializer, the current edition
+preserves the established Bool `false`, enum first-member, range lower-bound, or
+external-placeholder `0` choice and emits `implicit_initial_value`. The warning
+contains the selected value, reason, current/next severity, field span, and a
+machine-applicable explicit-initializer insertion.
+
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
 aggregate/effect summary, `fslc domain expand` to inspect a generated kernel FSL
@@ -441,6 +447,7 @@ that `decreases` draws from.)
 | `Int` / `Bool` | `count: Int` | Unbounded integer / boolean |
 | Domain type | `type Qty = 0..5` | Bounded integer. **The range is checked automatically** (§6) |
 | Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
+| Inline state initializer | `state { qty: Qty = 0 }` | Deterministic sugar for the equivalent root assignment in `init` |
 | Entity kind | `entity Claim` / `process Claim ...` | Finite identity sort. Allowed in any layer incl. kernel `spec`; size set by `verify { instances Claim = N }`; desugars to `type Claim = 0..N-1` |
 | Number kind | `number Amount` | Finite numeric sort. Allowed in any layer incl. kernel `spec`; range set by `verify { values Amount = lo..hi }`; desugars to `type` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
@@ -454,6 +461,17 @@ that `decreases` draws from.)
 **Scalar** = Int / Bool / domain type / enum. In a `state` declaration,
 `x: lo..hi` is accepted as an anonymous domain type and is equivalent to
 declaring `type X = lo..hi` and writing `x: X`.
+
+A Kernel state field may use `name: Type = expr` for a simple deterministic
+initial value. It is normalized to an ordinary root assignment before checking,
+so Monitor, explicit exploration, BMC, induction, and Public Kernel v1 observe
+the same semantics as an equivalent `init` block. The expression may use
+constants, enum members, constructors, `none`, and deterministic collection
+literals, but it must not read any state root or another initializer. Indexed,
+field, conditional-statement, quantified, relational, and bulk initialization
+remain in `init`. Assigning the same root both inline and in `init` is a semantic
+error that reports both source locations. See
+[`DESIGN-initialization.md`](DESIGN-initialization.md).
 
 **Types legal as state variables** (anything else is rejected by `check` as a type error):
 scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
@@ -1401,7 +1419,10 @@ verify {
   carried field's type `T` is a `number`, `Bool`, or an enum declared in the
   same requirements spec:
   - `number` fields default to the domain's `lo` bound; `f: T = <expr>` is an
-    optional explicit initializer (a compile-time constant expression).
+    optional explicit initializer (a compile-time constant expression). Omission
+    is retained in the current edition with the stable
+    `implicit_initial_value` warning and an insertion edit for the selected lower
+    bound.
   - `Bool` and enum fields have no invented default — `f: Bool = true/false`
     and `f: T = Member` are **required**; omitting the initializer is a
     check-time error (no silently-chosen `false` or first enum member).

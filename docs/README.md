@@ -45,6 +45,7 @@
 | [`DESIGN-vacuity.md`](DESIGN-vacuity.md) | Vacuity checking (invariants whose antecedent is unreachable, leadsTo whose trigger is unreachable, always-true requires) |
 | [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md) | The `--strict-tags` lint (matching untagged declarations and unreferenced requirements) |
 | [`DESIGN-init-if.md`](DESIGN-init-if.md) | Statement-level `if` in `init` (lowered to path-conditional initial-state constraints, same branch shape as action bodies) |
+| [`DESIGN-initialization.md`](DESIGN-initialization.md) | Kernel inline state initializers, normalization to `init`, overlap diagnostics, and implicit-default migration warnings |
 | [`DESIGN-inline-range.md`](DESIGN-inline-range.md) | Inline anonymous range types (`x: lo..hi`) |
 | [`DESIGN-spec-domains.md`](DESIGN-spec-domains.md) | `entity` / `number` in the kernel `spec` (decoupling a domain from the verification bound) |
 | [`DESIGN-def.md`](DESIGN-def.md) | Non-recursive named predicate frontend sugar, expansion order, capture and diagnostic contract |

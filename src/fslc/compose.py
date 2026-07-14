@@ -33,7 +33,7 @@ def _collect_component_names(items):
         elif tag in ("type", "enum", "struct"):
             types.add(it[1])
         elif tag == "state":
-            for _, n, _ in it[1]:
+            for _, n, *_ in it[1]:
                 state.add(n)
         elif tag == "action":
             actions.add(it[1])
@@ -316,10 +316,17 @@ def _prefix_component_items(items, alias, display_names):
             out.append(("struct", pn, fields))
         elif tag == "state":
             decls = []
-            for _, n, ty_ast in it[1]:
+            for declaration in it[1]:
+                _, n, ty_ast, *initializer = declaration
                 pn = _prefix(n, alias)
                 display_names[pn] = _display_logical(alias, n)
-                decls.append(("decl", pn, _rewrite_type(ty_ast, {alias}, types, consts)))
+                rewritten = ("decl", pn, _rewrite_type(ty_ast, {alias}, types, consts))
+                if initializer:
+                    rewritten += (
+                        _rewrite_expr(initializer[0], {alias}, state, types, consts),
+                        initializer[1],
+                    )
+                decls.append(rewritten)
             out.append(("state", decls))
         elif tag == "init":
             out.append(("init", [_rewrite_stmt(s, {alias}, state, types, consts) for s in it[1]]))
@@ -518,8 +525,15 @@ def _rewrite_compose_items(compose_rest, action_by_name, compose_aliases, merged
             merged.append(("action", aname, _rewrite_params(params, compose_aliases), new_body, loc, fair, meta))
         elif tag == "state":
             decls = []
-            for _, n, ty_ast in it[1]:
-                decls.append(("decl", n, _rewrite_type(ty_ast, compose_aliases)))
+            for declaration in it[1]:
+                _, n, ty_ast, *initializer = declaration
+                rewritten = ("decl", n, _rewrite_type(ty_ast, compose_aliases))
+                if initializer:
+                    rewritten += (
+                        _rewrite_expr(initializer[0], compose_aliases, empty_comp, set(), set()),
+                        initializer[1],
+                    )
+                decls.append(rewritten)
             merged.append(("state", decls))
         elif tag == "init":
             merged.append(("init", [_rewrite_stmt(s, compose_aliases, empty_comp, set(), set()) for s in it[1]]))

@@ -90,12 +90,13 @@ fn base_env(model: &KernelModel) -> TypeEnv {
             crate::FslValue::Bool(_) => TypeRef::Bool,
             _ => TypeRef::Int,
         };
-        env.insert(name.clone(), ty);
+        env.entry(name.clone()).or_insert(ty);
     }
     for (type_name, definition) in &model.types {
         if let TypeDef::Enum { members, .. } = definition {
             for member in members {
-                env.insert(member.clone(), TypeRef::Named(type_name.clone()));
+                env.entry(member.clone())
+                    .or_insert_with(|| TypeRef::Named(type_name.clone()));
             }
         }
     }
@@ -262,6 +263,77 @@ fn infer_type(
     }
 }
 
+fn types_compatible(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<bool, PublicKernelError> {
+    let actual = resolve(model, actual)?;
+    let expected = resolve(model, expected)?;
+    Ok(match (&actual, &expected) {
+        (TypeRef::Int | TypeRef::Range(_, _), TypeRef::Int | TypeRef::Range(_, _))
+        | (TypeRef::Bool, TypeRef::Bool) => true,
+        (TypeRef::Named(actual), TypeRef::Named(expected)) => actual == expected,
+        (TypeRef::Set(actual), TypeRef::Set(expected))
+        | (TypeRef::Option(actual), TypeRef::Option(expected))
+        | (TypeRef::Seq(actual, _), TypeRef::Seq(expected, _)) => {
+            types_compatible(actual, expected, model)?
+        }
+        (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value))
+        | (
+            TypeRef::Relation(actual_key, actual_value),
+            TypeRef::Relation(expected_key, expected_value),
+        ) => {
+            types_compatible(actual_key, expected_key, model)?
+                && types_compatible(actual_value, expected_value, model)?
+        }
+        _ => false,
+    })
+}
+
+fn ensure_assignable(
+    expr: &Expr,
+    expected: &TypeRef,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<(), PublicKernelError> {
+    let resolved = resolve(model, expected)?;
+    match (expr, &resolved) {
+        (Expr::None, TypeRef::Option(_)) => return Ok(()),
+        (Expr::Some(item), TypeRef::Option(expected_item)) => {
+            return ensure_assignable(item, expected_item, env, model);
+        }
+        (Expr::Set(items), TypeRef::Set(expected_item))
+        | (Expr::Seq(items), TypeRef::Seq(expected_item, _)) => {
+            for item in items {
+                ensure_assignable(item, expected_item, env, model)?;
+            }
+            return Ok(());
+        }
+        (
+            Expr::IfThenElse {
+                then_expr,
+                else_expr,
+                ..
+            },
+            _,
+        ) => {
+            ensure_assignable(then_expr, expected, env, model)?;
+            ensure_assignable(else_expr, expected, env, model)?;
+            return Ok(());
+        }
+        _ => {}
+    }
+    let actual = infer_type(expr, env, model, None)?;
+    if types_compatible(&actual, expected, model)? {
+        Ok(())
+    } else {
+        Err(error(format!(
+            "expression of type {actual:?} is not assignable to {expected:?}"
+        )))
+    }
+}
+
 fn extend_pattern_binding(
     expression: &Expr,
     env: &mut TypeEnv,
@@ -361,6 +433,13 @@ fn expr_json(
     expected: Option<&TypeRef>,
 ) -> Result<Value, PublicKernelError> {
     let ty = infer_type(expr, env, model, expected)?;
+    if let Some(expected) = expected
+        && !types_compatible(&ty, expected, model)?
+    {
+        return Err(error(format!(
+            "expression of type {ty:?} is not assignable to {expected:?}"
+        )));
+    }
     let mut output = Map::from_iter([
         ("kind".to_owned(), Value::String("unknown".to_owned())),
         ("type".to_owned(), type_json(&ty)),
@@ -747,6 +826,7 @@ fn statement_json(
             span,
         } => {
             let ty = lvalue_type(target, env, model)?;
+            ensure_assignable(value, &ty, env, model)?;
             Ok(json!({
                 "kind":"assign","type":{"kind":"statement"},"span":span_json(path,*span),
                 "target":lvalue_json(target,env,model,path,*span)?,
@@ -782,6 +862,60 @@ fn statement_json(
                 "binder":binder_json(binder,env,model,path,*span)?,
                 "statements":statements.iter().map(|item|statement_json(item,&local,model,path)).collect::<Result<Vec<_>,_>>()?
             }))
+        }
+    }
+}
+
+/// Run the public Kernel expression/type checker for one normalized statement.
+///
+/// Inline state initializers lower to ordinary assignments, so keeping this
+/// entry point beside `statement_json` prevents their validation rules from
+/// drifting away from the existing normalized Kernel contract.
+pub(crate) fn validate_statement_types(
+    statement: &Statement,
+    model: &KernelModel,
+) -> Result<(), PublicKernelError> {
+    validate_statement_assignments(statement, &base_env(model), model)
+}
+
+fn validate_statement_assignments(
+    statement: &Statement,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<(), PublicKernelError> {
+    match statement {
+        Statement::Assign { .. } => statement_json(statement, env, model, "").map(|_| ()),
+        Statement::If {
+            then_statements,
+            else_statements,
+            ..
+        } => then_statements
+            .iter()
+            .chain(else_statements)
+            .try_for_each(|item| validate_statement_assignments(item, env, model)),
+        Statement::ForAll {
+            binder, statements, ..
+        } => {
+            let (name, ty) = match binder {
+                Binder::Typed {
+                    name, type_name, ..
+                } => (name, TypeRef::Named(qualified_name(type_name)?)),
+                Binder::Range { name, .. } => (name, TypeRef::Int),
+                Binder::Collection {
+                    name, collection, ..
+                } => {
+                    let collection_ty = resolve(model, &infer_type(collection, env, model, None)?)?;
+                    let (TypeRef::Set(item) | TypeRef::Seq(item, _)) = collection_ty else {
+                        return Err(error("collection binder requires Set or Seq"));
+                    };
+                    (name, *item)
+                }
+            };
+            let mut local = env.clone();
+            local.insert(name.clone(), ty);
+            statements
+                .iter()
+                .try_for_each(|item| validate_statement_assignments(item, &local, model))
         }
     }
 }

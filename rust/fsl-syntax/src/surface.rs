@@ -72,6 +72,29 @@ pub struct HelpfulAction {
     pub span: Span,
 }
 
+/// One Kernel state declaration, retaining optional inline-initializer syntax.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StateField {
+    pub name: String,
+    pub ty: TypeExpr,
+    pub initializer: Option<Expr>,
+    pub span: Span,
+    pub initializer_span: Option<Span>,
+}
+
+impl StateField {
+    #[must_use]
+    pub fn generated(name: impl Into<String>, ty: TypeExpr, span: Span) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            initializer: None,
+            span,
+            initializer_span: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VerifyItem {
     Instances(String, i64, Span),
@@ -107,7 +130,7 @@ pub enum SpecItem {
     },
     Entity(String, Span),
     Number(String, Span),
-    State(Vec<(String, TypeExpr)>),
+    State(Vec<StateField>),
     Init {
         statements: Vec<Statement>,
         meta: Option<MetaTag>,
@@ -227,6 +250,8 @@ pub struct ProcessField {
     pub name: String,
     pub type_name: QualifiedName,
     pub initial: Option<Expr>,
+    pub span: Span,
+    pub type_span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -783,7 +808,15 @@ impl SpecItem {
                 "state",
                 declarations
                     .iter()
-                    .map(|(name, ty)| json!(["decl", name, ty.python_ast()]))
+                    .map(|field| {
+                        let mut declaration =
+                            vec![json!("decl"), json!(field.name), field.ty.python_ast()];
+                        if let Some(initializer) = &field.initializer {
+                            declaration.push(initializer.python_ast());
+                            declaration.push(json!(field.initializer_span.map(Span::python_loc)));
+                        }
+                        Value::Array(declaration)
+                    })
                     .collect::<Vec<_>>()
             ]),
             Self::Init { statements, meta } => {

@@ -140,6 +140,15 @@ actions retain the decision as primary and the command as secondary. Synthetic
 event flags and terminal nodes are explicitly generated-only. Requirement tags
 remain a separate traceability relation.
 
+Aggregate state fields retain their typed explicit initializer when present. In
+the current edition, an omitted initializer keeps the established lowering
+choice for Bool (`false`), enum (first declared member), range (lower bound), or
+external placeholder (`0`) and emits `implicit_initial_value`. The warning names
+the chosen value and reason and carries a byte insertion edit. This makes the
+existing behavior migratable without treating an arbitrary default as newly
+inferred intent; the edition migrator consumes the edit contract described in
+[`DESIGN-initialization.md`](DESIGN-initialization.md).
+
 ## Effects
 
 An async `effect` declares the request event, completion events, correlation id,
