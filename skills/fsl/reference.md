@@ -1069,7 +1069,11 @@ first failed layer and later layers are marked `skipped`.
   a heuristic from trace-monotonicity, not a proof; absent when no such counter
   is found.
 - `verified` / `reachable_failed` / `violated` from BMC are bounded and include
-  `completeness:"bounded"`, `checked_to_depth`, and `cost: {"elapsed_s": ...}`.
+  `completeness:"bounded"`, `checked_to_depth`, and fixed-shape `cost` with
+  total `elapsed_s`, solver check statistics, and deterministic per-property
+  check counts/times. Native/Worker keys and nullability match; Z3 counters are
+  maximum observed snapshots. Explicit verification emits zero/null solver
+  statistics in the same shape. See `docs/DESIGN-verification-cost.md`.
   Bounded `verified` may include a saturation `hint` when the depth-K frontier
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),

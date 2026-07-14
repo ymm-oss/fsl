@@ -123,6 +123,45 @@ struct PreparedBmc {
     checked_bounds: Option<std::collections::BTreeSet<String>>,
 }
 
+struct SolvedBmc {
+    result: fsl_verifier::BmcResult,
+    statistics: fsl_solver::VerificationStatistics,
+}
+
+fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStatistics) -> Value {
+    serde_json::to_value(statistics.with_elapsed(started.elapsed().as_secs_f64()))
+        .expect("verification cost serializes")
+}
+
+fn finish_solver_verification(
+    output: &mut Map<String, Value>,
+    checked: usize,
+    started: Instant,
+    statistics: &fsl_solver::VerificationStatistics,
+) {
+    output.insert("checked_to_depth".to_owned(), json!(checked));
+    output.insert("completeness".to_owned(), json!("bounded"));
+    output.insert("cost".to_owned(), verification_cost(started, statistics));
+}
+
+fn finish_verification(
+    output: &mut Map<String, Value>,
+    checked: usize,
+    started: Instant,
+    statistics: Option<&fsl_solver::VerificationStatistics>,
+) {
+    if let Some(statistics) = statistics {
+        finish_solver_verification(output, checked, started, statistics);
+    } else {
+        finish_solver_verification(
+            output,
+            checked,
+            started,
+            &fsl_solver::VerificationStatistics::default(),
+        );
+    }
+}
+
 fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, String> {
     selection
         .scope
@@ -145,12 +184,18 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         auxiliary,
     } = request;
     let started = Instant::now();
-    let (base_value, base_status) = run_bmc_filtered(BmcRequest {
+    let base_request = BmcRequest {
         selection,
         depth,
         deadlock,
         initial_state: None,
-    });
+    };
+    let (base_prepared, base_solved) = match execute_bmc(&base_request, started) {
+        Ok(execution) => execution,
+        Err(output) => return output,
+    };
+    let (base_value, base_status) =
+        render_bmc_result(&base_request, &base_prepared, &base_solved, started);
     let Value::Object(base) = &base_value else {
         return (
             error_output("internal", "BMC returned a non-object envelope"),
@@ -175,17 +220,29 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
     };
 
     if let Some(cti) = &induction.cti {
-        return render_induction_cti(&model, cti, depth, started);
+        let mut statistics = base_solved.statistics.clone();
+        statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
+        return render_induction_cti(&model, cti, depth, started, &statistics);
     }
 
     let ranked = match block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver)) {
         Ok(result) => result,
         Err(error) => return (error_output("semantics", &error.to_string()), 2),
     };
+    let mut statistics = base_solved.statistics.clone();
+    statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
     if let Some(failure) = &ranked.failure {
-        return render_rank_failure(&model, failure, depth, started);
+        return render_rank_failure(&model, failure, depth, started, &statistics);
     }
-    render_induction_success(&model, base, &induction, &ranked, depth, started)
+    render_induction_success(
+        &model,
+        base,
+        &induction,
+        &ranked,
+        depth,
+        started,
+        &statistics,
+    )
 }
 
 fn load_induction_model(
@@ -211,6 +268,7 @@ fn render_induction_cti(
     cti: &fsl_verifier::InductionCti,
     depth: usize,
     started: Instant,
+    statistics: &fsl_solver::VerificationStatistics,
 ) -> (Value, i32) {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
@@ -261,10 +319,7 @@ fn render_induction_cti(
             ),
         );
     }
-    output.insert(
-        "cost".to_owned(),
-        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
-    );
+    output.insert("cost".to_owned(), verification_cost(started, statistics));
     (Value::Object(output), 1)
 }
 
@@ -273,6 +328,7 @@ fn render_rank_failure(
     failure: &fsl_verifier::RankFailure,
     depth: usize,
     started: Instant,
+    statistics: &fsl_solver::VerificationStatistics,
 ) -> (Value, i32) {
     let property = model
         .leadstos
@@ -348,10 +404,7 @@ fn render_rank_failure(
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert("completeness".to_owned(), json!("bounded"));
     output.insert("trace_type".to_owned(), json!("induction_cti"));
-    output.insert(
-        "cost".to_owned(),
-        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
-    );
+    output.insert("cost".to_owned(), verification_cost(started, statistics));
     (Value::Object(output), 1)
 }
 
@@ -362,6 +415,7 @@ fn render_induction_success(
     ranked: &fsl_verifier::RankedLeadstoResult,
     depth: usize,
     started: Instant,
+    statistics: &fsl_solver::VerificationStatistics,
 ) -> (Value, i32) {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
@@ -439,10 +493,7 @@ fn render_induction_success(
         };
         output.insert("note".to_owned(), json!(note));
     }
-    output.insert(
-        "cost".to_owned(),
-        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
-    );
+    output.insert("cost".to_owned(), verification_cost(started, statistics));
     (Value::Object(output), 0)
 }
 
@@ -538,7 +589,7 @@ fn render_explicit_result(
 ) -> CommandResult {
     let compatible = explicit_as_bmc(result);
     if let Some(violation) = &compatible.violation {
-        let (mut output, status) = render_bmc_violation(model, violation, started);
+        let (mut output, status) = render_bmc_violation(model, violation, started, None);
         add_explicit_metadata(&mut output, result);
         return (output, status);
     }
@@ -546,7 +597,7 @@ fn render_explicit_result(
     if deadlock == DeadlockMode::Error
         && let Some(step) = result.deadlock_step
     {
-        let (mut output, status) = render_deadlock_failure(model, &compatible, step, started);
+        let (mut output, status) = render_deadlock_failure(model, &compatible, step, started, None);
         add_explicit_metadata(&mut output, result);
         return (output, status);
     }
@@ -581,6 +632,7 @@ fn render_explicit_result(
             result.depth_reached,
             checked_bounds,
             started,
+            None,
         );
         if result.closure {
             mark_reachables_definitively_unreachable(&mut output);
@@ -631,7 +683,7 @@ fn render_explicit_budget(
     );
     output.insert(
         "cost".to_owned(),
-        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+        verification_cost(started, &fsl_solver::VerificationStatistics::default()),
     );
     let mut value = Value::Object(output);
     add_explicit_metadata(&mut value, result);
@@ -654,6 +706,7 @@ fn render_explicit_success(
             checked_bounds,
             deadlock,
             started,
+            None,
         );
         add_explicit_metadata(&mut output, result);
         return (output, status);
@@ -692,7 +745,7 @@ fn render_explicit_success(
     );
     output.insert(
         "cost".to_owned(),
-        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
+        verification_cost(started, &fsl_solver::VerificationStatistics::default()),
     );
     let mut value = Value::Object(output);
     add_explicit_metadata(&mut value, result);
@@ -738,15 +791,20 @@ fn mark_reachables_definitively_unreachable(output: &mut Value) {
 
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
-    let prepared = match prepare_bmc(&request, started) {
-        Ok(prepared) => prepared,
+    let (prepared, solved) = match execute_bmc(&request, started) {
+        Ok(execution) => execution,
         Err(output) => return output,
     };
-    let result = match solve_bmc(&request, &prepared) {
-        Ok(result) => result,
-        Err(output) => return output,
-    };
-    render_bmc_result(&request, &prepared, &result, started)
+    render_bmc_result(&request, &prepared, &solved, started)
+}
+
+fn execute_bmc(
+    request: &BmcRequest<'_>,
+    started: Instant,
+) -> Result<(PreparedBmc, SolvedBmc), CommandResult> {
+    let prepared = prepare_bmc(request, started)?;
+    let solved = solve_bmc(request, &prepared)?;
+    Ok((prepared, solved))
 }
 
 fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc, CommandResult> {
@@ -760,9 +818,15 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     if checked_bounds.is_none() && request.initial_state.is_none() {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
             Ok(Some((violation, trace))) => {
-                return Err(concrete_boundary_output(
-                    &model, &violation, &trace, started,
-                ));
+                let (mut output, status) =
+                    concrete_boundary_output(&model, &violation, &trace, started);
+                if let Value::Object(output) = &mut output {
+                    output.insert(
+                        "cost".to_owned(),
+                        verification_cost(started, &fsl_solver::VerificationStatistics::default()),
+                    );
+                }
+                return Err((output, status));
             }
             Ok(None) => {}
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
@@ -774,10 +838,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     })
 }
 
-fn solve_bmc(
-    request: &BmcRequest<'_>,
-    prepared: &PreparedBmc,
-) -> Result<fsl_verifier::BmcResult, CommandResult> {
+fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedBmc, CommandResult> {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
@@ -805,18 +866,23 @@ fn solve_bmc(
     if let Err(error) = replay_all(&prepared.model, &result, request.initial_state) {
         return Err((error_output("internal", &error), 3));
     }
-    Ok(result)
+    Ok(SolvedBmc {
+        result,
+        statistics: fsl_solver::SmtSolver::statistics(&solver),
+    })
 }
 
 fn render_bmc_result(
     request: &BmcRequest<'_>,
     prepared: &PreparedBmc,
-    result: &fsl_verifier::BmcResult,
+    solved: &SolvedBmc,
     started: Instant,
 ) -> CommandResult {
+    let result = &solved.result;
+    let statistics = &solved.statistics;
     let model = &prepared.model;
     if let Some(violation) = &result.violation {
-        return render_bmc_violation(model, violation, started);
+        return render_bmc_violation(model, violation, started, Some(statistics));
     }
 
     let unreached = result
@@ -838,17 +904,18 @@ fn render_bmc_result(
             request.depth,
             prepared.checked_bounds.as_ref(),
             started,
+            Some(statistics),
         );
     }
 
     if request.deadlock == DeadlockMode::Error {
         if let Some(step) = result.deadlock_step {
-            return render_deadlock_failure(model, result, step, started);
+            return render_deadlock_failure(model, result, step, started, Some(statistics));
         }
     }
 
     if let Some(violation) = &result.leadsto_violation {
-        return render_leadsto_failure(model, violation, request.depth, started);
+        return render_leadsto_failure(model, violation, request.depth, started, Some(statistics));
     }
     render_bmc_success(
         model,
@@ -857,6 +924,7 @@ fn render_bmc_result(
         prepared.checked_bounds.as_ref(),
         request.deadlock,
         started,
+        Some(statistics),
     )
 }
 
@@ -865,6 +933,7 @@ fn render_bmc_violation(
     model: &KernelModel,
     violation: &fsl_verifier::BmcViolation,
     started: Instant,
+    statistics: Option<&fsl_solver::VerificationStatistics>,
 ) -> (Value, i32) {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
@@ -972,7 +1041,7 @@ fn render_bmc_violation(
         }
     }
     output.insert("trace".to_owned(), trace);
-    finish(&mut output, violation.step, started);
+    finish_verification(&mut output, violation.step, started, statistics);
     output.insert(
         "trace_type".to_owned(),
         json!(if violation.name.starts_with("_deadline_") {
@@ -991,6 +1060,7 @@ fn render_reachable_failure(
     depth: usize,
     checked_bounds: Option<&std::collections::BTreeSet<String>>,
     started: Instant,
+    statistics: Option<&fsl_solver::VerificationStatistics>,
 ) -> (Value, i32) {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
@@ -1048,7 +1118,7 @@ fn render_reachable_failure(
         "recommended_action".to_owned(),
         json!("add a single-shot reachable for the action / raise --depth"),
     );
-    finish(&mut output, depth, started);
+    finish_verification(&mut output, depth, started, statistics);
     output.insert("trace_type".to_owned(), json!("reachable"));
     (Value::Object(output), 1)
 }
@@ -1058,6 +1128,7 @@ fn render_deadlock_failure(
     result: &fsl_verifier::BmcResult,
     step: usize,
     started: Instant,
+    statistics: Option<&fsl_solver::VerificationStatistics>,
 ) -> (Value, i32) {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
@@ -1075,7 +1146,7 @@ fn render_deadlock_failure(
                 .map_or(Value::Null, |action| json!({"name": display(&action.name)})),
         );
     }
-    finish(&mut output, step, started);
+    finish_verification(&mut output, step, started, statistics);
     output.insert("trace_type".to_owned(), json!("deadlock"));
     (Value::Object(output), 1)
 }
@@ -1085,6 +1156,7 @@ fn render_leadsto_failure(
     violation: &fsl_verifier::BmcViolation,
     depth: usize,
     started: Instant,
+    statistics: Option<&fsl_solver::VerificationStatistics>,
 ) -> (Value, i32) {
     let Some(details) = &violation.leads_to else {
         return (error_output("internal", "missing leadsTo diagnostics"), 3);
@@ -1128,7 +1200,7 @@ fn render_leadsto_failure(
         ::fslc_rust::trace_json(model, &violation.trace),
     );
     output.insert("hint".to_owned(), json!(details.hint));
-    finish(&mut output, depth, started);
+    finish_verification(&mut output, depth, started, statistics);
     output.insert("trace_type".to_owned(), json!("leadsTo"));
     (Value::Object(output), 1)
 }
@@ -1140,6 +1212,7 @@ fn render_bmc_success(
     checked_bounds: Option<&std::collections::BTreeSet<String>>,
     deadlock: DeadlockMode,
     started: Instant,
+    statistics: Option<&fsl_solver::VerificationStatistics>,
 ) -> (Value, i32) {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
@@ -1184,10 +1257,14 @@ fn render_bmc_success(
             )),
         );
     }
-    output.insert(
-        "cost".to_owned(),
-        json!({"elapsed_s": started.elapsed().as_secs_f64()}),
-    );
+    if let Some(statistics) = statistics {
+        output.insert("cost".to_owned(), verification_cost(started, statistics));
+    } else {
+        output.insert(
+            "cost".to_owned(),
+            verification_cost(started, &fsl_solver::VerificationStatistics::default()),
+        );
+    }
     (Value::Object(output), 0)
 }
 
@@ -2137,7 +2214,13 @@ mod tests {
             k: 1,
             trace: Vec::new(),
         };
-        let (output, status) = render_induction_cti(&model, &cti, 1, Instant::now());
+        let (output, status) = render_induction_cti(
+            &model,
+            &cti,
+            1,
+            Instant::now(),
+            &fsl_solver::VerificationStatistics::default(),
+        );
         assert_eq!(status, 1);
         assert_eq!(output["invariant"], "mustBeApproved");
         assert_eq!(output["generated_name"], "Order_mustBeApproved");

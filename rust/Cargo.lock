@@ -377,6 +377,9 @@ dependencies = [
 [[package]]
 name = "fsl-solver"
 version = "2.7.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "fsl-solver-z3"
@@ -429,6 +432,7 @@ version = "2.7.0"
 dependencies = [
  "fsl-core",
  "fsl-runtime",
+ "fsl-solver",
  "fsl-solver-z3js",
  "fsl-verifier",
  "serde",
@@ -445,6 +449,7 @@ dependencies = [
  "ed25519-dalek",
  "fsl-core",
  "fsl-runtime",
+ "fsl-solver",
  "fsl-solver-z3",
  "fsl-syntax",
  "fsl-tools",

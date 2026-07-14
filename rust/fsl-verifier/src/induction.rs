@@ -67,6 +67,13 @@ impl Property<'_> {
             Self::Invariant(index) => model.invariants[index].name.clone(),
         }
     }
+
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Bound(_) => "type_bound",
+            Self::Invariant(_) => "invariant",
+        }
+    }
 }
 
 fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
@@ -124,6 +131,16 @@ fn property_condition<S: SmtSolver>(
     }
 }
 
+fn attributed_property_condition<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: Property<'_>,
+    state: &SymbolicState<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    solver.set_query_context(property.kind(), &property.name(model));
+    property_condition(solver, model, property, state, None)
+}
+
 /// Prove kernel invariants and transitions by k-induction after a successful
 /// bounded base case.
 ///
@@ -131,6 +148,7 @@ fn property_condition<S: SmtSolver>(
 ///
 /// Returns [`VerifyError`] for unsupported symbolic expressions or solver
 /// failures.
+#[allow(clippy::too_many_lines)]
 pub async fn prove_induction<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
@@ -168,7 +186,7 @@ pub async fn prove_induction<S: SmtSolver>(
 
         let mut still_remaining = Vec::new();
         for property in remaining {
-            let condition = property_condition(solver, model, property, &states[k], None)?;
+            let condition = attributed_property_condition(solver, model, property, &states[k])?;
             solver.push();
             solver.assert(&solver.not(&condition)?)?;
             match solver.check().await? {
@@ -195,6 +213,7 @@ pub async fn prove_induction<S: SmtSolver>(
 
         if k == 1 {
             for transition in &model.transitions {
+                solver.set_query_context("trans", &transition.name);
                 let mut bindings = Bindings::new();
                 let value = eval(
                     solver,
@@ -278,6 +297,7 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
         let Some(measure_expr) = &property.decreases else {
             continue;
         };
+        solver.set_query_context("leadsTo_rank", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             let p0 =
                 leadsto_condition(solver, model, &property.before, &state0, &binding.symbolic)?;

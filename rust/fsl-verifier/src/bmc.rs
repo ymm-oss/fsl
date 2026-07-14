@@ -142,6 +142,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             solver.assert(&constraint)?;
         }
     }
+    solver.set_query_context("init", "initial_state");
     match solver.check().await? {
         SatResult::Sat => {}
         SatResult::Unsat => return Err(VerifyError::new("init constraints are unsatisfiable")),
@@ -206,6 +207,7 @@ async fn verify_bounded_config<S: SmtSolver>(
         let enabled = enabled_terms(solver, model, &instances, &states[step])?;
         record_coverage(solver, &instances, &enabled, step, &mut result).await?;
         if result.deadlock_step.is_none() {
+            solver.set_query_context("deadlock", "deadlock");
             let mut deadlock = solver.not(&solver.or(&enabled)?)?;
             if let Some(terminal) = &model.terminal {
                 let mut bindings = Bindings::new();
@@ -279,6 +281,7 @@ async fn check_state_properties<S: SmtSolver>(
                 .get(name)
                 .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?,
         )?;
+        solver.set_query_context("type_bound", &property_name);
         if probe_not(solver, &valid).await? {
             let failure = solver.not(&valid)?;
             return Ok(Some(
@@ -309,6 +312,7 @@ async fn check_state_properties<S: SmtSolver>(
             None,
         )?;
         let condition = bool_term(&value)?.clone();
+        solver.set_query_context("invariant", &property.name);
         if probe_not(solver, &condition).await? {
             let failure = solver.not(&condition)?;
             return Ok(Some(
@@ -342,6 +346,7 @@ async fn check_state_properties<S: SmtSolver>(
             Some(&states[step - 1]),
         )?;
         let condition = bool_term(&value)?.clone();
+        solver.set_query_context("trans", &property.name);
         if probe_not(solver, &condition).await? {
             let failure = solver.not(&condition)?;
             return Ok(Some(
@@ -373,6 +378,7 @@ async fn check_state_properties<S: SmtSolver>(
             &solver.int_value(i64_index(instance_index)?),
         )?;
         for ensure in &action.ensures {
+            solver.set_query_context("ensures", &action.name);
             let value = eval(
                 solver,
                 model,
@@ -422,6 +428,7 @@ async fn record_reachables<S: SmtSolver>(
             continue;
         }
         let mut bindings = Bindings::new();
+        solver.set_query_context("reachable", &property.name);
         let value = eval(
             solver,
             model,
@@ -484,6 +491,7 @@ async fn record_coverage<S: SmtSolver>(
         if result.action_coverage[&instance.action] {
             continue;
         }
+        solver.set_query_context("action_coverage", &instance.action);
         if probe(solver, enabled).await? {
             result.action_coverage.insert(instance.action.clone(), true);
             if step == result.depth && result.depth > 0 {
@@ -812,6 +820,7 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
 ) -> Result<Option<BmcViolation>, VerifyError> {
     let deadlock = solver.not(&solver.or(enabled)?)?;
     for property in &model.leadstos {
+        solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             for pending in 0..=step {
                 let mut terms = vec![
@@ -889,6 +898,7 @@ async fn check_leadsto_deadlines<S: SmtSolver>(
         let Some(within) = property.within else {
             continue;
         };
+        solver.set_query_context("leadsTo", &property.name);
         let within = usize::try_from(within)
             .map_err(|_| VerifyError::new("leadsTo within must be non-negative"))?;
         let Some(pending) = step.checked_sub(within) else {
@@ -954,6 +964,7 @@ async fn check_leadstos<S: SmtSolver>(
     depth: usize,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     for property in &model.leadstos {
+        solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             for loop_start in 0..depth {
                 for loop_end in (loop_start + 1)..=depth {

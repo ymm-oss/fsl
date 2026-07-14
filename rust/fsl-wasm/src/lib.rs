@@ -12,6 +12,12 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn performance_now() -> f64;
+}
+
 #[derive(Debug, Deserialize)]
 struct Request {
     cmd: String,
@@ -138,6 +144,7 @@ fn check(request: &Request, solver_version: &str) -> Value {
 }
 
 async fn verify(request: &Request, solver_version: &str) -> Value {
+    let started = performance_now();
     let model = match build(request, solver_version) {
         Ok(model) => model,
         Err(error) => return error,
@@ -148,7 +155,15 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             Ok(result) => result,
             Err(failure) => return error(solver_version, "semantics", failure.to_string()),
         };
-    render_verify(&model, &request.options, result, solver_version)
+    let statistics = fsl_solver::SmtSolver::statistics(&solver);
+    render_verify(
+        &model,
+        &request.options,
+        result,
+        solver_version,
+        &statistics,
+        (performance_now() - started) / 1000.0,
+    )
 }
 
 #[allow(clippy::too_many_lines)]
@@ -157,9 +172,16 @@ fn render_verify(
     options: &Options,
     result: fsl_verifier::BmcResult,
     solver_version: &str,
+    statistics: &fsl_solver::VerificationStatistics,
+    elapsed_s: f64,
 ) -> Value {
     let mut output = envelope(solver_version);
     output.insert("spec".to_owned(), json!(model.name));
+    output.insert(
+        "cost".to_owned(),
+        serde_json::to_value(statistics.with_elapsed(elapsed_s))
+            .expect("verification cost serializes"),
+    );
     if let Some(violation) = result.violation {
         output.insert("result".to_owned(), json!("violated"));
         output.insert("violation_kind".to_owned(), json!(violation.kind));
@@ -414,7 +436,14 @@ mod tests {
             frontier_progress: false,
         };
 
-        let envelope = render_verify(&model, &Options::default(), result, TEST_SOLVER_VERSION);
+        let envelope = render_verify(
+            &model,
+            &Options::default(),
+            result,
+            TEST_SOLVER_VERSION,
+            &fsl_solver::VerificationStatistics::default(),
+            0.0,
+        );
         let warnings = envelope["warnings"].as_array().expect("warnings array");
 
         assert_eq!(envelope["versions"]["verifier"]["name"], "fsl-wasm");
@@ -484,7 +513,14 @@ mod tests {
             deadlock: "error".to_owned(),
         };
 
-        let envelope = render_verify(&model, &options, result, TEST_SOLVER_VERSION);
+        let envelope = render_verify(
+            &model,
+            &options,
+            result,
+            TEST_SOLVER_VERSION,
+            &fsl_solver::VerificationStatistics::default(),
+            0.0,
+        );
 
         assert_eq!(envelope["violation_kind"], json!("deadlock"));
     }

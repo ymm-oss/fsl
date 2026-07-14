@@ -236,6 +236,13 @@ fn native_cli_preserves_induction_outcomes() {
     assert_eq!(proved["result"], "proved");
     assert_eq!(proved["engine"], "induction");
     assert_eq!(proved["completeness"], "unbounded");
+    assert!(proved["cost"]["solver"]["checks"].as_u64().unwrap_or(0) > 0);
+    assert!(
+        !proved["cost"]["properties"]
+            .as_array()
+            .expect("induction property cost")
+            .is_empty()
+    );
 
     let (cti, status) = run_cli(&[
         "verify",
@@ -252,4 +259,5 @@ fn native_cli_preserves_induction_outcomes() {
     assert_eq!(cti["result"], "unknown_cti");
     assert_eq!(cti["invariant"], "Sync");
     assert_eq!(cti["completeness"], "bounded");
+    assert!(cti["cost"]["solver"]["checks"].as_u64().unwrap_or(0) > 0);
 }
