@@ -112,7 +112,9 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
      when `f: T` has no initializer; `f: T = <const-expr>` is an optional
      explicit initializer, const-evaluated at desugar time (out-of-bounds
      values are caught by the kernel's ordinary type-bound invariant, not by
-     a separate desugar-time bounds check).
+     a separate desugar-time bounds check). Omission emits the stable
+     `implicit_initial_value` migration warning with the selected lower bound
+     and a machine-applicable insertion edit.
    - `Bool`: **requires** an explicit initializer, `f: Bool = true` or
      `f: Bool = false`; the field-map value type is the kernel `Bool`, not a
      0/1 domain. Missing the initializer is a check-time error.

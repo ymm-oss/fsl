@@ -15,7 +15,7 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   struct <Name> { <field>: <type>, ... }  // field: scalar | Option<scalar>
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive predicate, frontend-inlined
 
-  state { <var>: <type>, ... }
+  state { <var>: <type> [= <deterministic expr>], ... }
   init  ["undecided: reason"] { <stmt>... } // assign exactly once per variable/Map-key (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
@@ -258,6 +258,11 @@ source-less nodes as generated-only. Requirement tags are a separate
 traceability relation, not origin identities. Public Kernel v1 remains
 byte-compatible and does not expose the internal chain; publication belongs to
 v2 (#256).
+
+Omitted domain aggregate initializers retain the current Bool `false`, enum
+first-member, range lower-bound, or external-placeholder `0` behavior while
+emitting `implicit_initial_value`. The warning carries the selected value,
+reason, edition severities, source span, and a machine-applicable insertion.
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
@@ -549,6 +554,7 @@ still caught as `map_out_of_bounds`/`abs_state_mismatch`.
 | Int / Bool | `n: Int` | Int is unbounded |
 | Domain type | `type Qty = 0..5` | **automatic bound check** (violated/type_bound) |
 | Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
+| Inline state initializer | `state { qty: Qty = 0 }` | Deterministic sugar for the equivalent root assignment in `init`; may not read state |
 | symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
 | entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements; bound by `verify { instances Claim = N }` |
 | number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements; bound by `verify { values Amount = lo..hi }` |
@@ -569,6 +575,14 @@ Map<bounded scalar, scalar|Option|struct> | Set<bounded scalar> | Seq<scalar, N>
 relation bounded-scalar -> bounded-scalar.
 Anything else (nested structs, Set/Map/Seq as a Map value, etc.) is rejected by
 check as a type error.
+
+Kernel `state` fields may carry deterministic inline initializers. They normalize
+to ordinary root assignments before checking and therefore share Monitor/BMC/
+induction/explicit/Public-Kernel semantics with `init`. Constants, enum members,
+constructors, `none`, and deterministic collection literals are allowed. State
+reads, references to another initializer, indexed/field targets, statement `if`,
+`forall`, and bulk/relational initialization remain invalid inline. The same root
+cannot be assigned both inline and in `init`.
 
 ## 3. Expression catalog
 
@@ -1369,7 +1383,9 @@ verify {
   field updates (`set f = expr`), and traceability (`covers REQ-n "text"`). A
   carried field's type `T` is a `number`, `Bool`, or an enum declared in the
   same requirements spec. Numbers default to the domain's `lo` bound and may
-  take an optional explicit `f: T = <const-expr>` initializer; `Bool` and enum
+  take an optional explicit `f: T = <const-expr>` initializer; omission emits
+  `implicit_initial_value` with the selected lower bound and an insertion edit.
+  `Bool` and enum
   fields have no invented default and **require** an explicit initializer
   (`f: Bool = true/false`, `f: T = Member`) — omitting it is a check-time error.
 - `kpi NAME = count ENTITY in STAGE` is a declarative projection in both

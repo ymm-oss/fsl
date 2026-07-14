@@ -39,9 +39,9 @@ pub use surface::{
     GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
     PreservationItem, ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem,
     RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementBranch, RequirementsItem, SpecItem, Statement, SurfaceBusiness, SurfaceCompose,
-    SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec,
-    SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    RequirementBranch, RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness,
+    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
+    SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

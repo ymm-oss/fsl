@@ -121,7 +121,7 @@ impl ComponentNames {
                 SpecItem::State(fields) => {
                     names
                         .state
-                        .extend(fields.iter().map(|(name, _)| name.clone()));
+                        .extend(fields.iter().map(|field| field.name.clone()));
                 }
                 SpecItem::Action { name, .. } => {
                     names.actions.insert(name.clone());
@@ -305,7 +305,15 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
         SpecItem::State(fields) => SpecItem::State(
             fields
                 .into_iter()
-                .map(|(name, ty)| (prefix(alias, &name), rewrite_type(ty, component)))
+                .map(|field| fsl_syntax::StateField {
+                    name: prefix(alias, &field.name),
+                    ty: rewrite_type(field.ty, component),
+                    initializer: field
+                        .initializer
+                        .map(|expr| rewrite_expr(expr, component, &HashSet::new())),
+                    span: field.span,
+                    initializer_span: field.initializer_span,
+                })
                 .collect(),
         ),
         SpecItem::Init { statements, meta } => SpecItem::Init {
