@@ -9,7 +9,9 @@ use fsl_core::{
 use serde_json::{Value, json};
 
 pub mod coverage;
+pub mod frontend_output;
 pub mod origin_coverage;
+pub mod verification_output;
 
 pub use fsl_core::{
     display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json, trace_json,

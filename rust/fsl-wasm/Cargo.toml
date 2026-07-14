@@ -15,7 +15,9 @@ fsl-core = { path = "../fsl-core" }
 fsl-runtime = { path = "../fsl-runtime" }
 fsl-solver = { path = "../fsl-solver" }
 fsl-solver-z3js = { path = "../fsl-solver-z3js" }
+fsl-syntax = { path = "../fsl-syntax" }
 fsl-verifier = { path = "../fsl-verifier" }
+fslc-rust = { path = "../fslc", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true

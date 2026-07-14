@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,3 +43,4 @@ await cp(resolve(root, "web/index.html"), resolve(dist, "index.html"));
 await cp(resolve(root, "web/client.mjs"), resolve(dist, "client.mjs"));
 await cp(resolve(root, "web/cases.mjs"), resolve(dist, "cases.mjs"));
 await cp(resolve(root, "web/worker-protocol.mjs"), resolve(dist, "worker-protocol.mjs"));
+await writeFile(resolve(dist, "parity-cases.json"), "[]\n", "utf8");

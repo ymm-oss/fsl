@@ -3,15 +3,18 @@
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import "./build.mjs";
 import { cases } from "./web/cases.mjs";
+import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
+
+assertNormalizerContract();
 
 const protocolError = workerMessageError({
   transportError: { kind: "initialization", message: "probe" },
@@ -21,6 +24,118 @@ if (protocolError?.message !== "initialization: probe" || workerMessageError({ e
 }
 
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
+const repository = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+
+async function command(executable, args) {
+  return new Promise((resolveCommand, reject) => {
+    const process = spawn(executable, args, { cwd: repository, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    process.stdout.setEncoding("utf8");
+    process.stderr.setEncoding("utf8");
+    process.stdout.on("data", (chunk) => { stdout += chunk; });
+    process.stderr.on("data", (chunk) => { stderr += chunk; });
+    process.on("error", reject);
+    process.on("close", (status) => resolveCommand({ status, stdout, stderr }));
+  });
+}
+
+async function collectFslFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return collectFslFiles(path);
+    return entry.isFile() && entry.name.endsWith(".fsl") ? [path] : [];
+  }));
+  return nested.flat();
+}
+
+const surfaceBuild = await command("cargo", [
+  "build", "--manifest-path", "rust/Cargo.toml", "-p", "fsl-syntax",
+  "--bin", "fsl-parse-surface", "--locked",
+]);
+if (surfaceBuild.status !== 0) throw new Error(`surface classifier build failed: ${surfaceBuild.stderr}`);
+const surfaceBinary = join(repository, "rust/target/debug/fsl-parse-surface");
+const candidates = [
+  ...await collectFslFiles(join(repository, "specs")),
+  ...await collectFslFiles(join(repository, "examples")),
+].sort();
+const unsupportedDocuments = new Map(Object.entries({
+  "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": "refinement",
+  "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": "refinement",
+  "examples/agentic_rag/negative/guard_bypass_refines_requirements.fsl": "refinement",
+  "examples/agentic_rag/negative/liveness_drop_refines_requirements.fsl": "refinement",
+  "examples/agentic_rag/negative/tool_approval_bypass_refines_requirements.fsl": "refinement",
+  "examples/ai/recursive_support_agent.fsl": "agent",
+  "examples/consulting/tobe_refines_asis.fsl": "refinement",
+  "examples/e2e/3_refines_2.fsl": "refinement",
+  "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": "refinement",
+  "examples/gallery/errors/refinement_failed_map.fsl": "refinement",
+  "examples/layers/return_impl_refines.fsl": "refinement",
+  "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": "refinement",
+  "examples/multi_agent_system/multi_agent_requirements_refines_business.fsl": "refinement",
+  "examples/nfr/sla_worker_refines.fsl": "refinement",
+  "examples/refinement_chain/bot_refines_mid.fsl": "refinement",
+  "examples/refinement_chain/mid_refines_top.fsl": "refinement",
+  "examples/refinement_liveness/design_bypasses_control_refines.fsl": "refinement",
+  "examples/refinement_liveness/design_drops_liveness_progress_refines.fsl": "refinement",
+  "examples/refinement_liveness/design_drops_liveness_refines.fsl": "refinement",
+  "examples/refinement_liveness/design_keeps_liveness_progress_refines.fsl": "refinement",
+  "examples/refinement_liveness/design_keeps_liveness_refines.fsl": "refinement",
+  "examples/ui_spike/ui_refines_req.fsl": "refinement",
+  "examples/validation/order_refund_instant_refines.fsl": "refinement",
+  "examples/validation/order_refund_windowed_refines.fsl": "refinement",
+  "specs/bank_refines.fsl": "refinement",
+  "specs/cart_refines.fsl": "refinement",
+  "specs/seat_refines.fsl": "refinement",
+}));
+const observedUnsupported = new Set();
+const parityCases = [];
+for (const path of candidates) {
+  const repositoryPath = relative(repository, path).split("\\").join("/");
+  const classified = await command(surfaceBinary, [path]);
+  let documentType = "parse-error";
+  if (classified.status === 0) {
+    const ast = JSON.parse(classified.stdout);
+    documentType = Array.isArray(ast) ? ast[0] : ast.$type?.toLowerCase();
+  }
+  if (["agent", "refinement"].includes(documentType)) {
+    if (unsupportedDocuments.get(repositoryPath) !== documentType) {
+      throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
+    }
+    observedUnsupported.add(repositoryPath);
+    continue;
+  }
+  if (unsupportedDocuments.has(repositoryPath)) {
+    throw new Error(`unsupported-document classification changed: ${repositoryPath}`);
+  }
+  const source = await readFile(path, "utf8");
+  const files = {};
+  for (const match of source.matchAll(/\b(?:from|refinement)\s+"([^"]+)"/g)) {
+    files[match[1]] = await readFile(resolve(dirname(path), match[1]), "utf8");
+  }
+  for (const cmd of ["check", "verify"]) {
+    parityCases.push({
+      id: `parity-${parityCases.length}`,
+      cmd,
+      path: repositoryPath,
+      source,
+      source_file: repositoryPath,
+      files,
+      options: cmd === "verify" ? { depth: 3, deadlock: "warn" } : {},
+    });
+  }
+}
+for (const path of unsupportedDocuments.keys()) {
+  if (!observedUnsupported.has(path)) {
+    throw new Error(`reviewed unsupported document disappeared: ${path}`);
+  }
+}
+const duplicateWriteCase = "examples/gallery/errors/semantics_duplicate_assignment.fsl";
+if (!parityCases.some((testCase) => testCase.path === duplicateWriteCase)) {
+  throw new Error(`${duplicateWriteCase} must remain in the parity corpus`);
+}
+await writeFile(join(dist, "parity-cases.json"), `${JSON.stringify(parityCases)}\n`, "utf8");
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -129,16 +244,20 @@ if (details.ok !== "true") {
 const browser = JSON.parse(details.text);
 if (!browser.cancelled) throw new Error("Worker cancellation did not complete");
 const nativeBinary = fileURLToPath(new URL("../target/debug/fslc", import.meta.url));
-async function nativeVerdict(testCase, index) {
-  const path = join(tmpdir(), `fsl-wasm-native-${process.pid}-${index}.fsl`);
-  await writeFile(path, testCase.source, "utf8");
-  const args = [
-    "verify", path,
-    "--depth", String(testCase.options.depth),
-    "--deadlock", testCase.options.deadlock,
-  ];
+async function nativeEnvelope(testCase) {
+  const args = testCase.cmd === "check"
+    ? ["check", testCase.path]
+    : [
+      "verify", testCase.path,
+      "--depth", String(testCase.options.depth),
+      "--deadlock", testCase.options.deadlock,
+      "--no-cache",
+    ];
   return new Promise((resolve, reject) => {
-    const childProcess = spawn(nativeBinary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const childProcess = spawn(nativeBinary, args, {
+      cwd: repository,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     childProcess.stdout.setEncoding("utf8");
@@ -155,91 +274,44 @@ async function nativeVerdict(testCase, index) {
   });
 }
 const native = [];
-for (let index = 0; index < cases.length; index += 1) {
-  native.push(await nativeVerdict(cases[index], index));
+for (const testCase of parityCases) {
+  native.push(await nativeEnvelope(testCase));
 }
-const wasm = browser.envelopes.map((envelope) => (
-  { result: envelope.result, violation_kind: envelope.violation_kind ?? null }
-));
-const versionKeys = ["core", "solver", "verifier"];
-const componentKeys = ["name", "version"];
-const solverKeys = ["backend", "name", "version"];
-const costKeys = ["elapsed_s", "properties", "solver"];
-const solverCostKeys = ["check_elapsed_s", "checks", "conflicts", "decisions", "memory_mb", "propagations"];
-const propertyCostKeys = ["checks", "elapsed_s", "kind", "name"];
-function validateVersions(envelope, verifier, backend) {
-  if (JSON.stringify(Object.keys(envelope.versions ?? {}).sort()) !== JSON.stringify(versionKeys)) {
-    throw new Error(`invalid version envelope: ${JSON.stringify(envelope.versions)}`);
-  }
-  for (const component of ["core", "verifier"]) {
-    if (JSON.stringify(Object.keys(envelope.versions[component]).sort()) !== JSON.stringify(componentKeys)) {
-      throw new Error(`invalid ${component} version: ${JSON.stringify(envelope.versions[component])}`);
-    }
-  }
-  if (JSON.stringify(Object.keys(envelope.versions.solver).sort()) !== JSON.stringify(solverKeys)) {
-    throw new Error(`invalid solver version: ${JSON.stringify(envelope.versions.solver)}`);
-  }
-  if (envelope.versions.verifier.name !== verifier
-      || envelope.versions.core.name !== "fsl-core"
-      || envelope.versions.solver.name !== "z3"
-      || envelope.versions.solver.backend !== backend
-      || !envelope.versions.verifier.version
-      || !envelope.versions.core.version
-      || !envelope.versions.solver.version.startsWith("Z3 4.16.0")) {
-    throw new Error(`incorrect version identity: ${JSON.stringify(envelope.versions)}`);
+const mismatches = [];
+for (let index = 0; index < parityCases.length; index += 1) {
+  const nativeEnvelope = native[index];
+  const wasmEnvelope = browser.parityEnvelopes[index];
+  const envelopeDifferences = differences(
+    normalizeEnvelope(nativeEnvelope),
+    normalizeEnvelope(wasmEnvelope),
+  );
+  if (envelopeDifferences.length > 0) {
+    mismatches.push({
+      schema: "fsl-native-wasm-parity-failure.v1",
+      case: {
+        path: parityCases[index].path,
+        command: parityCases[index].cmd,
+        options: parityCases[index].options,
+      },
+      differences: envelopeDifferences,
+      native: nativeEnvelope,
+      wasm: wasmEnvelope,
+    });
   }
 }
-function validateCost(envelope) {
-  const cost = envelope.cost;
-  if (JSON.stringify(Object.keys(cost ?? {}).sort()) !== JSON.stringify(costKeys)
-      || !Number.isFinite(cost.elapsed_s) || cost.elapsed_s < 0
-      || JSON.stringify(Object.keys(cost.solver ?? {}).sort()) !== JSON.stringify(solverCostKeys)
-      || !Number.isInteger(cost.solver.checks) || cost.solver.checks <= 0
-      || !Number.isFinite(cost.solver.check_elapsed_s) || cost.solver.check_elapsed_s < 0
-      || cost.solver.check_elapsed_s > cost.elapsed_s) {
-    throw new Error(`invalid verification cost: ${JSON.stringify(cost)}`);
-  }
-  for (const key of ["conflicts", "decisions", "propagations", "memory_mb"]) {
-    if (cost.solver[key] !== null
-        && (!Number.isFinite(cost.solver[key]) || cost.solver[key] < 0)) {
-      throw new Error(`invalid solver statistic ${key}: ${JSON.stringify(cost.solver)}`);
-    }
-  }
-  const identities = cost.properties.map((property) => {
-    if (JSON.stringify(Object.keys(property).sort()) !== JSON.stringify(propertyCostKeys)
-        || !property.kind || !property.name
-        || !Number.isInteger(property.checks) || property.checks <= 0
-        || !Number.isFinite(property.elapsed_s) || property.elapsed_s < 0) {
-      throw new Error(`invalid property cost: ${JSON.stringify(property)}`);
-    }
-    return `${property.kind}\u0000${property.name}`;
-  });
-  if (JSON.stringify(identities) !== JSON.stringify([...identities].sort())
-      || cost.properties.reduce((sum, property) => sum + property.checks, 0)
-        !== cost.solver.checks) {
-    throw new Error(`non-deterministic or incomplete property cost: ${JSON.stringify(cost)}`);
-  }
+if (mismatches.length > 0) {
+  const report = JSON.stringify({
+    schema: "fsl-native-wasm-parity-failure.v1",
+    mismatches,
+  }, null, 2);
+  const reportPath = join(tmpdir(), "fsl-native-wasm-parity-failure.json");
+  await writeFile(reportPath, `${report}\n`, "utf8");
+  throw new Error(`${report}\nfull report: ${reportPath}`);
 }
-for (let index = 0; index < native.length; index += 1) {
-  validateVersions(native[index], "fslc-rust", "native-z3");
-  validateVersions(browser.envelopes[index], "fsl-wasm", "z3-solver-wasm");
-  validateCost(native[index]);
-  validateCost(browser.envelopes[index]);
-  if (native[index].versions.verifier.version !== browser.envelopes[index].versions.verifier.version
-      || native[index].versions.core.version !== browser.envelopes[index].versions.core.version
-      || native[index].versions.solver.version !== browser.envelopes[index].versions.solver.version) {
-    throw new Error(`native/WASM version mismatch: native=${JSON.stringify(native[index].versions)} wasm=${JSON.stringify(browser.envelopes[index].versions)}`);
-  }
-  const nativeProperties = native[index].cost.properties.map(({ kind, name, checks }) => ({ kind, name, checks }));
-  const wasmProperties = browser.envelopes[index].cost.properties.map(({ kind, name, checks }) => ({ kind, name, checks }));
-  if (JSON.stringify(nativeProperties) !== JSON.stringify(wasmProperties)) {
-    throw new Error(`native/WASM property-cost mismatch: native=${JSON.stringify(nativeProperties)} wasm=${JSON.stringify(wasmProperties)}`);
-  }
-}
-const nativeVerdicts = native.map((envelope) => (
-  { result: envelope.result, violation_kind: envelope.violation_kind ?? null }
-));
-if (JSON.stringify(nativeVerdicts) !== JSON.stringify(wasm)) {
-  throw new Error(`native/WASM verdict mismatch: native=${JSON.stringify(nativeVerdicts)} wasm=${JSON.stringify(wasm)}`);
-}
-console.log(JSON.stringify({ schema: "fsl-wasm-browser.v1", ok: true, cancelled: true, nativeParity: true }, null, 2));
+console.log(JSON.stringify({
+  schema: "fsl-wasm-browser.v1",
+  ok: true,
+  cancelled: true,
+  nativeParity: true,
+  parityCases: parityCases.length,
+}, null, 2));

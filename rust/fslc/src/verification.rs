@@ -21,23 +21,7 @@ impl VerificationEngine {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum DeadlockMode {
-    Warn,
-    Error,
-    Ignore,
-}
-
-impl DeadlockMode {
-    pub(super) fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "warn" => Ok(Self::Warn),
-            "error" => Ok(Self::Error),
-            "ignore" => Ok(Self::Ignore),
-            _ => Err("--deadlock must be warn, error, or ignore".to_owned()),
-        }
-    }
-}
+pub(super) use fslc_rust::verification_output::DeadlockMode;
 
 #[derive(Clone, Copy)]
 pub(super) struct ModelSelection<'a> {
@@ -818,15 +802,20 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     if checked_bounds.is_none() && request.initial_state.is_none() {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
             Ok(Some((violation, trace))) => {
-                let (mut output, status) =
-                    concrete_boundary_output(&model, &violation, &trace, started);
-                if let Value::Object(output) = &mut output {
-                    output.insert(
-                        "cost".to_owned(),
-                        verification_cost(started, &fsl_solver::VerificationStatistics::default()),
-                    );
-                }
-                return Err((output, status));
+                let statistics = fsl_solver::VerificationStatistics::default();
+                return Err(fslc_rust::verification_output::render_boundary_output(
+                    envelope(),
+                    &model,
+                    &violation,
+                    &trace,
+                    &fslc_rust::verification_output::BmcOutputOptions {
+                        depth: request.depth,
+                        deadlock: request.deadlock,
+                        checked_bounds: None,
+                        elapsed_s: started.elapsed().as_secs_f64(),
+                        statistics: &statistics,
+                    },
+                ));
             }
             Ok(None) => {}
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
@@ -863,7 +852,11 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
         Ok(result) => result,
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
     };
-    if let Err(error) = replay_all(&prepared.model, &result, request.initial_state) {
+    if let Err(error) = ::fslc_rust::verification_output::replay_bmc_witnesses(
+        &prepared.model,
+        &result,
+        request.initial_state,
+    ) {
         return Err((error_output("internal", &error), 3));
     }
     Ok(SolvedBmc {
@@ -878,53 +871,17 @@ fn render_bmc_result(
     solved: &SolvedBmc,
     started: Instant,
 ) -> CommandResult {
-    let result = &solved.result;
-    let statistics = &solved.statistics;
-    let model = &prepared.model;
-    if let Some(violation) = &result.violation {
-        return render_bmc_violation(model, violation, started, Some(statistics));
-    }
-
-    let unreached = result
-        .reachables
-        .iter()
-        .filter(|(_, witness)| witness.is_none())
-        .filter_map(|(name, _)| {
-            model
-                .reachables
-                .iter()
-                .find(|property| property.name == *name)
-        })
-        .collect::<Vec<_>>();
-    if !unreached.is_empty() {
-        return render_reachable_failure(
-            model,
-            result,
-            &unreached,
-            request.depth,
-            prepared.checked_bounds.as_ref(),
-            started,
-            Some(statistics),
-        );
-    }
-
-    if request.deadlock == DeadlockMode::Error {
-        if let Some(step) = result.deadlock_step {
-            return render_deadlock_failure(model, result, step, started, Some(statistics));
-        }
-    }
-
-    if let Some(violation) = &result.leadsto_violation {
-        return render_leadsto_failure(model, violation, request.depth, started, Some(statistics));
-    }
-    render_bmc_success(
-        model,
-        result,
-        request.depth,
-        prepared.checked_bounds.as_ref(),
-        request.deadlock,
-        started,
-        Some(statistics),
+    fslc_rust::verification_output::render_bmc_output(
+        envelope(),
+        &prepared.model,
+        &solved.result,
+        fslc_rust::verification_output::BmcOutputOptions {
+            depth: request.depth,
+            deadlock: request.deadlock,
+            checked_bounds: prepared.checked_bounds.as_ref(),
+            elapsed_s: started.elapsed().as_secs_f64(),
+            statistics: &solved.statistics,
+        },
     )
 }
 
@@ -1148,60 +1105,6 @@ fn render_deadlock_failure(
     }
     finish_verification(&mut output, step, started, statistics);
     output.insert("trace_type".to_owned(), json!("deadlock"));
-    (Value::Object(output), 1)
-}
-
-fn render_leadsto_failure(
-    model: &KernelModel,
-    violation: &fsl_verifier::BmcViolation,
-    depth: usize,
-    started: Instant,
-    statistics: Option<&fsl_solver::VerificationStatistics>,
-) -> (Value, i32) {
-    let Some(details) = &violation.leads_to else {
-        return (error_output("internal", "missing leadsTo diagnostics"), 3);
-    };
-    let property = model
-        .leadstos
-        .iter()
-        .find(|property| property.name == violation.name);
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("violated"));
-    output.insert("violation_kind".to_owned(), json!("leadsTo"));
-    let name = origin_aware_property_name(&mut output, model, "leadsTo", &violation.name);
-    output.insert("invariant".to_owned(), json!(name));
-    output
-        .entry("loc".to_owned())
-        .or_insert_with(|| property.map_or(Value::Null, |property| property.span.python_loc()));
-    output.insert(
-        "bindings".to_owned(),
-        Value::Object(
-            details
-                .bindings
-                .iter()
-                .map(|(name, value)| (name.clone(), ::fslc_rust::fsl_value_json(value)))
-                .collect(),
-        ),
-    );
-    output.insert("pending_since".to_owned(), json!(details.pending_since));
-    if let Some(loop_start) = details.loop_start {
-        output.insert("loop_start".to_owned(), json!(loop_start));
-    }
-    if let Some(deadline) = details.deadline {
-        output.insert("deadline".to_owned(), json!(deadline));
-    }
-    if let Some(within) = details.within {
-        output.insert("within".to_owned(), json!(within));
-    }
-    output.insert("stutter".to_owned(), json!(details.stutter));
-    output.insert(
-        "trace".to_owned(),
-        ::fslc_rust::trace_json(model, &violation.trace),
-    );
-    output.insert("hint".to_owned(), json!(details.hint));
-    finish_verification(&mut output, depth, started, statistics);
-    output.insert("trace_type".to_owned(), json!("leadsTo"));
     (Value::Object(output), 1)
 }
 

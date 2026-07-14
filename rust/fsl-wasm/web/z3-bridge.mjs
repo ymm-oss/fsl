@@ -11,6 +11,8 @@ export async function installZ3Bridge() {
   const { Array: Z3Array, Bool, If, Int, Solver } = ctx;
   const solver = new Solver();
   solver.set("unsat_core", true);
+  solver.set("random_seed", 0);
+  solver.set("smt.random_seed", 0);
   globalThis.fslZ3Version = () => initialized.getFullVersion();
   const terms = [null];
   const sorts = [null];

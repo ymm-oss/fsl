@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Native/WASM parity now runs every Worker-supported surface document from the
+  shared `specs/` and `examples/` corpus and structurally compares complete
+  envelopes. Only schema-validated timing/backend identity and replay-validated
+  witness state values and commuting-step order are normalized while state
+  keys, action/source identity, and change shapes remain exact; structured failures retain difference paths,
+  both envelopes, and version metadata. Native and browser Z3 seeds are fixed,
+  and the gate includes a pre-#267 duplicate-write regression (issue #273).
 - Distribution is now fail-closed: every Rust workspace crate is marked
   non-publishable, the dormant PyPI workflow and obsolete Python/PyInstaller
   binary path are removed, and GitHub Releases are documented as the only

@@ -4,10 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{
-    CoreError, FileResolver, KernelModel, TypeDef, TypeRef, display_name, fsl_value_json,
-    model_warnings, trace_json,
-};
+use fsl_core::{CoreError, FileResolver, KernelModel, model_warnings};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
@@ -22,10 +19,16 @@ extern "C" {
 struct Request {
     cmd: String,
     source: String,
+    #[serde(default = "default_source_file")]
+    source_file: String,
     #[serde(default)]
     files: BTreeMap<String, String>,
     #[serde(default)]
     options: Options,
+}
+
+fn default_source_file() -> String {
+    "spec.fsl".to_owned()
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,241 +98,261 @@ fn build(request: &Request, solver_version: &str) -> Result<KernelModel, Value> 
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
-    let kernel = fsl_core::parse_kernel_source(&request.source, &resolver)
-        .map_err(|failure| error(solver_version, "parse", failure.to_string()))?;
-    fsl_core::build_model(kernel)
-        .map_err(|failure| error(solver_version, "semantics", failure.to_string()))
-}
-
-fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
-    }
-}
-
-fn invariant_names(model: &KernelModel) -> Vec<String> {
-    let mut names = model
-        .state
-        .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
-        .collect::<Vec<_>>();
-    names.extend(
-        model
-            .invariants
-            .iter()
-            .map(|property| property.name.clone()),
-    );
-    names
+    let kernel =
+        fsl_core::parse_kernel_source_with_file(&request.source, &resolver, &request.source_file)
+            .map_err(|failure| error(solver_version, "parse", failure.to_string()))?;
+    fsl_core::build_model(kernel).map_err(|failure| {
+        fslc_rust::verification_output::render_semantic_error(
+            envelope(solver_version),
+            &failure.to_string(),
+        )
+    })
 }
 
 fn check(request: &Request, solver_version: &str) -> Value {
+    if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+        &request.source,
+        &request.source_file,
+        envelope(solver_version),
+    ) {
+        return output;
+    }
+    if let Err(failure) = fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&request.source)) {
+        return fslc_rust::frontend_output::render_surface_parse_error(
+            envelope(solver_version),
+            &failure,
+        );
+    }
     let model = match build(request, solver_version) {
         Ok(model) => model,
         Err(error) => return error,
+    };
+    let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
+        &envelope(solver_version),
+        &request.source,
+        &model,
+    ) {
+        Ok((Some(failure), _)) => return failure,
+        Ok((None, has_contract)) => has_contract,
+        Err(failure) => return error(solver_version, "semantics", failure),
     };
     let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("warnings".to_owned(), Value::Array(model_warnings(&model)));
-    Value::Object(output)
+    let mut output = add_frontend_metadata(
+        request,
+        solver_version,
+        &model,
+        has_trace_contract,
+        8,
+        Value::Object(output),
+    );
+    match governance_output(request) {
+        Ok(Some(governance)) => {
+            output
+                .as_object_mut()
+                .expect("check envelope")
+                .insert("governance".to_owned(), governance);
+        }
+        Ok(None) => {}
+        Err(failure) => return error(solver_version, "type", failure),
+    }
+    output
+}
+
+fn governance_output(request: &Request) -> Result<Option<Value>, String> {
+    let resolver = MemoryResolver {
+        files: request.files.clone(),
+    };
+    fslc_rust::verification_output::governance_output(&request.source, |preservation| {
+        let implementation_source = resolver
+            .read(&preservation.after_path)
+            .map_err(|failure| failure.to_string())?;
+        let abstraction_source = resolver
+            .read(&preservation.before_path)
+            .map_err(|failure| failure.to_string())?;
+        let mapping_source = resolver
+            .read(&preservation.refinement_path)
+            .map_err(|failure| failure.to_string())?;
+        let implementation = fsl_core::build_model(
+            fsl_core::parse_kernel_source_with_file(
+                &implementation_source,
+                &resolver,
+                &preservation.after_path,
+            )
+            .map_err(|failure| failure.to_string())?,
+        )
+        .map_err(|failure| failure.to_string())?;
+        let abstraction = fsl_core::build_model(
+            fsl_core::parse_kernel_source_with_file(
+                &abstraction_source,
+                &resolver,
+                &preservation.before_path,
+            )
+            .map_err(|failure| failure.to_string())?,
+        )
+        .map_err(|failure| failure.to_string())?;
+        let mapping = fsl_core::parse_refinement(&mapping_source, &implementation, &abstraction)
+            .map_err(|failure| failure.message)?;
+        if !mapping.progress.is_empty() {
+            return Err(
+                "governance preservation with progress requires browser refinement progress verification"
+                    .to_owned(),
+            );
+        }
+        let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 8)
+            .map_err(|failure| failure.to_string())?;
+        Ok(json!(if checked.failure.is_some() {
+            "refinement_failed"
+        } else {
+            "refines"
+        }))
+    })
+}
+
+fn remove_generic_invariant_warning(output: &mut Value) {
+    if let Some(warnings) = output.get_mut("warnings").and_then(Value::as_array_mut) {
+        warnings.retain(|warning| {
+            warning.get("message").and_then(Value::as_str)
+                != Some("spec declares no user invariants (only implicit type bounds are checked)")
+        });
+    }
+}
+
+fn add_frontend_metadata(
+    request: &Request,
+    solver_version: &str,
+    model: &KernelModel,
+    has_trace_contract: bool,
+    depth: usize,
+    mut output: Value,
+) -> Value {
+    if has_trace_contract {
+        remove_generic_invariant_warning(&mut output);
+    }
+    let resolver = MemoryResolver {
+        files: request.files.clone(),
+    };
+    match fslc_rust::verification_output::requirements_implements_output(
+        &request.source,
+        &resolver,
+        model,
+        depth,
+    ) {
+        Ok(Some(implements)) => {
+            output
+                .as_object_mut()
+                .expect("verify envelope")
+                .insert("implements".to_owned(), implements);
+            remove_generic_invariant_warning(&mut output);
+        }
+        Ok(None) => {}
+        Err(failure) => return error(solver_version, "semantics", failure),
+    }
+    let additions = fslc_rust::frontend_output::implicit_initial_value_warnings(
+        &request.source,
+        &request.source_file,
+    );
+    if !additions.is_empty() {
+        output
+            .as_object_mut()
+            .expect("verify envelope")
+            .entry("warnings")
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .expect("warnings array")
+            .extend(additions);
+    }
+    output
 }
 
 async fn verify(request: &Request, solver_version: &str) -> Value {
     let started = performance_now();
+    if let Err(failure) = fsl_syntax::parse_surface_document(&request.source) {
+        return error(solver_version, "parse", failure.to_string());
+    }
     let model = match build(request, solver_version) {
         Ok(model) => model,
         Err(error) => return error,
     };
+    let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
+        &envelope(solver_version),
+        &request.source,
+        &model,
+    ) {
+        Ok((Some(failure), _)) => return failure,
+        Ok((None, has_contract)) => has_contract,
+        Err(failure) => return error(solver_version, "semantics", failure),
+    };
+    let deadlock =
+        match fslc_rust::verification_output::DeadlockMode::parse(&request.options.deadlock) {
+            Ok(deadlock) => deadlock,
+            Err(message) => return error(solver_version, "usage", message),
+        };
+    match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
+        Ok(Some((violation, trace))) => {
+            let statistics = fsl_solver::VerificationStatistics::default();
+            return fslc_rust::verification_output::render_boundary_output(
+                envelope(solver_version),
+                &model,
+                &violation,
+                &trace,
+                &fslc_rust::verification_output::BmcOutputOptions {
+                    depth: request.options.depth,
+                    deadlock,
+                    checked_bounds: None,
+                    elapsed_s: (performance_now() - started) / 1000.0,
+                    statistics: &statistics,
+                },
+            )
+            .0;
+        }
+        Ok(None) => {}
+        Err(failure) => {
+            return fslc_rust::verification_output::render_semantic_error(
+                envelope(solver_version),
+                &failure.to_string(),
+            );
+        }
+    }
     let mut solver = fsl_solver_z3js::Z3JsSolver::new();
     let result =
         match fsl_verifier::verify_bounded(&model, &mut solver, request.options.depth).await {
             Ok(result) => result,
-            Err(failure) => return error(solver_version, "semantics", failure.to_string()),
+            Err(failure) => {
+                return fslc_rust::verification_output::render_semantic_error(
+                    envelope(solver_version),
+                    &failure.to_string(),
+                );
+            }
         };
-    let statistics = fsl_solver::SmtSolver::statistics(&solver);
-    render_verify(
-        &model,
-        &request.options,
-        result,
-        solver_version,
-        &statistics,
-        (performance_now() - started) / 1000.0,
-    )
-}
-
-#[allow(clippy::too_many_lines)]
-fn render_verify(
-    model: &KernelModel,
-    options: &Options,
-    result: fsl_verifier::BmcResult,
-    solver_version: &str,
-    statistics: &fsl_solver::VerificationStatistics,
-    elapsed_s: f64,
-) -> Value {
-    let mut output = envelope(solver_version);
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert(
-        "cost".to_owned(),
-        serde_json::to_value(statistics.with_elapsed(elapsed_s))
-            .expect("verification cost serializes"),
-    );
-    if let Some(violation) = result.violation {
-        output.insert("result".to_owned(), json!("violated"));
-        output.insert("violation_kind".to_owned(), json!(violation.kind));
-        output.insert("invariant".to_owned(), json!(violation.name));
-        output.insert("violated_at_step".to_owned(), json!(violation.step));
-        output.insert(
-            "last_action".to_owned(),
-            violation
-                .last_action
-                .map_or(Value::Null, |name| json!({"name": name})),
-        );
-        output.insert("checked_to_depth".to_owned(), json!(violation.step));
-        output.insert("completeness".to_owned(), json!("bounded"));
-        output.insert("trace_type".to_owned(), json!(violation.kind));
-        output.insert("trace".to_owned(), trace_json(model, &violation.trace));
-        return Value::Object(output);
-    }
-    // Native CLI (rust/fslc/src/verification.rs render_bmc_result) checks
-    // deadlock-as-error before leadsto_violation: both are populated inside
-    // the same per-step loop and can legitimately be `Some` at once, so this
-    // order is the contract.
-    if options.deadlock == "error"
-        && let Some(step) = result.deadlock_step
+    if let Err(failure) =
+        fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
     {
-        output.insert("result".to_owned(), json!("violated"));
-        output.insert("violation_kind".to_owned(), json!("deadlock"));
-        output.insert("invariant".to_owned(), json!("deadlock"));
-        output.insert("violated_at_step".to_owned(), json!(step));
-        output.insert("checked_to_depth".to_owned(), json!(step));
-        output.insert("completeness".to_owned(), json!("bounded"));
-        output.insert("trace_type".to_owned(), json!("deadlock"));
-        return Value::Object(output);
+        return error(solver_version, "internal", failure);
     }
-    if let Some(violation) = result.leadsto_violation {
-        output.insert("result".to_owned(), json!("violated"));
-        output.insert("violation_kind".to_owned(), json!("leadsTo"));
-        output.insert("invariant".to_owned(), json!(display_name(&violation.name)));
-        output.insert("violated_at_step".to_owned(), json!(violation.step));
-        if let Some(details) = violation.leads_to {
-            output.insert(
-                "bindings".to_owned(),
-                Value::Object(
-                    details
-                        .bindings
-                        .iter()
-                        .map(|(name, value)| (name.clone(), fsl_value_json(value)))
-                        .collect(),
-                ),
-            );
-            output.insert("pending_since".to_owned(), json!(details.pending_since));
-            if let Some(loop_start) = details.loop_start {
-                output.insert("loop_start".to_owned(), json!(loop_start));
-            }
-            if let Some(deadline) = details.deadline {
-                output.insert("deadline".to_owned(), json!(deadline));
-            }
-            if let Some(within) = details.within {
-                output.insert("within".to_owned(), json!(within));
-            }
-            output.insert("stutter".to_owned(), json!(details.stutter));
-            output.insert("hint".to_owned(), json!(details.hint));
-        }
-        output.insert("checked_to_depth".to_owned(), json!(violation.step));
-        output.insert("completeness".to_owned(), json!("bounded"));
-        output.insert("trace_type".to_owned(), json!("leadsTo"));
-        output.insert("trace".to_owned(), trace_json(model, &violation.trace));
-        return Value::Object(output);
-    }
-    output.insert("result".to_owned(), json!("verified"));
-    output.insert("depth".to_owned(), json!(options.depth));
-    output.insert("checked_to_depth".to_owned(), json!(options.depth));
-    output.insert("completeness".to_owned(), json!("bounded"));
-    output.insert(
-        "invariants_checked".to_owned(),
-        json!(invariant_names(model)),
-    );
-    output.insert(
-        "transitions_checked".to_owned(),
-        json!(
-            model
-                .transitions
-                .iter()
-                .map(|property| &property.name)
-                .collect::<Vec<_>>()
-        ),
-    );
-    output.insert(
-        "reachables".to_owned(),
-        Value::Object(
-            result
-                .reachables
-                .iter()
-                .map(|(name, witness)| {
-                    (
-                        name.clone(),
-                        witness.as_ref().map_or(
-                            Value::Null,
-                            |witness| json!({"witnessed_at_step": witness.step}),
-                        ),
-                    )
-                })
-                .collect(),
-        ),
-    );
-    output.insert(
-        "action_coverage".to_owned(),
-        Value::Object(
-            result
-                .action_coverage
-                .iter()
-                .map(|(name, covered)| (name.clone(), json!(covered)))
-                .collect(),
-        ),
-    );
-    output.insert(
-        "deadlock".to_owned(),
-        if options.deadlock == "ignore" {
-            json!({"found": false})
-        } else {
-            result.deadlock_step.map_or_else(
-                || json!({"found": false}),
-                |step| json!({"found": true, "at_step": step}),
-            )
+    let statistics = fsl_solver::SmtSolver::statistics(&solver);
+    let (output, _) = fslc_rust::verification_output::render_bmc_output(
+        envelope(solver_version),
+        &model,
+        &result,
+        fslc_rust::verification_output::BmcOutputOptions {
+            depth: request.options.depth,
+            deadlock,
+            checked_bounds: None,
+            elapsed_s: (performance_now() - started) / 1000.0,
+            statistics: &statistics,
         },
     );
-    output.insert(
-        "warnings".to_owned(),
-        Value::Array(fsl_runtime::verification_warnings(
-            model,
-            options.depth,
-            options.deadlock == "warn",
-            result.deadlock_step,
-            result
-                .deadlock_trace
-                .as_ref()
-                .and_then(|trace| trace.last())
-                .map(|entry| &entry.state),
-            &result.action_coverage,
-        )),
-    );
-    output.insert(
-        "note".to_owned(),
-        json!(format!(
-            "bounded verification: no violation within depth {}",
-            options.depth
-        )),
-    );
-    Value::Object(output)
+    add_frontend_metadata(
+        request,
+        solver_version,
+        &model,
+        has_trace_contract,
+        request.options.depth,
+        output,
+    )
 }
 
 /// Execute one Worker request and return the stable JSON envelope as text.
@@ -378,7 +401,7 @@ pub fn internal_error(message: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fsl_core::{FslValue, TraceAction, TraceStep};
+    use fsl_core::{FslValue, TraceAction, TraceStep, trace_json};
     use fsl_verifier::{BmcResult, BmcViolation, LeadsToViolation};
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
@@ -391,11 +414,36 @@ mod tests {
         fsl_core::build_model(kernel).expect("model")
     }
 
+    fn render_verify(
+        model: &KernelModel,
+        options: &Options,
+        result: &BmcResult,
+        solver_version: &str,
+        statistics: &fsl_solver::VerificationStatistics,
+        elapsed_s: f64,
+    ) -> Value {
+        fslc_rust::verification_output::render_bmc_output(
+            envelope(solver_version),
+            model,
+            result,
+            fslc_rust::verification_output::BmcOutputOptions {
+                depth: options.depth,
+                deadlock: fslc_rust::verification_output::DeadlockMode::parse(&options.deadlock)
+                    .expect("test deadlock mode is valid"),
+                checked_bounds: None,
+                elapsed_s,
+                statistics,
+            },
+        )
+        .0
+    }
+
     #[test]
     fn build_rejects_duplicate_action_writes() {
         let request = Request {
             cmd: "verify".to_owned(),
             source: "spec Duplicate { state { x: Bool } init { x = false } action write_twice() { x = true x = false } }".to_owned(),
+            source_file: "duplicate.fsl".to_owned(),
             files: BTreeMap::new(),
             options: Options::default(),
         };
@@ -439,7 +487,7 @@ mod tests {
         let envelope = render_verify(
             &model,
             &Options::default(),
-            result,
+            &result,
             TEST_SOLVER_VERSION,
             &fsl_solver::VerificationStatistics::default(),
             0.0,
@@ -516,7 +564,7 @@ mod tests {
         let envelope = render_verify(
             &model,
             &options,
-            result,
+            &result,
             TEST_SOLVER_VERSION,
             &fsl_solver::VerificationStatistics::default(),
             0.0,
