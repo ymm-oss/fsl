@@ -48,6 +48,29 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
     Lexer::new(source).lex_all()
 }
 
+pub(crate) fn lex_declaration_prefix(source: &str) -> Result<Vec<Token>, LexError> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens = Vec::new();
+    loop {
+        let token = lexer.next_token()?;
+        let annotation = matches!(&token.kind, TokenKind::Symbol(symbol) if symbol == "@");
+        let eof = matches!(token.kind, TokenKind::Eof);
+        tokens.push(token);
+        if eof || !annotation {
+            return Ok(tokens);
+        }
+        loop {
+            let token = lexer.next_token()?;
+            let annotation_end = matches!(&token.kind, TokenKind::Symbol(symbol) if symbol == ")");
+            let eof = matches!(token.kind, TokenKind::Eof);
+            tokens.push(token);
+            if annotation_end || eof {
+                break;
+            }
+        }
+    }
+}
+
 struct Lexer<'a> {
     source: &'a str,
     offset: usize,
@@ -68,36 +91,47 @@ impl<'a> Lexer<'a> {
     fn lex_all(mut self) -> Result<Vec<Token>, LexError> {
         let mut tokens = Vec::new();
         loop {
-            self.skip_trivia();
-            let start = self.pos();
-            let Some(ch) = self.peek() else {
-                tokens.push(Token {
-                    kind: TokenKind::Eof,
-                    span: Span { start, end: start },
-                });
+            let token = self.next_token()?;
+            let eof = matches!(token.kind, TokenKind::Eof);
+            tokens.push(token);
+            if eof {
                 return Ok(tokens);
-            };
-            let kind = if ch.is_ascii_alphabetic() || ch == '_' {
-                self.lex_ident()
-            } else if ch.is_ascii_digit() {
-                self.lex_int(start)?
-            } else if ch == '"' {
-                self.lex_string(start)?
-            } else {
-                self.lex_symbol(start)?
-            };
-            tokens.push(Token {
-                kind,
-                span: Span {
-                    start,
-                    end: self.pos(),
-                },
-            });
+            }
         }
+    }
+
+    fn next_token(&mut self) -> Result<Token, LexError> {
+        self.skip_trivia();
+        let start = self.pos();
+        let Some(ch) = self.peek() else {
+            return Ok(Token {
+                kind: TokenKind::Eof,
+                span: Span { start, end: start },
+            });
+        };
+        let kind = if ch.is_ascii_alphabetic() || ch == '_' {
+            self.lex_ident()
+        } else if ch.is_ascii_digit() {
+            self.lex_int(start)?
+        } else if ch == '"' {
+            self.lex_string(start)?
+        } else {
+            self.lex_symbol(start)?
+        };
+        Ok(Token {
+            kind,
+            span: Span {
+                start,
+                end: self.pos(),
+            },
+        })
     }
 
     fn skip_trivia(&mut self) {
         loop {
+            if self.offset == 0 && self.peek() == Some('\u{feff}') {
+                self.bump();
+            }
             while self.peek().is_some_and(char::is_whitespace) {
                 self.bump();
             }
@@ -173,7 +207,7 @@ impl<'a> Lexer<'a> {
             return Ok(TokenKind::Symbol((*symbol).to_owned()));
         }
         let ch = self.bump().expect("peeked character");
-        if "{}()[],:;.+-*/%<>=.|".contains(ch) {
+        if "{}()[],:;.+-*/%<>=.|@".contains(ch) {
             Ok(TokenKind::Symbol(ch.to_string()))
         } else {
             Err(LexError {
@@ -226,6 +260,13 @@ mod tests {
         assert_eq!(tokens[0].span.start.line, 2);
         assert_eq!(tokens[0].span.start.column, 1);
         assert_eq!(tokens[1].kind, TokenKind::Symbol("<=".to_owned()));
+    }
+
+    #[test]
+    fn leading_bom_is_trivia() {
+        let tokens = lex("\u{feff}  spec Example {}").unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("spec".to_owned()));
+        assert_eq!(tokens[0].span.start.column, 4);
     }
 
     #[test]

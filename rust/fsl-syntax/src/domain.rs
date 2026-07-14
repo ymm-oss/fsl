@@ -454,11 +454,15 @@ impl DomainSaga {
 ///
 /// Returns [`ParseError`] when lexical, syntactic, or structural analysis fails.
 pub fn parse_domain(source: &str) -> Result<DomainSpec, ParseError> {
-    let tokens = lex(source).map_err(|error| ParseError {
-        message: error.message,
-        span: error.span,
-    })?;
-    let mut parser = DomainParser { tokens, cursor: 0 };
+    let tokens = lex(source).map_err(ParseError::from)?;
+    parse_domain_tokens(tokens, 0)
+}
+
+pub(crate) fn parse_domain_tokens(
+    tokens: Vec<Token>,
+    cursor: usize,
+) -> Result<DomainSpec, ParseError> {
+    let mut parser = DomainParser { tokens, cursor };
     let domain = parser.domain()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after domain"));
@@ -1222,10 +1226,7 @@ impl DomainParser {
     fn time_value(&mut self) -> Result<String, ParseError> {
         let token = self.bump().clone();
         let TokenKind::Int(value) = token.kind else {
-            return Err(ParseError {
-                message: "expected time value".to_owned(),
-                span: token.span,
-            });
+            return Err(ParseError::new("expected time value", token.span));
         };
         let mut output = value.to_string();
         if let TokenKind::Ident(unit) = &self.peek().kind {
@@ -1256,10 +1257,10 @@ impl DomainParser {
         if is_dotted_reference(&expression) {
             Ok(expression)
         } else {
-            Err(ParseError {
-                message: "effect reference must be a dotted identifier path".to_owned(),
-                span: expression.span,
-            })
+            Err(ParseError::new(
+                "effect reference must be a dotted identifier path",
+                expression.span,
+            ))
         }
     }
 
@@ -1326,10 +1327,7 @@ impl DomainParser {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Ident(value) => Ok(value),
-            _ => Err(ParseError {
-                message: "expected identifier".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected identifier", token.span)),
         }
     }
 
@@ -1340,10 +1338,7 @@ impl DomainParser {
                 text,
                 span: token.span,
             }),
-            _ => Err(ParseError {
-                message: "expected identifier".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected identifier", token.span)),
         }
     }
 
@@ -1359,10 +1354,7 @@ impl DomainParser {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Int(value) => Ok(value),
-            _ => Err(ParseError {
-                message: "expected integer".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected integer", token.span)),
         }
     }
 
@@ -1375,10 +1367,7 @@ impl DomainParser {
     }
 
     fn error(&self, message: &str) -> ParseError {
-        ParseError {
-            message: message.to_owned(),
-            span: self.peek().span,
-        }
+        ParseError::new(message, self.peek().span)
     }
 }
 
@@ -1386,10 +1375,10 @@ fn expression_name(expression: SyntaxExpr) -> Result<SyntaxIdent, ParseError> {
     let span = expression.span;
     match expression.kind {
         SyntaxExprKind::Name(name) => Ok(name),
-        _ => Err(ParseError {
-            message: "domain enum members must be identifiers".to_owned(),
+        _ => Err(ParseError::new(
+            "domain enum members must be identifiers",
             span,
-        }),
+        )),
     }
 }
 

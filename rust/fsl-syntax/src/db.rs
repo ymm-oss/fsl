@@ -263,11 +263,15 @@ enum DbItem {
 ///
 /// Returns [`ParseError`] when lexical, syntactic, or structural analysis fails.
 pub fn parse_db_system(source: &str) -> Result<DbSystem, ParseError> {
-    let tokens = lex(source).map_err(|error| ParseError {
-        message: error.message,
-        span: error.span,
-    })?;
-    let mut parser = DbParser { tokens, cursor: 0 };
+    let tokens = lex(source).map_err(ParseError::from)?;
+    parse_db_system_tokens(tokens, 0)
+}
+
+pub(crate) fn parse_db_system_tokens(
+    tokens: Vec<Token>,
+    cursor: usize,
+) -> Result<DbSystem, ParseError> {
+    let mut parser = DbParser { tokens, cursor };
     let system = parser.system()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after dbsystem"));
@@ -712,10 +716,7 @@ impl DbParser {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Ident(value) => Ok(value),
-            _ => Err(ParseError {
-                message: "expected identifier".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected identifier", token.span)),
         }
     }
 
@@ -731,10 +732,7 @@ impl DbParser {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Int(value) => Ok(value),
-            _ => Err(ParseError {
-                message: "expected integer".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected integer", token.span)),
         }
     }
 
@@ -747,9 +745,6 @@ impl DbParser {
     }
 
     fn error(&self, message: &str) -> ParseError {
-        ParseError {
-            message: message.to_owned(),
-            span: self.peek().span,
-        }
+        ParseError::new(message, self.peek().span)
     }
 }

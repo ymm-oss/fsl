@@ -188,13 +188,16 @@ class _Block:
 
 
 def is_ai_project_source(src: str) -> bool:
-    stripped = src.lstrip()
+    from .dialect_registry import inspect_source
+
+    parser_source = inspect_source(src).source
+    stripped = parser_source.lstrip()
     if not stripped:
         return False
     first = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\b", stripped)
     if not first or first.group(1) not in PROJECT_BLOCKS:
         return False
-    blocks = _top_blocks(src)
+    blocks = _top_blocks(parser_source)
     return len(blocks) != 1 or blocks[0].kind != "ai_component"
 
 

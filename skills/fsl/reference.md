@@ -5,6 +5,23 @@ of rules as of v2.x.
 
 ## 1. Top-level structure
 
+The native parser selects every dialect from one shared lexer/registry. A leading
+UTF-8 BOM, whitespace, and `//` comments are trivia. Typed document annotations
+may precede the dialect keyword and attach to the document rather than affecting
+dispatch:
+
+```fsl
+@requirement("REQ-DOC", "document contract")
+@acme.review(owner.platform, 2, true)
+spec <Name> { ... }
+```
+
+Document annotations support `@requirement(id, text?)`, `@undecided(reason)`,
+`@kind(id, text?)`, and multi-segment custom namespaces. Annotation argument
+keywords are never dialect keywords. Annotation syntax on declarations inside a
+document remains outside this subset. Empty/unknown documents use the stable
+`FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` diagnostics.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
@@ -1246,8 +1263,10 @@ annotation carrier. An outer requirement can therefore coexist with an inner
 `undecided` marker. Explicit `covers` and requirement-block annotations retain
 their own spans; `undecided` is reserved and cannot be an explicit requirement
 ID. Multiple-relation JSON outputs use `requirements` and preserve singular
-fields as lexical compatibility projections. `@...` parser syntax is still separate. See
-`docs/DESIGN-undecided.md` and `docs/DESIGN-annotations.md`. This syntax and its
+fields as lexical compatibility projections. Document-level `@...` syntax is
+available as described in §1; annotation placement on declarations inside the
+document remains separate. See `docs/DESIGN-undecided.md`,
+`docs/DESIGN-annotations.md`, and `docs/DESIGN-dialect-dispatch.md`. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
 

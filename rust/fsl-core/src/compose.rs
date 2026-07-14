@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use fsl_syntax::{
-    ActionItem, Binder, ComposeItem, Expr, LValue, Param, QualifiedName, SpecItem, Statement,
-    SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr, parse_surface_document,
+    ActionItem, Annotations, Binder, ComposeItem, Expr, LValue, Param, QualifiedName, SourceFile,
+    SpecItem, Statement, SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr,
+    parse_document,
 };
 
 use crate::{CoreError, KernelSpec, PredicateExpander, expand_spec_domains, substitute};
@@ -53,7 +54,8 @@ pub fn parse_kernel_source(
     source: &str,
     resolver: &dyn FileResolver,
 ) -> Result<KernelSpec, CoreError> {
-    match parse_surface_document(source)? {
+    let parsed = parse_document(SourceFile::new(source))?;
+    let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(spec) => crate::lower_direct_spec(spec),
         SurfaceDocument::Business(business) => crate::lower_business(business),
         SurfaceDocument::Requirements(requirements) => crate::lower_requirements(requirements),
@@ -62,13 +64,17 @@ pub fn parse_kernel_source(
         SurfaceDocument::Domain(domain) => crate::lower_domain(&domain),
         SurfaceDocument::AiComponent(component) => crate::lower_ai_component(component),
         SurfaceDocument::Compose(compose) => lower_compose(compose, resolver),
-        SurfaceDocument::Refinement(_) => Err(CoreError {
+        SurfaceDocument::Refinement(_) | SurfaceDocument::Agent(_) => Err(CoreError {
             message: "top-level document has not reached the kernel lowering gate".to_owned(),
             line: 1,
             column: 1,
             origin: None,
         }),
-    }
+    }?;
+    kernel
+        .annotations
+        .extend(crate::SPEC_TARGET, parsed.annotations);
+    Ok(kernel)
 }
 
 /// Parse and lower source while attaching the caller-known root file identity
@@ -141,6 +147,32 @@ impl ComponentNames {
     }
 }
 
+fn parse_component(
+    source: &str,
+    use_span: fsl_syntax::Span,
+) -> Result<(SurfaceSpec, Annotations), CoreError> {
+    let parsed = parse_document(SourceFile::new(source))?;
+    let SurfaceDocument::Spec(spec) = parsed.surface else {
+        return Err(error_at("compose use must reference a spec", use_span));
+    };
+    let spec = PredicateExpander::new(&spec)?.expand(spec)?;
+    Ok((expand_spec_domains(spec)?, parsed.annotations))
+}
+
+fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations) -> KernelSpec {
+    let mut kernel = KernelSpec {
+        spec: SurfaceSpec {
+            name,
+            meta: None,
+            items,
+        },
+        origins: crate::OriginRegistry::default(),
+        annotations: fsl_syntax::AnnotationRegistry::default(),
+    };
+    kernel.annotations.extend(crate::SPEC_TARGET, annotations);
+    kernel
+}
+
 /// Lower one compose document using source-relative component resolution.
 ///
 /// # Errors
@@ -152,6 +184,7 @@ pub fn lower_compose(
     resolver: &dyn FileResolver,
 ) -> Result<KernelSpec, CoreError> {
     let mut components = BTreeMap::new();
+    let mut component_annotations = Annotations::default();
     let mut order = Vec::new();
     for item in &compose.items {
         let ComposeItem::Use {
@@ -167,11 +200,8 @@ pub fn lower_compose(
             return Err(error_at(format!("duplicate alias '{alias}'"), *span));
         }
         let source = resolver.read(path)?;
-        let SurfaceDocument::Spec(spec) = parse_surface_document(&source)? else {
-            return Err(error_at("compose use must reference a spec", *span));
-        };
-        let spec = PredicateExpander::new(&spec)?.expand(spec)?;
-        let spec = expand_spec_domains(spec)?;
+        let (spec, annotations) = parse_component(&source, *span)?;
+        component_annotations.extend(annotations.source_order().iter().cloned());
         order.push(alias.clone());
         components.insert(
             alias.clone(),
@@ -244,15 +274,11 @@ pub fn lower_compose(
         meta: init_meta,
     });
     static_items.extend(actions);
-    Ok(KernelSpec {
-        spec: SurfaceSpec {
-            name: compose.name,
-            meta: None,
-            items: static_items,
-        },
-        origins: crate::OriginRegistry::default(),
-        annotations: fsl_syntax::AnnotationRegistry::default(),
-    })
+    Ok(composed_kernel(
+        compose.name,
+        static_items,
+        component_annotations,
+    ))
 }
 
 fn prefix(alias: &str, name: &str) -> String {

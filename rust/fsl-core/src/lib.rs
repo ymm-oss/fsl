@@ -8,8 +8,8 @@ use std::fmt;
 
 use fsl_syntax::{
     ActionItem, AnnotationRegistry, Binder, BusinessItem, Expr, LValue, Param, ParseError,
-    RequirementsItem, SpecItem, StateField, Statement, SurfaceDocument, SurfaceSpec, TypeExpr,
-    VerifyItem, parse_surface_document,
+    RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceDocument, SurfaceSpec,
+    TypeExpr, VerifyItem, parse_document,
 };
 use serde_json::Value;
 
@@ -206,7 +206,8 @@ impl KernelSpec {
 /// Returns [`CoreError`] for parse failures, non-`spec` documents, invalid
 /// predicate definitions, recursion, arity mismatches, or variable capture.
 pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
-    let SurfaceDocument::Spec(spec) = parse_surface_document(source)? else {
+    let parsed = parse_document(SourceFile::new(source))?;
+    let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(CoreError {
             message: "expected direct kernel spec".to_owned(),
             line: 1,
@@ -214,7 +215,9 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
             origin: None,
         });
     };
-    lower_direct_spec(spec)
+    let mut kernel = lower_direct_spec(spec)?;
+    kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
+    Ok(kernel)
 }
 
 fn validate_direct_scope_overrides(
@@ -309,7 +312,8 @@ pub fn parse_kernel_source_with_bounds(
         }
     }
 
-    match parse_surface_document(source)? {
+    let parsed = parse_document(SourceFile::new(source))?;
+    let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {
             validate_direct_scope_overrides(&spec, instances, values)?;
             for item in &mut spec.items {
@@ -339,7 +343,9 @@ pub fn parse_kernel_source_with_bounds(
             column: 1,
             origin: None,
         }),
-    }
+    }?;
+    kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
+    Ok(kernel)
 }
 
 /// Lower a parsed direct `spec` into the kernel representation.

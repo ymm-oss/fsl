@@ -399,7 +399,8 @@ DB_PARSER = Lark(
 
 
 def is_dbsystem_source(src):
-    return src.lstrip().startswith("dbsystem")
+    from .dialect_registry import dialect_keyword
+    return dialect_keyword(src) == "dbsystem"
 
 
 def parse_dbsystem(src):

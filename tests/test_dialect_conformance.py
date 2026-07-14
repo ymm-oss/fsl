@@ -18,7 +18,6 @@ No ``pytest.skip`` anywhere in this file: every non-conformance file is a
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -28,6 +27,7 @@ import pytest
 from fslc.ai_parser import is_ai_agent_source, is_ai_component_source
 from fslc.ai_project import is_ai_project_source
 from fslc.cli import run_verify
+from fslc.dialect_registry import dialect_keyword
 from fslc.parser import parse_src
 from fslc.runtime import Monitor
 
@@ -44,7 +44,6 @@ INJECTED = "INJECTED"
 CONFORMANCE = "CONFORMANCE"
 UNKNOWN = "UNKNOWN"
 
-_CONSTRUCT_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\b")
 _KEYWORD_TO_DIALECT = {d.construct: key for key, d in DIALECTS.items()}
 
 
@@ -74,16 +73,6 @@ def _injected(front: list[str]) -> bool:
     return any(ln.startswith("// inject:") or ln.startswith("// expect-detector:") for ln in front)
 
 
-def _top_construct(src: str) -> Optional[str]:
-    for line in src.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("//"):
-            continue
-        m = _CONSTRUCT_RE.match(stripped)
-        return m.group(1) if m else None
-    return None
-
-
 def classify(path: Path) -> Classified:
     src = path.read_text(encoding="utf-8")
     rel = path.relative_to(ROOT).as_posix()
@@ -95,7 +84,7 @@ def classify(path: Path) -> Classified:
     if is_ai_agent_source(src):
         return Classified(path, EXCLUDED, reason="ai-agent")
 
-    construct = _top_construct(src)
+    construct = dialect_keyword(src)
     if construct == "refinement":
         return Classified(path, REFINEMENT)
 
@@ -107,9 +96,7 @@ def classify(path: Path) -> Classified:
         return Classified(path, INJECTED, dialect=dialect)
 
     dialect = _KEYWORD_TO_DIALECT.get(construct)
-    # is_ai_component_source uses a bare startswith("ai_component") check, which
-    # is exactly _KEYWORD_TO_DIALECT's "ai_component" -> "ai" lookup too, kept
-    # explicit here so a change to either check can't silently diverge.
+    # Keep the compatibility predicate coupled to the shared registry result.
     if construct == "ai_component":
         assert is_ai_component_source(src), path
     if dialect is None:

@@ -9,9 +9,8 @@ contextual, so declarations and references are classified by parse-tree
 position, not by spelling. The `ai_component`/`agent`/`dbsystem`/`domain`
 frontend dialects have their own Lark grammars (``fslc.ai_parser``/
 ``fslc.db_parser``/``fslc.domain_parser``) that never reach the kernel
-grammar at all -- ``build_index`` picks the matching raw parser via
-``is_ai_source``/``is_dbsystem_source``/``is_domain_source`` before falling
-back to the kernel ``PARSER``, so those files no longer fail to parse here
+grammar at all -- ``build_index`` picks the matching raw parser through the
+shared dialect registry before falling back to the kernel ``PARSER``, so those files no longer fail to parse here
 just because indexing hard-codes the kernel grammar. fsl-ai *project* files
 (``is_ai_project_source``) are a further special case: they are not
 Lark-parsed at all (``ai_project.py`` scans top-level blocks with regexes),
@@ -33,10 +32,11 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from lark import Tree, Token
 
 from fslc.grammar import PARSER
-from fslc.ai_parser import AI_PARSER, is_ai_source
+from fslc.ai_parser import AI_PARSER
 from fslc.ai_project import _top_blocks, is_ai_project_source
-from fslc.db_parser import DB_PARSER, is_dbsystem_source
-from fslc.domain_parser import PARSER as DOMAIN_PARSER, is_domain_source
+from fslc.db_parser import DB_PARSER
+from fslc.domain_parser import PARSER as DOMAIN_PARSER
+from fslc.dialect_registry import inspect_source
 
 
 VALUE_ROLES = {
@@ -569,11 +569,12 @@ class DocumentIndex:
 
 
 def _parser_for_source(source: str):
-    if is_dbsystem_source(source):
+    keyword = inspect_source(source).keyword
+    if keyword == "dbsystem":
         return DB_PARSER
-    if is_domain_source(source):
+    if keyword == "domain":
         return DOMAIN_PARSER
-    if is_ai_source(source):
+    if keyword in {"ai_component", "agent"}:
         return AI_PARSER
     return PARSER
 
@@ -616,7 +617,8 @@ def build_index(source: str, path: Optional[str] = None) -> DocumentIndex:
 
     if is_ai_project_source(source):
         return _build_ai_project_index(source, path)
-    tree = _parser_for_source(source).parse(source)
+    dispatch = inspect_source(source)
+    tree = _parser_for_source(source).parse(dispatch.source)
     builder = _IndexBuilder(source, path)
     builder.visit(tree, None, None)
     return DocumentIndex(

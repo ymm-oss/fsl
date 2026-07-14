@@ -489,16 +489,18 @@ AI_PARSER = Lark(
 
 
 def is_ai_component_source(src):
-    return src.lstrip().startswith("ai_component")
+    from .dialect_registry import dialect_keyword
+    return dialect_keyword(src) == "ai_component"
 
 
 def is_ai_agent_source(src):
-    return src.lstrip().startswith("agent")
+    from .dialect_registry import dialect_keyword
+    return dialect_keyword(src) == "agent"
 
 
 def is_ai_source(src):
-    stripped = src.lstrip()
-    return stripped.startswith("ai_component") or stripped.startswith("agent")
+    from .dialect_registry import dialect_keyword
+    return dialect_keyword(src) in {"ai_component", "agent"}
 
 
 def parse_ai_component(src):

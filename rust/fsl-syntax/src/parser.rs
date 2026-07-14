@@ -27,6 +27,34 @@ fn join_span(start: Span, end: Span) -> Span {
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+    code: &'static str,
+}
+
+impl ParseError {
+    #[must_use]
+    pub fn new(message: impl Into<String>, span: Span) -> Self {
+        Self::coded("FSL-PARSE", message, span)
+    }
+
+    #[must_use]
+    pub fn coded(code: &'static str, message: impl Into<String>, span: Span) -> Self {
+        Self {
+            message: message.into(),
+            span,
+            code,
+        }
+    }
+
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        self.code
+    }
+}
+
+impl From<crate::LexError> for ParseError {
+    fn from(error: crate::LexError) -> Self {
+        Self::new(error.message, error.span)
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -48,10 +76,7 @@ impl std::error::Error for ParseError {}
 /// Returns [`ParseError`] when lexical analysis fails or the token sequence is
 /// not accepted by the FSL expression grammar.
 pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
-    let tokens = lex(source).map_err(|error| ParseError {
-        message: error.message,
-        span: error.span,
-    })?;
+    let tokens = lex(source).map_err(ParseError::from)?;
     let mut parser = Parser { tokens, cursor: 0 };
     let expr = parser.expression(0)?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -67,10 +92,7 @@ pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
 /// Returns [`ParseError`] when the source is not a syntactically valid kernel
 /// spec. Other top-level dialects are rejected by this phase-0 entrypoint.
 pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
-    let tokens = lex(source).map_err(|error| ParseError {
-        message: error.message,
-        span: error.span,
-    })?;
+    let tokens = lex(source).map_err(ParseError::from)?;
     let mut parser = Parser { tokens, cursor: 0 };
     let spec = parser.surface_spec()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -86,20 +108,14 @@ pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
 /// Returns [`ParseError`] for invalid syntax or a top-level dialect that has
 /// not yet reached the Phase-0 parser gate.
 pub fn parse_surface_document(source: &str) -> Result<SurfaceDocument, ParseError> {
-    if source.trim_start().starts_with("dbsystem") {
-        return crate::parse_db_system(source).map(SurfaceDocument::Db);
-    }
-    if source.trim_start().starts_with("domain ") {
-        return crate::parse_domain(source).map(SurfaceDocument::Domain);
-    }
-    if source.trim_start().starts_with("ai_component ") {
-        return crate::parse_ai_component(source).map(SurfaceDocument::AiComponent);
-    }
-    let tokens = lex(source).map_err(|error| ParseError {
-        message: error.message,
-        span: error.span,
-    })?;
-    let mut parser = Parser { tokens, cursor: 0 };
+    crate::parse_document(crate::SourceFile::new(source)).map(|parsed| parsed.surface)
+}
+
+pub(crate) fn parse_shared_tokens(
+    tokens: Vec<Token>,
+    cursor: usize,
+) -> Result<SurfaceDocument, ParseError> {
+    let mut parser = Parser { tokens, cursor };
     let document = if parser.peek_ident("spec") {
         SurfaceDocument::Spec(parser.surface_spec()?)
     } else if parser.peek_ident("refinement") {
@@ -757,10 +773,10 @@ impl Parser {
             TokenKind::Ident(kind) if kind == "goal" => {
                 Ok(GovernanceArtifactRef::Goal(self.req_id()?, token.span))
             }
-            _ => Err(ParseError {
-                message: "expected policy or goal reference".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new(
+                "expected policy or goal reference",
+                token.span,
+            )),
         }
     }
 
@@ -939,10 +955,7 @@ impl Parser {
             let id = self.req_id()?;
             let token = self.bump().clone();
             let TokenKind::String(text) = token.kind else {
-                return Err(ParseError {
-                    message: "expected string literal".to_owned(),
-                    span: token.span,
-                });
+                return Err(ParseError::new("expected string literal", token.span));
             };
             Some(ProcessCover {
                 id,
@@ -1781,10 +1794,7 @@ impl Parser {
                     token.span,
                 ));
             } else {
-                return Err(ParseError {
-                    message: "expected instances or values".to_owned(),
-                    span: token.span,
-                });
+                return Err(ParseError::new("expected instances or values", token.span));
             }
             self.eat_symbol(";");
         }
@@ -2010,10 +2020,7 @@ impl Parser {
         if let TokenKind::Ident(value) = token.kind {
             Ok(value)
         } else {
-            Err(ParseError {
-                message: "expected identifier".to_owned(),
-                span: token.span,
-            })
+            Err(ParseError::new("expected identifier", token.span))
         }
     }
 
@@ -2026,10 +2033,7 @@ impl Parser {
         if let TokenKind::String(value) = token.kind {
             Ok((value, token.span))
         } else {
-            Err(ParseError {
-                message: "expected string literal".to_owned(),
-                span: token.span,
-            })
+            Err(ParseError::new("expected string literal", token.span))
         }
     }
 
@@ -2039,10 +2043,10 @@ impl Parser {
             TokenKind::Ident(value) => value,
             TokenKind::Int(value) => value.to_string(),
             _ => {
-                return Err(ParseError {
-                    message: "expected requirement identifier".to_owned(),
-                    span: token.span,
-                });
+                return Err(ParseError::new(
+                    "expected requirement identifier",
+                    token.span,
+                ));
             }
         };
         while self.peek_symbol("-") {
@@ -2068,10 +2072,7 @@ impl Parser {
     }
 
     fn error(&self, message: &str) -> ParseError {
-        ParseError {
-            message: message.to_owned(),
-            span: self.peek().span,
-        }
+        ParseError::new(message, self.peek().span)
     }
 }
 

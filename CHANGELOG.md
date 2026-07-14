@@ -71,6 +71,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Native dialect selection now lexes each document once and dispatches through a
+  duplicate-checked keyword registry shared by Kernel, CLI, WASM, and mirrored
+  Python/LSP entrypoints. Leading BOM/comments/whitespace and typed top-level
+  annotations are handled before selection without mistaking annotation arguments
+  for dialects; specialized frontends consume the original token stream. Add
+  exact empty/unknown diagnostic codes, spans, and supported-keyword lists, an
+  evidence-only `agent` surface, and span-retaining multi-segment `SymbolPath`
+  values (issue #247).
 - Native Rust now carries ordered, typed `Requirement`, `Undecided`, `Kind`,
   and namespaced `Custom` annotations through a common target-keyed IR. Legacy
   declaration strings, spec badges, requirement blocks, process `covers`, and
