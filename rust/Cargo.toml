@@ -18,6 +18,7 @@ version = "2.7.0"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.85"
+publish = false
 
 [workspace.dependencies]
 base64 = "0.22"

@@ -6,6 +6,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Distribution is now fail-closed: every Rust workspace crate is marked
+  non-publishable, the dormant PyPI workflow and obsolete Python/PyInstaller
+  binary path are removed, and GitHub Releases are documented as the only
+  official distribution surface (issue #272).
 - Native, induction, explicit, and browser verification results now share one
   fixed `cost` schema. Z3 backends report check count/time, nullable common
   conflict/decision/propagation/memory statistics, and deterministic

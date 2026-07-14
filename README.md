@@ -177,6 +177,12 @@ Uninstall:
 rm -rf ~/.fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
 ```
 
+Official releases are the checksummed native binaries, VSCode extension, and
+Kernel bundles attached to GitHub Releases. The retained Python reference/LSP
+is installed from this repository and is not published to PyPI; the Rust
+workspace crates are not published to crates.io. Publishing either surface
+requires an explicit manifest, workflow, and documentation change.
+
 ## Developer setup
 
 First get the repository:

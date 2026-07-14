@@ -22,6 +22,29 @@ RUST = ROOT / "rust" / "target" / "debug" / "fslc"
 RUST_ONLY_SURFACE = ROOT / "tests" / "rust_only_surface.json"
 
 
+def test_workspace_packages_and_python_reference_are_not_publishable():
+    metadata = subprocess.run(
+        [
+            "cargo",
+            "metadata",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "--no-deps",
+            "--locked",
+            "--format-version",
+            "1",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    packages = json.loads(metadata.stdout)["packages"]
+    assert packages
+    assert all(package["publish"] == [] for package in packages)
+    assert not (ROOT / ".github/workflows/publish.yml").exists()
+
+
 def _walk(node: dict):
     yield node
     for child in node["commands"]:

@@ -11,7 +11,7 @@ Language support for [FSL](https://github.com/ymm-oss/fsl) specification files (
 
 This extension is a thin LSP client. It launches the **`fslc-lsp`** language server,
 which must be available on your `PATH`. Install it with the project's `install.sh`
-(it links `fslc-lsp` into `~/.local/bin`) or with `pip install "fslc[lsp]"`.
+(it links `fslc-lsp` into `~/.local/bin`).
 
 To point the extension at a specific server binary instead of `PATH`, set the
 `FSLC_LSP_COMMAND` environment variable (e.g. to a virtualenv's `fslc-lsp`).
