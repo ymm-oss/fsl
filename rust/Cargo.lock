@@ -348,6 +348,7 @@ name = "fsl-wasm"
 version = "2.7.0"
 dependencies = [
  "fsl-core",
+ "fsl-runtime",
  "fsl-solver-z3js",
  "fsl-verifier",
  "serde",

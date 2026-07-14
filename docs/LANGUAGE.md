@@ -574,7 +574,11 @@ variable.
 - For `Map<K, Struct>` values, field writes are tracked per field. Updating two
   different fields of the same element in one action, such as `m[k].f1 = 1`
   followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same
-  path is a semantics error.
+  path is a semantics error. Indexed writes are rejected unless their indices
+  are provably distinct constants; guards such as `requires k != j` and local
+  constant bindings do not establish distinctness. The checked Kernel model rejects it before any
+  verifier backend runs, so native `check`/`verify` and the browser Worker
+  return the same `kind:"semantics"` classification.
 
   ```fsl
   type K = 0..1
@@ -590,8 +594,8 @@ variable.
   Observed result: `fslc check struct_fields_ok.fsl` returned `result:"ok"`,
   and `fslc verify struct_fields_ok.fsl --depth 1` returned
   `result:"verified"`. Changing the action to assign `m[k].f1` twice returned
-  `result:"error"`, `kind:"semantics"` from `fslc verify`, with message
-  `double assignment to 'm' field 'f1' on the same path`.
+  `result:"error"`, `kind:"semantics"` from both `fslc check` and
+  `fslc verify`.
 - **requires**: enabled only when all hold.
 - **ensures**: checked in the post-transition state. A violation is
   `violation_kind: "ensures"`.

@@ -407,19 +407,9 @@ fn render_induction_success(
     let warnings = base
         .get("warnings")
         .and_then(Value::as_array)
-        .map(|warnings| {
-            warnings
-                .iter()
-                .filter(|warning| {
-                    !warning
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .is_some_and(|message| message.contains("deadlock"))
-                })
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
+        .map_or_else(Vec::new, |warnings| {
+            fsl_runtime::induction_warnings(warnings)
+        });
     output.insert("warnings".to_owned(), Value::Array(warnings));
     if let Some(leads_to) = base.get("leads_to") {
         let mut leads_to = leads_to.as_object().cloned().unwrap_or_default();
@@ -473,19 +463,6 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
     };
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
-    }
-    if model
-        .actions
-        .iter()
-        .any(|action| duplicate_statement_write(&action.statements).is_some())
-    {
-        return (
-            error_output(
-                "semantics",
-                "an action may not assign the same state location more than once",
-            ),
-            2,
-        );
     }
     let checked_bounds = selected_implicit_bounds(
         &model,
@@ -700,7 +677,7 @@ fn render_explicit_success(
     }
     output.insert(
         "warnings".to_owned(),
-        Value::Array(verification_warnings(
+        Value::Array(shared_warnings(
             model,
             compatible,
             result.depth_reached,
@@ -780,19 +757,6 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         request.selection.property,
         request.selection.excluded,
     );
-    if model
-        .actions
-        .iter()
-        .any(|action| duplicate_statement_write(&action.statements).is_some())
-    {
-        return Err((
-            error_output(
-                "semantics",
-                "an action may not assign the same state location more than once",
-            ),
-            2,
-        ));
-    }
     if checked_bounds.is_none() && request.initial_state.is_none() {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
             Ok(Some((violation, trace))) => {
@@ -1204,7 +1168,7 @@ fn render_bmc_success(
             ),
         );
     }
-    let warnings = verification_warnings(model, result, depth, deadlock);
+    let warnings = shared_warnings(model, result, depth, deadlock);
     output.insert("warnings".to_owned(), Value::Array(warnings));
     output.insert(
         "note".to_owned(),
@@ -1227,64 +1191,24 @@ fn render_bmc_success(
     (Value::Object(output), 0)
 }
 
-fn verification_warnings(
+fn shared_warnings(
     model: &KernelModel,
     result: &fsl_verifier::BmcResult,
     depth: usize,
     deadlock: DeadlockMode,
 ) -> Vec<Value> {
-    let mut warnings = check_warnings(model);
-    for property in &model.invariants {
-        let KernelExpr::Binary { op, left, .. } = &property.expr else {
-            continue;
-        };
-        if op != "=>" {
-            continue;
-        }
-        if matches!(
-            fsl_runtime::expression_reachable(model.clone(), left, depth),
-            Ok(false)
-        ) {
-            let mut warning = json!({
-                "kind": "vacuous_implication",
-                "name": display(&property.name),
-                "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display(&property.name)),
-                "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
-                "loc": property.span.python_loc(),
-                "classification": "insufficient_depth",
-                "blocking": [],
-                "faithfulness_class": "intent_unexercised",
-                "recommended_action": "add a single-shot reachable for the action / raise --depth",
-            });
-            if let Value::Object(warning) = &mut warning {
-                insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
-            }
-            warnings.push(warning);
-        }
-    }
-    if deadlock == DeadlockMode::Warn
-        && let Some(step) = result.deadlock_step
-    {
-        let state_summary = result
+    fsl_runtime::verification_warnings(
+        model,
+        depth,
+        deadlock == DeadlockMode::Warn,
+        result.deadlock_step,
+        result
             .deadlock_trace
             .as_ref()
             .and_then(|trace| trace.last())
-            .map(|entry| format_state_summary(model, &entry.state))
-            .unwrap_or_default();
-        warnings.push(json!({
-            "message": format!("deadlock reachable at step {step} (state: {state_summary})"),
-            "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional",
-        }));
-    }
-    for (name, covered) in &result.action_coverage {
-        if !covered {
-            warnings.push(json!({
-                "message": format!("action '{}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)", display(name)),
-                "hint": coverage_hint(depth),
-            }));
-        }
-    }
-    warnings
+            .map(|entry| &entry.state),
+        &result.action_coverage,
+    )
 }
 
 fn add_common_verification(

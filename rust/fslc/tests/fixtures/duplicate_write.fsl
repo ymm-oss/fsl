@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec DuplicateWrite {
+  state { x: Bool }
+  init { x = false }
+
+  action write_twice() {
+    x = true
+    x = false
+  }
+}
