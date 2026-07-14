@@ -1,34 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { cases } from "./cases.mjs";
+
 const output = document.querySelector("#result");
 const heartbeat = setInterval(() => {
   output.dataset.tick = String(Number(output.dataset.tick ?? 0) + 1);
 }, 100);
-
-const cases = [
-  {
-    id: "verified",
-    expected: "verified",
-    source: `spec BrowserCounter {
-  type K = 0..1
-  state { x: K }
-  init { x = 0 }
-  action increment() { requires x == 0 x = 1 }
-  invariant Bounded { x >= 0 and x <= 1 }
-}`,
-  },
-  {
-    id: "violated",
-    expected: "violated",
-    source: `spec BrowserBug {
-  type K = 0..1
-  state { x: K }
-  init { x = 0 }
-  action break_it() { requires x == 0 x = 1 }
-  invariant StayZero { x == 0 }
-}`,
-  },
-];
 
 function runCase(testCase) {
   return new Promise((resolve, reject) => {
@@ -46,7 +23,7 @@ function runCase(testCase) {
       id: testCase.id,
       cmd: "verify",
       source: testCase.source,
-      options: { depth: 2, deadlock: "ignore" },
+      options: testCase.options,
     });
   });
 }
@@ -78,6 +55,10 @@ function cancelAndRecover() {
   });
 }
 
+function caseHolds(testCase, envelope) {
+  return envelope.result === testCase.expected;
+}
+
 try {
   const cancelled = await cancelAndRecover();
   const envelopes = [];
@@ -87,7 +68,7 @@ try {
   output.dataset.ok = String(
     crossOriginIsolated
       && cancelled
-      && envelopes.every((envelope, index) => envelope.result === cases[index].expected),
+      && envelopes.every((envelope, index) => caseHolds(cases[index], envelope)),
   );
   output.textContent = JSON.stringify(details);
 } catch (error) {
