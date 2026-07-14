@@ -230,6 +230,11 @@ async fn verify_bounded_config<S: SmtSolver>(
             .await?;
         }
 
+        if result.leadsto_violation.is_none() && !model.leadstos.is_empty() {
+            result.leadsto_violation =
+                check_leadsto_deadlines(solver, model, &states, &choices, &instances, step).await?;
+        }
+
         if step == depth || instances.is_empty() {
             continue;
         }
@@ -862,6 +867,83 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
     Ok(None)
 }
 
+/// Check whether a `within` deadline expires unmet at `states[step]`.
+///
+/// At step `t`, the only window whose deadline lands on `t` starts at
+/// `pending = t - within`; the probe asks whether P can hold at `pending`
+/// with Q failing on every state through `t`. Like
+/// `check_leadsto_stagnation`, this must run before the BMC unrolling loop
+/// asserts a mandatory forward transition out of `states[step]`: a path that
+/// deadlocks after a missed deadline becomes globally unsatisfiable once the
+/// deadlocked step's forced transition is committed, so a post-loop probe
+/// misses exactly the missed-deadline-then-deadlock combination (issue #266).
+async fn check_leadsto_deadlines<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+) -> Result<Option<BmcViolation>, VerifyError> {
+    for property in &model.leadstos {
+        let Some(within) = property.within else {
+            continue;
+        };
+        let within = usize::try_from(within)
+            .map_err(|_| VerifyError::new("leadsTo within must be non-negative"))?;
+        let Some(pending) = step.checked_sub(within) else {
+            continue;
+        };
+        for binding in leadsto_bindings(solver, model, property)? {
+            let mut terms = vec![leadsto_condition(
+                solver,
+                model,
+                &property.before,
+                &states[pending],
+                &binding.symbolic,
+            )?];
+            for state in states.iter().take(step + 1).skip(pending) {
+                terms.push(solver.not(&leadsto_condition(
+                    solver,
+                    model,
+                    &property.after,
+                    state,
+                    &binding.symbolic,
+                )?)?);
+            }
+            let condition = solver.and(&terms)?;
+            if probe(solver, &condition).await? {
+                return Ok(Some(
+                    leadsto_violation(
+                        solver,
+                        model,
+                        property,
+                        &binding,
+                        &condition,
+                        states,
+                        choices,
+                        instances,
+                        step,
+                        LeadsToViolation {
+                            bindings: BTreeMap::new(),
+                            pending_since: pending,
+                            loop_start: None,
+                            deadline: Some(step),
+                            within: property.within,
+                            stutter: false,
+                            hint: format!(
+                                "leadsTo deadline missed: P holds at step {pending}, but Q does not hold within {within} step(s)"
+                            ),
+                        },
+                    )
+                    .await?,
+                ));
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[allow(clippy::too_many_lines)]
 async fn check_leadstos<S: SmtSolver>(
     solver: &mut S,
@@ -873,61 +955,6 @@ async fn check_leadstos<S: SmtSolver>(
 ) -> Result<Option<BmcViolation>, VerifyError> {
     for property in &model.leadstos {
         for binding in leadsto_bindings(solver, model, property)? {
-            if let Some(within) = property.within {
-                let within = usize::try_from(within)
-                    .map_err(|_| VerifyError::new("leadsTo within must be non-negative"))?;
-                for pending in 0..=depth {
-                    let deadline = pending.saturating_add(within);
-                    if deadline > depth {
-                        continue;
-                    }
-                    let mut terms = vec![leadsto_condition(
-                        solver,
-                        model,
-                        &property.before,
-                        &states[pending],
-                        &binding.symbolic,
-                    )?];
-                    for state in states.iter().take(deadline + 1).skip(pending) {
-                        terms.push(solver.not(&leadsto_condition(
-                            solver,
-                            model,
-                            &property.after,
-                            state,
-                            &binding.symbolic,
-                        )?)?);
-                    }
-                    let condition = solver.and(&terms)?;
-                    if probe(solver, &condition).await? {
-                        return Ok(Some(
-                            leadsto_violation(
-                                solver,
-                                model,
-                                property,
-                                &binding,
-                                &condition,
-                                states,
-                                choices,
-                                instances,
-                                deadline,
-                                LeadsToViolation {
-                                    bindings: BTreeMap::new(),
-                                    pending_since: pending,
-                                    loop_start: None,
-                                    deadline: Some(deadline),
-                                    within: property.within,
-                                    stutter: false,
-                                    hint: format!(
-                                        "leadsTo deadline missed: P holds at step {pending}, but Q does not hold within {within} step(s)"
-                                    ),
-                                },
-                            )
-                            .await?,
-                        ));
-                    }
-                }
-            }
-
             for loop_start in 0..depth {
                 for loop_end in (loop_start + 1)..=depth {
                     let loop_equal =

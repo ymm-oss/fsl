@@ -687,7 +687,7 @@ variable.</p></div></details>
 </tr>
 <tr>
 <td>leadsTo</td>
-<td>A P ~&gt; Q violation via a lasso up to depth K or via deadlock stagnation (detected as soon as <code>--depth</code> reaches the stalling step, and at every larger depth after that, not only when it lands exactly on that step)</td>
+<td>A P ~&gt; Q violation via a missed <code>within</code> deadline, a lasso up to depth K, or deadlock stagnation (deadline misses and stagnation are detected as soon as <code>--depth</code> reaches the deadline/stalling step, and at every larger depth after that, not only when it lands exactly on that step)</td>
 <td><code>violated</code> / <code>leadsTo</code> / <code>bindings</code> + trace</td>
 </tr>
 </tbody>
