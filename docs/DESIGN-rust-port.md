@@ -194,6 +194,14 @@ contract, including non-obvious details:
 
 - `"fsl":"1.0"` is first, JSON is indented by two spaces, and non-ASCII text is
   emitted without ASCII escaping;
+- `versions` identifies the verifier package, `fsl-core`, and the linked Z3
+  runtime using the version it reports; native and
+  Worker envelopes use the same component schema even though their verifier
+  and backend names differ. The check/verify envelope contract is published as
+  `schemas/fslc/envelope.v1.schema.json`;
+- a Worker failure before Z3 initialization is a transport-level
+  `transportError`, not a check/verify envelope, because no loaded solver
+  version exists to report;
 - `faithfulness` defaults are applied recursively to nested result dictionaries;
 - `trace_type` is a top-level trailing default;
 - exit codes 0/1/2/3 retain their current meaning;

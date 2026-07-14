@@ -6,6 +6,25 @@ use serde_json::{Map, Value, json};
 
 use crate::{KernelModel, TypeRef, display_name};
 
+/// Return implementation versions for native and Worker check/verify envelopes.
+#[must_use]
+pub fn version_metadata(
+    verifier: &str,
+    verifier_version: &str,
+    solver_backend: &str,
+    solver_version: &str,
+) -> Value {
+    json!({
+        "verifier": {"name": verifier, "version": verifier_version},
+        "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
+        "solver": {
+            "name": "z3",
+            "backend": solver_backend,
+            "version": solver_version,
+        },
+    })
+}
+
 #[must_use]
 pub fn model_warnings(model: &KernelModel) -> Vec<Value> {
     let mut warnings = model

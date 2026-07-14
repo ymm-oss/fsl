@@ -8,6 +8,12 @@ use z3::{Model, Solver};
 
 const REQUIRED_Z3_VERSION: &str = "4.16.0";
 
+/// Return the version reported by the linked Z3 library.
+#[must_use]
+pub fn version() -> &'static str {
+    z3::full_version()
+}
+
 #[derive(Clone, Debug)]
 pub enum Z3Term {
     Bool(Bool),
@@ -48,7 +54,7 @@ impl Z3Solver {
     ///
     /// Returns an error when the loaded Z3 library is not version 4.16.0.
     pub fn new() -> SolverResult<Self> {
-        let version = z3::full_version().to_owned();
+        let version = version().to_owned();
         let required_prefix = format!("Z3 {REQUIRED_Z3_VERSION}.");
         if !version.starts_with(&required_prefix) {
             return Err(SolverError::new(format!(
@@ -435,6 +441,7 @@ mod tests {
                 .version()
                 .starts_with(&format!("Z3 {REQUIRED_Z3_VERSION}."))
         );
+        assert_eq!(solver.version(), version());
         let x = solver.constant("x", &Sort::Int)?;
         let four = solver.int_value(4);
         let seven = solver.int_value(7);

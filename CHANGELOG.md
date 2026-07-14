@@ -6,6 +6,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Native CLI and browser Worker result envelopes now identify the verifier,
+  `fsl-core`, and loaded Z3 versions through one `versions` schema. Native
+  verdict-cache keys and entries use the linked Z3 runtime version instead of a
+  hard-coded release string (issue #268).
 - Domain finite variants now use canonical `enum Name { Member, ... }` syntax,
   while bounded numeric domains remain `type Name = lo..hi`. The 2.x legacy
   union spelling remains compatible with a stable

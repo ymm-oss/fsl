@@ -28,6 +28,23 @@ fn native_cli_checks_a_repository_spec_without_python() {
     assert_eq!(value["fsl"], "1.0");
     assert_eq!(value["result"], "ok");
     assert_eq!(value["spec"], "ShoppingCart");
+    assert_eq!(value["versions"]["verifier"]["name"], "fslc-rust");
+    assert_eq!(
+        value["versions"]["verifier"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(value["versions"]["core"]["name"], "fsl-core");
+    assert_eq!(
+        value["versions"]["core"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(value["versions"]["solver"]["name"], "z3");
+    assert_eq!(value["versions"]["solver"]["backend"], "native-z3");
+    assert!(
+        value["versions"]["solver"]["version"]
+            .as_str()
+            .is_some_and(|version| version.starts_with("Z3 4.16.0"))
+    );
 }
 
 #[test]

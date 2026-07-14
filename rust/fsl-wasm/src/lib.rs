@@ -62,27 +62,37 @@ impl FileResolver for MemoryResolver {
     }
 }
 
-fn envelope() -> Map<String, Value> {
+fn envelope(solver_version: &str) -> Map<String, Value> {
     let mut output = Map::new();
     output.insert("fsl".to_owned(), json!("1.0"));
+    output.insert(
+        "versions".to_owned(),
+        fsl_core::version_metadata(
+            "fsl-wasm",
+            env!("CARGO_PKG_VERSION"),
+            "z3-solver-wasm",
+            solver_version,
+        ),
+    );
     output
 }
 
-fn error(kind: &str, message: impl AsRef<str>) -> Value {
-    let mut output = envelope();
+fn error(solver_version: &str, kind: &str, message: impl AsRef<str>) -> Value {
+    let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message.as_ref()));
     Value::Object(output)
 }
 
-fn build(request: &Request) -> Result<KernelModel, Value> {
+fn build(request: &Request, solver_version: &str) -> Result<KernelModel, Value> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
     let kernel = fsl_core::parse_kernel_source(&request.source, &resolver)
-        .map_err(|failure| error("parse", failure.to_string()))?;
-    fsl_core::build_model(kernel).map_err(|failure| error("semantics", failure.to_string()))
+        .map_err(|failure| error(solver_version, "parse", failure.to_string()))?;
+    fsl_core::build_model(kernel)
+        .map_err(|failure| error(solver_version, "semantics", failure.to_string()))
 }
 
 fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
@@ -115,20 +125,20 @@ fn invariant_names(model: &KernelModel) -> Vec<String> {
     names
 }
 
-fn check(request: &Request) -> Value {
-    let model = match build(request) {
+fn check(request: &Request, solver_version: &str) -> Value {
+    let model = match build(request, solver_version) {
         Ok(model) => model,
         Err(error) => return error,
     };
-    let mut output = envelope();
+    let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("warnings".to_owned(), Value::Array(model_warnings(&model)));
     Value::Object(output)
 }
 
-async fn verify(request: &Request) -> Value {
-    let model = match build(request) {
+async fn verify(request: &Request, solver_version: &str) -> Value {
+    let model = match build(request, solver_version) {
         Ok(model) => model,
         Err(error) => return error,
     };
@@ -136,14 +146,19 @@ async fn verify(request: &Request) -> Value {
     let result =
         match fsl_verifier::verify_bounded(&model, &mut solver, request.options.depth).await {
             Ok(result) => result,
-            Err(failure) => return error("semantics", failure.to_string()),
+            Err(failure) => return error(solver_version, "semantics", failure.to_string()),
         };
-    render_verify(&model, &request.options, result)
+    render_verify(&model, &request.options, result, solver_version)
 }
 
 #[allow(clippy::too_many_lines)]
-fn render_verify(model: &KernelModel, options: &Options, result: fsl_verifier::BmcResult) -> Value {
-    let mut output = envelope();
+fn render_verify(
+    model: &KernelModel,
+    options: &Options,
+    result: fsl_verifier::BmcResult,
+    solver_version: &str,
+) -> Value {
+    let mut output = envelope(solver_version);
     output.insert("spec".to_owned(), json!(model.name));
     if let Some(violation) = result.violation {
         output.insert("result".to_owned(), json!("violated"));
@@ -296,28 +311,46 @@ fn render_verify(model: &KernelModel, options: &Options, result: fsl_verifier::B
 }
 
 /// Execute one Worker request and return the stable JSON envelope as text.
+///
+/// # Panics
+///
+/// Panics only if an in-memory `serde_json::Value` cannot be serialized.
 #[wasm_bindgen]
 pub async fn run(request_json: String) -> String {
+    let solver_version = fsl_solver_z3js::version();
     let request = match serde_json::from_str::<Request>(&request_json) {
         Ok(request) => request,
         Err(failure) => {
-            return error("io", format!("invalid request JSON: {failure}")).to_string();
+            return error(
+                &solver_version,
+                "io",
+                format!("invalid request JSON: {failure}"),
+            )
+            .to_string();
         }
     };
     let output = match request.cmd.as_str() {
-        "check" => check(&request),
-        "verify" => verify(&request).await,
+        "check" => check(&request, &solver_version),
+        "verify" => verify(&request, &solver_version).await,
         command => error(
+            &solver_version,
             "usage",
             format!("command '{command}' is not available in the browser Worker"),
         ),
     };
-    serde_json::to_string_pretty(&output).unwrap_or_else(|failure| {
-        format!(
-            "{{\"fsl\":\"1.0\",\"result\":\"error\",\"kind\":\"internal\",\"message\":{}}}",
-            serde_json::to_string(&failure.to_string()).unwrap_or_else(|_| "null".to_owned())
-        )
-    })
+    serde_json::to_string_pretty(&output).expect("JSON values serialize")
+}
+
+/// Render an internal verifier error after the Worker solver runtime initialized.
+///
+/// # Panics
+///
+/// Panics only if an in-memory `serde_json::Value` cannot be serialized.
+#[wasm_bindgen]
+#[must_use]
+pub fn internal_error(message: String) -> String {
+    let output = error(&fsl_solver_z3js::version(), "internal", message);
+    serde_json::to_string_pretty(&output).expect("JSON values serialize")
 }
 
 #[cfg(test)]
@@ -325,6 +358,8 @@ mod tests {
     use super::*;
     use fsl_core::{FslValue, TraceAction, TraceStep};
     use fsl_verifier::{BmcResult, BmcViolation, LeadsToViolation};
+
+    const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
 
     fn model_from(source: &str) -> KernelModel {
         let resolver = MemoryResolver {
@@ -343,7 +378,8 @@ mod tests {
             options: Options::default(),
         };
 
-        let error = build(&request).expect_err("duplicate write must fail in Worker build");
+        let error = build(&request, TEST_SOLVER_VERSION)
+            .expect_err("duplicate write must fail in Worker build");
 
         assert_eq!(error["kind"], json!("semantics"));
         assert!(
@@ -378,9 +414,22 @@ mod tests {
             frontier_progress: false,
         };
 
-        let envelope = render_verify(&model, &Options::default(), result);
+        let envelope = render_verify(&model, &Options::default(), result, TEST_SOLVER_VERSION);
         let warnings = envelope["warnings"].as_array().expect("warnings array");
 
+        assert_eq!(envelope["versions"]["verifier"]["name"], "fsl-wasm");
+        assert_eq!(
+            envelope["versions"]["verifier"]["version"],
+            env!("CARGO_PKG_VERSION")
+        );
+        assert_eq!(envelope["versions"]["core"]["name"], "fsl-core");
+        assert_eq!(envelope["versions"]["solver"]["name"], "z3");
+        assert_eq!(envelope["versions"]["solver"]["backend"], "z3-solver-wasm");
+        assert!(
+            envelope["versions"]["solver"]["version"]
+                .as_str()
+                .is_some_and(|version| version.starts_with("Z3 4.16.0"))
+        );
         assert_eq!(warnings.len(), 3);
         assert_eq!(warnings[0]["kind"], json!("vacuous_implication"));
         assert_eq!(
@@ -435,7 +484,7 @@ mod tests {
             deadlock: "error".to_owned(),
         };
 
-        let envelope = render_verify(&model, &options, result);
+        let envelope = render_verify(&model, &options, result, TEST_SOLVER_VERSION);
 
         assert_eq!(envelope["violation_kind"], json!("deadlock"));
     }

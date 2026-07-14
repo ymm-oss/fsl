@@ -11,6 +11,14 @@ import { fileURLToPath } from "node:url";
 
 import "./build.mjs";
 import { cases } from "./web/cases.mjs";
+import { workerMessageError } from "./web/worker-protocol.mjs";
+
+const protocolError = workerMessageError({
+  transportError: { kind: "initialization", message: "probe" },
+});
+if (protocolError?.message !== "initialization: probe" || workerMessageError({ envelope: {} })) {
+  throw new Error("Worker transport-error protocol is not observable by the client");
+}
 
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 const mime = {
@@ -141,7 +149,7 @@ async function nativeVerdict(testCase, index) {
     childProcess.on("close", () => {
       try {
         const envelope = JSON.parse(stdout);
-        resolve({ result: envelope.result, violation_kind: envelope.violation_kind ?? null });
+        resolve(envelope);
       } catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
     });
   });
@@ -153,7 +161,44 @@ for (let index = 0; index < cases.length; index += 1) {
 const wasm = browser.envelopes.map((envelope) => (
   { result: envelope.result, violation_kind: envelope.violation_kind ?? null }
 ));
-if (JSON.stringify(native) !== JSON.stringify(wasm)) {
-  throw new Error(`native/WASM verdict mismatch: native=${JSON.stringify(native)} wasm=${JSON.stringify(wasm)}`);
+const versionKeys = ["core", "solver", "verifier"];
+const componentKeys = ["name", "version"];
+const solverKeys = ["backend", "name", "version"];
+function validateVersions(envelope, verifier, backend) {
+  if (JSON.stringify(Object.keys(envelope.versions ?? {}).sort()) !== JSON.stringify(versionKeys)) {
+    throw new Error(`invalid version envelope: ${JSON.stringify(envelope.versions)}`);
+  }
+  for (const component of ["core", "verifier"]) {
+    if (JSON.stringify(Object.keys(envelope.versions[component]).sort()) !== JSON.stringify(componentKeys)) {
+      throw new Error(`invalid ${component} version: ${JSON.stringify(envelope.versions[component])}`);
+    }
+  }
+  if (JSON.stringify(Object.keys(envelope.versions.solver).sort()) !== JSON.stringify(solverKeys)) {
+    throw new Error(`invalid solver version: ${JSON.stringify(envelope.versions.solver)}`);
+  }
+  if (envelope.versions.verifier.name !== verifier
+      || envelope.versions.core.name !== "fsl-core"
+      || envelope.versions.solver.name !== "z3"
+      || envelope.versions.solver.backend !== backend
+      || !envelope.versions.verifier.version
+      || !envelope.versions.core.version
+      || !envelope.versions.solver.version.startsWith("Z3 4.16.0")) {
+    throw new Error(`incorrect version identity: ${JSON.stringify(envelope.versions)}`);
+  }
+}
+for (let index = 0; index < native.length; index += 1) {
+  validateVersions(native[index], "fslc-rust", "native-z3");
+  validateVersions(browser.envelopes[index], "fsl-wasm", "z3-solver-wasm");
+  if (native[index].versions.verifier.version !== browser.envelopes[index].versions.verifier.version
+      || native[index].versions.core.version !== browser.envelopes[index].versions.core.version
+      || native[index].versions.solver.version !== browser.envelopes[index].versions.solver.version) {
+    throw new Error(`native/WASM version mismatch: native=${JSON.stringify(native[index].versions)} wasm=${JSON.stringify(browser.envelopes[index].versions)}`);
+  }
+}
+const nativeVerdicts = native.map((envelope) => (
+  { result: envelope.result, violation_kind: envelope.violation_kind ?? null }
+));
+if (JSON.stringify(nativeVerdicts) !== JSON.stringify(wasm)) {
+  throw new Error(`native/WASM verdict mismatch: native=${JSON.stringify(nativeVerdicts)} wasm=${JSON.stringify(wasm)}`);
 }
 console.log(JSON.stringify({ schema: "fsl-wasm-browser.v1", ok: true, cancelled: true, nativeParity: true }, null, 2));

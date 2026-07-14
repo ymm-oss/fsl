@@ -1594,6 +1594,14 @@ fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Resul
 }
 
 fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String, String), String> {
+    verify_cache_keys_with_solver_version(path, options, fsl_solver_z3::version())
+}
+
+fn verify_cache_keys_with_solver_version(
+    path: &Path,
+    options: &CliVerifyOptions,
+    solver_version: &str,
+) -> Result<(String, String), String> {
     let canonical = path.canonicalize().map_err(|error| error.to_string())?;
     let base = canonical.parent().unwrap_or_else(|| Path::new("."));
     let mut sources = Vec::new();
@@ -1605,7 +1613,9 @@ fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String,
     if options.engine == "explicit" {
         digest.update(b"\0backend=native-explicit\0");
     } else {
-        digest.update(b"\0backend=native-z3\0solver=4.16.0\0");
+        digest.update(b"\0backend=native-z3\0solver=");
+        digest.update(solver_version.as_bytes());
+        digest.update(b"\0");
     }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     digest.update(b"executable\0");
@@ -1720,7 +1730,11 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         "schema": "fslc-rust-cache.v1",
         "key": key,
         "backend": if explicit { "native-explicit" } else { "native-z3" },
-        "solver_version": if explicit { Value::Null } else { json!("4.16.0") },
+        "solver_version": if explicit {
+            Value::Null
+        } else {
+            json!(fsl_solver_z3::version())
+        },
         "output": output,
     });
     if serde_json::to_vec(&entry)
@@ -2146,5 +2160,18 @@ mod tests {
 
         assert_ne!(bmc_keys, explicit_keys);
         assert_ne!(explicit_keys, smaller_keys);
+    }
+
+    #[test]
+    fn bmc_cache_keys_include_the_loaded_solver_version() {
+        let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
+        let options = CliVerifyOptions::default();
+
+        let current = verify_cache_keys_with_solver_version(&path, &options, "Z3 4.16.0.0")
+            .expect("current solver cache keys");
+        let updated = verify_cache_keys_with_solver_version(&path, &options, "Z3 4.17.0.0")
+            .expect("updated solver cache keys");
+
+        assert_ne!(current, updated);
     }
 }
