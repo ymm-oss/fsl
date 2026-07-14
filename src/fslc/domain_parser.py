@@ -177,8 +177,8 @@ def _clean(text):
 
 
 def is_domain_source(src: str) -> bool:
-    stripped = src.lstrip()
-    return stripped.startswith("domain ")
+    from .dialect_registry import dialect_keyword
+    return dialect_keyword(src) == "domain"
 
 
 @v_args(inline=True, meta=True)

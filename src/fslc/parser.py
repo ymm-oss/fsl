@@ -23,12 +23,13 @@ from .dialects import (
     expand_spec_domains,
 )
 from .db_expand import expand_dbsystem
-from .db_parser import is_dbsystem_source, parse_dbsystem
+from .db_parser import parse_dbsystem
 from .ai_expand import expand_ai_component
-from .ai_parser import is_ai_component_source, parse_ai_component
+from .ai_parser import parse_ai_component
 from .domain_expand import expand_domain
-from .domain_parser import is_domain_source, parse_domain
+from .domain_parser import parse_domain
 from .predicates import expand_named_predicates
+from .dialect_registry import inspect_source
 
 
 _EXPR_PARSER = None
@@ -60,11 +61,8 @@ def parse_surface_src(src):
     db/AI/domain grammars have their own typed surface IR and are intentionally
     rejected here; :func:`parse_src` remains the public all-frontend entrypoint.
     """
-    if (
-        is_dbsystem_source(src)
-        or is_ai_component_source(src)
-        or is_domain_source(src)
-    ):
+    dispatch = inspect_source(src)
+    if dispatch.keyword in {"dbsystem", "ai_component", "agent", "domain"}:
         from .model import FslError
 
         raise FslError(
@@ -72,7 +70,7 @@ def parse_surface_src(src):
             kind="semantics",
         )
     try:
-        tree = PARSER.parse(src)
+        tree = PARSER.parse(dispatch.source)
     except UnexpectedInput as exc:
         exc.source = src
         raise
@@ -86,7 +84,9 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
     comes from ``fslc verify --instances``/``--values`` and replaces the matching
     ``verify { ... }`` bounds before dialect desugaring runs.
     """
-    if is_dbsystem_source(src):
+    dispatch = inspect_source(src)
+    parser_source = dispatch.source
+    if dispatch.keyword == "dbsystem":
         has_bounds_overrides = bool(
             bounds_overrides
             and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
@@ -97,11 +97,11 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
                 "--instances/--values do not apply to dbsystem; set finite schema windows in the dbsystem file",
                 kind="semantics",
             )
-        system = parse_dbsystem(src)
+        system = parse_dbsystem(parser_source)
         expanded = expand_dbsystem(system)
         return expanded.ast, expanded.display_names
 
-    if is_ai_component_source(src):
+    if dispatch.keyword == "ai_component":
         has_bounds_overrides = bool(
             bounds_overrides
             and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
@@ -112,11 +112,11 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
                 "--instances/--values do not apply to ai_component; declare finite tool authority in the ai_component file",
                 kind="semantics",
             )
-        component = parse_ai_component(src)
+        component = parse_ai_component(parser_source)
         expanded = expand_ai_component(component)
         return expanded.ast, expanded.display_names
 
-    if is_domain_source(src):
+    if dispatch.keyword == "domain":
         has_bounds_overrides = bool(
             bounds_overrides
             and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
@@ -127,11 +127,11 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
                 "--instances/--values do not apply to domain; declare finite ID/value ranges in the domain file",
                 kind="semantics",
             )
-        domain = parse_domain(src)
+        domain = parse_domain(parser_source)
         expanded = expand_domain(domain)
         return expanded.ast, expanded.display_names
 
-    ast = parse_surface_src(src)
+    ast = parse_surface_src(parser_source)
     ast = expand_named_predicates(ast)
     if bounds_overrides:
         ast = apply_verify_bounds_overrides(ast, bounds_overrides)

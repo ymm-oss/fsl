@@ -99,6 +99,10 @@ typed syntax is name/type-resolved in `fsl-core` and lowered directly to Kernel
 surface AST. Generated Kernel text is available for inspection but is not an
 input to parsing, checking, runtime execution, or verification.
 
+Issue #247 replaced raw-prefix selection with the accepted token registry in
+`DESIGN-dialect-dispatch.md`: one shared lex produces the token stream consumed
+by the selected frontend, and Kernel/CLI/WASM callers share that library entrypoint.
+
 File access is behind a `FileResolver` interface:
 
 - native CLI: filesystem-backed, with the current source-relative semantics;

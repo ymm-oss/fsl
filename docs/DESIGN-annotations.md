@@ -19,6 +19,11 @@ values. `SymbolPath` rejects empty namespace segments. Every annotation retains
 its own source span; declaration provenance remains in `OriginRegistry` and never
 uses a requirement ID as source identity.
 
+Issue #247 subsequently added the document-level `@...` subset needed by
+token-based dialect dispatch. `DESIGN-dialect-dispatch.md` is authoritative for
+annotations immediately before a top-level document; issue #241 retains ownership
+of annotation placement on declarations inside that document.
+
 ## Carrier and declaration coverage
 
 `Annotations` preserves source order for formatter/comment fidelity while its
@@ -99,7 +104,9 @@ suppression, and exact declaration matching—remain unchanged.
 
 ## Non-goals
 
-- `@requirement`, `@kind`, or arbitrary `@namespace` parser syntax;
+- `@requirement`, `@kind`, or arbitrary `@namespace` syntax on declarations
+  inside a document (document-level syntax is defined by
+  `DESIGN-dialect-dispatch.md`);
 - formatter or source migrator behavior;
 - macro execution or verifier semantics selected by an annotation;
 - publishing annotations by mutating Public Kernel v1/v2.

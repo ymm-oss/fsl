@@ -9,8 +9,11 @@ use std::fmt;
 use crate::Span;
 
 /// A namespaced symbol such as `acme.review.owner`.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct SymbolPath(Vec<String>);
+#[derive(Clone, Debug)]
+pub struct SymbolPath {
+    segments: Vec<String>,
+    span: Span,
+}
 
 impl SymbolPath {
     /// Construct a validated symbol path.
@@ -29,18 +32,43 @@ impl SymbolPath {
                 span,
             ));
         }
-        Ok(Self(segments))
+        Ok(Self { segments, span })
     }
 
     #[must_use]
     pub fn segments(&self) -> &[String] {
-        &self.0
+        &self.segments
+    }
+
+    #[must_use]
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl PartialEq for SymbolPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.segments == other.segments
+    }
+}
+
+impl Eq for SymbolPath {}
+
+impl PartialOrd for SymbolPath {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SymbolPath {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.segments.cmp(&other.segments)
     }
 }
 
 impl fmt::Display for SymbolPath {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.join("."))
+        formatter.write_str(&self.segments.join("."))
     }
 }
 

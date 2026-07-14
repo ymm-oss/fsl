@@ -599,6 +599,12 @@ pub struct SurfaceCompose {
     pub items: Vec<ComposeItem>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurfaceAgent {
+    pub name: String,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SurfaceDocument {
     Spec(SurfaceSpec),
@@ -610,6 +616,7 @@ pub enum SurfaceDocument {
     Db(DbSystem),
     Domain(DomainSpec),
     AiComponent(AiComponent),
+    Agent(SurfaceAgent),
 }
 
 impl MetaTag {
@@ -1709,6 +1716,9 @@ impl SurfaceDocument {
             Self::Db(system) => system.python_ast(),
             Self::Domain(domain) => domain.python_ast(),
             Self::AiComponent(component) => component.python_ast(),
+            Self::Agent(agent) => json!({
+                "$type": "Agent", "name": agent.name, "loc": agent.span.python_loc(),
+            }),
         }
     }
 }

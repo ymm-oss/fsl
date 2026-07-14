@@ -788,3 +788,41 @@ def test_build_index_handles_dbsystem_dialect_without_crashing():
     column_loc = index.definition_at(column_ref.range.start.line, column_ref.range.start.character)
     assert column_loc is not None
     assert column_loc.range == column_decl.selection_range
+
+
+def test_build_index_uses_registry_after_bom_comments_and_top_level_annotations():
+    domain_source = "\ufeff// leading comment\n@acme.route(spec, requirements)\ndomain Orders {}"
+    agent_source = "// leading comment\n@acme.owner(\"platform\")\nagent Parent {}"
+
+    domain = build_index(domain_source, "orders.fsl")
+    agent = build_index(agent_source, "parent.fsl")
+
+    assert _symbol(domain, "Orders", "domain").selection_range.start.line == 2
+    assert _symbol(agent, "Parent", "agent").selection_range.start.line == 2
+
+
+def test_registry_handles_annotation_trivia_and_rejects_invalid_shapes():
+    from fslc.dialect_registry import inspect_source
+
+    source = '@ // comment\n acme . owner (\"platform\", // argument\n team . ops)\nspec Routed {}'
+    index = build_index(source, "routed.fsl")
+    assert _symbol(index, "Routed", "spec").selection_range.start.line == 3
+
+    for invalid in (
+        "@acme.owner spec Routed {}",
+        "@é.owner() spec Routed {}",
+        "@requirement() spec Routed {}",
+        '@requirement("undecided") spec Routed {}',
+        '@requirement("REQ-1", "first")\n@requirement("REQ-1", "second")\nspec Routed {}',
+        "@acme.limit(9223372036854775808) spec Routed {}",
+        "@acme.owner(team,) spec Routed {}",
+        "@acme.owner(true.team) spec Routed {}",
+    ):
+        assert inspect_source(invalid).keyword is None
+
+    for valid in (
+        '@requirement("REQ-1", "") spec Routed {}',
+        '@kind("safety", "") spec Routed {}',
+        "@acme.limit(9223372036854775807) spec Routed {}",
+    ):
+        assert inspect_source(valid).keyword == "spec"

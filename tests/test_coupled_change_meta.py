@@ -30,15 +30,36 @@ from pathlib import Path
 from lark import Token, Tree
 
 from fslc.ai_parser import is_ai_agent_source, is_ai_source
-from fslc.ai_project import is_ai_project_source
+from fslc.ai_project import PROJECT_BLOCKS, is_ai_project_source
 from fslc.cli import _build_arg_parser
 from fslc.db_parser import is_dbsystem_source
+from fslc.dialect_registry import DIALECT_KEYWORDS
 from fslc.domain_parser import is_domain_source
 from fslc.grammar import GRAMMAR
 from fslc.lsp.index import DOMAIN_PARSER, _IndexBuilder, _parser_for_source, build_index
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+
+
+def test_retained_python_dialect_registry_matches_native_authority():
+    source = (ROOT / "rust" / "fsl-syntax" / "src" / "dispatch.rs").read_text()
+    block = re.search(r"frontends!\s*\{(?P<body>.*?)\n\}", source, re.DOTALL)
+    assert block is not None
+    native = tuple(re.findall(r'"([a-z_]+)"\s*=>', block.group("body")))
+    assert native == DIALECT_KEYWORDS
+
+
+def test_native_ai_project_block_gate_matches_retained_parser():
+    source = (ROOT / "rust" / "fslc" / "src" / "main.rs").read_text()
+    block = re.search(
+        r"const PROJECT_BLOCKS: &\[&str\] = &\[(?P<body>.*?)\n\s*\];",
+        source,
+        re.DOTALL,
+    )
+    assert block is not None
+    native = set(re.findall(r'"([a-z_]+)"', block.group("body")))
+    assert native == PROJECT_BLOCKS
 
 # ---------------------------------------------------------------------------
 # 1. LSP index coverage

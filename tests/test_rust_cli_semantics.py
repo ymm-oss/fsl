@@ -516,6 +516,71 @@ def test_rust_generic_check_recognizes_ai_agent_and_project():
     )
 
 
+def test_rust_check_dispatches_after_trivia_and_reports_stable_dialect_errors(tmp_path):
+    agent_path = tmp_path / "agent.fsl"
+    agent_path.write_text(
+        "\ufeff// leading comment\n@acme.owner(\"platform\")\nagent Routed {}",
+        encoding="utf-8",
+    )
+    empty_path = tmp_path / "empty.fsl"
+    empty_path.write_text("// comment only\n", encoding="utf-8")
+    unknown_path = tmp_path / "unknown.fsl"
+    unknown_path.write_text("mystery Unknown {}", encoding="utf-8")
+    disguised_project_path = tmp_path / "disguised-project.fsl"
+    disguised_project_path.write_text(
+        "mystery Unknown {}\nstatistical_property Quality {}", encoding="utf-8"
+    )
+    invalid_agent_path = tmp_path / "invalid-agent.fsl"
+    invalid_agent_path.write_text("agent Routed {} spec Hidden {}", encoding="utf-8")
+    evidence_project_path = tmp_path / "evidence-project.fsl"
+    evidence_project_path.write_text(
+        'dataset Eval { source "eval.jsonl" }\nstatistical_property Quality {}',
+        encoding="utf-8",
+    )
+    opaque_project_path = tmp_path / "opaque-project.fsl"
+    opaque_project_path.write_text(
+        "ai_action Draft { arbitrary & opaque ? text }\nstatistical_property Quality {}",
+        encoding="utf-8",
+    )
+
+    agent_status, agent = _run_rust("check", str(agent_path))
+    empty_status, empty = _run_rust("check", str(empty_path))
+    unknown_status, unknown = _run_rust("check", str(unknown_path))
+    disguised_status, disguised = _run_rust("check", str(disguised_project_path))
+    invalid_agent_status, invalid_agent = _run_rust("check", str(invalid_agent_path))
+    evidence_status, evidence = _run_rust("check", str(evidence_project_path))
+    opaque_status, opaque = _run_rust("check", str(opaque_project_path))
+
+    assert (agent_status, agent["spec"], agent["dialect"]) == (
+        0,
+        "Routed",
+        "fsl-ai-agent.v0",
+    )
+    assert (empty_status, empty["diagnostic_code"], empty["loc"]) == (
+        2,
+        "FSL-DIALECT-EMPTY",
+        {"line": 2, "column": 1},
+    )
+    assert unknown_status == 2
+    assert unknown["diagnostic_code"] == "FSL-DIALECT-UNKNOWN"
+    assert unknown["loc"] == {"line": 1, "column": 1}
+    assert "spec, refinement, compose" in unknown["message"]
+    assert (disguised_status, disguised["diagnostic_code"]) == (
+        2,
+        "FSL-DIALECT-UNKNOWN",
+    )
+    assert invalid_agent_status == 2
+    assert invalid_agent["diagnostic_code"] == "FSL-PARSE"
+    assert (evidence_status, evidence["ai_analysis_result"]) == (
+        0,
+        "ai_project_analyzed",
+    )
+    assert (opaque_status, opaque["ai_analysis_result"]) == (
+        0,
+        "ai_project_analyzed",
+    )
+
+
 def test_rust_verify_preserves_parse_error_classification():
     for spec in (
         "examples/gallery/errors/parse_missing_expression.fsl",

@@ -187,7 +187,9 @@ def drift_ai_project(
 
 def ai_compat_profile_from_file(path, environment: Optional[str] = None) -> dict:
     src = Path(path).read_text(encoding="utf-8")
-    if not is_ai_project_source(src) and src.lstrip().startswith("ai_component"):
+    from .dialect_registry import dialect_keyword
+
+    if not is_ai_project_source(src) and dialect_keyword(src) == "ai_component":
         components = [parse_ai_component(src)]
     else:
         components = list(parse_ai_project(src, name=Path(path).stem).components)

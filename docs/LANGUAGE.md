@@ -1392,6 +1392,24 @@ compatibility projection. See `DESIGN-undecided.md` and
 `DESIGN-annotations.md`. This is implemented by the authoritative native Rust
 CLI and is not backported to the frozen Python reference implementation.
 
+A document itself may now carry typed annotations before its dialect keyword:
+
+```fsl
+@requirement("REQ-DOC", "this document owns the checkout contract")
+@acme.review(owner.platform, 2, true)
+spec Checkout { ... }
+```
+
+The shared lexer skips a leading BOM, whitespace, and `//` comments before
+these annotations, retains their order and spans, then selects the dialect from
+the following declaration keyword. Keywords inside annotation arguments do not
+participate in dispatch. This document-level subset supports `@requirement`,
+`@undecided`, `@kind`, and custom multi-segment namespaces; annotation placement
+on declarations inside the document remains tracked by issue #241. Empty and
+unknown documents report `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` with exact
+locations and the deterministic supported-keyword list. See
+`DESIGN-dialect-dispatch.md`.
+
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
 ```fsl

@@ -12,6 +12,7 @@ mod ai;
 mod annotation;
 mod ast;
 mod db;
+mod dispatch;
 mod domain;
 mod lexer;
 mod parser;
@@ -30,6 +31,10 @@ pub use db::{
     DbArtifact, DbCheck, DbColumn, DbColumnRef, DbDatabase, DbEnvironment, DbEnvironmentArtifact,
     DbFlag, DbFlagCondition, DbMigration, DbMigrationOp, DbSystem, DbTable, parse_db_system,
 };
+pub use dispatch::{
+    DIALECT_KEYWORDS, ParsedDocument, SourceFile, declaration_keyword, dialect_keyword,
+    parse_document, validate_frontend_registry,
+};
 pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,
     DomainError, DomainEvent, DomainEvolve, DomainField, DomainInvariant, DomainLoc,
@@ -45,8 +50,9 @@ pub use surface::{
     PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
     RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementBranch, RequirementsItem, SpecItem, StateField, Statement,
-    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
-    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance,
+    SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr,
+    VerifyItem,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

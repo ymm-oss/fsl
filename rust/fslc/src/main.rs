@@ -3199,19 +3199,6 @@ fn format_fsl_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> Stri
 
 fn run_check(path: &Path) -> (Value, i32) {
     if let Ok(source) = std::fs::read_to_string(path)
-        && source.trim_start().starts_with("agent ")
-    {
-        let name = declaration_name(source.trim_start(), "agent ").unwrap_or_default();
-        let mut output = envelope();
-        output.insert("result".to_owned(), json!("ok"));
-        output.insert("spec".to_owned(), json!(name));
-        output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
-        output.insert("warnings".to_owned(), json!([]));
-        output.insert("ai_analysis_result".to_owned(), json!("agent_analyzed"));
-        output.insert("agent_analysis_result".to_owned(), json!("agent_analyzed"));
-        return (Value::Object(output), 0);
-    }
-    if let Ok(source) = std::fs::read_to_string(path)
         && is_ai_project(&source)
     {
         let mut output = envelope();
@@ -3232,10 +3219,24 @@ fn run_check(path: &Path) -> (Value, i32) {
         );
         return (Value::Object(output), 0);
     }
-    if let Ok(source) = std::fs::read_to_string(path)
-        && let Err(error) = fsl_syntax::parse_surface_document(&source)
-    {
-        return (error_output("parse", &error.to_string()), 2);
+    if let Ok(source) = std::fs::read_to_string(path) {
+        match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
+            Ok(fsl_syntax::ParsedDocument {
+                surface: fsl_syntax::SurfaceDocument::Agent(agent),
+                ..
+            }) => {
+                let mut output = envelope();
+                output.insert("result".to_owned(), json!("ok"));
+                output.insert("spec".to_owned(), json!(agent.name));
+                output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
+                output.insert("warnings".to_owned(), json!([]));
+                output.insert("ai_analysis_result".to_owned(), json!("agent_analyzed"));
+                output.insert("agent_analysis_result".to_owned(), json!("agent_analyzed"));
+                return (Value::Object(output), 0);
+            }
+            Ok(_) => {}
+            Err(error) => return (surface_parse_error_output(&error), 2),
+        }
     }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -3369,21 +3370,13 @@ fn run_conformance(
 }
 
 fn source_dialect(source: &str) -> &str {
-    let first = source
-        .lines()
-        .map(str::trim_start)
-        .find(|line| !line.is_empty() && !line.starts_with("//"))
-        .and_then(|line| line.split_whitespace().next());
-    match first {
-        Some("spec") => "kernel",
-        Some("requirements") => "requirements",
-        Some("business") => "business",
-        Some("domain") => "domain",
-        Some("database" | "db") => "db",
-        Some("governance") => "governance",
-        Some("component") => "ai-component",
-        Some(other) => other,
-        None => "unknown",
+    match fsl_syntax::dialect_keyword(source) {
+        Ok("spec") => "kernel",
+        Ok("dbsystem") => "db",
+        Ok("ai_component") => "ai-component",
+        Ok("agent") => "ai-agent",
+        Ok(keyword) => keyword,
+        Err(_) => "unknown",
     }
 }
 
@@ -4131,11 +4124,26 @@ struct AiProjectSummary {
     raw_blocks: Vec<String>,
 }
 fn is_ai_project(source: &str) -> bool {
+    const PROJECT_BLOCKS: &[&str] = &[
+        "ai_action",
+        "ai_component",
+        "ai_contract",
+        "ai_migration",
+        "authority",
+        "dataset",
+        "evaluator",
+        "failure_mode",
+        "observed_property",
+        "retriever",
+        "statistical_property",
+        "trust_boundary",
+    ];
     source.lines().any(|line| {
         line.trim_start().starts_with("statistical_property ")
             || line.trim_start().starts_with("ai_migration ")
             || line.trim_start().starts_with("observed_property ")
-    })
+    }) && fsl_syntax::declaration_keyword(source)
+        .is_ok_and(|keyword| PROJECT_BLOCKS.contains(&keyword.as_str()))
 }
 fn declaration_name(line: &str, prefix: &str) -> Option<String> {
     line.trim()
@@ -7206,6 +7214,7 @@ fn surface_document_name(document: &fsl_syntax::SurfaceDocument) -> Option<&str>
         fsl_syntax::SurfaceDocument::Business(document) => Some(&document.name),
         fsl_syntax::SurfaceDocument::Requirements(document) => Some(&document.name),
         fsl_syntax::SurfaceDocument::Compose(document) => Some(&document.name),
+        fsl_syntax::SurfaceDocument::Agent(document) => Some(&document.name),
         _ => None,
     }
 }
@@ -12708,10 +12717,23 @@ fn run_verify(
     explicit_budget: usize,
     k_ind: usize,
 ) -> (Value, i32) {
-    if let Ok(source) = std::fs::read_to_string(path)
-        && let Err(error) = fsl_syntax::parse_surface_document(&source)
-    {
-        return (error_output("parse", &error.to_string()), 2);
+    if let Ok(source) = std::fs::read_to_string(path) {
+        match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
+            Err(error) => return (surface_parse_error_output(&error), 2),
+            Ok(fsl_syntax::ParsedDocument {
+                surface: fsl_syntax::SurfaceDocument::Agent(_),
+                ..
+            }) => {
+                return (
+                    error_output(
+                        "parse",
+                        "agent documents cannot be verified as Kernel specs",
+                    ),
+                    2,
+                );
+            }
+            Ok(_) => {}
+        }
     }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -13374,6 +13396,14 @@ fn error_output(kind: &str, message: &str) -> Value {
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
     Value::Object(output)
+}
+
+fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {
+    let mut output = error_output("parse", &error.to_string());
+    let object = output.as_object_mut().expect("error envelope");
+    object.insert("diagnostic_code".to_owned(), json!(error.code()));
+    object.insert("loc".to_owned(), error.span.python_loc());
+    output
 }
 
 fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {

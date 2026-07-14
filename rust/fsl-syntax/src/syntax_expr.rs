@@ -390,11 +390,10 @@ impl SyntaxExpr {
                 right: Box::new(right.into_kernel()?),
             },
             SyntaxExprKind::Membership { .. } => {
-                return Err(ParseError {
-                    message: "finite membership is domain syntax and requires domain lowering"
-                        .to_owned(),
+                return Err(ParseError::new(
+                    "finite membership is domain syntax and requires domain lowering",
                     span,
-                });
+                ));
             }
             SyntaxExprKind::Neg(value) => Expr::Neg(Box::new(value.into_kernel()?)),
             SyntaxExprKind::Not(value) => Expr::Not(Box::new(value.into_kernel()?)),
@@ -894,10 +893,7 @@ impl SyntaxParser<'_> {
                     span: join(token.span, self.previous_span()),
                 })
             }
-            _ => Err(ParseError {
-                message: "expected expression".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected expression", token.span)),
         }
     }
 
@@ -1245,10 +1241,7 @@ impl SyntaxParser<'_> {
                 text,
                 span: token.span,
             }),
-            _ => Err(ParseError {
-                message: "expected identifier".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected identifier", token.span)),
         }
     }
 
@@ -1272,19 +1265,13 @@ impl SyntaxParser<'_> {
         if self.at_boundary() {
             self.boundary_error(message)
         } else {
-            ParseError {
-                message: message.to_owned(),
-                span: self.peek().span,
-            }
+            ParseError::new(message, self.peek().span)
         }
     }
 
     fn boundary_error(&self, message: &str) -> ParseError {
         let end = self.previous_span().end;
-        ParseError {
-            message: message.to_owned(),
-            span: Span { start: end, end },
-        }
+        ParseError::new(message, Span { start: end, end })
     }
 }
 

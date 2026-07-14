@@ -8090,7 +8090,12 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "parse",
-          "message": "unexpected character '&' at 6:47"
+          "message": "unexpected character '&' at 6:47",
+          "diagnostic_code": "FSL-PARSE",
+          "loc": {
+            "line": 6,
+            "column": 47
+          }
         }
       },
       "verify": {
@@ -8170,7 +8175,12 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "parse",
-          "message": "expected expression at 6:42"
+          "message": "expected expression at 6:42",
+          "diagnostic_code": "FSL-PARSE",
+          "loc": {
+            "line": 6,
+            "column": 42
+          }
         }
       },
       "verify": {
@@ -8190,7 +8200,12 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "parse",
-          "message": "expected expression at 6:44"
+          "message": "expected expression at 6:44",
+          "diagnostic_code": "FSL-PARSE",
+          "loc": {
+            "line": 6,
+            "column": 44
+          }
         }
       },
       "verify": {

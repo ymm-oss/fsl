@@ -128,14 +128,19 @@ impl AiHardCheck {
 ///
 /// Returns [`ParseError`] when lexical or syntactic analysis fails.
 pub fn parse_ai_component(source: &str) -> Result<AiComponent, ParseError> {
-    let tokens = lex(source).map_err(|error| ParseError {
-        message: error.message,
-        span: error.span,
-    })?;
+    let tokens = lex(source).map_err(ParseError::from)?;
+    parse_ai_component_tokens(source, tokens, 0)
+}
+
+pub(crate) fn parse_ai_component_tokens(
+    source: &str,
+    tokens: Vec<Token>,
+    cursor: usize,
+) -> Result<AiComponent, ParseError> {
     let mut parser = AiParser {
         source,
         tokens,
-        cursor: 0,
+        cursor,
     };
     let component = parser.component()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -335,10 +340,7 @@ impl AiParser<'_> {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Ident(value) | TokenKind::String(value) => Ok(value),
-            _ => Err(ParseError {
-                message: "expected name or string".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected name or string", token.span)),
         }
     }
 
@@ -405,10 +407,7 @@ impl AiParser<'_> {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Ident(value) => Ok(value),
-            _ => Err(ParseError {
-                message: "expected identifier".to_owned(),
-                span: token.span,
-            }),
+            _ => Err(ParseError::new("expected identifier", token.span)),
         }
     }
 
@@ -429,9 +428,6 @@ impl AiParser<'_> {
     }
 
     fn error(&self, message: &str) -> ParseError {
-        ParseError {
-            message: message.to_owned(),
-            span: self.peek().span,
-        }
+        ParseError::new(message, self.peek().span)
     }
 }

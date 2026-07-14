@@ -2,8 +2,8 @@
 // Copyright 2026 Ryoichi Izumita
 
 use fsl_core::{
-    Annotation, AnnotationValue, FsResolver, SymbolPath, action_target, build_model,
-    parse_kernel_source, requirements_trace_contract,
+    Annotation, AnnotationValue, FileResolver, FsResolver, SPEC_TARGET, SymbolPath, action_target,
+    build_model, parse_kernel_source, parse_kernel_source_with_bounds, requirements_trace_contract,
 };
 use fsl_syntax::{SourcePos, Span};
 
@@ -49,6 +49,10 @@ fn keeps_multiple_typed_annotations_and_legacy_projection_on_one_declaration() {
             span: span(20),
         },
     );
+    let custom = SymbolPath::new(["acme".to_owned(), "review".to_owned()], span(24))
+        .expect("valid namespace");
+    assert_eq!(custom.segments(), ["acme", "review"]);
+    assert_eq!(custom.span(), span(24));
     kernel.bind_annotation(
         target.clone(),
         Annotation::Undecided {
@@ -98,6 +102,77 @@ fn keeps_multiple_typed_annotations_and_legacy_projection_on_one_declaration() {
         "review owner is pending"
     );
     assert_eq!(action.meta.as_ref().expect("legacy projection").id, "REQ-1");
+}
+
+#[test]
+fn top_level_annotations_flow_from_dispatch_into_the_checked_spec() {
+    let kernel = parse_kernel_source(
+        r#"
+@requirement("REQ-TOP", "the document owns this contract")
+@acme.review(owner.team, 2, true)
+spec TopLevelAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated document");
+
+    let annotations = kernel.annotations().annotations_for(SPEC_TARGET);
+    assert_eq!(annotations.source_order().len(), 2);
+    assert_eq!(annotations.requirements().unwrap()[0].id, "REQ-TOP");
+    let Annotation::Custom { namespace, .. } = &annotations.source_order()[1] else {
+        panic!("expected custom annotation")
+    };
+    assert_eq!(namespace.to_string(), "acme.review");
+    assert_eq!(namespace.span().start.line, 3);
+}
+
+#[test]
+fn scoped_parse_preserves_top_level_annotations() {
+    let kernel = parse_kernel_source_with_bounds(
+        "@requirement(\"REQ-TOP\")\nspec Annotated { state { ready: Bool } init { ready = false } }",
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
+    )
+    .expect("parse annotated scoped document");
+
+    assert_eq!(
+        kernel
+            .annotations()
+            .annotations_for(SPEC_TARGET)
+            .requirements()
+            .unwrap()[0]
+            .id,
+        "REQ-TOP"
+    );
+}
+
+#[test]
+fn compose_preserves_component_document_annotations() {
+    struct Resolver;
+    impl FileResolver for Resolver {
+        fn read(&self, _path: &str) -> Result<String, fsl_core::CoreError> {
+            Ok("@requirement(\"REQ-COMPONENT\")\nspec Child { state { ready: Bool } init { ready = false } }".to_owned())
+        }
+    }
+
+    let kernel = parse_kernel_source(
+        "compose Parent { use Child as child from \"child.fsl\" }",
+        &Resolver,
+    )
+    .expect("parse annotated component");
+
+    assert_eq!(
+        kernel
+            .annotations()
+            .annotations_for(SPEC_TARGET)
+            .requirements()
+            .unwrap()[0]
+            .id,
+        "REQ-COMPONENT"
+    );
 }
 
 #[test]
