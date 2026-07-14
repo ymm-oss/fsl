@@ -98,7 +98,10 @@ impl<'a> Lexer<'a> {
 
     fn skip_trivia(&mut self) {
         loop {
-            while self.peek().is_some_and(char::is_whitespace) {
+            while self
+                .peek()
+                .is_some_and(|ch| ch.is_whitespace() || ch == '\u{feff}')
+            {
                 self.bump();
             }
             if self.remaining().starts_with("//") {
@@ -173,7 +176,7 @@ impl<'a> Lexer<'a> {
             return Ok(TokenKind::Symbol((*symbol).to_owned()));
         }
         let ch = self.bump().expect("peeked character");
-        if "{}()[],:;.+-*/%<>=.|".contains(ch) {
+        if "{}()[],:;.+-*/%<>=.|@".contains(ch) {
             Ok(TokenKind::Symbol(ch.to_string()))
         } else {
             Err(LexError {

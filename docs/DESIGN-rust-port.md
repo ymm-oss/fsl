@@ -89,6 +89,14 @@ Every AST node retains line and column information. `kind: "parse"` and `loc`
 must match the Python result for the corpus; detailed parser messages and expected
 token lists may differ only where the parity allowlist says so.
 
+Issue #247 makes the native `fsl-syntax::parse_document` token registry the
+authority for document dispatch. Native CLI/library/tool/Worker entrypoints use
+that API (or its compatibility adapter) and specialized frontends borrow its one
+token stream. The retained Python LSP cannot link the Rust crate, so its parser
+selection is explicitly a compatibility adapter with the same ordered keys and
+significant-token rules; parity tests, not independent language authority, keep
+it aligned. See `DESIGN-token-registry.md`.
+
 Phase 0 adds a temporary Python AST JSON exporter and compares the Rust AST with
 the tuple AST for every corpus file. Dialect expansion remains a pure AST-to-AST
 stage before `build_spec`, matching the current requirements, business,

@@ -71,6 +71,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Native document parsing now lexes once and dispatches all ten supported
+  top-level dialects through one token registry. BOM/comments/whitespace and
+  typed top-level annotations are handled before dispatch; keyword-like
+  annotation arguments cannot select a frontend. Duplicate keys fail closed,
+  empty/unknown documents expose stable codes, spans, and supported keys,
+  recursive agents and AI projects no longer use raw-prefix CLI exceptions,
+  and the retained Python LSP mirrors the significant-token contract with
+  offset-preserving parity tests. `SymbolPath` now retains multi-segment
+  identifiers and its full span (issue #247).
 - Native Rust now carries ordered, typed `Requirement`, `Undecided`, `Kind`,
   and namespaced `Custom` annotations through a common target-keyed IR. Legacy
   declaration strings, spec badges, requirement blocks, process `covers`, and

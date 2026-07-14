@@ -6,11 +6,14 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::Span;
+use crate::{Span, SyntaxIdent};
 
 /// A namespaced symbol such as `acme.review.owner`.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct SymbolPath(Vec<String>);
+#[derive(Clone, Debug)]
+pub struct SymbolPath {
+    segments: Vec<SyntaxIdent>,
+    span: Span,
+}
 
 impl SymbolPath {
     /// Construct a validated symbol path.
@@ -22,25 +25,119 @@ impl SymbolPath {
         segments: impl IntoIterator<Item = String>,
         span: Span,
     ) -> Result<Self, AnnotationError> {
-        let segments = segments.into_iter().collect::<Vec<_>>();
-        if segments.is_empty() || segments.iter().any(|segment| segment.trim().is_empty()) {
+        let segments = segments
+            .into_iter()
+            .map(|text| SyntaxIdent { text, span })
+            .collect::<Vec<_>>();
+        Self::from_idents(segments, span)
+    }
+
+    /// Construct a symbol path while retaining every identifier span.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnnotationError`] when the path is empty or contains an empty segment.
+    pub fn from_idents(segments: Vec<SyntaxIdent>, span: Span) -> Result<Self, AnnotationError> {
+        if segments.is_empty()
+            || segments
+                .iter()
+                .any(|segment| segment.text.trim().is_empty())
+        {
             return Err(AnnotationError::new(
                 "custom annotation namespace must contain non-empty segments",
                 span,
             ));
         }
-        Ok(Self(segments))
+        Ok(Self { segments, span })
     }
 
     #[must_use]
-    pub fn segments(&self) -> &[String] {
-        &self.0
+    pub fn segments(&self) -> &[SyntaxIdent] {
+        &self.segments
+    }
+
+    #[must_use]
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    #[must_use]
+    pub fn matches(&self, segments: &[&str]) -> bool {
+        self.segments.len() == segments.len()
+            && self
+                .segments
+                .iter()
+                .zip(segments)
+                .all(|(actual, expected)| actual.as_str() == *expected)
+    }
+
+    /// Return the final identifier segment.
+    ///
+    /// # Panics
+    ///
+    /// This panics only if the private non-empty path invariant is violated.
+    #[must_use]
+    pub fn name(&self) -> &SyntaxIdent {
+        self.segments.last().expect("symbol paths are non-empty")
+    }
+
+    #[must_use]
+    pub fn has_namespace(&self) -> bool {
+        self.segments.len() > 1
+    }
+
+    /// Adapt the loss-aware path to the frozen two-field kernel name shape.
+    #[must_use]
+    pub fn legacy_parts(&self) -> (Option<String>, String) {
+        let name = self.name().text.clone();
+        let namespace = (self.segments.len() > 1).then(|| {
+            self.segments[..self.segments.len() - 1]
+                .iter()
+                .map(SyntaxIdent::as_str)
+                .collect::<Vec<_>>()
+                .join(".")
+        });
+        (namespace, name)
+    }
+}
+
+impl PartialEq for SymbolPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.segments
+            .iter()
+            .map(SyntaxIdent::as_str)
+            .eq(other.segments.iter().map(SyntaxIdent::as_str))
+    }
+}
+
+impl Eq for SymbolPath {}
+
+impl PartialOrd for SymbolPath {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SymbolPath {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.segments
+            .iter()
+            .map(SyntaxIdent::as_str)
+            .cmp(other.segments.iter().map(SyntaxIdent::as_str))
     }
 }
 
 impl fmt::Display for SymbolPath {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.join("."))
+        let mut segments = self.segments.iter();
+        if let Some(first) = segments.next() {
+            formatter.write_str(first.as_str())?;
+        }
+        for segment in segments {
+            formatter.write_str(".")?;
+            formatter.write_str(segment.as_str())?;
+        }
+        Ok(())
     }
 }
 
@@ -227,7 +324,7 @@ impl Annotations {
                     if namespace
                         .segments()
                         .iter()
-                        .any(|segment| segment.trim().is_empty())
+                        .any(|segment| segment.text.trim().is_empty())
                     {
                         return Err(AnnotationError::new(
                             "custom annotation namespace must contain non-empty segments",

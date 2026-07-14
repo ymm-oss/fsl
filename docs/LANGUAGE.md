@@ -20,6 +20,24 @@ the implementation design of each feature can be reached from
 
 ## 1. Structure of a specification
 
+Every document begins with one registered declaration keyword: `spec`,
+`refinement`, `compose`, `business`, `governance`, `requirements`, `domain`,
+`dbsystem`, `ai_component`, or `agent`. Leading whitespace, `//` comments, and a
+UTF-8 BOM do not affect dispatch. Typed document metadata may precede the
+declaration:
+
+```fsl
+@requirement("REQ-247", "shared dispatch")
+@acme.review.owner(team.platform, 2, true)
+spec Example {}
+```
+
+Annotation names and symbol arguments are multi-segment paths. Arguments may be
+strings, integers, Booleans, or symbol paths. `requirement`, `kind`, and
+`undecided` use the built-in typed annotation variants; other paths are inert
+custom metadata. Annotation argument keywords are never dialect selectors. See
+`DESIGN-token-registry.md`.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>

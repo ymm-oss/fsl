@@ -267,7 +267,14 @@ pub fn parse_db_system(source: &str) -> Result<DbSystem, ParseError> {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = DbParser { tokens, cursor: 0 };
+    parse_db_system_tokens(&tokens, 0)
+}
+
+pub(crate) fn parse_db_system_tokens(
+    tokens: &[Token],
+    cursor: usize,
+) -> Result<DbSystem, ParseError> {
+    let mut parser = DbParser { tokens, cursor };
     let system = parser.system()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after dbsystem"));
@@ -275,12 +282,12 @@ pub fn parse_db_system(source: &str) -> Result<DbSystem, ParseError> {
     Ok(system)
 }
 
-struct DbParser {
-    tokens: Vec<Token>,
+struct DbParser<'a> {
+    tokens: &'a [Token],
     cursor: usize,
 }
 
-impl DbParser {
+impl DbParser<'_> {
     fn system(&mut self) -> Result<DbSystem, ParseError> {
         let span = self.peek().span;
         self.expect_ident_value("dbsystem")?;

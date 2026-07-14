@@ -9,9 +9,8 @@ contextual, so declarations and references are classified by parse-tree
 position, not by spelling. The `ai_component`/`agent`/`dbsystem`/`domain`
 frontend dialects have their own Lark grammars (``fslc.ai_parser``/
 ``fslc.db_parser``/``fslc.domain_parser``) that never reach the kernel
-grammar at all -- ``build_index`` picks the matching raw parser via
-``is_ai_source``/``is_dbsystem_source``/``is_domain_source`` before falling
-back to the kernel ``PARSER``, so those files no longer fail to parse here
+grammar at all -- ``build_index`` uses the token-registry compatibility adapter
+before falling back to the kernel ``PARSER``, so those files no longer fail to parse here
 just because indexing hard-codes the kernel grammar. fsl-ai *project* files
 (``is_ai_project_source``) are a further special case: they are not
 Lark-parsed at all (``ai_project.py`` scans top-level blocks with regexes),
@@ -33,10 +32,11 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from lark import Tree, Token
 
 from fslc.grammar import PARSER
-from fslc.ai_parser import AI_PARSER, is_ai_source
+from fslc.ai_parser import AI_PARSER
 from fslc.ai_project import _top_blocks, is_ai_project_source
-from fslc.db_parser import DB_PARSER, is_dbsystem_source
-from fslc.domain_parser import PARSER as DOMAIN_PARSER, is_domain_source
+from fslc.db_parser import DB_PARSER
+from fslc.domain_parser import PARSER as DOMAIN_PARSER
+from fslc.lsp.dialect_dispatch import classify_lsp_dialect, mask_dispatch_prefix
 
 
 VALUE_ROLES = {
@@ -569,11 +569,12 @@ class DocumentIndex:
 
 
 def _parser_for_source(source: str):
-    if is_dbsystem_source(source):
+    dispatch = classify_lsp_dialect(source)
+    if dispatch is not None and dispatch.keyword == "dbsystem":
         return DB_PARSER
-    if is_domain_source(source):
+    if dispatch is not None and dispatch.keyword == "domain":
         return DOMAIN_PARSER
-    if is_ai_source(source):
+    if dispatch is not None and dispatch.keyword in {"ai_component", "agent"}:
         return AI_PARSER
     return PARSER
 
@@ -614,9 +615,19 @@ def _build_ai_project_index(source: str, path: Optional[str]) -> "DocumentIndex"
 def build_index(source: str, path: Optional[str] = None) -> DocumentIndex:
     """Parse ``source`` and return a raw-tree symbol/reference index."""
 
-    if is_ai_project_source(source):
+    dispatch = classify_lsp_dialect(source)
+    if (
+        dispatch is not None
+        and dispatch.keyword == "ai_component"
+        and is_ai_project_source(source)
+    ):
         return _build_ai_project_index(source, path)
-    tree = _parser_for_source(source).parse(source)
+    parser_source = (
+        mask_dispatch_prefix(source, dispatch.declaration_offset)
+        if dispatch is not None
+        else source
+    )
+    tree = _parser_for_source(source).parse(parser_source)
     builder = _IndexBuilder(source, path)
     builder.visit(tree, None, None)
     return DocumentIndex(

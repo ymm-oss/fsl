@@ -132,25 +132,45 @@ pub fn parse_ai_component(source: &str) -> Result<AiComponent, ParseError> {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = AiParser {
-        source,
-        tokens,
-        cursor: 0,
-    };
-    let component = parser.component()?;
-    if !matches!(parser.peek().kind, TokenKind::Eof) {
-        return Err(parser.error("unexpected token after ai_component"));
+    parse_ai_component_tokens(source, &tokens, 0)
+}
+
+pub(crate) fn parse_ai_component_tokens(
+    source: &str,
+    tokens: &[Token],
+    cursor: usize,
+) -> Result<AiComponent, ParseError> {
+    let (component, cursor) = parse_ai_component_prefix(source, tokens, cursor)?;
+    if !matches!(tokens[cursor].kind, TokenKind::Eof) {
+        return Err(ParseError {
+            message: "unexpected token after ai_component".to_owned(),
+            span: tokens[cursor].span,
+        });
     }
     Ok(component)
 }
 
-struct AiParser<'a> {
-    source: &'a str,
-    tokens: Vec<Token>,
+pub(crate) fn parse_ai_component_prefix(
+    source: &str,
+    tokens: &[Token],
+    cursor: usize,
+) -> Result<(AiComponent, usize), ParseError> {
+    let mut parser = AiParser {
+        source,
+        tokens,
+        cursor,
+    };
+    let component = parser.component()?;
+    Ok((component, parser.cursor))
+}
+
+struct AiParser<'source, 'tokens> {
+    source: &'source str,
+    tokens: &'tokens [Token],
     cursor: usize,
 }
 
-impl AiParser<'_> {
+impl AiParser<'_, '_> {
     fn component(&mut self) -> Result<AiComponent, ParseError> {
         let loc = self.loc();
         self.expect_ident_value("ai_component")?;

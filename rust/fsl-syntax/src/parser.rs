@@ -1,20 +1,167 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
+use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::OnceLock;
 
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
-    AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Binder, BusinessGoalBody,
-    BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr, GovernanceArtifactRef,
-    GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
-    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    QualifiedName, RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
-    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
-    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr,
-    VerifyItem, lex,
+    AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Annotation, AnnotationValue,
+    Annotations, Binder, BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem,
+    ControlAttribute, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
+    HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessCover,
+    ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName, RefinementItem,
+    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
+    RequirementBranch, RequirementsItem, Span, SpecItem, Statement, SurfaceAgent, SurfaceBusiness,
+    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
+    SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem, Token, TokenKind,
+    TypeExpr, VerifyItem, lex,
 };
+
+const SUPPORTED_DIALECTS: [FrontendRegistration; 10] = [
+    FrontendRegistration::registered("spec", Dialect::Spec, parse_shared_frontend),
+    FrontendRegistration::registered("refinement", Dialect::Refinement, parse_shared_frontend),
+    FrontendRegistration::registered("compose", Dialect::Compose, parse_shared_frontend),
+    FrontendRegistration::registered("business", Dialect::Business, parse_shared_frontend),
+    FrontendRegistration::registered("governance", Dialect::Governance, parse_shared_frontend),
+    FrontendRegistration::registered("requirements", Dialect::Requirements, parse_shared_frontend),
+    FrontendRegistration::registered("domain", Dialect::Domain, parse_domain_frontend),
+    FrontendRegistration::registered("dbsystem", Dialect::DbSystem, parse_db_frontend),
+    FrontendRegistration::registered("ai_component", Dialect::AiComponent, parse_ai_frontend),
+    FrontendRegistration::registered("agent", Dialect::Agent, parse_agent_frontend),
+];
+
+static SUPPORTED_KEYWORDS: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DiagnosticCode {
+    Syntax,
+    EmptyDocument,
+    UnsupportedDialect,
+    DuplicateDialectKey,
+}
+
+impl DiagnosticCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Syntax => "FSL-PARSE-SYNTAX",
+            Self::EmptyDocument => "FSL-PARSE-EMPTY-DOCUMENT",
+            Self::UnsupportedDialect => "FSL-PARSE-UNSUPPORTED-DIALECT",
+            Self::DuplicateDialectKey => "FSL-PARSE-DUPLICATE-DIALECT-KEY",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Dialect {
+    Spec,
+    Refinement,
+    Compose,
+    Business,
+    Governance,
+    Requirements,
+    Domain,
+    DbSystem,
+    AiComponent,
+    Agent,
+}
+
+type FrontendParser = fn(&str, &[Token], &DocumentHeader) -> Result<SurfaceDocument, ParseError>;
+
+#[derive(Clone, Copy, Debug)]
+pub struct FrontendRegistration {
+    pub keyword: &'static str,
+    pub dialect: Dialect,
+    frontend: Option<FrontendParser>,
+}
+
+impl FrontendRegistration {
+    #[must_use]
+    pub const fn new(keyword: &'static str, dialect: Dialect) -> Self {
+        Self {
+            keyword,
+            dialect,
+            frontend: None,
+        }
+    }
+
+    const fn registered(keyword: &'static str, dialect: Dialect, frontend: FrontendParser) -> Self {
+        Self {
+            keyword,
+            dialect,
+            frontend: Some(frontend),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RegistryError {
+    message: String,
+}
+
+impl RegistryError {
+    #[must_use]
+    pub const fn code(&self) -> DiagnosticCode {
+        DiagnosticCode::DuplicateDialectKey
+    }
+}
+
+impl fmt::Display for RegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RegistryError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceFile<'a> {
+    name: Option<&'a str>,
+    text: &'a str,
+}
+
+impl<'a> SourceFile<'a> {
+    #[must_use]
+    pub const fn anonymous(text: &'a str) -> Self {
+        Self { name: None, text }
+    }
+
+    #[must_use]
+    pub const fn named(name: &'a str, text: &'a str) -> Self {
+        Self {
+            name: Some(name),
+            text,
+        }
+    }
+
+    #[must_use]
+    pub const fn text(self) -> &'a str {
+        self.text
+    }
+
+    #[must_use]
+    pub const fn name(self) -> Option<&'a str> {
+        self.name
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DocumentHeader {
+    pub dialect: Dialect,
+    pub annotations: Annotations,
+    pub declaration_span: Span,
+    declaration_index: usize,
+    registration_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedDocument {
+    pub dialect: Dialect,
+    pub annotations: Annotations,
+    pub surface: SurfaceDocument,
+}
 
 fn join_span(start: Span, end: Span) -> Span {
     Span {
@@ -27,6 +174,31 @@ fn join_span(start: Span, end: Span) -> Span {
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+}
+
+impl ParseError {
+    #[must_use]
+    pub fn code(&self) -> DiagnosticCode {
+        match self.message.as_str() {
+            "empty document" => DiagnosticCode::EmptyDocument,
+            message if message.starts_with("unsupported dialect '") => {
+                DiagnosticCode::UnsupportedDialect
+            }
+            message if message.starts_with("duplicate dialect registry key '") => {
+                DiagnosticCode::DuplicateDialectKey
+            }
+            _ => DiagnosticCode::Syntax,
+        }
+    }
+
+    #[must_use]
+    pub fn supported_keywords(&self) -> &'static [&'static str] {
+        if self.code() == DiagnosticCode::UnsupportedDialect {
+            supported_dialect_keywords()
+        } else {
+            &[]
+        }
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -52,7 +224,10 @@ pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = Parser { tokens, cursor: 0 };
+    let mut parser = Parser {
+        tokens: &tokens,
+        cursor: 0,
+    };
     let expr = parser.expression(0)?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after expression"));
@@ -71,12 +246,91 @@ pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = Parser { tokens, cursor: 0 };
+    let mut parser = Parser {
+        tokens: &tokens,
+        cursor: 0,
+    };
     let spec = parser.surface_spec()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after spec"));
     }
     Ok(spec)
+}
+
+#[must_use]
+pub fn supported_dialect_keywords() -> &'static [&'static str] {
+    SUPPORTED_KEYWORDS
+        .get_or_init(|| {
+            SUPPORTED_DIALECTS
+                .iter()
+                .map(|registration| registration.keyword)
+                .collect()
+        })
+        .as_slice()
+}
+
+/// Validate that a frontend registry has one owner for every keyword.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] when a keyword occurs more than once.
+pub fn validate_frontend_registry(
+    registrations: &[FrontendRegistration],
+) -> Result<(), RegistryError> {
+    let mut keys = BTreeSet::new();
+    for registration in registrations {
+        if !keys.insert(registration.keyword) {
+            return Err(RegistryError {
+                message: format!("duplicate dialect registry key '{}'", registration.keyword),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Classify a source document from its first significant declaration token.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] for lexical errors, malformed annotations, empty
+/// documents, or unsupported top-level keywords.
+pub fn classify_document(source: &SourceFile<'_>) -> Result<DocumentHeader, ParseError> {
+    let tokens = lex(source.text()).map_err(|error| ParseError {
+        message: error.message,
+        span: error.span,
+    })?;
+    classify_tokens(&tokens)
+}
+
+/// Parse a document through the shared lexer and dialect registry.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] when lexing, annotation parsing, dispatch, or the
+/// selected dialect frontend fails.
+pub fn parse_document(source: &SourceFile<'_>) -> Result<ParsedDocument, ParseError> {
+    validate_frontend_registry(&SUPPORTED_DIALECTS).map_err(|error| ParseError {
+        message: error.to_string(),
+        span: zero_span(),
+    })?;
+    let tokens = lex(source.text()).map_err(|error| ParseError {
+        message: error.message,
+        span: error.span,
+    })?;
+    let header = classify_tokens(&tokens)?;
+    let frontend = SUPPORTED_DIALECTS
+        .get(header.registration_index)
+        .and_then(|registration| registration.frontend)
+        .ok_or_else(|| ParseError {
+            message: "dialect registry entry has no frontend".to_owned(),
+            span: header.declaration_span,
+        })?;
+    let surface = frontend(source.text(), &tokens, &header)?;
+    Ok(ParsedDocument {
+        dialect: header.dialect,
+        annotations: header.annotations,
+        surface,
+    })
 }
 
 /// Parse a supported shared-grammar surface document.
@@ -86,34 +340,332 @@ pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
 /// Returns [`ParseError`] for invalid syntax or a top-level dialect that has
 /// not yet reached the Phase-0 parser gate.
 pub fn parse_surface_document(source: &str) -> Result<SurfaceDocument, ParseError> {
-    if source.trim_start().starts_with("dbsystem") {
-        return crate::parse_db_system(source).map(SurfaceDocument::Db);
+    parse_document(&SourceFile::anonymous(source)).map(|parsed| parsed.surface)
+}
+
+fn zero_span() -> Span {
+    let position = crate::SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
+    Span {
+        start: position,
+        end: position,
     }
-    if source.trim_start().starts_with("domain ") {
-        return crate::parse_domain(source).map(SurfaceDocument::Domain);
-    }
-    if source.trim_start().starts_with("ai_component ") {
-        return crate::parse_ai_component(source).map(SurfaceDocument::AiComponent);
-    }
-    let tokens = lex(source).map_err(|error| ParseError {
+}
+
+fn classify_tokens(tokens: &[Token]) -> Result<DocumentHeader, ParseError> {
+    let mut cursor = 0;
+    let annotations = parse_document_annotations(tokens, &mut cursor)?;
+    annotations.validate().map_err(|error| ParseError {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = Parser { tokens, cursor: 0 };
-    let document = if parser.peek_ident("spec") {
-        SurfaceDocument::Spec(parser.surface_spec()?)
-    } else if parser.peek_ident("refinement") {
-        SurfaceDocument::Refinement(parser.surface_refinement()?)
-    } else if parser.peek_ident("business") {
-        SurfaceDocument::Business(parser.surface_business()?)
-    } else if parser.peek_ident("governance") {
-        SurfaceDocument::Governance(parser.surface_governance()?)
-    } else if parser.peek_ident("requirements") {
-        SurfaceDocument::Requirements(parser.surface_requirements()?)
-    } else if parser.peek_ident("compose") {
-        SurfaceDocument::Compose(parser.surface_compose()?)
+    let token = tokens
+        .get(cursor)
+        .unwrap_or_else(|| tokens.last().expect("lexer emits EOF"));
+    let TokenKind::Ident(keyword) = &token.kind else {
+        if matches!(token.kind, TokenKind::Eof) {
+            return Err(ParseError {
+                message: "empty document".to_owned(),
+                span: token.span,
+            });
+        }
+        return Err(ParseError {
+            message: "expected top-level declaration keyword".to_owned(),
+            span: token.span,
+        });
+    };
+    let (registration_index, registration) = SUPPORTED_DIALECTS
+        .iter()
+        .enumerate()
+        .find(|(_, registration)| registration.keyword == keyword)
+        .ok_or_else(|| ParseError {
+            message: format!("unsupported dialect '{keyword}'"),
+            span: token.span,
+        })?;
+    Ok(DocumentHeader {
+        dialect: registration.dialect,
+        annotations,
+        declaration_span: token.span,
+        declaration_index: cursor,
+        registration_index,
+    })
+}
+
+fn parse_document_annotations(
+    tokens: &[Token],
+    cursor: &mut usize,
+) -> Result<Annotations, ParseError> {
+    let mut annotations = Vec::new();
+    while token_is_symbol(tokens, *cursor, "@") {
+        annotations.push(parse_document_annotation(tokens, cursor)?);
+    }
+    Ok(Annotations::new(annotations))
+}
+
+fn parse_document_annotation(
+    tokens: &[Token],
+    cursor: &mut usize,
+) -> Result<Annotation, ParseError> {
+    let start = tokens[*cursor].span;
+    *cursor += 1;
+    let namespace = parse_symbol_path(tokens, cursor)?;
+    let mut arguments = Vec::new();
+    let mut end = namespace.span();
+    if token_is_symbol(tokens, *cursor, "(") {
+        *cursor += 1;
+        if !token_is_symbol(tokens, *cursor, ")") {
+            loop {
+                arguments.push(parse_annotation_value(tokens, cursor)?);
+                if token_is_symbol(tokens, *cursor, ")") {
+                    break;
+                }
+                expect_token_symbol(tokens, cursor, ",")?;
+            }
+        }
+        end = tokens[*cursor].span;
+        *cursor += 1;
+    }
+    let span = join_span(start, end);
+    annotation_from_parts(namespace, arguments, span)
+}
+
+fn annotation_from_parts(
+    namespace: SymbolPath,
+    arguments: Vec<AnnotationValue>,
+    span: Span,
+) -> Result<Annotation, ParseError> {
+    if namespace.matches(&["requirement"]) {
+        let (id, text) = annotation_id_and_text(&arguments, span)?;
+        return Ok(Annotation::Requirement { id, text, span });
+    }
+    if namespace.matches(&["kind"]) {
+        let (id, text) = annotation_id_and_text(&arguments, span)?;
+        return Ok(Annotation::Kind { id, text, span });
+    }
+    if namespace.matches(&["undecided"]) {
+        return match arguments.as_slice() {
+            [AnnotationValue::String(reason)] => Ok(Annotation::Undecided {
+                reason: reason.clone(),
+                span,
+            }),
+            _ => Err(ParseError {
+                message: "@undecided expects one string argument".to_owned(),
+                span,
+            }),
+        };
+    }
+    Ok(Annotation::Custom {
+        namespace,
+        arguments,
+        span,
+    })
+}
+
+fn annotation_id_and_text(
+    arguments: &[AnnotationValue],
+    span: Span,
+) -> Result<(String, Option<String>), ParseError> {
+    let id = match arguments.first() {
+        Some(AnnotationValue::String(value)) => value.clone(),
+        Some(AnnotationValue::Symbol(value)) => value.to_string(),
+        _ => {
+            return Err(ParseError {
+                message: "annotation expects a string or symbol ID".to_owned(),
+                span,
+            });
+        }
+    };
+    let text = match arguments.get(1) {
+        None => None,
+        Some(AnnotationValue::String(value)) => Some(value.clone()),
+        _ => {
+            return Err(ParseError {
+                message: "annotation text must be a string".to_owned(),
+                span,
+            });
+        }
+    };
+    if arguments.len() > 2 {
+        return Err(ParseError {
+            message: "annotation accepts at most two arguments".to_owned(),
+            span,
+        });
+    }
+    Ok((id, text))
+}
+
+fn parse_annotation_value(
+    tokens: &[Token],
+    cursor: &mut usize,
+) -> Result<AnnotationValue, ParseError> {
+    let token = tokens
+        .get(*cursor)
+        .unwrap_or_else(|| tokens.last().expect("lexer emits EOF"));
+    match &token.kind {
+        TokenKind::String(value) => {
+            *cursor += 1;
+            Ok(AnnotationValue::String(value.clone()))
+        }
+        TokenKind::Int(value) => {
+            *cursor += 1;
+            Ok(AnnotationValue::Integer(*value))
+        }
+        TokenKind::Ident(value) if value == "true" || value == "false" => {
+            *cursor += 1;
+            Ok(AnnotationValue::Boolean(value == "true"))
+        }
+        TokenKind::Ident(_) => parse_symbol_path(tokens, cursor).map(AnnotationValue::Symbol),
+        _ => Err(ParseError {
+            message: "expected annotation argument".to_owned(),
+            span: token.span,
+        }),
+    }
+}
+
+fn parse_symbol_path(tokens: &[Token], cursor: &mut usize) -> Result<SymbolPath, ParseError> {
+    let mut segments = vec![expect_token_ident(tokens, cursor)?];
+    while token_is_symbol(tokens, *cursor, ".") {
+        *cursor += 1;
+        segments.push(expect_token_ident(tokens, cursor)?);
+    }
+    let span = join_span(
+        segments.first().expect("path has one segment").span,
+        segments.last().expect("path has one segment").span,
+    );
+    SymbolPath::from_idents(segments, span).map_err(|error| ParseError {
+        message: error.message,
+        span: error.span,
+    })
+}
+
+fn expect_token_ident(tokens: &[Token], cursor: &mut usize) -> Result<SyntaxIdent, ParseError> {
+    let token = tokens
+        .get(*cursor)
+        .unwrap_or_else(|| tokens.last().expect("lexer emits EOF"));
+    if let TokenKind::Ident(text) = &token.kind {
+        *cursor += 1;
+        Ok(SyntaxIdent {
+            text: text.clone(),
+            span: token.span,
+        })
     } else {
-        return Err(parser.error("unsupported shared-grammar top-level declaration"));
+        Err(ParseError {
+            message: "expected identifier".to_owned(),
+            span: token.span,
+        })
+    }
+}
+
+fn expect_token_symbol(
+    tokens: &[Token],
+    cursor: &mut usize,
+    symbol: &str,
+) -> Result<(), ParseError> {
+    let token = tokens
+        .get(*cursor)
+        .unwrap_or_else(|| tokens.last().expect("lexer emits EOF"));
+    if matches!(&token.kind, TokenKind::Symbol(value) if value == symbol) {
+        *cursor += 1;
+        Ok(())
+    } else {
+        Err(ParseError {
+            message: format!("expected '{symbol}'"),
+            span: token.span,
+        })
+    }
+}
+
+fn token_is_symbol(tokens: &[Token], cursor: usize, symbol: &str) -> bool {
+    matches!(
+        tokens.get(cursor).map(|token| &token.kind),
+        Some(TokenKind::Symbol(value)) if value == symbol
+    )
+}
+
+fn parse_db_frontend(
+    source: &str,
+    tokens: &[Token],
+    header: &DocumentHeader,
+) -> Result<SurfaceDocument, ParseError> {
+    let _ = source;
+    crate::db::parse_db_system_tokens(tokens, header.declaration_index).map(SurfaceDocument::Db)
+}
+
+fn parse_domain_frontend(
+    source: &str,
+    tokens: &[Token],
+    header: &DocumentHeader,
+) -> Result<SurfaceDocument, ParseError> {
+    let _ = source;
+    crate::domain::parse_domain_tokens(tokens, header.declaration_index)
+        .map(SurfaceDocument::Domain)
+}
+
+fn parse_ai_frontend(
+    source: &str,
+    tokens: &[Token],
+    header: &DocumentHeader,
+) -> Result<SurfaceDocument, ParseError> {
+    let (component, cursor) =
+        crate::ai::parse_ai_component_prefix(source, tokens, header.declaration_index)?;
+    if matches!(tokens[cursor].kind, TokenKind::Eof) {
+        Ok(SurfaceDocument::AiComponent(component))
+    } else if tokens[cursor..].iter().any(|token| {
+        matches!(
+            &token.kind,
+            TokenKind::Ident(value)
+                if matches!(
+                    value.as_str(),
+                    "statistical_property" | "ai_migration" | "observed_property"
+                )
+        )
+    }) {
+        Ok(SurfaceDocument::AiProject(component))
+    } else {
+        Err(ParseError {
+            message: "unexpected token after ai_component".to_owned(),
+            span: tokens[cursor].span,
+        })
+    }
+}
+
+fn parse_agent_frontend(
+    source: &str,
+    tokens: &[Token],
+    header: &DocumentHeader,
+) -> Result<SurfaceDocument, ParseError> {
+    let _ = source;
+    parse_agent(tokens, header.declaration_index).map(SurfaceDocument::Agent)
+}
+
+fn parse_shared_frontend(
+    source: &str,
+    tokens: &[Token],
+    header: &DocumentHeader,
+) -> Result<SurfaceDocument, ParseError> {
+    let _ = source;
+    parse_shared_document(tokens, header.declaration_index, header.dialect)
+}
+
+fn parse_shared_document(
+    tokens: &[Token],
+    cursor: usize,
+    dialect: Dialect,
+) -> Result<SurfaceDocument, ParseError> {
+    let mut parser = Parser { tokens, cursor };
+    let document = match dialect {
+        Dialect::Spec => SurfaceDocument::Spec(parser.surface_spec()?),
+        Dialect::Refinement => SurfaceDocument::Refinement(parser.surface_refinement()?),
+        Dialect::Compose => SurfaceDocument::Compose(parser.surface_compose()?),
+        Dialect::Business => SurfaceDocument::Business(parser.surface_business()?),
+        Dialect::Governance => SurfaceDocument::Governance(parser.surface_governance()?),
+        Dialect::Requirements => SurfaceDocument::Requirements(parser.surface_requirements()?),
+        Dialect::Domain | Dialect::DbSystem | Dialect::AiComponent | Dialect::Agent => {
+            unreachable!("specialized frontend")
+        }
     };
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after surface document"));
@@ -121,12 +673,52 @@ pub fn parse_surface_document(source: &str) -> Result<SurfaceDocument, ParseErro
     Ok(document)
 }
 
-struct Parser {
-    tokens: Vec<Token>,
+fn parse_agent(tokens: &[Token], cursor: usize) -> Result<SurfaceAgent, ParseError> {
+    let mut cursor = cursor;
+    let start = tokens[cursor].span;
+    cursor += 1;
+    let name = expect_token_ident(tokens, &mut cursor)?.text;
+    expect_token_symbol(tokens, &mut cursor, "{")?;
+    let mut depth = 1_u32;
+    let mut end = start;
+    while depth > 0 {
+        let token = tokens
+            .get(cursor)
+            .unwrap_or_else(|| tokens.last().expect("lexer emits EOF"));
+        match &token.kind {
+            TokenKind::Symbol(symbol) if symbol == "{" => depth += 1,
+            TokenKind::Symbol(symbol) if symbol == "}" => {
+                depth -= 1;
+                end = token.span;
+            }
+            TokenKind::Eof => {
+                return Err(ParseError {
+                    message: "unterminated agent declaration".to_owned(),
+                    span: token.span,
+                });
+            }
+            _ => {}
+        }
+        cursor += 1;
+    }
+    if !matches!(tokens[cursor].kind, TokenKind::Eof) {
+        return Err(ParseError {
+            message: "unexpected token after agent declaration".to_owned(),
+            span: tokens[cursor].span,
+        });
+    }
+    Ok(SurfaceAgent {
+        name,
+        span: join_span(start, end),
+    })
+}
+
+struct Parser<'a> {
+    tokens: &'a [Token],
     cursor: usize,
 }
 
-impl Parser {
+impl Parser<'_> {
     fn surface_spec(&mut self) -> Result<SurfaceSpec, ParseError> {
         self.expect_ident_value("spec")?;
         let name = self.expect_ident()?;
@@ -1488,12 +2080,13 @@ impl Parser {
                 return Ok(result);
             }
         }
-        if let TokenKind::Ident(name) = &self.peek().kind {
-            if self.next_is_type_delimiter() {
-                let name = name.clone();
-                self.bump();
-                return Ok(TypeExpr::Name(name));
+        if matches!(self.peek().kind, TokenKind::Ident(_)) {
+            let checkpoint = self.cursor;
+            let path = self.symbol_path()?;
+            if self.current_is_type_delimiter() {
+                return Ok(TypeExpr::Name(path.to_string()));
             }
+            self.cursor = checkpoint;
         }
         let lo = self.expression(0)?;
         self.expect_symbol("..")?;
@@ -1501,9 +2094,9 @@ impl Parser {
         Ok(TypeExpr::Range(lo, hi))
     }
 
-    fn next_is_type_delimiter(&self) -> bool {
+    fn current_is_type_delimiter(&self) -> bool {
         matches!(
-            &self.peek_n(1).kind,
+            &self.peek().kind,
             TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ">" | "}" | "->" | "=")
         )
     }
@@ -1869,7 +2462,7 @@ impl Parser {
         );
         let mut cursor = self.cursor;
         let expression =
-            parse_tokens_expression(&self.tokens, &mut cursor, ExpressionMode::Kernel, false)?;
+            parse_tokens_expression(self.tokens, &mut cursor, ExpressionMode::Kernel, false)?;
         self.cursor = cursor;
         expression.into_kernel()
     }
@@ -1914,18 +2507,25 @@ impl Parser {
     }
 
     fn qualified_name(&mut self) -> Result<QualifiedName, ParseError> {
-        let first = self.expect_ident()?;
-        if self.eat_symbol(".") {
-            Ok(QualifiedName {
-                namespace: Some(first),
-                name: self.expect_ident()?,
-            })
-        } else {
-            Ok(QualifiedName {
-                namespace: None,
-                name: first,
-            })
+        let path = self.symbol_path()?;
+        let (namespace, name) = path.legacy_parts();
+        Ok(QualifiedName { namespace, name })
+    }
+
+    fn symbol_path(&mut self) -> Result<SymbolPath, ParseError> {
+        let mut segments = vec![self.expect_syntax_ident()?];
+        while self.eat_symbol(".") {
+            segments.push(self.expect_syntax_ident()?);
         }
+        let span = join_span(
+            segments.first().expect("qualified path is non-empty").span,
+            segments.last().expect("qualified path is non-empty").span,
+        );
+        let path = SymbolPath::from_idents(segments, span).map_err(|error| ParseError {
+            message: error.message,
+            span: error.span,
+        })?;
+        Ok(path)
     }
 
     fn expression_list(&mut self, close: &str) -> Result<Vec<Expr>, ParseError> {
@@ -2009,6 +2609,21 @@ impl Parser {
         let token = self.bump().clone();
         if let TokenKind::Ident(value) = token.kind {
             Ok(value)
+        } else {
+            Err(ParseError {
+                message: "expected identifier".to_owned(),
+                span: token.span,
+            })
+        }
+    }
+
+    fn expect_syntax_ident(&mut self) -> Result<SyntaxIdent, ParseError> {
+        let token = self.bump().clone();
+        if let TokenKind::Ident(text) = token.kind {
+            Ok(SyntaxIdent {
+                text,
+                span: token.span,
+            })
         } else {
             Err(ParseError {
                 message: "expected identifier".to_owned(),

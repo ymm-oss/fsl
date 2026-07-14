@@ -5,6 +5,14 @@ of rules as of v2.x.
 
 ## 1. Top-level structure
 
+The native document registry recognizes `spec`, `refinement`, `compose`,
+`business`, `governance`, `requirements`, `domain`, `dbsystem`, `ai_component`,
+and `agent` after BOM/whitespace/`//` trivia. Optional document annotations use
+`@path.to.name(<string|integer|boolean|symbol-path>, ...)` immediately before the
+declaration. Keywords inside annotation arguments do not select a dialect.
+Unknown/empty documents fail with stable structured diagnostics; see
+`docs/DESIGN-token-registry.md`.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)

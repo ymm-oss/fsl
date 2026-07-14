@@ -12,10 +12,10 @@
 use std::fmt;
 use std::ops::Deref;
 
-use crate::{Binder, Expr, ParseError, Pattern, QualifiedName, Span, Token, TokenKind};
+use crate::{Binder, Expr, ParseError, Pattern, QualifiedName, Span, SymbolPath, Token, TokenKind};
 
 /// An unresolved source identifier with its exact token span.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct SyntaxIdent {
     pub text: String,
     pub span: Span,
@@ -52,9 +52,7 @@ pub struct SyntaxOperator {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxQualifiedName {
-    pub namespace: Option<SyntaxIdent>,
-    pub name: SyntaxIdent,
-    pub span: Span,
+    pub path: SymbolPath,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -494,18 +492,29 @@ impl fmt::Display for SyntaxLValue {
 }
 
 impl SyntaxQualifiedName {
-    fn render_source(&self) -> String {
-        self.namespace.as_ref().map_or_else(
-            || self.name.text.clone(),
-            |namespace| format!("{}.{}", namespace.text, self.name.text),
-        )
+    #[must_use]
+    pub fn render_source(&self) -> String {
+        self.path.to_string()
+    }
+
+    #[must_use]
+    pub fn span(&self) -> Span {
+        self.path.span()
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &SyntaxIdent {
+        self.path.name()
+    }
+
+    #[must_use]
+    pub fn has_namespace(&self) -> bool {
+        self.path.has_namespace()
     }
 
     fn into_kernel(self) -> QualifiedName {
-        QualifiedName {
-            namespace: self.namespace.map(|value| value.text),
-            name: self.name.text,
-        }
+        let (namespace, name) = self.path.legacy_parts();
+        QualifiedName { namespace, name }
     }
 }
 
@@ -1024,7 +1033,7 @@ impl SyntaxParser<'_> {
             };
             let end = where_expr
                 .as_deref()
-                .map_or(type_name.span, |expression| expression.span);
+                .map_or(type_name.span(), |expression| expression.span);
             return Ok(SyntaxBinder::Typed {
                 name,
                 type_name,
@@ -1105,22 +1114,19 @@ impl SyntaxParser<'_> {
     }
 
     fn qualified_name(&mut self) -> Result<SyntaxQualifiedName, ParseError> {
-        let first = self.expect_ident()?;
-        let start = first.span;
-        if self.eat_symbol(".") {
-            let name = self.expect_ident()?;
-            Ok(SyntaxQualifiedName {
-                namespace: Some(first),
-                span: join(start, name.span),
-                name,
-            })
-        } else {
-            Ok(SyntaxQualifiedName {
-                span: start,
-                namespace: None,
-                name: first,
-            })
+        let mut segments = vec![self.expect_ident()?];
+        while self.eat_symbol(".") {
+            segments.push(self.expect_ident()?);
         }
+        let span = join(
+            segments.first().expect("qualified path is non-empty").span,
+            segments.last().expect("qualified path is non-empty").span,
+        );
+        let path = SymbolPath::from_idents(segments, span).map_err(|error| ParseError {
+            message: error.message,
+            span: error.span,
+        })?;
+        Ok(SyntaxQualifiedName { path })
     }
 
     fn expression_list(&mut self, close: &str) -> Result<Vec<SyntaxExpr>, ParseError> {

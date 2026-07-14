@@ -599,6 +599,17 @@ pub struct SurfaceCompose {
     pub items: Vec<ComposeItem>,
 }
 
+/// Minimal syntax boundary for the recursive `agent` evidence dialect.
+///
+/// Structural agent semantics remain owned by the AI analysis frontend. The
+/// shared document parser retains the declaration identity and source extent so
+/// generic entrypoints no longer need raw prefix inspection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurfaceAgent {
+    pub name: String,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SurfaceDocument {
     Spec(SurfaceSpec),
@@ -610,6 +621,8 @@ pub enum SurfaceDocument {
     Db(DbSystem),
     Domain(DomainSpec),
     AiComponent(AiComponent),
+    AiProject(AiComponent),
+    Agent(SurfaceAgent),
 }
 
 impl MetaTag {
@@ -1708,7 +1721,12 @@ impl SurfaceDocument {
             Self::Compose(compose) => compose.python_ast(),
             Self::Db(system) => system.python_ast(),
             Self::Domain(domain) => domain.python_ast(),
-            Self::AiComponent(component) => component.python_ast(),
+            Self::AiComponent(component) | Self::AiProject(component) => component.python_ast(),
+            Self::Agent(agent) => json!({
+                "$type": "AgentDocument",
+                "name": agent.name,
+                "loc": agent.span.python_loc(),
+            }),
         }
     }
 }

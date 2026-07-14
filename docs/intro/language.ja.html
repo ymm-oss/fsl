@@ -71,7 +71,21 @@
 </tr>
 </tbody>
 </table></div></details>
-<details id="1-structure-of-a-specification"><summary>1. Structure of a specification<span class="tree-blurb"> — spec 宣言・状態・初期状態・アクションの基本構造。</span></summary><div class="tree-body"><pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
+<details id="1-structure-of-a-specification"><summary>1. Structure of a specification<span class="tree-blurb"> — spec 宣言・状態・初期状態・アクションの基本構造。</span></summary><div class="tree-body"><p>Every document begins with one registered declaration keyword: <code>spec</code>,
+<code>refinement</code>, <code>compose</code>, <code>business</code>, <code>governance</code>, <code>requirements</code>, <code>domain</code>,
+<code>dbsystem</code>, <code>ai_component</code>, or <code>agent</code>. Leading whitespace, <code>//</code> comments, and a
+UTF-8 BOM do not affect dispatch. Typed document metadata may precede the
+declaration:</p>
+<pre><code class="language-fsl">@requirement(&quot;REQ-247&quot;, &quot;shared dispatch&quot;)
+@acme.review.owner(team.platform, 2, true)
+spec Example {}
+</code></pre>
+<p>Annotation names and symbol arguments are multi-segment paths. Arguments may be
+strings, integers, Booleans, or symbol paths. <code>requirement</code>, <code>kind</code>, and
+<code>undecided</code> use the built-in typed annotation variants; other paths are inert
+custom metadata. Annotation argument keywords are never dialect selectors. See
+<code>DESIGN-token-registry.md</code>.</p>
+<pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const &lt;NAME&gt; = &lt;constant expr&gt;
   type  &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;            // domain type (bounded integer)
   symmetric type &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;   // domain whose values are interchangeable identities

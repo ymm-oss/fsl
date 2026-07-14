@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use fsl_syntax::{
-    ActionItem, Binder, ComposeItem, Expr, LValue, Param, QualifiedName, SpecItem, Statement,
-    SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr, parse_surface_document,
+    ActionItem, Binder, ComposeItem, Expr, LValue, Param, QualifiedName, SourceFile, SpecItem,
+    Statement, SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr, parse_document,
+    parse_surface_document,
 };
 
 use crate::{CoreError, KernelSpec, PredicateExpander, expand_spec_domains, substitute};
@@ -53,7 +54,9 @@ pub fn parse_kernel_source(
     source: &str,
     resolver: &dyn FileResolver,
 ) -> Result<KernelSpec, CoreError> {
-    match parse_surface_document(source)? {
+    let parsed = parse_document(&SourceFile::anonymous(source))?;
+    let annotations = parsed.annotations;
+    let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(spec) => crate::lower_direct_spec(spec),
         SurfaceDocument::Business(business) => crate::lower_business(business),
         SurfaceDocument::Requirements(requirements) => crate::lower_requirements(requirements),
@@ -61,14 +64,24 @@ pub fn parse_kernel_source(
         SurfaceDocument::Db(system) => crate::lower_db(&system),
         SurfaceDocument::Domain(domain) => crate::lower_domain(&domain),
         SurfaceDocument::AiComponent(component) => crate::lower_ai_component(component),
+        SurfaceDocument::AiProject(_) => Err(CoreError {
+            message: "AI project evidence documents do not lower to a kernel model".to_owned(),
+            line: 1,
+            column: 1,
+            origin: None,
+        }),
         SurfaceDocument::Compose(compose) => lower_compose(compose, resolver),
-        SurfaceDocument::Refinement(_) => Err(CoreError {
+        SurfaceDocument::Refinement(_) | SurfaceDocument::Agent(_) => Err(CoreError {
             message: "top-level document has not reached the kernel lowering gate".to_owned(),
             line: 1,
             column: 1,
             origin: None,
         }),
+    }?;
+    for annotation in annotations.source_order().iter().cloned() {
+        kernel.bind_annotation("spec", annotation);
     }
+    Ok(kernel)
 }
 
 /// Parse and lower source while attaching the caller-known root file identity

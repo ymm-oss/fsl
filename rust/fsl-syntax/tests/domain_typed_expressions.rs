@@ -297,7 +297,7 @@ fn public_helper_nodes_retain_their_own_spans() {
     let source = r"domain SpannedHelpers {
   type Id = 0..1
   aggregate A {
-    invariant quantified { forall item: Id { item == 0 } }
+    invariant quantified { forall item: acme.types.Id { item == 0 } }
     invariant patterned { maybe is some(value) }
   }
 }";
@@ -307,7 +307,7 @@ fn public_helper_nodes_retain_their_own_spans() {
     assert_eq!(quantified.name.text, "quantified");
     assert_eq!(
         &source[quantified.span.start.offset..quantified.span.end.offset],
-        "invariant quantified { forall item: Id { item == 0 } }"
+        "invariant quantified { forall item: acme.types.Id { item == 0 } }"
     );
     let SyntaxExprKind::Quantified { binder, .. } = &quantified.expr.kind else {
         panic!("expected quantified expression");
@@ -318,11 +318,16 @@ fn public_helper_nodes_retain_their_own_spans() {
     else {
         panic!("expected typed binder");
     };
-    assert_eq!(&source[span.start.offset..span.end.offset], "item: Id");
     assert_eq!(
-        &source[type_name.span.start.offset..type_name.span.end.offset],
-        "Id"
+        &source[span.start.offset..span.end.offset],
+        "item: acme.types.Id"
     );
+    let type_span = type_name.span();
+    assert_eq!(
+        &source[type_span.start.offset..type_span.end.offset],
+        "acme.types.Id"
+    );
+    assert!(type_name.path.matches(&["acme", "types", "Id"]));
 
     let patterned = &domain.aggregates[0].invariants[1].expr;
     let SyntaxExprKind::Is { pattern, .. } = &patterned.kind else {

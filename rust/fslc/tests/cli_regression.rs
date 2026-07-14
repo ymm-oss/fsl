@@ -31,6 +31,50 @@ fn native_cli_checks_a_repository_spec_without_python() {
 }
 
 #[test]
+fn native_cli_exposes_registry_diagnostics_and_comment_safe_agent_dispatch() {
+    let directory = std::env::temp_dir().join(format!("fslc-registry-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("create registry fixture directory");
+    let empty = directory.join("empty.fsl");
+    let unknown = directory.join("unknown.fsl");
+    let agent = directory.join("agent.fsl");
+    std::fs::write(&empty, "\u{feff}// only trivia\n").expect("write empty fixture");
+    std::fs::write(&unknown, "mystery Demo {}\n").expect("write unknown fixture");
+    std::fs::write(&agent, "// leading\nagent Parent {}\n").expect("write agent fixture");
+
+    let (empty_output, empty_status) = run_cli(&["check", empty.to_str().expect("UTF-8 path")]);
+    assert_eq!(empty_status, 2);
+    assert_eq!(empty_output["code"], "FSL-PARSE-EMPTY-DOCUMENT");
+    assert_eq!(empty_output["loc"]["line"], 2);
+
+    let (unknown_output, unknown_status) =
+        run_cli(&["check", unknown.to_str().expect("UTF-8 path")]);
+    assert_eq!(unknown_status, 2);
+    assert_eq!(unknown_output["code"], "FSL-PARSE-UNSUPPORTED-DIALECT");
+    assert_eq!(
+        unknown_output["supported_dialects"],
+        serde_json::json!([
+            "spec",
+            "refinement",
+            "compose",
+            "business",
+            "governance",
+            "requirements",
+            "domain",
+            "dbsystem",
+            "ai_component",
+            "agent"
+        ])
+    );
+
+    let (agent_output, agent_status) = run_cli(&["check", agent.to_str().expect("UTF-8 path")]);
+    assert_eq!(agent_status, 0);
+    assert_eq!(agent_output["spec"], "Parent");
+    assert_eq!(agent_output["dialect"], "fsl-ai-agent.v0");
+
+    std::fs::remove_dir_all(directory).expect("remove registry fixture directory");
+}
+
+#[test]
 fn native_cli_preserves_bmc_outcomes() {
     let (verified, status) = run_cli(&[
         "verify",

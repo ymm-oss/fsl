@@ -38,6 +38,30 @@ spec TypedAnnotations "design: annotation carrier" {
 }
 
 #[test]
+fn top_level_annotations_are_passed_to_the_dispatched_declaration() {
+    let kernel = parse_kernel_source(
+        r#"@requirement("REQ-DOCUMENT", "document contract")
+@acme.review.owner(team.platform)
+spec AnnotatedDocument {}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse top-level annotations");
+    let annotations = kernel.annotations().annotations_for("spec");
+    assert_eq!(annotations.source_order().len(), 2);
+    assert!(matches!(
+        &annotations.source_order()[0],
+        Annotation::Requirement { id, text, .. }
+            if id == "REQ-DOCUMENT" && text.as_deref() == Some("document contract")
+    ));
+    assert!(matches!(
+        &annotations.source_order()[1],
+        Annotation::Custom { namespace, .. }
+            if namespace.to_string() == "acme.review.owner"
+    ));
+}
+
+#[test]
 fn keeps_multiple_typed_annotations_and_legacy_projection_on_one_declaration() {
     let mut kernel = direct_spec();
     let target = action_target("publish");

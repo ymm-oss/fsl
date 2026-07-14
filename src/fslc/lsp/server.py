@@ -24,6 +24,7 @@ from fslc.lsp.index import (
     build_index,
     encode_semantic_tokens,
 )
+from fslc.lsp.dialect_dispatch import classify_lsp_dialect, mask_dispatch_prefix
 
 
 SERVER_NAME = "fslc-lsp"
@@ -58,7 +59,9 @@ def check_source(
     from fslc.model import FslError, build_spec
     from fslc.parser import parse_src
     from fslc.refine import build_refinement
-    from fslc.domain_parser import is_domain_source, parse_domain
+    from fslc.ai_parser import parse_ai_source
+    from fslc.ai_project import is_ai_project_source, parse_ai_project
+    from fslc.domain_parser import parse_domain
 
     def acceptance_error(spec):
         checked = validate_acceptance(spec)
@@ -78,9 +81,36 @@ def check_source(
 
     try:
         base_dir = str(Path(path).parent) if path else "."
+        dispatch = classify_lsp_dialect(source)
+        parser_source = (
+            mask_dispatch_prefix(source, dispatch.declaration_offset)
+            if dispatch is not None
+            else source
+        )
+        if dispatch is not None and dispatch.keyword == "agent":
+            agent = parse_ai_source(parser_source)
+            return _envelope({
+                "result": "ok",
+                "spec": agent.name,
+                "dialect": "fsl-ai-agent.v0",
+                "warnings": [],
+            })
+        if (
+            dispatch is not None
+            and dispatch.keyword == "ai_component"
+            and is_ai_project_source(parser_source)
+        ):
+            project_name = Path(path).stem if path else "AiProject"
+            parse_ai_project(parser_source, project_name)
+            return _envelope({
+                "result": "ok",
+                "spec": project_name,
+                "dialect": "fsl-ai-project.v0",
+                "warnings": [],
+            })
         domain_warnings = []
-        if is_domain_source(source):
-            domain = parse_domain(source)
+        if dispatch is not None and dispatch.keyword == "domain":
+            domain = parse_domain(parser_source)
             for type_def in domain.types:
                 if type_def.source_form != "legacy_enum_union":
                     continue
@@ -97,7 +127,7 @@ def check_source(
                     "canonical_replacement": replacement,
                     "hint": f"replace the declaration with `{replacement}`",
                 })
-        ast, display_names = parse_src(source, base_dir)
+        ast, display_names = parse_src(parser_source, base_dir)
         if ast[0] == "refinement":
             impl_name, abs_name = _refinement_ast_names(ast)
             impl_spec = _build_resolved_spec(impl_name, name_resolver, parse_src, build_spec)
@@ -182,7 +212,13 @@ def _build_resolved_spec(name, name_resolver, parse_src, build_spec):
         target_source = target.read_text(encoding="utf-8")
     except OSError:
         return None
-    ast, display_names = parse_src(target_source, str(target.parent))
+    dispatch = classify_lsp_dialect(target_source)
+    parser_source = (
+        mask_dispatch_prefix(target_source, dispatch.declaration_offset)
+        if dispatch is not None
+        else target_source
+    )
+    ast, display_names = parse_src(parser_source, str(target.parent))
     return build_spec(ast, display_names)
 
 

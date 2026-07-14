@@ -458,7 +458,14 @@ pub fn parse_domain(source: &str) -> Result<DomainSpec, ParseError> {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = DomainParser { tokens, cursor: 0 };
+    parse_domain_tokens(&tokens, 0)
+}
+
+pub(crate) fn parse_domain_tokens(
+    tokens: &[Token],
+    cursor: usize,
+) -> Result<DomainSpec, ParseError> {
+    let mut parser = DomainParser { tokens, cursor };
     let domain = parser.domain()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after domain"));
@@ -466,12 +473,12 @@ pub fn parse_domain(source: &str) -> Result<DomainSpec, ParseError> {
     Ok(domain)
 }
 
-struct DomainParser {
-    tokens: Vec<Token>,
+struct DomainParser<'a> {
+    tokens: &'a [Token],
     cursor: usize,
 }
 
-impl DomainParser {
+impl DomainParser<'_> {
     fn domain(&mut self) -> Result<DomainSpec, ParseError> {
         let loc = self.loc();
         self.expect_ident_value("domain")?;
@@ -1244,7 +1251,7 @@ impl DomainParser {
 
     fn expression(&mut self, line_terminated: bool) -> Result<SyntaxExpr, ParseError> {
         parse_tokens_expression(
-            &self.tokens,
+            self.tokens,
             &mut self.cursor,
             ExpressionMode::Domain,
             line_terminated,
@@ -1264,7 +1271,7 @@ impl DomainParser {
     }
 
     fn lvalue(&mut self) -> Result<SyntaxLValue, ParseError> {
-        parse_tokens_lvalue(&self.tokens, &mut self.cursor, ExpressionMode::Domain)
+        parse_tokens_lvalue(self.tokens, &mut self.cursor, ExpressionMode::Domain)
     }
 
     fn loc(&self) -> DomainLoc {

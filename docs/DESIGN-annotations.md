@@ -41,8 +41,10 @@ property and the `leadsTo` property.
 
 ## Adapters and compatibility
 
-The current source grammar still has a single optional legacy string slot; `@...`
-syntax is a separate issue. Native lowering adapts all existing sources into the
+Declarations retain their optional legacy string slot. Issue #247 additionally
+allows typed `@...` metadata immediately before a top-level document declaration;
+`DESIGN-token-registry.md` supersedes the earlier parser-syntax non-goal only for
+that document boundary. Native lowering adapts all existing sources into the
 typed carrier:
 
 - declaration `"REQ-3: text"` becomes `Requirement`;
@@ -99,7 +101,7 @@ suppression, and exact declaration matching—remain unchanged.
 
 ## Non-goals
 
-- `@requirement`, `@kind`, or arbitrary `@namespace` parser syntax;
+- declaration-local `@...` syntax below the document boundary;
 - formatter or source migrator behavior;
 - macro execution or verifier semantics selected by an annotation;
 - publishing annotations by mutating Public Kernel v1/v2.
