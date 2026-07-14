@@ -1239,9 +1239,17 @@ Reserved intentional-undecided metadata uses the same single tag slot:
 `action choose() "undecided: selection policy pending" { ... }`. It is not a
 verification condition or requirement ID. `ledger` / `html` list the marker and
 state-dependency-derived affected requirement IDs; `analyze --profile ai-review`
-retains matching underspecification findings with `acknowledged:true`. See
-`docs/DESIGN-undecided.md`. This syntax and its report surfaces are native Rust
-CLI features; the frozen Python reference is not extended.
+retains matching underspecification findings with `acknowledged:true`. The
+source slot remains singular, but native lowering converts it, requirement
+blocks, process `covers`, acceptance, and forbidden IDs into the shared typed
+annotation carrier. An outer requirement can therefore coexist with an inner
+`undecided` marker. Explicit `covers` and requirement-block annotations retain
+their own spans; `undecided` is reserved and cannot be an explicit requirement
+ID. Multiple-relation JSON outputs use `requirements` and preserve singular
+fields as lexical compatibility projections. `@...` parser syntax is still separate. See
+`docs/DESIGN-undecided.md` and `docs/DESIGN-annotations.md`. This syntax and its
+report surfaces are native Rust CLI features; the frozen Python reference is
+not extended.
 
 ### Authoring specs as readable documentation (requirements + design)
 

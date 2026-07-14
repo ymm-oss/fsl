@@ -118,17 +118,30 @@ impl OriginRegistry {
 /// provenance. `MetaTag.id` must never become an origin identity.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TraceabilityRegistry {
-    relations: BTreeMap<String, MetaTag>,
+    relations: BTreeMap<String, Vec<MetaTag>>,
 }
 
 impl TraceabilityRegistry {
     pub(crate) fn bind(&mut self, target: impl Into<String>, requirement: MetaTag) {
-        self.relations.insert(target.into(), requirement);
+        let requirements = self.relations.entry(target.into()).or_default();
+        if !requirements
+            .iter()
+            .any(|existing| existing.id == requirement.id && existing.text == requirement.text)
+        {
+            requirements.push(requirement);
+            requirements
+                .sort_by(|left, right| (&left.id, &left.text).cmp(&(&right.id, &right.text)));
+        }
     }
 
     #[must_use]
     pub fn requirement_for(&self, target: &str) -> Option<&MetaTag> {
-        self.relations.get(target)
+        self.requirements_for(target).first()
+    }
+
+    #[must_use]
+    pub fn requirements_for(&self, target: &str) -> &[MetaTag] {
+        self.relations.get(target).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -143,6 +156,7 @@ pub fn type_target(name: &str) -> String {
 }
 
 pub const SPEC_TARGET: &str = "spec";
+pub const INIT_TARGET: &str = "init";
 
 #[must_use]
 pub fn init_statement_target(index: usize) -> String {

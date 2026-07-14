@@ -74,6 +74,7 @@ pub async fn check_refinement_progress<S: SmtSolver>(
                 before: substitute_expr(property.before.clone(), &replacements),
                 after: substitute_expr(property.after.clone(), &replacements),
                 meta: property.meta.clone(),
+                annotations: property.annotations.clone(),
                 decreases: property
                     .decreases
                     .clone()

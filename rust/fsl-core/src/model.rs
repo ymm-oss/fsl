@@ -5,13 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionItem, Binder, Expr, LValue, MetaTag, Param, Span, SpecItem, Statement, SurfaceSpec,
-    TypeExpr,
+    ActionItem, Annotation, AnnotationRegistry, Annotations, Binder, Expr, LValue, MetaTag, Param,
+    RequirementLink, SourcePos, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
 };
 
 use crate::{
-    KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
-    TraceabilityRegistry, action_target, property_target, state_target, type_target,
+    INIT_TARGET, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
+    SPEC_TARGET, TraceabilityRegistry, action_target, property_target, state_target, type_target,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -92,6 +92,7 @@ pub struct ActionDef {
     pub ensure_spans: Vec<Span>,
     pub fair: bool,
     pub meta: Option<MetaTag>,
+    pub annotations: Annotations,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,6 +107,7 @@ pub struct PropertyDef {
     pub expr: Expr,
     pub span: Span,
     pub meta: Option<MetaTag>,
+    pub annotations: Annotations,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -116,6 +118,7 @@ pub struct LeadsToDef {
     pub before: Expr,
     pub after: Expr,
     pub meta: Option<MetaTag>,
+    pub annotations: Annotations,
     pub decreases: Option<Expr>,
     pub within: Option<i64>,
 }
@@ -129,6 +132,7 @@ pub struct KernelModel {
     pub state: Vec<(String, TypeRef)>,
     pub init: Vec<Statement>,
     pub init_meta: Option<MetaTag>,
+    pub init_annotations: Annotations,
     pub actions: Vec<ActionDef>,
     pub invariants: Vec<PropertyDef>,
     pub transitions: Vec<PropertyDef>,
@@ -136,6 +140,7 @@ pub struct KernelModel {
     pub leadstos: Vec<LeadsToDef>,
     pub terminal: Option<Expr>,
     origins: OriginRegistry,
+    annotations: AnnotationRegistry,
     traceability: TraceabilityRegistry,
 }
 
@@ -260,6 +265,19 @@ impl KernelModel {
     }
 
     #[must_use]
+    pub fn requirements_for(&self, target: &str) -> Vec<RequirementLink> {
+        self.annotations
+            .annotations_for(target)
+            .requirements()
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn annotations_for(&self, target: &str) -> &Annotations {
+        self.annotations.annotations_for(target)
+    }
+
+    #[must_use]
     pub fn property_origin(&self, kind: &str, name: &str) -> Option<&crate::OriginChain> {
         self.origins.primary_for(&property_target(kind, name))
     }
@@ -341,6 +359,7 @@ pub fn build_model(kernel: KernelSpec) -> Result<KernelModel, ModelError> {
 struct ModelBuilder {
     spec: SurfaceSpec,
     origins: OriginRegistry,
+    annotations: AnnotationRegistry,
     consts: BTreeMap<String, Value>,
     types: BTreeMap<String, TypeDef>,
     enum_members: BTreeMap<String, Value>,
@@ -348,10 +367,15 @@ struct ModelBuilder {
 
 impl ModelBuilder {
     fn new(kernel: KernelSpec) -> Self {
-        let KernelSpec { spec, origins } = kernel;
+        let KernelSpec {
+            spec,
+            origins,
+            annotations,
+        } = kernel;
         Self {
             spec,
             origins,
+            annotations,
             consts: BTreeMap::new(),
             types: BTreeMap::new(),
             enum_members: BTreeMap::new(),
@@ -362,6 +386,11 @@ impl ModelBuilder {
     fn build(mut self) -> Result<KernelModel, ModelError> {
         self.collect_consts()?;
         self.collect_types()?;
+        self.collect_legacy_annotations();
+        self.annotations.validate().map_err(|error| ModelError {
+            message: error.message,
+            origin: Some(Box::new(source_origin("annotation", error.span, None))),
+        })?;
         let state_names = self
             .spec
             .items
@@ -394,6 +423,21 @@ impl ModelBuilder {
         let mut leadstos = Vec::new();
         let mut terminal = None;
         let mut traceability = TraceabilityRegistry::default();
+        for (target, annotations) in self.annotations.targets() {
+            for requirement in annotations
+                .requirements()
+                .expect("annotations were validated before model construction")
+            {
+                traceability.bind(
+                    target.to_owned(),
+                    MetaTag {
+                        id: requirement.id,
+                        text: requirement.text,
+                        span: Some(requirement.span),
+                    },
+                );
+            }
+        }
         for item in &self.spec.items {
             match item {
                 SpecItem::State(fields) => {
@@ -480,9 +524,6 @@ impl ModelBuilder {
                     span,
                     ..
                 } => {
-                    if let Some(meta) = meta {
-                        traceability.bind(action_target(name), meta.clone());
-                    }
                     let origin = self.origins.diagnostic_origin(&action_target(name));
                     actions.push(
                         self.action(name, params, items, *span, *fair, meta.clone())
@@ -496,14 +537,15 @@ impl ModelBuilder {
                     meta,
                     ..
                 } => {
-                    if let Some(meta) = meta {
-                        traceability.bind(property_target("invariant", name), meta.clone());
-                    }
                     invariants.push(PropertyDef {
                         name: name.clone(),
                         expr: expr.as_ref().clone(),
                         span: *span,
                         meta: meta.clone(),
+                        annotations: self
+                            .annotations
+                            .annotations_for(&property_target("invariant", name))
+                            .clone(),
                     });
                 }
                 SpecItem::Trans {
@@ -513,14 +555,15 @@ impl ModelBuilder {
                     meta,
                     ..
                 } => {
-                    if let Some(meta) = meta {
-                        traceability.bind(property_target("trans", name), meta.clone());
-                    }
                     transitions.push(PropertyDef {
                         name: name.clone(),
                         expr: expr.as_ref().clone(),
                         span: *span,
                         meta: meta.clone(),
+                        annotations: self
+                            .annotations
+                            .annotations_for(&property_target("trans", name))
+                            .clone(),
                     });
                 }
                 SpecItem::Reachable {
@@ -530,14 +573,15 @@ impl ModelBuilder {
                     meta,
                     ..
                 } => {
-                    if let Some(meta) = meta {
-                        traceability.bind(property_target("reachable", name), meta.clone());
-                    }
                     reachables.push(PropertyDef {
                         name: name.clone(),
                         expr: expr.as_ref().clone(),
                         span: *span,
                         meta: meta.clone(),
+                        annotations: self
+                            .annotations
+                            .annotations_for(&property_target("reachable", name))
+                            .clone(),
                     });
                 }
                 SpecItem::Terminal { expr, .. } => terminal = Some(expr.as_ref().clone()),
@@ -553,6 +597,10 @@ impl ModelBuilder {
                     expr: unless_expr(before, after),
                     span: *span,
                     meta: meta.clone(),
+                    annotations: self
+                        .annotations
+                        .annotations_for(&property_target("trans", name))
+                        .clone(),
                 }),
                 SpecItem::Until {
                     name,
@@ -567,6 +615,13 @@ impl ModelBuilder {
                         expr: unless_expr(before, after),
                         span: *span,
                         meta: meta.clone(),
+                        annotations: self
+                            .annotations
+                            .annotations_for(&property_target(
+                                "trans",
+                                &format!("{name}_until_safety"),
+                            ))
+                            .clone(),
                     });
                     leadstos.push(LeadsToDef {
                         name: name.clone(),
@@ -575,6 +630,10 @@ impl ModelBuilder {
                         before: before.as_ref().clone(),
                         after: after.as_ref().clone(),
                         meta: meta.clone(),
+                        annotations: self
+                            .annotations
+                            .annotations_for(&property_target("leadsTo", name))
+                            .clone(),
                         decreases: None,
                         within: None,
                     });
@@ -600,6 +659,10 @@ impl ModelBuilder {
                         before: before.as_ref().clone(),
                         after: after.as_ref().clone(),
                         meta: meta.clone(),
+                        annotations: self
+                            .annotations
+                            .annotations_for(&property_target("leadsTo", name))
+                            .clone(),
                         decreases: decreases.as_deref().cloned(),
                         within: within
                             .as_deref()
@@ -625,6 +688,7 @@ impl ModelBuilder {
             state,
             init,
             init_meta,
+            init_annotations: self.annotations.annotations_for(INIT_TARGET).clone(),
             actions,
             invariants,
             transitions,
@@ -632,6 +696,7 @@ impl ModelBuilder {
             leadstos,
             terminal,
             origins: self.origins,
+            annotations: self.annotations,
             traceability,
         };
         let inline_initializers = inline_initializers
@@ -865,7 +930,86 @@ impl ModelBuilder {
             ensure_spans,
             fair,
             meta,
+            annotations: self
+                .annotations
+                .annotations_for(&action_target(name))
+                .clone(),
         })
+    }
+
+    fn collect_legacy_annotations(&mut self) {
+        if let Some(meta) = &self.spec.meta {
+            self.annotations.bind(
+                SPEC_TARGET,
+                Annotation::from_legacy_kind(
+                    meta.id.clone(),
+                    meta.text.clone(),
+                    meta.span.unwrap_or_else(unknown_span),
+                ),
+            );
+        }
+        for item in &self.spec.items {
+            let (target, meta, span) = match item {
+                SpecItem::Init { meta, .. } => {
+                    (Some(INIT_TARGET.to_owned()), meta.as_ref(), unknown_span())
+                }
+                SpecItem::Action {
+                    name, meta, span, ..
+                } => (Some(action_target(name)), meta.as_ref(), *span),
+                SpecItem::Invariant {
+                    name, meta, span, ..
+                } => (
+                    Some(property_target("invariant", name)),
+                    meta.as_ref(),
+                    *span,
+                ),
+                SpecItem::Trans {
+                    name, meta, span, ..
+                }
+                | SpecItem::Unless {
+                    name, meta, span, ..
+                } => (Some(property_target("trans", name)), meta.as_ref(), *span),
+                SpecItem::Reachable {
+                    name, meta, span, ..
+                } => (
+                    Some(property_target("reachable", name)),
+                    meta.as_ref(),
+                    *span,
+                ),
+                SpecItem::Until {
+                    name, meta, span, ..
+                } => {
+                    if let Some(meta) = meta {
+                        let annotation = Annotation::from_legacy(
+                            meta.id.clone(),
+                            meta.text.clone(),
+                            meta.span.unwrap_or(*span),
+                        );
+                        self.annotations.bind(
+                            property_target("trans", &format!("{name}_until_safety")),
+                            annotation.clone(),
+                        );
+                        self.annotations
+                            .bind(property_target("leadsTo", name), annotation);
+                    }
+                    (None, None, *span)
+                }
+                SpecItem::LeadsTo {
+                    name, meta, span, ..
+                } => (Some(property_target("leadsTo", name)), meta.as_ref(), *span),
+                _ => (None, None, unknown_span()),
+            };
+            if let (Some(target), Some(meta)) = (target, meta) {
+                self.annotations.bind(
+                    target,
+                    Annotation::from_legacy(
+                        meta.id.clone(),
+                        meta.text.clone(),
+                        meta.span.unwrap_or(span),
+                    ),
+                );
+            }
+        }
     }
 
     fn const_int(&self, expr: &Expr) -> Result<i64, ModelError> {
@@ -873,6 +1017,18 @@ impl ModelBuilder {
             Value::Int(value) => Ok(value),
             _ => Err(model_error("constant expression must be an integer")),
         }
+    }
+}
+
+fn unknown_span() -> Span {
+    let position = SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
+    Span {
+        start: position,
+        end: position,
     }
 }
 

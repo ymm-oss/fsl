@@ -56,6 +56,8 @@ per-declaration tags, it is **metadata only** — never verified — and is surf
 `skeleton.spec_kind = {id, text}`). Use it to record what kind of thing the whole
 spec is (e.g. `ui` for a screen-flow spec that models only the behavioral slice);
 it carries no kernel semantics and desugars to nothing. See `docs/DESIGN-ui.md`.
+Internally this legacy badge is adapted to the shared typed `Kind` annotation;
+the source grammar remains unchanged. See `DESIGN-annotations.md`.
 
 Any layer — including a kernel `spec` — may declare identity/number sorts whose
 finite sizes come from a sibling top-level `verify` block instead of an inline
@@ -1377,10 +1379,18 @@ action route() "undecided: routing policy is pending" { ... }
 `fslc ledger` and `fslc html` list these declarations and the requirement IDs
 whose state dependencies overlap them. `analyze --profile ai-review` keeps an
 underspecification finding but marks an exact declaration match as
-`acknowledged:true`. Because the declaration-tag slot is singular, an
-`undecided` declaration does not also carry an `ID: text` tag. See
-`DESIGN-undecided.md`. This feature is implemented by the authoritative native
-Rust CLI and is not backported to the frozen Python reference implementation.
+`acknowledged:true`. The current direct declaration syntax still has one string
+slot, but native lowering adapts it to a typed annotation carrier that can hold
+requirements, undecided markers, kinds, and namespaced custom annotations
+together. Requirement blocks therefore merge their outer requirement with an
+inner legacy marker instead of overwriting it. `@...` source syntax remains a
+separate feature. Explicit `covers` and requirement-block annotations keep their
+own exact source spans, and `undecided` is reserved rather than accepted as an
+explicit requirement ID. JSON consumers that expose multiple relations use a
+`requirements` array while preserving the existing singular field as a lexical
+compatibility projection. See `DESIGN-undecided.md` and
+`DESIGN-annotations.md`. This is implemented by the authoritative native Rust
+CLI and is not backported to the frozen Python reference implementation.
 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 

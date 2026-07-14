@@ -5,17 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{ActionDef, KernelBinder, KernelExpr, KernelLValue, KernelModel, KernelStatement};
-use fsl_syntax::MetaTag;
+use fsl_core::{
+    ActionDef, Annotations, KernelBinder, KernelExpr, KernelLValue, KernelModel, KernelStatement,
+};
 use serde_json::{Value, json};
-
-fn is_undecided(meta: Option<&MetaTag>) -> bool {
-    meta.is_some_and(|meta| meta.id.eq_ignore_ascii_case("undecided"))
-}
-
-fn reason(meta: &MetaTag) -> String {
-    meta.text.clone().unwrap_or_default()
-}
 
 fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> {
     fn collect(expr: &KernelExpr, roots: &mut BTreeSet<String>) {
@@ -181,13 +174,19 @@ fn action_roots(model: &KernelModel, action: &ActionDef) -> BTreeSet<String> {
 
 fn requirement_roots(model: &KernelModel) -> BTreeMap<String, BTreeSet<String>> {
     let mut output = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut add = |meta: Option<&MetaTag>, roots: BTreeSet<String>| {
-        if let Some(meta) = meta.filter(|meta| !is_undecided(Some(meta))) {
-            output.entry(meta.id.clone()).or_default().extend(roots);
+    let mut add = |annotations: &Annotations, roots: BTreeSet<String>| {
+        for requirement in annotations
+            .requirements()
+            .expect("checked model annotations are valid")
+        {
+            output
+                .entry(requirement.id)
+                .or_default()
+                .extend(roots.clone());
         }
     };
     for action in &model.actions {
-        add(action.meta.as_ref(), action_roots(model, action));
+        add(&action.annotations, action_roots(model, action));
     }
     for property in model
         .invariants
@@ -196,7 +195,7 @@ fn requirement_roots(model: &KernelModel) -> BTreeMap<String, BTreeSet<String>> 
         .chain(&model.reachables)
     {
         add(
-            property.meta.as_ref(),
+            &property.annotations,
             expression_roots(model, &property.expr),
         );
     }
@@ -206,7 +205,7 @@ fn requirement_roots(model: &KernelModel) -> BTreeMap<String, BTreeSet<String>> 
         if let Some(decreases) = &property.decreases {
             roots.extend(expression_roots(model, decreases));
         }
-        add(property.meta.as_ref(), roots);
+        add(&property.annotations, roots);
     }
     output
 }
@@ -214,7 +213,7 @@ fn requirement_roots(model: &KernelModel) -> BTreeMap<String, BTreeSet<String>> 
 fn record(
     declaration: &str,
     node: &str,
-    meta: &MetaTag,
+    reason: &str,
     roots: &BTreeSet<String>,
     requirements: &BTreeMap<String, BTreeSet<String>>,
 ) -> Value {
@@ -226,7 +225,7 @@ fn record(
     json!({
         "declaration": declaration,
         "node": node,
-        "reason": reason(meta),
+        "reason": reason,
         "requirement_ids": requirement_ids,
     })
 }
@@ -236,20 +235,16 @@ fn record(
 pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
     let requirements = requirement_roots(model);
     let mut output = Vec::new();
-    if let Some(meta) = model
-        .init_meta
-        .as_ref()
-        .filter(|meta| is_undecided(Some(meta)))
-    {
+    for (reason, _) in model.init_annotations.undecided() {
         let roots = statement_roots(model, &model.init);
-        output.push(record("init", "init", meta, &roots, &requirements));
+        output.push(record("init", "init", reason, &roots, &requirements));
     }
     for action in &model.actions {
-        if let Some(meta) = action.meta.as_ref().filter(|meta| is_undecided(Some(meta))) {
+        for (reason, _) in action.annotations.undecided() {
             output.push(record(
                 &format!("action {}", action.name),
                 &format!("action:{}", action.name),
-                meta,
+                reason,
                 &action_roots(model, action),
                 &requirements,
             ));
@@ -261,15 +256,11 @@ pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
         ("reachable", &model.reachables),
     ] {
         for property in properties {
-            if let Some(meta) = property
-                .meta
-                .as_ref()
-                .filter(|meta| is_undecided(Some(meta)))
-            {
+            for (reason, _) in property.annotations.undecided() {
                 output.push(record(
                     &format!("{kind} {}", property.name),
                     &format!("{kind}:{}", property.name),
-                    meta,
+                    reason,
                     &expression_roots(model, &property.expr),
                     &requirements,
                 ));
@@ -277,17 +268,13 @@ pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
         }
     }
     for property in &model.leadstos {
-        if let Some(meta) = property
-            .meta
-            .as_ref()
-            .filter(|meta| is_undecided(Some(meta)))
-        {
+        for (reason, _) in property.annotations.undecided() {
             let mut roots = expression_roots(model, &property.before);
             roots.extend(expression_roots(model, &property.after));
             output.push(record(
                 &format!("leadsTo {}", property.name),
                 &format!("leadsTo:{}", property.name),
-                meta,
+                reason,
                 &roots,
                 &requirements,
             ));

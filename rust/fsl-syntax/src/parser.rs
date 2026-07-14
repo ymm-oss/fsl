@@ -8,8 +8,8 @@ use crate::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Binder, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr, GovernanceArtifactRef,
     GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
-    PreservationItem, ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName,
-    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
+    QualifiedName, RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
     SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
     SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr,
@@ -407,9 +407,10 @@ impl Parser {
     }
 
     fn requirement_block(&mut self) -> Result<RequirementsItem, ParseError> {
-        let span = self.bump().span;
+        let start = self.bump().span;
         let id = self.req_id()?;
-        let text = self.expect_string()?;
+        let (text, text_span) = self.expect_string_with_span()?;
+        let span = join_span(start, text_span);
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
@@ -526,9 +527,10 @@ impl Parser {
     }
 
     fn acceptance_block(&mut self) -> Result<RequirementsItem, ParseError> {
-        let span = self.bump().span;
+        let start = self.bump().span;
         let id = self.req_id()?;
-        let text = self.expect_string()?;
+        let (text, text_span) = self.expect_string_with_span()?;
+        let span = join_span(start, text_span);
         self.expect_symbol("{")?;
         let mut steps = Vec::new();
         while !self.peek_ident("expect") {
@@ -563,9 +565,10 @@ impl Parser {
     }
 
     fn forbidden_block(&mut self) -> Result<RequirementsItem, ParseError> {
-        let span = self.bump().span;
+        let start = self.bump().span;
         let id = self.req_id()?;
-        let text = self.expect_string()?;
+        let (text, text_span) = self.expect_string_with_span()?;
+        let span = join_span(start, text_span);
         self.expect_symbol("{")?;
         let mut steps = Vec::new();
         while !self.peek_ident("expect") {
@@ -931,8 +934,21 @@ impl Parser {
                 }
             }
         }
-        let covers = if self.eat_ident("covers") {
-            Some((self.req_id()?, self.expect_string()?))
+        let covers = if self.peek_ident("covers") {
+            let start = self.bump().span;
+            let id = self.req_id()?;
+            let token = self.bump().clone();
+            let TokenKind::String(text) = token.kind else {
+                return Err(ParseError {
+                    message: "expected string literal".to_owned(),
+                    span: token.span,
+                });
+            };
+            Some(ProcessCover {
+                id,
+                text,
+                span: join_span(start, token.span),
+            })
         } else {
             None
         };
@@ -1776,11 +1792,12 @@ impl Parser {
     }
 
     fn take_meta(&mut self) -> Option<MetaTag> {
-        let TokenKind::String(value) = self.peek().kind.clone() else {
+        let token = self.peek().clone();
+        let TokenKind::String(value) = token.kind else {
             return None;
         };
         self.bump();
-        Some(MetaTag::parse(&value))
+        Some(MetaTag::parse(&value, token.span))
     }
 
     fn ident_list(&mut self, close: &str) -> Result<Vec<String>, ParseError> {
@@ -2001,9 +2018,13 @@ impl Parser {
     }
 
     fn expect_string(&mut self) -> Result<String, ParseError> {
+        self.expect_string_with_span().map(|(value, _)| value)
+    }
+
+    fn expect_string_with_span(&mut self) -> Result<(String, Span), ParseError> {
         let token = self.bump().clone();
         if let TokenKind::String(value) = token.kind {
-            Ok(value)
+            Ok((value, token.span))
         } else {
             Err(ParseError {
                 message: "expected string literal".to_owned(),

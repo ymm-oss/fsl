@@ -8,7 +8,8 @@ use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
 use fsl_core::{
-    FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement, ParamDef, TypeDef, TypeRef,
+    Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement, ParamDef,
+    TypeDef, TypeRef,
 };
 use serde_json::{Map, Value, json};
 
@@ -2818,13 +2819,16 @@ fn run_scenarios_mode(
         scenario.insert("kind".to_owned(), json!("reachable"));
         scenario.insert("property".to_owned(), json!(display(name)));
         scenario.insert("final_check".to_owned(), json!(display(name)));
-        if let Some(meta) = model
+        if let Some(property) = model
             .reachables
             .iter()
             .find(|property| property.name == *name)
-            .and_then(|property| property.meta.as_ref())
         {
-            scenario.insert("requirement".to_owned(), metadata(Some(meta)));
+            insert_requirement_metadata(
+                &mut scenario,
+                &property.annotations,
+                property.meta.as_ref(),
+            );
         }
         scenarios.push(Value::Object(scenario));
     }
@@ -2864,13 +2868,16 @@ fn run_scenarios_mode(
         );
         scenario.insert("kind".to_owned(), json!("leadsTo"));
         scenario.insert("property".to_owned(), json!(display(&response.property)));
-        if let Some(meta) = model
+        if let Some(property) = model
             .leadstos
             .iter()
             .find(|property| property.name == response.property)
-            .and_then(|property| property.meta.as_ref())
         {
-            scenario.insert("requirement".to_owned(), metadata(Some(meta)));
+            insert_requirement_metadata(
+                &mut scenario,
+                &property.annotations,
+                property.meta.as_ref(),
+            );
         }
         scenario.insert(
             "bindings".to_owned(),
@@ -2895,12 +2902,7 @@ fn run_scenarios_mode(
         scenario.insert("name".to_owned(), json!(format!("cover_{}", display(name))));
         scenario.insert("kind".to_owned(), json!("action_coverage"));
         scenario.insert("action".to_owned(), json!(display(name)));
-        if let Some(meta) = action.meta.as_ref() {
-            scenario.insert(
-                "requirement".to_owned(),
-                json!({"id":meta.id,"text":meta.text}),
-            );
-        }
+        insert_requirement_metadata(&mut scenario, &action.annotations, action.meta.as_ref());
         scenarios.push(Value::Object(scenario));
     }
     if let Some(trace) = &result.deadlock_trace {
@@ -3393,42 +3395,40 @@ fn strict_tag_warnings(
 ) -> Result<Vec<Value>, String> {
     let mut warnings = Vec::new();
     let hint = "add a declaration tag such as \"REQ-1: original requirement\"; use \"MODEL: ...\" or \"ASSUME-1: ...\" when this is modeling intent";
-    for (element, name, span, meta) in model
+    for (element, name, span, annotations) in model
         .actions
         .iter()
-        .map(|item| ("action", item.name.as_str(), &item.span, item.meta.as_ref()))
+        .map(|item| ("action", item.name.as_str(), &item.span, &item.annotations))
         .chain(model.invariants.iter().map(|item| {
             (
                 "invariant",
                 item.name.as_str(),
                 &item.span,
-                item.meta.as_ref(),
+                &item.annotations,
             )
         }))
         .chain(
             model
                 .transitions
                 .iter()
-                .map(|item| ("trans", item.name.as_str(), &item.span, item.meta.as_ref())),
+                .map(|item| ("trans", item.name.as_str(), &item.span, &item.annotations)),
         )
-        .chain(model.leadstos.iter().map(|item| {
-            (
-                "leadsTo",
-                item.name.as_str(),
-                &item.span,
-                item.meta.as_ref(),
-            )
-        }))
+        .chain(
+            model
+                .leadstos
+                .iter()
+                .map(|item| ("leadsTo", item.name.as_str(), &item.span, &item.annotations)),
+        )
         .chain(model.reachables.iter().map(|item| {
             (
                 "reachable",
                 item.name.as_str(),
                 &item.span,
-                item.meta.as_ref(),
+                &item.annotations,
             )
         }))
     {
-        if meta.is_none() && !name.starts_with('_') {
+        if annotations.source_order().is_empty() && !name.starts_with('_') {
             warnings.push(json!({
                 "kind": "untagged",
                 "element": element,
@@ -3439,35 +3439,24 @@ fn strict_tag_warnings(
         }
     }
 
-    let mut referenced = model
+    let mut referenced = std::collections::BTreeSet::new();
+    for annotations in model
         .actions
         .iter()
-        .filter_map(|item| item.meta.as_ref().map(|meta| meta.id.clone()))
-        .chain(
-            model
-                .invariants
-                .iter()
-                .filter_map(|item| item.meta.as_ref().map(|meta| meta.id.clone())),
-        )
-        .chain(
-            model
-                .transitions
-                .iter()
-                .filter_map(|item| item.meta.as_ref().map(|meta| meta.id.clone())),
-        )
-        .chain(
-            model
-                .leadstos
-                .iter()
-                .filter_map(|item| item.meta.as_ref().map(|meta| meta.id.clone())),
-        )
-        .chain(
-            model
-                .reachables
-                .iter()
-                .filter_map(|item| item.meta.as_ref().map(|meta| meta.id.clone())),
-        )
-        .collect::<std::collections::BTreeSet<_>>();
+        .map(|item| &item.annotations)
+        .chain(model.invariants.iter().map(|item| &item.annotations))
+        .chain(model.transitions.iter().map(|item| &item.annotations))
+        .chain(model.leadstos.iter().map(|item| &item.annotations))
+        .chain(model.reachables.iter().map(|item| &item.annotations))
+    {
+        referenced.extend(
+            annotations
+                .requirements()
+                .expect("checked model annotations are valid")
+                .into_iter()
+                .map(|requirement| requirement.id),
+        );
+    }
     if let Ok(source) = std::fs::read_to_string(source_path)
         && let Ok(Some(contract)) = fsl_core::requirements_trace_contract(&source)
     {
@@ -4881,6 +4870,39 @@ fn metadata(meta: Option<&fsl_syntax::MetaTag>) -> Value {
     )
 }
 
+fn requirement_metadata(
+    annotations: &Annotations,
+    legacy: Option<&fsl_syntax::MetaTag>,
+) -> Vec<Value> {
+    let requirements = annotations
+        .requirements()
+        .expect("checked model annotations are valid")
+        .into_iter()
+        .map(|requirement| json!({"id":requirement.id,"text":requirement.text}))
+        .collect::<Vec<_>>();
+    if requirements.is_empty() {
+        legacy
+            .filter(|meta| !meta.id.eq_ignore_ascii_case("undecided"))
+            .map_or_else(Vec::new, |meta| {
+                vec![json!({"id":meta.id,"text":meta.text})]
+            })
+    } else {
+        requirements
+    }
+}
+
+fn insert_requirement_metadata(
+    output: &mut Map<String, Value>,
+    annotations: &Annotations,
+    legacy: Option<&fsl_syntax::MetaTag>,
+) {
+    let requirements = requirement_metadata(annotations, legacy);
+    if let Some(first) = requirements.first() {
+        output.insert("requirement".to_owned(), first.clone());
+        output.insert("requirements".to_owned(), Value::Array(requirements));
+    }
+}
+
 fn param_skeleton(model: &KernelModel, param: &ParamDef) -> Value {
     match param {
         ParamDef::Typed { name, ty } => {
@@ -5021,8 +5043,11 @@ fn model_skeleton(model: &KernelModel) -> Value {
                 "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
                 "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
                 "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
-                "writes": statement_writes(&action.statements), "requirement": metadata(action.meta.as_ref()),
+                "writes": statement_writes(&action.statements), "requirement": Value::Null,
             });
+            if let Value::Object(value) = &mut value {
+                insert_requirement_metadata(value, &action.annotations, action.meta.as_ref());
+            }
             if action.fair
                 && let Value::Object(value) = &mut value
             {
@@ -5058,8 +5083,11 @@ fn model_skeleton(model: &KernelModel) -> Value {
                     .map_or_else(|| fslc_rust::display_name(&property.name), String::clone),
                 "kind":kind,
                 "body_text":fslc_rust::expr_text(&property.expr),
-                "requirement":metadata(property.meta.as_ref())
+                "requirement":Value::Null
             });
+            if let Value::Object(value) = &mut value {
+                insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
+            }
             if let Some(origin) = origin
                 && let Value::Object(value) = &mut value
             {
@@ -5073,7 +5101,11 @@ fn model_skeleton(model: &KernelModel) -> Value {
         }));
     }
     for property in &model.leadstos {
-        properties.push(json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::expr_text(&property.before),fslc_rust::expr_text(&property.after)),"requirement":metadata(property.meta.as_ref())}));
+        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::expr_text(&property.before),fslc_rust::expr_text(&property.after)),"requirement":Value::Null});
+        if let Value::Object(value) = &mut value {
+            insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
+        }
+        properties.push(value);
     }
     let mut entity_domains = std::collections::BTreeSet::new();
     for (_, ty) in &model.state {
@@ -5148,9 +5180,9 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
             .iter()
             .find_map(|key| entry.get(*key).filter(|value| !value.is_null()).cloned());
             let target_name = target.as_ref().and_then(Value::as_str);
-            let requirement = entry
-                .get("requirement")
-                .filter(|requirement| !requirement.is_null())
+            let requirements = entry
+                .get("requirements")
+                .and_then(Value::as_array)
                 .cloned()
                 .or_else(|| {
                     target_name.and_then(|name| {
@@ -5158,8 +5190,9 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                             .actions
                             .iter()
                             .find(|action| fslc_rust::display_name(&action.name) == name)
-                            .and_then(|action| action.meta.as_ref())
-                            .map(|meta| metadata(Some(meta)))
+                            .map(|action| {
+                                requirement_metadata(&action.annotations, action.meta.as_ref())
+                            })
                             .or_else(|| {
                                 model
                                     .reachables
@@ -5169,11 +5202,21 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                                     .find(|property| {
                                         fslc_rust::display_name(&property.name) == name
                                     })
-                                    .and_then(|property| property.meta.as_ref())
-                                    .map(|meta| metadata(Some(meta)))
+                                    .map(|property| {
+                                        requirement_metadata(
+                                            &property.annotations,
+                                            property.meta.as_ref(),
+                                        )
+                                    })
                             })
                     })
                 })
+                .unwrap_or_default();
+            let requirement = entry
+                .get("requirement")
+                .filter(|requirement| !requirement.is_null())
+                .cloned()
+                .or_else(|| requirements.first().cloned())
                 .unwrap_or(Value::Null);
             let steps = entry.get("steps").cloned().unwrap_or_else(|| json!([]));
             let narration = steps
@@ -5210,6 +5253,7 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                 "kind":kind,
                 "target":target,
                 "requirement":requirement,
+                "requirements":requirements,
                 "steps":steps,
                 "narration":narration,
                 "initial_state":entry.get("initial_state"),
@@ -5519,12 +5563,16 @@ fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
             value.insert("origin".to_owned(), json!(origin));
             value.insert("label".to_owned(), json!("init weakening"));
         }
-        output.push(json!({
+        let mut item = json!({
             "property":fslc_rust::display_name(&property.name),
             "weakening":weakening,
             "result":"reachable_failed",
-            "requirement":property.meta.as_ref().map(|meta|json!({"id":meta.id,"text":meta.text})),
-        }));
+            "requirement":Value::Null,
+        });
+        if let Value::Object(item) = &mut item {
+            insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
+        }
+        output.push(item);
     }
     Value::Array(output)
 }
@@ -6038,22 +6086,22 @@ fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
             _ => 99,
         };
         let key = (canonical_violation.trace.len(), priority, span.start.line);
-        let requirement = original
+        let property = original
             .invariants
             .iter()
-            .find(|property| property.name == violation.name)
-            .and_then(|property| property.meta.as_ref())
-            .map_or(
-                Value::Null,
-                |meta| json!({"id": meta.id, "text": meta.text}),
-            );
-        let item = json!({
+            .find(|property| property.name == violation.name);
+        let mut item = json!({
             "invariant": display(&violation.name),
             "weakening": weakening,
             "trace": trace,
-            "requirement": requirement,
+            "requirement": Value::Null,
             "violation": explanation,
         });
+        if let Some(property) = property
+            && let Value::Object(item) = &mut item
+        {
+            insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
+        }
         if found
             .get(&violation.name)
             .is_none_or(|(current, _)| key < *current)
@@ -6068,13 +6116,21 @@ fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
             .map(|property| {
                 found.get(&property.name).map_or_else(
                     || {
-                        json!({
+                        let mut item = json!({
                             "invariant": display(&property.name),
                             "weakening": null,
                             "trace": null,
-                            "requirement": property.meta.as_ref().map_or(Value::Null, |meta| json!({"id": meta.id, "text": meta.text})),
+                            "requirement": Value::Null,
                             "note": format!("no counterfactual within depth {depth}"),
-                        })
+                        });
+                        if let Value::Object(item) = &mut item {
+                            insert_requirement_metadata(
+                                item,
+                                &property.annotations,
+                                property.meta.as_ref(),
+                            );
+                        }
+                        item
                     },
                     |(_, item)| item.clone(),
                 )
@@ -6161,12 +6217,17 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
                 display(&action.name),
                 if action.fair { " [fair]" } else { "" },
             );
-            if let Some(meta) = &action.meta {
+            for requirement in action
+                .annotations
+                .requirements()
+                .expect("checked model annotations are valid")
+            {
                 let _ = writeln!(
                     text,
                     "    requirement: {}{}",
-                    meta.id,
-                    meta.text
+                    requirement.id,
+                    requirement
+                        .text
                         .as_ref()
                         .map_or_else(String::new, |value| format!(": {value}"))
                 );
@@ -6443,10 +6504,18 @@ fn run_mutate_legacy(
     }
     for action in &model.actions {
         for (index, _) in action.requires.iter().enumerate() {
-            mutants.push(json!({"op":"requires_remove","target":format!("{} requires #{}",fslc_rust::display_name(&action.name),index+1),"status":"survived","loc":action.require_spans.get(index).map(|span|span.python_loc()),"killed_by":Value::Null,"requirement":metadata(action.meta.as_ref()),"source":"builtin"}));
+            let mut mutant = json!({"op":"requires_remove","target":format!("{} requires #{}",fslc_rust::display_name(&action.name),index+1),"status":"survived","loc":action.require_spans.get(index).map(|span|span.python_loc()),"killed_by":Value::Null,"requirement":Value::Null,"source":"builtin"});
+            if let Value::Object(mutant) = &mut mutant {
+                insert_requirement_metadata(mutant, &action.annotations, action.meta.as_ref());
+            }
+            mutants.push(mutant);
         }
         if !action.statements.is_empty() {
-            mutants.push(json!({"op":"assignment_remove","target":format!("{} assignment",fslc_rust::display_name(&action.name)),"status":"survived","loc":action.span.python_loc(),"killed_by":Value::Null,"requirement":metadata(action.meta.as_ref()),"source":"builtin"}));
+            let mut mutant = json!({"op":"assignment_remove","target":format!("{} assignment",fslc_rust::display_name(&action.name)),"status":"survived","loc":action.span.python_loc(),"killed_by":Value::Null,"requirement":Value::Null,"source":"builtin"});
+            if let Value::Object(mutant) = &mut mutant {
+                insert_requirement_metadata(mutant, &action.annotations, action.meta.as_ref());
+            }
+            mutants.push(mutant);
         }
     }
     let discovered = discovered.unwrap_or(mutants.len());
@@ -6486,26 +6555,34 @@ fn run_mutate_legacy(
 struct MutationOracle {
     clean: bool,
     killed_by: Option<String>,
-    killer_requirement: Option<String>,
+    killer_requirements: Vec<String>,
 }
 
-fn property_requirement(model: &KernelModel, name: &str) -> Option<String> {
+fn annotation_requirement_ids(annotations: &Annotations) -> Vec<String> {
+    annotations
+        .requirements()
+        .expect("checked model annotations are valid")
+        .into_iter()
+        .map(|requirement| requirement.id)
+        .collect()
+}
+
+fn property_requirements(model: &KernelModel, name: &str) -> Vec<String> {
     model
         .invariants
         .iter()
         .chain(&model.transitions)
         .chain(&model.reachables)
         .find(|property| property.name == name)
-        .and_then(|property| property.meta.as_ref())
-        .map(|meta| meta.id.clone())
+        .map(|property| annotation_requirement_ids(&property.annotations))
         .or_else(|| {
             model
                 .leadstos
                 .iter()
                 .find(|property| property.name == name)
-                .and_then(|property| property.meta.as_ref())
-                .map(|meta| meta.id.clone())
+                .map(|property| annotation_requirement_ids(&property.annotations))
         })
+        .unwrap_or_default()
 }
 
 fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle {
@@ -6514,7 +6591,7 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
             return MutationOracle {
                 clean: false,
                 killed_by: Some("internal".to_owned()),
-                killer_requirement: None,
+                killer_requirements: Vec::new(),
             };
         };
         let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
@@ -6522,7 +6599,7 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
             return MutationOracle {
                 clean: false,
                 killed_by: Some("build_spec".to_owned()),
-                killer_requirement: None,
+                killer_requirements: Vec::new(),
             };
         };
         if let Some(violation) = result.violation {
@@ -6541,7 +6618,7 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
             return MutationOracle {
                 clean: false,
                 killed_by: Some(display(&violation.name)),
-                killer_requirement: property_requirement(&model, &violation.name),
+                killer_requirements: property_requirements(&model, &violation.name),
             };
         }
         if let Some(property) = model.reachables.iter().find(|property| {
@@ -6553,14 +6630,14 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
             return MutationOracle {
                 clean: false,
                 killed_by: Some(display(&property.name)),
-                killer_requirement: property.meta.as_ref().map(|meta| meta.id.clone()),
+                killer_requirements: annotation_requirement_ids(&property.annotations),
             };
         }
         if let Some(violation) = result.leadsto_violation {
             return MutationOracle {
                 clean: false,
                 killed_by: Some(display(&violation.name)),
-                killer_requirement: property_requirement(&model, &violation.name),
+                killer_requirements: property_requirements(&model, &violation.name),
             };
         }
         break;
@@ -6568,7 +6645,7 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
     MutationOracle {
         clean: true,
         killed_by: None,
-        killer_requirement: None,
+        killer_requirements: Vec::new(),
     }
 }
 
@@ -6577,14 +6654,14 @@ fn mutation_oracle(spec: fsl_syntax::SurfaceSpec, depth: usize) -> MutationOracl
         return MutationOracle {
             clean: false,
             killed_by: Some("build_spec".to_owned()),
-            killer_requirement: None,
+            killer_requirements: Vec::new(),
         };
     };
     let Ok(model) = fsl_core::build_model(kernel) else {
         return MutationOracle {
             clean: false,
             killed_by: Some("build_spec".to_owned()),
-            killer_requirement: None,
+            killer_requirements: Vec::new(),
         };
     };
     mutation_oracle_for_model(model, depth)
@@ -6595,7 +6672,7 @@ fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle
         return MutationOracle {
             clean: false,
             killed_by: Some(violation.name.clone()),
-            killer_requirement: property_requirement(&model, &violation.name),
+            killer_requirements: property_requirements(&model, &violation.name),
         };
     }
     let mut automatic = model.clone();
@@ -6633,7 +6710,7 @@ fn apply_requirement_mutation_oracle(
                 }
                 .to_owned(),
             ),
-            killer_requirement: None,
+            killer_requirements: Vec::new(),
         };
     }
     Ok(())
@@ -6659,7 +6736,7 @@ fn apply_implements_mutation_oracle(
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
             .map_err(|error| error.to_string())?;
     if let Some(failure) = checked.failure {
-        let killer_requirement = failure
+        let killer_requirements = failure
             .impl_action
             .as_ref()
             .and_then(|instance| {
@@ -6668,12 +6745,13 @@ fn apply_implements_mutation_oracle(
                     .iter()
                     .find(|action| action.name == instance.name)
             })
-            .and_then(|action| action.meta.as_ref())
-            .map(|meta| meta.id.clone());
+            .map_or_else(Vec::new, |action| {
+                annotation_requirement_ids(&action.annotations)
+            });
         *outcome = MutationOracle {
             clean: false,
             killed_by: Some("refinement".to_owned()),
-            killer_requirement,
+            killer_requirements,
         };
     }
     Ok(())
@@ -6729,21 +6807,23 @@ fn mutation_summary(mutants: &[Value]) -> Value {
 
 fn requirement_kill_index(model: &KernelModel) -> Map<String, Value> {
     let mut result = Map::new();
-    for meta in model
+    for annotations in model
         .actions
         .iter()
-        .filter_map(|item| item.meta.as_ref())
+        .map(|item| &item.annotations)
         .chain(
             model
                 .invariants
                 .iter()
                 .chain(&model.transitions)
                 .chain(&model.reachables)
-                .filter_map(|item| item.meta.as_ref()),
+                .map(|item| &item.annotations),
         )
-        .chain(model.leadstos.iter().filter_map(|item| item.meta.as_ref()))
+        .chain(model.leadstos.iter().map(|item| &item.annotations))
     {
-        result.entry(meta.id.clone()).or_insert(json!({"kills":0}));
+        for requirement in annotation_requirement_ids(annotations) {
+            result.entry(requirement).or_insert(json!({"kills":0}));
+        }
     }
     result
 }
@@ -7252,7 +7332,7 @@ fn run_mutate(
                 outcome = MutationOracle {
                     clean: false,
                     killed_by: Some(error),
-                    killer_requirement: None,
+                    killer_requirements: Vec::new(),
                 };
             } else if apply_implements_mutation_oracle(
                 &source,
@@ -7266,7 +7346,7 @@ fn run_mutate(
                 outcome = MutationOracle {
                     clean: false,
                     killed_by: Some("refinement".to_owned()),
-                    killer_requirement: None,
+                    killer_requirements: Vec::new(),
                 };
             }
         }
@@ -7288,7 +7368,7 @@ fn run_mutate(
             outcome = MutationOracle {
                 clean: false,
                 killed_by: Some(format!("_bounds_{root}")),
-                killer_requirement: None,
+                killer_requirements: Vec::new(),
             };
         }
         let status = if outcome.clean { "survived" } else { "killed" };
@@ -7309,6 +7389,22 @@ fn run_mutate(
             "requirement":metadata(mutant.requirement.as_ref()),
             "source":"builtin",
         });
+        let annotations = mutant.action.as_deref().and_then(|name| {
+            if name == "init" {
+                Some(&model.init_annotations)
+            } else {
+                model
+                    .actions
+                    .iter()
+                    .find(|action| action.name == name)
+                    .map(|action| &action.annotations)
+            }
+        });
+        if let Some(annotations) = annotations
+            && let Value::Object(public) = &mut public
+        {
+            insert_requirement_metadata(public, annotations, mutant.requirement.as_ref());
+        }
         if outcome.clean
             && mutant
                 .action
@@ -7321,14 +7417,14 @@ fn run_mutate(
                 json!("action dead at baseline — survival expected"),
             );
         }
-        if let Some(requirement) = outcome.killer_requirement
-            && let Some(Value::Object(entry)) = by_req.get_mut(&requirement)
-        {
-            let kills = entry
-                .get("kills")
-                .and_then(Value::as_u64)
-                .unwrap_or_default();
-            entry.insert("kills".to_owned(), json!(kills + 1));
+        for requirement in outcome.killer_requirements {
+            if let Some(Value::Object(entry)) = by_req.get_mut(&requirement) {
+                let kills = entry
+                    .get("kills")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default();
+                entry.insert("kills".to_owned(), json!(kills + 1));
+            }
         }
         public_mutants.push(public);
     }
@@ -7407,14 +7503,14 @@ fn run_mutate(
                     )),
                 ));
             } else {
-                if let Some(requirement) = outcome.killer_requirement.as_ref()
-                    && let Some(Value::Object(entry)) = by_req.get_mut(requirement)
-                {
-                    let kills = entry
-                        .get("kills")
-                        .and_then(Value::as_u64)
-                        .unwrap_or_default();
-                    entry.insert("kills".to_owned(), json!(kills + 1));
+                for requirement in &outcome.killer_requirements {
+                    if let Some(Value::Object(entry)) = by_req.get_mut(requirement) {
+                        let kills = entry
+                            .get("kills")
+                            .and_then(Value::as_u64)
+                            .unwrap_or_default();
+                        entry.insert("kills".to_owned(), json!(kills + 1));
+                    }
                 }
                 public_mutants.push(external_mutant_public(
                     &candidate,
@@ -8514,12 +8610,14 @@ fn tag_statement_effects(
 }
 
 fn tagged_property(kind: &str, property: &fsl_core::PropertyDef) -> Option<Value> {
-    let meta = property.meta.as_ref()?;
+    let tags = requirement_metadata(&property.annotations, property.meta.as_ref());
+    let tag = tags.first()?.clone();
     Some(json!({
         "kind":kind,
         "name":property.name,
         "node_id":format!("{kind}:{}",property.name),
-        "tag":metadata(Some(meta)),
+        "tag":tag,
+        "tags":tags,
         "loc":property.span.python_loc(),
         "formal_definition":{"expression":fslc_rust::expr_text(&property.expr)},
         "formal_identifiers":expression_identifiers(&property.expr.python_ast()),
@@ -8530,7 +8628,8 @@ fn tagged_property(kind: &str, property: &fsl_core::PropertyDef) -> Option<Value
 fn tag_review_output(model: &KernelModel) -> Value {
     let mut declarations = Vec::new();
     for action in &model.actions {
-        let Some(meta) = action.meta.as_ref() else {
+        let tags = requirement_metadata(&action.annotations, action.meta.as_ref());
+        let Some(tag) = tags.first().cloned() else {
             continue;
         };
         let mut identifiers = std::collections::BTreeSet::new();
@@ -8547,7 +8646,8 @@ fn tag_review_output(model: &KernelModel) -> Value {
             "kind":"action",
             "name":action.name,
             "node_id":format!("action:{}",action.name),
-            "tag":metadata(Some(meta)),
+            "tag":tag,
+            "tags":tags,
             "loc":action.span.python_loc(),
             "formal_definition":{
                 "parameters":action.params.iter().map(ParamDef::name).collect::<Vec<_>>(),
@@ -8577,7 +8677,8 @@ fn tag_review_output(model: &KernelModel) -> Value {
             .filter_map(|property| tagged_property("reachable", property)),
     );
     for property in &model.leadstos {
-        let Some(meta) = property.meta.as_ref() else {
+        let tags = requirement_metadata(&property.annotations, property.meta.as_ref());
+        let Some(tag) = tags.first().cloned() else {
             continue;
         };
         let mut identifiers = expression_identifiers(&property.before.python_ast());
@@ -8607,7 +8708,8 @@ fn tag_review_output(model: &KernelModel) -> Value {
             "kind":"leadsTo",
             "name":property.name,
             "node_id":format!("leadsTo:{}",property.name),
-            "tag":metadata(Some(meta)),
+            "tag":tag,
+            "tags":tags,
             "loc":property.span.python_loc(),
             "formal_definition":formal,
             "formal_identifiers":identifiers,
@@ -9141,7 +9243,12 @@ fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
     let action_meta = model
         .actions
         .iter()
-        .map(|action| (format!("action:{}", action.name), action.meta.is_some()))
+        .map(|action| {
+            (
+                format!("action:{}", action.name),
+                !action.annotations.source_order().is_empty(),
+            )
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
     let dependency_edges = dependencies["edges"]
         .as_array()
@@ -9958,9 +10065,13 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
 fn add_requirements_layer_nodes(tsg: &mut Value, model: &KernelModel) {
     let mut requirements = std::collections::BTreeMap::<String, Vec<String>>::new();
     for action in &model.actions {
-        if let Some(meta) = &action.meta {
+        for requirement in action
+            .annotations
+            .requirements()
+            .expect("checked model annotations are valid")
+        {
             requirements
-                .entry(meta.id.clone())
+                .entry(requirement.id)
                 .or_default()
                 .push(format!("action:{}", action.name));
         }
@@ -9971,18 +10082,26 @@ fn add_requirements_layer_nodes(tsg: &mut Value, model: &KernelModel) {
         ("reachable", &model.reachables),
     ] {
         for property in properties {
-            if let Some(meta) = &property.meta {
+            for requirement in property
+                .annotations
+                .requirements()
+                .expect("checked model annotations are valid")
+            {
                 requirements
-                    .entry(meta.id.clone())
+                    .entry(requirement.id)
                     .or_default()
                     .push(format!("{kind}:{}", property.name));
             }
         }
     }
     for property in &model.leadstos {
-        if let Some(meta) = &property.meta {
+        for requirement in property
+            .annotations
+            .requirements()
+            .expect("checked model annotations are valid")
+        {
             requirements
-                .entry(meta.id.clone())
+                .entry(requirement.id)
                 .or_default()
                 .push(format!("leadsTo:{}", property.name));
         }

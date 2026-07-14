@@ -3,12 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
-    ActionItem, Binder, BusinessGoalBody, BusinessItem, BusinessPolicyBody, Expr,
-    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, LValue, MetaTag, Param,
-    PreservationItem, ProcessField, ProcessItem, ProcessTransition, QualifiedName,
-    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementsItem, SpecItem,
-    StateField, Statement, SurfaceBusiness, SurfaceDocument, SurfaceGovernance,
-    SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
+    ActionItem, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
+    BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
+    LValue, MetaTag, Param, PreservationItem, ProcessField, ProcessItem, ProcessTransition,
+    QualifiedName, RequirementAction, RequirementActionItem, RequirementBlockItem,
+    RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness, SurfaceDocument,
+    SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
 };
 
 use crate::{CoreError, KernelSpec, lower_direct_spec, substitute_expr};
@@ -74,6 +74,7 @@ pub struct RequirementsTraceCase {
     pub expectation: Option<RequirementsTraceExpectation>,
     pub line: u32,
     pub column: u32,
+    pub annotations: Annotations,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -151,6 +152,7 @@ fn meta(id: &str, text: impl Into<String>) -> Option<MetaTag> {
     Some(MetaTag {
         id: id.to_owned(),
         text: Some(text.into()),
+        span: None,
     })
 }
 
@@ -249,6 +251,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
     }
 
     let mut items = Vec::new();
+    let mut explicit_annotations = Vec::new();
     for (entity, span) in &entities {
         let count = bounds.get(entity).ok_or_else(|| {
             core_error(
@@ -313,6 +316,24 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
     }
     for process in &processes {
         for transition in &process.transitions {
+            let metadata = transition.covers.as_ref().map_or_else(
+                || meta(&transition.name, format!("by {}", transition.actor)),
+                |cover| {
+                    explicit_annotations.push((
+                        crate::action_target(&transition.name),
+                        Annotation::Requirement {
+                            id: cover.id.clone(),
+                            text: Some(cover.text.clone()),
+                            span: cover.span,
+                        },
+                    ));
+                    Some(MetaTag {
+                        id: cover.id.clone(),
+                        text: Some(cover.text.clone()),
+                        span: Some(cover.span),
+                    })
+                },
+            );
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
                 params: vec![Param::Typed("c".to_owned(), qualified(&process.name))],
@@ -332,7 +353,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 ],
                 span: transition.span,
                 fair: true,
-                meta: meta(&transition.name, format!("by {}", transition.actor)),
+                meta: metadata,
                 sync: false,
             });
         }
@@ -476,11 +497,15 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             meta: meta(id, text),
         });
     }
-    lower_direct_spec(SurfaceSpec {
+    let mut kernel = lower_direct_spec(SurfaceSpec {
         name: business.name,
         meta: None,
         items,
-    })
+    })?;
+    for (target, annotation) in explicit_annotations {
+        kernel.bind_annotation(target, annotation);
+    }
+    Ok(kernel)
 }
 
 fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
@@ -756,6 +781,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         }
     }
     let mut items = Vec::new();
+    let mut extra_annotations = Vec::new();
     for (name, span) in &entities {
         let count = instance_bounds.get(name).ok_or_else(|| {
             core_error(
@@ -945,7 +971,21 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             }
             let metadata = transition.covers.as_ref().map_or_else(
                 || meta(&transition.name, format!("by {}", transition.actor)),
-                |(id, text)| meta(id, text),
+                |cover| {
+                    extra_annotations.push((
+                        crate::action_target(&transition.name),
+                        Annotation::Requirement {
+                            id: cover.id.clone(),
+                            text: Some(cover.text.clone()),
+                            span: cover.span,
+                        },
+                    ));
+                    Some(MetaTag {
+                        id: cover.id.clone(),
+                        text: Some(cover.text.clone()),
+                        span: Some(cover.span),
+                    })
+                },
             );
             let mut params = vec![Param::Typed(
                 "c".to_owned(),
@@ -969,7 +1009,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             id,
             text,
             items: declarations,
-            ..
+            span: requirement_span,
         } = requirement
         else {
             unreachable!();
@@ -978,13 +1018,67 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         for declaration in declarations {
             match declaration {
                 RequirementBlockItem::Action(action) => {
-                    items.extend(lower_requirement_action(action, metadata.clone()));
+                    let lowered = lower_requirement_action(action, metadata.clone());
+                    for item in &lowered {
+                        if let SpecItem::Action { name, span, .. } = item {
+                            extra_annotations.push((
+                                crate::action_target(name),
+                                Annotation::Requirement {
+                                    id: id.clone(),
+                                    text: Some(text.clone()),
+                                    span: *requirement_span,
+                                },
+                            ));
+                            if let Some(inner) = &action.meta {
+                                extra_annotations.push((
+                                    crate::action_target(name),
+                                    Annotation::from_legacy(
+                                        inner.id.clone(),
+                                        inner.text.clone(),
+                                        inner.span.unwrap_or(*span),
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                    items.extend(lowered);
                 }
                 RequirementBlockItem::Property(property) => {
-                    items.push(with_meta(property.clone(), metadata.clone()));
+                    let lowered = with_meta(property.clone(), metadata.clone());
+                    for target in property_targets(&lowered) {
+                        extra_annotations.push((
+                            target,
+                            Annotation::Requirement {
+                                id: id.clone(),
+                                text: Some(text.clone()),
+                                span: *requirement_span,
+                            },
+                        ));
+                    }
+                    if let Some(inner) = property_meta(property) {
+                        for target in property_targets(&lowered) {
+                            extra_annotations.push((
+                                target,
+                                Annotation::from_legacy(
+                                    inner.id.clone(),
+                                    inner.text.clone(),
+                                    inner.span.unwrap_or_else(|| property_span(property)),
+                                ),
+                            ));
+                        }
+                    }
+                    items.push(lowered);
                 }
                 RequirementBlockItem::Deadline { name, bound, span } => {
-                    deadlines.push((name.clone(), bound.clone(), *span, metadata.clone()));
+                    deadlines.push((
+                        name.clone(),
+                        bound.clone(),
+                        *span,
+                        metadata.clone(),
+                        id.clone(),
+                        text.clone(),
+                        *requirement_span,
+                    ));
                 }
             }
         }
@@ -1189,7 +1283,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             meta: None,
             sync: false,
         });
-        for (index, (name, bound, span, metadata)) in deadlines.iter().enumerate() {
+        for (
+            index,
+            (name, bound, span, metadata, requirement_id, requirement_text, requirement_span),
+        ) in deadlines.iter().enumerate()
+        {
             let Some((binder, _, _, _, reference, _, _)) = age_info.get(name) else {
                 return Err(core_error(
                     format!("deadline references undeclared age '{name}'"),
@@ -1221,19 +1319,74 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                     }
                 })
                 .collect::<String>();
+            let generated_name = format!("_deadline_{safe_id}_{name}_{}", index + 1);
+            extra_annotations.push((
+                crate::property_target("invariant", &generated_name),
+                Annotation::Requirement {
+                    id: requirement_id.clone(),
+                    text: Some(requirement_text.clone()),
+                    span: *requirement_span,
+                },
+            ));
             items.push(SpecItem::Invariant {
-                name: format!("_deadline_{safe_id}_{name}_{}", index + 1),
+                name: generated_name,
                 expr: Box::new(expression),
                 span: *span,
                 meta: metadata.clone(),
             });
         }
     }
-    lower_direct_spec(SurfaceSpec {
+    let mut kernel = lower_direct_spec(SurfaceSpec {
         name: requirements.name,
         meta: None,
         items,
-    })
+    })?;
+    for (target, annotation) in extra_annotations {
+        kernel.bind_annotation(target, annotation);
+    }
+    Ok(kernel)
+}
+
+fn property_targets(item: &SpecItem) -> Vec<String> {
+    match item {
+        SpecItem::Invariant { name, .. } => vec![crate::property_target("invariant", name)],
+        SpecItem::Trans { name, .. } | SpecItem::Unless { name, .. } => {
+            vec![crate::property_target("trans", name)]
+        }
+        SpecItem::Reachable { name, .. } => vec![crate::property_target("reachable", name)],
+        SpecItem::Until { name, .. } => {
+            vec![
+                crate::property_target("trans", &format!("{name}_until_safety")),
+                crate::property_target("leadsTo", name),
+            ]
+        }
+        SpecItem::LeadsTo { name, .. } => vec![crate::property_target("leadsTo", name)],
+        _ => Vec::new(),
+    }
+}
+
+fn property_meta(item: &SpecItem) -> Option<&MetaTag> {
+    match item {
+        SpecItem::Invariant { meta, .. }
+        | SpecItem::Trans { meta, .. }
+        | SpecItem::Reachable { meta, .. }
+        | SpecItem::Until { meta, .. }
+        | SpecItem::Unless { meta, .. }
+        | SpecItem::LeadsTo { meta, .. } => meta.as_ref(),
+        _ => None,
+    }
+}
+
+fn property_span(item: &SpecItem) -> fsl_syntax::Span {
+    match item {
+        SpecItem::Invariant { span, .. }
+        | SpecItem::Trans { span, .. }
+        | SpecItem::Reachable { span, .. }
+        | SpecItem::Until { span, .. }
+        | SpecItem::Unless { span, .. }
+        | SpecItem::LeadsTo { span, .. } => *span,
+        _ => zero_span(),
+    }
 }
 
 /// Lower a governance catalog to its executable sentinel kernel.
@@ -1404,6 +1557,7 @@ pub fn requirements_trace_contract(
                 expectation,
                 span,
             } => {
+                let annotations = trace_case_annotations(&id, &text, span)?;
                 let expectation = match expectation {
                     fsl_syntax::AcceptanceExpectation::Expr(expr, _) => {
                         RequirementsTraceExpectation::Expr(expr)
@@ -1420,6 +1574,7 @@ pub fn requirements_trace_contract(
                     },
                 };
                 acceptance.push(RequirementsTraceCase {
+                    annotations,
                     id,
                     text,
                     steps: convert_steps(steps),
@@ -1433,14 +1588,18 @@ pub fn requirements_trace_contract(
                 text,
                 steps,
                 span,
-            } => forbidden.push(RequirementsTraceCase {
-                id,
-                text,
-                steps: convert_steps(steps),
-                expectation: None,
-                line: span.start.line,
-                column: span.start.column,
-            }),
+            } => {
+                let annotations = trace_case_annotations(&id, &text, span)?;
+                forbidden.push(RequirementsTraceCase {
+                    annotations,
+                    id,
+                    text,
+                    steps: convert_steps(steps),
+                    expectation: None,
+                    line: span.start.line,
+                    column: span.start.column,
+                });
+            }
             _ => {}
         }
     }
@@ -1448,6 +1607,22 @@ pub fn requirements_trace_contract(
         acceptance,
         forbidden,
     }))
+}
+
+fn trace_case_annotations(
+    id: &str,
+    text: &str,
+    span: fsl_syntax::Span,
+) -> Result<Annotations, CoreError> {
+    let annotations = Annotations::new(vec![Annotation::Requirement {
+        id: id.to_owned(),
+        text: Some(text.to_owned()),
+        span,
+    }]);
+    annotations
+        .validate()
+        .map_err(|error| core_error(error.message, error.span))?;
+    Ok(annotations)
 }
 
 /// Extract governance catalog relationships needed by CLI reporting.
