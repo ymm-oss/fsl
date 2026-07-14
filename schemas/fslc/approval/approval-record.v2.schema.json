@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/approval/approval-record.v2.schema.json",
+  "title": "FSL signed approval record v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "spec", "target", "approval", "signature"],
+  "properties": {
+    "schema": { "const": "fslc.approval.v2" },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest_algorithm", "digest", "git_commit"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "digest_algorithm": { "const": "fsl-kernel-ast-v1+sha256" },
+        "digest": { "$ref": "#/$defs/sha256" },
+        "git_commit": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "digest_algorithm", "digest", "generator", "generator_version", "inputs"],
+      "properties": {
+        "kind": { "enum": ["ledger", "html", "scenarios"] },
+        "path": { "type": "string", "minLength": 1 },
+        "digest_algorithm": { "const": "fsl-rendered-artifact-v1+sha256" },
+        "digest": { "$ref": "#/$defs/sha256" },
+        "generator": { "const": "fslc" },
+        "generator_version": { "type": "string", "minLength": 1 },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["depth", "deadlock", "engine"],
+          "properties": {
+            "depth": { "type": "integer", "minimum": 0 },
+            "deadlock": { "enum": ["warn", "error", "ignore"] },
+            "engine": { "enum": ["bmc", "induction"] }
+          }
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approver", "approved_at", "requirements"],
+      "properties": {
+        "approver": { "type": "string", "minLength": 1 },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "value"],
+      "properties": {
+        "algorithm": { "const": "ed25519" },
+        "key_id": { "$ref": "#/$defs/sha256" },
+        "value": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+  }
+}

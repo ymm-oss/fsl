@@ -675,10 +675,10 @@ fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
-fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [-o record.json]
-fslc approval check  <file.fsl> --record <record.json>       # approved | drifted
-fslc approval diff   <file.fsl> --record <record.json> [--depth K]
+fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
@@ -800,6 +800,15 @@ all match; otherwise it returns `drifted` with `spec_changed`,
 same status per requirement and includes the full baseline digest. `approval
 diff` materializes the approved commit and invokes the ordinary bounded semantic
 diff against the current working file. See `docs/DESIGN-approval.md`.
+
+Without `--signing-key`, `approval create` emits the unchanged unsigned
+`fslc.approval.v1` record. With an Ed25519 PKCS#8 PEM signing key it emits
+`fslc.approval.v2`; every check, diff, or ledger use of that record requires the
+matching SPKI PEM `--trust-key`. The v2 detached signature covers the full
+canonical record, and a cryptographic mismatch is `signature-invalid` rather
+than an approval. Trust-key possession authenticates a signer but authorization
+remains an organizational policy. The exact canonicalization and key formats
+are specified in `docs/DESIGN-approval.md`.
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
