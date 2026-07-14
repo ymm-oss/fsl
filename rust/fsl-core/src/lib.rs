@@ -21,6 +21,7 @@ mod compose;
 mod db;
 mod dialect;
 mod domain;
+mod domain_lowering;
 mod model;
 mod public_kernel;
 mod refinement;

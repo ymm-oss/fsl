@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Native Rust domain lowering (issue #239) now resolves typed domain symbols,
+  enum members, `can()`, finite membership, state reads, and nested lvalues
+  structurally, then builds Kernel AST directly without generated-source
+  render/reparse or substring semantics. Resolver/type failures report original
+  domain spans; empty membership and map-state initialization are explicit;
+  characterization now records direct-lowering origins and fail-closed checks.
 - Native Rust domain parsing (issue #236) now retains defaults, ranges, guards,
   rejection conditions, assignments, invariants, stale policies, effect
   correlation/idempotency expressions, and saga guards as unresolved typed

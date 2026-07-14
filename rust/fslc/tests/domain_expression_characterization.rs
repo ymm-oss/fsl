@@ -399,7 +399,7 @@ fn cli_snapshot(args: &[&str]) -> Value {
     json!({"exit":status,"output":output})
 }
 
-fn generated_span_note(name: &str, action_name: &str, source_declaration: &str) -> Value {
+fn direct_span_note(name: &str, action_name: &str, source_declaration: &str) -> Value {
     let contract = public_projection(name);
     let action = contract["actions"]
         .as_array()
@@ -413,7 +413,7 @@ fn generated_span_note(name: &str, action_name: &str, source_declaration: &str) 
         .unwrap_or_else(|| panic!("missing source declaration '{source_declaration}'"))
         + 1;
     json!({
-        "classification":"known_generated_kernel_coordinate_attached_to_source_file",
+        "classification":"original_domain_coordinate_preserved",
         "file":name,
         "source_declaration_line":source_line,
         "reported_public_kernel_line":action["span"]["line"],
@@ -466,9 +466,9 @@ fn baseline() -> Value {
             "expressions_valid.fsl":public_projection("expressions_valid.fsl"),
             "effect_saga_valid.fsl":public_projection("effect_saga_valid.fsl")
         },
-        "known_generated_spans":[
-            generated_span_note("expressions_valid.fsl","order_approve","decide Approve {"),
-            generated_span_note("effect_saga_valid.fsl","order_approve","decide Approve {")
+        "direct_domain_spans":[
+            direct_span_note("expressions_valid.fsl","order_approve","decide Approve {"),
+            direct_span_note("effect_saga_valid.fsl","order_approve","decide Approve {")
         ],
         "generated_kernel_source_fragments":{
             "expressions_valid.fsl":generated_fragments(&expressions,&[
@@ -522,7 +522,11 @@ fn domain_surface_lowering_public_kernel_and_diagnostics_match_baseline() {
 fn domain_monitor_and_symbolic_semantics_agree() {
     let mut total_checked = 0_usize;
     let mut rejected_changed_successor = false;
-    for name in ["expressions_valid.fsl", "effect_saga_valid.fsl"] {
+    for name in [
+        "expressions_valid.fsl",
+        "effect_saga_valid.fsl",
+        "lvalues_surface.fsl",
+    ] {
         let model = model(name);
         let initial = fsl_runtime::Monitor::new(model.clone()).expect("create Monitor");
         let mut queue = VecDeque::from([(initial, 0_usize)]);
