@@ -41,6 +41,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- Bounded `leadsTo` deadlock-stagnation detection no longer requires `--depth`
+  to land exactly on the stalling step. The BMC unrolling loop permanently
+  asserted a forward transition out of every non-final step before the
+  deadlock-stagnation check ran as a single post-hoc pass, so a deadlocked
+  path below the requested depth was excluded from the solver context and the
+  spec falsely verified. The check now runs inside the per-step loop, before
+  that step's forward-transition assertion, matching the frozen Python
+  reference's existing behavior (issue #260).
 - The browser Worker now reports `leadsTo` violations. The Worker envelope
   previously ignored the bounded verifier's leadsTo verdict, so a spec whose
   `must eventually` policy is violated was reported as `verified` in the
