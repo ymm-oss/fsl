@@ -568,7 +568,7 @@
           "check"
         ],
         "prog": "fslc check",
-        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n",
+        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n  --edition {current,next}\n",
         "actions": [
           {
             "dest": "help",
@@ -602,6 +602,19 @@
             "flags": [
               "--requirements"
             ],
+            "action": "store"
+          },
+          {
+            "dest": "edition",
+            "required": false,
+            "flags": [
+              "--edition"
+            ],
+            "choices": [
+              "current",
+              "next"
+            ],
+            "default": "current",
             "action": "store"
           }
         ],
@@ -963,7 +976,7 @@
               "check"
             ],
             "prog": "fslc domain check",
-            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n",
+            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n  --edition {current,next}\n",
             "actions": [
               {
                 "dest": "help",
@@ -1015,6 +1028,19 @@
                   "ignore"
                 ],
                 "default": "warn",
+                "action": "store"
+              },
+              {
+                "dest": "edition",
+                "required": false,
+                "flags": [
+                  "--edition"
+                ],
+                "choices": [
+                  "current",
+                  "next"
+                ],
+                "default": "current",
                 "action": "store"
               }
             ],
@@ -1985,7 +2011,7 @@
           "verify"
         ],
         "prog": "fslc verify",
-        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction,explicit}\n  --k K_IND             max induction depth (induction engine only)\n  --explicit-budget EXPLICIT_BUDGET\n                        max visited states for the explicit engine (default\n                        1000000); exceeding returns unknown_budget\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation; resolves\n                        across invariant/trans/leadsTo/reachable declarations\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n",
+        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction,explicit}\n  --k K_IND             max induction depth (induction engine only)\n  --explicit-budget EXPLICIT_BUDGET\n                        max visited states for the explicit engine (default\n                        1000000); exceeding returns unknown_budget\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation; resolves\n                        across invariant/trans/leadsTo/reachable declarations\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n  --edition {current,next}\n",
         "actions": [
           {
             "dest": "help",
@@ -2150,6 +2176,19 @@
             "flags": [
               "--from-state"
             ],
+            "action": "store"
+          },
+          {
+            "dest": "edition",
+            "required": false,
+            "flags": [
+              "--edition"
+            ],
+            "choices": [
+              "current",
+              "next"
+            ],
+            "default": "current",
             "action": "store"
           }
         ],

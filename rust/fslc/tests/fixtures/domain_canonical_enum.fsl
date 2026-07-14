@@ -1,0 +1,18 @@
+domain CanonicalEnum { // SPDX-License-Identifier: Apache-2.0
+  enum Status {
+    Pending,
+    Approved,
+  }
+
+  aggregate Order {
+    state { status: Status = Pending; }
+    command Approve {}
+    event ApprovedEvent {}
+    decide Approve {
+      requires status == Pending
+      emits ApprovedEvent
+    }
+    evolve ApprovedEvent { status = Approved }
+    invariant valid { status in [Pending, Approved] }
+  }
+}

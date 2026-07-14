@@ -365,8 +365,8 @@
       "path": [
         "verify"
       ],
-      "python_sha256": "6616a6b36c0b9694b571449e9100c0507018b84c35aab1f2918024f8754cc948",
-      "rust_sha256": "120d39603796ab9509bddb97aa5ee23f251e344bbf0e2763524c437ecefb5981"
+      "python_sha256": "4ef502e9d7641bf3025096fe525cb4134c03f58b16316c17de318bab98e4863f",
+      "rust_sha256": "18818b8474ecd22d722894bb7c5dd738a5201c34a52db163cd4b8e045b0540e3"
     }
   ]
 }

@@ -1,8 +1,8 @@
 domain UnsafeIrreversibleEffect {
   implementation_profile functional_ddd
 
-  type OrderStatus = Pending | Approved
-  type PaymentStatus = NotRequested | PaymentPending | Captured
+  enum OrderStatus { Pending, Approved }
+  enum PaymentStatus { NotRequested, PaymentPending, Captured }
 
   aggregate Order {
     id OrderId

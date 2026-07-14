@@ -167,7 +167,7 @@ reports stable fsl-domain findings):
 domain <Name> {
   implementation_profile functional_ddd
 
-  type OrderStatus = Pending | Approved | Cancelled
+  enum OrderStatus { Pending, Approved, Cancelled }
 
   aggregate Order {
     id OrderId
@@ -242,6 +242,15 @@ aggregate and becomes the conjunction of the command's `requires` clauses and
 the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.
+
+Domain declarations use `enum Name { Member, ... }` for finite variants and
+`type Name = lo..hi` for bounded numeric ranges. The legacy spelling
+`type Name = A | B` remains accepted in the current 2.x edition and produces the
+stable `deprecated_domain_enum_union` warning over the complete declaration,
+including a canonical replacement. `fslc check`, `fslc verify`, and
+`fslc domain check` accept `--edition current|next`; `next` rejects the legacy
+union spelling. Empty enums and duplicate members are errors, reported at the
+declaration and duplicate member respectively.
 
 The native Rust frontend also retains a private origin chain for domain state,
 actions, guards, statements, and properties. Verification, counterexample, and

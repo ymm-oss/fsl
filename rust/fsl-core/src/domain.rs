@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
     DomainAggregate, DomainEffect, DomainEvolve, DomainField, DomainLoc, DomainSaga,
-    DomainSagaStep, DomainSpec, DomainType, SourcePos, Span, SyntaxExpr, SyntaxExprKind,
+    DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, SourcePos, Span, SyntaxExpr,
+    SyntaxExprKind,
 };
 
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
@@ -149,10 +150,13 @@ impl<'a> Context<'a> {
                     name,
                     kind: "external".to_owned(),
                     members: Vec::new(),
+                    member_spans: Vec::new(),
                     lo: Some(synthetic_num(0, domain.loc)),
                     hi: Some(synthetic_num(1, domain.loc)),
                     fields: Vec::new(),
                     invariants: Vec::new(),
+                    source_form: DomainTypeSourceForm::External,
+                    span: domain.loc.span(),
                     loc: domain.loc,
                 });
             }

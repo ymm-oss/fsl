@@ -141,6 +141,37 @@ def test_raw_tree_index_extracts_spec_definitions_references_and_ranges():
     assert init_i_loc.range == init_i.selection_range
 
 
+def test_domain_canonical_enum_is_indexed_with_members():
+    source = """domain Orders {
+  enum Status { Pending, Approved }
+  aggregate Order {
+    state { status: Status = Pending; }
+  }
+}
+"""
+    index = build_index(source, "orders.fsl")
+    assert _symbol(index, "Status", "domain_type").detail == "enum"
+    assert _symbol(index, "Pending", "enum_member").detail == "enum member"
+    assert _symbol(index, "Approved", "enum_member").detail == "enum member"
+
+    canonical = check_source(source, "orders.fsl")
+    assert not any(
+        warning.get("code") == "deprecated_domain_enum_union"
+        for warning in canonical.get("warnings", [])
+    )
+
+    legacy = check_source(
+        source.replace("enum Status { Pending, Approved }", "type Status = Pending | Approved"),
+        "orders.fsl",
+    )
+    warning = next(
+        warning
+        for warning in legacy["warnings"]
+        if warning.get("code") == "deprecated_domain_enum_union"
+    )
+    assert warning["canonical_replacement"] == "enum Status { Pending, Approved }"
+
+
 def test_compose_definition_resolution_crosses_use_imports():
     path = SPECS / "order_system.fsl"
     source = path.read_text(encoding="utf-8")

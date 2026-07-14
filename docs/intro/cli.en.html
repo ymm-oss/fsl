@@ -79,7 +79,7 @@ def _error_envelope(kind, message, loc=None, expected=None, hint=None):
     if hint:
         err[&quot;hint&quot;] = hint
     return _envelope(err)
-</pre></div></details><div class="disclosure-tree"><details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] file
+</pre></div></details><div class="disclosure-tree"><details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file
 
 positional arguments:
   file
@@ -88,8 +88,9 @@ options:
   -h, --help            show this help message and exit
   --strict-tags
   --requirements REQUIREMENTS
+  --edition {current,next}
 </pre></div></details>
-<details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] file
+<details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next}] file
 
 positional arguments:
   file
@@ -122,6 +123,7 @@ options:
   --from-state FROM_STATE
                         replace spec init with a complete Monitor/replay
                         logical-state JSON snapshot (BMC only)
+  --edition {current,next}
 </pre></div></details>
 <details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file
 
@@ -417,7 +419,7 @@ options:
   -h, --help            show this help message and exit
   --environment ENVIRONMENT
 </pre></div></details></div></div></details>
-<details><summary>fslc domain <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc domain check</summary><div class="tree-body"><pre>usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
+<details><summary>fslc domain <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc domain check</summary><div class="tree-body"><pre>usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next}] file
 
 positional arguments:
   file
@@ -427,6 +429,7 @@ options:
   --depth DEPTH
   --engine {bmc,induction}
   --deadlock {warn,error,ignore}
+  --edition {current,next}
 </pre></div></details>
 <details><summary>fslc domain analyze</summary><div class="tree-body"><pre>usage: fslc domain analyze [-h] file
 

@@ -4,9 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
     ActionItem, Binder, DomainAggregate, DomainDecide, DomainEffect, DomainField, DomainLoc,
-    DomainSaga, DomainSagaStep, DomainSpec, DomainType, Expr, LValue, MetaTag, Param, Pattern,
-    QualifiedName, Span, SpecItem, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr,
-    SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr,
+    DomainSaga, DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, Expr, LValue,
+    MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, Statement, SurfaceSpec, SyntaxBinder,
+    SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr,
     SyntaxTypeExprKind, TypeExpr,
 };
 
@@ -263,10 +263,13 @@ impl<'a> Resolver<'a> {
                     name,
                     kind: "external".to_owned(),
                     members: Vec::new(),
+                    member_spans: Vec::new(),
                     lo: None,
                     hi: None,
                     fields: Vec::new(),
                     invariants: Vec::new(),
+                    source_form: DomainTypeSourceForm::External,
+                    span: domain.loc.span(),
                     loc: domain.loc,
                 });
             }
@@ -1836,6 +1839,26 @@ impl<'a> Resolver<'a> {
     }
 
     fn validate_document_expressions(&self) -> Result<(), CoreError> {
+        for ty in &self.types {
+            if ty.kind != "enum" {
+                continue;
+            }
+            if ty.members.is_empty() {
+                return Err(error_at(
+                    format!("enum '{}' has no members", ty.name),
+                    ty.span,
+                ));
+            }
+            let mut seen = BTreeSet::new();
+            for (index, member) in ty.members.iter().enumerate() {
+                if !seen.insert(member) {
+                    return Err(error_at(
+                        format!("duplicate enum member '{member}' in '{}'", ty.name),
+                        ty.member_spans.get(index).copied().unwrap_or(ty.span),
+                    ));
+                }
+            }
+        }
         for ty in &self.types {
             if ty.kind != "value_object" {
                 continue;

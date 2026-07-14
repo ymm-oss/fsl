@@ -1032,6 +1032,27 @@ class _IndexBuilder:
             self._add_symbol(token, "domain_type", _tree_range(node), parent=parent, detail="type")
         self._visit_children_after_first_token(node, parent, local_scope)
 
+    def _visit_enum_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
+        token = _first_token(node)
+        idx = parent
+        if token is not None:
+            idx = self._add_symbol(token, "domain_type", _tree_range(node), parent=parent, detail="enum")
+        self._visit_children_after_first_token(node, idx, local_scope)
+
+    def _visit_domain_enum_member(
+        self, node: Tree, parent: Optional[int], local_scope: Optional[Range]
+    ) -> None:
+        token = _first_token(node)
+        if token is not None:
+            self._add_symbol(
+                token,
+                "enum_member",
+                _tree_range(node),
+                parent=parent,
+                detail="enum member",
+                exported=False,
+            )
+
     def _visit_value_object_def(self, node: Tree, parent: Optional[int], local_scope: Optional[Range]) -> None:
         token = _first_token(node)
         idx = parent

@@ -1,5 +1,5 @@
 domain Orders { // SPDX-License-Identifier: Apache-2.0
-  type Status = Pending | Approved
+  enum Status { Pending, Approved }
   aggregate Order {
     state { status: Status = Pending; }
 
