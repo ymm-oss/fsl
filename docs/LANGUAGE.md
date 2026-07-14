@@ -234,11 +234,19 @@ event-flag guarded actions, and effect lifecycle state to finite
 `Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Domain
 enum members are namespaced during lowering, so two domain enums may both contain
 `Pending`. Domain expressions may use `X in [A, B]` and `can(Command)`; these are
-rewritten to kernel expressions.
+resolved from the typed domain tree and lowered structurally to kernel
+expressions. Bare enum members use the expected logical type; an untyped member
+shared by multiple enums is an error. Finite membership becomes an equality
+disjunction (`X in []` is `false`). `can(Command)` resolves within the current
+aggregate and becomes the conjunction of the command's `requires` clauses and
+the negation of each rejection condition. Unknown symbols, cross-aggregate
+commands, type mismatches, and unsupported calls are reported at the original
+domain expression.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
-aggregate/effect summary, `fslc domain expand` to inspect generated kernel FSL,
+aggregate/effect summary, `fslc domain expand` to inspect a generated kernel FSL
+debug view,
 `fslc domain generate --target typescript|python|kotlin|swift|rust` for
 Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
 scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /

@@ -30,9 +30,9 @@
   ],
   "baseline": {
     "case_count": 4,
-    "initial_check_successes": 3,
-    "initial_check_success_rate": "3/4",
-    "repairs_until_check_success": [0, 1, 0, 0],
+    "initial_check_successes": 1,
+    "initial_check_success_rate": "1/4",
+    "repairs_until_check_success": [0, 1, 1, 1],
     "operator_misuse_count": 2,
     "enum_misuse_count": 1,
     "internal_generated_name_misuse_count": 1,

@@ -73,8 +73,10 @@ Each aggregate becomes kernel state and actions:
 
 Domain enum members are namespaced during lowering (`OrderStatus_Pending`) so
 two domain enums can both contain `Pending`. Domain expressions stay in the
-short source vocabulary; the expander rewrites comparisons and `in [A, B]`
-membership according to the field type.
+short source vocabulary. The resolver selects bare enum members by expected
+logical type and lowers `in [A, B]` to a finite equality disjunction; empty
+membership lowers to `false`. A bare member with multiple candidates and no
+expected type is rejected as ambiguous.
 
 `can(Command)` is a domain-only expression helper. It lowers to that command's
 decide preconditions: all `requires` clauses and the negation of every
@@ -102,12 +104,22 @@ Effect idempotency and correlation references remain restricted to the existing
 dotted-identifier path grammar; routing those paths through the expression
 parser does not broaden the public syntax to calls, indexing, or arithmetic.
 
-Existing lowering and compatibility projections temporarily render these
-typed nodes back to source-shaped text at their boundary. That renderer is an
-adapter, not a second parser; domain expressions are never sliced and reparsed
-with repaired offsets. Consequently malformed expressions are diagnosed at
-their original domain-source coordinates while generated Kernel and CLI
-semantics remain unchanged.
+`fsl-core` builds a symbol table for domain types, aggregate state, command and
+event fields, commands, events, enum members, and lexical binders. Command/event
+fields and inner binders shadow aggregate-state reads; assignment roots always
+resolve to writable aggregate state. Resolution attaches a logical type and a
+stable generated Kernel name to each selected symbol, then recursively lowers
+`SyntaxExpr` and `SyntaxLValue` into `Expr` and `LValue`. `can(Command)` is
+resolved only against the current aggregate. Unknown or cross-aggregate
+commands, ambiguous enum members, type mismatches, invalid lvalues, and
+unsupported calls fail at the original typed node span.
+
+The executable path constructs `SurfaceSpec` directly and passes it to the
+checked Kernel lowering gate. It never renders domain source as Kernel FSL and
+parses it again. `fslc domain expand` may still render generated source as a
+debug/interop view, but that text is not semantic input. This separation also
+lets public Kernel diagnostics and origins use domain declaration/expression
+coordinates rather than generated-source coordinates.
 
 ## Effects
 

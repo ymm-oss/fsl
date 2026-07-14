@@ -227,8 +227,12 @@ errors, pure `decide`/`evolve`, async effect lifecycles, and saga/process-manage
 coordination. It lowers to kernel actions/state/invariants plus finite effect
 status/attempt maps. Domain enum members are namespaced during lowering, so
 separate enums may reuse words like `Pending`. Domain expressions may use `X in
-[A, B]` and `can(Command)`.
-Use `fslc domain check` for `verified_under_assumptions` plus fsl-domain
+[A, B]` and `can(Command)`. Rust resolves these constructs structurally: bare
+enum members use the expected field type, membership becomes a finite equality
+disjunction, and `can()` expands the selected current-aggregate command's
+preconditions. Unknown/ambiguous symbols and type mismatches point to the
+original domain expression. Use `fslc domain check` for
+`verified_under_assumptions` plus fsl-domain
 findings, `fslc domain expand` to inspect the generated kernel, and
 `fslc domain generate --target typescript|python|kotlin|swift|rust` /
 `fslc domain testgen` for Functional DDD and adapter scaffolds. Use

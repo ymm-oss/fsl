@@ -94,6 +94,11 @@ the tuple AST for every corpus file. Dialect expansion remains a pure AST-to-AST
 stage before `build_spec`, matching the current requirements, business,
 governance, compose, database, AI, and domain frontends.
 
+The native domain frontend enforces this boundary concretely: its unresolved
+typed syntax is name/type-resolved in `fsl-core` and lowered directly to Kernel
+surface AST. Generated Kernel text is available for inspection but is not an
+input to parsing, checking, runtime execution, or verification.
+
 File access is behind a `FileResolver` interface:
 
 - native CLI: filesystem-backed, with the current source-relative semantics;

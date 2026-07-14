@@ -908,7 +908,7 @@
                 ">=",
                 [
                   "var",
-                  "order_quantity"
+                  "quantity"
                 ],
                 [
                   "num",
@@ -1046,7 +1046,7 @@
               ],
               [
                 "var",
-                "order_quantity"
+                "quantity"
               ],
               "<location>"
             ]
@@ -1332,22 +1332,22 @@
               "not",
               [
                 "bin",
-                "or",
+                "and",
                 [
                   "bin",
-                  "==",
+                  "or",
                   [
-                    "var",
-                    "order_status"
+                    "bin",
+                    "==",
+                    [
+                      "var",
+                      "order_status"
+                    ],
+                    [
+                      "var",
+                      "OrderStatus_Draft"
+                    ]
                   ],
-                  [
-                    "var",
-                    "OrderStatus_Draft"
-                  ]
-                ],
-                [
-                  "bin",
-                  "and",
                   [
                     "bin",
                     "==",
@@ -1359,20 +1359,20 @@
                       "var",
                       "OrderStatus_Approved"
                     ]
-                  ],
+                  ]
+                ],
+                [
+                  "not",
                   [
-                    "not",
+                    "bin",
+                    "==",
                     [
-                      "bin",
-                      "==",
-                      [
-                        "var",
-                        "order_status"
-                      ],
-                      [
-                        "var",
-                        "OrderStatus_Cancelled"
-                      ]
+                      "var",
+                      "order_status"
+                    ],
+                    [
+                      "var",
+                      "OrderStatus_Cancelled"
                     ]
                   ]
                 ]
@@ -2958,10 +2958,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 16,
-              "column": 5,
-              "end_line": 16,
-              "end_column": 17
+              "line": 19,
+              "column": 7,
+              "end_line": 19,
+              "end_column": 35
             },
             "target": {
               "kind": "var",
@@ -2971,10 +2971,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 16,
-                "column": 5,
-                "end_line": 16,
-                "end_column": 17
+                "line": 19,
+                "column": 7,
+                "end_line": 19,
+                "end_column": 35
               },
               "name": "order_status"
             },
@@ -2986,10 +2986,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 16,
-                "column": 5,
-                "end_line": 16,
-                "end_column": 17
+                "line": 19,
+                "column": 7,
+                "end_line": 19,
+                "end_column": 35
               },
               "name": "OrderStatus_Draft"
             }
@@ -3001,10 +3001,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 17,
-              "column": 5,
-              "end_line": 17,
-              "end_column": 26
+              "line": 20,
+              "column": 7,
+              "end_line": 20,
+              "end_column": 44
             },
             "target": {
               "kind": "var",
@@ -3014,10 +3014,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 17,
-                "column": 5,
-                "end_line": 17,
-                "end_column": 26
+                "line": 20,
+                "column": 7,
+                "end_line": 20,
+                "end_column": 44
               },
               "name": "order_previous_status"
             },
@@ -3029,10 +3029,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 17,
-                "column": 5,
-                "end_line": 17,
-                "end_column": 26
+                "line": 20,
+                "column": 7,
+                "end_line": 20,
+                "end_column": 44
               },
               "name": "OrderStatus_Draft"
             }
@@ -3044,10 +3044,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 18,
-              "column": 5,
-              "end_line": 18,
-              "end_column": 19
+              "line": 21,
+              "column": 7,
+              "end_line": 21,
+              "end_column": 30
             },
             "target": {
               "kind": "var",
@@ -3057,10 +3057,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 18,
-                "column": 5,
-                "end_line": 18,
-                "end_column": 19
+                "line": 21,
+                "column": 7,
+                "end_line": 21,
+                "end_column": 30
               },
               "name": "order_quantity"
             },
@@ -3073,10 +3073,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 18,
-                "column": 5,
-                "end_line": 18,
-                "end_column": 19
+                "line": 21,
+                "column": 7,
+                "end_line": 21,
+                "end_column": 30
               },
               "value": 0
             }
@@ -3088,10 +3088,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 19,
-              "column": 5,
-              "end_line": 19,
-              "end_column": 16
+              "line": 22,
+              "column": 7,
+              "end_line": 22,
+              "end_column": 25
             },
             "target": {
               "kind": "var",
@@ -3101,10 +3101,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 19,
-                "column": 5,
-                "end_line": 19,
-                "end_column": 16
+                "line": 22,
+                "column": 7,
+                "end_line": 22,
+                "end_column": 25
               },
               "name": "order_audit"
             },
@@ -3116,10 +3116,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 19,
-                "column": 5,
-                "end_line": 19,
-                "end_column": 16
+                "line": 22,
+                "column": 7,
+                "end_line": 22,
+                "end_column": 25
               },
               "name": "AuditStamp",
               "fields": {
@@ -3131,10 +3131,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 19,
-                    "column": 5,
-                    "end_line": 19,
-                    "end_column": 16
+                    "line": 22,
+                    "column": 7,
+                    "end_line": 22,
+                    "end_column": 25
                   },
                   "name": "OrderStatus_Draft"
                 },
@@ -3147,10 +3147,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 19,
-                    "column": 5,
-                    "end_line": 19,
-                    "end_column": 16
+                    "line": 22,
+                    "column": 7,
+                    "end_line": 22,
+                    "end_column": 25
                   },
                   "value": 0
                 }
@@ -3164,10 +3164,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 20,
-              "column": 5,
-              "end_line": 20,
-              "end_column": 27
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -3176,10 +3176,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 20,
-                "column": 5,
-                "end_line": 20,
-                "end_column": 27
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_ApprovalRejected"
             },
@@ -3190,10 +3190,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 20,
-                "column": 5,
-                "end_line": 20,
-                "end_column": 27
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -3205,10 +3205,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 21,
-              "column": 5,
-              "end_line": 21,
-              "end_column": 19
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -3217,10 +3217,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 21,
-                "column": 5,
-                "end_line": 21,
-                "end_column": 19
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_Approved"
             },
@@ -3231,10 +3231,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 21,
-                "column": 5,
-                "end_line": 21,
-                "end_column": 19
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -3246,10 +3246,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 22,
-              "column": 5,
-              "end_line": 22,
-              "end_column": 20
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -3258,10 +3258,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 22,
-                "column": 5,
-                "end_line": 22,
-                "end_column": 20
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_Cancelled"
             },
@@ -3272,10 +3272,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 22,
-                "column": 5,
-                "end_line": 22,
-                "end_column": 20
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -3289,10 +3289,10 @@
         },
         "span": {
           "file": "expressions_valid.fsl",
-          "line": 16,
-          "column": 5,
-          "end_line": 16,
-          "end_column": 17
+          "line": 19,
+          "column": 7,
+          "end_line": 19,
+          "end_column": 35
         }
       },
       "actions": [
@@ -3309,10 +3309,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 25,
-                  "column": 5,
-                  "end_line": 25,
-                  "end_column": 13
+                  "line": 40,
+                  "column": 16,
+                  "end_line": 40,
+                  "end_column": 61
                 },
                 "operator": "and",
                 "left": {
@@ -3322,10 +3322,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 25,
-                    "column": 5,
-                    "end_line": 25,
-                    "end_column": 13
+                    "line": 40,
+                    "column": 16,
+                    "end_line": 40,
+                    "end_column": 61
                   },
                   "operator": "==",
                   "left": {
@@ -3336,10 +3336,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 25,
-                      "column": 5,
-                      "end_line": 25,
-                      "end_column": 13
+                      "line": 40,
+                      "column": 16,
+                      "end_line": 40,
+                      "end_column": 61
                     },
                     "name": "order_status"
                   },
@@ -3351,10 +3351,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 25,
-                      "column": 5,
-                      "end_line": 25,
-                      "end_column": 13
+                      "line": 40,
+                      "column": 16,
+                      "end_line": 40,
+                      "end_column": 61
                     },
                     "name": "OrderStatus_Draft"
                   }
@@ -3366,10 +3366,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 25,
-                    "column": 5,
-                    "end_line": 25,
-                    "end_column": 13
+                    "line": 40,
+                    "column": 16,
+                    "end_line": 40,
+                    "end_column": 61
                   },
                   "operand": {
                     "kind": "binary",
@@ -3378,10 +3378,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 25,
-                      "column": 5,
-                      "end_line": 25,
-                      "end_column": 13
+                      "line": 40,
+                      "column": 16,
+                      "end_line": 40,
+                      "end_column": 61
                     },
                     "operator": "==",
                     "left": {
@@ -3392,10 +3392,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 25,
-                        "column": 5,
-                        "end_line": 25,
-                        "end_column": 13
+                        "line": 40,
+                        "column": 16,
+                        "end_line": 40,
+                        "end_column": 61
                       },
                       "name": "order_status"
                     },
@@ -3407,10 +3407,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 25,
-                        "column": 5,
-                        "end_line": 25,
-                        "end_column": 13
+                        "line": 40,
+                        "column": 16,
+                        "end_line": 40,
+                        "end_column": 61
                       },
                       "name": "OrderStatus_Cancelled"
                     }
@@ -3427,10 +3427,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 26,
-                  "column": 5,
-                  "end_line": 26,
-                  "end_column": 13
+                  "line": 41,
+                  "column": 16,
+                  "end_line": 41,
+                  "end_column": 53
                 },
                 "operator": "and",
                 "left": {
@@ -3440,10 +3440,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 26,
-                    "column": 5,
-                    "end_line": 26,
-                    "end_column": 13
+                    "line": 41,
+                    "column": 16,
+                    "end_line": 41,
+                    "end_column": 53
                   },
                   "operator": "!=",
                   "left": {
@@ -3454,10 +3454,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 26,
-                      "column": 5,
-                      "end_line": 26,
-                      "end_column": 13
+                      "line": 41,
+                      "column": 16,
+                      "end_line": 41,
+                      "end_column": 53
                     },
                     "name": "order_status"
                   },
@@ -3469,10 +3469,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 26,
-                      "column": 5,
-                      "end_line": 26,
-                      "end_column": 13
+                      "line": 41,
+                      "column": 16,
+                      "end_line": 41,
+                      "end_column": 53
                     },
                     "name": "OrderStatus_Cancelled"
                   }
@@ -3484,10 +3484,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 26,
-                    "column": 5,
-                    "end_line": 26,
-                    "end_column": 13
+                    "line": 41,
+                    "column": 16,
+                    "end_line": 41,
+                    "end_column": 53
                   },
                   "operator": ">=",
                   "left": {
@@ -3498,12 +3498,12 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 26,
-                      "column": 5,
-                      "end_line": 26,
-                      "end_column": 13
+                      "line": 41,
+                      "column": 16,
+                      "end_line": 41,
+                      "end_column": 53
                     },
-                    "name": "order_quantity"
+                    "name": "quantity"
                   },
                   "right": {
                     "kind": "num",
@@ -3512,10 +3512,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 26,
-                      "column": 5,
-                      "end_line": 26,
-                      "end_column": 13
+                      "line": 41,
+                      "column": 16,
+                      "end_line": 41,
+                      "end_column": 53
                     },
                     "value": 0
                   }
@@ -3531,10 +3531,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 27,
-                  "column": 5,
-                  "end_line": 27,
-                  "end_column": 13
+                  "line": 42,
+                  "column": 29,
+                  "end_line": 42,
+                  "end_column": 60
                 },
                 "operand": {
                   "kind": "binary",
@@ -3543,10 +3543,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 27,
-                    "column": 5,
-                    "end_line": 27,
-                    "end_column": 13
+                    "line": 42,
+                    "column": 29,
+                    "end_line": 42,
+                    "end_column": 60
                   },
                   "operator": "or",
                   "left": {
@@ -3556,10 +3556,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 27,
-                      "column": 5,
-                      "end_line": 27,
-                      "end_column": 13
+                      "line": 42,
+                      "column": 29,
+                      "end_line": 42,
+                      "end_column": 60
                     },
                     "operator": "==",
                     "left": {
@@ -3570,10 +3570,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 27,
-                        "column": 5,
-                        "end_line": 27,
-                        "end_column": 13
+                        "line": 42,
+                        "column": 29,
+                        "end_line": 42,
+                        "end_column": 60
                       },
                       "name": "order_status"
                     },
@@ -3585,10 +3585,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 27,
-                        "column": 5,
-                        "end_line": 27,
-                        "end_column": 13
+                        "line": 42,
+                        "column": 29,
+                        "end_line": 42,
+                        "end_column": 60
                       },
                       "name": "OrderStatus_Approved"
                     }
@@ -3600,10 +3600,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 27,
-                      "column": 5,
-                      "end_line": 27,
-                      "end_column": 13
+                      "line": 42,
+                      "column": 29,
+                      "end_line": 42,
+                      "end_column": 60
                     },
                     "operator": "==",
                     "left": {
@@ -3614,10 +3614,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 27,
-                        "column": 5,
-                        "end_line": 27,
-                        "end_column": 13
+                        "line": 42,
+                        "column": 29,
+                        "end_line": 42,
+                        "end_column": 60
                       },
                       "name": "order_status"
                     },
@@ -3629,10 +3629,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 27,
-                        "column": 5,
-                        "end_line": 27,
-                        "end_column": 13
+                        "line": 42,
+                        "column": 29,
+                        "end_line": 42,
+                        "end_column": 60
                       },
                       "name": "OrderStatus_Cancelled"
                     }
@@ -3649,10 +3649,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 31,
-                  "column": 5,
-                  "end_line": 31,
-                  "end_column": 13
+                  "line": 53,
+                  "column": 16,
+                  "end_line": 53,
+                  "end_column": 31
                 },
                 "operator": "==",
                 "left": {
@@ -3663,10 +3663,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 31,
-                    "column": 5,
-                    "end_line": 31,
-                    "end_column": 13
+                    "line": 53,
+                    "column": 16,
+                    "end_line": 53,
+                    "end_column": 31
                   },
                   "name": "order_status"
                 },
@@ -3678,10 +3678,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 31,
-                    "column": 5,
-                    "end_line": 31,
-                    "end_column": 13
+                    "line": 53,
+                    "column": 16,
+                    "end_line": 53,
+                    "end_column": 31
                   },
                   "name": "OrderStatus_Draft"
                 }
@@ -3696,10 +3696,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 28,
+                "line": 39,
                 "column": 5,
-                "end_line": 28,
-                "end_column": 27
+                "end_line": 39,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -3708,10 +3708,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 28,
+                  "line": 39,
                   "column": 5,
-                  "end_line": 28,
-                  "end_column": 27
+                  "end_line": 39,
+                  "end_column": 5
                 },
                 "name": "event_ApprovalRejected"
               },
@@ -3722,10 +3722,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 28,
+                  "line": 39,
                   "column": 5,
-                  "end_line": 28,
-                  "end_column": 27
+                  "end_line": 39,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -3737,10 +3737,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 29,
+                "line": 39,
                 "column": 5,
-                "end_line": 29,
-                "end_column": 19
+                "end_line": 39,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -3749,10 +3749,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 29,
+                  "line": 39,
                   "column": 5,
-                  "end_line": 29,
-                  "end_column": 19
+                  "end_line": 39,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               },
@@ -3763,10 +3763,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 29,
+                  "line": 39,
                   "column": 5,
-                  "end_line": 29,
-                  "end_column": 19
+                  "end_line": 39,
+                  "end_column": 5
                 },
                 "value": true
               }
@@ -3778,10 +3778,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 30,
+                "line": 39,
                 "column": 5,
-                "end_line": 30,
-                "end_column": 20
+                "end_line": 39,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -3790,10 +3790,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 30,
+                  "line": 39,
                   "column": 5,
-                  "end_line": 30,
-                  "end_column": 20
+                  "end_line": 39,
+                  "end_column": 5
                 },
                 "name": "event_Cancelled"
               },
@@ -3804,10 +3804,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 30,
+                  "line": 39,
                   "column": 5,
-                  "end_line": 30,
-                  "end_column": 20
+                  "end_line": 39,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -3819,10 +3819,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 32,
-                "column": 5,
-                "end_line": 32,
-                "end_column": 26
+                "line": 54,
+                "column": 7,
+                "end_line": 54,
+                "end_column": 31
               },
               "target": {
                 "kind": "var",
@@ -3832,10 +3832,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 32,
-                  "column": 5,
-                  "end_line": 32,
-                  "end_column": 26
+                  "line": 54,
+                  "column": 7,
+                  "end_line": 54,
+                  "end_column": 31
                 },
                 "name": "order_previous_status"
               },
@@ -3847,10 +3847,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 32,
-                  "column": 5,
-                  "end_line": 32,
-                  "end_column": 26
+                  "line": 54,
+                  "column": 7,
+                  "end_line": 54,
+                  "end_column": 31
                 },
                 "name": "order_status"
               }
@@ -3862,10 +3862,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 33,
-                "column": 5,
-                "end_line": 33,
-                "end_column": 17
+                "line": 55,
+                "column": 7,
+                "end_line": 55,
+                "end_column": 24
               },
               "target": {
                 "kind": "var",
@@ -3875,10 +3875,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 33,
-                  "column": 5,
-                  "end_line": 33,
-                  "end_column": 17
+                  "line": 55,
+                  "column": 7,
+                  "end_line": 55,
+                  "end_column": 24
                 },
                 "name": "order_status"
               },
@@ -3890,10 +3890,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 33,
-                  "column": 5,
-                  "end_line": 33,
-                  "end_column": 17
+                  "line": 55,
+                  "column": 7,
+                  "end_line": 55,
+                  "end_column": 24
                 },
                 "name": "OrderStatus_Approved"
               }
@@ -3905,10 +3905,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 34,
-                "column": 5,
-                "end_line": 34,
-                "end_column": 16
+                "line": 56,
+                "column": 7,
+                "end_line": 56,
+                "end_column": 28
               },
               "target": {
                 "kind": "field_lv",
@@ -3918,10 +3918,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 34,
-                  "column": 5,
-                  "end_line": 34,
-                  "end_column": 16
+                  "line": 56,
+                  "column": 7,
+                  "end_line": 56,
+                  "end_column": 28
                 },
                 "target": {
                   "kind": "var",
@@ -3931,10 +3931,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 34,
-                    "column": 5,
-                    "end_line": 34,
-                    "end_column": 16
+                    "line": 56,
+                    "column": 7,
+                    "end_line": 56,
+                    "end_column": 28
                   },
                   "name": "order_audit"
                 },
@@ -3948,10 +3948,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 34,
-                  "column": 5,
-                  "end_line": 34,
-                  "end_column": 16
+                  "line": 56,
+                  "column": 7,
+                  "end_line": 56,
+                  "end_column": 28
                 },
                 "name": "order_status"
               }
@@ -3963,10 +3963,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 35,
-                "column": 5,
-                "end_line": 35,
-                "end_column": 19
+                "line": 57,
+                "column": 7,
+                "end_line": 57,
+                "end_column": 26
               },
               "target": {
                 "kind": "var",
@@ -3976,10 +3976,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 35,
-                  "column": 5,
-                  "end_line": 35,
-                  "end_column": 19
+                  "line": 57,
+                  "column": 7,
+                  "end_line": 57,
+                  "end_column": 26
                 },
                 "name": "order_quantity"
               },
@@ -3991,12 +3991,12 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 35,
-                  "column": 5,
-                  "end_line": 35,
-                  "end_column": 19
+                  "line": 57,
+                  "column": 7,
+                  "end_line": 57,
+                  "end_column": 26
                 },
-                "name": "order_quantity"
+                "name": "quantity"
               }
             }
           ],
@@ -4008,10 +4008,10 @@
           },
           "span": {
             "file": "expressions_valid.fsl",
-            "line": 24,
-            "column": 3,
-            "end_line": 24,
-            "end_column": 9
+            "line": 39,
+            "column": 5,
+            "end_line": 39,
+            "end_column": 5
           }
         },
         {
@@ -4027,10 +4027,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 38,
-                  "column": 5,
-                  "end_line": 38,
-                  "end_column": 13
+                  "line": 47,
+                  "column": 16,
+                  "end_line": 47,
+                  "end_column": 53
                 },
                 "operator": "or",
                 "left": {
@@ -4040,10 +4040,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 38,
-                    "column": 5,
-                    "end_line": 38,
-                    "end_column": 13
+                    "line": 47,
+                    "column": 16,
+                    "end_line": 47,
+                    "end_column": 53
                   },
                   "operator": "==",
                   "left": {
@@ -4054,10 +4054,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 38,
-                      "column": 5,
-                      "end_line": 38,
-                      "end_column": 13
+                      "line": 47,
+                      "column": 16,
+                      "end_line": 47,
+                      "end_column": 53
                     },
                     "name": "order_status"
                   },
@@ -4069,10 +4069,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 38,
-                      "column": 5,
-                      "end_line": 38,
-                      "end_column": 13
+                      "line": 47,
+                      "column": 16,
+                      "end_line": 47,
+                      "end_column": 53
                     },
                     "name": "OrderStatus_Draft"
                   }
@@ -4084,10 +4084,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 38,
-                    "column": 5,
-                    "end_line": 38,
-                    "end_column": 13
+                    "line": 47,
+                    "column": 16,
+                    "end_line": 47,
+                    "end_column": 53
                   },
                   "operator": "==",
                   "left": {
@@ -4098,10 +4098,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 38,
-                      "column": 5,
-                      "end_line": 38,
-                      "end_column": 13
+                      "line": 47,
+                      "column": 16,
+                      "end_line": 47,
+                      "end_column": 53
                     },
                     "name": "order_status"
                   },
@@ -4113,10 +4113,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 38,
-                      "column": 5,
-                      "end_line": 38,
-                      "end_column": 13
+                      "line": 47,
+                      "column": 16,
+                      "end_line": 47,
+                      "end_column": 53
                     },
                     "name": "OrderStatus_Approved"
                   }
@@ -4132,10 +4132,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 39,
-                  "column": 5,
-                  "end_line": 39,
-                  "end_column": 13
+                  "line": 48,
+                  "column": 37,
+                  "end_line": 48,
+                  "end_column": 56
                 },
                 "operand": {
                   "kind": "binary",
@@ -4144,10 +4144,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 39,
-                    "column": 5,
-                    "end_line": 39,
-                    "end_column": 13
+                    "line": 48,
+                    "column": 37,
+                    "end_line": 48,
+                    "end_column": 56
                   },
                   "operator": "==",
                   "left": {
@@ -4158,10 +4158,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 39,
-                      "column": 5,
-                      "end_line": 39,
-                      "end_column": 13
+                      "line": 48,
+                      "column": 37,
+                      "end_line": 48,
+                      "end_column": 56
                     },
                     "name": "order_status"
                   },
@@ -4173,10 +4173,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 39,
-                      "column": 5,
-                      "end_line": 39,
-                      "end_column": 13
+                      "line": 48,
+                      "column": 37,
+                      "end_line": 48,
+                      "end_column": 56
                     },
                     "name": "OrderStatus_Cancelled"
                   }
@@ -4192,10 +4192,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 40,
+                "line": 46,
                 "column": 5,
-                "end_line": 40,
-                "end_column": 27
+                "end_line": 46,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -4204,10 +4204,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 40,
+                  "line": 46,
                   "column": 5,
-                  "end_line": 40,
-                  "end_column": 27
+                  "end_line": 46,
+                  "end_column": 5
                 },
                 "name": "event_ApprovalRejected"
               },
@@ -4218,10 +4218,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 40,
+                  "line": 46,
                   "column": 5,
-                  "end_line": 40,
-                  "end_column": 27
+                  "end_line": 46,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -4233,10 +4233,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 41,
+                "line": 46,
                 "column": 5,
-                "end_line": 41,
-                "end_column": 19
+                "end_line": 46,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -4245,10 +4245,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 41,
+                  "line": 46,
                   "column": 5,
-                  "end_line": 41,
-                  "end_column": 19
+                  "end_line": 46,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               },
@@ -4259,10 +4259,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 41,
+                  "line": 46,
                   "column": 5,
-                  "end_line": 41,
-                  "end_column": 19
+                  "end_line": 46,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -4274,10 +4274,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 42,
+                "line": 46,
                 "column": 5,
-                "end_line": 42,
-                "end_column": 20
+                "end_line": 46,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -4286,10 +4286,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 42,
+                  "line": 46,
                   "column": 5,
-                  "end_line": 42,
-                  "end_column": 20
+                  "end_line": 46,
+                  "end_column": 5
                 },
                 "name": "event_Cancelled"
               },
@@ -4300,10 +4300,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 42,
+                  "line": 46,
                   "column": 5,
-                  "end_line": 42,
-                  "end_column": 20
+                  "end_line": 46,
+                  "end_column": 5
                 },
                 "value": true
               }
@@ -4315,10 +4315,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 43,
-                "column": 5,
-                "end_line": 43,
-                "end_column": 26
+                "line": 61,
+                "column": 7,
+                "end_line": 61,
+                "end_column": 31
               },
               "target": {
                 "kind": "var",
@@ -4328,10 +4328,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 43,
-                  "column": 5,
-                  "end_line": 43,
-                  "end_column": 26
+                  "line": 61,
+                  "column": 7,
+                  "end_line": 61,
+                  "end_column": 31
                 },
                 "name": "order_previous_status"
               },
@@ -4343,10 +4343,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 43,
-                  "column": 5,
-                  "end_line": 43,
-                  "end_column": 26
+                  "line": 61,
+                  "column": 7,
+                  "end_line": 61,
+                  "end_column": 31
                 },
                 "name": "order_status"
               }
@@ -4358,10 +4358,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 44,
-                "column": 5,
-                "end_line": 44,
-                "end_column": 17
+                "line": 62,
+                "column": 7,
+                "end_line": 62,
+                "end_column": 25
               },
               "target": {
                 "kind": "var",
@@ -4371,10 +4371,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 44,
-                  "column": 5,
-                  "end_line": 44,
-                  "end_column": 17
+                  "line": 62,
+                  "column": 7,
+                  "end_line": 62,
+                  "end_column": 25
                 },
                 "name": "order_status"
               },
@@ -4386,10 +4386,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 44,
-                  "column": 5,
-                  "end_line": 44,
-                  "end_column": 17
+                  "line": 62,
+                  "column": 7,
+                  "end_line": 62,
+                  "end_column": 25
                 },
                 "name": "OrderStatus_Cancelled"
               }
@@ -4403,10 +4403,10 @@
           },
           "span": {
             "file": "expressions_valid.fsl",
-            "line": 37,
-            "column": 3,
-            "end_line": 37,
-            "end_column": 9
+            "line": 46,
+            "column": 5,
+            "end_line": 46,
+            "end_column": 5
           }
         }
       ],
@@ -4422,10 +4422,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 46,
-                "column": 3,
-                "end_line": 46,
-                "end_column": 12
+                "line": 73,
+                "column": 5,
+                "end_line": 75,
+                "end_column": 6
               },
               "operator": "=>",
               "left": {
@@ -4435,10 +4435,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 46,
-                  "column": 3,
-                  "end_line": 46,
-                  "end_column": 12
+                  "line": 73,
+                  "column": 5,
+                  "end_line": 75,
+                  "end_column": 6
                 },
                 "operator": "==",
                 "left": {
@@ -4449,10 +4449,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 46,
-                    "column": 3,
-                    "end_line": 46,
-                    "end_column": 12
+                    "line": 73,
+                    "column": 5,
+                    "end_line": 75,
+                    "end_column": 6
                   },
                   "name": "order_status"
                 },
@@ -4464,10 +4464,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 46,
-                    "column": 3,
-                    "end_line": 46,
-                    "end_column": 12
+                    "line": 73,
+                    "column": 5,
+                    "end_line": 75,
+                    "end_column": 6
                   },
                   "name": "OrderStatus_Approved"
                 }
@@ -4479,10 +4479,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 46,
-                  "column": 3,
-                  "end_line": 46,
-                  "end_column": 12
+                  "line": 73,
+                  "column": 5,
+                  "end_line": 75,
+                  "end_column": 6
                 },
                 "operator": "or",
                 "left": {
@@ -4492,10 +4492,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 46,
-                    "column": 3,
-                    "end_line": 46,
-                    "end_column": 12
+                    "line": 73,
+                    "column": 5,
+                    "end_line": 75,
+                    "end_column": 6
                   },
                   "operator": "==",
                   "left": {
@@ -4506,10 +4506,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 46,
-                      "column": 3,
-                      "end_line": 46,
-                      "end_column": 12
+                      "line": 73,
+                      "column": 5,
+                      "end_line": 75,
+                      "end_column": 6
                     },
                     "name": "order_previous_status"
                   },
@@ -4521,10 +4521,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 46,
-                      "column": 3,
-                      "end_line": 46,
-                      "end_column": 12
+                      "line": 73,
+                      "column": 5,
+                      "end_line": 75,
+                      "end_column": 6
                     },
                     "name": "OrderStatus_Draft"
                   }
@@ -4536,10 +4536,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 46,
-                    "column": 3,
-                    "end_line": 46,
-                    "end_column": 12
+                    "line": 73,
+                    "column": 5,
+                    "end_line": 75,
+                    "end_column": 6
                   },
                   "operator": "==",
                   "left": {
@@ -4550,10 +4550,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 46,
-                      "column": 3,
-                      "end_line": 46,
-                      "end_column": 12
+                      "line": 73,
+                      "column": 5,
+                      "end_line": 75,
+                      "end_column": 6
                     },
                     "name": "order_previous_status"
                   },
@@ -4565,10 +4565,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 46,
-                      "column": 3,
-                      "end_line": 46,
-                      "end_column": 12
+                      "line": 73,
+                      "column": 5,
+                      "end_line": 75,
+                      "end_column": 6
                     },
                     "name": "OrderStatus_Approved"
                   }
@@ -4583,10 +4583,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 46,
-              "column": 3,
-              "end_line": 46,
-              "end_column": 12
+              "line": 73,
+              "column": 5,
+              "end_line": 75,
+              "end_column": 6
             }
           },
           {
@@ -4599,10 +4599,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 49,
-                "column": 3,
-                "end_line": 49,
-                "end_column": 12
+                "line": 85,
+                "column": 5,
+                "end_line": 87,
+                "end_column": 6
               },
               "operator": "or",
               "left": {
@@ -4612,10 +4612,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 49,
-                  "column": 3,
-                  "end_line": 49,
-                  "end_column": 12
+                  "line": 85,
+                  "column": 5,
+                  "end_line": 87,
+                  "end_column": 6
                 },
                 "operator": "or",
                 "left": {
@@ -4625,10 +4625,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 49,
-                    "column": 3,
-                    "end_line": 49,
-                    "end_column": 12
+                    "line": 85,
+                    "column": 5,
+                    "end_line": 87,
+                    "end_column": 6
                   },
                   "operator": "==",
                   "left": {
@@ -4639,10 +4639,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 49,
-                      "column": 3,
-                      "end_line": 49,
-                      "end_column": 12
+                      "line": 85,
+                      "column": 5,
+                      "end_line": 87,
+                      "end_column": 6
                     },
                     "name": "order_status"
                   },
@@ -4654,10 +4654,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 49,
-                      "column": 3,
-                      "end_line": 49,
-                      "end_column": 12
+                      "line": 85,
+                      "column": 5,
+                      "end_line": 87,
+                      "end_column": 6
                     },
                     "name": "OrderStatus_Draft"
                   }
@@ -4669,10 +4669,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 49,
-                    "column": 3,
-                    "end_line": 49,
-                    "end_column": 12
+                    "line": 85,
+                    "column": 5,
+                    "end_line": 87,
+                    "end_column": 6
                   },
                   "operator": "==",
                   "left": {
@@ -4683,10 +4683,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 49,
-                      "column": 3,
-                      "end_line": 49,
-                      "end_column": 12
+                      "line": 85,
+                      "column": 5,
+                      "end_line": 87,
+                      "end_column": 6
                     },
                     "name": "order_status"
                   },
@@ -4698,10 +4698,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 49,
-                      "column": 3,
-                      "end_line": 49,
-                      "end_column": 12
+                      "line": 85,
+                      "column": 5,
+                      "end_line": 87,
+                      "end_column": 6
                     },
                     "name": "OrderStatus_Approved"
                   }
@@ -4714,10 +4714,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 49,
-                  "column": 3,
-                  "end_line": 49,
-                  "end_column": 12
+                  "line": 85,
+                  "column": 5,
+                  "end_line": 87,
+                  "end_column": 6
                 },
                 "operator": "==",
                 "left": {
@@ -4728,10 +4728,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 49,
-                    "column": 3,
-                    "end_line": 49,
-                    "end_column": 12
+                    "line": 85,
+                    "column": 5,
+                    "end_line": 87,
+                    "end_column": 6
                   },
                   "name": "order_status"
                 },
@@ -4743,10 +4743,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 49,
-                    "column": 3,
-                    "end_line": 49,
-                    "end_column": 12
+                    "line": 85,
+                    "column": 5,
+                    "end_line": 87,
+                    "end_column": 6
                   },
                   "name": "OrderStatus_Cancelled"
                 }
@@ -4760,10 +4760,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 49,
-              "column": 3,
-              "end_line": 49,
-              "end_column": 12
+              "line": 85,
+              "column": 5,
+              "end_line": 87,
+              "end_column": 6
             }
           },
           {
@@ -4776,10 +4776,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 48,
-                "column": 3,
-                "end_line": 48,
-                "end_column": 12
+                "line": 81,
+                "column": 5,
+                "end_line": 83,
+                "end_column": 6
               },
               "operator": "or",
               "left": {
@@ -4789,10 +4789,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 48,
-                  "column": 3,
-                  "end_line": 48,
-                  "end_column": 12
+                  "line": 81,
+                  "column": 5,
+                  "end_line": 83,
+                  "end_column": 6
                 },
                 "operator": "or",
                 "left": {
@@ -4802,10 +4802,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 48,
-                    "column": 3,
-                    "end_line": 48,
-                    "end_column": 12
+                    "line": 81,
+                    "column": 5,
+                    "end_line": 83,
+                    "end_column": 6
                   },
                   "operator": "==",
                   "left": {
@@ -4816,10 +4816,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 48,
-                      "column": 3,
-                      "end_line": 48,
-                      "end_column": 12
+                      "line": 81,
+                      "column": 5,
+                      "end_line": 83,
+                      "end_column": 6
                     },
                     "name": "order_status"
                   },
@@ -4831,10 +4831,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 48,
-                      "column": 3,
-                      "end_line": 48,
-                      "end_column": 12
+                      "line": 81,
+                      "column": 5,
+                      "end_line": 83,
+                      "end_column": 6
                     },
                     "name": "OrderStatus_Draft"
                   }
@@ -4846,10 +4846,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 48,
-                    "column": 3,
-                    "end_line": 48,
-                    "end_column": 12
+                    "line": 81,
+                    "column": 5,
+                    "end_line": 83,
+                    "end_column": 6
                   },
                   "operator": "==",
                   "left": {
@@ -4860,10 +4860,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 48,
-                      "column": 3,
-                      "end_line": 48,
-                      "end_column": 12
+                      "line": 81,
+                      "column": 5,
+                      "end_line": 83,
+                      "end_column": 6
                     },
                     "name": "order_status"
                   },
@@ -4875,10 +4875,10 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 48,
-                      "column": 3,
-                      "end_line": 48,
-                      "end_column": 12
+                      "line": 81,
+                      "column": 5,
+                      "end_line": 83,
+                      "end_column": 6
                     },
                     "name": "OrderStatus_Approved"
                   }
@@ -4891,10 +4891,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 48,
-                  "column": 3,
-                  "end_line": 48,
-                  "end_column": 12
+                  "line": 81,
+                  "column": 5,
+                  "end_line": 83,
+                  "end_column": 6
                 },
                 "operator": "==",
                 "left": {
@@ -4905,10 +4905,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 48,
-                    "column": 3,
-                    "end_line": 48,
-                    "end_column": 12
+                    "line": 81,
+                    "column": 5,
+                    "end_line": 83,
+                    "end_column": 6
                   },
                   "name": "order_status"
                 },
@@ -4920,10 +4920,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 48,
-                    "column": 3,
-                    "end_line": 48,
-                    "end_column": 12
+                    "line": 81,
+                    "column": 5,
+                    "end_line": 83,
+                    "end_column": 6
                   },
                   "name": "OrderStatus_Cancelled"
                 }
@@ -4937,10 +4937,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 48,
-              "column": 3,
-              "end_line": 48,
-              "end_column": 12
+              "line": 81,
+              "column": 5,
+              "end_line": 83,
+              "end_column": 6
             }
           },
           {
@@ -4953,10 +4953,10 @@
               },
               "span": {
                 "file": "expressions_valid.fsl",
-                "line": 47,
-                "column": 3,
-                "end_line": 47,
-                "end_column": 12
+                "line": 77,
+                "column": 5,
+                "end_line": 79,
+                "end_column": 6
               },
               "operator": "=>",
               "left": {
@@ -4966,10 +4966,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 47,
-                  "column": 3,
-                  "end_line": 47,
-                  "end_column": 12
+                  "line": 77,
+                  "column": 5,
+                  "end_line": 79,
+                  "end_column": 6
                 },
                 "operator": "==",
                 "left": {
@@ -4980,10 +4980,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 47,
-                    "column": 3,
-                    "end_line": 47,
-                    "end_column": 12
+                    "line": 77,
+                    "column": 5,
+                    "end_line": 79,
+                    "end_column": 6
                   },
                   "name": "order_status"
                 },
@@ -4995,10 +4995,10 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 47,
-                    "column": 3,
-                    "end_line": 47,
-                    "end_column": 12
+                    "line": 77,
+                    "column": 5,
+                    "end_line": 79,
+                    "end_column": 6
                   },
                   "name": "OrderStatus_Cancelled"
                 }
@@ -5010,10 +5010,10 @@
                 },
                 "span": {
                   "file": "expressions_valid.fsl",
-                  "line": 47,
-                  "column": 3,
-                  "end_line": 47,
-                  "end_column": 12
+                  "line": 77,
+                  "column": 5,
+                  "end_line": 79,
+                  "end_column": 6
                 },
                 "operand": {
                   "kind": "binary",
@@ -5022,12 +5022,12 @@
                   },
                   "span": {
                     "file": "expressions_valid.fsl",
-                    "line": 47,
-                    "column": 3,
-                    "end_line": 47,
-                    "end_column": 12
+                    "line": 77,
+                    "column": 5,
+                    "end_line": 79,
+                    "end_column": 6
                   },
-                  "operator": "or",
+                  "operator": "and",
                   "left": {
                     "kind": "binary",
                     "type": {
@@ -5035,56 +5035,12 @@
                     },
                     "span": {
                       "file": "expressions_valid.fsl",
-                      "line": 47,
-                      "column": 3,
-                      "end_line": 47,
-                      "end_column": 12
+                      "line": 77,
+                      "column": 5,
+                      "end_line": 79,
+                      "end_column": 6
                     },
-                    "operator": "==",
-                    "left": {
-                      "kind": "var",
-                      "type": {
-                        "kind": "named",
-                        "name": "OrderStatus"
-                      },
-                      "span": {
-                        "file": "expressions_valid.fsl",
-                        "line": 47,
-                        "column": 3,
-                        "end_line": 47,
-                        "end_column": 12
-                      },
-                      "name": "order_status"
-                    },
-                    "right": {
-                      "kind": "var",
-                      "type": {
-                        "kind": "named",
-                        "name": "OrderStatus"
-                      },
-                      "span": {
-                        "file": "expressions_valid.fsl",
-                        "line": 47,
-                        "column": 3,
-                        "end_line": 47,
-                        "end_column": 12
-                      },
-                      "name": "OrderStatus_Draft"
-                    }
-                  },
-                  "right": {
-                    "kind": "binary",
-                    "type": {
-                      "kind": "bool"
-                    },
-                    "span": {
-                      "file": "expressions_valid.fsl",
-                      "line": 47,
-                      "column": 3,
-                      "end_line": 47,
-                      "end_column": 12
-                    },
-                    "operator": "and",
+                    "operator": "or",
                     "left": {
                       "kind": "binary",
                       "type": {
@@ -5092,10 +5048,10 @@
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 47,
-                        "column": 3,
-                        "end_line": 47,
-                        "end_column": 12
+                        "line": 77,
+                        "column": 5,
+                        "end_line": 79,
+                        "end_column": 6
                       },
                       "operator": "==",
                       "left": {
@@ -5106,10 +5062,10 @@
                         },
                         "span": {
                           "file": "expressions_valid.fsl",
-                          "line": 47,
-                          "column": 3,
-                          "end_line": 47,
-                          "end_column": 12
+                          "line": 77,
+                          "column": 5,
+                          "end_line": 79,
+                          "end_column": 6
                         },
                         "name": "order_status"
                       },
@@ -5121,69 +5077,113 @@
                         },
                         "span": {
                           "file": "expressions_valid.fsl",
-                          "line": 47,
-                          "column": 3,
-                          "end_line": 47,
-                          "end_column": 12
+                          "line": 77,
+                          "column": 5,
+                          "end_line": 79,
+                          "end_column": 6
                         },
-                        "name": "OrderStatus_Approved"
+                        "name": "OrderStatus_Draft"
                       }
                     },
                     "right": {
-                      "kind": "not",
+                      "kind": "binary",
                       "type": {
                         "kind": "bool"
                       },
                       "span": {
                         "file": "expressions_valid.fsl",
-                        "line": 47,
-                        "column": 3,
-                        "end_line": 47,
-                        "end_column": 12
+                        "line": 77,
+                        "column": 5,
+                        "end_line": 79,
+                        "end_column": 6
                       },
-                      "operand": {
-                        "kind": "binary",
+                      "operator": "==",
+                      "left": {
+                        "kind": "var",
                         "type": {
-                          "kind": "bool"
+                          "kind": "named",
+                          "name": "OrderStatus"
                         },
                         "span": {
                           "file": "expressions_valid.fsl",
-                          "line": 47,
-                          "column": 3,
-                          "end_line": 47,
-                          "end_column": 12
+                          "line": 77,
+                          "column": 5,
+                          "end_line": 79,
+                          "end_column": 6
                         },
-                        "operator": "==",
-                        "left": {
-                          "kind": "var",
-                          "type": {
-                            "kind": "named",
-                            "name": "OrderStatus"
-                          },
-                          "span": {
-                            "file": "expressions_valid.fsl",
-                            "line": 47,
-                            "column": 3,
-                            "end_line": 47,
-                            "end_column": 12
-                          },
-                          "name": "order_status"
+                        "name": "order_status"
+                      },
+                      "right": {
+                        "kind": "var",
+                        "type": {
+                          "kind": "named",
+                          "name": "OrderStatus"
                         },
-                        "right": {
-                          "kind": "var",
-                          "type": {
-                            "kind": "named",
-                            "name": "OrderStatus"
-                          },
-                          "span": {
-                            "file": "expressions_valid.fsl",
-                            "line": 47,
-                            "column": 3,
-                            "end_line": 47,
-                            "end_column": 12
-                          },
-                          "name": "OrderStatus_Cancelled"
-                        }
+                        "span": {
+                          "file": "expressions_valid.fsl",
+                          "line": 77,
+                          "column": 5,
+                          "end_line": 79,
+                          "end_column": 6
+                        },
+                        "name": "OrderStatus_Approved"
+                      }
+                    }
+                  },
+                  "right": {
+                    "kind": "not",
+                    "type": {
+                      "kind": "bool"
+                    },
+                    "span": {
+                      "file": "expressions_valid.fsl",
+                      "line": 77,
+                      "column": 5,
+                      "end_line": 79,
+                      "end_column": 6
+                    },
+                    "operand": {
+                      "kind": "binary",
+                      "type": {
+                        "kind": "bool"
+                      },
+                      "span": {
+                        "file": "expressions_valid.fsl",
+                        "line": 77,
+                        "column": 5,
+                        "end_line": 79,
+                        "end_column": 6
+                      },
+                      "operator": "==",
+                      "left": {
+                        "kind": "var",
+                        "type": {
+                          "kind": "named",
+                          "name": "OrderStatus"
+                        },
+                        "span": {
+                          "file": "expressions_valid.fsl",
+                          "line": 77,
+                          "column": 5,
+                          "end_line": 79,
+                          "end_column": 6
+                        },
+                        "name": "order_status"
+                      },
+                      "right": {
+                        "kind": "var",
+                        "type": {
+                          "kind": "named",
+                          "name": "OrderStatus"
+                        },
+                        "span": {
+                          "file": "expressions_valid.fsl",
+                          "line": 77,
+                          "column": 5,
+                          "end_line": 79,
+                          "end_column": 6
+                        },
+                        "name": "OrderStatus_Cancelled"
                       }
                     }
                   }
@@ -5198,10 +5198,10 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 47,
-              "column": 3,
-              "end_line": 47,
-              "end_column": 12
+              "line": 77,
+              "column": 5,
+              "end_line": 79,
+              "end_column": 6
             }
           }
         ],
@@ -5215,19 +5215,19 @@
             },
             "span": {
               "file": "expressions_valid.fsl",
-              "line": 50,
-              "column": 3,
-              "end_line": 50,
-              "end_column": 11
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "value": false
           },
           "span": {
             "file": "expressions_valid.fsl",
-            "line": 50,
-            "column": 3,
-            "end_line": 50,
-            "end_column": 11
+            "line": 1,
+            "column": 1,
+            "end_line": 1,
+            "end_column": 1
           }
         }
       }
@@ -5365,10 +5365,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 18,
-              "column": 5,
-              "end_line": 18,
-              "end_column": 17
+              "line": 11,
+              "column": 13,
+              "end_line": 11,
+              "end_column": 36
             },
             "target": {
               "kind": "var",
@@ -5378,10 +5378,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 18,
-                "column": 5,
-                "end_line": 18,
-                "end_column": 17
+                "line": 11,
+                "column": 13,
+                "end_line": 11,
+                "end_column": 36
               },
               "name": "order_status"
             },
@@ -5393,10 +5393,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 18,
-                "column": 5,
-                "end_line": 18,
-                "end_column": 17
+                "line": 11,
+                "column": 13,
+                "end_line": 11,
+                "end_column": 36
               },
               "name": "Status_Draft"
             }
@@ -5408,10 +5408,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 19,
-              "column": 5,
-              "end_line": 19,
-              "end_column": 19
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -5420,10 +5420,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 19,
-                "column": 5,
-                "end_line": 19,
-                "end_column": 19
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_Approved"
             },
@@ -5434,10 +5434,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 19,
-                "column": 5,
-                "end_line": 19,
-                "end_column": 19
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -5449,10 +5449,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 20,
-              "column": 5,
-              "end_line": 20,
-              "end_column": 26
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -5461,10 +5461,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 20,
-                "column": 5,
-                "end_line": 20,
-                "end_column": 26
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_PaymentCaptured"
             },
@@ -5475,10 +5475,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 20,
-                "column": 5,
-                "end_line": 20,
-                "end_column": 26
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -5490,10 +5490,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 21,
-              "column": 5,
-              "end_line": 21,
-              "end_column": 24
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -5502,10 +5502,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 21,
-                "column": 5,
-                "end_line": 21,
-                "end_column": 24
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_PaymentFailed"
             },
@@ -5516,10 +5516,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 21,
-                "column": 5,
-                "end_line": 21,
-                "end_column": 24
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -5531,10 +5531,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 22,
-              "column": 5,
-              "end_line": 22,
-              "end_column": 27
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -5543,10 +5543,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 22,
-                "column": 5,
-                "end_line": 22,
-                "end_column": 27
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_PaymentRequested"
             },
@@ -5557,10 +5557,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 22,
-                "column": 5,
-                "end_line": 22,
-                "end_column": 27
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -5572,10 +5572,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 23,
-              "column": 5,
-              "end_line": 23,
-              "end_column": 26
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "target": {
               "kind": "var",
@@ -5584,10 +5584,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 23,
-                "column": 5,
-                "end_line": 23,
-                "end_column": 26
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "name": "event_PaymentTimedOut"
             },
@@ -5598,10 +5598,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 23,
-                "column": 5,
-                "end_line": 23,
-                "end_column": 26
+                "line": 1,
+                "column": 1,
+                "end_line": 1,
+                "end_column": 1
               },
               "value": false
             }
@@ -5613,10 +5613,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 24,
-              "column": 5,
-              "end_line": 24,
-              "end_column": 11
+              "line": 38,
+              "column": 3,
+              "end_line": 38,
+              "end_column": 3
             },
             "binder": {
               "name": "k",
@@ -5634,10 +5634,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 24,
-                  "column": 34,
-                  "end_line": 24,
-                  "end_column": 56
+                  "line": 38,
+                  "column": 3,
+                  "end_line": 38,
+                  "end_column": 3
                 },
                 "target": {
                   "kind": "index",
@@ -5647,10 +5647,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 24,
-                    "column": 34,
-                    "end_line": 24,
-                    "end_column": 56
+                    "line": 38,
+                    "column": 3,
+                    "end_line": 38,
+                    "end_column": 3
                   },
                   "name": "capture_payment_status",
                   "index": {
@@ -5661,10 +5661,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 24,
-                      "column": 34,
-                      "end_line": 24,
-                      "end_column": 56
+                      "line": 38,
+                      "column": 3,
+                      "end_line": 38,
+                      "end_column": 3
                     },
                     "name": "k"
                   }
@@ -5677,10 +5677,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 24,
-                    "column": 34,
-                    "end_line": 24,
-                    "end_column": 56
+                    "line": 38,
+                    "column": 3,
+                    "end_line": 38,
+                    "end_column": 3
                   },
                   "name": "CapturePaymentEffectStatus_NotStarted"
                 }
@@ -5694,10 +5694,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 25,
-              "column": 5,
-              "end_line": 25,
-              "end_column": 11
+              "line": 38,
+              "column": 3,
+              "end_line": 38,
+              "end_column": 3
             },
             "binder": {
               "name": "k",
@@ -5715,10 +5715,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 25,
-                  "column": 34,
-                  "end_line": 25,
-                  "end_column": 58
+                  "line": 38,
+                  "column": 3,
+                  "end_line": 38,
+                  "end_column": 3
                 },
                 "target": {
                   "kind": "index",
@@ -5728,10 +5728,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 25,
-                    "column": 34,
-                    "end_line": 25,
-                    "end_column": 58
+                    "line": 38,
+                    "column": 3,
+                    "end_line": 38,
+                    "end_column": 3
                   },
                   "name": "capture_payment_attempts",
                   "index": {
@@ -5742,10 +5742,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 25,
-                      "column": 34,
-                      "end_line": 25,
-                      "end_column": 58
+                      "line": 38,
+                      "column": 3,
+                      "end_line": 38,
+                      "end_column": 3
                     },
                     "name": "k"
                   }
@@ -5759,10 +5759,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 25,
-                    "column": 34,
-                    "end_line": 25,
-                    "end_column": 58
+                    "line": 38,
+                    "column": 3,
+                    "end_line": 38,
+                    "end_column": 3
                   },
                   "value": 0
                 }
@@ -5778,10 +5778,10 @@
         },
         "span": {
           "file": "effect_saga_valid.fsl",
-          "line": 18,
-          "column": 5,
-          "end_line": 18,
-          "end_column": 17
+          "line": 11,
+          "column": 13,
+          "end_line": 11,
+          "end_column": 36
         }
       },
       "actions": [
@@ -5798,10 +5798,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 50,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 50,
-                  "end_column": 13
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "operator": "==",
                 "left": {
@@ -5812,10 +5812,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 50,
+                    "line": 18,
                     "column": 5,
-                    "end_line": 50,
-                    "end_column": 13
+                    "end_line": 18,
+                    "end_column": 5
                   },
                   "collection": {
                     "kind": "var",
@@ -5832,10 +5832,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 50,
+                      "line": 18,
                       "column": 5,
-                      "end_line": 50,
-                      "end_column": 13
+                      "end_line": 18,
+                      "end_column": 5
                     },
                     "name": "capture_payment_status"
                   },
@@ -5847,10 +5847,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 50,
+                      "line": 18,
                       "column": 5,
-                      "end_line": 50,
-                      "end_column": 13
+                      "end_line": 18,
+                      "end_column": 5
                     },
                     "name": "payment_request_id"
                   }
@@ -5863,10 +5863,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 50,
+                    "line": 18,
                     "column": 5,
-                    "end_line": 50,
-                    "end_column": 13
+                    "end_line": 18,
+                    "end_column": 5
                   },
                   "name": "CapturePaymentEffectStatus_Pending"
                 }
@@ -5881,10 +5881,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 51,
+                "line": 18,
                 "column": 5,
-                "end_line": 51,
-                "end_column": 19
+                "end_line": 18,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -5893,10 +5893,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 51,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 51,
-                  "end_column": 19
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               },
@@ -5907,10 +5907,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 51,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 51,
-                  "end_column": 19
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -5922,10 +5922,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 52,
+                "line": 18,
                 "column": 5,
-                "end_line": 52,
-                "end_column": 26
+                "end_line": 18,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -5934,10 +5934,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 52,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 52,
-                  "end_column": 26
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -5948,10 +5948,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 52,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 52,
-                  "end_column": 26
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "value": true
               }
@@ -5963,10 +5963,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 53,
+                "line": 18,
                 "column": 5,
-                "end_line": 53,
-                "end_column": 24
+                "end_line": 18,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -5975,10 +5975,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 53,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 53,
-                  "end_column": 24
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "event_PaymentFailed"
               },
@@ -5989,10 +5989,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 53,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 53,
-                  "end_column": 24
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6004,10 +6004,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 54,
+                "line": 18,
                 "column": 5,
-                "end_line": 54,
-                "end_column": 27
+                "end_line": 18,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6016,10 +6016,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 54,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 54,
-                  "end_column": 27
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "event_PaymentRequested"
               },
@@ -6030,10 +6030,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 54,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 54,
-                  "end_column": 27
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6045,10 +6045,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 55,
+                "line": 18,
                 "column": 5,
-                "end_line": 55,
-                "end_column": 26
+                "end_line": 18,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6057,10 +6057,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 55,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 55,
-                  "end_column": 26
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -6071,10 +6071,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 55,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 55,
-                  "end_column": 26
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6086,10 +6086,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 56,
+                "line": 18,
                 "column": 5,
-                "end_line": 56,
-                "end_column": 27
+                "end_line": 18,
+                "end_column": 5
               },
               "target": {
                 "kind": "index",
@@ -6099,10 +6099,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 56,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 56,
-                  "end_column": 27
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "capture_payment_status",
                 "index": {
@@ -6113,10 +6113,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 56,
+                    "line": 18,
                     "column": 5,
-                    "end_line": 56,
-                    "end_column": 27
+                    "end_line": 18,
+                    "end_column": 5
                   },
                   "name": "payment_request_id"
                 }
@@ -6129,10 +6129,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 56,
+                  "line": 18,
                   "column": 5,
-                  "end_line": 56,
-                  "end_column": 27
+                  "end_line": 18,
+                  "end_column": 5
                 },
                 "name": "CapturePaymentEffectStatus_Succeeded"
               }
@@ -6144,10 +6144,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 57,
-                "column": 5,
-                "end_line": 57,
-                "end_column": 17
+                "line": 33,
+                "column": 30,
+                "end_line": 33,
+                "end_column": 43
               },
               "target": {
                 "kind": "var",
@@ -6157,10 +6157,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 57,
-                  "column": 5,
-                  "end_line": 57,
-                  "end_column": 17
+                  "line": 33,
+                  "column": 30,
+                  "end_line": 33,
+                  "end_column": 43
                 },
                 "name": "order_status"
               },
@@ -6172,10 +6172,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 57,
-                  "column": 5,
-                  "end_line": 57,
-                  "end_column": 17
+                  "line": 33,
+                  "column": 30,
+                  "end_line": 33,
+                  "end_column": 43
                 },
                 "name": "Status_Paid"
               }
@@ -6189,10 +6189,10 @@
           },
           "span": {
             "file": "effect_saga_valid.fsl",
-            "line": 49,
-            "column": 3,
-            "end_line": 49,
-            "end_column": 9
+            "line": 18,
+            "column": 5,
+            "end_line": 18,
+            "end_column": 5
           }
         },
         {
@@ -6208,10 +6208,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 28,
-                  "column": 5,
-                  "end_line": 28,
-                  "end_column": 13
+                  "line": 23,
+                  "column": 16,
+                  "end_line": 23,
+                  "end_column": 31
                 },
                 "operator": "==",
                 "left": {
@@ -6222,10 +6222,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 28,
-                    "column": 5,
-                    "end_line": 28,
-                    "end_column": 13
+                    "line": 23,
+                    "column": 16,
+                    "end_line": 23,
+                    "end_column": 31
                   },
                   "name": "order_status"
                 },
@@ -6237,10 +6237,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 28,
-                    "column": 5,
-                    "end_line": 28,
-                    "end_column": 13
+                    "line": 23,
+                    "column": 16,
+                    "end_line": 23,
+                    "end_column": 31
                   },
                   "name": "Status_Draft"
                 }
@@ -6255,10 +6255,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 29,
+                "line": 22,
                 "column": 5,
-                "end_line": 29,
-                "end_column": 19
+                "end_line": 22,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6267,10 +6267,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 29,
+                  "line": 22,
                   "column": 5,
-                  "end_line": 29,
-                  "end_column": 19
+                  "end_line": 22,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               },
@@ -6281,10 +6281,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 29,
+                  "line": 22,
                   "column": 5,
-                  "end_line": 29,
-                  "end_column": 19
+                  "end_line": 22,
+                  "end_column": 5
                 },
                 "value": true
               }
@@ -6296,10 +6296,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 30,
+                "line": 22,
                 "column": 5,
-                "end_line": 30,
-                "end_column": 26
+                "end_line": 22,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6308,10 +6308,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 30,
+                  "line": 22,
                   "column": 5,
-                  "end_line": 30,
-                  "end_column": 26
+                  "end_line": 22,
+                  "end_column": 5
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -6322,10 +6322,133 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 30,
+                  "line": 22,
                   "column": 5,
-                  "end_line": 30,
-                  "end_column": 26
+                  "end_line": 22,
+                  "end_column": 5
+                },
+                "value": false
+              }
+            },
+            {
+              "kind": "assign",
+              "type": {
+                "kind": "statement"
+              },
+              "span": {
+                "file": "effect_saga_valid.fsl",
+                "line": 22,
+                "column": 5,
+                "end_line": 22,
+                "end_column": 5
+              },
+              "target": {
+                "kind": "var",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 22,
+                  "column": 5,
+                  "end_line": 22,
+                  "end_column": 5
+                },
+                "name": "event_PaymentFailed"
+              },
+              "value": {
+                "kind": "bool",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 22,
+                  "column": 5,
+                  "end_line": 22,
+                  "end_column": 5
+                },
+                "value": false
+              }
+            },
+            {
+              "kind": "assign",
+              "type": {
+                "kind": "statement"
+              },
+              "span": {
+                "file": "effect_saga_valid.fsl",
+                "line": 22,
+                "column": 5,
+                "end_line": 22,
+                "end_column": 5
+              },
+              "target": {
+                "kind": "var",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 22,
+                  "column": 5,
+                  "end_line": 22,
+                  "end_column": 5
+                },
+                "name": "event_PaymentRequested"
+              },
+              "value": {
+                "kind": "bool",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 22,
+                  "column": 5,
+                  "end_line": 22,
+                  "end_column": 5
+                },
+                "value": false
+              }
+            },
+            {
+              "kind": "assign",
+              "type": {
+                "kind": "statement"
+              },
+              "span": {
+                "file": "effect_saga_valid.fsl",
+                "line": 22,
+                "column": 5,
+                "end_line": 22,
+                "end_column": 5
+              },
+              "target": {
+                "kind": "var",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 22,
+                  "column": 5,
+                  "end_line": 22,
+                  "end_column": 5
+                },
+                "name": "event_PaymentTimedOut"
+              },
+              "value": {
+                "kind": "bool",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 22,
+                  "column": 5,
+                  "end_line": 22,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6338,132 +6461,9 @@
               "span": {
                 "file": "effect_saga_valid.fsl",
                 "line": 31,
-                "column": 5,
+                "column": 23,
                 "end_line": 31,
-                "end_column": 24
-              },
-              "target": {
-                "kind": "var",
-                "type": {
-                  "kind": "bool"
-                },
-                "span": {
-                  "file": "effect_saga_valid.fsl",
-                  "line": 31,
-                  "column": 5,
-                  "end_line": 31,
-                  "end_column": 24
-                },
-                "name": "event_PaymentFailed"
-              },
-              "value": {
-                "kind": "bool",
-                "type": {
-                  "kind": "bool"
-                },
-                "span": {
-                  "file": "effect_saga_valid.fsl",
-                  "line": 31,
-                  "column": 5,
-                  "end_line": 31,
-                  "end_column": 24
-                },
-                "value": false
-              }
-            },
-            {
-              "kind": "assign",
-              "type": {
-                "kind": "statement"
-              },
-              "span": {
-                "file": "effect_saga_valid.fsl",
-                "line": 32,
-                "column": 5,
-                "end_line": 32,
-                "end_column": 27
-              },
-              "target": {
-                "kind": "var",
-                "type": {
-                  "kind": "bool"
-                },
-                "span": {
-                  "file": "effect_saga_valid.fsl",
-                  "line": 32,
-                  "column": 5,
-                  "end_line": 32,
-                  "end_column": 27
-                },
-                "name": "event_PaymentRequested"
-              },
-              "value": {
-                "kind": "bool",
-                "type": {
-                  "kind": "bool"
-                },
-                "span": {
-                  "file": "effect_saga_valid.fsl",
-                  "line": 32,
-                  "column": 5,
-                  "end_line": 32,
-                  "end_column": 27
-                },
-                "value": false
-              }
-            },
-            {
-              "kind": "assign",
-              "type": {
-                "kind": "statement"
-              },
-              "span": {
-                "file": "effect_saga_valid.fsl",
-                "line": 33,
-                "column": 5,
-                "end_line": 33,
-                "end_column": 26
-              },
-              "target": {
-                "kind": "var",
-                "type": {
-                  "kind": "bool"
-                },
-                "span": {
-                  "file": "effect_saga_valid.fsl",
-                  "line": 33,
-                  "column": 5,
-                  "end_line": 33,
-                  "end_column": 26
-                },
-                "name": "event_PaymentTimedOut"
-              },
-              "value": {
-                "kind": "bool",
-                "type": {
-                  "kind": "bool"
-                },
-                "span": {
-                  "file": "effect_saga_valid.fsl",
-                  "line": 33,
-                  "column": 5,
-                  "end_line": 33,
-                  "end_column": 26
-                },
-                "value": false
-              }
-            },
-            {
-              "kind": "assign",
-              "type": {
-                "kind": "statement"
-              },
-              "span": {
-                "file": "effect_saga_valid.fsl",
-                "line": 34,
-                "column": 5,
-                "end_line": 34,
-                "end_column": 17
+                "end_column": 40
               },
               "target": {
                 "kind": "var",
@@ -6473,10 +6473,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 34,
-                  "column": 5,
-                  "end_line": 34,
-                  "end_column": 17
+                  "line": 31,
+                  "column": 23,
+                  "end_line": 31,
+                  "end_column": 40
                 },
                 "name": "order_status"
               },
@@ -6488,10 +6488,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 34,
-                  "column": 5,
-                  "end_line": 34,
-                  "end_column": 17
+                  "line": 31,
+                  "column": 23,
+                  "end_line": 31,
+                  "end_column": 40
                 },
                 "name": "Status_Approved"
               }
@@ -6505,10 +6505,10 @@
           },
           "span": {
             "file": "effect_saga_valid.fsl",
-            "line": 27,
-            "column": 3,
-            "end_line": 27,
-            "end_column": 9
+            "line": 22,
+            "column": 5,
+            "end_line": 22,
+            "end_column": 5
           }
         },
         {
@@ -6524,10 +6524,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 37,
-                  "column": 5,
-                  "end_line": 37,
-                  "end_column": 13
+                  "line": 27,
+                  "column": 16,
+                  "end_line": 27,
+                  "end_column": 34
                 },
                 "operator": "==",
                 "left": {
@@ -6538,10 +6538,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 37,
-                    "column": 5,
-                    "end_line": 37,
-                    "end_column": 13
+                    "line": 27,
+                    "column": 16,
+                    "end_line": 27,
+                    "end_column": 34
                   },
                   "name": "order_status"
                 },
@@ -6553,10 +6553,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 37,
-                    "column": 5,
-                    "end_line": 37,
-                    "end_column": 13
+                    "line": 27,
+                    "column": 16,
+                    "end_line": 27,
+                    "end_column": 34
                   },
                   "name": "Status_Approved"
                 }
@@ -6571,10 +6571,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 38,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 38,
-                  "end_column": 13
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "operator": "!=",
                 "left": {
@@ -6585,10 +6585,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 38,
+                    "line": 26,
                     "column": 5,
-                    "end_line": 38,
-                    "end_column": 13
+                    "end_line": 26,
+                    "end_column": 5
                   },
                   "collection": {
                     "kind": "var",
@@ -6605,10 +6605,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 38,
+                      "line": 26,
                       "column": 5,
-                      "end_line": 38,
-                      "end_column": 13
+                      "end_line": 26,
+                      "end_column": 5
                     },
                     "name": "capture_payment_status"
                   },
@@ -6620,10 +6620,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 38,
+                      "line": 26,
                       "column": 5,
-                      "end_line": 38,
-                      "end_column": 13
+                      "end_line": 26,
+                      "end_column": 5
                     },
                     "name": "payment_request_id"
                   }
@@ -6636,10 +6636,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 38,
+                    "line": 26,
                     "column": 5,
-                    "end_line": 38,
-                    "end_column": 13
+                    "end_line": 26,
+                    "end_column": 5
                   },
                   "name": "CapturePaymentEffectStatus_Pending"
                 }
@@ -6654,10 +6654,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 39,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 39,
-                  "end_column": 13
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "operator": "!=",
                 "left": {
@@ -6668,10 +6668,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 39,
+                    "line": 26,
                     "column": 5,
-                    "end_line": 39,
-                    "end_column": 13
+                    "end_line": 26,
+                    "end_column": 5
                   },
                   "collection": {
                     "kind": "var",
@@ -6688,10 +6688,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 39,
+                      "line": 26,
                       "column": 5,
-                      "end_line": 39,
-                      "end_column": 13
+                      "end_line": 26,
+                      "end_column": 5
                     },
                     "name": "capture_payment_status"
                   },
@@ -6703,10 +6703,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 39,
+                      "line": 26,
                       "column": 5,
-                      "end_line": 39,
-                      "end_column": 13
+                      "end_line": 26,
+                      "end_column": 5
                     },
                     "name": "payment_request_id"
                   }
@@ -6719,10 +6719,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 39,
+                    "line": 26,
                     "column": 5,
-                    "end_line": 39,
-                    "end_column": 13
+                    "end_line": 26,
+                    "end_column": 5
                   },
                   "name": "CapturePaymentEffectStatus_Succeeded"
                 }
@@ -6737,10 +6737,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 40,
+                "line": 26,
                 "column": 5,
-                "end_line": 40,
-                "end_column": 19
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6749,10 +6749,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 40,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 40,
-                  "end_column": 19
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               },
@@ -6763,10 +6763,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 40,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 40,
-                  "end_column": 19
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6778,10 +6778,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 41,
+                "line": 26,
                 "column": 5,
-                "end_line": 41,
-                "end_column": 26
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6790,10 +6790,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 41,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 41,
-                  "end_column": 26
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -6804,10 +6804,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 41,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 41,
-                  "end_column": 26
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6819,10 +6819,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 42,
+                "line": 26,
                 "column": 5,
-                "end_line": 42,
-                "end_column": 24
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6831,10 +6831,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 42,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 42,
-                  "end_column": 24
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "event_PaymentFailed"
               },
@@ -6845,10 +6845,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 42,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 42,
-                  "end_column": 24
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6860,10 +6860,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 43,
+                "line": 26,
                 "column": 5,
-                "end_line": 43,
-                "end_column": 27
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6872,10 +6872,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 43,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 43,
-                  "end_column": 27
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "event_PaymentRequested"
               },
@@ -6886,10 +6886,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 43,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 43,
-                  "end_column": 27
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "value": true
               }
@@ -6901,10 +6901,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 44,
+                "line": 26,
                 "column": 5,
-                "end_line": 44,
-                "end_column": 26
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -6913,10 +6913,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 44,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 44,
-                  "end_column": 26
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -6927,10 +6927,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 44,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 44,
-                  "end_column": 26
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -6942,10 +6942,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 45,
-                "column": 5,
-                "end_line": 45,
-                "end_column": 17
+                "line": 32,
+                "column": 31,
+                "end_line": 32,
+                "end_column": 48
               },
               "target": {
                 "kind": "var",
@@ -6955,10 +6955,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 45,
-                  "column": 5,
-                  "end_line": 45,
-                  "end_column": 17
+                  "line": 32,
+                  "column": 31,
+                  "end_line": 32,
+                  "end_column": 48
                 },
                 "name": "order_status"
               },
@@ -6970,10 +6970,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 45,
-                  "column": 5,
-                  "end_line": 45,
-                  "end_column": 17
+                  "line": 32,
+                  "column": 31,
+                  "end_line": 32,
+                  "end_column": 48
                 },
                 "name": "Status_Approved"
               }
@@ -6985,10 +6985,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 46,
+                "line": 26,
                 "column": 5,
-                "end_line": 46,
-                "end_column": 27
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "index",
@@ -6998,10 +6998,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 46,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 46,
-                  "end_column": 27
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "capture_payment_status",
                 "index": {
@@ -7012,10 +7012,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 46,
+                    "line": 26,
                     "column": 5,
-                    "end_line": 46,
-                    "end_column": 27
+                    "end_line": 26,
+                    "end_column": 5
                   },
                   "name": "payment_request_id"
                 }
@@ -7028,10 +7028,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 46,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 46,
-                  "end_column": 27
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "CapturePaymentEffectStatus_Pending"
               }
@@ -7043,10 +7043,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 47,
+                "line": 26,
                 "column": 5,
-                "end_line": 47,
-                "end_column": 29
+                "end_line": 26,
+                "end_column": 5
               },
               "target": {
                 "kind": "index",
@@ -7056,10 +7056,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 47,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 47,
-                  "end_column": 29
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "name": "capture_payment_attempts",
                 "index": {
@@ -7070,10 +7070,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 47,
+                    "line": 26,
                     "column": 5,
-                    "end_line": 47,
-                    "end_column": 29
+                    "end_line": 26,
+                    "end_column": 5
                   },
                   "name": "payment_request_id"
                 }
@@ -7087,10 +7087,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 47,
+                  "line": 26,
                   "column": 5,
-                  "end_line": 47,
-                  "end_column": 29
+                  "end_line": 26,
+                  "end_column": 5
                 },
                 "value": 1
               }
@@ -7104,10 +7104,10 @@
           },
           "span": {
             "file": "effect_saga_valid.fsl",
-            "line": 36,
-            "column": 3,
-            "end_line": 36,
-            "end_column": 9
+            "line": 26,
+            "column": 5,
+            "end_line": 26,
+            "end_column": 5
           }
         },
         {
@@ -7123,10 +7123,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 115,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 115,
-                  "end_column": 13
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               }
@@ -7140,10 +7140,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 116,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 116,
-                  "end_column": 13
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "operator": "and",
                 "left": {
@@ -7153,10 +7153,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 116,
+                    "line": 52,
                     "column": 5,
-                    "end_line": 116,
-                    "end_column": 13
+                    "end_line": 52,
+                    "end_column": 5
                   },
                   "name": "event_Approved"
                 },
@@ -7167,10 +7167,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 116,
+                    "line": 52,
                     "column": 5,
-                    "end_line": 116,
-                    "end_column": 13
+                    "end_line": 52,
+                    "end_column": 5
                   },
                   "operand": {
                     "kind": "var",
@@ -7179,10 +7179,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 116,
+                      "line": 52,
                       "column": 5,
-                      "end_line": 116,
-                      "end_column": 13
+                      "end_line": 52,
+                      "end_column": 5
                     },
                     "name": "event_PaymentFailed"
                   }
@@ -7198,10 +7198,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 117,
+                "line": 52,
                 "column": 5,
-                "end_line": 117,
-                "end_column": 19
+                "end_line": 52,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -7210,10 +7210,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 117,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 117,
-                  "end_column": 19
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "name": "event_Approved"
               },
@@ -7224,10 +7224,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 117,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 117,
-                  "end_column": 19
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -7239,10 +7239,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 118,
+                "line": 52,
                 "column": 5,
-                "end_line": 118,
-                "end_column": 26
+                "end_line": 52,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -7251,10 +7251,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 118,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 118,
-                  "end_column": 26
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -7265,10 +7265,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 118,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 118,
-                  "end_column": 26
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -7280,10 +7280,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 119,
+                "line": 52,
                 "column": 5,
-                "end_line": 119,
-                "end_column": 24
+                "end_line": 52,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -7292,10 +7292,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 119,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 119,
-                  "end_column": 24
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "name": "event_PaymentFailed"
               },
@@ -7306,10 +7306,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 119,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 119,
-                  "end_column": 24
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -7321,10 +7321,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 120,
+                "line": 52,
                 "column": 5,
-                "end_line": 120,
-                "end_column": 27
+                "end_line": 52,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -7333,10 +7333,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 120,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 120,
-                  "end_column": 27
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "name": "event_PaymentRequested"
               },
@@ -7347,10 +7347,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 120,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 120,
-                  "end_column": 27
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "value": true
               }
@@ -7362,10 +7362,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 121,
+                "line": 52,
                 "column": 5,
-                "end_line": 121,
-                "end_column": 26
+                "end_line": 52,
+                "end_column": 5
               },
               "target": {
                 "kind": "var",
@@ -7374,10 +7374,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 121,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 121,
-                  "end_column": 26
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -7388,10 +7388,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 121,
+                  "line": 52,
                   "column": 5,
-                  "end_line": 121,
-                  "end_column": 26
+                  "end_line": 52,
+                  "end_column": 5
                 },
                 "value": false
               }
@@ -7405,10 +7405,10 @@
           },
           "span": {
             "file": "effect_saga_valid.fsl",
-            "line": 114,
-            "column": 3,
-            "end_line": 114,
-            "end_column": 9
+            "line": 52,
+            "column": 5,
+            "end_line": 52,
+            "end_column": 5
           }
         }
       ],
@@ -7424,10 +7424,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 132,
-                "column": 3,
-                "end_line": 132,
-                "end_column": 12
+                "line": 59,
+                "column": 5,
+                "end_line": 61,
+                "end_column": 6
               },
               "operator": "=>",
               "left": {
@@ -7437,10 +7437,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 132,
-                  "column": 3,
-                  "end_line": 132,
-                  "end_column": 12
+                  "line": 59,
+                  "column": 5,
+                  "end_line": 61,
+                  "end_column": 6
                 },
                 "operator": "or",
                 "left": {
@@ -7450,10 +7450,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 132,
-                    "column": 3,
-                    "end_line": 132,
-                    "end_column": 12
+                    "line": 59,
+                    "column": 5,
+                    "end_line": 61,
+                    "end_column": 6
                   },
                   "operator": "or",
                   "left": {
@@ -7463,10 +7463,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 132,
-                      "column": 3,
-                      "end_line": 132,
-                      "end_column": 12
+                      "line": 59,
+                      "column": 5,
+                      "end_line": 61,
+                      "end_column": 6
                     },
                     "name": "event_PaymentCaptured"
                   },
@@ -7477,10 +7477,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 132,
-                      "column": 3,
-                      "end_line": 132,
-                      "end_column": 12
+                      "line": 59,
+                      "column": 5,
+                      "end_line": 61,
+                      "end_column": 6
                     },
                     "name": "event_PaymentFailed"
                   }
@@ -7492,10 +7492,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 132,
-                    "column": 3,
-                    "end_line": 132,
-                    "end_column": 12
+                    "line": 59,
+                    "column": 5,
+                    "end_line": 61,
+                    "end_column": 6
                   },
                   "name": "event_PaymentTimedOut"
                 }
@@ -7507,10 +7507,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 132,
-                  "column": 3,
-                  "end_line": 132,
-                  "end_column": 12
+                  "line": 59,
+                  "column": 5,
+                  "end_line": 61,
+                  "end_column": 6
                 },
                 "operand": {
                   "kind": "var",
@@ -7519,10 +7519,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 132,
-                    "column": 3,
-                    "end_line": 132,
-                    "end_column": 12
+                    "line": 59,
+                    "column": 5,
+                    "end_line": 61,
+                    "end_column": 6
                   },
                   "name": "event_PaymentRequested"
                 }
@@ -7536,10 +7536,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 132,
-              "column": 3,
-              "end_line": 132,
-              "end_column": 12
+              "line": 59,
+              "column": 5,
+              "end_line": 61,
+              "end_column": 6
             }
           }
         ],
@@ -7554,10 +7554,10 @@
               },
               "span": {
                 "file": "effect_saga_valid.fsl",
-                "line": 133,
+                "line": 38,
                 "column": 3,
-                "end_line": 133,
-                "end_column": 8
+                "end_line": 38,
+                "end_column": 3
               },
               "quantifier": "forall",
               "binder": {
@@ -7575,10 +7575,10 @@
                 },
                 "span": {
                   "file": "effect_saga_valid.fsl",
-                  "line": 133,
+                  "line": 38,
                   "column": 3,
-                  "end_line": 133,
-                  "end_column": 8
+                  "end_line": 38,
+                  "end_column": 3
                 },
                 "operator": "=>",
                 "left": {
@@ -7588,10 +7588,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 133,
+                    "line": 38,
                     "column": 3,
-                    "end_line": 133,
-                    "end_column": 8
+                    "end_line": 38,
+                    "end_column": 3
                   },
                   "operator": "==",
                   "left": {
@@ -7602,10 +7602,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 133,
+                      "line": 38,
                       "column": 3,
-                      "end_line": 133,
-                      "end_column": 8
+                      "end_line": 38,
+                      "end_column": 3
                     },
                     "operand": {
                       "kind": "index",
@@ -7615,10 +7615,10 @@
                       },
                       "span": {
                         "file": "effect_saga_valid.fsl",
-                        "line": 133,
+                        "line": 38,
                         "column": 3,
-                        "end_line": 133,
-                        "end_column": 8
+                        "end_line": 38,
+                        "end_column": 3
                       },
                       "collection": {
                         "kind": "var",
@@ -7635,10 +7635,10 @@
                         },
                         "span": {
                           "file": "effect_saga_valid.fsl",
-                          "line": 133,
+                          "line": 38,
                           "column": 3,
-                          "end_line": 133,
-                          "end_column": 8
+                          "end_line": 38,
+                          "end_column": 3
                         },
                         "name": "capture_payment_status"
                       },
@@ -7650,10 +7650,10 @@
                         },
                         "span": {
                           "file": "effect_saga_valid.fsl",
-                          "line": 133,
+                          "line": 38,
                           "column": 3,
-                          "end_line": 133,
-                          "end_column": 8
+                          "end_line": 38,
+                          "end_column": 3
                         },
                         "name": "k"
                       }
@@ -7667,10 +7667,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 133,
+                      "line": 38,
                       "column": 3,
-                      "end_line": 133,
-                      "end_column": 8
+                      "end_line": 38,
+                      "end_column": 3
                     },
                     "name": "CapturePaymentEffectStatus_Succeeded"
                   }
@@ -7682,10 +7682,10 @@
                   },
                   "span": {
                     "file": "effect_saga_valid.fsl",
-                    "line": 133,
+                    "line": 38,
                     "column": 3,
-                    "end_line": 133,
-                    "end_column": 8
+                    "end_line": 38,
+                    "end_column": 3
                   },
                   "operator": "==",
                   "left": {
@@ -7696,10 +7696,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 133,
+                      "line": 38,
                       "column": 3,
-                      "end_line": 133,
-                      "end_column": 8
+                      "end_line": 38,
+                      "end_column": 3
                     },
                     "collection": {
                       "kind": "var",
@@ -7716,10 +7716,10 @@
                       },
                       "span": {
                         "file": "effect_saga_valid.fsl",
-                        "line": 133,
+                        "line": 38,
                         "column": 3,
-                        "end_line": 133,
-                        "end_column": 8
+                        "end_line": 38,
+                        "end_column": 3
                       },
                       "name": "capture_payment_status"
                     },
@@ -7731,10 +7731,10 @@
                       },
                       "span": {
                         "file": "effect_saga_valid.fsl",
-                        "line": 133,
+                        "line": 38,
                         "column": 3,
-                        "end_line": 133,
-                        "end_column": 8
+                        "end_line": 38,
+                        "end_column": 3
                       },
                       "name": "k"
                     }
@@ -7747,10 +7747,10 @@
                     },
                     "span": {
                       "file": "effect_saga_valid.fsl",
-                      "line": 133,
+                      "line": 38,
                       "column": 3,
-                      "end_line": 133,
-                      "end_column": 8
+                      "end_line": 38,
+                      "end_column": 3
                     },
                     "name": "CapturePaymentEffectStatus_Succeeded"
                   }
@@ -7765,10 +7765,10 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 133,
+              "line": 38,
               "column": 3,
-              "end_line": 133,
-              "end_column": 8
+              "end_line": 38,
+              "end_column": 3
             }
           }
         ],
@@ -7781,30 +7781,30 @@
             },
             "span": {
               "file": "effect_saga_valid.fsl",
-              "line": 134,
-              "column": 3,
-              "end_line": 134,
-              "end_column": 11
+              "line": 1,
+              "column": 1,
+              "end_line": 1,
+              "end_column": 1
             },
             "value": false
           },
           "span": {
             "file": "effect_saga_valid.fsl",
-            "line": 134,
-            "column": 3,
-            "end_line": 134,
-            "end_column": 11
+            "line": 1,
+            "column": 1,
+            "end_line": 1,
+            "end_column": 1
           }
         }
       }
     }
   },
-  "known_generated_spans": [
+  "direct_domain_spans": [
     {
-      "classification": "known_generated_kernel_coordinate_attached_to_source_file",
+      "classification": "original_domain_coordinate_preserved",
       "file": "expressions_valid.fsl",
       "source_declaration_line": 39,
-      "reported_public_kernel_line": 24,
+      "reported_public_kernel_line": 39,
       "origin": {
         "dialect": "domain",
         "declaration": "order_approve",
@@ -7813,10 +7813,10 @@
       }
     },
     {
-      "classification": "known_generated_kernel_coordinate_attached_to_source_file",
+      "classification": "original_domain_coordinate_preserved",
       "file": "effect_saga_valid.fsl",
       "source_declaration_line": 22,
-      "reported_public_kernel_line": 27,
+      "reported_public_kernel_line": 22,
       "origin": {
         "dialect": "domain",
         "declaration": "order_approve",
@@ -7918,8 +7918,8 @@
                   "name": "order_cancel",
                   "params": {},
                   "loc": {
-                    "line": 37,
-                    "column": 3
+                    "line": 46,
+                    "column": 5
                   }
                 },
                 "changes": {
@@ -7999,12 +7999,27 @@
         }
       },
       "verify": {
-        "exit": 2,
+        "exit": 0,
         "output": {
           "fsl": "1.0",
-          "result": "error",
-          "kind": "semantics",
-          "message": "indexing requires a map or sequence"
+          "spec": "DomainLvalueCharacterization",
+          "result": "verified",
+          "depth": 2,
+          "checked_to_depth": 2,
+          "completeness": "bounded",
+          "invariants_checked": [
+            "_bounds_inventory_total",
+            "_bounds_inventory_counts",
+            "_bounds_inventory_counter"
+          ],
+          "transitions_checked": [],
+          "reachables": {},
+          "action_coverage": {
+            "inventory_adjust": true
+          },
+          "deadlock": {
+            "found": false
+          }
         }
       }
     },
@@ -8030,11 +8045,12 @@
     },
     "invalid_unknown_name.fsl": {
       "check": {
-        "exit": 0,
+        "exit": 2,
         "output": {
           "fsl": "1.0",
-          "result": "ok",
-          "spec": "InvalidUnknownName"
+          "result": "error",
+          "kind": "semantics",
+          "message": "unknown domain symbol 'missing_status' at 10:29"
         }
       },
       "verify": {
@@ -8043,17 +8059,18 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown identifier 'missing_status'"
+          "message": "unknown domain symbol 'missing_status' at 10:29"
         }
       }
     },
     "invalid_unknown_member.fsl": {
       "check": {
-        "exit": 0,
+        "exit": 2,
         "output": {
           "fsl": "1.0",
-          "result": "ok",
-          "spec": "InvalidUnknownMember"
+          "result": "error",
+          "kind": "semantics",
+          "message": "unknown domain symbol 'Cancelled' at 10:41"
         }
       },
       "verify": {
@@ -8062,64 +8079,27 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown identifier 'Cancelled'"
+          "message": "unknown domain symbol 'Cancelled' at 10:41"
         }
       }
     },
     "invalid_type_mismatch.fsl": {
       "check": {
-        "exit": 0,
+        "exit": 2,
         "output": {
           "fsl": "1.0",
-          "result": "ok",
-          "spec": "InvalidTypeMismatch"
+          "result": "error",
+          "kind": "semantics",
+          "message": "comparison operand type mismatch at 10:37"
         }
       },
       "verify": {
-        "exit": 1,
+        "exit": 2,
         "output": {
           "fsl": "1.0",
-          "spec": "InvalidTypeMismatch",
-          "result": "violated",
-          "violation_kind": "invariant",
-          "invariant": "Order_typeMismatch",
-          "requirement": {
-            "id": "DOMAIN-INVARIANT",
-            "text": "Order.typeMismatch"
-          },
-          "loc": {
-            "line": 15,
-            "column": 3
-          },
-          "violated_at_step": 0,
-          "violating_bindings": [
-            {}
-          ],
-          "blame": {
-            "conjuncts": [
-              {
-                "index": 0,
-                "text": "order_status == 1",
-                "holds": false,
-                "violating_bindings": [
-                  {}
-                ]
-              }
-            ]
-          },
-          "last_action": null,
-          "trace": [
-            {
-              "step": 0,
-              "state": {
-                "event_Touched": false,
-                "order_status": "Status_Draft"
-              }
-            }
-          ],
-          "checked_to_depth": 0,
-          "completeness": "bounded",
-          "trace_type": "invariant"
+          "result": "error",
+          "kind": "semantics",
+          "message": "comparison operand type mismatch at 10:37"
         }
       }
     },
@@ -8165,34 +8145,21 @@
     },
     "ai_internal_name_misuse.fsl": {
       "check": {
-        "exit": 0,
+        "exit": 2,
         "output": {
           "fsl": "1.0",
-          "result": "ok",
-          "spec": "AiInternalNameMisuse"
+          "result": "error",
+          "kind": "semantics",
+          "message": "unknown domain symbol 'Status_Draft' at 10:41"
         }
       },
       "verify": {
-        "exit": 0,
+        "exit": 2,
         "output": {
           "fsl": "1.0",
-          "spec": "AiInternalNameMisuse",
-          "result": "verified",
-          "depth": 2,
-          "checked_to_depth": 2,
-          "completeness": "bounded",
-          "invariants_checked": [
-            "_bounds_order_status",
-            "Order_generatedName"
-          ],
-          "transitions_checked": [],
-          "reachables": {},
-          "action_coverage": {
-            "order_touch": true
-          },
-          "deadlock": {
-            "found": false
-          }
+          "result": "error",
+          "kind": "semantics",
+          "message": "unknown domain symbol 'Status_Draft' at 10:41"
         }
       }
     }

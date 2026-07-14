@@ -50,6 +50,12 @@ Unsupported or incompletely lowered structures fail export with a semantic error
 The exporter never silently omits an unknown type, predicate call, expression,
 lvalue, or non-scalar parameter domain.
 
+The Rust domain frontend reaches this boundary through typed name/type
+resolution and direct AST-to-AST lowering. Generated Kernel source from
+`fslc domain expand` is a debug representation only and is never reparsed to
+construct the checked contract. Resolver diagnostics therefore retain the
+original domain node coordinates.
+
 Compose lowering currently loses the component filename while retaining its line
 span. Public Kernel v1 therefore rejects `compose` input explicitly instead of
 fabricating a root-file source location. A future schema version may add
