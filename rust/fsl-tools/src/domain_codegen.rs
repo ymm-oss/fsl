@@ -569,16 +569,18 @@ fn is_identifier(value: &str) -> bool {
 }
 
 fn render_ts_assignment(assignment: &DomainAssignment) -> Option<String> {
-    if !is_identifier(&assignment.target) {
+    let target = assignment.target.render_source();
+    if !is_identifier(&target) {
         return None;
     }
-    let expression = assignment.expr.trim();
+    let value = assignment.value.render_source();
+    let expression = value.trim();
     let expression = if is_identifier(expression) {
         format!("\"{expression}\"")
     } else {
         expression.to_owned()
     };
-    Some(format!("{}: {expression}", camel(&assignment.target)))
+    Some(format!("{}: {expression}", camel(&target)))
 }
 
 fn emit_evolve(aggregate: &DomainAggregate) -> String {
@@ -614,7 +616,8 @@ fn emit_evolve(aggregate: &DomainAggregate) -> String {
             } else {
                 lines.push(format!(
                     "      // {} = {}",
-                    assignment.target, assignment.expr
+                    assignment.target.render_source(),
+                    assignment.value.render_source()
                 ));
             }
         }

@@ -4,6 +4,10 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::syntax_expr::{
+    ExpressionMode, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxTypeExpr,
+    parse_tokens_expression, parse_tokens_lvalue,
+};
 use crate::{ParseError, Span, Token, TokenKind, lex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -23,9 +27,10 @@ impl From<Span> for DomainLoc {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainField {
-    pub name: String,
-    pub type_name: String,
-    pub default: Option<String>,
+    pub name: SyntaxIdent,
+    pub type_name: SyntaxTypeExpr,
+    pub default: Option<SyntaxExpr>,
+    pub span: Span,
     pub loc: DomainLoc,
 }
 
@@ -34,8 +39,8 @@ pub struct DomainType {
     pub name: String,
     pub kind: String,
     pub members: Vec<String>,
-    pub lo: Option<String>,
-    pub hi: Option<String>,
+    pub lo: Option<SyntaxExpr>,
+    pub hi: Option<SyntaxExpr>,
     pub fields: Vec<DomainField>,
     pub invariants: Vec<DomainInvariant>,
     pub loc: DomainLoc,
@@ -64,14 +69,14 @@ pub struct DomainError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainReject {
     pub error: String,
-    pub condition: String,
+    pub condition: SyntaxExpr,
     pub loc: DomainLoc,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainDecide {
     pub command: String,
-    pub requires: Vec<String>,
+    pub requires: Vec<SyntaxExpr>,
     pub rejects: Vec<DomainReject>,
     pub emits: Vec<String>,
     pub loc: DomainLoc,
@@ -79,23 +84,25 @@ pub struct DomainDecide {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainAssignment {
-    pub target: String,
-    pub expr: String,
+    pub target: SyntaxLValue,
+    pub value: SyntaxExpr,
+    pub span: Span,
     pub loc: DomainLoc,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainEvolve {
     pub event: String,
-    pub requires: Vec<String>,
+    pub requires: Vec<SyntaxExpr>,
     pub assignments: Vec<DomainAssignment>,
     pub loc: DomainLoc,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainInvariant {
-    pub name: String,
-    pub expr: String,
+    pub name: SyntaxIdent,
+    pub expr: SyntaxExpr,
+    pub span: Span,
     pub loc: DomainLoc,
 }
 
@@ -110,7 +117,7 @@ pub struct DomainProjection {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainStalePolicy {
     pub event: String,
-    pub condition: String,
+    pub condition: SyntaxExpr,
     pub emits: Vec<String>,
     pub loc: DomainLoc,
 }
@@ -143,8 +150,8 @@ pub struct DomainEffect {
     pub async_effect: bool,
     pub reliable: bool,
     pub irreversible: bool,
-    pub idempotency_key: Option<String>,
-    pub correlation_id: Option<String>,
+    pub idempotency_key: Option<SyntaxExpr>,
+    pub correlation_id: Option<SyntaxExpr>,
     pub handles: Option<String>,
     pub outcomes: Vec<String>,
     pub request_event: Option<String>,
@@ -172,7 +179,7 @@ pub struct DomainAwait {
 pub struct DomainSagaStep {
     pub name: String,
     pub async_step: bool,
-    pub requires: Vec<String>,
+    pub requires: Vec<SyntaxExpr>,
     pub emits: Vec<String>,
     pub awaits_mode: String,
     pub awaits: Vec<String>,
@@ -241,13 +248,13 @@ impl DomainSpec {
 
 impl DomainField {
     fn python_ast(&self) -> Value {
-        json!({"$type":"DomainField","name":self.name,"type_name":self.type_name,"default":self.default,"loc":self.loc})
+        json!({"$type":"DomainField","name":self.name.text,"type_name":self.type_name.render_source(),"default":render_optional_expr(self.default.as_ref()),"loc":self.loc})
     }
 }
 
 impl DomainInvariant {
     fn python_ast(&self) -> Value {
-        json!({"$type":"DomainInvariant","name":self.name,"expr":self.expr,"loc":self.loc})
+        json!({"$type":"DomainInvariant","name":self.name.text,"expr":self.expr.render_source(),"loc":self.loc})
     }
 }
 
@@ -255,7 +262,7 @@ impl DomainType {
     fn python_ast(&self) -> Value {
         json!({
             "$type":"DomainType","name":self.name,"kind":self.kind,"members":self.members,
-            "lo":self.lo,"hi":self.hi,"fields":ast_list!(self.fields, python_ast),
+            "lo":render_optional_expr(self.lo.as_ref()),"hi":render_optional_expr(self.hi.as_ref()),"fields":ast_list!(self.fields, python_ast),
             "invariants":ast_list!(self.invariants, python_ast),"loc":self.loc,
         })
     }
@@ -281,14 +288,14 @@ impl DomainError {
 
 impl DomainReject {
     fn python_ast(&self) -> Value {
-        json!({"$type":"DomainReject","error":self.error,"condition":self.condition,"loc":self.loc})
+        json!({"$type":"DomainReject","error":self.error,"condition":self.condition.render_source(),"loc":self.loc})
     }
 }
 
 impl DomainDecide {
     fn python_ast(&self) -> Value {
         json!({
-            "$type":"DomainDecide","command":self.command,"requires":self.requires,
+            "$type":"DomainDecide","command":self.command,"requires":render_exprs(&self.requires),
             "rejects":ast_list!(self.rejects, python_ast),"emits":self.emits,"loc":self.loc,
         })
     }
@@ -296,14 +303,14 @@ impl DomainDecide {
 
 impl DomainAssignment {
     fn python_ast(&self) -> Value {
-        json!({"$type":"DomainAssignment","target":self.target,"expr":self.expr,"loc":self.loc})
+        json!({"$type":"DomainAssignment","target":self.target.render_source(),"expr":self.value.render_source(),"loc":self.loc})
     }
 }
 
 impl DomainEvolve {
     fn python_ast(&self) -> Value {
         json!({
-            "$type":"DomainEvolve","event":self.event,"requires":self.requires,
+            "$type":"DomainEvolve","event":self.event,"requires":render_exprs(&self.requires),
             "assignments":ast_list!(self.assignments, python_ast),"loc":self.loc,
         })
     }
@@ -317,7 +324,7 @@ impl DomainProjection {
 
 impl DomainStalePolicy {
     fn python_ast(&self) -> Value {
-        json!({"$type":"DomainStalePolicy","event":self.event,"condition":self.condition,"emits":self.emits,"loc":self.loc})
+        json!({"$type":"DomainStalePolicy","event":self.event,"condition":self.condition.render_source(),"emits":self.emits,"loc":self.loc})
     }
 }
 
@@ -368,7 +375,7 @@ impl DomainEffect {
         json!({
             "$type":"DomainEffect","name":self.name,"async_effect":self.async_effect,
             "reliable":self.reliable,"irreversible":self.irreversible,
-            "idempotency_key":self.idempotency_key,"correlation_id":self.correlation_id,
+            "idempotency_key":render_optional_expr(self.idempotency_key.as_ref()),"correlation_id":render_optional_expr(self.correlation_id.as_ref()),
             "handles":self.handles,"outcomes":self.outcomes,"request_event":self.request_event,
             "success_event":self.success_event,"failure_event":self.failure_event,
             "timeout_event":self.timeout_event,"retry":self.retry.python_ast(),
@@ -388,7 +395,7 @@ impl DomainSagaStep {
     fn python_ast(&self) -> Value {
         json!({
             "$type":"DomainSagaStep","name":self.name,"async_step":self.async_step,
-            "requires":self.requires,"emits":self.emits,"awaits_mode":self.awaits_mode,
+            "requires":render_exprs(&self.requires),"emits":self.emits,"awaits_mode":self.awaits_mode,
             "awaits":self.awaits,"timeout_after":self.timeout_after,
             "timeout_event":self.timeout_event,"loc":self.loc,
         })
@@ -429,11 +436,7 @@ pub fn parse_domain(source: &str) -> Result<DomainSpec, ParseError> {
         message: error.message,
         span: error.span,
     })?;
-    let mut parser = DomainParser {
-        source,
-        tokens,
-        cursor: 0,
-    };
+    let mut parser = DomainParser { tokens, cursor: 0 };
     let domain = parser.domain()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after domain"));
@@ -441,13 +444,12 @@ pub fn parse_domain(source: &str) -> Result<DomainSpec, ParseError> {
     Ok(domain)
 }
 
-struct DomainParser<'a> {
-    source: &'a str,
+struct DomainParser {
     tokens: Vec<Token>,
     cursor: usize,
 }
 
-impl DomainParser<'_> {
+impl DomainParser {
     fn domain(&mut self) -> Result<DomainSpec, ParseError> {
         let loc = self.loc();
         self.expect_ident_value("domain")?;
@@ -509,17 +511,20 @@ impl DomainParser<'_> {
         self.bump();
         let name = self.expect_ident()?;
         self.expect_symbol("=")?;
-        let body = self.raw_line()?;
-        self.eat_symbol(";");
-        if body.contains('|') {
+        let first = self.expression(true)?;
+        if self.eat_symbol("|") {
+            let mut members = vec![expression_name(first)?];
+            loop {
+                members.push(self.expect_ident()?);
+                if !self.eat_symbol("|") {
+                    break;
+                }
+            }
+            self.eat_symbol(";");
             return Ok(DomainType {
                 name,
                 kind: "enum".to_owned(),
-                members: body
-                    .split('|')
-                    .map(clean)
-                    .filter(|part| !part.is_empty())
-                    .collect(),
+                members,
                 lo: None,
                 hi: None,
                 fields: Vec::new(),
@@ -527,19 +532,19 @@ impl DomainParser<'_> {
                 loc,
             });
         }
-        if let Some((lo, hi)) = body.split_once("..") {
-            return Ok(DomainType {
-                name,
-                kind: "range".to_owned(),
-                members: Vec::new(),
-                lo: Some(clean(lo)),
-                hi: Some(clean(hi)),
-                fields: Vec::new(),
-                invariants: Vec::new(),
-                loc,
-            });
-        }
-        Err(self.error("domain type must be an enum union or bounded range"))
+        self.expect_symbol("..")?;
+        let hi = self.expression(true)?;
+        self.eat_symbol(";");
+        Ok(DomainType {
+            name,
+            kind: "range".to_owned(),
+            members: Vec::new(),
+            lo: Some(first),
+            hi: Some(hi),
+            fields: Vec::new(),
+            invariants: Vec::new(),
+            loc,
+        })
     }
 
     fn value_object(&mut self) -> Result<DomainType, ParseError> {
@@ -662,40 +667,45 @@ impl DomainParser<'_> {
 
     fn field(&mut self, allow_input: bool, allow_default: bool) -> Result<DomainField, ParseError> {
         let loc = self.loc();
+        let start = self.peek().span;
         if allow_input {
             self.eat_ident("input");
         }
-        let name = self.expect_ident()?;
+        let name = self.expect_syntax_ident()?;
         self.expect_symbol(":")?;
         let type_name = self.type_ref()?;
         let default = if allow_default && self.eat_symbol("=") {
-            Some(self.raw_line()?)
+            Some(self.expression(true)?)
         } else {
             None
         };
         self.eat_symbol(";");
+        let span = join(start, self.previous_span());
         Ok(DomainField {
             name,
             type_name,
             default,
+            span,
             loc,
         })
     }
 
-    fn type_ref(&mut self) -> Result<String, ParseError> {
-        let name = self.expect_ident()?;
+    fn type_ref(&mut self) -> Result<SyntaxTypeExpr, ParseError> {
+        let name = self.expect_syntax_ident()?;
+        let start = name.span;
         if !self.eat_symbol("<") {
-            return Ok(name);
+            return Ok(SyntaxTypeExpr::name(name));
         }
-        let first = self.type_ref()?;
-        let value = if self.eat_symbol(",") {
-            let second = self.type_ref()?;
-            format!("{name}<{first}, {second}>")
-        } else {
-            format!("{name}<{first}>")
-        };
+        let mut arguments = vec![self.type_ref()?];
+        if self.eat_symbol(",") {
+            arguments.push(self.type_ref()?);
+        }
         self.expect_symbol(">")?;
-        Ok(value)
+        Ok(SyntaxTypeExpr::apply(
+            name,
+            arguments,
+            join(start, self.previous_span()),
+        ))
     }
 
     fn decide(&mut self) -> Result<DomainDecide, ParseError> {
@@ -716,7 +726,7 @@ impl DomainParser<'_> {
                 self.expect_ident_value("when")?;
                 rejects.push(DomainReject {
                     error,
-                    condition: self.raw_line()?,
+                    condition: self.expression(true)?,
                     loc: reject_loc,
                 });
                 self.eat_symbol(";");
@@ -759,31 +769,33 @@ impl DomainParser<'_> {
 
     fn assignment(&mut self) -> Result<DomainAssignment, ParseError> {
         let loc = self.loc();
-        let mut target = self.expect_ident()?;
-        if self.eat_symbol("[") {
-            target.push('[');
-            target.push_str(&self.raw_until_symbol("]")?);
-            self.expect_symbol("]")?;
-            target.push(']');
-        }
-        if self.eat_symbol(".") {
-            target.push('.');
-            target.push_str(&self.expect_ident()?);
-        }
+        let start = self.peek().span;
+        let target = self.lvalue()?;
         self.expect_symbol("=")?;
-        let expr = self.raw_line()?;
+        let value = self.expression(true)?;
         self.eat_symbol(";");
-        Ok(DomainAssignment { target, expr, loc })
+        Ok(DomainAssignment {
+            target,
+            value,
+            span: join(start, self.previous_span()),
+            loc,
+        })
     }
 
     fn invariant(&mut self) -> Result<DomainInvariant, ParseError> {
         let loc = self.loc();
+        let start = self.peek().span;
         self.bump();
-        let name = self.expect_ident()?;
+        let name = self.expect_syntax_ident()?;
         self.expect_symbol("{")?;
-        let expr = self.raw_line()?;
+        let expr = self.expression(true)?;
         self.expect_symbol("}")?;
-        Ok(DomainInvariant { name, expr, loc })
+        Ok(DomainInvariant {
+            name,
+            expr,
+            span: join(start, self.previous_span()),
+            loc,
+        })
     }
 
     fn projection(&mut self) -> Result<DomainProjection, ParseError> {
@@ -817,7 +829,7 @@ impl DomainParser<'_> {
         self.bump();
         let event = self.expect_ident()?;
         self.expect_ident_value("when")?;
-        let condition = self.raw_until_symbol("{")?;
+        let condition = self.expression(true)?;
         self.expect_symbol("{")?;
         let mut emits = Vec::new();
         while !self.eat_symbol("}") {
@@ -856,10 +868,10 @@ impl DomainParser<'_> {
                 }
                 self.eat_symbol(";");
             } else if self.eat_ident("idempotency_key") {
-                effect.idempotency_key = Some(self.reference()?);
+                effect.idempotency_key = Some(self.effect_reference()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("correlation_id") {
-                effect.correlation_id = Some(self.reference()?);
+                effect.correlation_id = Some(self.effect_reference()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("handles") {
                 effect.handles = Some(self.expect_ident()?);
@@ -1080,9 +1092,9 @@ impl DomainParser<'_> {
         })
     }
 
-    fn requires(&mut self) -> Result<String, ParseError> {
+    fn requires(&mut self) -> Result<SyntaxExpr, ParseError> {
         self.bump();
-        let value = self.raw_line()?;
+        let value = self.expression(true)?;
         self.eat_symbol(";");
         Ok(value)
     }
@@ -1134,15 +1146,6 @@ impl DomainParser<'_> {
         Ok(names)
     }
 
-    fn reference(&mut self) -> Result<String, ParseError> {
-        let mut value = self.expect_ident()?;
-        while self.eat_symbol(".") {
-            value.push('.');
-            value.push_str(&self.expect_ident()?);
-        }
-        Ok(value)
-    }
-
     fn time_value(&mut self) -> Result<String, ParseError> {
         let token = self.bump().clone();
         let TokenKind::Int(value) = token.kind else {
@@ -1166,48 +1169,29 @@ impl DomainParser<'_> {
             && matches!(self.peek_n(1).kind, TokenKind::Symbol(ref symbol) if symbol == ":")
     }
 
-    fn raw_line(&mut self) -> Result<String, ParseError> {
-        let start = self.peek().span.start.offset;
-        if matches!(self.peek().kind, TokenKind::Eof) {
-            return Err(self.error("expected expression"));
-        }
-        let rest = &self.source[start..];
-        let relative_end = rest
-            .char_indices()
-            .find_map(|(offset, ch)| matches!(ch, '\n' | ';' | '{' | '}').then_some(offset))
-            .unwrap_or(rest.len());
-        let end = start + relative_end;
-        self.advance_before(end);
-        let value = clean(&self.source[start..end]);
-        if value.is_empty() {
-            Err(self.error("expected expression"))
+    fn expression(&mut self, line_terminated: bool) -> Result<SyntaxExpr, ParseError> {
+        parse_tokens_expression(
+            &self.tokens,
+            &mut self.cursor,
+            ExpressionMode::Domain,
+            line_terminated,
+        )
+    }
+
+    fn effect_reference(&mut self) -> Result<SyntaxExpr, ParseError> {
+        let expression = self.expression(true)?;
+        if is_dotted_reference(&expression) {
+            Ok(expression)
         } else {
-            Ok(value)
+            Err(ParseError {
+                message: "effect reference must be a dotted identifier path".to_owned(),
+                span: expression.span,
+            })
         }
     }
 
-    fn raw_until_symbol(&mut self, symbol: &str) -> Result<String, ParseError> {
-        let start = self.peek().span.start.offset;
-        let end = self
-            .tokens
-            .iter()
-            .skip(self.cursor)
-            .find(|token| matches!(&token.kind, TokenKind::Symbol(value) if value == symbol))
-            .map(|token| token.span.start.offset)
-            .ok_or_else(|| self.error(&format!("expected '{symbol}'")))?;
-        self.advance_before(end);
-        let value = clean(&self.source[start..end]);
-        if value.is_empty() {
-            Err(self.error("expected expression"))
-        } else {
-            Ok(value)
-        }
-    }
-
-    fn advance_before(&mut self, offset: usize) {
-        while self.peek().span.start.offset < offset {
-            self.bump();
-        }
+    fn lvalue(&mut self) -> Result<SyntaxLValue, ParseError> {
+        parse_tokens_lvalue(&self.tokens, &mut self.cursor, ExpressionMode::Domain)
     }
 
     fn loc(&self) -> DomainLoc {
@@ -1230,6 +1214,13 @@ impl DomainParser<'_> {
             self.cursor += 1;
         }
         &self.tokens[index]
+    }
+
+    fn previous_span(&self) -> Span {
+        self.cursor
+            .checked_sub(1)
+            .and_then(|index| self.tokens.get(index))
+            .map_or_else(|| self.peek().span, |token| token.span)
     }
 
     fn peek_ident(&self, expected: &str) -> bool {
@@ -1262,6 +1253,20 @@ impl DomainParser<'_> {
         let token = self.bump().clone();
         match token.kind {
             TokenKind::Ident(value) => Ok(value),
+            _ => Err(ParseError {
+                message: "expected identifier".to_owned(),
+                span: token.span,
+            }),
+        }
+    }
+
+    fn expect_syntax_ident(&mut self) -> Result<SyntaxIdent, ParseError> {
+        let token = self.bump().clone();
+        match token.kind {
+            TokenKind::Ident(text) => Ok(SyntaxIdent {
+                text,
+                span: token.span,
+            }),
             _ => Err(ParseError {
                 message: "expected identifier".to_owned(),
                 span: token.span,
@@ -1304,8 +1309,38 @@ impl DomainParser<'_> {
     }
 }
 
-fn clean(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
+fn expression_name(expression: SyntaxExpr) -> Result<String, ParseError> {
+    let span = expression.span;
+    match expression.kind {
+        SyntaxExprKind::Name(name) => Ok(name.text),
+        _ => Err(ParseError {
+            message: "domain enum members must be identifiers".to_owned(),
+            span,
+        }),
+    }
+}
+
+fn render_exprs(values: &[SyntaxExpr]) -> Vec<String> {
+    values.iter().map(SyntaxExpr::render_source).collect()
+}
+
+fn render_optional_expr(value: Option<&SyntaxExpr>) -> Option<String> {
+    value.map(SyntaxExpr::render_source)
+}
+
+fn is_dotted_reference(expression: &SyntaxExpr) -> bool {
+    match &expression.kind {
+        SyntaxExprKind::Name(_) => true,
+        SyntaxExprKind::Field { receiver, .. } => is_dotted_reference(receiver),
+        _ => false,
+    }
+}
+
+fn join(first: Span, last: Span) -> Span {
+    Span {
+        start: first.start,
+        end: last.end,
+    }
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {

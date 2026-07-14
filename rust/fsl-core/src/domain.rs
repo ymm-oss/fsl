@@ -3,9 +3,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
-    DomainAggregate, DomainEffect, DomainEvolve, DomainField, DomainSaga, DomainSagaStep,
-    DomainSpec, DomainType,
+    DomainAggregate, DomainEffect, DomainEvolve, DomainField, DomainLoc, DomainSaga,
+    DomainSagaStep, DomainSpec, DomainType, SourcePos, Span, SyntaxExpr, SyntaxExprKind,
 };
+
+fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
+    let position = SourcePos {
+        offset: 0,
+        line: loc.line,
+        column: loc.column,
+    };
+    SyntaxExpr {
+        kind: SyntaxExprKind::Num(value),
+        span: Span {
+            start: position,
+            end: position,
+        },
+    }
+}
 
 fn safe(name: &str) -> String {
     let mut value = name
@@ -134,8 +149,8 @@ impl<'a> Context<'a> {
                     name,
                     kind: "external".to_owned(),
                     members: Vec::new(),
-                    lo: Some("0".to_owned()),
-                    hi: Some("1".to_owned()),
+                    lo: Some(synthetic_num(0, domain.loc)),
+                    hi: Some(synthetic_num(1, domain.loc)),
                     fields: Vec::new(),
                     invariants: Vec::new(),
                     loc: domain.loc,
@@ -207,11 +222,16 @@ impl<'a> Context<'a> {
             .or(effect.request_event.as_deref())
     }
 
-    fn correlation_field(effect: &DomainEffect) -> Option<&str> {
+    fn correlation_field(effect: &DomainEffect) -> Option<String> {
         effect
             .correlation_id
-            .as_deref()
-            .map(|value| value.rsplit_once('.').map_or(value, |(_, field)| field))
+            .as_ref()
+            .map(SyntaxExpr::render_source)
+            .map(|value| {
+                value
+                    .rsplit_once('.')
+                    .map_or(value.clone(), |(_, field)| field.to_owned())
+            })
     }
 
     fn event(&self, name: &str) -> Option<(&DomainAggregate, &fsl_syntax::DomainEvent)> {
@@ -230,22 +250,29 @@ impl<'a> Context<'a> {
         event
             .fields
             .iter()
-            .find(|candidate| candidate.name == field)
-            .map(|candidate| candidate.type_name.clone())
+            .find(|candidate| candidate.name.as_str() == field)
+            .map(|candidate| candidate.type_name.render_source())
     }
 
     fn default(&self, field: &DomainField, type_env: &BTreeMap<String, String>) -> String {
         if let Some(value) = &field.default {
-            return self.normalize(value, None, type_env, Some(&field.type_name), true);
+            return self.normalize(
+                &value.render_source(),
+                None,
+                type_env,
+                Some(&field.type_name),
+                true,
+            );
         }
         match field.type_name.as_str() {
             "Bool" => "false".to_owned(),
             "Int" => "0".to_owned(),
             _ => match self.ty(&field.type_name) {
                 Some(ty) if ty.kind == "enum" => self.enum_value(&ty.name, &ty.members[0]),
-                Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => {
-                    ty.lo.clone().unwrap_or_else(|| "0".to_owned())
-                }
+                Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => ty
+                    .lo
+                    .as_ref()
+                    .map_or_else(|| "0".to_owned(), SyntaxExpr::render_source),
                 Some(ty) if ty.kind == "value_object" => format!(
                     "{} {{ {} }}",
                     ty.name,
@@ -276,7 +303,11 @@ impl<'a> Context<'a> {
             for decide in &aggregate.decides {
                 let pattern = format!("can({})", decide.command);
                 if output.contains(&pattern) {
-                    let mut pieces = decide.requires.clone();
+                    let mut pieces = decide
+                        .requires
+                        .iter()
+                        .map(SyntaxExpr::render_source)
+                        .collect::<Vec<_>>();
                     pieces.extend(
                         decide
                             .rejects
@@ -411,23 +442,29 @@ fn evolve_assignments(
         .map(|requirement| {
             format!(
                 "requires {}",
-                context.normalize(requirement, Some(aggregate), type_env, None, true)
+                context.normalize(
+                    &requirement.render_source(),
+                    Some(aggregate),
+                    type_env,
+                    None,
+                    true
+                )
             )
         })
         .collect::<Vec<_>>();
     output.extend(evolve.assignments.iter().map(|assignment| {
-        let root = assignment
-            .target
+        let rendered_target = assignment.target.render_source();
+        let root = rendered_target
             .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
             .next()
             .unwrap_or_default();
         let target = replace_identifier(
-            &assignment.target,
+            &rendered_target,
             root,
             &Context::state_name(aggregate, root),
         );
         let expression = context.normalize(
-            &assignment.expr,
+            &assignment.value.render_source(),
             Some(aggregate),
             type_env,
             state.get(root).copied(),
@@ -475,7 +512,11 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
             .iter()
             .map(|field| format!("{}: {}", field.name, field.type_name))
             .collect::<Vec<_>>();
-        if !event.fields.iter().any(|field| field.name == correlation) {
+        if !event
+            .fields
+            .iter()
+            .any(|field| field.name.as_str() == correlation)
+        {
             parameters.insert(0, format!("{correlation}: {correlation_type}"));
         }
         let action = format!(
@@ -501,9 +542,9 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
             .state
             .iter()
             .chain(&event.fields)
-            .map(|field| (field.name.clone(), field.type_name.clone()))
+            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
             .collect::<BTreeMap<_, _>>();
-        environment.insert(correlation.to_owned(), correlation_type.clone());
+        environment.insert(correlation.clone(), correlation_type.clone());
         lines.extend(
             evolve_assignments(
                 context,
@@ -547,8 +588,8 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
     lines
 }
 
-fn saga_condition(context: &Context<'_>, expression: &str) -> String {
-    let mut output = compact(expression)
+fn saga_condition(context: &Context<'_>, expression: &SyntaxExpr) -> String {
+    let mut output = compact(&expression.render_source())
         .replace("&&", " and ")
         .replace("||", " or ")
         .replace("->", "=>");
@@ -631,7 +672,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
             .state
             .iter()
             .chain(&event.fields)
-            .map(|field| (field.name.clone(), field.type_name.clone()))
+            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
             .collect();
         lines.extend(
             evolve_assignments(
@@ -714,8 +755,12 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
             "range" | "external" => lines.push(format!(
                 "  type {} = {}..{}",
                 ty.name,
-                ty.lo.as_deref().unwrap_or("0"),
-                ty.hi.as_deref().unwrap_or("1")
+                ty.lo
+                    .as_ref()
+                    .map_or_else(|| "0".to_owned(), SyntaxExpr::render_source),
+                ty.hi
+                    .as_ref()
+                    .map_or_else(|| "1".to_owned(), SyntaxExpr::render_source)
             )),
             "value_object" => lines.push(format!(
                 "  struct {} {{ {} }}",
@@ -760,7 +805,7 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
         let environment = aggregate
             .state
             .iter()
-            .map(|field| (field.name.clone(), field.type_name.clone()))
+            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
             .collect();
         for field in &aggregate.state {
             let name = Context::state_name(aggregate, &field.name);
@@ -842,24 +887,36 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
                 .state
                 .iter()
                 .chain(&command.inputs)
-                .map(|field| (field.name.clone(), field.type_name.clone()))
+                .map(|field| (field.name.text.clone(), field.type_name.render_source()))
                 .collect::<BTreeMap<_, _>>();
             for requirement in &decide.requires {
                 lines.push(format!(
                     "    requires {}",
-                    context.normalize(requirement, Some(aggregate), &environment, None, true)
+                    context.normalize(
+                        &requirement.render_source(),
+                        Some(aggregate),
+                        &environment,
+                        None,
+                        true
+                    )
                 ));
             }
             for reject in &decide.rejects {
                 lines.push(format!(
                     "    requires not ({})",
-                    context.normalize(&reject.condition, Some(aggregate), &environment, None, true)
+                    context.normalize(
+                        &reject.condition.render_source(),
+                        Some(aggregate),
+                        &environment,
+                        None,
+                        true
+                    )
                 ));
             }
             for event in &decide.emits {
                 for effect in effects_by_request.get(event.as_str()).into_iter().flatten() {
                     if let Some(correlation) = Context::correlation_field(effect)
-                        && environment.contains_key(correlation)
+                        && environment.contains_key(&correlation)
                     {
                         let status = Context::status_var(effect);
                         lines.push(format!(
@@ -891,7 +948,7 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
                 );
                 for effect in effects_by_request.get(event.as_str()).into_iter().flatten() {
                     if let Some(correlation) = Context::correlation_field(effect)
-                        && environment.contains_key(correlation)
+                        && environment.contains_key(&correlation)
                     {
                         lines.push(format!(
                             "    {}[{correlation}] = {}",
@@ -926,7 +983,7 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
         let environment = aggregate
             .state
             .iter()
-            .map(|field| (field.name.clone(), field.type_name.clone()))
+            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
             .collect();
         for invariant in &aggregate.invariants {
             lines.push(format!(
@@ -935,7 +992,13 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
                 safe(&invariant.name),
                 aggregate.name,
                 invariant.name,
-                context.normalize(&invariant.expr, Some(aggregate), &environment, None, true)
+                context.normalize(
+                    &invariant.expr.render_source(),
+                    Some(aggregate),
+                    &environment,
+                    None,
+                    true
+                )
             ));
         }
     }

@@ -80,6 +80,35 @@ membership according to the field type.
 decide preconditions: all `requires` clauses and the negation of every
 `rejects ... when ...` condition.
 
+### Parse IR boundary
+
+The Rust frontend parses every expression-bearing domain declaration directly
+from the document's shared token stream into unresolved, loss-aware syntax
+nodes. `SyntaxExpr`, `SyntaxIdent`, `SyntaxTypeExpr`, and `SyntaxLValue` retain
+exact source spans for nodes and components; field declarations, invariants,
+and assignments also retain their complete declaration span. Defaults, bounded
+ranges, guards, rejection conditions, assignments,
+invariants, stale policies, effect keys/correlation paths, and saga guards do
+not cross the parse boundary as strings. This parse IR deliberately does not
+perform domain name or type resolution. Checked and lowered expressions remain
+the responsibility of `fsl-core` and the public Kernel contract.
+
+Domain-only finite membership is represented structurally. Accepted legacy
+spellings retain their source spelling while recording the canonical operator:
+`||` is `or`, and logical `->` is `=>`. Structural `->` in declarations such
+as await routing is consumed by the declaration grammar, not the expression
+parser. `&&` remains outside the language and is rejected by the lexer.
+Effect idempotency and correlation references remain restricted to the existing
+dotted-identifier path grammar; routing those paths through the expression
+parser does not broaden the public syntax to calls, indexing, or arithmetic.
+
+Existing lowering and compatibility projections temporarily render these
+typed nodes back to source-shaped text at their boundary. That renderer is an
+adapter, not a second parser; domain expressions are never sliced and reparsed
+with repaired offsets. Consequently malformed expressions are diagnosed at
+their original domain-source coordinates while generated Kernel and CLI
+semantics remain unchanged.
+
 ## Effects
 
 An async `effect` declares the request event, completion events, correlation id,

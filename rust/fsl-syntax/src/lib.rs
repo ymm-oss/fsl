@@ -15,6 +15,7 @@ mod domain;
 mod lexer;
 mod parser;
 mod surface;
+mod syntax_expr;
 
 pub use ai::{
     AiAuthority, AiComponent, AiFallback, AiHardCheck, AiLoc, AiTool, parse_ai_component,
@@ -41,4 +42,8 @@ pub use surface::{
     RequirementBranch, RequirementsItem, SpecItem, Statement, SurfaceBusiness, SurfaceCompose,
     SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec,
     SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+};
+pub use syntax_expr::{
+    SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,
+    SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
 };

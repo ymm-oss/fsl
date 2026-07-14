@@ -3,12 +3,13 @@
 
 use std::fmt;
 
+use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Binder, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr, GovernanceArtifactRef,
     GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
-    Pattern, PreservationItem, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    QualifiedName, RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    PreservationItem, ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName,
+    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
     SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
     SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr,
@@ -1795,209 +1796,15 @@ impl Parser {
     }
 
     fn expression(&mut self, min_binding_power: u8) -> Result<Expr, ParseError> {
-        let mut left = self.prefix()?;
-        left = self.postfix(left)?;
-
-        loop {
-            if self.peek_ident("is") {
-                let left_power = 4;
-                if left_power < min_binding_power {
-                    break;
-                }
-                self.bump();
-                let pattern = if self.eat_ident("none") {
-                    Pattern::None
-                } else if self.eat_ident("some") {
-                    self.expect_symbol("(")?;
-                    let name = self.expect_ident()?;
-                    self.expect_symbol(")")?;
-                    Pattern::Some(name)
-                } else {
-                    return Err(self.error("expected none or some(name) after is"));
-                };
-                left = Expr::Is {
-                    expr: Box::new(left),
-                    pattern,
-                };
-                continue;
-            }
-
-            let Some((op, left_power, right_power)) = self.infix() else {
-                break;
-            };
-            if left_power < min_binding_power {
-                break;
-            }
-            self.bump();
-            let right = self.expression(right_power)?;
-            left = Expr::Binary {
-                op: op.to_owned(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
-    }
-
-    fn prefix(&mut self) -> Result<Expr, ParseError> {
-        if self.peek_ident("forall") || self.peek_ident("exists") {
-            let quantifier = self.expect_ident()?;
-            let binder = self.binder()?;
-            self.eat_symbol(":");
-            let body = if self.eat_symbol("{") {
-                let body = self.expression(0)?;
-                self.expect_symbol("}")?;
-                body
-            } else {
-                self.expression(0)?
-            };
-            return Ok(Expr::Quantified {
-                quantifier,
-                binder,
-                body: Box::new(body),
-            });
-        }
-        if self.eat_ident("not") {
-            return Ok(Expr::Not(Box::new(self.expression(4)?)));
-        }
-        if self.eat_symbol("-") {
-            return Ok(Expr::Neg(Box::new(self.expression(8)?)));
-        }
-        self.atom()
-    }
-
-    fn atom(&mut self) -> Result<Expr, ParseError> {
-        let token = self.bump().clone();
-        match token.kind {
-            TokenKind::Int(value) => Ok(Expr::Num(value)),
-            TokenKind::Ident(name) if name == "true" => Ok(Expr::Bool(true)),
-            TokenKind::Ident(name) if name == "false" => Ok(Expr::Bool(false)),
-            TokenKind::Ident(name) if name == "none" => Ok(Expr::None),
-            TokenKind::Ident(name) if name == "some" => {
-                self.expect_symbol("(")?;
-                let expr = self.expression(0)?;
-                self.expect_symbol(")")?;
-                Ok(Expr::Some(Box::new(expr)))
-            }
-            TokenKind::Ident(name) if name == "Set" || name == "Seq" => {
-                self.expect_symbol("{")?;
-                let items = self.expression_list("}")?;
-                if name == "Set" {
-                    Ok(Expr::Set(items))
-                } else {
-                    Ok(Expr::Seq(items))
-                }
-            }
-            TokenKind::Ident(name) if name == "count" && self.peek_symbol("(") => self.count(),
-            TokenKind::Ident(name) if name == "sum" && self.peek_symbol("(") => self.sum(),
-            TokenKind::Ident(name) if name == "unique" || name == "exactlyOne" => {
-                self.expect_symbol("(")?;
-                let binder = self.binder()?;
-                self.expect_symbol(")")?;
-                Ok(Expr::BinderNamed {
-                    name: if name == "exactlyOne" {
-                        "exactly_one".to_owned()
-                    } else {
-                        name
-                    },
-                    binder,
-                })
-            }
-            TokenKind::Ident(name) => self.ident_atom(name, token.span),
-            TokenKind::Symbol(symbol) if symbol == "(" => {
-                let expr = self.expression(0)?;
-                self.expect_symbol(")")?;
-                Ok(expr)
-            }
-            _ => Err(ParseError {
-                message: "expected expression".to_owned(),
-                span: token.span,
-            }),
-        }
-    }
-
-    fn ident_atom(&mut self, name: String, span: Span) -> Result<Expr, ParseError> {
-        if self.starts_struct_fields() {
-            self.bump();
-            let mut fields = Vec::new();
-            if !self.eat_symbol("}") {
-                loop {
-                    let field = self.expect_ident()?;
-                    self.expect_symbol(":")?;
-                    fields.push((field, self.expression(0)?));
-                    if self.eat_symbol("}") {
-                        break;
-                    }
-                    self.expect_symbol(",")?;
-                    if self.eat_symbol("}") {
-                        break;
-                    }
-                }
-            }
-            return Ok(Expr::Struct { name, fields });
-        }
-        if !self.eat_symbol("(") {
-            return Ok(Expr::Var(name));
-        }
-
-        let args = self.expression_list(")")?;
-        match (name.as_str(), args.as_slice()) {
-            ("stage" | "old" | "abs", [expr]) => Ok(Expr::UnaryNamed {
-                name,
-                expr: Box::new(expr.clone()),
-                span,
-            }),
-            ("acyclic" | "functional" | "injective" | "domain" | "range", [expr]) => {
-                Ok(Expr::UnaryNamed {
-                    name: format!("rel_{name}"),
-                    expr: Box::new(expr.clone()),
-                    span,
-                })
-            }
-            ("min" | "max", [left, right]) => Ok(Expr::BinaryNamed {
-                name,
-                left: Box::new(left.clone()),
-                right: Box::new(right.clone()),
-            }),
-            ("reachable", [first, second, third]) => Ok(Expr::TernaryNamed {
-                name: "rel_reachable".to_owned(),
-                first: Box::new(first.clone()),
-                second: Box::new(second.clone()),
-                third: Box::new(third.clone()),
-            }),
-            _ => Ok(Expr::Call { name, args, span }),
-        }
-    }
-
-    fn postfix(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
-        loop {
-            if self.eat_symbol("[") {
-                let index = self.expression(0)?;
-                self.expect_symbol("]")?;
-                expr = Expr::Index(Box::new(expr), Box::new(index));
-                continue;
-            }
-            if !self.eat_symbol(".") {
-                return Ok(expr);
-            }
-            let name = self.expect_ident()?;
-            if self.eat_symbol("(") {
-                let args = self.expression_list(")")?;
-                if !matches!(
-                    name.as_str(),
-                    "contains" | "add" | "remove" | "push" | "pop" | "head" | "at" | "size"
-                ) {
-                    return Err(self.error("unknown FSL collection method"));
-                }
-                expr = Expr::Method {
-                    receiver: Box::new(expr),
-                    name,
-                    args,
-                };
-            } else {
-                expr = Expr::Field(Box::new(expr), name);
-            }
-        }
+        debug_assert_eq!(
+            min_binding_power, 0,
+            "shared parser owns recursive precedence"
+        );
+        let mut cursor = self.cursor;
+        let expression =
+            parse_tokens_expression(&self.tokens, &mut cursor, ExpressionMode::Kernel, false)?;
+        self.cursor = cursor;
+        expression.into_kernel()
     }
 
     fn binder(&mut self) -> Result<Binder, ParseError> {
@@ -2054,42 +1861,6 @@ impl Parser {
         }
     }
 
-    fn count(&mut self) -> Result<Expr, ParseError> {
-        self.expect_symbol("(")?;
-        let name = self.expect_ident()?;
-        self.expect_symbol(":")?;
-        let type_name = self.qualified_name()?;
-        self.expect_ident_value("where")?;
-        let condition = self.expression(0)?;
-        self.expect_symbol(")")?;
-        Ok(Expr::Count {
-            name,
-            type_name,
-            condition: Box::new(condition),
-        })
-    }
-
-    fn sum(&mut self) -> Result<Expr, ParseError> {
-        self.expect_symbol("(")?;
-        let name = self.expect_ident()?;
-        self.expect_symbol(":")?;
-        let type_name = self.qualified_name()?;
-        self.expect_ident_value("of")?;
-        let body = self.expression(0)?;
-        let condition = if self.eat_ident("where") {
-            Some(Box::new(self.expression(0)?))
-        } else {
-            None
-        };
-        self.expect_symbol(")")?;
-        Ok(Expr::Sum {
-            name,
-            type_name,
-            body: Box::new(body),
-            condition,
-        })
-    }
-
     fn expression_list(&mut self, close: &str) -> Result<Vec<Expr>, ParseError> {
         let mut items = Vec::new();
         if self.eat_symbol(close) {
@@ -2104,30 +1875,6 @@ impl Parser {
             if self.eat_symbol(close) {
                 return Ok(items);
             }
-        }
-    }
-
-    fn infix(&self) -> Option<(&'static str, u8, u8)> {
-        let text = match &self.peek().kind {
-            TokenKind::Ident(text) | TokenKind::Symbol(text) => text.as_str(),
-            _ => return None,
-        };
-        match text {
-            "=>" => Some(("=>", 1, 1)),
-            "or" => Some(("or", 2, 3)),
-            "and" => Some(("and", 3, 4)),
-            "==" => Some(("==", 5, 6)),
-            "!=" => Some(("!=", 5, 6)),
-            "<" => Some(("<", 5, 6)),
-            "<=" => Some(("<=", 5, 6)),
-            ">" => Some((">", 5, 6)),
-            ">=" => Some((">=", 5, 6)),
-            "+" => Some(("+", 6, 7)),
-            "-" => Some(("-", 6, 7)),
-            "*" => Some(("*", 7, 8)),
-            "/" => Some(("/", 7, 8)),
-            "%" => Some(("%", 7, 8)),
-            _ => None,
         }
     }
 
@@ -2151,12 +1898,6 @@ impl Parser {
 
     fn peek_n_is_symbol(&self, offset: usize, expected: &str) -> bool {
         matches!(&self.peek_n(offset).kind, TokenKind::Symbol(value) if value == expected)
-    }
-
-    fn starts_struct_fields(&self) -> bool {
-        matches!(&self.peek().kind, TokenKind::Symbol(value) if value == "{")
-            && matches!(&self.peek_n(1).kind, TokenKind::Ident(_))
-            && matches!(&self.peek_n(2).kind, TokenKind::Symbol(value) if value == ":")
     }
 
     fn bump(&mut self) -> &Token {
