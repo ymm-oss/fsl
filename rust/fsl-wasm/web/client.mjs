@@ -56,7 +56,11 @@ function cancelAndRecover() {
 }
 
 function caseHolds(testCase, envelope) {
-  return envelope.result === testCase.expected;
+  if (envelope.result !== testCase.expected) return false;
+  const expect = testCase.expect ?? {};
+  if (expect.kind && envelope.violation_kind !== expect.kind) return false;
+  if (expect.trace && !(Array.isArray(envelope.trace) && envelope.trace.length > 0)) return false;
+  return true;
 }
 
 try {

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{CoreError, FileResolver, KernelModel, TypeDef, TypeRef};
+use fsl_core::{CoreError, FileResolver, FslValue, KernelModel, TraceStep, TypeDef, TypeRef};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
@@ -111,6 +111,105 @@ fn invariant_names(model: &KernelModel) -> Vec<String> {
     names
 }
 
+fn display_name(name: &str) -> String {
+    name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")
+}
+
+fn map_key(value: &FslValue) -> String {
+    match value {
+        FslValue::Int(value) => value.to_string(),
+        FslValue::Bool(value) => value.to_string(),
+        FslValue::Enum { member, .. } => member.clone(),
+        _ => format!("{value:?}"),
+    }
+}
+
+fn fsl_value_json(value: &FslValue) -> Value {
+    match value {
+        FslValue::Int(value) => json!(value),
+        FslValue::Bool(value) => json!(value),
+        FslValue::Enum { member, .. } => json!(member),
+        FslValue::None => Value::Null,
+        FslValue::Some(value) => fsl_value_json(value),
+        FslValue::Struct { fields, .. } => Value::Object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), fsl_value_json(value)))
+                .collect(),
+        ),
+        FslValue::Map(entries) => Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (map_key(key), fsl_value_json(value)))
+                .collect(),
+        ),
+        FslValue::Set(values) => Value::Array(values.iter().map(fsl_value_json).collect()),
+        FslValue::Seq(values) => Value::Array(values.iter().map(fsl_value_json).collect()),
+        FslValue::Relation(values) => Value::Array(
+            values
+                .iter()
+                .map(|(source, target)| json!([fsl_value_json(source), fsl_value_json(target)]))
+                .collect(),
+        ),
+    }
+}
+
+fn trace_json(trace: &[TraceStep]) -> Value {
+    Value::Array(
+        trace
+            .iter()
+            .map(|entry| {
+                let mut value = Map::new();
+                value.insert("step".to_owned(), json!(entry.step));
+                value.insert(
+                    "state".to_owned(),
+                    Value::Object(
+                        entry
+                            .state
+                            .iter()
+                            .map(|(name, state)| (display_name(name), fsl_value_json(state)))
+                            .collect(),
+                    ),
+                );
+                if let Some(action) = &entry.action {
+                    value.insert(
+                        "action".to_owned(),
+                        json!({
+                            "name": display_name(&action.name),
+                            "params": Value::Object(
+                                action
+                                    .params
+                                    .iter()
+                                    .map(|(name, param)| (name.clone(), fsl_value_json(param)))
+                                    .collect(),
+                            ),
+                        }),
+                    );
+                    value.insert(
+                        "changes".to_owned(),
+                        Value::Object(
+                            entry
+                                .changes
+                                .iter()
+                                .map(|(name, change)| {
+                                    (
+                                        display_name(name),
+                                        json!({
+                                            "from": fsl_value_json(&change.from),
+                                            "to": fsl_value_json(&change.to),
+                                        }),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                    );
+                }
+                Value::Object(value)
+            })
+            .collect(),
+    )
+}
+
 fn check(request: &Request) -> Value {
     let model = match build(request) {
         Ok(model) => model,
@@ -160,6 +259,7 @@ async fn verify(request: &Request) -> Value {
         output.insert("checked_to_depth".to_owned(), json!(violation.step));
         output.insert("completeness".to_owned(), json!("bounded"));
         output.insert("trace_type".to_owned(), json!(violation.kind));
+        output.insert("trace".to_owned(), trace_json(&violation.trace));
         return Value::Object(output);
     }
     if request.options.deadlock == "error"

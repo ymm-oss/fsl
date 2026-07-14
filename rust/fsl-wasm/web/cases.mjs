@@ -19,6 +19,7 @@ export const cases = [
   {
     id: "violated",
     expected: "violated",
+    expect: { trace: true },
     options: { depth: 2, deadlock: "ignore" },
     source: `spec BrowserBug {
   type K = 0..1

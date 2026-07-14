@@ -39,6 +39,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- The browser Worker verify envelope now carries the counterexample `trace`
+  (per-step state, action, and changes) for invariant and type-bound
+  violations, matching the native CLI trace shape. Browser clients previously
+  only received the violated property name and step.
 - Domain-expression characterization corpus (issue #235): Rust CI now freezes
   pre-typed-AST surface expressions and locations, normalized semantic model
   structure, representative public Kernel expression/origin output, generated
