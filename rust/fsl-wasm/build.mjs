@@ -41,3 +41,4 @@ await cp(resolve(z3Build, "z3-built.wasm"), resolve(dist, "z3-built.wasm"));
 await cp(resolve(pkg, "fsl_wasm_bg.wasm"), resolve(dist, "fsl_wasm_bg.wasm"));
 await cp(resolve(root, "web/index.html"), resolve(dist, "index.html"));
 await cp(resolve(root, "web/client.mjs"), resolve(dist, "client.mjs"));
+await cp(resolve(root, "web/cases.mjs"), resolve(dist, "cases.mjs"));

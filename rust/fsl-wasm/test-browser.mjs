@@ -10,6 +10,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import "./build.mjs";
+import { cases } from "./web/cases.mjs";
 
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 const mime = {
@@ -120,27 +121,16 @@ if (details.ok !== "true") {
 const browser = JSON.parse(details.text);
 if (!browser.cancelled) throw new Error("Worker cancellation did not complete");
 const nativeBinary = fileURLToPath(new URL("../target/debug/fslc", import.meta.url));
-const nativeSources = [
-  `spec BrowserCounter {
-  type K = 0..1
-  state { x: K }
-  init { x = 0 }
-  action increment() { requires x == 0 x = 1 }
-  invariant Bounded { x >= 0 and x <= 1 }
-}`,
-  `spec BrowserBug {
-  type K = 0..1
-  state { x: K }
-  init { x = 0 }
-  action break_it() { requires x == 0 x = 1 }
-  invariant StayZero { x == 0 }
-}`,
-];
-async function nativeVerdict(source, index) {
+async function nativeVerdict(testCase, index) {
   const path = join(tmpdir(), `fsl-wasm-native-${process.pid}-${index}.fsl`);
-  await writeFile(path, source, "utf8");
+  await writeFile(path, testCase.source, "utf8");
+  const args = [
+    "verify", path,
+    "--depth", String(testCase.options.depth),
+    "--deadlock", testCase.options.deadlock,
+  ];
   return new Promise((resolve, reject) => {
-    const childProcess = spawn(nativeBinary, ["verify", path, "--depth", "2", "--deadlock", "ignore"], { stdio: ["ignore", "pipe", "pipe"] });
+    const childProcess = spawn(nativeBinary, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     childProcess.stdout.setEncoding("utf8");
@@ -149,17 +139,21 @@ async function nativeVerdict(source, index) {
     childProcess.stderr.on("data", (chunk) => { stderr += chunk; });
     childProcess.on("error", reject);
     childProcess.on("close", () => {
-      try { resolve(JSON.parse(stdout).result); }
-      catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
+      try {
+        const envelope = JSON.parse(stdout);
+        resolve({ result: envelope.result, violation_kind: envelope.violation_kind ?? null });
+      } catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
     });
   });
 }
 const native = [];
-for (let index = 0; index < nativeSources.length; index += 1) {
-  native.push(await nativeVerdict(nativeSources[index], index));
+for (let index = 0; index < cases.length; index += 1) {
+  native.push(await nativeVerdict(cases[index], index));
 }
-const wasm = browser.envelopes.map((envelope) => envelope.result);
+const wasm = browser.envelopes.map((envelope) => (
+  { result: envelope.result, violation_kind: envelope.violation_kind ?? null }
+));
 if (JSON.stringify(native) !== JSON.stringify(wasm)) {
-  throw new Error(`native/WASM verdict mismatch: native=${native} wasm=${wasm}`);
+  throw new Error(`native/WASM verdict mismatch: native=${JSON.stringify(native)} wasm=${JSON.stringify(wasm)}`);
 }
 console.log(JSON.stringify({ schema: "fsl-wasm-browser.v1", ok: true, cancelled: true, nativeParity: true }, null, 2));

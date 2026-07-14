@@ -28,6 +28,7 @@ mod origin;
 mod public_kernel;
 mod refinement;
 mod trace;
+mod trace_json;
 
 pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
@@ -57,6 +58,9 @@ pub use refinement::{
     StateMap, parse_refinement, requirements_implements,
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
+pub use trace_json::{
+    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json, trace_json,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoreError {
