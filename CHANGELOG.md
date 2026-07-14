@@ -41,6 +41,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- The browser Worker now reports `leadsTo` violations. The Worker envelope
+  previously ignored the bounded verifier's leadsTo verdict, so a spec whose
+  `must eventually` policy is violated was reported as `verified` in the
+  browser while the native CLI reports `violated` — a confidently green false
+  negative. The Worker now emits the native CLI's leadsTo fields (bindings,
+  `pending_since`, `stutter`, `hint`, and the counterexample trace).
+- The browser Z3 bridge now builds if-then-else terms through the z3-solver
+  `If` API and resolves constant sorts from their FSL sort descriptors instead
+  of a TypeScript-only `__typename` marker that does not exist at runtime.
+  Previously any spec with `Bool` state or `count` aggregation failed in the
+  browser Worker with an internal error while verifying natively.
 - Windows native CI now keeps the conformance coverage and approval Markdown
   snapshots on LF and canonicalizes both the specification and repository-root
   paths before binding approval records to Git, avoiding false snapshot drift
@@ -62,6 +73,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   conformance, and provenance-coverage schemas/goldens plus an independently
   checksummed v2 release bundle. Public Kernel v1, its goldens, default CLI,
   and compose rejection remain unchanged (issue #256).
+- The browser Worker verify envelope now carries the counterexample `trace`
+  (per-step state, action, and changes) for invariant and type-bound
+  violations, matching the native CLI trace shape. Browser clients previously
+  only received the violated property name and step.
 - Kernel state fields now accept deterministic inline initializers and normalize
   them to the existing `init` assignment semantics across Monitor, explicit
   exploration, BMC, induction, and Public Kernel v1. State-reading/order-dependent

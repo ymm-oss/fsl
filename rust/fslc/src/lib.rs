@@ -4,129 +4,24 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use fsl_core::{
-    FslValue, KernelBinder as Binder, KernelExpr as Expr, KernelModel, ParamDef, Pattern, TraceStep,
+    FslValue, KernelBinder as Binder, KernelExpr as Expr, KernelModel, ParamDef, Pattern,
 };
 use serde_json::{Value, json};
 
 pub mod coverage;
 pub mod origin_coverage;
 
-#[must_use]
-pub fn display_name(name: &str) -> String {
-    name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")
-}
+pub use fsl_core::{
+    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json, trace_json,
+};
 
-fn origin_site_json(site: &fsl_core::OriginSite) -> Value {
-    let span = site.span.map(|span| {
-        json!({
-            "start": {
-                "offset": span.start.offset,
-                "line": span.start.line,
-                "column": span.start.column,
-            },
-            "end": {
-                "offset": span.end.offset,
-                "line": span.end.line,
-                "column": span.end.column,
-            },
-        })
-    });
-    json!({
-        "source_file": site.source_file,
-        "span": span,
-        "dialect": site.dialect,
-        "declaration_path": site.declaration_path,
-    })
-}
-
-#[must_use]
-pub fn internal_origin_json(origin: &fsl_core::OriginChain) -> Value {
-    json!({
-        "identity": origin.id.0,
-        "dialect": origin.dialect,
-        "primary": origin.primary.as_ref().map(origin_site_json),
-        "secondary": origin.secondary.iter().map(origin_site_json).collect::<Vec<_>>(),
-        "lowering_steps": origin.lowering_steps.iter().map(|step| json!({
-            "kind": step.kind,
-            "detail": step.detail,
-        })).collect::<Vec<_>>(),
-        "generated": origin.generated,
-    })
-}
-
-#[must_use]
-pub fn origin_display_name(origin: &fsl_core::OriginChain) -> Option<&str> {
-    origin
-        .primary
-        .as_ref()
-        .and_then(|site| site.declaration_path.last())
-        .map(String::as_str)
-}
-
-#[must_use]
-pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
-    Value::Array(
-        trace
-            .iter()
-            .map(|entry| {
-                let mut value = serde_json::Map::new();
-                value.insert("step".to_owned(), json!(entry.step));
-                value.insert("state".to_owned(), state_json(&entry.state));
-                if let Some(action) = &entry.action {
-                    let mut action_json = serde_json::Map::new();
-                    let origin = model.action_origin(&action.name);
-                    action_json.insert(
-                        "name".to_owned(),
-                        json!(
-                            origin
-                                .and_then(origin_display_name)
-                                .map_or_else(|| display_name(&action.name), str::to_owned)
-                        ),
-                    );
-                    if let Some(origin) = origin {
-                        action_json.insert(
-                            "generated_name".to_owned(),
-                            json!(display_name(&action.name)),
-                        );
-                        action_json.insert("origin".to_owned(), internal_origin_json(origin));
-                    }
-                    action_json.insert(
-                        "params".to_owned(),
-                        Value::Object(
-                            action
-                                .params
-                                .iter()
-                                .map(|(name, value)| (name.clone(), fsl_value_json(value)))
-                                .collect(),
-                        ),
-                    );
-                    if let Some(definition) = model
-                        .actions
-                        .iter()
-                        .find(|definition| definition.name == action.name)
-                    {
-                        action_json.insert("loc".to_owned(), definition.span.python_loc());
-                    }
-                    value.insert("action".to_owned(), Value::Object(action_json));
-                    value.insert(
-                        "changes".to_owned(),
-                        trace.get(entry.step.saturating_sub(1)).map_or_else(
-                            || Value::Object(serde_json::Map::new()),
-                            |previous| {
-                                Value::Object(compute_changes(
-                                    &state_json(&previous.state),
-                                    &state_json(&entry.state),
-                                ))
-                            },
-                        ),
-                    );
-                }
-                Value::Object(value)
-            })
-            .collect(),
-    )
-}
-
+/// Diff two already-JSON-rendered values into a native `trace_json`-style
+/// nested-path `changes` map, for `conformance_vectors`' before/after pair.
+///
+/// Kept as a private duplicate of `fsl_core::trace_json`'s internal helper of
+/// the same name: conformance vectors are a CLI-only artifact never produced
+/// by the browser Worker, so sharing it would widen `fsl-core`'s public
+/// surface for no cross-implementation parity benefit.
 fn compute_changes(previous: &Value, current: &Value) -> serde_json::Map<String, Value> {
     fn walk(
         path: &str,
@@ -394,47 +289,10 @@ fn action_calls(model: &KernelModel) -> Result<Vec<ActionCall>, String> {
     Ok(calls)
 }
 
-#[must_use]
-pub fn state_json(state: &BTreeMap<String, FslValue>) -> Value {
-    Value::Object(
-        state
-            .iter()
-            .map(|(name, value)| (display_name(name), fsl_value_json(value)))
-            .collect(),
-    )
-}
-
-#[must_use]
-pub fn fsl_value_json(value: &FslValue) -> Value {
-    match value {
-        FslValue::Int(value) => json!(value),
-        FslValue::Bool(value) => json!(value),
-        FslValue::Enum { member, .. } => json!(member),
-        FslValue::None => Value::Null,
-        FslValue::Some(value) => fsl_value_json(value),
-        FslValue::Struct { fields, .. } => Value::Object(
-            fields
-                .iter()
-                .map(|(name, value)| (name.clone(), fsl_value_json(value)))
-                .collect(),
-        ),
-        FslValue::Map(entries) => Value::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (map_key(key), fsl_value_json(value)))
-                .collect(),
-        ),
-        FslValue::Set(values) => Value::Array(values.iter().map(fsl_value_json).collect()),
-        FslValue::Seq(values) => Value::Array(values.iter().map(fsl_value_json).collect()),
-        FslValue::Relation(values) => Value::Array(
-            values
-                .iter()
-                .map(|(source, target)| json!([fsl_value_json(source), fsl_value_json(target)]))
-                .collect(),
-        ),
-    }
-}
-
+/// Map key encoding for `conformance_value_json`'s `Map`-typed fields.
+///
+/// Kept as a private duplicate of `fsl_core::trace_json`'s internal helper of
+/// the same name, for the same reason as `compute_changes` above.
 fn map_key(value: &FslValue) -> String {
     match value {
         FslValue::Int(value) => value.to_string(),
