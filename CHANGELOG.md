@@ -23,6 +23,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- The browser Worker now reports `leadsTo` violations. The Worker envelope
+  previously ignored the bounded verifier's leadsTo verdict, so a spec whose
+  `must eventually` policy is violated was reported as `verified` in the
+  browser while the native CLI reports `violated` — a confidently green false
+  negative. The Worker now emits the native CLI's leadsTo fields (bindings,
+  `pending_since`, `stutter`, `hint`, and the counterexample trace).
 - The browser Z3 bridge now builds if-then-else terms through the z3-solver
   `If` API and resolves constant sorts from their FSL sort descriptors instead
   of a TypeScript-only `__typename` marker that does not exist at runtime.

@@ -262,6 +262,47 @@ async fn verify(request: &Request) -> Value {
         output.insert("trace".to_owned(), trace_json(&violation.trace));
         return Value::Object(output);
     }
+    if let Some(violation) = result.leadsto_violation {
+        output.insert("result".to_owned(), json!("violated"));
+        output.insert("violation_kind".to_owned(), json!("leadsTo"));
+        output.insert("invariant".to_owned(), json!(display_name(&violation.name)));
+        output.insert("violated_at_step".to_owned(), json!(violation.step));
+        output.insert(
+            "last_action".to_owned(),
+            violation
+                .last_action
+                .map_or(Value::Null, |name| json!({"name": display_name(&name)})),
+        );
+        if let Some(details) = violation.leads_to {
+            output.insert(
+                "bindings".to_owned(),
+                Value::Object(
+                    details
+                        .bindings
+                        .iter()
+                        .map(|(name, value)| (name.clone(), fsl_value_json(value)))
+                        .collect(),
+                ),
+            );
+            output.insert("pending_since".to_owned(), json!(details.pending_since));
+            if let Some(loop_start) = details.loop_start {
+                output.insert("loop_start".to_owned(), json!(loop_start));
+            }
+            if let Some(deadline) = details.deadline {
+                output.insert("deadline".to_owned(), json!(deadline));
+            }
+            if let Some(within) = details.within {
+                output.insert("within".to_owned(), json!(within));
+            }
+            output.insert("stutter".to_owned(), json!(details.stutter));
+            output.insert("hint".to_owned(), json!(details.hint));
+        }
+        output.insert("checked_to_depth".to_owned(), json!(violation.step));
+        output.insert("completeness".to_owned(), json!("bounded"));
+        output.insert("trace_type".to_owned(), json!("leadsTo"));
+        output.insert("trace".to_owned(), trace_json(&violation.trace));
+        return Value::Object(output);
+    }
     if request.options.deadlock == "error"
         && let Some(step) = result.deadlock_step
     {

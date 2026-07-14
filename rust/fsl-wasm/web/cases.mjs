@@ -67,4 +67,32 @@ verify {
   instances Job = 1
 }`,
   },
+  {
+    // A must-eventually policy that a drop transition breaks; the Worker
+    // must report the leadsTo verdict and trace the native CLI reports.
+    id: "business-leadsto",
+    expected: "violated",
+    expect: { kind: "leadsTo", trace: true },
+    options: { depth: 2, deadlock: "ignore" },
+    source: `business BrowserLeak {
+  actor System
+  entity Job
+
+  process Job {
+    stages Idle, Pending, Done, Dropped
+    initial Idle
+
+    transition submit Idle    -> Pending by System
+    transition finish Pending -> Done    by System
+    transition drop   Pending -> Dropped by System
+  }
+
+  policy POL-DONE "every submitted job must eventually complete"
+    every Job in Pending must eventually be Done
+}
+
+verify {
+  instances Job = 1
+}`,
+  },
 ];
