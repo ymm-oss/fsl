@@ -4,7 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{CoreError, FileResolver, FslValue, KernelModel, TraceStep, TypeDef, TypeRef};
+use fsl_core::{
+    CoreError, FileResolver, KernelModel, TypeDef, TypeRef, display_name, fsl_value_json,
+    trace_json,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
@@ -111,105 +114,6 @@ fn invariant_names(model: &KernelModel) -> Vec<String> {
     names
 }
 
-fn display_name(name: &str) -> String {
-    name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")
-}
-
-fn map_key(value: &FslValue) -> String {
-    match value {
-        FslValue::Int(value) => value.to_string(),
-        FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
-        _ => format!("{value:?}"),
-    }
-}
-
-fn fsl_value_json(value: &FslValue) -> Value {
-    match value {
-        FslValue::Int(value) => json!(value),
-        FslValue::Bool(value) => json!(value),
-        FslValue::Enum { member, .. } => json!(member),
-        FslValue::None => Value::Null,
-        FslValue::Some(value) => fsl_value_json(value),
-        FslValue::Struct { fields, .. } => Value::Object(
-            fields
-                .iter()
-                .map(|(name, value)| (name.clone(), fsl_value_json(value)))
-                .collect(),
-        ),
-        FslValue::Map(entries) => Value::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (map_key(key), fsl_value_json(value)))
-                .collect(),
-        ),
-        FslValue::Set(values) => Value::Array(values.iter().map(fsl_value_json).collect()),
-        FslValue::Seq(values) => Value::Array(values.iter().map(fsl_value_json).collect()),
-        FslValue::Relation(values) => Value::Array(
-            values
-                .iter()
-                .map(|(source, target)| json!([fsl_value_json(source), fsl_value_json(target)]))
-                .collect(),
-        ),
-    }
-}
-
-fn trace_json(trace: &[TraceStep]) -> Value {
-    Value::Array(
-        trace
-            .iter()
-            .map(|entry| {
-                let mut value = Map::new();
-                value.insert("step".to_owned(), json!(entry.step));
-                value.insert(
-                    "state".to_owned(),
-                    Value::Object(
-                        entry
-                            .state
-                            .iter()
-                            .map(|(name, state)| (display_name(name), fsl_value_json(state)))
-                            .collect(),
-                    ),
-                );
-                if let Some(action) = &entry.action {
-                    value.insert(
-                        "action".to_owned(),
-                        json!({
-                            "name": display_name(&action.name),
-                            "params": Value::Object(
-                                action
-                                    .params
-                                    .iter()
-                                    .map(|(name, param)| (name.clone(), fsl_value_json(param)))
-                                    .collect(),
-                            ),
-                        }),
-                    );
-                    value.insert(
-                        "changes".to_owned(),
-                        Value::Object(
-                            entry
-                                .changes
-                                .iter()
-                                .map(|(name, change)| {
-                                    (
-                                        display_name(name),
-                                        json!({
-                                            "from": fsl_value_json(&change.from),
-                                            "to": fsl_value_json(&change.to),
-                                        }),
-                                    )
-                                })
-                                .collect(),
-                        ),
-                    );
-                }
-                Value::Object(value)
-            })
-            .collect(),
-    )
-}
-
 fn check(request: &Request) -> Value {
     let model = match build(request) {
         Ok(model) => model,
@@ -231,7 +135,6 @@ fn check(request: &Request) -> Value {
     Value::Object(output)
 }
 
-#[allow(clippy::too_many_lines)]
 async fn verify(request: &Request) -> Value {
     let model = match build(request) {
         Ok(model) => model,
@@ -243,6 +146,11 @@ async fn verify(request: &Request) -> Value {
             Ok(result) => result,
             Err(failure) => return error("semantics", failure.to_string()),
         };
+    render_verify(&model, &request.options, result)
+}
+
+#[allow(clippy::too_many_lines)]
+fn render_verify(model: &KernelModel, options: &Options, result: fsl_verifier::BmcResult) -> Value {
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
     if let Some(violation) = result.violation {
@@ -259,7 +167,23 @@ async fn verify(request: &Request) -> Value {
         output.insert("checked_to_depth".to_owned(), json!(violation.step));
         output.insert("completeness".to_owned(), json!("bounded"));
         output.insert("trace_type".to_owned(), json!(violation.kind));
-        output.insert("trace".to_owned(), trace_json(&violation.trace));
+        output.insert("trace".to_owned(), trace_json(model, &violation.trace));
+        return Value::Object(output);
+    }
+    // Native CLI (rust/fslc/src/verification.rs render_bmc_result) checks
+    // deadlock-as-error before leadsto_violation: both can legitimately be
+    // `Some` at once (deadlock_step is set inside the per-step loop,
+    // leadsto_violation only after it ends), so this order is the contract.
+    if options.deadlock == "error"
+        && let Some(step) = result.deadlock_step
+    {
+        output.insert("result".to_owned(), json!("violated"));
+        output.insert("violation_kind".to_owned(), json!("deadlock"));
+        output.insert("invariant".to_owned(), json!("deadlock"));
+        output.insert("violated_at_step".to_owned(), json!(step));
+        output.insert("checked_to_depth".to_owned(), json!(step));
+        output.insert("completeness".to_owned(), json!("bounded"));
+        output.insert("trace_type".to_owned(), json!("deadlock"));
         return Value::Object(output);
     }
     if let Some(violation) = result.leadsto_violation {
@@ -267,12 +191,6 @@ async fn verify(request: &Request) -> Value {
         output.insert("violation_kind".to_owned(), json!("leadsTo"));
         output.insert("invariant".to_owned(), json!(display_name(&violation.name)));
         output.insert("violated_at_step".to_owned(), json!(violation.step));
-        output.insert(
-            "last_action".to_owned(),
-            violation
-                .last_action
-                .map_or(Value::Null, |name| json!({"name": display_name(&name)})),
-        );
         if let Some(details) = violation.leads_to {
             output.insert(
                 "bindings".to_owned(),
@@ -300,28 +218,16 @@ async fn verify(request: &Request) -> Value {
         output.insert("checked_to_depth".to_owned(), json!(violation.step));
         output.insert("completeness".to_owned(), json!("bounded"));
         output.insert("trace_type".to_owned(), json!("leadsTo"));
-        output.insert("trace".to_owned(), trace_json(&violation.trace));
-        return Value::Object(output);
-    }
-    if request.options.deadlock == "error"
-        && let Some(step) = result.deadlock_step
-    {
-        output.insert("result".to_owned(), json!("violated"));
-        output.insert("violation_kind".to_owned(), json!("deadlock"));
-        output.insert("invariant".to_owned(), json!("deadlock"));
-        output.insert("violated_at_step".to_owned(), json!(step));
-        output.insert("checked_to_depth".to_owned(), json!(step));
-        output.insert("completeness".to_owned(), json!("bounded"));
-        output.insert("trace_type".to_owned(), json!("deadlock"));
+        output.insert("trace".to_owned(), trace_json(model, &violation.trace));
         return Value::Object(output);
     }
     output.insert("result".to_owned(), json!("verified"));
-    output.insert("depth".to_owned(), json!(request.options.depth));
-    output.insert("checked_to_depth".to_owned(), json!(request.options.depth));
+    output.insert("depth".to_owned(), json!(options.depth));
+    output.insert("checked_to_depth".to_owned(), json!(options.depth));
     output.insert("completeness".to_owned(), json!("bounded"));
     output.insert(
         "invariants_checked".to_owned(),
-        json!(invariant_names(&model)),
+        json!(invariant_names(model)),
     );
     output.insert(
         "transitions_checked".to_owned(),
@@ -363,7 +269,7 @@ async fn verify(request: &Request) -> Value {
     );
     output.insert(
         "deadlock".to_owned(),
-        if request.options.deadlock == "ignore" {
+        if options.deadlock == "ignore" {
             json!({"found": false})
         } else {
             result.deadlock_step.map_or_else(
@@ -377,7 +283,7 @@ async fn verify(request: &Request) -> Value {
         "note".to_owned(),
         json!(format!(
             "bounded verification: no violation within depth {}",
-            request.options.depth
+            options.depth
         )),
     );
     Value::Object(output)
@@ -406,4 +312,117 @@ pub async fn run(request_json: String) -> String {
             serde_json::to_string(&failure.to_string()).unwrap_or_else(|_| "null".to_owned())
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fsl_core::{FslValue, TraceAction, TraceStep};
+    use fsl_verifier::{BmcResult, BmcViolation, LeadsToViolation};
+
+    fn model_from(source: &str) -> KernelModel {
+        let resolver = MemoryResolver {
+            files: BTreeMap::new(),
+        };
+        let kernel = fsl_core::parse_kernel_source(source, &resolver).expect("parse");
+        fsl_core::build_model(kernel).expect("model")
+    }
+
+    #[test]
+    fn deadlock_as_error_wins_over_leadsto_violation() {
+        let model =
+            model_from("spec Test { state { x: Int } init { x = 0 } action a() { x = 0 } }");
+        let result = BmcResult {
+            spec: model.name.clone(),
+            depth: 4,
+            violation: None,
+            leadsto_violation: Some(BmcViolation {
+                kind: "leadsTo".to_owned(),
+                name: "SomeLeadsTo".to_owned(),
+                step: 1,
+                last_action: None,
+                trace: Vec::new(),
+                leads_to: Some(LeadsToViolation {
+                    bindings: BTreeMap::new(),
+                    pending_since: 0,
+                    loop_start: None,
+                    deadline: None,
+                    within: None,
+                    stutter: false,
+                    hint: "stuck".to_owned(),
+                }),
+            }),
+            reachables: BTreeMap::new(),
+            deadlock_step: Some(1),
+            deadlock_trace: Some(Vec::new()),
+            action_coverage: BTreeMap::new(),
+            frontier_progress: false,
+        };
+        let options = Options {
+            depth: 4,
+            deadlock: "error".to_owned(),
+        };
+
+        let envelope = render_verify(&model, &options, result);
+
+        assert_eq!(envelope["violation_kind"], json!("deadlock"));
+    }
+
+    #[test]
+    fn trace_json_diffs_struct_state_by_field_not_whole_value() {
+        let model = model_from(
+            "spec Test { \
+             struct Job { status: Int, priority: Int } \
+             state { job: Job } \
+             init { job = Job { status: 0, priority: 0 } } \
+             action advance() { job.status = 1 } \
+             }",
+        );
+
+        let before = FslValue::Struct {
+            type_name: "Job".to_owned(),
+            fields: BTreeMap::from([
+                ("status".to_owned(), FslValue::Int(0)),
+                ("priority".to_owned(), FslValue::Int(0)),
+            ]),
+        };
+        let after = FslValue::Struct {
+            type_name: "Job".to_owned(),
+            fields: BTreeMap::from([
+                ("status".to_owned(), FslValue::Int(1)),
+                ("priority".to_owned(), FslValue::Int(0)),
+            ]),
+        };
+        let trace = vec![
+            TraceStep {
+                step: 0,
+                state: BTreeMap::from([("job".to_owned(), before)]),
+                action: None,
+                changes: BTreeMap::new(),
+            },
+            TraceStep {
+                step: 1,
+                state: BTreeMap::from([("job".to_owned(), after)]),
+                action: Some(TraceAction {
+                    name: "advance".to_owned(),
+                    params: BTreeMap::new(),
+                }),
+                changes: BTreeMap::new(),
+            },
+        ];
+
+        let rendered = trace_json(&model, &trace);
+        let changes = rendered[1]["changes"]
+            .as_object()
+            .expect("changes is an object");
+
+        assert!(
+            changes.keys().any(|key| key.contains("[status]")),
+            "expected a nested-path key like 'job[status]', got {changes:?}"
+        );
+        assert!(
+            !changes.contains_key("job"),
+            "whole-struct key must not appear, got {changes:?}"
+        );
+    }
 }

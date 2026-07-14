@@ -139,8 +139,10 @@ async function nativeVerdict(testCase, index) {
     childProcess.stderr.on("data", (chunk) => { stderr += chunk; });
     childProcess.on("error", reject);
     childProcess.on("close", () => {
-      try { resolve(JSON.parse(stdout).result); }
-      catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
+      try {
+        const envelope = JSON.parse(stdout);
+        resolve({ result: envelope.result, violation_kind: envelope.violation_kind ?? null });
+      } catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
     });
   });
 }
@@ -148,8 +150,10 @@ const native = [];
 for (let index = 0; index < cases.length; index += 1) {
   native.push(await nativeVerdict(cases[index], index));
 }
-const wasm = browser.envelopes.map((envelope) => envelope.result);
+const wasm = browser.envelopes.map((envelope) => (
+  { result: envelope.result, violation_kind: envelope.violation_kind ?? null }
+));
 if (JSON.stringify(native) !== JSON.stringify(wasm)) {
-  throw new Error(`native/WASM verdict mismatch: native=${native} wasm=${wasm}`);
+  throw new Error(`native/WASM verdict mismatch: native=${JSON.stringify(native)} wasm=${JSON.stringify(wasm)}`);
 }
 console.log(JSON.stringify({ schema: "fsl-wasm-browser.v1", ok: true, cancelled: true, nativeParity: true }, null, 2));

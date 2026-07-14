@@ -95,4 +95,46 @@ verify {
   instances Job = 1
 }`,
   },
+  {
+    // A `must eventually` obligation whose only path deadlocks: both
+    // `deadlock_step` and `leadsto_violation` are set on the same BmcResult,
+    // and with --deadlock error the Worker must report "deadlock" (matching
+    // the native CLI's render_bmc_result branch order), not "leadsTo".
+    id: "deadlock-beats-leadsto",
+    expected: "violated",
+    expect: { kind: "deadlock" },
+    options: { depth: 2, deadlock: "error" },
+    source: `spec BrowserStuckKernel {
+  enum Stage { Idle, Pending, Done }
+
+  state { stage: Stage }
+
+  init { stage = Idle }
+
+  action submit() {
+    requires stage == Idle
+    stage = Pending
+  }
+
+  leadsTo Progress { stage == Pending ~> stage == Done }
+}`,
+  },
+  {
+    // Struct-typed top-level state where one action changes only one field;
+    // the Worker must not blow up rendering the trace for non-scalar state.
+    id: "struct-state",
+    expected: "violated",
+    expect: { trace: true },
+    options: { depth: 2, deadlock: "ignore" },
+    source: `spec BrowserStructState {
+  struct Job { status: Int, priority: Int }
+  state { job: Job }
+  init { job = Job { status: 0, priority: 0 } }
+  action advance() {
+    requires job.status == 0
+    job.status = 1
+  }
+  invariant NeverAdvance { job.status == 0 }
+}`,
+  },
 ];
