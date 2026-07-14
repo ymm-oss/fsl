@@ -10,7 +10,7 @@ use std::task::{Context, Poll, Waker};
 use fsl_core::{
     FsResolver, FslValue, KernelModel, ParamDef, TypeDef, TypeRef, build_model, parse_kernel_source,
 };
-use fsl_syntax::{DomainSpec, SurfaceDocument, parse_surface_document};
+use fsl_syntax::{DomainSpec, SurfaceDocument, SyntaxExpr, parse_surface_document};
 use serde_json::{Map, Value, json};
 
 const UPDATE_ENV: &str = "UPDATE_DOMAIN_CHARACTERIZATION";
@@ -48,42 +48,50 @@ fn domain(name: &str) -> DomainSpec {
     domain
 }
 
+fn rendered(expression: Option<&SyntaxExpr>) -> Option<String> {
+    expression.map(SyntaxExpr::render_source)
+}
+
+fn rendered_all(expressions: &[SyntaxExpr]) -> Vec<String> {
+    expressions.iter().map(SyntaxExpr::render_source).collect()
+}
+
 fn surface_projection(domain: &DomainSpec) -> Value {
     json!({
         "name":domain.name,
         "loc":domain.loc,
         "types":domain.types.iter().map(|ty|json!({
-            "name":ty.name,"kind":ty.kind,"members":ty.members,"lo":ty.lo,"hi":ty.hi,
-            "fields":ty.fields.iter().map(|field|json!({"name":field.name,"type":field.type_name,"default":field.default,"loc":field.loc})).collect::<Vec<_>>(),
-            "invariants":ty.invariants.iter().map(|item|json!({"name":item.name,"expr":item.expr,"loc":item.loc})).collect::<Vec<_>>(),
+            "name":ty.name,"kind":ty.kind,"members":ty.members,"lo":rendered(ty.lo.as_ref()),"hi":rendered(ty.hi.as_ref()),
+            "fields":ty.fields.iter().map(|field|json!({"name":field.name.text,"type":field.type_name.render_source(),"default":rendered(field.default.as_ref()),"loc":field.loc})).collect::<Vec<_>>(),
+            "invariants":ty.invariants.iter().map(|item|json!({"name":item.name.text,"expr":item.expr.render_source(),"loc":item.loc})).collect::<Vec<_>>(),
             "loc":ty.loc
         })).collect::<Vec<_>>(),
         "aggregates":domain.aggregates.iter().map(|aggregate|json!({
             "name":aggregate.name,
-            "state":aggregate.state.iter().map(|field|json!({"name":field.name,"type":field.type_name,"default":field.default,"loc":field.loc})).collect::<Vec<_>>(),
+            "state":aggregate.state.iter().map(|field|json!({"name":field.name.text,"type":field.type_name.render_source(),"default":rendered(field.default.as_ref()),"loc":field.loc})).collect::<Vec<_>>(),
             "decides":aggregate.decides.iter().map(|item|json!({
-                "command":item.command,"requires":item.requires,
-                "rejects":item.rejects.iter().map(|reject|json!({"error":reject.error,"condition":reject.condition,"loc":reject.loc})).collect::<Vec<_>>(),
+                "command":item.command,"requires":rendered_all(&item.requires),
+                "rejects":item.rejects.iter().map(|reject|json!({"error":reject.error,"condition":reject.condition.render_source(),"loc":reject.loc})).collect::<Vec<_>>(),
                 "emits":item.emits,"loc":item.loc
             })).collect::<Vec<_>>(),
             "evolves":aggregate.evolves.iter().map(|item|json!({
-                "event":item.event,"requires":item.requires,
-                "assignments":item.assignments.iter().map(|assignment|json!({"target":assignment.target,"expr":assignment.expr,"loc":assignment.loc})).collect::<Vec<_>>(),
+                "event":item.event,"requires":rendered_all(&item.requires),
+                "assignments":item.assignments.iter().map(|assignment|json!({"target":assignment.target.render_source(),"expr":assignment.value.render_source(),"loc":assignment.loc})).collect::<Vec<_>>(),
                 "loc":item.loc
             })).collect::<Vec<_>>(),
-            "invariants":aggregate.invariants.iter().map(|item|json!({"name":item.name,"expr":item.expr,"loc":item.loc})).collect::<Vec<_>>(),
-            "stale_policies":aggregate.stale_policies.iter().map(|item|json!({"event":item.event,"condition":item.condition,"emits":item.emits,"loc":item.loc})).collect::<Vec<_>>(),
+            "invariants":aggregate.invariants.iter().map(|item|json!({"name":item.name.text,"expr":item.expr.render_source(),"loc":item.loc})).collect::<Vec<_>>(),
+            "stale_policies":aggregate.stale_policies.iter().map(|item|json!({"event":item.event,"condition":item.condition.render_source(),"emits":item.emits,"loc":item.loc})).collect::<Vec<_>>(),
             "loc":aggregate.loc
         })).collect::<Vec<_>>(),
         "effects":domain.effects.iter().map(|effect|json!({
-            "name":effect.name,"idempotency_key":effect.idempotency_key,"correlation_id":effect.correlation_id,
+            "name":effect.name,"idempotency_key":rendered(effect.idempotency_key.as_ref()),"correlation_id":rendered(effect.correlation_id.as_ref()),
             "handles":effect.handles,"outcomes":effect.outcomes,"timeout_event":effect.timeout_event,
             "retry_max_attempts":effect.retry.max_attempts,"loc":effect.loc
         })).collect::<Vec<_>>(),
         "sagas":domain.sagas.iter().map(|saga|json!({
             "name":saga.name,"starts_on":saga.starts_on,
-            "steps":saga.steps.iter().map(|step|json!({"name":step.name,"requires":step.requires,"emits":step.emits,"awaits":step.awaits,"timeout_event":step.timeout_event,"loc":step.loc})).collect::<Vec<_>>(),
-            "invariants":saga.invariants.iter().map(|item|json!({"name":item.name,"expr":item.expr,"loc":item.loc})).collect::<Vec<_>>(),
+            "steps":saga.steps.iter().map(|step|json!({"name":step.name,"requires":rendered_all(&step.requires),"emits":step.emits,"awaits":step.awaits,"timeout_event":step.timeout_event,"loc":step.loc})).collect::<Vec<_>>(),
+            "invariants":saga.invariants.iter().map(|item|json!({"name":item.name.text,"expr":item.expr.render_source(),"loc":item.loc})).collect::<Vec<_>>(),
             "loc":saga.loc
         })).collect::<Vec<_>>()
     })

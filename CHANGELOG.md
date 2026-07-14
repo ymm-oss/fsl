@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- Native Rust domain parsing (issue #236) now retains defaults, ranges, guards,
+  rejection conditions, assignments, invariants, stale policies, effect
+  correlation/idempotency expressions, and saga guards as unresolved typed
+  syntax nodes with exact source spans. Field identifiers/type references and
+  declaration nodes are span-aware as well. Domain-only membership and legacy
+  logical spellings are structural, effect paths retain their prior restricted
+  grammar, existing lowering remains compatible through a rendering adapter,
+  and malformed expressions now report their original domain-source location
+  instead of a generated Kernel coordinate.
+
 ### Fixed
 - Rust CLI contract validation (issue #220) now preserves exact compatibility
   with the frozen Python surface while checking native-only commands and
