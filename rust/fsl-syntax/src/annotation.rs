@@ -6,12 +6,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::Span;
+use crate::{Span, SyntaxIdent};
 
 /// A namespaced symbol such as `acme.review.owner`.
 #[derive(Clone, Debug)]
 pub struct SymbolPath {
     segments: Vec<String>,
+    segment_spans: Vec<Span>,
     span: Span,
 }
 
@@ -32,7 +33,35 @@ impl SymbolPath {
                 span,
             ));
         }
-        Ok(Self { segments, span })
+        let segment_spans = vec![span; segments.len()];
+        Ok(Self {
+            segments,
+            segment_spans,
+            span,
+        })
+    }
+
+    /// Construct a path while retaining the exact span of every segment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnnotationError`] when the path is empty or contains an empty segment.
+    pub fn from_idents(segments: Vec<SyntaxIdent>, span: Span) -> Result<Self, AnnotationError> {
+        if segments.is_empty()
+            || segments
+                .iter()
+                .any(|segment| segment.text.trim().is_empty())
+        {
+            return Err(AnnotationError::new(
+                "custom annotation namespace must contain non-empty segments",
+                span,
+            ));
+        }
+        Ok(Self {
+            segment_spans: segments.iter().map(|segment| segment.span).collect(),
+            segments: segments.into_iter().map(|segment| segment.text).collect(),
+            span,
+        })
     }
 
     #[must_use]
@@ -43,6 +72,34 @@ impl SymbolPath {
     #[must_use]
     pub fn span(&self) -> Span {
         self.span
+    }
+
+    #[must_use]
+    pub fn segment_spans(&self) -> &[Span] {
+        &self.segment_spans
+    }
+
+    #[must_use]
+    pub fn has_namespace(&self) -> bool {
+        self.segments.len() > 1
+    }
+
+    /// Return the final path segment.
+    ///
+    /// # Panics
+    ///
+    /// This panics only if the private non-empty path invariant is violated.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.segments.last().expect("symbol paths are non-empty")
+    }
+
+    /// Adapt the loss-aware path to the frozen two-field Kernel name shape.
+    #[must_use]
+    pub fn legacy_parts(&self) -> (Option<String>, String) {
+        let namespace =
+            (self.segments.len() > 1).then(|| self.segments[..self.segments.len() - 1].join("."));
+        (namespace, self.name().to_owned())
     }
 }
 

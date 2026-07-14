@@ -78,7 +78,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   for dialects; specialized frontends consume the original token stream. Add
   exact empty/unknown diagnostic codes, spans, and supported-keyword lists, an
   evidence-only `agent` surface, and span-retaining multi-segment `SymbolPath`
-  values (issue #247).
+  values. Qualified syntax shares the same arbitrary-depth path and per-segment
+  spans, dispatch errors expose machine-readable supported dialects, and LSP
+  diagnostics route annotated agent/AI-project sources consistently (issue #247).
 - Native Rust now carries ordered, typed `Requirement`, `Undecided`, `Kind`,
   and namespaced `Custom` annotations through a common target-keyed IR. Legacy
   declaration strings, spec badges, requirement blocks, process `covers`, and

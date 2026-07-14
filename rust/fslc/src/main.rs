@@ -13403,6 +13403,15 @@ fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {
     let object = output.as_object_mut().expect("error envelope");
     object.insert("diagnostic_code".to_owned(), json!(error.code()));
     object.insert("loc".to_owned(), error.span.python_loc());
+    if matches!(
+        error.code(),
+        "FSL-DIALECT-EMPTY" | "FSL-DIALECT-ANNOTATION-TARGET" | "FSL-DIALECT-UNKNOWN"
+    ) {
+        object.insert(
+            "supported_dialects".to_owned(),
+            json!(fsl_syntax::DIALECT_KEYWORDS),
+        );
+    }
     output
 }
 

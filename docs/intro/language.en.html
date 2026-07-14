@@ -1425,6 +1425,20 @@ explicit requirement ID. JSON consumers that expose multiple relations use a
 compatibility projection. See <code>DESIGN-undecided.md</code> and
 <code>DESIGN-annotations.md</code>. This is implemented by the authoritative native Rust
 CLI and is not backported to the frozen Python reference implementation.</p>
+<p>A document itself may now carry typed annotations before its dialect keyword:</p>
+<pre><code class="language-fsl">@requirement(&quot;REQ-DOC&quot;, &quot;this document owns the checkout contract&quot;)
+@acme.review(owner.platform, 2, true)
+spec Checkout { ... }
+</code></pre>
+<p>The shared lexer skips a leading BOM, whitespace, and <code>//</code> comments before
+these annotations, retains their order and spans, then selects the dialect from
+the following declaration keyword. Keywords inside annotation arguments do not
+participate in dispatch. This document-level subset supports <code>@requirement</code>,
+<code>@undecided</code>, <code>@kind</code>, and custom multi-segment namespaces; annotation placement
+on declarations inside the document remains tracked by issue #241. Empty and
+unknown documents report <code>FSL-DIALECT-EMPTY</code> / <code>FSL-DIALECT-UNKNOWN</code> with exact
+locations and the deterministic supported-keyword list. See
+<code>DESIGN-dialect-dispatch.md</code>.</p>
 <h3 id="132-requirements-layer-requirements-the-fsl-req-dialect">13.2 Requirements layer: <code>requirements</code> (the fsl-req dialect)</h3>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }

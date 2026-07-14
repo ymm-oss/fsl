@@ -55,6 +55,9 @@ def check_source(
         _parse_error_result,
     )
     from fslc.analysis import analyze as analyze_structure
+    from fslc.ai_parser import parse_ai_source
+    from fslc.ai_project import is_ai_project_source, parse_ai_project
+    from fslc.dialect_registry import inspect_source
     from fslc.model import FslError, build_spec
     from fslc.parser import parse_src
     from fslc.refine import build_refinement
@@ -78,6 +81,24 @@ def check_source(
 
     try:
         base_dir = str(Path(path).parent) if path else "."
+        dispatch = inspect_source(source)
+        if dispatch.keyword == "agent":
+            agent = parse_ai_source(dispatch.source)
+            return _envelope({
+                "result": "ok",
+                "spec": agent.name,
+                "dialect": "fsl-ai-agent.v0",
+                "warnings": [],
+            })
+        if is_ai_project_source(source):
+            project_name = Path(path).stem if path else "AiProject"
+            parse_ai_project(dispatch.source, project_name)
+            return _envelope({
+                "result": "ok",
+                "spec": project_name,
+                "dialect": "fsl-ai-project.v0",
+                "warnings": [],
+            })
         domain_warnings = []
         if is_domain_source(source):
             domain = parse_domain(source)
