@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use fsl_core::{
     Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement, ParamDef,
-    TypeDef, TypeRef,
+    TypeDef, TypeRef, insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use serde_json::{Map, Value, json};
 
@@ -3093,110 +3093,6 @@ fn display_binding(value: &fsl_core::FslValue) -> String {
     }
 }
 
-fn format_state_summary(
-    model: &KernelModel,
-    state: &std::collections::BTreeMap<String, FslValue>,
-) -> String {
-    model
-        .state
-        .iter()
-        .filter_map(|(name, ty)| {
-            state
-                .get(name)
-                .map(|value| format!("{}={}", display(name), format_fsl_value(model, value, ty)))
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn format_fsl_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> String {
-    match value {
-        FslValue::Int(value) => value.to_string(),
-        FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
-        FslValue::None => "null".to_owned(),
-        FslValue::Some(value) => {
-            let inner = match ty {
-                TypeRef::Option(inner) => inner.as_ref(),
-                _ => ty,
-            };
-            format_fsl_value(model, value, inner)
-        }
-        FslValue::Struct { type_name, fields } => {
-            let declared = model.struct_fields(type_name).unwrap_or(&[]);
-            format!(
-                "{{{}}}",
-                declared
-                    .iter()
-                    .filter_map(|(name, field_ty)| fields.get(name).map(|value| format!(
-                        "{name}: {}",
-                        format_fsl_value(model, value, field_ty)
-                    )))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-        FslValue::Map(entries) => {
-            let (key_ty, value_ty) = match ty {
-                TypeRef::Map(key, value) => (key.as_ref(), value.as_ref()),
-                _ => (ty, ty),
-            };
-            format!(
-                "{{{}}}",
-                entries
-                    .iter()
-                    .map(|(key, value)| format!(
-                        "{}: {}",
-                        format_fsl_value(model, key, key_ty),
-                        format_fsl_value(model, value, value_ty)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-        FslValue::Set(values) => {
-            let inner = match ty {
-                TypeRef::Set(inner) => inner.as_ref(),
-                _ => ty,
-            };
-            format!(
-                "[{}]",
-                values
-                    .iter()
-                    .map(|value| format_fsl_value(model, value, inner))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-        FslValue::Seq(values) => {
-            let inner = match ty {
-                TypeRef::Seq(inner, _) => inner.as_ref(),
-                _ => ty,
-            };
-            format!(
-                "[{}]",
-                values
-                    .iter()
-                    .map(|value| format_fsl_value(model, value, inner))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-        FslValue::Relation(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|(source, target)| format!(
-                    "[{}, {}]",
-                    fslc_rust::fsl_value_json(source),
-                    fslc_rust::fsl_value_json(target)
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
-}
-
 fn run_check(path: &Path) -> (Value, i32) {
     if let Ok(source) = std::fs::read_to_string(path)
         && is_ai_project(&source)
@@ -3256,7 +3152,7 @@ fn run_check(path: &Path) -> (Value, i32) {
                 Err(error) => return (error_output("type", &error), 2),
             };
             let warnings = if implements.is_some() || has_trace_contract {
-                check_warnings(&model)
+                model_warnings(&model)
                     .into_iter()
                     .filter(|warning| {
                         warning.get("message").and_then(Value::as_str)
@@ -3264,7 +3160,7 @@ fn run_check(path: &Path) -> (Value, i32) {
                     })
                     .collect()
             } else {
-                check_warnings(&model)
+                model_warnings(&model)
             };
             output.insert("warnings".to_owned(), Value::Array(warnings));
             if let Some(implements) = implements {
@@ -4876,39 +4772,6 @@ fn metadata(meta: Option<&fsl_syntax::MetaTag>) -> Value {
         Value::Null,
         |meta| json!({"id": meta.id, "text": meta.text}),
     )
-}
-
-fn requirement_metadata(
-    annotations: &Annotations,
-    legacy: Option<&fsl_syntax::MetaTag>,
-) -> Vec<Value> {
-    let requirements = annotations
-        .requirements()
-        .expect("checked model annotations are valid")
-        .into_iter()
-        .map(|requirement| json!({"id":requirement.id,"text":requirement.text}))
-        .collect::<Vec<_>>();
-    if requirements.is_empty() {
-        legacy
-            .filter(|meta| !meta.id.eq_ignore_ascii_case("undecided"))
-            .map_or_else(Vec::new, |meta| {
-                vec![json!({"id":meta.id,"text":meta.text})]
-            })
-    } else {
-        requirements
-    }
-}
-
-fn insert_requirement_metadata(
-    output: &mut Map<String, Value>,
-    annotations: &Annotations,
-    legacy: Option<&fsl_syntax::MetaTag>,
-) {
-    let requirements = requirement_metadata(annotations, legacy);
-    if let Some(first) = requirements.first() {
-        output.insert("requirement".to_owned(), first.clone());
-        output.insert("requirements".to_owned(), Value::Array(requirements));
-    }
 }
 
 fn param_skeleton(model: &KernelModel, param: &ParamDef) -> Value {
@@ -12434,43 +12297,6 @@ fn run_refine_chain(
     (Value::Object(output), 0)
 }
 
-fn duplicate_statement_write(
-    statements: &[fsl_core::KernelStatement],
-) -> Option<fsl_core::KernelLValue> {
-    fn writes(
-        statements: &[fsl_core::KernelStatement],
-    ) -> Result<Vec<fsl_core::KernelLValue>, Box<fsl_core::KernelLValue>> {
-        let mut seen = Vec::new();
-        for statement in statements {
-            let candidates = match statement {
-                fsl_core::KernelStatement::Assign { target, .. } => vec![target.clone()],
-                fsl_core::KernelStatement::If {
-                    then_statements,
-                    else_statements,
-                    ..
-                } => {
-                    let mut branch = writes(then_statements)?;
-                    for target in writes(else_statements)? {
-                        if !branch.contains(&target) {
-                            branch.push(target);
-                        }
-                    }
-                    branch
-                }
-                fsl_core::KernelStatement::ForAll { statements, .. } => writes(statements)?,
-            };
-            for target in candidates {
-                if seen.contains(&target) {
-                    return Err(Box::new(target));
-                }
-                seen.push(target);
-            }
-        }
-        Ok(seen)
-    }
-    writes(statements).err().map(|target| *target)
-}
-
 fn statement_location(statements: &[fsl_core::KernelStatement]) -> Value {
     statements.first().map_or(Value::Null, |statement| {
         let span = match statement {
@@ -12999,32 +12825,6 @@ fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
             None => false,
         },
     }
-}
-
-fn check_warnings(model: &KernelModel) -> Vec<Value> {
-    let mut warnings = model
-        .state
-        .iter()
-        .filter(|(_, ty)| {
-            matches!(ty, TypeRef::Map(key, _) if matches!(key.as_ref(), TypeRef::Int))
-        })
-        .map(|(name, _)| {
-            json!({
-                "message": format!("Map<Int, ...> on '{}' is deprecated; use a bounded domain type as key", display(name)),
-                "hint": "declare `type K = 0..<max>` and use `Map<K, ...>`",
-            })
-        })
-        .collect::<Vec<_>>();
-    if model.invariants.is_empty()
-        && model.transitions.is_empty()
-        && model.reachables.is_empty()
-        && model.leadstos.is_empty()
-    {
-        warnings.push(json!({
-            "message": "spec declares no user invariants (only implicit type bounds are checked)",
-        }));
-    }
-    warnings
 }
 
 fn parse_params(

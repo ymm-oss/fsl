@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
-use crate::{FslValue, KernelModel, OriginChain, OriginSite, TraceStep};
+use crate::{FslValue, KernelModel, OriginChain, OriginSite, TraceStep, TypeRef};
 
 #[must_use]
 pub fn display_name(name: &str) -> String {
@@ -106,6 +106,108 @@ pub fn state_json(state: &BTreeMap<String, FslValue>) -> Value {
             .map(|(name, value)| (display_name(name), fsl_value_json(value)))
             .collect(),
     )
+}
+
+#[must_use]
+pub fn state_summary(model: &KernelModel, state: &BTreeMap<String, FslValue>) -> String {
+    model
+        .state
+        .iter()
+        .filter_map(|(name, ty)| {
+            state
+                .get(name)
+                .map(|value| format!("{}={}", display_name(name), format_value(model, value, ty)))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> String {
+    match value {
+        FslValue::Int(value) => value.to_string(),
+        FslValue::Bool(value) => value.to_string(),
+        FslValue::Enum { member, .. } => member.clone(),
+        FslValue::None => "null".to_owned(),
+        FslValue::Some(value) => format_value(
+            model,
+            value,
+            match ty {
+                TypeRef::Option(inner) => inner,
+                _ => ty,
+            },
+        ),
+        FslValue::Struct { type_name, fields } => {
+            let declared = model.struct_fields(type_name).unwrap_or(&[]);
+            format!(
+                "{{{}}}",
+                declared
+                    .iter()
+                    .filter_map(|(name, field_ty)| fields
+                        .get(name)
+                        .map(|value| format!("{name}: {}", format_value(model, value, field_ty))))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Map(entries) => {
+            let (key_ty, value_ty) = match ty {
+                TypeRef::Map(key, value) => (key.as_ref(), value.as_ref()),
+                _ => (ty, ty),
+            };
+            format!(
+                "{{{}}}",
+                entries
+                    .iter()
+                    .map(|(key, value)| format!(
+                        "{}: {}",
+                        format_value(model, key, key_ty),
+                        format_value(model, value, value_ty)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Set(values) => {
+            let inner = match ty {
+                TypeRef::Set(inner) => inner.as_ref(),
+                _ => ty,
+            };
+            format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| format_value(model, value, inner))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Seq(values) => {
+            let inner = match ty {
+                TypeRef::Seq(inner, _) => inner.as_ref(),
+                _ => ty,
+            };
+            format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| format_value(model, value, inner))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        FslValue::Relation(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|(source, target)| format!(
+                    "[{}, {}]",
+                    fsl_value_json(source),
+                    fsl_value_json(target)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 #[must_use]

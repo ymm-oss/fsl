@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use fsl_core::{
     CoreError, FileResolver, KernelModel, TypeDef, TypeRef, display_name, fsl_value_json,
-    trace_json,
+    model_warnings, trace_json,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -123,16 +123,7 @@ fn check(request: &Request) -> Value {
     let mut output = envelope();
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
-    let warnings = if model.invariants.is_empty()
-        && model.transitions.is_empty()
-        && model.reachables.is_empty()
-        && model.leadstos.is_empty()
-    {
-        json!([{"message": "spec declares no user invariants (only implicit type bounds are checked)"}])
-    } else {
-        json!([])
-    };
-    output.insert("warnings".to_owned(), warnings);
+    output.insert("warnings".to_owned(), Value::Array(model_warnings(&model)));
     Value::Object(output)
 }
 
@@ -279,7 +270,21 @@ fn render_verify(model: &KernelModel, options: &Options, result: fsl_verifier::B
             )
         },
     );
-    output.insert("warnings".to_owned(), json!([]));
+    output.insert(
+        "warnings".to_owned(),
+        Value::Array(fsl_runtime::verification_warnings(
+            model,
+            options.depth,
+            options.deadlock == "warn",
+            result.deadlock_step,
+            result
+                .deadlock_trace
+                .as_ref()
+                .and_then(|trace| trace.last())
+                .map(|entry| &entry.state),
+            &result.action_coverage,
+        )),
+    );
     output.insert(
         "note".to_owned(),
         json!(format!(
@@ -327,6 +332,72 @@ mod tests {
         };
         let kernel = fsl_core::parse_kernel_source(source, &resolver).expect("parse");
         fsl_core::build_model(kernel).expect("model")
+    }
+
+    #[test]
+    fn build_rejects_duplicate_action_writes() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: "spec Duplicate { state { x: Bool } init { x = false } action write_twice() { x = true x = false } }".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+
+        let error = build(&request).expect_err("duplicate write must fail in Worker build");
+
+        assert_eq!(error["kind"], json!("semantics"));
+        assert!(
+            error["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("same state location"))
+        );
+    }
+
+    #[test]
+    fn verified_result_contains_shared_warnings() {
+        let model = model_from(
+            "spec Warnings { state { x: Bool } init { x = false } \
+             action blocked() { requires x x = false } \
+             invariant Vacuous \"REQ-WARN: vacuous warning\" { x => x } }",
+        );
+        let initial = TraceStep {
+            step: 0,
+            state: BTreeMap::from([("x".to_owned(), FslValue::Bool(false))]),
+            action: None,
+            changes: BTreeMap::new(),
+        };
+        let result = BmcResult {
+            spec: model.name.clone(),
+            depth: 2,
+            violation: None,
+            leadsto_violation: None,
+            reachables: BTreeMap::new(),
+            deadlock_step: Some(0),
+            deadlock_trace: Some(vec![initial]),
+            action_coverage: BTreeMap::from([("blocked".to_owned(), false)]),
+            frontier_progress: false,
+        };
+
+        let envelope = render_verify(&model, &Options::default(), result);
+        let warnings = envelope["warnings"].as_array().expect("warnings array");
+
+        assert_eq!(warnings.len(), 3);
+        assert_eq!(warnings[0]["kind"], json!("vacuous_implication"));
+        assert_eq!(
+            warnings[0]["requirement"],
+            json!({"id": "REQ-WARN", "text": "vacuous warning"})
+        );
+        assert!(warnings[0]["loc"].is_object());
+        assert_eq!(warnings[1]["kind"], json!("deadlock"));
+        assert_eq!(
+            warnings[1]["message"],
+            json!("deadlock reachable at step 0 (state: x=false)")
+        );
+        assert!(
+            warnings[2]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("action 'blocked' is never enabled"))
+        );
     }
 
     #[test]

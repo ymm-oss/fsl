@@ -917,6 +917,14 @@ impl ModelBuilder {
                 ActionItem::Statement(statement) => statements.push(statement.clone()),
             }
         }
+        let mut index_constants = self.consts.clone();
+        index_constants.extend(self.enum_members.clone());
+        if duplicate_statement_write(&statements, &index_constants).is_some() {
+            return Err(model_error(
+                "an action may not assign the same state location more than once",
+            )
+            .with_origin(self.origins.diagnostic_origin(&action_target(name))));
+        }
         Ok(ActionDef {
             name: name.to_owned(),
             span,
@@ -1016,6 +1024,92 @@ impl ModelBuilder {
         match eval_const(expr, &self.consts)? {
             Value::Int(value) => Ok(value),
             _ => Err(model_error("constant expression must be an integer")),
+        }
+    }
+}
+
+fn duplicate_statement_write(
+    statements: &[Statement],
+    constants: &BTreeMap<String, Value>,
+) -> Option<LValue> {
+    fn writes(
+        statements: &[Statement],
+        constants: &BTreeMap<String, Value>,
+    ) -> Result<Vec<LValue>, Box<LValue>> {
+        let mut seen = Vec::new();
+        for statement in statements {
+            let candidates = match statement {
+                Statement::Assign { target, .. } => vec![target.clone()],
+                Statement::If {
+                    then_statements,
+                    else_statements,
+                    ..
+                } => {
+                    let mut branch = writes(then_statements, constants)?;
+                    branch.extend(writes(else_statements, constants)?);
+                    branch
+                }
+                Statement::ForAll {
+                    binder, statements, ..
+                } => {
+                    let repeated = writes(statements, constants)?;
+                    if let Some(target) = repeated
+                        .iter()
+                        .find(|target| !write_is_injective_for_binder(target, binder))
+                    {
+                        return Err(Box::new(target.clone()));
+                    }
+                    repeated
+                }
+            };
+            if let Some(target) = candidates.iter().find(|target| {
+                seen.iter()
+                    .any(|previous| lvalues_may_alias(previous, target, constants))
+            }) {
+                return Err(Box::new(target.clone()));
+            }
+            seen.extend(candidates);
+        }
+        Ok(seen)
+    }
+    writes(statements, constants).err().map(|target| *target)
+}
+
+fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
+    let name = match binder {
+        Binder::Typed { name, .. } | Binder::Range { name, .. } => name,
+        Binder::Collection { .. } => return false,
+    };
+    let (_, index, _) = lvalue_path(target);
+    matches!(index, Some(Expr::Var(index)) if index == name)
+}
+
+fn lvalues_may_alias(left: &LValue, right: &LValue, constants: &BTreeMap<String, Value>) -> bool {
+    let (left_root, left_index, left_fields) = lvalue_path(left);
+    let (right_root, right_index, right_fields) = lvalue_path(right);
+    if left_root != right_root {
+        return false;
+    }
+    if let (Some(left), Some(right)) = (left_index, right_index)
+        && let (Ok(left), Ok(right)) = (eval_const(left, constants), eval_const(right, constants))
+        && left != right
+    {
+        return false;
+    }
+    left_fields
+        .iter()
+        .zip(&right_fields)
+        .all(|(left, right)| left == right)
+}
+
+fn lvalue_path(target: &LValue) -> (&str, Option<&Expr>, Vec<&str>) {
+    match target {
+        LValue::Var(name) => (name, None, Vec::new()),
+        LValue::Index(name, index) => (name, Some(index), Vec::new()),
+        LValue::Field(base, field) => {
+            let (root, index, mut fields) = lvalue_path(base);
+            fields.push(field);
+            (root, index, fields)
         }
     }
 }

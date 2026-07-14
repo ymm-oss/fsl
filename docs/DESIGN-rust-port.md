@@ -209,6 +209,31 @@ non-deterministic traces. The migration harness therefore has three layers:
    content and parser wording; and
 3. bidirectional trace replay to validate non-unique Z3 witnesses semantically.
 
+### Shared semantic diagnostics
+
+Frontend code must not decide whether a specification is semantically valid or
+which verification warnings apply. Those decisions are shared in the same
+solver-independent crates used by both delivery surfaces:
+
+- `fsl-core::build_model` rejects duplicate writes on one action path. A model
+  that reaches either native verification or the Worker has therefore passed
+  the same semantic gate.
+- `fsl-core` owns model-only warnings, requirement metadata projection, and
+  deterministic state summaries.
+- `fsl-runtime::verification_warnings` owns vacuous-implication reachability,
+  deadlock warnings, and action-coverage warnings. It consumes only the checked
+  model and backend-neutral result facts.
+- Shared warnings use typed `kind` values for downstream selection. In
+  particular, induction removes bounded `kind:"deadlock"` warnings through
+  `fsl-runtime::induction_warnings`; frontends never classify a warning by
+  searching its human-readable message.
+
+The CLI and Worker may translate arguments and I/O, but they only call these
+shared functions. Warning order is model warnings, vacuity warnings, deadlock,
+then action coverage; this order is part of native/Worker parity. A regression
+test must fail if either frontend accepts a duplicate-write model or replaces
+shared warnings with a local empty/default list.
+
 Any new allowlist entry requires a reason tied to a known nondeterminism. Verdict,
 location, assurance, and exit-code differences are never allowlisted.
 

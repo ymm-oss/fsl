@@ -41,6 +41,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- Native and browser verification now share duplicate-write validation and
+  verification warning generation. Duplicate writes are rejected while building
+  the checked Kernel model for `check` and `verify`; model, vacuity, deadlock,
+  and action-coverage warnings come from solver-independent shared crates rather
+  than frontend-local implementations. The Worker no longer accepts ambiguous
+  write order or emits an unconditional empty warning list. Indexed writes that
+  may alias are rejected unless constant indexes prove them distinct, and
+  induction selects typed warning kinds instead of message substrings (issue
+  #267).
 - The bounded `leadsTo ... within N` deadline check no longer misses a
   violation when the path deadlocks after the deadline. The deadline probe ran
   as a single post-hoc pass after the BMC unrolling loop, by which point every

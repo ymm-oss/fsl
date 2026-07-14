@@ -31,6 +31,28 @@ fn native_cli_checks_a_repository_spec_without_python() {
 }
 
 #[test]
+fn native_check_and_verify_share_the_core_duplicate_write_gate() {
+    let fixture = "rust/fslc/tests/fixtures/duplicate_write.fsl";
+
+    for args in [
+        vec!["check", fixture],
+        vec!["verify", fixture, "--no-cache"],
+    ] {
+        let command = args[0];
+        let (value, status) = run_cli(&args);
+        assert_eq!(status, 2, "{command}");
+        assert_eq!(value["result"], "error", "{command}");
+        assert_eq!(value["kind"], "semantics", "{command}");
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("same state location")),
+            "{command}: {value}"
+        );
+    }
+}
+
+#[test]
 fn native_cli_preserves_bmc_outcomes() {
     let (verified, status) = run_cli(&[
         "verify",

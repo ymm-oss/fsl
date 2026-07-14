@@ -651,8 +651,11 @@ cannot be assigned both inline and in `init`.
    For `Map<K, Struct>` values, the path includes the field: `m[k].f1 = ...`
    and `m[k].f2 = ...` in one action are allowed independent field writes
    (`check` and `verify --depth 1` succeed in the repro). Repeating the same
-   field, e.g. `m[k].f1 = 1; m[k].f1 = 2`, fails during verification with
-   `kind:"semantics"` and `double assignment to 'm' field 'f1' on the same path`.
+   field, e.g. `m[k].f1 = 1; m[k].f1 = 2`, is rejected while building the
+   checked Kernel model. Indexed writes are rejected unless their indices are
+   provably distinct constants; `requires k != j` and local constant bindings
+   do not establish distinctness. Native `check`/`verify` and the browser Worker all
+   return `kind:"semantics"` before a verifier backend runs.
 
    ```fsl
    struct Pair { f1: V, f2: V }
