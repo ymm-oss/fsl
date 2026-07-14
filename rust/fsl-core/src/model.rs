@@ -386,7 +386,7 @@ impl ModelBuilder {
     fn build(mut self) -> Result<KernelModel, ModelError> {
         self.collect_consts()?;
         self.collect_types()?;
-        self.collect_legacy_annotations();
+        self.collect_declaration_annotations();
         self.annotations.validate().map_err(|error| ModelError {
             message: error.message,
             origin: Some(Box::new(source_origin("annotation", error.span, None))),
@@ -509,7 +509,9 @@ impl ModelBuilder {
                 // example an NFR age counter) after the user's init block.
                 // Every fragment is part of the same logical initialization;
                 // replacing the earlier fragment leaves user state unconstrained.
-                SpecItem::Init { statements, meta } => {
+                SpecItem::Init {
+                    statements, meta, ..
+                } => {
                     init.extend(statements.clone());
                     if init_meta.is_none() {
                         init_meta.clone_from(meta);
@@ -945,7 +947,8 @@ impl ModelBuilder {
         })
     }
 
-    fn collect_legacy_annotations(&mut self) {
+    #[allow(clippy::too_many_lines)]
+    fn collect_declaration_annotations(&mut self) {
         if let Some(meta) = &self.spec.meta {
             self.annotations.bind(
                 SPEC_TARGET,
@@ -957,57 +960,113 @@ impl ModelBuilder {
             );
         }
         for item in &self.spec.items {
-            let (target, meta, span) = match item {
-                SpecItem::Init { meta, .. } => {
-                    (Some(INIT_TARGET.to_owned()), meta.as_ref(), unknown_span())
-                }
+            let (target, meta, annotations, span) = match item {
+                SpecItem::Init {
+                    meta, annotations, ..
+                } => (
+                    Some(INIT_TARGET.to_owned()),
+                    meta.as_ref(),
+                    Some(annotations),
+                    unknown_span(),
+                ),
                 SpecItem::Action {
-                    name, meta, span, ..
-                } => (Some(action_target(name)), meta.as_ref(), *span),
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
+                } => (
+                    Some(action_target(name)),
+                    meta.as_ref(),
+                    Some(annotations),
+                    *span,
+                ),
                 SpecItem::Invariant {
-                    name, meta, span, ..
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
                 } => (
                     Some(property_target("invariant", name)),
                     meta.as_ref(),
+                    Some(annotations),
                     *span,
                 ),
                 SpecItem::Trans {
-                    name, meta, span, ..
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
                 }
                 | SpecItem::Unless {
-                    name, meta, span, ..
-                } => (Some(property_target("trans", name)), meta.as_ref(), *span),
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
+                } => (
+                    Some(property_target("trans", name)),
+                    meta.as_ref(),
+                    Some(annotations),
+                    *span,
+                ),
                 SpecItem::Reachable {
-                    name, meta, span, ..
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
                 } => (
                     Some(property_target("reachable", name)),
                     meta.as_ref(),
+                    Some(annotations),
                     *span,
                 ),
                 SpecItem::Until {
-                    name, meta, span, ..
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
                 } => {
+                    let trans_target = property_target("trans", &format!("{name}_until_safety"));
+                    let leadsto_target = property_target("leadsTo", name);
+                    self.annotations
+                        .extend(trans_target.clone(), annotations.clone());
+                    self.annotations
+                        .extend(leadsto_target.clone(), annotations.clone());
                     if let Some(meta) = meta {
                         let annotation = Annotation::from_legacy(
                             meta.id.clone(),
                             meta.text.clone(),
                             meta.span.unwrap_or(*span),
                         );
-                        self.annotations.bind(
-                            property_target("trans", &format!("{name}_until_safety")),
-                            annotation.clone(),
-                        );
-                        self.annotations
-                            .bind(property_target("leadsTo", name), annotation);
+                        self.annotations.bind(trans_target, annotation.clone());
+                        self.annotations.bind(leadsto_target, annotation);
                     }
-                    (None, None, *span)
+                    (None, None, None, *span)
                 }
                 SpecItem::LeadsTo {
-                    name, meta, span, ..
-                } => (Some(property_target("leadsTo", name)), meta.as_ref(), *span),
-                _ => (None, None, unknown_span()),
+                    name,
+                    meta,
+                    span,
+                    annotations,
+                    ..
+                } => (
+                    Some(property_target("leadsTo", name)),
+                    meta.as_ref(),
+                    Some(annotations),
+                    *span,
+                ),
+                _ => (None, None, None, unknown_span()),
             };
-            if let (Some(target), Some(meta)) = (target, meta) {
+            let Some(target) = target else { continue };
+            if let Some(annotations) = annotations {
+                self.annotations.extend(target.clone(), annotations.clone());
+            }
+            if let Some(meta) = meta {
                 self.annotations.bind(
                     target,
                     Annotation::from_legacy(

@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
-    ActionItem, Binder, DomainAggregate, DomainDecide, DomainEffect, DomainField, DomainLoc,
-    DomainSaga, DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, Expr, LValue,
-    MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, StateField, Statement, SurfaceSpec,
-    SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern, SyntaxQualifiedName,
-    SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
+    ActionItem, Annotations, Binder, DomainAggregate, DomainDecide, DomainEffect, DomainField,
+    DomainLoc, DomainSaga, DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, Expr,
+    LValue, MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, StateField, Statement,
+    SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern,
+    SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
 };
 
 use crate::CoreError;
@@ -2006,6 +2006,7 @@ fn action(name: String, params: Vec<Param>, items: Vec<ActionItem>, span: Span) 
         fair: false,
         meta: None,
         sync: false,
+        annotations: Annotations::default(),
     }
 }
 
@@ -2245,6 +2246,7 @@ pub(crate) fn lower_domain_surface(
     items.push(SpecItem::Init {
         statements: init,
         meta: None,
+        annotations: Annotations::default(),
     });
 
     lower_aggregate_actions(&resolver, domain, &mut items)?;
@@ -2726,6 +2728,7 @@ fn lower_properties(
                     "DOMAIN-INVARIANT",
                     format!("{}.{}", aggregate.name, invariant.name),
                 )),
+                annotations: Annotations::default(),
             });
         }
     }
@@ -2740,6 +2743,7 @@ fn lower_properties(
                     "DOMAIN-SAGA",
                     format!("{}.{}", saga.name, invariant.name),
                 )),
+                annotations: Annotations::default(),
             });
         }
     }
@@ -2783,6 +2787,7 @@ fn lower_properties(
                 "DOMAIN-EFFECT",
                 format!("{} success is sticky", effect.name),
             )),
+            annotations: Annotations::default(),
         });
     }
     Ok(())

@@ -312,6 +312,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 })
                 .collect(),
             meta: None,
+            annotations: Annotations::default(),
         });
     }
     for process in &processes {
@@ -355,6 +356,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 fair: true,
                 meta: metadata,
                 sync: false,
+                annotations: transition.annotations.clone(),
             });
         }
     }
@@ -395,6 +397,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             text,
             body,
             span,
+            annotations: policy_annotations,
             ..
         } = policy
         else {
@@ -406,6 +409,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 expr: Box::new(expr.clone()),
                 span: *span,
                 meta: meta(id, text),
+                annotations: policy_annotations.clone(),
             }),
             BusinessPolicyBody::Responds {
                 binders,
@@ -422,6 +426,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 decreases: None,
                 within: within.clone(),
                 helpful: Vec::new(),
+                annotations: policy_annotations.clone(),
             }),
             BusinessPolicyBody::Eventually {
                 case_name,
@@ -446,6 +451,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     decreases: None,
                     within: None,
                     helpful: Vec::new(),
+                    annotations: policy_annotations.clone(),
                 });
             }
             BusinessPolicyBody::Precedence { .. } => {}
@@ -457,6 +463,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             text,
             body,
             span,
+            annotations: goal_annotations,
             ..
         } = goal
         else {
@@ -495,6 +502,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             expr: Box::new(expr),
             span: *span,
             meta: meta(id, text),
+            annotations: goal_annotations.clone(),
         });
     }
     let mut kernel = lower_direct_spec(SurfaceSpec {
@@ -536,6 +544,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
             span,
             fair,
             sync,
+            annotations,
             ..
         } => SpecItem::Action {
             name,
@@ -545,22 +554,33 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
             fair,
             meta: metadata,
             sync,
+            annotations,
         },
         SpecItem::Invariant {
-            name, expr, span, ..
+            name,
+            expr,
+            span,
+            annotations,
+            ..
         } => SpecItem::Invariant {
             name,
             expr,
             span,
             meta: metadata,
+            annotations,
         },
         SpecItem::Reachable {
-            name, expr, span, ..
+            name,
+            expr,
+            span,
+            annotations,
+            ..
         } => SpecItem::Reachable {
             name,
             expr,
             span,
             meta: metadata,
+            annotations,
         },
         SpecItem::LeadsTo {
             name,
@@ -571,6 +591,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
             decreases,
             within,
             helpful,
+            annotations,
             ..
         } => SpecItem::LeadsTo {
             name,
@@ -582,6 +603,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
             decreases,
             within,
             helpful,
+            annotations,
         },
         other => other,
     }
@@ -612,6 +634,7 @@ fn lower_requirement_action(
             fair: action.fair,
             meta: metadata.or_else(|| action.meta.clone()),
             sync: false,
+            annotations: action.annotations.clone(),
         }],
         Some(branches) => branches
             .iter()
@@ -628,6 +651,7 @@ fn lower_requirement_action(
                     fair: action.fair,
                     meta: metadata.clone().or_else(|| action.meta.clone()),
                     sync: false,
+                    annotations: action.annotations.clone(),
                 }
             })
             .collect(),
@@ -921,6 +945,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         items.push(SpecItem::Init {
             statements: init,
             meta: None,
+            annotations: Annotations::default(),
         });
     }
     for process in &processes {
@@ -1000,6 +1025,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 fair: true,
                 meta: metadata,
                 sync: false,
+                annotations: transition.annotations.clone(),
             });
         }
     }
@@ -1010,6 +1036,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             text,
             items: declarations,
             span: requirement_span,
+            annotations: block_annotations,
         } = requirement
         else {
             unreachable!();
@@ -1039,6 +1066,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                                     ),
                                 ));
                             }
+                            for annotation in block_annotations.source_order() {
+                                extra_annotations
+                                    .push((crate::action_target(name), annotation.clone()));
+                            }
                         }
                     }
                     items.extend(lowered);
@@ -1065,6 +1096,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                                     inner.span.unwrap_or_else(|| property_span(property)),
                                 ),
                             ));
+                        }
+                    }
+                    for target in property_targets(&lowered) {
+                        for annotation in block_annotations.source_order() {
+                            extra_annotations.push((target.clone(), annotation.clone()));
                         }
                     }
                     items.push(lowered);
@@ -1209,6 +1245,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             items.push(SpecItem::Init {
                 statements: vec![init_statement],
                 meta: None,
+                annotations: Annotations::default(),
             });
             age_info.insert(
                 name,
@@ -1282,6 +1319,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             fair: false,
             meta: None,
             sync: false,
+            annotations: Annotations::default(),
         });
         for (
             index,
@@ -1333,6 +1371,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 expr: Box::new(expression),
                 span: *span,
                 meta: metadata.clone(),
+                annotations: Annotations::default(),
             });
         }
     }
@@ -1419,6 +1458,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                     span,
                 }],
                 meta: None,
+                annotations: Annotations::default(),
             },
             SpecItem::Action {
                 name: "_governance_noop".to_owned(),
@@ -1428,6 +1468,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                 fair: false,
                 meta: metadata.clone(),
                 sync: false,
+                annotations: Annotations::default(),
             },
             SpecItem::Invariant {
                 name: "_governance_catalog_ok".to_owned(),
@@ -1438,6 +1479,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                 }),
                 span,
                 meta: metadata,
+                annotations: Annotations::default(),
             },
             SpecItem::Terminal {
                 expr: Box::new(Expr::Bool(true)),
@@ -1469,6 +1511,7 @@ fn lower_catalog_sentinel(name: String, prefix: &str, id: &str) -> Result<Kernel
                     span,
                 }],
                 meta: None,
+                annotations: Annotations::default(),
             },
             SpecItem::Action {
                 name: action_name,
@@ -1478,12 +1521,14 @@ fn lower_catalog_sentinel(name: String, prefix: &str, id: &str) -> Result<Kernel
                 fair: false,
                 meta: metadata.clone(),
                 sync: false,
+                annotations: Annotations::default(),
             },
             SpecItem::Invariant {
                 name: invariant_name,
                 expr: Box::new(Expr::Var(state_name)),
                 span,
                 meta: metadata,
+                annotations: Annotations::default(),
             },
             SpecItem::Terminal {
                 expr: Box::new(Expr::Bool(true)),
@@ -1556,8 +1601,9 @@ pub fn requirements_trace_contract(
                 steps,
                 expectation,
                 span,
+                annotations: surface_annotations,
             } => {
-                let annotations = trace_case_annotations(&id, &text, span)?;
+                let annotations = trace_case_annotations(&id, &text, span, &surface_annotations)?;
                 let expectation = match expectation {
                     fsl_syntax::AcceptanceExpectation::Expr(expr, _) => {
                         RequirementsTraceExpectation::Expr(expr)
@@ -1588,8 +1634,9 @@ pub fn requirements_trace_contract(
                 text,
                 steps,
                 span,
+                annotations: surface_annotations,
             } => {
-                let annotations = trace_case_annotations(&id, &text, span)?;
+                let annotations = trace_case_annotations(&id, &text, span, &surface_annotations)?;
                 forbidden.push(RequirementsTraceCase {
                     annotations,
                     id,
@@ -1613,12 +1660,14 @@ fn trace_case_annotations(
     id: &str,
     text: &str,
     span: fsl_syntax::Span,
+    surface_annotations: &Annotations,
 ) -> Result<Annotations, CoreError> {
-    let annotations = Annotations::new(vec![Annotation::Requirement {
+    let mut annotations = Annotations::new(vec![Annotation::Requirement {
         id: id.to_owned(),
         text: Some(text.to_owned()),
         span,
     }]);
+    annotations.extend(surface_annotations.source_order().iter().cloned());
     annotations
         .validate()
         .map_err(|error| core_error(error.message, error.span))?;

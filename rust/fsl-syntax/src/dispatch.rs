@@ -4,11 +4,9 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::{
-    Annotation, AnnotationValue, Annotations, ParseError, Span, SurfaceAgent, SurfaceDocument,
-    SymbolPath, SyntaxIdent, Token, TokenKind, lex,
-};
+use crate::{Annotations, ParseError, Span, SurfaceAgent, SurfaceDocument, Token, TokenKind, lex};
 
 /// Original source passed beside the shared token stream to a dialect frontend.
 #[derive(Clone, Copy, Debug)]
@@ -100,7 +98,8 @@ fn validate_registry(registry: &[FrontendRegistration]) -> Result<(), String> {
 /// Returns a coded parse error for empty, annotation-only, or unknown documents.
 pub fn dialect_keyword(source: &str) -> Result<&'static str, ParseError> {
     let tokens = lex(source).map_err(ParseError::from)?;
-    let (_, cursor) = leading_annotations(&tokens)?;
+    let mut cursor = 0;
+    leading_annotations(&tokens, &mut cursor)?;
     select_frontend(&tokens, cursor).map(|registration| registration.keyword)
 }
 
@@ -112,7 +111,8 @@ pub fn dialect_keyword(source: &str) -> Result<&'static str, ParseError> {
 /// Returns a coded parse error when the document has no declaration identifier.
 pub fn declaration_keyword(source: &str) -> Result<String, ParseError> {
     let tokens = lex_declaration_prefix(source).map_err(ParseError::from)?;
-    let (_, cursor) = leading_annotations(&tokens)?;
+    let mut cursor = 0;
+    leading_annotations(&tokens, &mut cursor)?;
     declaration_identifier(&tokens, cursor).map(str::to_owned)
 }
 
@@ -124,7 +124,8 @@ pub fn declaration_keyword(source: &str) -> Result<String, ParseError> {
 pub fn parse_document(source: SourceFile<'_>) -> Result<ParsedDocument, ParseError> {
     LazyLock::force(&VALID_REGISTRY);
     let tokens = lex(source.source()).map_err(ParseError::from)?;
-    let (annotations, cursor) = leading_annotations(&tokens)?;
+    let mut cursor = 0;
+    let annotations = leading_annotations(&tokens, &mut cursor)?;
     let registration = select_frontend(&tokens, cursor)?;
     let surface = (registration.parse)(source, tokens, cursor)?;
     Ok(ParsedDocument {
@@ -282,178 +283,6 @@ fn parse_agent(
             end: end.end,
         },
     }))
-}
-
-fn leading_annotations(tokens: &[Token]) -> Result<(Annotations, usize), ParseError> {
-    let mut cursor = 0;
-    let mut annotations = Vec::new();
-    while symbol(tokens, cursor, "@") {
-        annotations.push(annotation(tokens, &mut cursor)?);
-    }
-    let annotations = Annotations::new(annotations);
-    annotations
-        .validate()
-        .map_err(|error| ParseError::coded("FSL-ANNOTATION-INVALID", error.message, error.span))?;
-    Ok((annotations, cursor))
-}
-
-fn annotation(tokens: &[Token], cursor: &mut usize) -> Result<Annotation, ParseError> {
-    let start = tokens[*cursor].span;
-    *cursor += 1;
-    let (path, _) = symbol_path(tokens, cursor)?;
-    expect_symbol(tokens, cursor, "(")?;
-    let mut arguments = Vec::new();
-    if !symbol(tokens, *cursor, ")") {
-        loop {
-            arguments.push(annotation_value(tokens, cursor)?);
-            if symbol(tokens, *cursor, ")") {
-                break;
-            }
-            expect_symbol(tokens, cursor, ",")?;
-        }
-    }
-    let end = tokens[*cursor].span;
-    *cursor += 1;
-    let span = Span {
-        start: start.start,
-        end: end.end,
-    };
-    match path.segments() {
-        [name] if name == "requirement" => match arguments.as_slice() {
-            [AnnotationValue::String(id)] => Ok(Annotation::Requirement {
-                id: id.clone(),
-                text: None,
-                span,
-            }),
-            [AnnotationValue::String(id), AnnotationValue::String(text)] => {
-                Ok(Annotation::Requirement {
-                    id: id.clone(),
-                    text: Some(text.clone()),
-                    span,
-                })
-            }
-            _ => Err(annotation_shape(
-                "requirement",
-                "one or two string arguments",
-                span,
-            )),
-        },
-        [name] if name == "undecided" => match arguments.as_slice() {
-            [AnnotationValue::String(reason)] => Ok(Annotation::Undecided {
-                reason: reason.clone(),
-                span,
-            }),
-            _ => Err(annotation_shape("undecided", "one string argument", span)),
-        },
-        [name] if name == "kind" => match arguments.as_slice() {
-            [AnnotationValue::String(id)] => Ok(Annotation::Kind {
-                id: id.clone(),
-                text: None,
-                span,
-            }),
-            [AnnotationValue::String(id), AnnotationValue::String(text)] => Ok(Annotation::Kind {
-                id: id.clone(),
-                text: Some(text.clone()),
-                span,
-            }),
-            _ => Err(annotation_shape(
-                "kind",
-                "one or two string arguments",
-                span,
-            )),
-        },
-        _ => Ok(Annotation::Custom {
-            namespace: path,
-            arguments,
-            span,
-        }),
-    }
-}
-
-fn annotation_shape(name: &str, expected: &str, span: Span) -> ParseError {
-    ParseError::coded(
-        "FSL-ANNOTATION-ARGUMENTS",
-        format!("@{name} expects {expected}"),
-        span,
-    )
-}
-
-fn annotation_value(tokens: &[Token], cursor: &mut usize) -> Result<AnnotationValue, ParseError> {
-    let token = &tokens[*cursor];
-    match &token.kind {
-        TokenKind::String(value) => {
-            *cursor += 1;
-            Ok(AnnotationValue::String(value.clone()))
-        }
-        TokenKind::Int(value) => {
-            *cursor += 1;
-            Ok(AnnotationValue::Integer(*value))
-        }
-        TokenKind::Ident(value) if value == "true" || value == "false" => {
-            *cursor += 1;
-            Ok(AnnotationValue::Boolean(value == "true"))
-        }
-        TokenKind::Ident(_) => {
-            symbol_path(tokens, cursor).map(|(path, _)| AnnotationValue::Symbol(path))
-        }
-        _ => Err(ParseError::coded(
-            "FSL-ANNOTATION-ARGUMENTS",
-            "annotation argument must be a string, integer, Boolean, or symbol path",
-            token.span,
-        )),
-    }
-}
-
-fn symbol_path(tokens: &[Token], cursor: &mut usize) -> Result<(SymbolPath, Span), ParseError> {
-    let start = tokens[*cursor].span;
-    let mut segments = Vec::new();
-    loop {
-        match &tokens[*cursor].kind {
-            TokenKind::Ident(segment) => {
-                segments.push(SyntaxIdent {
-                    text: segment.clone(),
-                    span: tokens[*cursor].span,
-                });
-                *cursor += 1;
-            }
-            _ => {
-                return Err(ParseError::coded(
-                    "FSL-ANNOTATION-PATH",
-                    "expected annotation symbol path segment",
-                    tokens[*cursor].span,
-                ));
-            }
-        }
-        if !symbol(tokens, *cursor, ".") {
-            break;
-        }
-        *cursor += 1;
-    }
-    let end = tokens[*cursor - 1].span;
-    let span = Span {
-        start: start.start,
-        end: end.end,
-    };
-    SymbolPath::from_idents(segments, span)
-        .map(|path| (path, span))
-        .map_err(|error| ParseError::coded("FSL-ANNOTATION-PATH", error.message, error.span))
-}
-
-fn expect_symbol(tokens: &[Token], cursor: &mut usize, expected: &str) -> Result<(), ParseError> {
-    if symbol(tokens, *cursor, expected) {
-        *cursor += 1;
-        Ok(())
-    } else {
-        Err(ParseError::coded(
-            "FSL-ANNOTATION-SYNTAX",
-            format!("expected '{expected}' in annotation"),
-            tokens[*cursor].span,
-        ))
-    }
-}
-
-fn symbol(tokens: &[Token], cursor: usize, expected: &str) -> bool {
-    matches!(tokens.get(cursor).map(|token| &token.kind), Some(TokenKind::Symbol(value)) if value == expected)
 }
 
 #[cfg(test)]

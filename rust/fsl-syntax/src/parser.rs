@@ -3,17 +3,18 @@
 
 use std::fmt;
 
+use crate::annotation_parse;
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
-    AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Binder, BusinessGoalBody,
-    BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr, GovernanceArtifactRef,
-    GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
-    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    QualifiedName, RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
-    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
-    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr,
-    VerifyItem, lex,
+    AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Annotations, Binder,
+    BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr,
+    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
+    MapsClause, MetaTag, Param, PreservationItem, ProcessCover, ProcessField, ProcessFields,
+    ProcessItem, ProcessTransition, QualifiedName, RefinementItem, RefinementParam,
+    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
+    RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
+    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
+    TimeItem, Token, TokenKind, TypeExpr, VerifyItem, lex,
 };
 
 fn join_span(start: Span, end: Span) -> Span {
@@ -77,7 +78,7 @@ impl std::error::Error for ParseError {}
 /// not accepted by the FSL expression grammar.
 pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
     let tokens = lex(source).map_err(ParseError::from)?;
-    let mut parser = Parser { tokens, cursor: 0 };
+    let mut parser = Parser::new(tokens, 0);
     let expr = parser.expression(0)?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after expression"));
@@ -93,7 +94,7 @@ pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
 /// spec. Other top-level dialects are rejected by this phase-0 entrypoint.
 pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
     let tokens = lex(source).map_err(ParseError::from)?;
-    let mut parser = Parser { tokens, cursor: 0 };
+    let mut parser = Parser::new(tokens, 0);
     let spec = parser.surface_spec()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after spec"));
@@ -115,7 +116,7 @@ pub(crate) fn parse_shared_tokens(
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<SurfaceDocument, ParseError> {
-    let mut parser = Parser { tokens, cursor };
+    let mut parser = Parser::new(tokens, cursor);
     let document = if parser.peek_ident("spec") {
         SurfaceDocument::Spec(parser.surface_spec()?)
     } else if parser.peek_ident("refinement") {
@@ -140,9 +141,82 @@ pub(crate) fn parse_shared_tokens(
 struct Parser {
     tokens: Vec<Token>,
     cursor: usize,
+    pending_annotations: Annotations,
 }
 
 impl Parser {
+    fn new(tokens: Vec<Token>, cursor: usize) -> Self {
+        Self {
+            tokens,
+            cursor,
+            pending_annotations: Annotations::default(),
+        }
+    }
+
+    /// Parse zero or more leading `@name(args...)` annotations into
+    /// `self.pending_annotations`, ready to be drained by whichever
+    /// declaration constructor runs next.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] for malformed annotation syntax, a failed
+    /// validation, or one or more annotations with no following declaration
+    /// in the same block.
+    fn take_leading_annotations(&mut self) -> Result<(), ParseError> {
+        while self.peek_symbol("@") {
+            let annotation = annotation_parse::annotation(&self.tokens, &mut self.cursor)?;
+            self.pending_annotations.push(annotation);
+        }
+        if let Some(first) = self.pending_annotations.source_order().first()
+            && (self.peek_symbol("}") || matches!(self.peek().kind, TokenKind::Eof))
+        {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation must be followed by a declaration in the same block",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Drain and validate the annotations collected for the declaration
+    /// currently under construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] when the drained group fails validation (empty
+    /// requirement ID, reserved `undecided` ID, conflicting requirement
+    /// text, etc.).
+    fn take_annotations(&mut self) -> Result<Annotations, ParseError> {
+        let annotations = std::mem::take(&mut self.pending_annotations);
+        annotations.validate().map_err(|error| {
+            ParseError::coded("FSL-ANNOTATION-INVALID", error.message, error.span)
+        })?;
+        Ok(annotations)
+    }
+
+    /// Reject any annotation left over after parsing a declaration that does
+    /// not accept annotations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] coded `FSL-ANNOTATION-TARGET` when annotations
+    /// remain pending.
+    fn expect_no_pending_annotations(&mut self) -> Result<(), ParseError> {
+        if let Some(first) = self.pending_annotations.source_order().first() {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation cannot attach to this declaration",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn surface_spec(&mut self) -> Result<SurfaceSpec, ParseError> {
         self.expect_ident_value("spec")?;
         let name = self.expect_ident()?;
@@ -150,7 +224,10 @@ impl Parser {
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.spec_item()?);
+            self.take_leading_annotations()?;
+            let item = self.spec_item()?;
+            self.expect_no_pending_annotations()?;
+            items.push(item);
         }
         if self.peek_ident("verify") {
             items.push(self.verify_bounds()?);
@@ -175,7 +252,10 @@ impl Parser {
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.business_item()?);
+            self.take_leading_annotations()?;
+            let item = self.business_item()?;
+            self.expect_no_pending_annotations()?;
+            items.push(item);
         }
         if self.peek_ident("verify") {
             let SpecItem::VerifyBounds {
@@ -210,7 +290,10 @@ impl Parser {
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.compose_item()?);
+            self.take_leading_annotations()?;
+            let item = self.compose_item()?;
+            self.expect_no_pending_annotations()?;
+            items.push(item);
         }
         Ok(SurfaceCompose { name, items })
     }
@@ -311,6 +394,7 @@ impl Parser {
             refs.push(self.sync_ref()?);
         }
         let meta = self.take_meta();
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
@@ -341,6 +425,7 @@ impl Parser {
             span,
             fair,
             meta,
+            annotations,
         })
     }
 
@@ -362,7 +447,10 @@ impl Parser {
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.requirements_item()?);
+            self.take_leading_annotations()?;
+            let item = self.requirements_item()?;
+            self.expect_no_pending_annotations()?;
+            items.push(item);
         }
         if self.peek_ident("verify") {
             items.push(RequirementsItem::Common(self.verify_bounds()?));
@@ -427,9 +515,11 @@ impl Parser {
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             if self.peek_ident("fair") || self.peek_ident("action") {
                 items.push(RequirementBlockItem::Action(self.requirement_action()?));
             } else if self.peek_ident("deadline") {
@@ -446,12 +536,14 @@ impl Parser {
             } else {
                 return Err(self.error("expected requirement declaration"));
             }
+            self.expect_no_pending_annotations()?;
         }
         Ok(RequirementsItem::Requirement {
             id,
             text,
             items,
             span,
+            annotations,
         })
     }
 
@@ -468,6 +560,7 @@ impl Parser {
             None
         };
         let meta = self.take_meta();
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
@@ -506,6 +599,7 @@ impl Parser {
             fair,
             meta,
             maps,
+            annotations,
         })
     }
 
@@ -547,6 +641,7 @@ impl Parser {
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut steps = Vec::new();
         while !self.peek_ident("expect") {
@@ -577,6 +672,7 @@ impl Parser {
             steps,
             expectation,
             span,
+            annotations,
         })
     }
 
@@ -585,6 +681,7 @@ impl Parser {
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut steps = Vec::new();
         while !self.peek_ident("expect") {
@@ -598,6 +695,7 @@ impl Parser {
             text,
             steps,
             span,
+            annotations,
         })
     }
 
@@ -892,10 +990,14 @@ impl Parser {
         } else {
             None
         };
+        self.expect_no_pending_annotations()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.process_item()?);
+            self.take_leading_annotations()?;
+            let item = self.process_item()?;
+            self.expect_no_pending_annotations()?;
+            items.push(item);
         }
         Ok(BusinessItem::Process {
             name,
@@ -965,6 +1067,7 @@ impl Parser {
         } else {
             None
         };
+        let annotations = self.take_annotations()?;
         Ok(ProcessItem::Transition(Box::new(ProcessTransition {
             name,
             source,
@@ -975,6 +1078,7 @@ impl Parser {
             assignments,
             covers,
             span,
+            annotations,
         })))
     }
 
@@ -1071,6 +1175,7 @@ impl Parser {
             body: Box::new(body),
             span,
             satisfies,
+            annotations: self.take_annotations()?,
         })
     }
 
@@ -1108,6 +1213,7 @@ impl Parser {
             body,
             span,
             satisfies,
+            annotations: self.take_annotations()?,
         })
     }
 
@@ -1342,10 +1448,12 @@ impl Parser {
         if self.peek_ident("init") {
             self.bump();
             let meta = self.take_meta();
+            let annotations = self.take_annotations()?;
             self.expect_symbol("{")?;
             return Ok(SpecItem::Init {
                 statements: self.statement_list()?,
                 meta,
+                annotations,
             });
         }
         if self.peek_ident("fair") || self.peek_ident("action") {
@@ -1529,6 +1637,7 @@ impl Parser {
         self.expect_symbol("(")?;
         let params = self.params()?;
         let meta = self.take_meta();
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
@@ -1559,6 +1668,7 @@ impl Parser {
             fair,
             meta,
             sync: false,
+            annotations,
         })
     }
 
@@ -1650,6 +1760,7 @@ impl Parser {
         let span = self.bump().span;
         let name = self.expect_ident()?;
         let meta = self.take_meta();
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let expr = self.expression(0)?;
         self.expect_symbol("}")?;
@@ -1659,18 +1770,21 @@ impl Parser {
                 expr: Box::new(expr),
                 span,
                 meta,
+                annotations,
             },
             "trans" => SpecItem::Trans {
                 name,
                 expr: Box::new(expr),
                 span,
                 meta,
+                annotations,
             },
             "reachable" => SpecItem::Reachable {
                 name,
                 expr: Box::new(expr),
                 span,
                 meta,
+                annotations,
             },
             _ => unreachable!(),
         })
@@ -1683,6 +1797,7 @@ impl Parser {
         };
         let name = self.expect_ident()?;
         let meta = self.take_meta();
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let before = self.expression(0)?;
         self.expect_ident_value(&kind)?;
@@ -1695,6 +1810,7 @@ impl Parser {
                 after: Box::new(after),
                 span: token.span,
                 meta,
+                annotations,
             }
         } else {
             SpecItem::Unless {
@@ -1703,6 +1819,7 @@ impl Parser {
                 after: Box::new(after),
                 span: token.span,
                 meta,
+                annotations,
             }
         })
     }
@@ -1711,6 +1828,7 @@ impl Parser {
         let span = self.bump().span;
         let name = self.expect_ident()?;
         let meta = self.take_meta();
+        let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
         let mut binders = Vec::new();
         let (before, after, within) = self.leads_to_body(&mut binders)?;
@@ -1742,6 +1860,7 @@ impl Parser {
             decreases: decreases.map(Box::new),
             within: within.map(Box::new),
             helpful,
+            annotations,
         })
     }
 

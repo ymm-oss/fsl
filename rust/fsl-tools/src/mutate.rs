@@ -761,12 +761,17 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                     });
                 }
             }
-            SpecItem::Init { statements, meta } => {
+            SpecItem::Init {
+                statements,
+                meta,
+                annotations,
+            } => {
                 for mutation in statement_mutations(statements, &enums, "init") {
                     let mut mutated = spec.clone();
                     mutated.items[item_index] = SpecItem::Init {
                         statements: mutation.statements,
                         meta: meta.clone(),
+                        annotations: annotations.clone(),
                     };
                     output.push(BuiltinMutant {
                         op: mutation.op.to_owned(),
@@ -786,6 +791,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                 fair,
                 meta,
                 sync,
+                annotations,
             } => {
                 let label = name.clone();
                 let mut require_number = 0;
@@ -903,6 +909,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                         fair: false,
                         meta: meta.clone(),
                         sync: *sync,
+                        annotations: annotations.clone(),
                     };
                     output.push(BuiltinMutant {
                         op: "fair_remove".to_owned(),

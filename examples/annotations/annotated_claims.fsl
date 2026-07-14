@@ -1,0 +1,61 @@
+// ════════════════════════════════════════════════════════════════
+// Declaration-level @annotation syntax (issue #241) — sample corpus
+//
+// Demonstrates the canonical `@requirement(id, text?)` / `@undecided(reason)`
+// / `@kind(id, text?)` / custom-namespace annotation syntax attached
+// directly to declarations, coexisting on the same file with the legacy
+// string-metadata and `covers` forms it desugars to the same typed
+// relation. See docs/DESIGN-annotations.md and docs/LANGUAGE.md.
+//
+// Native-only: the frozen Python reference does not parse `@...` before a
+// nested declaration, so this file is excluded from the Python Monitor
+// conformance sweep (tests/dialect_registry.py MONITOR_EXCLUSIONS);
+// native coverage lives in rust/fsl-syntax and rust/fsl-core tests.
+//
+//   fslc check examples/annotations/annotated_claims.fsl
+//   fslc verify examples/annotations/annotated_claims.fsl --depth 6
+// ════════════════════════════════════════════════════════════════
+@kind("safety", "traceability sample")
+requirements AnnotatedClaims {
+  state { ready: Bool }
+
+  @requirement("REQ-INIT", "the ledger starts empty")
+  init { ready = false }
+
+  process Claim {
+    stages Draft, Submitted, Paid
+    initial Draft
+
+    @requirement("REQ-SUBMIT", "submission is traceable via the new @annotation syntax")
+    transition submit Draft -> Submitted by Claimant
+
+    // Legacy `covers` desugar and the new @requirement syntax project to the
+    // same typed RequirementLink; both forms are accepted in the 2.x edition.
+    transition pay Submitted -> Paid by Payer
+      covers REQ-PAY "payment closes the claim"
+  }
+
+  @undecided("the retry policy for a failed readiness check is still under discussion")
+  requirement REQ-READY "the ledger tracks readiness for external callers" {
+    action mark_ready() {
+      ready = true
+    }
+  }
+
+  @requirement("REQ-ACCEPT", "a submitted claim can be paid")
+  acceptance AC-1 "submit then pay reaches Paid" {
+    submit(0)
+    pay(0)
+    expect Claim 0 in Paid
+  }
+
+  @undecided("double-submission handling is still under discussion")
+  forbidden NEG-1 "a claim cannot be submitted twice" {
+    submit(0)
+    submit(0)
+    expect rejected
+  }
+}
+verify {
+  instances Claim = 1
+}
