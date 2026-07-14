@@ -242,6 +242,16 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
 
+The Rust frontend keeps an internal origin chain across direct domain lowering,
+checked-model construction, verification, counterexamples, and `explain`.
+Diagnostics prefer the original domain declaration/expression, expose generated
+Kernel names only as machine detail, preserve primary/secondary origins and
+expansion steps (`can()`, membership, legacy operators), and represent
+source-less nodes as generated-only. Requirement tags are a separate
+traceability relation, not origin identities. Public Kernel v1 remains
+byte-compatible and does not expose the internal chain; publication belongs to
+v2 (#256).
+
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
 

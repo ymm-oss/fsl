@@ -243,6 +243,15 @@ the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.
 
+The native Rust frontend also retains a private origin chain for domain state,
+actions, guards, statements, and properties. Verification, counterexample, and
+`explain` diagnostics use the original domain declaration as their primary
+display name and keep generated Kernel names as machine detail. The chain
+records source file/full span, declaration path, lowering steps,
+primary/secondary sources, and explicit generated-only nodes. Requirement IDs
+remain an independent traceability relation. Public Kernel v1 output is
+unchanged; publishing this chain is reserved for v2.
+
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
 aggregate/effect summary, `fslc domain expand` to inspect a generated kernel FSL

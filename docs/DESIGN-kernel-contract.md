@@ -46,6 +46,15 @@ direct spans for scalar/type/state declarations, so those declaration spans are
 explicitly `null`; their origin remains present. This is an intentional v1
 distinction, not a missing field.
 
+That v1 `origin` object is a frozen, lossy compatibility projection. The Rust
+frontend's authoritative internal provenance is the non-serialized origin chain in
+[`DESIGN-origin-chain.md`](DESIGN-origin-chain.md), where declaration/source
+origin and requirement traceability are separate types. The historical v1
+projection may still place a requirement tag in `origin.declaration` to remain
+byte-compatible; internal consumers must not infer source identity from it.
+The internal chain is absent from this closed schema and will be published only
+by Public Kernel v2 (#256).
+
 Unsupported or incompletely lowered structures fail export with a semantic error.
 The exporter never silently omits an unknown type, predicate call, expression,
 lvalue, or non-scalar parameter domain.

@@ -14,6 +14,8 @@ use crate::{ParseError, Span, Token, TokenKind, lex};
 pub struct DomainLoc {
     pub line: u32,
     pub column: u32,
+    #[serde(skip)]
+    span: Span,
 }
 
 impl From<Span> for DomainLoc {
@@ -21,7 +23,15 @@ impl From<Span> for DomainLoc {
         Self {
             line: span.start.line,
             column: span.start.column,
+            span,
         }
+    }
+}
+
+impl DomainLoc {
+    #[must_use]
+    pub fn span(self) -> Span {
+        self.span
     }
 }
 

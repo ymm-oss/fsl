@@ -15,6 +15,53 @@ pub fn display_name(name: &str) -> String {
     name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")
 }
 
+fn origin_site_json(site: &fsl_core::OriginSite) -> Value {
+    let span = site.span.map(|span| {
+        json!({
+            "start": {
+                "offset": span.start.offset,
+                "line": span.start.line,
+                "column": span.start.column,
+            },
+            "end": {
+                "offset": span.end.offset,
+                "line": span.end.line,
+                "column": span.end.column,
+            },
+        })
+    });
+    json!({
+        "source_file": site.source_file,
+        "span": span,
+        "dialect": site.dialect,
+        "declaration_path": site.declaration_path,
+    })
+}
+
+#[must_use]
+pub fn internal_origin_json(origin: &fsl_core::OriginChain) -> Value {
+    json!({
+        "identity": origin.id.0,
+        "dialect": origin.dialect,
+        "primary": origin.primary.as_ref().map(origin_site_json),
+        "secondary": origin.secondary.iter().map(origin_site_json).collect::<Vec<_>>(),
+        "lowering_steps": origin.lowering_steps.iter().map(|step| json!({
+            "kind": step.kind,
+            "detail": step.detail,
+        })).collect::<Vec<_>>(),
+        "generated": origin.generated,
+    })
+}
+
+#[must_use]
+pub fn origin_display_name(origin: &fsl_core::OriginChain) -> Option<&str> {
+    origin
+        .primary
+        .as_ref()
+        .and_then(|site| site.declaration_path.last())
+        .map(String::as_str)
+}
+
 #[must_use]
 pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
     Value::Array(
@@ -26,7 +73,22 @@ pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
                 value.insert("state".to_owned(), state_json(&entry.state));
                 if let Some(action) = &entry.action {
                     let mut action_json = serde_json::Map::new();
-                    action_json.insert("name".to_owned(), json!(display_name(&action.name)));
+                    let origin = model.action_origin(&action.name);
+                    action_json.insert(
+                        "name".to_owned(),
+                        json!(
+                            origin
+                                .and_then(origin_display_name)
+                                .map_or_else(|| display_name(&action.name), str::to_owned)
+                        ),
+                    );
+                    if let Some(origin) = origin {
+                        action_json.insert(
+                            "generated_name".to_owned(),
+                            json!(display_name(&action.name)),
+                        );
+                        action_json.insert("origin".to_owned(), internal_origin_json(origin));
+                    }
                     action_json.insert(
                         "params".to_owned(),
                         Value::Object(

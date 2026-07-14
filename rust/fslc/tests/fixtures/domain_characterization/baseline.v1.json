@@ -3167,7 +3167,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -3179,7 +3179,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_ApprovalRejected"
             },
@@ -3193,7 +3193,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -3208,7 +3208,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -3220,7 +3220,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_Approved"
             },
@@ -3234,7 +3234,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -3249,7 +3249,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -3261,7 +3261,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_Cancelled"
             },
@@ -3275,7 +3275,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -3699,7 +3699,7 @@
                 "line": 39,
                 "column": 5,
                 "end_line": 39,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -3711,7 +3711,7 @@
                   "line": 39,
                   "column": 5,
                   "end_line": 39,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_ApprovalRejected"
               },
@@ -3725,7 +3725,7 @@
                   "line": 39,
                   "column": 5,
                   "end_line": 39,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -3740,7 +3740,7 @@
                 "line": 39,
                 "column": 5,
                 "end_line": 39,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -3752,7 +3752,7 @@
                   "line": 39,
                   "column": 5,
                   "end_line": 39,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_Approved"
               },
@@ -3766,7 +3766,7 @@
                   "line": 39,
                   "column": 5,
                   "end_line": 39,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": true
               }
@@ -3781,7 +3781,7 @@
                 "line": 39,
                 "column": 5,
                 "end_line": 39,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -3793,7 +3793,7 @@
                   "line": 39,
                   "column": 5,
                   "end_line": 39,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_Cancelled"
               },
@@ -3807,7 +3807,7 @@
                   "line": 39,
                   "column": 5,
                   "end_line": 39,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -4011,7 +4011,7 @@
             "line": 39,
             "column": 5,
             "end_line": 39,
-            "end_column": 5
+            "end_column": 11
           }
         },
         {
@@ -4195,7 +4195,7 @@
                 "line": 46,
                 "column": 5,
                 "end_line": 46,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -4207,7 +4207,7 @@
                   "line": 46,
                   "column": 5,
                   "end_line": 46,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_ApprovalRejected"
               },
@@ -4221,7 +4221,7 @@
                   "line": 46,
                   "column": 5,
                   "end_line": 46,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -4236,7 +4236,7 @@
                 "line": 46,
                 "column": 5,
                 "end_line": 46,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -4248,7 +4248,7 @@
                   "line": 46,
                   "column": 5,
                   "end_line": 46,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_Approved"
               },
@@ -4262,7 +4262,7 @@
                   "line": 46,
                   "column": 5,
                   "end_line": 46,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -4277,7 +4277,7 @@
                 "line": 46,
                 "column": 5,
                 "end_line": 46,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -4289,7 +4289,7 @@
                   "line": 46,
                   "column": 5,
                   "end_line": 46,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_Cancelled"
               },
@@ -4303,7 +4303,7 @@
                   "line": 46,
                   "column": 5,
                   "end_line": 46,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": true
               }
@@ -4406,7 +4406,7 @@
             "line": 46,
             "column": 5,
             "end_line": 46,
-            "end_column": 5
+            "end_column": 11
           }
         }
       ],
@@ -5218,7 +5218,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "value": false
           },
@@ -5227,7 +5227,7 @@
             "line": 1,
             "column": 1,
             "end_line": 1,
-            "end_column": 1
+            "end_column": 7
           }
         }
       }
@@ -5411,7 +5411,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -5423,7 +5423,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_Approved"
             },
@@ -5437,7 +5437,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -5452,7 +5452,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -5464,7 +5464,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_PaymentCaptured"
             },
@@ -5478,7 +5478,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -5493,7 +5493,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -5505,7 +5505,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_PaymentFailed"
             },
@@ -5519,7 +5519,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -5534,7 +5534,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -5546,7 +5546,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_PaymentRequested"
             },
@@ -5560,7 +5560,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -5575,7 +5575,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "target": {
               "kind": "var",
@@ -5587,7 +5587,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "name": "event_PaymentTimedOut"
             },
@@ -5601,7 +5601,7 @@
                 "line": 1,
                 "column": 1,
                 "end_line": 1,
-                "end_column": 1
+                "end_column": 7
               },
               "value": false
             }
@@ -5616,7 +5616,7 @@
               "line": 38,
               "column": 3,
               "end_line": 38,
-              "end_column": 3
+              "end_column": 9
             },
             "binder": {
               "name": "k",
@@ -5637,7 +5637,7 @@
                   "line": 38,
                   "column": 3,
                   "end_line": 38,
-                  "end_column": 3
+                  "end_column": 9
                 },
                 "target": {
                   "kind": "index",
@@ -5650,7 +5650,7 @@
                     "line": 38,
                     "column": 3,
                     "end_line": 38,
-                    "end_column": 3
+                    "end_column": 9
                   },
                   "name": "capture_payment_status",
                   "index": {
@@ -5664,7 +5664,7 @@
                       "line": 38,
                       "column": 3,
                       "end_line": 38,
-                      "end_column": 3
+                      "end_column": 9
                     },
                     "name": "k"
                   }
@@ -5680,7 +5680,7 @@
                     "line": 38,
                     "column": 3,
                     "end_line": 38,
-                    "end_column": 3
+                    "end_column": 9
                   },
                   "name": "CapturePaymentEffectStatus_NotStarted"
                 }
@@ -5697,7 +5697,7 @@
               "line": 38,
               "column": 3,
               "end_line": 38,
-              "end_column": 3
+              "end_column": 9
             },
             "binder": {
               "name": "k",
@@ -5718,7 +5718,7 @@
                   "line": 38,
                   "column": 3,
                   "end_line": 38,
-                  "end_column": 3
+                  "end_column": 9
                 },
                 "target": {
                   "kind": "index",
@@ -5731,7 +5731,7 @@
                     "line": 38,
                     "column": 3,
                     "end_line": 38,
-                    "end_column": 3
+                    "end_column": 9
                   },
                   "name": "capture_payment_attempts",
                   "index": {
@@ -5745,7 +5745,7 @@
                       "line": 38,
                       "column": 3,
                       "end_line": 38,
-                      "end_column": 3
+                      "end_column": 9
                     },
                     "name": "k"
                   }
@@ -5762,7 +5762,7 @@
                     "line": 38,
                     "column": 3,
                     "end_line": 38,
-                    "end_column": 3
+                    "end_column": 9
                   },
                   "value": 0
                 }
@@ -5801,7 +5801,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "operator": "==",
                 "left": {
@@ -5815,7 +5815,7 @@
                     "line": 18,
                     "column": 5,
                     "end_line": 18,
-                    "end_column": 5
+                    "end_column": 10
                   },
                   "collection": {
                     "kind": "var",
@@ -5835,7 +5835,7 @@
                       "line": 18,
                       "column": 5,
                       "end_line": 18,
-                      "end_column": 5
+                      "end_column": 10
                     },
                     "name": "capture_payment_status"
                   },
@@ -5850,7 +5850,7 @@
                       "line": 18,
                       "column": 5,
                       "end_line": 18,
-                      "end_column": 5
+                      "end_column": 10
                     },
                     "name": "payment_request_id"
                   }
@@ -5866,7 +5866,7 @@
                     "line": 18,
                     "column": 5,
                     "end_line": 18,
-                    "end_column": 5
+                    "end_column": 10
                   },
                   "name": "CapturePaymentEffectStatus_Pending"
                 }
@@ -5884,7 +5884,7 @@
                 "line": 18,
                 "column": 5,
                 "end_line": 18,
-                "end_column": 5
+                "end_column": 10
               },
               "target": {
                 "kind": "var",
@@ -5896,7 +5896,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "event_Approved"
               },
@@ -5910,7 +5910,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "value": false
               }
@@ -5925,7 +5925,7 @@
                 "line": 18,
                 "column": 5,
                 "end_line": 18,
-                "end_column": 5
+                "end_column": 10
               },
               "target": {
                 "kind": "var",
@@ -5937,7 +5937,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -5951,7 +5951,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "value": true
               }
@@ -5966,7 +5966,7 @@
                 "line": 18,
                 "column": 5,
                 "end_line": 18,
-                "end_column": 5
+                "end_column": 10
               },
               "target": {
                 "kind": "var",
@@ -5978,7 +5978,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "event_PaymentFailed"
               },
@@ -5992,7 +5992,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "value": false
               }
@@ -6007,7 +6007,7 @@
                 "line": 18,
                 "column": 5,
                 "end_line": 18,
-                "end_column": 5
+                "end_column": 10
               },
               "target": {
                 "kind": "var",
@@ -6019,7 +6019,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "event_PaymentRequested"
               },
@@ -6033,7 +6033,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "value": false
               }
@@ -6048,7 +6048,7 @@
                 "line": 18,
                 "column": 5,
                 "end_line": 18,
-                "end_column": 5
+                "end_column": 10
               },
               "target": {
                 "kind": "var",
@@ -6060,7 +6060,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -6074,7 +6074,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "value": false
               }
@@ -6089,7 +6089,7 @@
                 "line": 18,
                 "column": 5,
                 "end_line": 18,
-                "end_column": 5
+                "end_column": 10
               },
               "target": {
                 "kind": "index",
@@ -6102,7 +6102,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "capture_payment_status",
                 "index": {
@@ -6116,7 +6116,7 @@
                     "line": 18,
                     "column": 5,
                     "end_line": 18,
-                    "end_column": 5
+                    "end_column": 10
                   },
                   "name": "payment_request_id"
                 }
@@ -6132,7 +6132,7 @@
                   "line": 18,
                   "column": 5,
                   "end_line": 18,
-                  "end_column": 5
+                  "end_column": 10
                 },
                 "name": "CapturePaymentEffectStatus_Succeeded"
               }
@@ -6192,7 +6192,7 @@
             "line": 18,
             "column": 5,
             "end_line": 18,
-            "end_column": 5
+            "end_column": 10
           }
         },
         {
@@ -6258,7 +6258,7 @@
                 "line": 22,
                 "column": 5,
                 "end_line": 22,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6270,7 +6270,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_Approved"
               },
@@ -6284,7 +6284,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": true
               }
@@ -6299,7 +6299,7 @@
                 "line": 22,
                 "column": 5,
                 "end_line": 22,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6311,7 +6311,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -6325,7 +6325,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6340,7 +6340,7 @@
                 "line": 22,
                 "column": 5,
                 "end_line": 22,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6352,7 +6352,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentFailed"
               },
@@ -6366,7 +6366,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6381,7 +6381,7 @@
                 "line": 22,
                 "column": 5,
                 "end_line": 22,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6393,7 +6393,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentRequested"
               },
@@ -6407,7 +6407,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6422,7 +6422,7 @@
                 "line": 22,
                 "column": 5,
                 "end_line": 22,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6434,7 +6434,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -6448,7 +6448,7 @@
                   "line": 22,
                   "column": 5,
                   "end_line": 22,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6508,7 +6508,7 @@
             "line": 22,
             "column": 5,
             "end_line": 22,
-            "end_column": 5
+            "end_column": 11
           }
         },
         {
@@ -6574,7 +6574,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "operator": "!=",
                 "left": {
@@ -6588,7 +6588,7 @@
                     "line": 26,
                     "column": 5,
                     "end_line": 26,
-                    "end_column": 5
+                    "end_column": 11
                   },
                   "collection": {
                     "kind": "var",
@@ -6608,7 +6608,7 @@
                       "line": 26,
                       "column": 5,
                       "end_line": 26,
-                      "end_column": 5
+                      "end_column": 11
                     },
                     "name": "capture_payment_status"
                   },
@@ -6623,7 +6623,7 @@
                       "line": 26,
                       "column": 5,
                       "end_line": 26,
-                      "end_column": 5
+                      "end_column": 11
                     },
                     "name": "payment_request_id"
                   }
@@ -6639,7 +6639,7 @@
                     "line": 26,
                     "column": 5,
                     "end_line": 26,
-                    "end_column": 5
+                    "end_column": 11
                   },
                   "name": "CapturePaymentEffectStatus_Pending"
                 }
@@ -6657,7 +6657,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "operator": "!=",
                 "left": {
@@ -6671,7 +6671,7 @@
                     "line": 26,
                     "column": 5,
                     "end_line": 26,
-                    "end_column": 5
+                    "end_column": 11
                   },
                   "collection": {
                     "kind": "var",
@@ -6691,7 +6691,7 @@
                       "line": 26,
                       "column": 5,
                       "end_line": 26,
-                      "end_column": 5
+                      "end_column": 11
                     },
                     "name": "capture_payment_status"
                   },
@@ -6706,7 +6706,7 @@
                       "line": 26,
                       "column": 5,
                       "end_line": 26,
-                      "end_column": 5
+                      "end_column": 11
                     },
                     "name": "payment_request_id"
                   }
@@ -6722,7 +6722,7 @@
                     "line": 26,
                     "column": 5,
                     "end_line": 26,
-                    "end_column": 5
+                    "end_column": 11
                   },
                   "name": "CapturePaymentEffectStatus_Succeeded"
                 }
@@ -6740,7 +6740,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6752,7 +6752,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_Approved"
               },
@@ -6766,7 +6766,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6781,7 +6781,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6793,7 +6793,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -6807,7 +6807,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6822,7 +6822,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6834,7 +6834,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentFailed"
               },
@@ -6848,7 +6848,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6863,7 +6863,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6875,7 +6875,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentRequested"
               },
@@ -6889,7 +6889,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": true
               }
@@ -6904,7 +6904,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "var",
@@ -6916,7 +6916,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -6930,7 +6930,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": false
               }
@@ -6988,7 +6988,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "index",
@@ -7001,7 +7001,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "capture_payment_status",
                 "index": {
@@ -7015,7 +7015,7 @@
                     "line": 26,
                     "column": 5,
                     "end_line": 26,
-                    "end_column": 5
+                    "end_column": 11
                   },
                   "name": "payment_request_id"
                 }
@@ -7031,7 +7031,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "CapturePaymentEffectStatus_Pending"
               }
@@ -7046,7 +7046,7 @@
                 "line": 26,
                 "column": 5,
                 "end_line": 26,
-                "end_column": 5
+                "end_column": 11
               },
               "target": {
                 "kind": "index",
@@ -7059,7 +7059,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "name": "capture_payment_attempts",
                 "index": {
@@ -7073,7 +7073,7 @@
                     "line": 26,
                     "column": 5,
                     "end_line": 26,
-                    "end_column": 5
+                    "end_column": 11
                   },
                   "name": "payment_request_id"
                 }
@@ -7090,7 +7090,7 @@
                   "line": 26,
                   "column": 5,
                   "end_line": 26,
-                  "end_column": 5
+                  "end_column": 11
                 },
                 "value": 1
               }
@@ -7107,7 +7107,7 @@
             "line": 26,
             "column": 5,
             "end_line": 26,
-            "end_column": 5
+            "end_column": 11
           }
         },
         {
@@ -7126,7 +7126,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "name": "event_Approved"
               }
@@ -7143,7 +7143,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "operator": "and",
                 "left": {
@@ -7156,7 +7156,7 @@
                     "line": 52,
                     "column": 5,
                     "end_line": 52,
-                    "end_column": 5
+                    "end_column": 9
                   },
                   "name": "event_Approved"
                 },
@@ -7170,7 +7170,7 @@
                     "line": 52,
                     "column": 5,
                     "end_line": 52,
-                    "end_column": 5
+                    "end_column": 9
                   },
                   "operand": {
                     "kind": "var",
@@ -7182,7 +7182,7 @@
                       "line": 52,
                       "column": 5,
                       "end_line": 52,
-                      "end_column": 5
+                      "end_column": 9
                     },
                     "name": "event_PaymentFailed"
                   }
@@ -7201,7 +7201,7 @@
                 "line": 52,
                 "column": 5,
                 "end_line": 52,
-                "end_column": 5
+                "end_column": 9
               },
               "target": {
                 "kind": "var",
@@ -7213,7 +7213,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "name": "event_Approved"
               },
@@ -7227,7 +7227,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "value": false
               }
@@ -7242,7 +7242,7 @@
                 "line": 52,
                 "column": 5,
                 "end_line": 52,
-                "end_column": 5
+                "end_column": 9
               },
               "target": {
                 "kind": "var",
@@ -7254,7 +7254,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "name": "event_PaymentCaptured"
               },
@@ -7268,7 +7268,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "value": false
               }
@@ -7283,7 +7283,7 @@
                 "line": 52,
                 "column": 5,
                 "end_line": 52,
-                "end_column": 5
+                "end_column": 9
               },
               "target": {
                 "kind": "var",
@@ -7295,7 +7295,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "name": "event_PaymentFailed"
               },
@@ -7309,7 +7309,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "value": false
               }
@@ -7324,7 +7324,7 @@
                 "line": 52,
                 "column": 5,
                 "end_line": 52,
-                "end_column": 5
+                "end_column": 9
               },
               "target": {
                 "kind": "var",
@@ -7336,7 +7336,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "name": "event_PaymentRequested"
               },
@@ -7350,7 +7350,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "value": true
               }
@@ -7365,7 +7365,7 @@
                 "line": 52,
                 "column": 5,
                 "end_line": 52,
-                "end_column": 5
+                "end_column": 9
               },
               "target": {
                 "kind": "var",
@@ -7377,7 +7377,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "name": "event_PaymentTimedOut"
               },
@@ -7391,7 +7391,7 @@
                   "line": 52,
                   "column": 5,
                   "end_line": 52,
-                  "end_column": 5
+                  "end_column": 9
                 },
                 "value": false
               }
@@ -7408,7 +7408,7 @@
             "line": 52,
             "column": 5,
             "end_line": 52,
-            "end_column": 5
+            "end_column": 9
           }
         }
       ],
@@ -7557,7 +7557,7 @@
                 "line": 38,
                 "column": 3,
                 "end_line": 38,
-                "end_column": 3
+                "end_column": 9
               },
               "quantifier": "forall",
               "binder": {
@@ -7578,7 +7578,7 @@
                   "line": 38,
                   "column": 3,
                   "end_line": 38,
-                  "end_column": 3
+                  "end_column": 9
                 },
                 "operator": "=>",
                 "left": {
@@ -7591,7 +7591,7 @@
                     "line": 38,
                     "column": 3,
                     "end_line": 38,
-                    "end_column": 3
+                    "end_column": 9
                   },
                   "operator": "==",
                   "left": {
@@ -7605,7 +7605,7 @@
                       "line": 38,
                       "column": 3,
                       "end_line": 38,
-                      "end_column": 3
+                      "end_column": 9
                     },
                     "operand": {
                       "kind": "index",
@@ -7618,7 +7618,7 @@
                         "line": 38,
                         "column": 3,
                         "end_line": 38,
-                        "end_column": 3
+                        "end_column": 9
                       },
                       "collection": {
                         "kind": "var",
@@ -7638,7 +7638,7 @@
                           "line": 38,
                           "column": 3,
                           "end_line": 38,
-                          "end_column": 3
+                          "end_column": 9
                         },
                         "name": "capture_payment_status"
                       },
@@ -7653,7 +7653,7 @@
                           "line": 38,
                           "column": 3,
                           "end_line": 38,
-                          "end_column": 3
+                          "end_column": 9
                         },
                         "name": "k"
                       }
@@ -7670,7 +7670,7 @@
                       "line": 38,
                       "column": 3,
                       "end_line": 38,
-                      "end_column": 3
+                      "end_column": 9
                     },
                     "name": "CapturePaymentEffectStatus_Succeeded"
                   }
@@ -7685,7 +7685,7 @@
                     "line": 38,
                     "column": 3,
                     "end_line": 38,
-                    "end_column": 3
+                    "end_column": 9
                   },
                   "operator": "==",
                   "left": {
@@ -7699,7 +7699,7 @@
                       "line": 38,
                       "column": 3,
                       "end_line": 38,
-                      "end_column": 3
+                      "end_column": 9
                     },
                     "collection": {
                       "kind": "var",
@@ -7719,7 +7719,7 @@
                         "line": 38,
                         "column": 3,
                         "end_line": 38,
-                        "end_column": 3
+                        "end_column": 9
                       },
                       "name": "capture_payment_status"
                     },
@@ -7734,7 +7734,7 @@
                         "line": 38,
                         "column": 3,
                         "end_line": 38,
-                        "end_column": 3
+                        "end_column": 9
                       },
                       "name": "k"
                     }
@@ -7750,7 +7750,7 @@
                       "line": 38,
                       "column": 3,
                       "end_line": 38,
-                      "end_column": 3
+                      "end_column": 9
                     },
                     "name": "CapturePaymentEffectStatus_Succeeded"
                   }
@@ -7768,7 +7768,7 @@
               "line": 38,
               "column": 3,
               "end_line": 38,
-              "end_column": 3
+              "end_column": 9
             }
           }
         ],
@@ -7784,7 +7784,7 @@
               "line": 1,
               "column": 1,
               "end_line": 1,
-              "end_column": 1
+              "end_column": 7
             },
             "value": false
           },
@@ -7793,7 +7793,7 @@
             "line": 1,
             "column": 1,
             "end_line": 1,
-            "end_column": 1
+            "end_column": 7
           }
         }
       }
@@ -7915,7 +7915,67 @@
                   "order_status": "OrderStatus_Cancelled"
                 },
                 "action": {
-                  "name": "order_cancel",
+                  "name": "Cancel",
+                  "generated_name": "order_cancel",
+                  "origin": {
+                    "identity": "domain:DomainExpressionCharacterization/aggregate/Order/decide/Cancel:1003:1009:46:5",
+                    "dialect": "domain",
+                    "primary": {
+                      "source_file": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+                      "span": {
+                        "start": {
+                          "offset": 1003,
+                          "line": 46,
+                          "column": 5
+                        },
+                        "end": {
+                          "offset": 1009,
+                          "line": 46,
+                          "column": 11
+                        }
+                      },
+                      "dialect": "domain",
+                      "declaration_path": [
+                        "DomainExpressionCharacterization",
+                        "aggregate",
+                        "Order",
+                        "decide",
+                        "Cancel"
+                      ]
+                    },
+                    "secondary": [
+                      {
+                        "source_file": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+                        "span": {
+                          "start": {
+                            "offset": 604,
+                            "line": 28,
+                            "column": 5
+                          },
+                          "end": {
+                            "offset": 611,
+                            "line": 28,
+                            "column": 12
+                          }
+                        },
+                        "dialect": "domain",
+                        "declaration_path": [
+                          "DomainExpressionCharacterization",
+                          "aggregate",
+                          "Order",
+                          "command",
+                          "Cancel"
+                        ]
+                      }
+                    ],
+                    "lowering_steps": [
+                      {
+                        "kind": "lower_decision_to_action",
+                        "detail": null
+                      }
+                    ],
+                    "generated": true
+                  },
                   "params": {},
                   "loc": {
                     "line": 46,
@@ -8050,7 +8110,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown domain symbol 'missing_status' at 10:29"
+          "message": "unknown domain symbol 'missing_status' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl:10:29"
         }
       },
       "verify": {
@@ -8059,7 +8119,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown domain symbol 'missing_status' at 10:29"
+          "message": "unknown domain symbol 'missing_status' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl:10:29"
         }
       }
     },
@@ -8070,7 +8130,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown domain symbol 'Cancelled' at 10:41"
+          "message": "unknown domain symbol 'Cancelled' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl:10:41"
         }
       },
       "verify": {
@@ -8079,7 +8139,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown domain symbol 'Cancelled' at 10:41"
+          "message": "unknown domain symbol 'Cancelled' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl:10:41"
         }
       }
     },
@@ -8090,7 +8150,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "comparison operand type mismatch at 10:37"
+          "message": "comparison operand type mismatch at rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl:10:37"
         }
       },
       "verify": {
@@ -8099,7 +8159,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "comparison operand type mismatch at 10:37"
+          "message": "comparison operand type mismatch at rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl:10:37"
         }
       }
     },
@@ -8150,7 +8210,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown domain symbol 'Status_Draft' at 10:41"
+          "message": "unknown domain symbol 'Status_Draft' at rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl:10:41"
         }
       },
       "verify": {
@@ -8159,7 +8219,7 @@
           "fsl": "1.0",
           "result": "error",
           "kind": "semantics",
-          "message": "unknown domain symbol 'Status_Draft' at 10:41"
+          "message": "unknown domain symbol 'Status_Draft' at rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl:10:41"
         }
       }
     }

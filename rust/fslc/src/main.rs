@@ -3455,7 +3455,15 @@ fn run_check_with_tags(
 
 fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    fsl_syntax::parse_surface_document(&source).map_err(|error| error.to_string())
+    fsl_syntax::parse_surface_document(&source).map_err(|error| {
+        format!(
+            "{} at {}:{}:{}",
+            error.message,
+            path.display(),
+            error.span.start.line,
+            error.span.start.column
+        )
+    })
 }
 
 fn validate_specialized_document(path: &Path) -> Result<(), String> {
@@ -4644,13 +4652,18 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
     flows
 }
 
+#[allow(clippy::too_many_lines)]
 fn model_skeleton(model: &KernelModel) -> Value {
     let actions = model
         .actions
         .iter()
         .map(|action| {
+            let origin = model.action_origin(&action.name);
             let mut value = json!({
-                "name": fslc_rust::display_name(&action.name),
+                "name": origin
+                    .and_then(|origin| origin.primary.as_ref())
+                    .and_then(|site| site.declaration_path.last())
+                    .map_or_else(|| fslc_rust::display_name(&action.name), String::clone),
                 "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
                 "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
                 "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
@@ -4660,6 +4673,18 @@ fn model_skeleton(model: &KernelModel) -> Value {
                 && let Value::Object(value) = &mut value
             {
                 value.insert("fair".to_owned(), json!(true));
+            }
+            if let Some(origin) = origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert(
+                    "generated_name".to_owned(),
+                    json!(fslc_rust::display_name(&action.name)),
+                );
+                value.insert(
+                    "origin".to_owned(),
+                    fslc_rust::internal_origin_json(origin),
+                );
             }
             value
         })
@@ -4671,7 +4696,26 @@ fn model_skeleton(model: &KernelModel) -> Value {
         ("reachable", &model.reachables),
     ] {
         properties.extend(items.iter().map(|property| {
-            json!({"name":fslc_rust::display_name(&property.name),"kind":kind,"body_text":fslc_rust::expr_text(&property.expr),"requirement":metadata(property.meta.as_ref())})
+            let origin = model.property_origin(kind, &property.name);
+            let mut value = json!({
+                "name": origin
+                    .and_then(|origin| origin.primary.as_ref())
+                    .and_then(|site| site.declaration_path.last())
+                    .map_or_else(|| fslc_rust::display_name(&property.name), String::clone),
+                "kind":kind,
+                "body_text":fslc_rust::expr_text(&property.expr),
+                "requirement":metadata(property.meta.as_ref())
+            });
+            if let Some(origin) = origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert(
+                    "generated_name".to_owned(),
+                    json!(fslc_rust::display_name(&property.name)),
+                );
+                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+            }
+            value
         }));
     }
     for property in &model.leadstos {
@@ -5471,21 +5515,52 @@ fn invariant_violation_explanation(
                 .actions
                 .iter()
                 .find(|definition| definition.name == action.name);
-            json!({
-                "name": display(&action.name),
+            let origin = model.action_origin(&action.name);
+            let mut value = json!({
+                "name": origin
+                    .and_then(fslc_rust::origin_display_name)
+                    .map_or_else(|| display(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
                 "loc": definition.map(|definition| definition.span.python_loc()),
-            })
+            });
+            if let Some(origin) = origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert("generated_name".to_owned(), json!(display(&action.name)));
+                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+                if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
+                    value.insert("loc".to_owned(), span.python_loc());
+                }
+            }
+            value
         });
     let mut explanation = Map::new();
     explanation.insert("violation_kind".to_owned(), json!(violation.kind));
-    explanation.insert("invariant".to_owned(), json!(display(&violation.name)));
+    let origin = model.property_origin("invariant", &violation.name);
+    explanation.insert(
+        "invariant".to_owned(),
+        json!(
+            origin
+                .and_then(fslc_rust::origin_display_name)
+                .map_or_else(|| display(&violation.name), str::to_owned)
+        ),
+    );
     explanation.insert(
         "loc".to_owned(),
-        property.map_or(Value::Null, |property| property.span.python_loc()),
+        origin
+            .and_then(|origin| origin.primary.as_ref())
+            .and_then(|site| site.span)
+            .map_or_else(
+                || property.map_or(Value::Null, |property| property.span.python_loc()),
+                fsl_syntax::Span::python_loc,
+            ),
     );
+    if let Some(origin) = origin {
+        explanation.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        explanation.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+    }
     explanation.insert("violated_at_step".to_owned(), json!(violation.step));
     explanation.insert("violating_bindings".to_owned(), violating.clone());
     explanation.insert(
@@ -11925,6 +12000,7 @@ fn statement_location(statements: &[fsl_core::KernelStatement]) -> Value {
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn concrete_boundary_output(
     model: &KernelModel,
     violation: &fsl_runtime::Violation,
@@ -11935,7 +12011,6 @@ fn concrete_boundary_output(
     output.insert("result".to_owned(), json!("violated"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
-    output.insert("invariant".to_owned(), json!(display(&violation.name)));
     let action = trace.last().and_then(|entry| entry.action.as_ref());
     let definition = action.and_then(|action| {
         model
@@ -11943,13 +12018,43 @@ fn concrete_boundary_output(
             .iter()
             .find(|definition| definition.name == action.name)
     });
+    let origin = match violation.kind.as_str() {
+        "invariant" => model.property_origin("invariant", &violation.name),
+        "trans" => model.property_origin("trans", &violation.name),
+        "type_bound" => violation
+            .name
+            .strip_prefix("_bounds_")
+            .and_then(|name| model.state_origin(name)),
+        _ => action.and_then(|action| model.action_origin(&action.name)),
+    };
+    output.insert(
+        "invariant".to_owned(),
+        json!(
+            origin
+                .and_then(fslc_rust::origin_display_name)
+                .map_or_else(|| display(&violation.name), str::to_owned)
+        ),
+    );
+    if let Some(origin) = origin {
+        output.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        output.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+    }
     output.insert(
         "loc".to_owned(),
-        if violation.kind == "partial_op" {
-            definition.map_or(Value::Null, |action| statement_location(&action.statements))
-        } else {
-            Value::Null
-        },
+        origin
+            .and_then(|origin| origin.primary.as_ref())
+            .and_then(|site| site.span)
+            .map_or_else(
+                || {
+                    if violation.kind == "partial_op" {
+                        definition
+                            .map_or(Value::Null, |action| statement_location(&action.statements))
+                    } else {
+                        Value::Null
+                    }
+                },
+                fsl_syntax::Span::python_loc,
+            ),
     );
     if violation.kind == "partial_op" {
         output.insert(
@@ -11984,13 +12089,23 @@ fn concrete_boundary_output(
     output.insert(
         "last_action".to_owned(),
         action.map_or(Value::Null, |action| {
-            json!({
-                "name": display(&action.name),
+            let action_origin = model.action_origin(&action.name);
+            let mut value = json!({
+                "name": action_origin
+                    .and_then(fslc_rust::origin_display_name)
+                    .map_or_else(|| display(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
                 "loc": definition.map(|definition| definition.span.python_loc()),
-            })
+            });
+            if let Some(origin) = action_origin
+                && let Value::Object(value) = &mut value
+            {
+                value.insert("generated_name".to_owned(), json!(display(&action.name)));
+                value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
+            }
+            value
         }),
     );
     let mut rendered_trace = fslc_rust::trace_json(model, trace);
@@ -12493,13 +12608,15 @@ fn load_model(path: &Path) -> Result<KernelModel, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| {
-        if error.message == "top-level document has not reached the kernel lowering gate" {
-            "spec has no state block".to_owned()
-        } else {
-            error.to_string()
-        }
-    })?;
+    let kernel =
+        fsl_core::parse_kernel_source_with_file(&source, &resolver, path.to_string_lossy())
+            .map_err(|error| {
+                if error.message == "top-level document has not reached the kernel lowering gate" {
+                    "spec has no state block".to_owned()
+                } else {
+                    error.to_string()
+                }
+            })?;
     fsl_core::build_model(kernel).map_err(|error| error.to_string())
 }
 
