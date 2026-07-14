@@ -81,6 +81,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Native Rust now accepts `@requirement(id, text?)`, `@undecided(reason)`,
+  `@kind(id, text?)`, and multi-segment custom-namespace annotations directly
+  on a declaration (`init`, `action`, `invariant`/`trans`/`reachable`/`until`/
+  `unless`/`leadsTo`, a process `transition`, and `requirement`/`acceptance`/
+  `forbidden` blocks) in the spec/business/requirements/compose dialects, not
+  only before a document's dialect keyword. A shared parser helper backs both
+  attachment points — no per-dialect copy. The new syntax and the legacy
+  string-metadata/`covers` forms desugar to the same typed relation and union
+  when both target one declaration; a requirement block's annotations fan out
+  to every action/property it contains. A malformed or stray annotation
+  (nothing to attach to) reports a precise coded diagnostic
+  (`FSL-ANNOTATION-TARGET`/`-ARGUMENTS`/`-PATH`/`-SYNTAX`). Public Kernel v1/v2
+  JSON and `python_ast` projections remain unchanged; `domain`/`dbsystem`/
+  `ai_component` nested declarations are not yet covered and are tracked by a
+  follow-up issue (issue #241; follow-up #281).
 - Native dialect selection now lexes each document once and dispatches through a
   duplicate-checked keyword registry shared by Kernel, CLI, WASM, and mirrored
   Python/LSP entrypoints. Leading BOM/comments/whitespace and typed top-level

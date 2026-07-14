@@ -5419,12 +5419,17 @@ fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidat
     let mut candidates = Vec::new();
     for (item_index, item) in spec.items.iter().enumerate() {
         match item {
-            fsl_syntax::SpecItem::Init { statements, meta } => {
+            fsl_syntax::SpecItem::Init {
+                statements,
+                meta,
+                annotations,
+            } => {
                 for (replacement, span) in statement_removals(statements) {
                     let mut mutated = spec.clone();
                     mutated.items[item_index] = fsl_syntax::SpecItem::Init {
                         statements: replacement,
                         meta: meta.clone(),
+                        annotations: annotations.clone(),
                     };
                     candidates.push(WeakeningCandidate {
                         spec: mutated,

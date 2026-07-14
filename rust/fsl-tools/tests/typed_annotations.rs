@@ -79,6 +79,42 @@ fn ledger_registers_every_typed_requirement_relation() {
 }
 
 #[test]
+fn tsg_and_undecided_report_read_declaration_level_annotation_syntax_with_no_legacy_string() {
+    let kernel = parse_kernel_source(
+        r#"
+spec AnnotationSyntaxOnly {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  @undecided("rollback policy is pending")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse spec");
+    let model = build_model(kernel).expect("build model");
+
+    let tsg = fsl_tools::build_tsg(&model);
+    let action = tsg["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|node| node["id"] == "action:publish")
+        .expect("publish node");
+    assert_eq!(
+        action["requirements"],
+        serde_json::json!([{"id":"REQ-1","text":"publishing changes readiness"}])
+    );
+
+    let report = fsl_tools::undecided_declarations(&model);
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0]["declaration"], "action publish");
+    assert_eq!(report[0]["reason"], "rollback policy is pending");
+    assert_eq!(report[0]["requirement_ids"], serde_json::json!(["REQ-1"]));
+}
+
+#[test]
 fn undecided_reports_use_typed_annotations_when_a_requirement_coexists() {
     let mut kernel = parse_kernel_source(
         r#"

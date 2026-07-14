@@ -60,4 +60,10 @@ MONITOR_EXCLUSIONS: dict[str, str] = {
         "deliberate no-action edge fixture; Monitor requires >=1 action. "
         "BMC-side coverage lives in tests/test_self_conformance.py"
     ),
+    "examples/annotations/annotated_claims.fsl": (
+        "native-only declaration-level @annotation syntax (issue #241); the "
+        "frozen Python reference does not parse @... before a nested "
+        "declaration. Native coverage lives in rust/fsl-syntax and "
+        "rust/fsl-core tests"
+    ),
 }

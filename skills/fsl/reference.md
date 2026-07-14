@@ -18,9 +18,29 @@ spec <Name> { ... }
 
 Document annotations support `@requirement(id, text?)`, `@undecided(reason)`,
 `@kind(id, text?)`, and multi-segment custom namespaces. Annotation argument
-keywords are never dialect keywords. Annotation syntax on declarations inside a
-document remains outside this subset. Empty/unknown documents use the stable
+keywords are never dialect keywords. Empty/unknown documents use the stable
 `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` diagnostics.
+
+The same `@...` syntax also attaches directly to a nested declaration —
+`init`, `action`, `invariant`/`trans`/`reachable`/`until`/`unless`/`leadsTo`, a
+process `transition`, or a `requirement`/`acceptance`/`forbidden` block — in
+the spec/business/requirements/compose dialects:
+
+```fsl
+@requirement("REQ-3", "the ledger matches payments")
+@undecided("late gateway completion policy is pending")
+invariant PaidLedger { ... }
+```
+
+Multiple annotations may stack in any order without changing the checked
+result; comments/blank lines between them or before the target do not break
+attachment. They coexist with (and desugar to the same relation as) the legacy
+`"ID: text"` string slot and `covers`/`requirement` block relations — see §13.1.
+An annotation with nothing supported to attach to reports
+`FSL-ANNOTATION-TARGET`. `domain`/`dbsystem`/`ai_component` nested
+declarations don't yet accept `@...` (only their one top-level document
+annotation does; tracked by follow-up issue #281); this is native-only syntax
+the frozen Python reference does not parse.
 
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
@@ -1259,13 +1279,14 @@ state-dependency-derived affected requirement IDs; `analyze --profile ai-review`
 retains matching underspecification findings with `acknowledged:true`. The
 source slot remains singular, but native lowering converts it, requirement
 blocks, process `covers`, acceptance, and forbidden IDs into the shared typed
-annotation carrier. An outer requirement can therefore coexist with an inner
-`undecided` marker. Explicit `covers` and requirement-block annotations retain
-their own spans; `undecided` is reserved and cannot be an explicit requirement
-ID. Multiple-relation JSON outputs use `requirements` and preserve singular
-fields as lexical compatibility projections. Document-level `@...` syntax is
-available as described in §1; annotation placement on declarations inside the
-document remains separate. See `docs/DESIGN-undecided.md`,
+annotation carrier — the same carrier the `@...` syntax in §1 populates
+directly, at both the document and the declaration level. An outer
+requirement can therefore coexist with an inner `undecided` marker, whether
+written as legacy strings, `@...` syntax, or a mix of both on one declaration.
+Explicit `covers` and requirement-block annotations retain their own spans;
+`undecided` is reserved and cannot be an explicit requirement ID.
+Multiple-relation JSON outputs use `requirements` and preserve singular fields
+as lexical compatibility projections. See `docs/DESIGN-undecided.md`,
 `docs/DESIGN-annotations.md`, and `docs/DESIGN-dialect-dispatch.md`. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.

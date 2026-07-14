@@ -345,6 +345,418 @@ requirements TraceCases {
 }
 
 #[test]
+fn nested_annotation_syntax_reaches_the_checked_model() {
+    let source = r#"
+spec NestedAnnotations {
+  state { ready: Bool }
+  @requirement("REQ-INIT", "startup is traceable")
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  @undecided("rollback policy is pending")
+  @kind("safety")
+  @acme.review(owner.team, 2, true)
+  action publish() { ready = true }
+  @requirement("REQ-2", "readiness is Boolean")
+  invariant Stable { ready == ready }
+  @requirement("REQ-3", "readiness never regresses")
+  trans Forward { ready == true => ready == true }
+  @requirement("REQ-4", "readiness is reachable")
+  reachable Ready { ready == true }
+  @requirement("REQ-5", "eventually ready")
+  leadsTo Progress { ready == false ~> ready == true }
+}
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse annotated spec");
+    let model = build_model(kernel).expect("build checked model");
+
+    assert_eq!(
+        model
+            .init_annotations
+            .requirements()
+            .unwrap()
+            .into_iter()
+            .map(|requirement| requirement.id)
+            .collect::<Vec<_>>(),
+        ["REQ-INIT"]
+    );
+
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(action.annotations.source_order().len(), 4);
+    assert_eq!(action.annotations.requirements().unwrap()[0].id, "REQ-1");
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "rollback policy is pending"
+    );
+
+    let invariant = model
+        .invariants
+        .iter()
+        .find(|item| item.name == "Stable")
+        .expect("Stable invariant");
+    assert_eq!(invariant.annotations.requirements().unwrap()[0].id, "REQ-2");
+
+    let trans = model
+        .transitions
+        .iter()
+        .find(|item| item.name == "Forward")
+        .expect("Forward trans");
+    assert_eq!(trans.annotations.requirements().unwrap()[0].id, "REQ-3");
+
+    let reachable = model
+        .reachables
+        .iter()
+        .find(|item| item.name == "Ready")
+        .expect("Ready reachable");
+    assert_eq!(reachable.annotations.requirements().unwrap()[0].id, "REQ-4");
+
+    let leadsto = model
+        .leadstos
+        .iter()
+        .find(|item| item.name == "Progress")
+        .expect("Progress leadsTo");
+    assert_eq!(leadsto.annotations.requirements().unwrap()[0].id, "REQ-5");
+}
+
+#[test]
+fn legacy_string_and_annotation_syntax_desugar_to_the_same_relation() {
+    let legacy = parse_kernel_source(
+        r#"
+spec LegacyMeta {
+  state { ready: Bool }
+  init { ready = false }
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse legacy spec");
+    let annotated = parse_kernel_source(
+        r#"
+spec AnnotationSyntax {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated spec");
+
+    let legacy_model = build_model(legacy).expect("build legacy model");
+    let annotated_model = build_model(annotated).expect("build annotated model");
+    let ids = |model: &fsl_core::KernelModel| {
+        model
+            .requirements_for(&action_target("publish"))
+            .into_iter()
+            .map(|requirement| (requirement.id, requirement.text))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&legacy_model), ids(&annotated_model));
+}
+
+#[test]
+fn legacy_and_annotation_syntax_on_one_declaration_deduplicate_an_identical_relation() {
+    let kernel = parse_kernel_source(
+        r#"
+spec CoexistingAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  @undecided("rollback policy is pending")
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse spec with both channels");
+    let model = build_model(kernel).expect("build checked model");
+    let links = model.requirements_for(&action_target("publish"));
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].id, "REQ-1");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "rollback policy is pending"
+    );
+}
+
+#[test]
+fn legacy_and_annotation_syntax_with_conflicting_text_is_a_checked_error() {
+    let kernel = parse_kernel_source(
+        r#"
+spec ConflictingAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "a different description")
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse spec with conflicting channels");
+    let error = build_model(kernel).expect_err("conflicting relation must fail");
+    assert!(error.message.contains("REQ-1"));
+}
+
+#[test]
+fn annotation_order_does_not_change_the_checked_result() {
+    let forward = parse_kernel_source(
+        r#"
+spec OrderForward {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "first")
+  @undecided("second")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse forward order");
+    let reverse = parse_kernel_source(
+        r#"
+spec OrderReverse {
+  state { ready: Bool }
+  init { ready = false }
+  @undecided("second")
+  @requirement("REQ-1", "first")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse reverse order");
+
+    let forward_model = build_model(forward).expect("build forward model");
+    let reverse_model = build_model(reverse).expect("build reverse model");
+    let summarize = |model: &fsl_core::KernelModel| {
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == "publish")
+            .expect("publish action");
+        (
+            action
+                .annotations
+                .requirements()
+                .unwrap()
+                .into_iter()
+                .map(|requirement| requirement.id)
+                .collect::<Vec<_>>(),
+            action.annotations.undecided()[0].0.to_owned(),
+        )
+    };
+    assert_eq!(summarize(&forward_model), summarize(&reverse_model));
+}
+
+#[test]
+fn until_annotations_bind_to_both_generated_targets() {
+    let source = r#"
+spec UntilAnnotations {
+  state { ready: Bool, done: Bool }
+  init { ready = false done = false }
+  @requirement("REQ-U", "ready holds until done")
+  until Sequence { ready until done }
+}
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse until spec");
+    let model = build_model(kernel).expect("build checked model");
+    let trans = model
+        .transitions
+        .iter()
+        .find(|item| item.name == "Sequence_until_safety")
+        .expect("generated until safety trans");
+    assert_eq!(trans.annotations.requirements().unwrap()[0].id, "REQ-U");
+    let leadsto = model
+        .leadstos
+        .iter()
+        .find(|item| item.name == "Sequence")
+        .expect("generated until leadsTo");
+    assert_eq!(leadsto.annotations.requirements().unwrap()[0].id, "REQ-U");
+}
+
+#[test]
+fn process_transition_accepts_leading_annotations_beside_covers() {
+    let source = r#"
+requirements TransitionAnnotations {
+  process Claim {
+    stages Draft, Done
+    initial Draft
+    @requirement("REQ-A", "annotation syntax")
+    transition finish Draft -> Done by User covers REQ-C "covers clause"
+  }
+}
+verify { instances Claim = 1 }
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse transition");
+    let model = build_model(kernel).expect("build checked model");
+    let mut ids = model
+        .requirements_for(&action_target("finish"))
+        .into_iter()
+        .map(|requirement| requirement.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["REQ-A", "REQ-C"]);
+}
+
+#[test]
+fn requirement_block_annotations_fan_out_to_the_inner_action_target() {
+    let source = r#"
+requirements BlockAnnotationFanOut {
+  state { ready: Bool }
+  init { ready = false }
+  @undecided("owning team is pending")
+  requirement REQ-B "publishing is controlled" {
+    action publish() { ready = true }
+  }
+}
+"#;
+    let kernel =
+        parse_kernel_source(source, &FsResolver::new(".")).expect("parse requirement block");
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "owning team is pending"
+    );
+    assert_eq!(
+        model.requirements_for(&action_target("publish"))[0].id,
+        "REQ-B"
+    );
+}
+
+#[test]
+fn acceptance_and_forbidden_blocks_accept_leading_annotations() {
+    let source = r#"
+requirements TraceAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  action publish() { ready = true }
+  @undecided("acceptance owner is pending")
+  acceptance AC-1 "publication succeeds" {
+    publish()
+    expect ready == true
+  }
+  @undecided("forbidden owner is pending")
+  forbidden NEG-1 "publication cannot repeat" {
+    publish() publish()
+    expect rejected
+  }
+}
+"#;
+    let contract = requirements_trace_contract(source)
+        .expect("parse trace contract")
+        .expect("requirements trace contract");
+    assert_eq!(
+        contract.acceptance[0].annotations.undecided()[0].0,
+        "acceptance owner is pending"
+    );
+    assert_eq!(
+        contract.acceptance[0].annotations.requirements().unwrap()[0].id,
+        "AC-1"
+    );
+    assert_eq!(
+        contract.forbidden[0].annotations.undecided()[0].0,
+        "forbidden owner is pending"
+    );
+}
+
+#[test]
+fn business_policy_and_goal_accept_leading_annotations() {
+    let source = r#"
+business AnnotatedBusiness {
+  actor Reviewer
+  entity Case
+  process Case {
+    stages Open, Closed
+    initial Open
+    transition close Open -> Closed by Reviewer
+  }
+  @requirement("REQ-POLICY", "closed cases stay closed")
+  policy POL-1 "closed cases stay closed" invariant {
+    case_stage[0] == Open or case_stage[0] == Closed
+  }
+  @undecided("the target closure rate is still under discussion")
+  goal GOAL-1 "cases eventually close" some Case can reach Closed
+}
+verify { instances Case = 1 }
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse business spec");
+    let model = build_model(kernel).expect("build checked model");
+
+    let policy = model
+        .invariants
+        .iter()
+        .find(|item| item.name == "POL-1")
+        .expect("POL-1 invariant");
+    let mut policy_ids = policy
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|requirement| requirement.id)
+        .collect::<Vec<_>>();
+    policy_ids.sort();
+    assert_eq!(policy_ids, ["POL-1", "REQ-POLICY"]);
+
+    let goal = model
+        .reachables
+        .iter()
+        .find(|item| item.name == "GOAL-1")
+        .expect("GOAL-1 reachable");
+    assert_eq!(
+        goal.annotations.undecided()[0].0,
+        "the target closure rate is still under discussion"
+    );
+}
+
+#[test]
+fn compose_sync_action_accepts_leading_annotations() {
+    struct Resolver;
+    impl FileResolver for Resolver {
+        fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+            let name = path.trim_end_matches(".fsl");
+            Ok(format!(
+                "spec {name} {{ state {{ ready: Bool }} init {{ ready = false }} action step() {{ ready = true }} }}"
+            ))
+        }
+    }
+
+    let kernel = parse_kernel_source(
+        r#"
+compose Combined {
+  use Left as left from "Left.fsl"
+  use Right as right from "Right.fsl"
+  @requirement("REQ-SYNC", "synchronized step is traceable")
+  action both() = left.step() || right.step() {}
+}
+"#,
+        &Resolver,
+    )
+    .expect("parse compose with annotated sync action");
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "both")
+        .expect("both action");
+    assert_eq!(action.annotations.requirements().unwrap()[0].id, "REQ-SYNC");
+}
+
+#[test]
 fn trace_cases_reject_the_reserved_undecided_requirement_id() {
     for keyword in ["acceptance", "forbidden"] {
         let expectation = if keyword == "acceptance" {

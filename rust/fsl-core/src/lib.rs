@@ -637,9 +637,14 @@ impl PredicateExpander {
                     })
                     .collect::<Result<_, CoreError>>()?,
             ),
-            SpecItem::Init { statements, meta } => SpecItem::Init {
+            SpecItem::Init {
+                statements,
+                meta,
+                annotations,
+            } => SpecItem::Init {
                 statements: self.expand_statements(statements, &mut Vec::new())?,
                 meta,
+                annotations,
             },
             SpecItem::Action {
                 name,
@@ -649,6 +654,7 @@ impl PredicateExpander {
                 fair,
                 meta,
                 sync,
+                annotations,
             } => SpecItem::Action {
                 name,
                 params: params
@@ -663,39 +669,46 @@ impl PredicateExpander {
                 fair,
                 meta,
                 sync,
+                annotations,
             },
             SpecItem::Invariant {
                 name,
                 expr,
                 span,
                 meta,
+                annotations,
             } => SpecItem::Invariant {
                 name,
                 expr: Box::new(self.expand_expr(*expr, &mut Vec::new())?),
                 span,
                 meta,
+                annotations,
             },
             SpecItem::Trans {
                 name,
                 expr,
                 span,
                 meta,
+                annotations,
             } => SpecItem::Trans {
                 name,
                 expr: Box::new(self.expand_expr(*expr, &mut Vec::new())?),
                 span,
                 meta,
+                annotations,
             },
             SpecItem::Reachable {
                 name,
                 expr,
                 span,
                 meta,
+                annotations,
             } => SpecItem::Reachable {
                 name,
                 expr: Box::new(self.expand_expr(*expr, &mut Vec::new())?),
                 span,
                 meta,
+                annotations,
             },
             SpecItem::Terminal { expr, span } => SpecItem::Terminal {
                 expr: Box::new(self.expand_expr(*expr, &mut Vec::new())?),
@@ -707,12 +720,14 @@ impl PredicateExpander {
                 after,
                 span,
                 meta,
+                annotations,
             } => SpecItem::Until {
                 name,
                 before: Box::new(self.expand_expr(*before, &mut Vec::new())?),
                 after: Box::new(self.expand_expr(*after, &mut Vec::new())?),
                 span,
                 meta,
+                annotations,
             },
             SpecItem::Unless {
                 name,
@@ -720,12 +735,14 @@ impl PredicateExpander {
                 after,
                 span,
                 meta,
+                annotations,
             } => SpecItem::Unless {
                 name,
                 before: Box::new(self.expand_expr(*before, &mut Vec::new())?),
                 after: Box::new(self.expand_expr(*after, &mut Vec::new())?),
                 span,
                 meta,
+                annotations,
             },
             SpecItem::LeadsTo {
                 name,
@@ -737,6 +754,7 @@ impl PredicateExpander {
                 decreases,
                 within,
                 helpful,
+                annotations,
             } => SpecItem::LeadsTo {
                 name,
                 binders: binders
@@ -747,6 +765,7 @@ impl PredicateExpander {
                 after: Box::new(self.expand_expr(*after, &mut Vec::new())?),
                 span,
                 meta,
+                annotations,
                 decreases: decreases
                     .map(|expr| self.expand_expr(*expr, &mut Vec::new()).map(Box::new))
                     .transpose()?,

@@ -3,7 +3,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::{AiComponent, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span};
+use crate::{AiComponent, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetaTag {
@@ -135,6 +135,7 @@ pub enum SpecItem {
     Init {
         statements: Vec<Statement>,
         meta: Option<MetaTag>,
+        annotations: Annotations,
     },
     Action {
         name: String,
@@ -144,24 +145,28 @@ pub enum SpecItem {
         fair: bool,
         meta: Option<MetaTag>,
         sync: bool,
+        annotations: Annotations,
     },
     Invariant {
         name: String,
         expr: Box<Expr>,
         span: Span,
         meta: Option<MetaTag>,
+        annotations: Annotations,
     },
     Trans {
         name: String,
         expr: Box<Expr>,
         span: Span,
         meta: Option<MetaTag>,
+        annotations: Annotations,
     },
     Reachable {
         name: String,
         expr: Box<Expr>,
         span: Span,
         meta: Option<MetaTag>,
+        annotations: Annotations,
     },
     Terminal {
         expr: Box<Expr>,
@@ -173,6 +178,7 @@ pub enum SpecItem {
         after: Box<Expr>,
         span: Span,
         meta: Option<MetaTag>,
+        annotations: Annotations,
     },
     Unless {
         name: String,
@@ -180,6 +186,7 @@ pub enum SpecItem {
         after: Box<Expr>,
         span: Span,
         meta: Option<MetaTag>,
+        annotations: Annotations,
     },
     LeadsTo {
         name: String,
@@ -191,6 +198,7 @@ pub enum SpecItem {
         decreases: Option<Box<Expr>>,
         within: Option<Box<Expr>>,
         helpful: Vec<HelpfulAction>,
+        annotations: Annotations,
     },
     VerifyBounds {
         items: Vec<VerifyItem>,
@@ -272,6 +280,7 @@ pub struct ProcessTransition {
     pub assignments: Vec<(String, Expr)>,
     pub covers: Option<ProcessCover>,
     pub span: Span,
+    pub annotations: Annotations,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -357,6 +366,7 @@ pub enum BusinessItem {
         body: Box<BusinessPolicyBody>,
         span: Span,
         satisfies: Vec<String>,
+        annotations: Annotations,
     },
     Goal {
         id: String,
@@ -364,6 +374,7 @@ pub enum BusinessItem {
         body: BusinessGoalBody,
         span: Span,
         satisfies: Vec<String>,
+        annotations: Annotations,
     },
     VerifyBounds {
         items: Vec<VerifyItem>,
@@ -473,6 +484,7 @@ pub struct RequirementAction {
     pub fair: bool,
     pub meta: Option<MetaTag>,
     pub maps: Option<MapsClause>,
+    pub annotations: Annotations,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -528,6 +540,7 @@ pub enum RequirementsItem {
         text: String,
         items: Vec<RequirementBlockItem>,
         span: Span,
+        annotations: Annotations,
     },
     Acceptance {
         id: String,
@@ -535,12 +548,14 @@ pub enum RequirementsItem {
         steps: Vec<AcceptanceStep>,
         expectation: AcceptanceExpectation,
         span: Span,
+        annotations: Annotations,
     },
     Forbidden {
         id: String,
         text: String,
         steps: Vec<AcceptanceStep>,
         span: Span,
+        annotations: Annotations,
     },
     Process(BusinessItem),
     Kpi(BusinessItem),
@@ -574,6 +589,7 @@ pub struct SyncAction {
     pub span: Span,
     pub fair: bool,
     pub meta: Option<MetaTag>,
+    pub annotations: Annotations,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -836,7 +852,9 @@ impl SpecItem {
                     })
                     .collect::<Vec<_>>()
             ]),
-            Self::Init { statements, meta } => {
+            Self::Init {
+                statements, meta, ..
+            } => {
                 let mut values = vec![json!("init"), Value::Array(statements_ast(statements))];
                 if let Some(meta) = meta {
                     values.push(meta.python_ast());
@@ -851,6 +869,7 @@ impl SpecItem {
                 fair,
                 meta,
                 sync,
+                ..
             } => {
                 let mut values = vec![
                     json!("action"),
@@ -871,18 +890,21 @@ impl SpecItem {
                 expr,
                 span,
                 meta,
+                ..
             } => property_ast("invariant", name, expr, *span, meta.as_ref()),
             Self::Trans {
                 name,
                 expr,
                 span,
                 meta,
+                ..
             } => property_ast("trans", name, expr, *span, meta.as_ref()),
             Self::Reachable {
                 name,
                 expr,
                 span,
                 meta,
+                ..
             } => property_ast("reachable", name, expr, *span, meta.as_ref()),
             Self::Terminal { expr, span } => {
                 json!(["terminal", expr.python_ast(), span.python_loc()])
@@ -893,6 +915,7 @@ impl SpecItem {
                 after,
                 span,
                 meta,
+                ..
             } => json!([
                 "until",
                 name,
@@ -907,6 +930,7 @@ impl SpecItem {
                 after,
                 span,
                 meta,
+                ..
             } => json!([
                 "unless",
                 name,
@@ -925,6 +949,7 @@ impl SpecItem {
                 decreases,
                 within,
                 helpful,
+                ..
             } => json!([
                 "leadsto",
                 name,
@@ -1244,6 +1269,7 @@ impl BusinessItem {
                 body,
                 span,
                 satisfies,
+                ..
             } => json!([
                 "biz_policy",
                 id,
@@ -1258,6 +1284,7 @@ impl BusinessItem {
                 body,
                 span,
                 satisfies,
+                ..
             } => json!([
                 "biz_goal",
                 id,
@@ -1563,6 +1590,7 @@ impl RequirementsItem {
                 text,
                 items,
                 span,
+                ..
             } => json!([
                 "requirement",
                 id,
@@ -1579,6 +1607,7 @@ impl RequirementsItem {
                 steps,
                 expectation,
                 span,
+                ..
             } => json!([
                 "acceptance",
                 id,
@@ -1595,6 +1624,7 @@ impl RequirementsItem {
                 text,
                 steps,
                 span,
+                ..
             } => json!([
                 "forbidden",
                 id,

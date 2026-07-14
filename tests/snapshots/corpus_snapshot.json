@@ -119,6 +119,12 @@
       "warnings": []
     }
   },
+  "examples/annotations/annotated_claims.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
   "examples/consulting/asis_expense.fsl": {
     "check": {
       "result": "ok",

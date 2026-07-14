@@ -1379,36 +1379,68 @@ action route() "undecided: routing policy is pending" { ... }
 `fslc ledger` and `fslc html` list these declarations and the requirement IDs
 whose state dependencies overlap them. `analyze --profile ai-review` keeps an
 underspecification finding but marks an exact declaration match as
-`acknowledged:true`. The current direct declaration syntax still has one string
+`acknowledged:true`. The legacy direct declaration syntax still has one string
 slot, but native lowering adapts it to a typed annotation carrier that can hold
 requirements, undecided markers, kinds, and namespaced custom annotations
-together. Requirement blocks therefore merge their outer requirement with an
-inner legacy marker instead of overwriting it. `@...` source syntax remains a
-separate feature. Explicit `covers` and requirement-block annotations keep their
-own exact source spans, and `undecided` is reserved rather than accepted as an
-explicit requirement ID. JSON consumers that expose multiple relations use a
-`requirements` array while preserving the existing singular field as a lexical
-compatibility projection. See `DESIGN-undecided.md` and
-`DESIGN-annotations.md`. This is implemented by the authoritative native Rust
-CLI and is not backported to the frozen Python reference implementation.
+together — the same carrier the canonical `@...` syntax below populates.
+Requirement blocks therefore merge their outer requirement with an inner
+legacy marker instead of overwriting it. Explicit `covers` and requirement-block
+annotations keep their own exact source spans, and `undecided` is reserved
+rather than accepted as an explicit requirement ID. JSON consumers that expose
+multiple relations use a `requirements` array while preserving the existing
+singular field as a lexical compatibility projection. See
+`DESIGN-undecided.md` and `DESIGN-annotations.md`. This is implemented by the
+authoritative native Rust CLI and is not backported to the frozen Python
+reference implementation.
 
-A document itself may now carry typed annotations before its dialect keyword:
+A document itself may carry typed annotations before its dialect keyword, and
+(as of issue #241) a declaration inside the document may carry typed
+annotations immediately before it, in either order relative to legacy
+metadata that also targets the same declaration:
 
 ```fsl
 @requirement("REQ-DOC", "this document owns the checkout contract")
 @acme.review(owner.platform, 2, true)
-spec Checkout { ... }
+spec Checkout {
+  state { paid: Bool }
+
+  @requirement("REQ-3", "the ledger matches payments")
+  @undecided("late gateway completion policy is pending")
+  @kind("safety")
+  invariant PaidLedger { paid == paid }
+}
 ```
 
-The shared lexer skips a leading BOM, whitespace, and `//` comments before
-these annotations, retains their order and spans, then selects the dialect from
-the following declaration keyword. Keywords inside annotation arguments do not
-participate in dispatch. This document-level subset supports `@requirement`,
-`@undecided`, `@kind`, and custom multi-segment namespaces; annotation placement
-on declarations inside the document remains tracked by issue #241. Empty and
-unknown documents report `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` with exact
-locations and the deterministic supported-keyword list. See
-`DESIGN-dialect-dispatch.md`.
+The shared lexer skips a leading BOM, whitespace, and `//` comments before an
+annotation group (top-level or nested); comments and blank lines between
+stacked annotations, or between the last annotation and its target, do not
+break attachment. Built-ins are `@requirement(id, text?)`, `@undecided(reason)`,
+`@kind(id, text?)`, and custom multi-segment namespaces
+(`@acme.review.owner(...)`) with string/integer/Boolean/symbol-path arguments;
+multiple annotations may stack on one declaration in any order without
+changing the checked result. At top level, keywords inside annotation
+arguments do not participate in dialect dispatch; empty and unknown documents
+report `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` with exact locations and the
+deterministic supported-keyword list (see `DESIGN-dialect-dispatch.md`).
+
+Declaration-level annotations attach to `init`, `action` (including sync and
+mapped/requirement actions), `invariant`, `trans`, `reachable`, `until`,
+`unless`, `leadsTo`, process `transition` (alongside `covers`), and
+`requirement`/`acceptance`/`forbidden` blocks (a `requirement` block's own
+annotations fan out to every action/property it contains, the same way its
+`id`/`text` already does). An annotation with no following declaration in the
+same block, or one preceding a declaration kind that does not accept
+annotations, reports `FSL-ANNOTATION-TARGET` at the annotation's span; malformed
+arguments, namespaces, or syntax report `FSL-ANNOTATION-ARGUMENTS` /
+`FSL-ANNOTATION-PATH` / `FSL-ANNOTATION-SYNTAX`. The new syntax and the legacy
+string/`covers` forms both desugar into the same typed relation and simply
+union when both are present on one declaration (identical `(id, text)` pairs
+deduplicate; conflicting text for one requirement ID is a checked-model error).
+Declaration-level annotations on `domain`/`dbsystem`/`ai_component` nested
+declarations (their top-level document annotation already works) are tracked
+by a follow-up issue (#281) and are not yet supported. `@...` on a nested declaration
+is a native-only surface addition — the frozen Python reference does not parse
+it, so specs that use it are outside the Python-parity corpus by construction.
 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 

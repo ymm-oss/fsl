@@ -10,6 +10,7 @@
 
 mod ai;
 mod annotation;
+mod annotation_parse;
 mod ast;
 mod db;
 mod dispatch;

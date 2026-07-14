@@ -179,6 +179,7 @@ fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations)
 ///
 /// Returns [`CoreError`] for missing/invalid components, unknown aliases or
 /// actions, sync arity mismatches, and nested compose inputs.
+#[allow(clippy::too_many_lines)]
 pub fn lower_compose(
     compose: SurfaceCompose,
     resolver: &dyn FileResolver,
@@ -224,12 +225,17 @@ pub fn lower_compose(
     let mut static_items = Vec::new();
     let mut init = Vec::new();
     let mut init_meta = None;
+    let mut init_annotations = Annotations::default();
     let mut actions = Vec::new();
     for alias in &order {
         let component = &components[alias];
         for item in &component.spec.items {
             match item {
-                SpecItem::Init { statements, meta } => {
+                SpecItem::Init {
+                    statements,
+                    meta,
+                    annotations,
+                } => {
                     init.extend(rewrite_statements(
                         statements.clone(),
                         component,
@@ -238,6 +244,7 @@ pub fn lower_compose(
                     if init_meta.is_none() {
                         init_meta.clone_from(meta);
                     }
+                    init_annotations.extend(annotations.source_order().iter().cloned());
                 }
                 SpecItem::Action { name, .. } => {
                     if !internal.contains(&(alias.clone(), name.clone())) {
@@ -254,11 +261,16 @@ pub fn lower_compose(
             ComposeItem::Common(SpecItem::State(fields)) => {
                 static_items.push(SpecItem::State(fields.clone()));
             }
-            ComposeItem::Common(SpecItem::Init { statements, meta }) => {
+            ComposeItem::Common(SpecItem::Init {
+                statements,
+                meta,
+                annotations,
+            }) => {
                 init.extend(rewrite_compose_statements(statements.clone(), &components));
                 if init_meta.is_none() {
                     init_meta.clone_from(meta);
                 }
+                init_annotations.extend(annotations.source_order().iter().cloned());
             }
             ComposeItem::Common(item) => {
                 static_items.push(rewrite_compose_item(item.clone(), &components)?);
@@ -272,6 +284,7 @@ pub fn lower_compose(
     static_items.push(SpecItem::Init {
         statements: init,
         meta: init_meta,
+        annotations: init_annotations,
     });
     static_items.extend(actions);
     Ok(composed_kernel(
@@ -343,9 +356,14 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                 })
                 .collect(),
         ),
-        SpecItem::Init { statements, meta } => SpecItem::Init {
+        SpecItem::Init {
+            statements,
+            meta,
+            annotations,
+        } => SpecItem::Init {
             statements: rewrite_statements(statements, component, &HashSet::new()),
             meta,
+            annotations,
         },
         SpecItem::Action {
             name,
@@ -355,6 +373,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             fair,
             meta,
             sync,
+            annotations,
         } => {
             let params = params
                 .into_iter()
@@ -374,6 +393,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                 fair,
                 meta,
                 sync,
+                annotations,
             }
         }
         SpecItem::Invariant {
@@ -381,33 +401,39 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             expr,
             span,
             meta,
+            annotations,
         } => SpecItem::Invariant {
             name: prefix(alias, &name),
             expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
             span,
             meta,
+            annotations,
         },
         SpecItem::Trans {
             name,
             expr,
             span,
             meta,
+            annotations,
         } => SpecItem::Trans {
             name: prefix(alias, &name),
             expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
             span,
             meta,
+            annotations,
         },
         SpecItem::Reachable {
             name,
             expr,
             span,
             meta,
+            annotations,
         } => SpecItem::Reachable {
             name: prefix(alias, &name),
             expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
             span,
             meta,
+            annotations,
         },
         SpecItem::Terminal { expr, span } => SpecItem::Terminal {
             expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
@@ -423,6 +449,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             decreases,
             within,
             helpful,
+            annotations,
         } => {
             let mut bound = HashSet::new();
             let binders = binders
@@ -443,6 +470,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                 decreases: decreases.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
                 within: within.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
                 helpful,
+                annotations,
             }
         }
         item @ (SpecItem::Until { .. }
@@ -813,33 +841,39 @@ fn rewrite_compose_item(
             expr,
             span,
             meta,
+            annotations,
         } => SpecItem::Invariant {
             name,
             expr: Box::new(resolve_alias_expr(*expr, components)?),
             span,
             meta,
+            annotations,
         },
         SpecItem::Trans {
             name,
             expr,
             span,
             meta,
+            annotations,
         } => SpecItem::Trans {
             name,
             expr: Box::new(resolve_alias_expr(*expr, components)?),
             span,
             meta,
+            annotations,
         },
         SpecItem::Reachable {
             name,
             expr,
             span,
             meta,
+            annotations,
         } => SpecItem::Reachable {
             name,
             expr: Box::new(resolve_alias_expr(*expr, components)?),
             span,
             meta,
+            annotations,
         },
         other => other,
     })
@@ -984,6 +1018,7 @@ fn sync_action(
         fair: action.fair,
         meta: action.meta.clone(),
         sync: true,
+        annotations: action.annotations.clone(),
     })
 }
 
