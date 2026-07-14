@@ -1,0 +1,16 @@
+domain CanonicalEnum { // SPDX-License-Identifier: Apache-2.0
+  // This comment and the declaration span must survive until a migrator applies the fix.
+  type Status = Pending | Approved
+
+  aggregate Order {
+    state { status: Status = Pending; }
+    command Approve {}
+    event ApprovedEvent {}
+    decide Approve {
+      requires status == Pending
+      emits ApprovedEvent
+    }
+    evolve ApprovedEvent { status = Approved }
+    invariant valid { status in [Pending, Approved] }
+  }
+}

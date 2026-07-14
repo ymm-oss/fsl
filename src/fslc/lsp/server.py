@@ -58,6 +58,7 @@ def check_source(
     from fslc.model import FslError, build_spec
     from fslc.parser import parse_src
     from fslc.refine import build_refinement
+    from fslc.domain_parser import is_domain_source, parse_domain
 
     def acceptance_error(spec):
         checked = validate_acceptance(spec)
@@ -77,6 +78,25 @@ def check_source(
 
     try:
         base_dir = str(Path(path).parent) if path else "."
+        domain_warnings = []
+        if is_domain_source(source):
+            domain = parse_domain(source)
+            for type_def in domain.types:
+                if type_def.source_form != "legacy_enum_union":
+                    continue
+                replacement = f"enum {type_def.name} {{ {', '.join(type_def.members)} }}"
+                domain_warnings.append({
+                    "kind": "deprecated_domain_enum_union",
+                    "code": "deprecated_domain_enum_union",
+                    "severity": "warning",
+                    "message": (
+                        f"domain enum union syntax for '{type_def.name}' is deprecated; "
+                        f"use `{replacement}`"
+                    ),
+                    "loc": type_def.loc,
+                    "canonical_replacement": replacement,
+                    "hint": f"replace the declaration with `{replacement}`",
+                })
         ast, display_names = parse_src(source, base_dir)
         if ast[0] == "refinement":
             impl_name, abs_name = _refinement_ast_names(ast)
@@ -99,7 +119,7 @@ def check_source(
         out: Dict[str, Any] = {
             "result": "ok",
             "spec": spec["name"],
-            "warnings": spec["warnings"],
+            "warnings": [*spec["warnings"], *domain_warnings],
         }
         if analysis_diagnostics:
             out["analysis_findings"] = analyze_structure(spec, profile="ai-review").get("findings", [])

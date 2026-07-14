@@ -75,6 +75,7 @@ from .domain_check import (
     load_domain,
     replay_domain_logs,
 )
+from .domain_parser import is_domain_source, parse_domain
 from .domain_testgen import default_domain_testgen_output
 
 FSL_VERSION = "1.0"
@@ -321,6 +322,58 @@ def _bounds_skip_warnings(ids, kind, bounds_overrides):
         }
         for scenario_id in ids
     ]
+
+
+def _domain_enum_union_findings(file):
+    try:
+        source = Path(file).read_text(encoding="utf-8")
+        if not is_domain_source(source):
+            return []
+        domain = parse_domain(source)
+    except (OSError, FslError, UnexpectedInput, VisitError):
+        return []
+
+    findings = []
+    for type_def in domain.types:
+        if type_def.source_form != "legacy_enum_union":
+            continue
+        replacement = f"enum {type_def.name} {{ {', '.join(type_def.members)} }}"
+        findings.append({
+            "kind": "deprecated_domain_enum_union",
+            "code": "deprecated_domain_enum_union",
+            "severity": "warning",
+            "message": (
+                f"domain enum union syntax for '{type_def.name}' is deprecated; "
+                f"use `{replacement}`"
+            ),
+            "loc": {"file": str(file), **(type_def.loc or {})},
+            "canonical_replacement": replacement,
+        })
+    return findings
+
+
+def _apply_domain_edition(result, file, edition):
+    findings = _domain_enum_union_findings(file)
+    if edition == "next" and findings:
+        errors = []
+        for finding in findings:
+            error = dict(finding)
+            error["severity"] = "error"
+            error["message"] += "; legacy domain enum unions are not accepted in the next edition"
+            errors.append(error)
+        return _envelope({
+            "result": "error",
+            "kind": "deprecated_domain_enum_union",
+            "edition": edition,
+            "findings": errors,
+        })
+
+    output = dict(result)
+    if findings:
+        output["warnings"] = [*output.get("warnings", []), *findings]
+    if edition == "next":
+        output["edition"] = edition
+    return output
 
 
 def run_check(file, strict_tags=False, requirements=None):
@@ -1949,6 +2002,7 @@ def _build_arg_parser():
     c.add_argument("file")
     c.add_argument("--strict-tags", action="store_true")
     c.add_argument("--requirements", default=None)
+    c.add_argument("--edition", choices=["current", "next"], default="current")
 
     v = sub.add_parser("verify")
     v.add_argument("file")
@@ -1980,6 +2034,7 @@ def _build_arg_parser():
     v.add_argument("--from-state", default=None,
                    help="replace spec init with a complete Monitor/replay logical-state "
                         "JSON snapshot (BMC only)")
+    v.add_argument("--edition", choices=["current", "next"], default="current")
 
     sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
     sw.add_argument("file")
@@ -2175,6 +2230,7 @@ def _build_arg_parser():
     domc.add_argument("--depth", type=int, default=8)
     domc.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
     domc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    domc.add_argument("--edition", choices=["current", "next"], default="current")
     doma = dom_sub.add_parser("analyze", help="emit aggregate/effect ownership findings")
     doma.add_argument("file")
     domx = dom_sub.add_parser("expand", help="expand domain/effect dialect to kernel FSL")
@@ -2210,6 +2266,7 @@ def _dispatch(args):
         return 0
     if args.cmd == "check":
         result = run_check(args.file, args.strict_tags, args.requirements)
+        result = _apply_domain_edition(result, args.file, args.edition)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "typestate":
         result = run_typestate(args.file)
@@ -2425,6 +2482,7 @@ def _dispatch(args):
     elif args.cmd == "domain":
         if args.domain_cmd == "check":
             result = run_domain_check(args.file, args.depth, args.engine, args.deadlock)
+            result = _apply_domain_edition(result, args.file, args.edition)
             print(json.dumps(result, indent=2, ensure_ascii=False))
         elif args.domain_cmd == "analyze":
             result = run_domain_analyze(args.file)
@@ -2480,6 +2538,7 @@ def _dispatch(args):
                             use_cache=not args.no_cache,
                             lemmas=args.lemmas,
                             from_state=args.from_state)
+        result = _apply_domain_edition(result, args.file, args.edition)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

@@ -29,7 +29,7 @@ pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,
     DomainError, DomainEvent, DomainEvolve, DomainField, DomainInvariant, DomainLoc,
     DomainProjection, DomainReject, DomainRetry, DomainSaga, DomainSagaCompensation,
-    DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, parse_domain,
+    DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
 pub use lexer::{LexError, Token, TokenKind, lex};
 pub use parser::{ParseError, parse_expr, parse_surface_document, parse_surface_spec};

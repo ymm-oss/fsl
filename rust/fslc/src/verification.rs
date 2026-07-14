@@ -1715,6 +1715,7 @@ fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String,
         "values": options.scope.values,
         "strict_tags": options.strict_tags,
         "lemmas": options.lemmas,
+        "edition": options.edition,
     });
     digest.update(serde_json::to_vec(&base_options).map_err(|error| error.to_string())?);
     let xdepth = format!("{:x}", digest.clone().finalize());

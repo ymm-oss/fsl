@@ -205,7 +205,7 @@ reports stable fsl-domain findings):</p>
 <pre><code class="language-fsl">domain &lt;Name&gt; {
   implementation_profile functional_ddd
 
-  type OrderStatus = Pending | Approved | Cancelled
+  enum OrderStatus { Pending, Approved, Cancelled }
 
   aggregate Order {
     id OrderId
@@ -279,6 +279,22 @@ aggregate and becomes the conjunction of the command's <code>requires</code> cla
 the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.</p>
+<p>Domain declarations use <code>enum Name { Member, ... }</code> for finite variants and
+<code>type Name = lo..hi</code> for bounded numeric ranges. The legacy spelling
+<code>type Name = A | B</code> remains accepted in the current 2.x edition and produces the
+stable <code>deprecated_domain_enum_union</code> warning over the complete declaration,
+including a canonical replacement. <code>fslc check</code>, <code>fslc verify</code>, and
+<code>fslc domain check</code> accept <code>--edition current|next</code>; <code>next</code> rejects the legacy
+union spelling. Empty enums and duplicate members are errors, reported at the
+declaration and duplicate member respectively.</p>
+<p>The native Rust frontend also retains a private origin chain for domain state,
+actions, guards, statements, and properties. Verification, counterexample, and
+<code>explain</code> diagnostics use the original domain declaration as their primary
+display name and keep generated Kernel names as machine detail. The chain
+records source file/full span, declaration path, lowering steps,
+primary/secondary sources, and explicit generated-only nodes. Requirement IDs
+remain an independent traceability relation. Public Kernel v1 output is
+unchanged; publishing this chain is reserved for v2.</p>
 <p>Use <code>fslc domain check</code> for stable fsl-domain findings and the nested kernel
 result (<code>verified_under_assumptions</code> on success), <code>fslc domain analyze</code> for the
 aggregate/effect summary, <code>fslc domain expand</code> to inspect a generated kernel FSL

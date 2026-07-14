@@ -169,10 +169,17 @@ DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
 Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
 
+Use `enum Name { Member, ... }` for finite domain variants and
+`type Name = lo..hi` for bounded numeric ranges. The legacy
+`type Name = A | B` spelling is accepted by the current 2.x edition with the
+stable `deprecated_domain_enum_union` warning and a canonical replacement.
+Pass `--edition next` to `check`, `verify`, or `domain check` to reject legacy
+enum unions during migration.
+
 ```fsl
 domain <Name> {
   implementation_profile functional_ddd
-  type OrderStatus = Pending | Approved | Cancelled
+  enum OrderStatus { Pending, Approved, Cancelled }
 
   aggregate Order {
     id OrderId

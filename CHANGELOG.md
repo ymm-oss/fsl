@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- Domain finite variants now use canonical `enum Name { Member, ... }` syntax,
+  while bounded numeric domains remain `type Name = lo..hi`. The 2.x legacy
+  union spelling remains compatible with a stable
+  `deprecated_domain_enum_union` diagnostic and loss-aware replacement;
+  `--edition next` rejects it. Canonical and legacy forms share the same typed
+  model, Kernel lowering, and verdict, and public examples now use the
+  canonical spelling (issue #244).
 - Native Rust domain lowering now carries a non-serialized origin chain from typed
   domain nodes through Surface/Kernel models into validation, verification,
   counterexamples, and `explain`. Source identity/full spans, declaration

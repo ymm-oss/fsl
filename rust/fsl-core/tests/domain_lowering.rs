@@ -17,7 +17,7 @@ fn lowering_error(source: &str) -> fsl_core::CoreError {
 fn resolves_enum_members_membership_and_can_structurally() {
     let source = r"
 domain Orders {
-  type Status = Pending | Approved
+  type Status = Pending | Approved;
   aggregate Order {
     state {
       status: Status = Pending;
@@ -264,6 +264,7 @@ domain InvalidValueObject {
     evolve Touched { counter.value = 0 }
   }
 }
+
 ",
     );
     assert!(
@@ -481,4 +482,60 @@ domain InvalidOptionOrdering {
             .message
             .contains("ordering operator requires numeric operands")
     );
+}
+
+#[test]
+fn canonical_and_legacy_domain_enums_lower_to_the_same_checked_model() {
+    let canonical = lower(
+        r"
+domain Orders {
+  enum Status { Pending, Approved }
+  aggregate Order {
+    state { status: Status = Pending; }
+    command Approve {}
+    event ApprovedEvent {}
+    decide Approve { requires status == Pending emits ApprovedEvent }
+    evolve ApprovedEvent { status = Approved }
+  }
+}
+",
+    );
+    let legacy = lower(
+        r"
+domain Orders {
+  type Status = Pending | Approved;
+  aggregate Order {
+    state { status: Status = Pending; }
+    command Approve {}
+    event ApprovedEvent {}
+    decide Approve { requires status == Pending emits ApprovedEvent }
+    evolve ApprovedEvent { status = Approved }
+  }
+}
+",
+    );
+    assert_eq!(
+        build_model(canonical).unwrap(),
+        build_model(legacy).unwrap()
+    );
+}
+
+#[test]
+fn canonical_domain_enum_rejects_empty_and_duplicate_members_at_source_spans() {
+    let empty = parse_kernel_source("domain Empty { enum Status {} }", &FsResolver::new("."))
+        .expect_err("empty enum");
+    assert!(empty.message.contains("enum 'Status' has no members"));
+    assert_eq!((empty.line, empty.column), (1, 16));
+
+    let duplicate = parse_kernel_source(
+        "domain Duplicate { enum Status { Pending, Pending } }",
+        &FsResolver::new("."),
+    )
+    .expect_err("duplicate enum member");
+    assert!(
+        duplicate
+            .message
+            .contains("duplicate enum member 'Pending'")
+    );
+    assert_eq!((duplicate.line, duplicate.column), (1, 43));
 }
