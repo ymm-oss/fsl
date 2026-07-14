@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from fslc.dialect_registry import DIALECT_KEYWORDS
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUST = ROOT / "rust" / "target" / "debug" / "fslc"
@@ -565,6 +567,8 @@ def test_rust_check_dispatches_after_trivia_and_reports_stable_dialect_errors(tm
     assert unknown["diagnostic_code"] == "FSL-DIALECT-UNKNOWN"
     assert unknown["loc"] == {"line": 1, "column": 1}
     assert "spec, refinement, compose" in unknown["message"]
+    assert empty["supported_dialects"] == list(DIALECT_KEYWORDS)
+    assert unknown["supported_dialects"] == list(DIALECT_KEYWORDS)
     assert (disguised_status, disguised["diagnostic_code"]) == (
         2,
         "FSL-DIALECT-UNKNOWN",

@@ -1242,20 +1242,18 @@ impl<'a> Resolver<'a> {
     }
 
     fn qualified_name(name: &SyntaxQualifiedName) -> QualifiedName {
-        QualifiedName {
-            namespace: name.namespace.as_ref().map(|value| value.text.clone()),
-            name: name.name.text.clone(),
-        }
+        let (namespace, name) = name.path.legacy_parts();
+        QualifiedName { namespace, name }
     }
 
     fn qualified_logical_type(&self, name: &SyntaxQualifiedName) -> Result<LogicalType, CoreError> {
-        if name.namespace.is_some() {
+        if name.has_namespace() {
             return Err(error_at(
                 "namespaced domain binder types are not supported",
-                name.span,
+                name.span(),
             ));
         }
-        Ok(match name.name.text.as_str() {
+        Ok(match name.name() {
             "Int" => LogicalType::Int,
             "Bool" => LogicalType::Bool,
             other if self.types.iter().any(|ty| ty.name == other) => {
@@ -1264,7 +1262,7 @@ impl<'a> Resolver<'a> {
             other => {
                 return Err(error_at(
                     format!("unknown domain type '{other}'"),
-                    name.span,
+                    name.span(),
                 ));
             }
         })

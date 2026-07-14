@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use crate::lexer::lex_declaration_prefix;
 use crate::{
     Annotation, AnnotationValue, Annotations, ParseError, Span, SurfaceAgent, SurfaceDocument,
-    SymbolPath, Token, TokenKind, lex,
+    SymbolPath, SyntaxIdent, Token, TokenKind, lex,
 };
 
 /// Original source passed beside the shared token stream to a dialect frontend.
@@ -410,7 +410,10 @@ fn symbol_path(tokens: &[Token], cursor: &mut usize) -> Result<(SymbolPath, Span
     loop {
         match &tokens[*cursor].kind {
             TokenKind::Ident(segment) => {
-                segments.push(segment.clone());
+                segments.push(SyntaxIdent {
+                    text: segment.clone(),
+                    span: tokens[*cursor].span,
+                });
                 *cursor += 1;
             }
             _ => {
@@ -431,7 +434,7 @@ fn symbol_path(tokens: &[Token], cursor: &mut usize) -> Result<(SymbolPath, Span
         start: start.start,
         end: end.end,
     };
-    SymbolPath::new(segments, span)
+    SymbolPath::from_idents(segments, span)
         .map(|path| (path, span))
         .map_err(|error| ParseError::coded("FSL-ANNOTATION-PATH", error.message, error.span))
 }

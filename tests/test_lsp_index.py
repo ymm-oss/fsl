@@ -826,3 +826,31 @@ def test_registry_handles_annotation_trivia_and_rejects_invalid_shapes():
         "@acme.limit(9223372036854775807) spec Routed {}",
     ):
         assert inspect_source(valid).keyword == "spec"
+
+
+def test_lsp_diagnostics_use_registry_for_annotations_agents_and_ai_projects():
+    annotated = check_source(
+        '@requirement("REQ-247")\nspec Routed { state { value: Int } }',
+        "routed.fsl",
+    )
+    agent = check_source(
+        '// leading\n@acme.owner("platform")\nagent Worker {}',
+        "worker.fsl",
+    )
+    project = check_source(
+        '@acme.owner("platform")\ndataset Eval { source "eval.jsonl" }\n'
+        "statistical_property Quality {}",
+        "quality.fsl",
+    )
+
+    assert (annotated["result"], annotated["spec"]) == ("ok", "Routed")
+    assert (agent["result"], agent["spec"], agent["dialect"]) == (
+        "ok",
+        "Worker",
+        "fsl-ai-agent.v0",
+    )
+    assert (project["result"], project["spec"], project["dialect"]) == (
+        "ok",
+        "quality",
+        "fsl-ai-project.v0",
+    )

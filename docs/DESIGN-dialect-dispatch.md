@@ -54,7 +54,8 @@ An empty/comment-only document returns `FSL-DIALECT-EMPTY` at EOF. An annotation
 without a target returns `FSL-DIALECT-ANNOTATION-TARGET`. An unknown first token
 returns `FSL-DIALECT-UNKNOWN` at that exact token and lists registry keywords in
 deterministic registration order. The CLI check/verify envelopes expose the code
-and `loc`; other syntax errors retain `FSL-PARSE` unless a narrower annotation
+and `loc`, plus a machine-readable `supported_dialects` list for these dispatch
+failures; other syntax errors retain `FSL-PARSE` unless a narrower annotation
 code applies.
 
 The BOM contributes its Unicode-scalar column and UTF-8 byte offset to following
@@ -72,8 +73,11 @@ spans. It is trivia only at byte offset zero.
   set, but those evidence blocks are not dialect registry entries.
 - Public Kernel v1/v2 JSON schemas do not gain annotation fields or a new dialect
   field. Existing normalized dialect strings are derived from the registry key.
-- `SymbolPath` stores its segments and complete span structurally. Display joins
-  segments only at the presentation boundary, and equality compares segments.
+- `SymbolPath` stores its segments, per-segment spans, and complete span
+  structurally. `SyntaxQualifiedName` uses the same arbitrary-depth path; its
+  frozen two-field Kernel projection is an explicit compatibility adapter.
+  Display joins segments only at the presentation boundary, and equality
+  compares segments.
 
 ## Verification obligations
 
@@ -82,5 +86,6 @@ spans. It is trivia only at byte offset zero.
 - duplicate keys fail registry validation;
 - annotation argument keywords never affect selection;
 - empty/unknown codes, spans, and supported-keyword order are stable;
-- CLI, library, Kernel lowering, LSP indexing, and the dialect corpus retain
-  their existing successful outcomes.
+- CLI, library, Kernel lowering, LSP indexing/diagnostics, and the dialect corpus
+  retain their existing successful outcomes, including agent and AI-project
+  editor diagnostics.
