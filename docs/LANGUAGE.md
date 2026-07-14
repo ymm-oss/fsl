@@ -2035,7 +2035,12 @@ result = prove(spec, k_ind=1, base_depth=8)   # k-induction
 ```
 
 Returns a dict with the same structure as the CLI (the CLI wraps it with a
-`"fsl": "1.0"` envelope).
+`"fsl": "1.0"` envelope). Native CLI and browser Worker `check`/`verify`
+envelopes also contain `versions.verifier`, `versions.core`, and
+`versions.solver` objects. Each object has `name` and `version`; the solver
+object additionally has `backend`. Solver versions come from the loaded native
+or browser Z3 runtime rather than a CLI constant. The machine-readable contract
+is `schemas/fslc/envelope.v1.schema.json`.
 
 ## 15. Validation suite (the spec ≠ intent gap)
 

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/envelope.v1.schema.json",
+  "title": "FSL native CLI and Worker check/verify envelope v1",
+  "type": "object",
+  "required": ["fsl", "versions", "result"],
+  "properties": {
+    "fsl": { "const": "1.0" },
+    "result": { "type": "string", "minLength": 1 },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifier", "core", "solver"],
+      "properties": {
+        "verifier": { "$ref": "#/$defs/component" },
+        "core": { "$ref": "#/$defs/component" },
+        "solver": { "$ref": "#/$defs/solverComponent" }
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "component": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "solverComponent": {
+      "type": "object",
+      "required": ["name", "version", "backend"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

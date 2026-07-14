@@ -51,6 +51,14 @@ extern "C" {
     fn js_unsat_core() -> Array;
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3ModelEval)]
     fn js_model_eval(term: u32, boolean: bool) -> JsValue;
+    #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Version)]
+    fn js_version() -> String;
+}
+
+/// Return the version reported by the initialized browser Z3 runtime.
+#[must_use]
+pub fn version() -> String {
+    js_version()
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +77,7 @@ impl Z3JsSolver {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            version: "Z3 4.16.0 (z3-solver npm)".to_owned(),
+            version: version(),
             stack_depth: 0,
         }
     }

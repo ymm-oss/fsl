@@ -330,12 +330,12 @@ fn command() -> Result<(Value, i32), String> {
                     _ => return Err(format!("unknown check option '{option}'")),
                 }
             }
-            Ok(run_check_with_tags(
+            Ok(with_version_metadata(run_check_with_tags(
                 &path,
                 strict_tags,
                 requirements.as_deref(),
                 &edition,
-            ))
+            )))
         }
         "kernel" => {
             let mut path = None;
@@ -1434,7 +1434,7 @@ fn command() -> Result<(Value, i32), String> {
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
                 let result = run_verify_cli(&path, &options);
-                apply_domain_edition(result, &path, &options.edition)
+                with_version_metadata(apply_domain_edition(result, &path, &options.edition))
             } else {
                 if options.engine != "bmc"
                     || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
@@ -13188,6 +13188,22 @@ fn envelope() -> Map<String, Value> {
     let mut output = Map::new();
     output.insert("fsl".to_owned(), json!("1.0"));
     output
+}
+
+fn with_version_metadata((mut output, status): (Value, i32)) -> (Value, i32) {
+    output
+        .as_object_mut()
+        .expect("check/verify envelope")
+        .insert(
+            "versions".to_owned(),
+            fsl_core::version_metadata(
+                "fslc-rust",
+                env!("CARGO_PKG_VERSION"),
+                "native-z3",
+                fsl_solver_z3::version(),
+            ),
+        );
+    (output, status)
 }
 
 fn error_output(kind: &str, message: &str) -> Value {
