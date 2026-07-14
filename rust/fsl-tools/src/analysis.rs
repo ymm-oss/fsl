@@ -5,9 +5,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
-    ActionDef, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
+    Annotations, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
     KernelStatement as Statement, TypeDef, TypeRef,
 };
+use fsl_syntax::MetaTag;
 use serde_json::{Map, Value, json};
 
 use crate::analysis_graph;
@@ -40,11 +41,34 @@ fn edge(from: &str, kind: &str, to: &str) -> Value {
     })
 }
 
-fn metadata(action: &ActionDef) -> Option<Value> {
-    action
-        .meta
-        .as_ref()
-        .map(|meta| json!({"id":meta.id,"text":meta.text}))
+fn requirement_metadata(annotations: &Annotations, legacy: Option<&MetaTag>) -> Vec<Value> {
+    let requirements = annotations
+        .requirements()
+        .expect("checked model annotations are valid")
+        .into_iter()
+        .map(|requirement| json!({"id":requirement.id,"text":requirement.text}))
+        .collect::<Vec<_>>();
+    if requirements.is_empty() {
+        legacy
+            .filter(|meta| !meta.id.eq_ignore_ascii_case("undecided"))
+            .map_or_else(Vec::new, |meta| {
+                vec![json!({"id":meta.id,"text":meta.text})]
+            })
+    } else {
+        requirements
+    }
+}
+
+fn add_requirement_metadata(
+    node: &mut Map<String, Value>,
+    annotations: &Annotations,
+    legacy: Option<&MetaTag>,
+) {
+    let requirements = requirement_metadata(annotations, legacy);
+    if let Some(first) = requirements.first() {
+        node.insert("meta".to_owned(), first.clone());
+        node.insert("requirements".to_owned(), Value::Array(requirements));
+    }
 }
 
 fn public_type(model: &KernelModel, ty: &TypeRef) -> Value {
@@ -408,9 +432,7 @@ impl<'a> Builder<'a> {
             );
             value.insert("fair".to_owned(), json!(action.fair));
             value.insert("sync".to_owned(), json!(false));
-            if let Some(meta) = metadata(action) {
-                value.insert("meta".to_owned(), meta);
-            }
+            add_requirement_metadata(&mut value, &action.annotations, action.meta.as_ref());
             self.add_node(value, true);
             let mut action_reads = BTreeSet::new();
             for (index, requirement) in action.requires.iter().enumerate() {
@@ -497,9 +519,7 @@ impl<'a> Builder<'a> {
                     Some(property.span.python_loc()),
                 );
                 value.insert("expr".to_owned(), property.expr.python_ast());
-                if let Some(meta) = &property.meta {
-                    value.insert("meta".to_owned(), json!({"id":meta.id,"text":meta.text}));
-                }
+                add_requirement_metadata(&mut value, &property.annotations, property.meta.as_ref());
                 self.add_node(value, true);
                 let reads = expr_reads(&property.expr, &self.state);
                 self.add_reads(&id, &reads);
@@ -516,6 +536,7 @@ impl<'a> Builder<'a> {
             );
             value.insert("P".to_owned(), property.before.python_ast());
             value.insert("Q".to_owned(), property.after.python_ast());
+            add_requirement_metadata(&mut value, &property.annotations, property.meta.as_ref());
             if let Some(within) = property.within {
                 value.insert("within".to_owned(), json!(within));
             }

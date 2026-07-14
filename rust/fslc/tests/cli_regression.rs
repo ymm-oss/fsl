@@ -61,6 +61,104 @@ fn native_cli_preserves_bmc_outcomes() {
 }
 
 #[test]
+fn typed_requirement_relations_reach_strict_tags_scenarios_and_diagnostics() {
+    let spec = "rust/fslc/tests/fixtures/typed_annotation_outputs.fsl";
+    let requirements = "rust/fslc/tests/fixtures/typed_annotation_requirements.txt";
+
+    let (checked, status) = run_cli(&[
+        "check",
+        spec,
+        "--strict-tags",
+        "--requirements",
+        requirements,
+    ]);
+    assert_eq!(status, 0);
+    assert_eq!(checked["result"], "ok");
+    assert!(
+        checked["warnings"]
+            .as_array()
+            .is_none_or(std::vec::Vec::is_empty)
+    );
+
+    let (violation, status) = run_cli(&[
+        "verify",
+        "rust/fslc/tests/fixtures/typed_annotation_violation.fsl",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 1);
+    assert_eq!(violation["result"], "violated");
+    assert_eq!(violation["requirement"]["id"], "REQ-OUTER");
+    assert_eq!(
+        violation["requirements"],
+        serde_json::json!([
+            {"id":"REQ-OUTER","text":"outer requirement"},
+            {"id":"REQ-SAFETY","text":"safety requirement"}
+        ])
+    );
+    let (scenarios, status) = run_cli(&["scenarios", spec, "--depth", "2", "--deadlock", "ignore"]);
+    assert_eq!(status, 0);
+    let publish = scenarios["scenarios"]
+        .as_array()
+        .expect("scenarios")
+        .iter()
+        .find(|scenario| scenario["name"] == "cover_publish")
+        .expect("publish coverage scenario");
+    assert_eq!(publish["requirement"]["id"], "REQ-ACTION");
+    assert_eq!(
+        publish["requirements"],
+        serde_json::json!([
+            {"id":"REQ-ACTION","text":"action requirement"},
+            {"id":"REQ-OUTER","text":"outer requirement"}
+        ])
+    );
+
+    let (explained, status) = run_cli(&["explain", spec, "--depth", "2"]);
+    assert_eq!(status, 0);
+    let explained_publish = explained["witnesses"]
+        .as_array()
+        .expect("witnesses")
+        .iter()
+        .find(|witness| witness["name"] == "cover_publish")
+        .expect("explained publish witness");
+    assert_eq!(explained_publish["requirements"], publish["requirements"]);
+
+    let (mutated, status) = run_cli(&[
+        "mutate",
+        spec,
+        "--depth",
+        "2",
+        "--max-mutants",
+        "100",
+        "--by-requirement",
+    ]);
+    assert_eq!(status, 0);
+    for id in ["REQ-ACTION", "REQ-OUTER", "REQ-REACH", "REQ-SAFETY"] {
+        assert!(mutated["by_requirement"].get(id).is_some(), "missing {id}");
+    }
+    let publish_mutant = mutated["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| {
+            mutant["target"]
+                .as_str()
+                .is_some_and(|target| target.starts_with("publish "))
+        })
+        .expect("publish mutant");
+    assert_eq!(
+        publish_mutant["requirements"],
+        serde_json::json!([
+            {"id":"REQ-ACTION","text":"action requirement"},
+            {"id":"REQ-OUTER","text":"outer requirement"}
+        ])
+    );
+}
+
+#[test]
 fn native_cli_replays_witnesses_from_partially_initialized_state() {
     let (violated, status) = run_cli(&[
         "verify",

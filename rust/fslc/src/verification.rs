@@ -201,6 +201,7 @@ fn load_induction_model(
             expr: expr.clone(),
             span: synthetic_span(),
             meta: None,
+            annotations: fsl_core::Annotations::default(),
         }));
     Ok(model)
 }
@@ -938,8 +939,8 @@ fn render_bmc_violation(
             ::fslc_rust::internal_origin_json(origin),
         );
     }
-    if let Some(meta) = property.and_then(|property| property.meta.as_ref()) {
-        output.insert("requirement".to_owned(), metadata(Some(meta)));
+    if let Some(property) = property {
+        insert_requirement_metadata(&mut output, &property.annotations, property.meta.as_ref());
     }
     output.insert(
         "loc".to_owned(),
@@ -1048,10 +1049,12 @@ fn render_reachable_failure(
                         "faithfulness_class": "intent_unexercised",
                         "recommended_action": "add a single-shot reachable for the action / raise --depth",
                     });
-                    if let Some(meta) = property.meta.as_ref()
-                        && let Value::Object(item) = &mut item
-                    {
-                        item.insert("requirement".to_owned(), metadata(Some(meta)));
+                    if let Value::Object(item) = &mut item {
+                        insert_requirement_metadata(
+                            item,
+                            &property.annotations,
+                            property.meta.as_ref(),
+                        );
                     }
                     if let Some(origin) = origin
                         && let Value::Object(item) = &mut item
@@ -1253,13 +1256,8 @@ fn verification_warnings(
                 "faithfulness_class": "intent_unexercised",
                 "recommended_action": "add a single-shot reachable for the action / raise --depth",
             });
-            if let Some(metadata) = &property.meta
-                && let Value::Object(warning) = &mut warning
-            {
-                warning.insert(
-                    "requirement".to_owned(),
-                    json!({"id": metadata.id, "text": metadata.text}),
-                );
+            if let Value::Object(warning) = &mut warning {
+                insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
             }
             warnings.push(warning);
         }
@@ -1350,12 +1348,10 @@ fn add_common_verification(
                         if *covered {
                             json!(true)
                         } else {
-                            let requirement = model
+                            let action = model
                                 .actions
                                 .iter()
-                                .find(|action| action.name == *name)
-                                .and_then(|action| action.meta.as_ref())
-                                .map(|meta| json!({"id": meta.id, "text": meta.text}));
+                                .find(|action| action.name == *name);
                             let mut diagnostic = json!({
                                 "covered": false,
                                 "blocking_requires": [],
@@ -1363,10 +1359,14 @@ fn add_common_verification(
                                 "faithfulness_class": "intent_unexercised",
                                 "recommended_action": "add a single-shot reachable for the action / raise --depth",
                             });
-                            if let Some(requirement) = requirement
+                            if let Some(action) = action
                                 && let Value::Object(entry) = &mut diagnostic
                             {
-                                entry.insert("requirement".to_owned(), requirement);
+                                insert_requirement_metadata(
+                                    entry,
+                                    &action.annotations,
+                                    action.meta.as_ref(),
+                                );
                             }
                             diagnostic
                         },
@@ -1443,6 +1443,7 @@ fn adjudicate_lemma(
         expr: expression.clone(),
         span: synthetic_span(),
         meta: None,
+        annotations: fsl_core::Annotations::default(),
     });
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,

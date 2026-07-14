@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use fsl_core::KernelModel;
-use fsl_syntax::MetaTag;
+use fsl_syntax::{Annotations, RequirementLink};
 use serde_json::Value;
 
 use crate::undecided_declarations;
@@ -34,20 +34,21 @@ fn add_requirement(
     registry: &mut BTreeMap<String, RequirementEntry>,
     group: &str,
     name: &str,
-    metadata: Option<&MetaTag>,
+    annotations: &Annotations,
 ) {
-    let Some(metadata) = metadata else { return };
-    if metadata.id.eq_ignore_ascii_case("undecided") {
-        return;
+    for requirement in annotations
+        .requirements()
+        .expect("checked model annotations are valid")
+    {
+        if !registry.contains_key(&requirement.id) {
+            order.push(requirement.id.clone());
+        }
+        let entry = registry.entry(requirement.id).or_default();
+        if entry.text.is_none() {
+            entry.text = requirement.text;
+        }
+        entry.elements.push((group.to_owned(), name.to_owned()));
     }
-    if !registry.contains_key(&metadata.id) {
-        order.push(metadata.id.clone());
-    }
-    let entry = registry.entry(metadata.id.clone()).or_default();
-    if entry.text.is_none() {
-        entry.text.clone_from(&metadata.text);
-    }
-    entry.elements.push((group.to_owned(), name.to_owned()));
 }
 
 fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, RequirementEntry>) {
@@ -59,7 +60,7 @@ fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, R
             &mut registry,
             "invariants",
             &property.name,
-            property.meta.as_ref(),
+            &property.annotations,
         );
     }
     for action in &model.actions {
@@ -68,7 +69,7 @@ fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, R
             &mut registry,
             "actions",
             &action.name,
-            action.meta.as_ref(),
+            &action.annotations,
         );
     }
     for property in &model.leadstos {
@@ -77,7 +78,7 @@ fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, R
             &mut registry,
             "leadstos",
             &property.name,
-            property.meta.as_ref(),
+            &property.annotations,
         );
     }
     for property in &model.reachables {
@@ -86,7 +87,7 @@ fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, R
             &mut registry,
             "reachables",
             &property.name,
-            property.meta.as_ref(),
+            &property.annotations,
         );
     }
     for property in &model.transitions {
@@ -95,7 +96,7 @@ fn requirement_registry(model: &KernelModel) -> (Vec<String>, BTreeMap<String, R
             &mut registry,
             "transitions",
             &property.name,
-            property.meta.as_ref(),
+            &property.annotations,
         );
     }
     (order, registry)
@@ -122,36 +123,42 @@ fn requirement(value: &Value) -> (Option<String>, Option<String>) {
     )
 }
 
-fn metadata_for<'a>(model: &'a KernelModel, group: &str, name: &str) -> Option<&'a MetaTag> {
-    let metadata = match group {
+fn metadata_for(model: &KernelModel, group: &str, name: &str) -> Option<RequirementLink> {
+    let annotations = match group {
         "invariants" => model
             .invariants
             .iter()
             .find(|property| property.name == name)
-            .and_then(|property| property.meta.as_ref()),
+            .map(|property| &property.annotations),
         "transitions" => model
             .transitions
             .iter()
             .find(|property| property.name == name)
-            .and_then(|property| property.meta.as_ref()),
+            .map(|property| &property.annotations),
         "reachables" => model
             .reachables
             .iter()
             .find(|property| property.name == name)
-            .and_then(|property| property.meta.as_ref()),
+            .map(|property| &property.annotations),
         "leadstos" => model
             .leadstos
             .iter()
             .find(|property| property.name == name)
-            .and_then(|property| property.meta.as_ref()),
+            .map(|property| &property.annotations),
         "actions" => model
             .actions
             .iter()
             .find(|action| action.name == name)
-            .and_then(|action| action.meta.as_ref()),
+            .map(|action| &action.annotations),
         _ => None,
     };
-    metadata.filter(|metadata| !metadata.id.eq_ignore_ascii_case("undecided"))
+    annotations.and_then(|annotations| {
+        annotations
+            .requirements()
+            .expect("checked model annotations are valid")
+            .into_iter()
+            .next()
+    })
 }
 
 fn finding_requirement(
@@ -164,9 +171,8 @@ fn finding_requirement(
     if direct.0.is_some() {
         return direct;
     }
-    metadata_for(model, group, name).map_or((None, None), |metadata| {
-        (Some(metadata.id.clone()), metadata.text.clone())
-    })
+    metadata_for(model, group, name)
+        .map_or((None, None), |metadata| (Some(metadata.id), metadata.text))
 }
 
 fn summarize_violation(value: &Value) -> String {

@@ -69,6 +69,7 @@
 | [`DESIGN-tag-drift.md`](DESIGN-tag-drift.md) | Deterministic declaration-tag identifier drift findings and `tag-review.v0` external review export contract |
 | [`DESIGN-underspecification.md`](DESIGN-underspecification.md) | bounded `divergent_choice` / `unconstrained_effect` AI-review findings and question-form output |
 | [`DESIGN-undecided.md`](DESIGN-undecided.md) | reserved `undecided:` declaration metadata, affected-requirement projection, ledger/HTML display, and acknowledged underspecification findings |
+| [`DESIGN-annotations.md`](DESIGN-annotations.md) | shared typed requirement/undecided/kind/custom annotation IR, validation, adapters, ordering, and compatibility boundaries |
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 | [`DESIGN-domain.md`](DESIGN-domain.md) | fsl-domain (`domain`) Functional DDD / async effect dialect: aggregate ownership, command/event decide/evolve lowering, saga/process-manager actions, effect lifecycle state, findings, multi-target scaffolds, and runtime replay |
 | [`DESIGN-effect.md`](DESIGN-effect.md) | fsl-effect lifecycle semantics used by fsl-domain: correlation, retry, timeout, idempotency, and guarantee boundary |

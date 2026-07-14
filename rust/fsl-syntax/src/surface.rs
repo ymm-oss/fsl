@@ -9,6 +9,7 @@ use crate::{AiComponent, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span
 pub struct MetaTag {
     pub id: String,
     pub text: Option<String>,
+    pub span: Option<Span>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -269,7 +270,14 @@ pub struct ProcessTransition {
     pub inputs: Vec<Param>,
     pub guard: Option<Expr>,
     pub assignments: Vec<(String, Expr)>,
-    pub covers: Option<(String, String)>,
+    pub covers: Option<ProcessCover>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProcessCover {
+    pub id: String,
+    pub text: String,
     pub span: Span,
 }
 
@@ -606,15 +614,17 @@ pub enum SurfaceDocument {
 
 impl MetaTag {
     #[must_use]
-    pub fn parse(value: &str) -> Self {
+    pub fn parse(value: &str, span: Span) -> Self {
         value.split_once(':').map_or_else(
             || Self {
                 id: value.trim().to_owned(),
                 text: None,
+                span: Some(span),
             },
             |(id, text)| Self {
                 id: id.trim().to_owned(),
                 text: Some(text.trim().to_owned()),
+                span: Some(span),
             },
         )
     }
@@ -1100,7 +1110,7 @@ impl ProcessItem {
                         transition
                             .covers
                             .as_ref()
-                            .map_or(Value::Null, |(id, text)| json!([id, text])),
+                            .map_or(Value::Null, |cover| json!([cover.id, cover.text])),
                     );
                 }
                 json!([

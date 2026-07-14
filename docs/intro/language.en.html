@@ -104,7 +104,9 @@ per-declaration tags, it is <strong>metadata only</strong> — never verified �
 <code>fslc explain</code> / <code>fslc html</code> as a classification badge next to the spec name (JSON:
 <code>skeleton.spec_kind = {id, text}</code>). Use it to record what kind of thing the whole
 spec is (e.g. <code>ui</code> for a screen-flow spec that models only the behavioral slice);
-it carries no kernel semantics and desugars to nothing. See <code>docs/DESIGN-ui.md</code>.</p>
+it carries no kernel semantics and desugars to nothing. See <code>docs/DESIGN-ui.md</code>.
+Internally this legacy badge is adapted to the shared typed <code>Kind</code> annotation;
+the source grammar remains unchanged. See <code>DESIGN-annotations.md</code>.</p>
 <p>Any layer — including a kernel <code>spec</code> — may declare identity/number sorts whose
 finite sizes come from a sibling top-level <code>verify</code> block instead of an inline
 <code>type X = lo..hi</code> range. This keeps the domain declaration (what exists) separate
@@ -294,7 +296,9 @@ display name and keep generated Kernel names as machine detail. The chain
 records source file/full span, declaration path, lowering steps,
 primary/secondary sources, and explicit generated-only nodes. Requirement IDs
 remain an independent traceability relation. Public Kernel v1 output is
-unchanged; publishing this chain is reserved for v2.</p>
+unchanged. Opt-in Public Kernel v2 publishes the chain as a top-level provenance
+graph with portable source identities, exact byte/line coordinates,
+target bindings, source-node reverse lookup, and explicit assurance/completeness.</p>
 <p>When a domain aggregate state field omits its initializer, the current edition
 preserves the established Bool <code>false</code>, enum first-member, range lower-bound, or
 external-placeholder <code>0</code> choice and emits <code>implicit_initial_value</code>. The warning
@@ -683,7 +687,7 @@ variable.</p></div></details>
 </tr>
 <tr>
 <td>leadsTo</td>
-<td>A P ~&gt; Q violation via a lasso up to depth K or via deadlock stagnation</td>
+<td>A P ~&gt; Q violation via a lasso up to depth K or via deadlock stagnation (detected as soon as <code>--depth</code> reaches the stalling step, and at every larger depth after that, not only when it lands exactly on that step)</td>
 <td><code>violated</code> / <code>leadsTo</code> / <code>bindings</code> + trace</td>
 </tr>
 </tbody>
@@ -713,8 +717,8 @@ variable.</p></div></details>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
-fslc kernel    &lt;file.fsl&gt;                        # normalized typed Kernel JSON for external compilers
-fslc conformance &lt;file.fsl&gt; [--depth K]          # language-neutral Monitor vectors (default K=4)
+fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
+fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
@@ -775,7 +779,11 @@ Public Kernel v1 explicitly rejects <code>compose</code> export because current 
 does not retain truthful per-component filenames; direct and other lowered
 dialects remain supported.
 Compatibility rules, schemas, fixtures, and Rust API entry points are specified
-in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>.</p>
+in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>. Public Kernel v2 is
+opt-in and specified by
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a>; it replaces the lossy
+v1 origin object with target references into a queryable provenance graph. Its
+<code>completeness</code> field must be checked before relying on source coverage.</p>
 <p><code>verify --from-state state.json</code> replaces the declared <code>init</code> for one bounded
 run and asks what can happen from that complete current state. The JSON shape is
 exactly <code>Monitor.state</code> / replay logical state: all variables and Map keys are
@@ -1405,10 +1413,18 @@ action route() &quot;undecided: routing policy is pending&quot; { ... }
 <p><code>fslc ledger</code> and <code>fslc html</code> list these declarations and the requirement IDs
 whose state dependencies overlap them. <code>analyze --profile ai-review</code> keeps an
 underspecification finding but marks an exact declaration match as
-<code>acknowledged:true</code>. Because the declaration-tag slot is singular, an
-<code>undecided</code> declaration does not also carry an <code>ID: text</code> tag. See
-<code>DESIGN-undecided.md</code>. This feature is implemented by the authoritative native
-Rust CLI and is not backported to the frozen Python reference implementation.</p>
+<code>acknowledged:true</code>. The current direct declaration syntax still has one string
+slot, but native lowering adapts it to a typed annotation carrier that can hold
+requirements, undecided markers, kinds, and namespaced custom annotations
+together. Requirement blocks therefore merge their outer requirement with an
+inner legacy marker instead of overwriting it. <code>@...</code> source syntax remains a
+separate feature. Explicit <code>covers</code> and requirement-block annotations keep their
+own exact source spans, and <code>undecided</code> is reserved rather than accepted as an
+explicit requirement ID. JSON consumers that expose multiple relations use a
+<code>requirements</code> array while preserving the existing singular field as a lexical
+compatibility projection. See <code>DESIGN-undecided.md</code> and
+<code>DESIGN-annotations.md</code>. This is implemented by the authoritative native Rust
+CLI and is not backported to the frozen Python reference implementation.</p>
 <h3 id="132-requirements-layer-requirements-the-fsl-req-dialect">13.2 Requirements layer: <code>requirements</code> (the fsl-req dialect)</h3>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }

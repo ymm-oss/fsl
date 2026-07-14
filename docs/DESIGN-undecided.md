@@ -81,6 +81,8 @@ natural-language similarity judgment.
   checks every allowed resolution.
 - Suppressing findings or lowering their evidence strength.
 - Inferring product decisions from the tag reason.
-- Supporting more than one metadata tag on a declaration.
+- Defining `@...` source syntax. The shared typed carrier now supports an
+  `Undecided` annotation alongside requirements/kinds/custom annotations; see
+  `DESIGN-annotations.md`.
 - Treating requirements-process `covers` as an undecided marker; `covers`
   remains the transition-to-requirement traceability contract.

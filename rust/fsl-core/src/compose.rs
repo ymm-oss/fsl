@@ -251,6 +251,7 @@ pub fn lower_compose(
             items: static_items,
         },
         origins: crate::OriginRegistry::default(),
+        annotations: fsl_syntax::AnnotationRegistry::default(),
     })
 }
 

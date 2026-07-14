@@ -193,27 +193,29 @@ pub fn spec_digest(path: &Path) -> Result<String, String> {
 #[must_use]
 pub fn requirement_ids(model: &KernelModel) -> Vec<String> {
     let mut ids = BTreeSet::new();
-    let mut add = |metadata: Option<&fsl_syntax::MetaTag>| {
-        if let Some(metadata) = metadata
-            && !metadata.id.eq_ignore_ascii_case("undecided")
-        {
-            ids.insert(metadata.id.clone());
-        }
+    let mut add = |annotations: &fsl_core::Annotations| {
+        ids.extend(
+            annotations
+                .requirements()
+                .expect("checked model annotations are valid")
+                .into_iter()
+                .map(|requirement| requirement.id),
+        );
     };
     for action in &model.actions {
-        add(action.meta.as_ref());
+        add(&action.annotations);
     }
     for property in &model.invariants {
-        add(property.meta.as_ref());
+        add(&property.annotations);
     }
     for property in &model.transitions {
-        add(property.meta.as_ref());
+        add(&property.annotations);
     }
     for property in &model.reachables {
-        add(property.meta.as_ref());
+        add(&property.annotations);
     }
     for property in &model.leadstos {
-        add(property.meta.as_ref());
+        add(&property.annotations);
     }
     ids.into_iter().collect()
 }
@@ -488,9 +490,11 @@ pub fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_canonical_utc_timestamp, normalized_artifact, normalized_ast, now_rfc3339, sha256_bytes,
-        shell_word,
+        is_canonical_utc_timestamp, normalized_artifact, normalized_ast, now_rfc3339,
+        requirement_ids, sha256_bytes, shell_word,
     };
+    use fsl_core::{Annotation, FsResolver, action_target, build_model, parse_kernel_source};
+    use fsl_syntax::{SourcePos, Span};
     use serde_json::{Value, json};
 
     #[test]
@@ -547,5 +551,38 @@ mod tests {
             shell_word("review specs/order.fsl"),
             "'review specs/order.fsl'"
         );
+    }
+
+    #[test]
+    fn approval_requirement_ids_include_every_typed_relation() {
+        let mut kernel = parse_kernel_source(
+            r#"
+spec ApprovalAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  action publish() "REQ-2: second" { ready = true }
+}
+"#,
+            &FsResolver::new("."),
+        )
+        .expect("parse spec");
+        let position = SourcePos {
+            offset: 0,
+            line: 1,
+            column: 1,
+        };
+        kernel.bind_annotation(
+            action_target("publish"),
+            Annotation::Requirement {
+                id: "REQ-1".to_owned(),
+                text: Some("first".to_owned()),
+                span: Span {
+                    start: position,
+                    end: position,
+                },
+            },
+        );
+        let model = build_model(kernel).expect("build model");
+        assert_eq!(requirement_ids(&model), ["REQ-1", "REQ-2"]);
     }
 }

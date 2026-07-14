@@ -7,15 +7,16 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionItem, Binder, BusinessItem, Expr, LValue, Param, ParseError, RequirementsItem, SpecItem,
-    StateField, Statement, SurfaceDocument, SurfaceSpec, TypeExpr, VerifyItem,
-    parse_surface_document,
+    ActionItem, AnnotationRegistry, Binder, BusinessItem, Expr, LValue, Param, ParseError,
+    RequirementsItem, SpecItem, StateField, Statement, SurfaceDocument, SurfaceSpec, TypeExpr,
+    VerifyItem, parse_surface_document,
 };
 use serde_json::Value;
 
 pub use fsl_syntax::{
-    Binder as KernelBinder, Expr as KernelExpr, LValue as KernelLValue, Pattern, QualifiedName,
-    Statement as KernelStatement,
+    Annotation, AnnotationError, AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue,
+    Annotations, Binder as KernelBinder, Expr as KernelExpr, LValue as KernelLValue, Pattern,
+    QualifiedName, RequirementLink, Statement as KernelStatement, SymbolPath,
 };
 
 mod compose;
@@ -46,9 +47,9 @@ pub use model::{
     TypeRef, Value as FslValue, build_model,
 };
 pub use origin::{
-    LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET, TERMINAL_TARGET,
-    TraceabilityRegistry, action_guard_target, action_statement_target, action_target,
-    init_statement_target, property_target, state_target, type_target,
+    INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
+    TERMINAL_TARGET, TraceabilityRegistry, action_guard_target, action_statement_target,
+    action_target, init_statement_target, property_target, state_target, type_target,
 };
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,
@@ -137,6 +138,7 @@ impl From<ParseError> for CoreError {
 pub struct KernelSpec {
     spec: SurfaceSpec,
     origins: OriginRegistry,
+    annotations: AnnotationRegistry,
 }
 
 /// Build a checked kernel model from an already parsed surface specification.
@@ -151,6 +153,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
     build_model(KernelSpec {
         spec,
         origins: OriginRegistry::default(),
+        annotations: AnnotationRegistry::default(),
     })
 }
 
@@ -173,6 +176,16 @@ impl KernelSpec {
     #[must_use]
     pub fn origins(&self) -> &OriginRegistry {
         &self.origins
+    }
+
+    /// Bind one typed annotation to a stable semantic target.
+    pub fn bind_annotation(&mut self, target: impl Into<String>, annotation: Annotation) {
+        self.annotations.bind(target, annotation);
+    }
+
+    #[must_use]
+    pub fn annotations(&self) -> &AnnotationRegistry {
+        &self.annotations
     }
 
     #[must_use]
@@ -344,7 +357,11 @@ fn lower_direct_spec_with_origins(
 ) -> Result<KernelSpec, CoreError> {
     let spec = PredicateExpander::new(&spec)?.expand(spec)?;
     let spec = expand_spec_domains(spec)?;
-    Ok(KernelSpec { spec, origins })
+    Ok(KernelSpec {
+        spec,
+        origins,
+        annotations: AnnotationRegistry::default(),
+    })
 }
 
 #[allow(clippy::too_many_lines)]

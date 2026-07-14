@@ -71,6 +71,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Native Rust now carries ordered, typed `Requirement`, `Undecided`, `Kind`,
+  and namespaced `Custom` annotations through a common target-keyed IR. Legacy
+  declaration strings, spec badges, requirement blocks, process `covers`, and
+  acceptance/forbidden IDs adapt into the same validated relation; identical
+  requirements deduplicate, conflicting text fails at its annotation span, and
+  semantic queries are order-independent. Explicit requirement forms retain
+  exact spans and reject reserved `undecided` IDs. Strict tags, analysis/TSG,
+  scenarios, verifier diagnostics, and ledgers consume every relation while
+  retaining lexical singular projections. Public Kernel v1/v2 JSON remains
+  unchanged (issue #237).
 - Opt-in Public Kernel v2 publishes the internal domain origin chain as a
   deterministic provenance graph with portable typed source identities,
   UTF-8 byte and Unicode-scalar coordinates, primary/secondary origins,

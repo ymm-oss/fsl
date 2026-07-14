@@ -1995,6 +1995,7 @@ fn metadata(id: impl Into<String>, text: impl Into<String>) -> MetaTag {
     MetaTag {
         id: id.into(),
         text: Some(text.into()),
+        span: None,
     }
 }
 

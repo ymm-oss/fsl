@@ -9,6 +9,7 @@
 //! differential tests without making that legacy representation the Rust AST.
 
 mod ai;
+mod annotation;
 mod ast;
 mod db;
 mod domain;
@@ -19,6 +20,10 @@ mod syntax_expr;
 
 pub use ai::{
     AiAuthority, AiComponent, AiFallback, AiHardCheck, AiLoc, AiTool, parse_ai_component,
+};
+pub use annotation::{
+    Annotation, AnnotationError, AnnotationRegistry, AnnotationValue, Annotations, RequirementLink,
+    SymbolPath,
 };
 pub use ast::{Binder, Expr, Pattern, QualifiedName, SourcePos, Span};
 pub use db::{
@@ -37,11 +42,11 @@ pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, GovernanceArtifactRef,
     GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
-    PreservationItem, ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem,
-    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementBranch, RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness,
-    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
-    SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
+    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementBranch, RequirementsItem, SpecItem, StateField, Statement,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,
