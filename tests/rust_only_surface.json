@@ -223,7 +223,7 @@
       ],
       "parent_index": 20,
       "prog": "fslc conformance",
-      "help_sha256": "0dc0b72607b492b1e610226d4bf0e4bb8b12567c0878bcaab08cd7170a9685fc",
+      "help_sha256": "e6e42200d6965afbf55f724c352a652f123bfa1f73f65ef1e4dfec5423e9e17b",
       "actions": [
         {
           "dest": "help",
@@ -249,6 +249,19 @@
           ],
           "default": 4,
           "action": "store"
+        },
+        {
+          "dest": "kernel_version",
+          "required": false,
+          "flags": [
+            "--kernel-version"
+          ],
+          "choices": [
+            "1",
+            "2"
+          ],
+          "default": "1",
+          "action": "store"
         }
       ],
       "commands": []
@@ -259,7 +272,7 @@
       ],
       "parent_index": 21,
       "prog": "fslc kernel",
-      "help_sha256": "36be1eae907ad5f6395027d2d9fbc3a6cff9023dced823760ea878a4d8cdee70",
+      "help_sha256": "634926347b0a3d64ca682656f5acec128e5cd98d2afce245e86b4d3f00082c87",
       "actions": [
         {
           "dest": "help",
@@ -275,6 +288,19 @@
           "dest": "file",
           "required": true,
           "positional": true,
+          "action": "store"
+        },
+        {
+          "dest": "kernel_version",
+          "required": false,
+          "flags": [
+            "--kernel-version"
+          ],
+          "choices": [
+            "1",
+            "2"
+          ],
+          "default": "1",
           "action": "store"
         }
       ],

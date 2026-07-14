@@ -9,6 +9,7 @@ use fsl_core::{
 use serde_json::{Value, json};
 
 pub mod coverage;
+pub mod origin_coverage;
 
 pub use fsl_core::{
     display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json, trace_json,
@@ -58,9 +59,14 @@ fn compute_changes(previous: &Value, current: &Value) -> serde_json::Map<String,
     changes
 }
 
-pub const CONFORMANCE_SCHEMA_VERSION: &str = "1.0.0";
-pub const CONFORMANCE_SCHEMA_ID: &str =
+pub const CONFORMANCE_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const CONFORMANCE_V1_SCHEMA_ID: &str =
     "https://fsl.dev/schemas/fslc/kernel/conformance.v1.schema.json";
+pub const CONFORMANCE_V2_SCHEMA_VERSION: &str = "2.0.0";
+pub const CONFORMANCE_V2_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/kernel/conformance.v2.schema.json";
+pub const CONFORMANCE_SCHEMA_VERSION: &str = CONFORMANCE_V1_SCHEMA_VERSION;
+pub const CONFORMANCE_SCHEMA_ID: &str = CONFORMANCE_V1_SCHEMA_ID;
 
 type ActionCall = (String, BTreeMap<String, FslValue>);
 
@@ -75,6 +81,19 @@ type ActionCall = (String, BTreeMap<String, FslValue>);
 /// Returns an error when initialization, bounded parameter enumeration, guard
 /// evaluation, or a concrete step cannot be evaluated.
 pub fn conformance_vectors(model: &KernelModel, depth: usize) -> Result<Value, String> {
+    conformance_vectors_for_version(model, depth, fsl_core::PublicKernelVersion::V1)
+}
+
+/// Build conformance vectors corresponding to an explicitly negotiated Kernel major.
+///
+/// # Errors
+///
+/// Returns an error when concrete initialization or exploration fails.
+pub fn conformance_vectors_for_version(
+    model: &KernelModel,
+    depth: usize,
+    version: fsl_core::PublicKernelVersion,
+) -> Result<Value, String> {
     let all_calls = action_calls(model)?;
     let initial = fsl_runtime::Monitor::new(model.clone()).map_err(|error| error.to_string())?;
     let initial_json = conformance_state_json(model, &initial.state)?;
@@ -131,10 +150,18 @@ pub fn conformance_vectors(model: &KernelModel, depth: usize) -> Result<Value, S
         }
     }
 
+    let (schema_id, schema_version) = match version {
+        fsl_core::PublicKernelVersion::V1 => {
+            (CONFORMANCE_V1_SCHEMA_ID, CONFORMANCE_V1_SCHEMA_VERSION)
+        }
+        fsl_core::PublicKernelVersion::V2 => {
+            (CONFORMANCE_V2_SCHEMA_ID, CONFORMANCE_V2_SCHEMA_VERSION)
+        }
+    };
     Ok(json!({
-        "$schema":CONFORMANCE_SCHEMA_ID,
-        "schema_version":CONFORMANCE_SCHEMA_VERSION,
-        "kernel_schema_version":fsl_core::KERNEL_SCHEMA_VERSION,
+        "$schema":schema_id,
+        "schema_version":schema_version,
+        "kernel_schema_version":version.schema_version(),
         "result":"conformance",
         "spec":model.name,
         "depth":depth,

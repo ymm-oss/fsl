@@ -2197,7 +2197,7 @@
       {
         "path": ["conformance"],
         "prog": "fslc conformance",
-        "help": "usage: fslc conformance [-h] [--depth DEPTH] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH  maximum transition depth (default: 4)\n",
+        "help": "usage: fslc conformance [-h] [--depth DEPTH] [--kernel-version {1,2}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         maximum transition depth (default: 4)\n  --kernel-version {1,2}\n                        public Kernel major (default: 1)\n",
         "actions": [
           {
             "dest": "help",
@@ -2218,6 +2218,14 @@
             "flags": ["--depth"],
             "default": 4,
             "action": "store"
+          },
+          {
+            "dest": "kernel_version",
+            "required": false,
+            "flags": ["--kernel-version"],
+            "choices": ["1", "2"],
+            "default": "1",
+            "action": "store"
           }
         ],
         "commands": []
@@ -2225,7 +2233,7 @@
       {
         "path": ["kernel"],
         "prog": "fslc kernel",
-        "help": "usage: fslc kernel [-h] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help  show this help message and exit\n",
+        "help": "usage: fslc kernel [-h] [--kernel-version {1,2}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kernel-version {1,2}\n                        public Kernel major (default: 1)\n",
         "actions": [
           {
             "dest": "help",
@@ -2238,6 +2246,14 @@
             "dest": "file",
             "required": true,
             "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "kernel_version",
+            "required": false,
+            "flags": ["--kernel-version"],
+            "choices": ["1", "2"],
+            "default": "1",
             "action": "store"
           }
         ],

@@ -259,7 +259,9 @@ display name and keep generated Kernel names as machine detail. The chain
 records source file/full span, declaration path, lowering steps,
 primary/secondary sources, and explicit generated-only nodes. Requirement IDs
 remain an independent traceability relation. Public Kernel v1 output is
-unchanged; publishing this chain is reserved for v2.
+unchanged. Opt-in Public Kernel v2 publishes the chain as a top-level provenance
+graph with portable source identities, exact byte/line coordinates,
+target bindings, source-node reverse lookup, and explicit assurance/completeness.
 
 When a domain aggregate state field omits its initializer, the current edition
 preserves the established Bool `false`, enum first-member, range lower-bound, or
@@ -633,8 +635,8 @@ variable.
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
-fslc kernel    <file.fsl>                        # normalized typed Kernel JSON for external compilers
-fslc conformance <file.fsl> [--depth K]          # language-neutral Monitor vectors (default K=4)
+fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
+fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
@@ -696,7 +698,11 @@ Public Kernel v1 explicitly rejects `compose` export because current lowering
 does not retain truthful per-component filenames; direct and other lowered
 dialects remain supported.
 Compatibility rules, schemas, fixtures, and Rust API entry points are specified
-in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md).
+in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md). Public Kernel v2 is
+opt-in and specified by
+[`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md); it replaces the lossy
+v1 origin object with target references into a queryable provenance graph. Its
+`completeness` field must be checked before relying on source coverage.
 
 `verify --from-state state.json` replaces the declared `init` for one bounded
 run and asks what can happen from that complete current state. The JSON shape is

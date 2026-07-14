@@ -717,8 +717,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 
 ```
 fslc check <f>                                  # syntax / names / types only
-fslc kernel <f>                                 # normalized typed Kernel JSON for external compilers
-fslc conformance <f> [--depth K=4]              # language-neutral Monitor success/failure vectors
+fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
+fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit] [--k N=1]
                [--explicit-budget N=1000000]        # explicit only; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
@@ -785,10 +785,15 @@ Use native `fslc kernel` as the stable compiler boundary after dialect lowering
 and type checking. Do not consume the frozen Python AST JSON or reparse expression
 strings: every exported expression has a structural type and span, actions and
 properties carry requirement/lowering origin, and partial failures declare
-rollback conditions. Use `fslc conformance` plus
-`schemas/fslc/kernel/conformance.v1.schema.json` to test an independent runtime.
+rollback conditions. The default and legacy Rust API remain Public Kernel v1.
+Select `--kernel-version 2` only when a consumer needs the queryable provenance
+graph; check its `completeness` and per-origin assurance rather than assuming v2
+means every dialect is source-complete. Requirement relations remain separate
+from origin targets. Use `fslc conformance` with the same major and the matching
+`schemas/fslc/kernel/conformance.v{1,2}.schema.json` to test an independent runtime.
 The compatibility policy and field contract are in
-`docs/DESIGN-kernel-contract.md`.
+`docs/DESIGN-kernel-contract.md`; v2 provenance is in
+`docs/DESIGN-kernel-origin-v2.md`.
 
 For an induction `unknown_cti`, first try `--engine explicit` — if exploration
 closes it returns `proved` with **no lemmas at all** (the invariant being

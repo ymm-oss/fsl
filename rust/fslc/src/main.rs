@@ -337,32 +337,61 @@ fn command() -> Result<(Value, i32), String> {
             ))
         }
         "kernel" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "usage: fslc kernel SPEC".to_owned())?,
-            );
-            if let Some(argument) = args.next() {
-                return Err(format!("unexpected kernel argument '{argument}'"));
+            let mut path = None;
+            let mut version = fsl_core::PublicKernelVersion::V1;
+            while let Some(argument) = args.next() {
+                match argument.as_str() {
+                    "--kernel-version" => {
+                        let value = required_option_value(&mut args, "--kernel-version")?;
+                        version = match fsl_core::PublicKernelVersion::parse(&value) {
+                            Ok(version) => version,
+                            Err(error) => {
+                                return Ok((semantic_error_output(&error.to_string()), 2));
+                            }
+                        };
+                    }
+                    option if option.starts_with('-') => {
+                        return Err(format!("unknown kernel option '{option}'"));
+                    }
+                    value if path.is_none() => path = Some(PathBuf::from(value)),
+                    value => return Err(format!("unexpected kernel argument '{value}'")),
+                }
             }
-            Ok(run_kernel_contract(&path))
+            let path =
+                path.ok_or_else(|| "usage: fslc kernel SPEC [--kernel-version MAJOR]".to_owned())?;
+            Ok(run_kernel_contract(&path, version))
         }
         "conformance" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "usage: fslc conformance SPEC [--depth N]".to_owned())?,
-            );
+            let mut path = None;
             let mut depth = 4_usize;
-            while let Some(option) = args.next() {
-                match option.as_str() {
+            let mut version = fsl_core::PublicKernelVersion::V1;
+            while let Some(argument) = args.next() {
+                match argument.as_str() {
                     "--depth" => {
                         depth = required_option_value(&mut args, "--depth")?
                             .parse()
                             .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
                     }
-                    _ => return Err(format!("unknown conformance option '{option}'")),
+                    "--kernel-version" => {
+                        let value = required_option_value(&mut args, "--kernel-version")?;
+                        version = match fsl_core::PublicKernelVersion::parse(&value) {
+                            Ok(version) => version,
+                            Err(error) => {
+                                return Ok((semantic_error_output(&error.to_string()), 2));
+                            }
+                        };
+                    }
+                    option if option.starts_with('-') => {
+                        return Err(format!("unknown conformance option '{option}'"));
+                    }
+                    value if path.is_none() => path = Some(PathBuf::from(value)),
+                    value => return Err(format!("unexpected conformance argument '{value}'")),
                 }
             }
-            Ok(run_conformance(&path, depth))
+            let path = path.ok_or_else(|| {
+                "usage: fslc conformance SPEC [--depth N] [--kernel-version MAJOR]".to_owned()
+            })?;
+            Ok(run_conformance(&path, depth, version))
         }
         "approval" => {
             let subcommand = args.next().ok_or_else(|| {
@@ -3247,14 +3276,44 @@ fn run_check(path: &Path) -> (Value, i32) {
     }
 }
 
-fn run_kernel_contract(path: &Path) -> (Value, i32) {
+fn portable_cli_source_path(path: &Path) -> Result<String, String> {
+    let absolute = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+    let current = std::env::current_dir()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| error.to_string())?;
+    let repository_root = absolute
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map_or(current.as_path(), |root| root);
+    let relative = absolute.strip_prefix(repository_root).map_err(|_| {
+        format!(
+            "public Kernel v2 source '{}' is outside the repository or bundle root",
+            path.display()
+        )
+    })?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+    let portable_path = if version == fsl_core::PublicKernelVersion::V2 {
+        match portable_cli_source_path(path) {
+            Ok(path) => Some(path),
+            Err(error) => return (semantic_error_output(&error), 2),
+        }
+    } else {
+        None
+    };
+    let parsed = portable_path.as_ref().map_or_else(
+        || fsl_core::parse_kernel_source(&source, &resolver),
+        |source_file| fsl_core::parse_kernel_source_with_file(&source, &resolver, source_file),
+    );
+    let kernel = match parsed {
         Ok(kernel) => kernel,
         Err(error) => {
             let message =
@@ -3270,8 +3329,14 @@ fn run_kernel_contract(path: &Path) -> (Value, i32) {
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let path = path.to_string_lossy();
-    match fsl_core::public_kernel_contract(&kernel, &model, &path, source_dialect(&source)) {
+    let source_path = portable_path.unwrap_or_else(|| path.to_string_lossy().into_owned());
+    match fsl_core::public_kernel_contract_for_version(
+        &kernel,
+        &model,
+        &source_path,
+        source_dialect(&source),
+        version,
+    ) {
         Ok(mut contract) => {
             let object = contract.as_object_mut().expect("public Kernel object");
             object.insert("fsl".to_owned(), json!("1.0"));
@@ -3282,8 +3347,14 @@ fn run_kernel_contract(path: &Path) -> (Value, i32) {
     }
 }
 
-fn run_conformance(path: &Path, depth: usize) -> (Value, i32) {
-    match load_model(path).and_then(|model| fslc_rust::conformance_vectors(&model, depth)) {
+fn run_conformance(
+    path: &Path,
+    depth: usize,
+    version: fsl_core::PublicKernelVersion,
+) -> (Value, i32) {
+    match load_model(path)
+        .and_then(|model| fslc_rust::conformance_vectors_for_version(&model, depth, version))
+    {
         Ok(mut vectors) => {
             vectors
                 .as_object_mut()

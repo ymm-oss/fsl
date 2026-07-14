@@ -221,6 +221,15 @@ fn compose_export_fails_instead_of_fabricating_component_source_paths() {
     )
     .expect_err("compose provenance is not representable in v1");
     assert!(error.message.contains("component source filenames"));
+    let error = fsl_core::public_kernel_contract_for_version(
+        &kernel,
+        &model,
+        "specs/bank_system.fsl",
+        "compose",
+        fsl_core::PublicKernelVersion::V2,
+    )
+    .expect_err("compose provenance is not representable in v2");
+    assert!(error.message.contains("component source filenames"));
 }
 
 #[test]
@@ -314,6 +323,40 @@ fn native_cli_conformance_output_matches_the_v1_golden_vector() {
 }
 
 #[test]
+fn native_cli_conformance_output_matches_the_v2_golden_vector() {
+    let input = fixture("conformance_failures.fsl");
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "conformance",
+            input.to_str().expect("UTF-8 path"),
+            "--depth",
+            "0",
+            "--kernel-version",
+            "2",
+        ])
+        .output()
+        .expect("run native CLI");
+    assert!(output.status.success());
+    let actual: Value = serde_json::from_slice(&output.stdout).expect("actual JSON");
+    let golden = fixture("conformance_failures.v2.json");
+    if std::env::var_os("FSLC_CONFORMANCE_V2_UPDATE").is_some() {
+        std::fs::write(
+            &golden,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&actual).expect("serialize v2 vectors")
+            ),
+        )
+        .expect("update v2 conformance golden");
+    }
+    let expected: Value =
+        serde_json::from_str(&std::fs::read_to_string(golden).expect("read golden v2 vector"))
+            .expect("golden JSON");
+    assert_eq!(actual, expected);
+    assert_eq!(actual["kernel_schema_version"], "2.0.0");
+}
+
+#[test]
 fn native_cli_kernel_output_matches_the_v1_golden_contract() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -333,6 +376,135 @@ fn native_cli_kernel_output_matches_the_v1_golden_contract() {
     )
     .expect("golden JSON");
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn native_cli_kernel_v2_output_matches_the_origin_golden_contract() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let relative = "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl";
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .current_dir(workspace)
+        .args(["kernel", relative, "--kernel-version", "2"])
+        .output()
+        .expect("run native CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let actual: Value = serde_json::from_slice(&output.stdout).expect("actual JSON");
+    assert_eq!(actual["schema_version"], "2.0.0");
+    assert_eq!(
+        actual["provenance"]["identity_stability"],
+        "exact_source_revision"
+    );
+
+    let golden = fixture("kernel_origin.v2.json");
+    if std::env::var_os("FSLC_KERNEL_V2_UPDATE").is_some() {
+        std::fs::write(
+            &golden,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&actual).expect("serialize v2 golden")
+            ),
+        )
+        .expect("update v2 golden");
+    }
+    let expected: Value =
+        serde_json::from_str(&std::fs::read_to_string(golden).expect("read v2 golden contract"))
+            .expect("golden JSON");
+    assert_eq!(actual, expected);
+
+    let from_rust_directory = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .current_dir(workspace.join("rust"))
+        .args([
+            "kernel",
+            "fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
+            "--kernel-version",
+            "2",
+        ])
+        .output()
+        .expect("run native CLI below repository root");
+    assert!(from_rust_directory.status.success());
+    let from_rust_directory: Value =
+        serde_json::from_slice(&from_rust_directory.stdout).expect("subdirectory JSON");
+    assert_eq!(from_rust_directory, actual);
+}
+
+#[test]
+fn native_cli_negotiates_kernel_and_conformance_majors_fail_closed() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let relative = "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl";
+    let conformance = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .current_dir(workspace)
+        .args([
+            "conformance",
+            relative,
+            "--depth",
+            "0",
+            "--kernel-version",
+            "2",
+        ])
+        .output()
+        .expect("run v2 conformance");
+    assert!(conformance.status.success());
+    let conformance: Value =
+        serde_json::from_slice(&conformance.stdout).expect("v2 conformance JSON");
+    assert_eq!(conformance["schema_version"], "2.0.0");
+    assert_eq!(conformance["kernel_schema_version"], "2.0.0");
+
+    let unsupported = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .current_dir(workspace)
+        .args(["kernel", relative, "--kernel-version", "3"])
+        .output()
+        .expect("run unsupported major");
+    assert_eq!(unsupported.status.code(), Some(2));
+    let unsupported: Value = serde_json::from_slice(&unsupported.stdout).expect("error envelope");
+    assert_eq!(unsupported["result"], "error");
+    assert_eq!(unsupported["kind"], "semantics");
+    assert!(
+        unsupported["message"]
+            .as_str()
+            .is_some_and(|message| { message.contains("unsupported public Kernel major") })
+    );
+
+    let unsupported_spelling = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .current_dir(workspace)
+        .args(["kernel", relative, "--kernel-version", "2.0.0"])
+        .output()
+        .expect("run unsupported version spelling");
+    assert_eq!(unsupported_spelling.status.code(), Some(2));
+}
+
+#[test]
+fn published_v2_schema_ids_match_the_rust_api_constants() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let kernel: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.join("schemas/fslc/kernel/kernel.v2.schema.json"))
+            .expect("read v2 Kernel schema"),
+    )
+    .expect("v2 Kernel schema JSON");
+    let conformance: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.join("schemas/fslc/kernel/conformance.v2.schema.json"))
+            .expect("read v2 conformance schema"),
+    )
+    .expect("v2 conformance schema JSON");
+    assert_eq!(kernel["$id"], fsl_core::KERNEL_V2_SCHEMA_ID);
+    assert_eq!(kernel["properties"]["schema_version"]["const"], "2.0.0");
+    assert_eq!(conformance["$id"], fslc_rust::CONFORMANCE_V2_SCHEMA_ID);
+    assert_eq!(
+        conformance["properties"]["kernel_schema_version"]["const"],
+        "2.0.0"
+    );
 }
 
 #[test]
