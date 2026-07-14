@@ -41,6 +41,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   instead of a generated Kernel coordinate.
 
 ### Fixed
+- The bounded `leadsTo ... within N` deadline check no longer misses a
+  violation when the path deadlocks after the deadline. The deadline probe ran
+  as a single post-hoc pass after the BMC unrolling loop, by which point every
+  non-final step had a permanently-asserted forward transition, so a
+  missed-deadline path that subsequently deadlocked was excluded from the
+  solver context and the spec falsely verified at any `--depth` past the
+  deadlock. The probe now runs inside the per-step loop, anchored at each
+  window's deadline step before that step's forward-transition assertion —
+  the same restructuring issue #260 applied to the stagnation check
+  (issue #266).
 - Bounded `leadsTo` deadlock-stagnation detection no longer requires `--depth`
   to land exactly on the stalling step. The BMC unrolling loop permanently
   asserted a forward transition out of every non-final step before the

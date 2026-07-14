@@ -294,6 +294,17 @@ failure is a transition-progress failure.
     fires" for every non-final step, so a deadlock-stall probe issued only
     after the full trace is built can never be satisfiable below the depth
     horizon. Reuses the enabled expression of the existing deadlock check.
+  - The `within` deadline probe must run inline, per step, for the same
+    reason: at step `t`, the single window whose deadline lands on `t` starts
+    at `p = t - within`, and the probe `P(states[p]) ∧ ∀ q ∈ [p, t]:
+    ¬Q(states[q])` is issued before step `t`'s forward-transition assertion.
+    A missed deadline is prefix-satisfiable regardless of what follows, so
+    the inline probe subsumes a post-loop sweep — and unlike a post-loop
+    sweep it still fires when the path deadlocks after the deadline (a
+    post-loop probe misses exactly that combination once `--depth` extends
+    past the deadlock; issue #266). The native Rust verifier implements this
+    (`check_leadsto_deadlines` in `rust/fsl-verifier/src/bmc.rs`); the frozen
+    Python reference still probes post-loop and retains the known gap.
   - Symmetry reduction (§2.5.1) adds canonical row-order constraints only inside
     the lasso/stall push/pop queries. It is not asserted on the shared path
     solver, so safety/reachability behavior and finite transition construction

@@ -149,6 +149,30 @@ verify {
 }`,
   },
   {
+    // A `within` deadline missed one step before the path deadlocks, unrolled
+    // past the deadlock step: the deadline probe must fire inline at the
+    // deadline step, not only when --depth lands before the deadlock
+    // (issue #266).
+    id: "leadsto-within-beyond-horizon",
+    expected: "violated",
+    expect: { kind: "leadsTo", trace: true },
+    options: { depth: 4, deadlock: "ignore" },
+    source: `spec BrowserLateQ {
+  type Count = 0..3
+
+  state { x: Count }
+
+  init { x = 0 }
+
+  action step() {
+    requires x < 3
+    x = x + 1
+  }
+
+  leadsTo Progress { x == 1 ~> within 1 x == 3 }
+}`,
+  },
+  {
     // Struct-typed top-level state where one action changes only one field;
     // the Worker must not blow up rendering the trace for non-scalar state.
     id: "struct-state",
