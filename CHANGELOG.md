@@ -94,6 +94,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   unlisted choice drift and runtime probes for invalid choices and help paths.
 
 ### Added
+- Approval records can now opt into detached Ed25519 signatures with
+  `approval create --signing-key`. The strict v2 schema binds the complete
+  canonical record, while `approval check`, `approval diff`, and `ledger`
+  require explicit repeatable trust anchors and distinguish signed, unsigned,
+  and signature-invalid evidence. Unsigned v1 behavior is unchanged (issue
+  #269).
 - Native dialect selection now lexes each document once and dispatches through a
   duplicate-checked keyword registry shared by Kernel, CLI, WASM, and mirrored
   Python/LSP entrypoints. Leading BOM/comments/whitespace and typed top-level

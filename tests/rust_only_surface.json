@@ -32,7 +32,7 @@
       ],
       "parent_index": 1,
       "prog": "fslc approval check",
-      "help_sha256": "4d6712f7502b3fa1ed3961330d467dcc5a3d07a78d05c5a92f17b84650dc013e",
+      "help_sha256": "5983559d3cab53308a58da533ad4681455f4eb3af5cc04c3fda170bd6d9bad29",
       "actions": [
         {
           "dest": "help",
@@ -57,6 +57,15 @@
             "--record"
           ],
           "action": "store"
+        },
+        {
+          "dest": "trust_key",
+          "required": false,
+          "flags": [
+            "--trust-key"
+          ],
+          "repeatable": true,
+          "action": "store"
         }
       ],
       "commands": []
@@ -68,7 +77,7 @@
       ],
       "parent_index": 0,
       "prog": "fslc approval create",
-      "help_sha256": "581f1401ef342238de077018d64efe62b754b57de8719fdd0cb19abea181761e",
+      "help_sha256": "ecaf05b0288085634eb5c103373e80cb461d49d4b573249e3e2a435a520f6256",
       "actions": [
         {
           "dest": "help",
@@ -122,6 +131,14 @@
             "--requirement"
           ],
           "repeatable": true,
+          "action": "store"
+        },
+        {
+          "dest": "signing_key",
+          "required": false,
+          "flags": [
+            "--signing-key"
+          ],
           "action": "store"
         },
         {
@@ -179,7 +196,7 @@
       ],
       "parent_index": 2,
       "prog": "fslc approval diff",
-      "help_sha256": "4168a8172ca50a3c84ac5113a6c02944e2322169716cd8c72c0af7cf3efab9f0",
+      "help_sha256": "201998a1041e0189f38f96955da44165d153a4bce9cb472d2bb7f81b24b40912",
       "actions": [
         {
           "dest": "help",
@@ -212,6 +229,15 @@
             "--depth"
           ],
           "default": 8,
+          "action": "store"
+        },
+        {
+          "dest": "trust_key",
+          "required": false,
+          "flags": [
+            "--trust-key"
+          ],
+          "repeatable": true,
           "action": "store"
         }
       ],
@@ -325,6 +351,21 @@
     },
     {
       "path": [
+        "ledger"
+      ],
+      "index": 9,
+      "action": {
+        "dest": "trust_key",
+        "required": false,
+        "flags": [
+          "--trust-key"
+        ],
+        "repeatable": true,
+        "action": "store"
+      }
+    },
+    {
+      "path": [
         "verify"
       ],
       "index": 5,
@@ -385,7 +426,7 @@
         "ledger"
       ],
       "python_sha256": "9bc531a1d829f7e1da5b9deaba1e36c57005357cb54be9715f2f601582b6ed9e",
-      "rust_sha256": "ba5dc8215863e6b2c4f81ade041a09fd9413647746e67e5b6ab841d6b11b44b3"
+      "rust_sha256": "c58d89663831ed7fe21dc38c63b99dc76f5c2d3d05f5a23be579daf68121e4d0"
     },
     {
       "path": [

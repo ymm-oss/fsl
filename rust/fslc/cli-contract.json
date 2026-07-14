@@ -1404,7 +1404,7 @@
           {
             "path": ["approval", "create"],
             "prog": "fslc approval create",
-            "help": "usage: fslc approval create [-h] --kind {ledger,html,scenarios} --artifact ARTIFACT --approver APPROVER [--requirement ID] [--depth DEPTH] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kind {ledger,html,scenarios}\n  --artifact ARTIFACT   reviewed artifact generated with the recorded inputs\n  --approver APPROVER\n  --requirement ID      requirement ID to approve; repeatable, defaults to all\n  --depth DEPTH\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc approval create [-h] --kind {ledger,html,scenarios} --artifact ARTIFACT --approver APPROVER [--requirement ID] [--signing-key PRIVATE_KEY] [--depth DEPTH] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kind {ledger,html,scenarios}\n  --artifact ARTIFACT   reviewed artifact generated with the recorded inputs\n  --approver APPROVER\n  --requirement ID      requirement ID to approve; repeatable, defaults to all\n  --signing-key PRIVATE_KEY\n                        create a signed v2 record with a PKCS#8 Ed25519 key\n  --depth DEPTH\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n  -o, --output OUTPUT\n",
             "actions": [
               {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
               {"dest":"file","required":true,"positional":true,"action":"store"},
@@ -1412,6 +1412,7 @@
               {"dest":"artifact","required":true,"flags":["--artifact"],"action":"store"},
               {"dest":"approver","required":true,"flags":["--approver"],"action":"store"},
               {"dest":"requirement","required":false,"flags":["--requirement"],"repeatable":true,"action":"store"},
+              {"dest":"signing_key","required":false,"flags":["--signing-key"],"action":"store"},
               {"dest":"depth","required":false,"flags":["--depth"],"default":8,"action":"store"},
               {"dest":"deadlock","required":false,"flags":["--deadlock"],"choices":["warn","error","ignore"],"default":"ignore","action":"store"},
               {"dest":"engine","required":false,"flags":["--engine"],"choices":["bmc","induction"],"default":"bmc","action":"store"},
@@ -1422,23 +1423,25 @@
           {
             "path": ["approval", "check"],
             "prog": "fslc approval check",
-            "help": "usage: fslc approval check [-h] --record RECORD file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help       show this help message and exit\n  --record RECORD\n",
+            "help": "usage: fslc approval check [-h] --record RECORD [--trust-key PUBLIC_KEY] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --record RECORD\n  --trust-key PUBLIC_KEY\n                        trusted SPKI Ed25519 public key; repeatable\n",
             "actions": [
               {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
               {"dest":"file","required":true,"positional":true,"action":"store"},
-              {"dest":"record","required":true,"flags":["--record"],"action":"store"}
+              {"dest":"record","required":true,"flags":["--record"],"action":"store"},
+              {"dest":"trust_key","required":false,"flags":["--trust-key"],"repeatable":true,"action":"store"}
             ],
             "commands": []
           },
           {
             "path": ["approval", "diff"],
             "prog": "fslc approval diff",
-            "help": "usage: fslc approval diff [-h] --record RECORD [--depth DEPTH] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help       show this help message and exit\n  --record RECORD\n  --depth DEPTH\n",
+            "help": "usage: fslc approval diff [-h] --record RECORD [--depth DEPTH] [--trust-key PUBLIC_KEY] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --record RECORD\n  --depth DEPTH\n  --trust-key PUBLIC_KEY\n                        trusted SPKI Ed25519 public key; repeatable\n",
             "actions": [
               {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
               {"dest":"file","required":true,"positional":true,"action":"store"},
               {"dest":"record","required":true,"flags":["--record"],"action":"store"},
-              {"dest":"depth","required":false,"flags":["--depth"],"default":8,"action":"store"}
+              {"dest":"depth","required":false,"flags":["--depth"],"default":8,"action":"store"},
+              {"dest":"trust_key","required":false,"flags":["--trust-key"],"repeatable":true,"action":"store"}
             ],
             "commands": []
           }
@@ -1449,7 +1452,7 @@
           "ledger"
         ],
         "prog": "fslc ledger",
-        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] [--approval RECORD] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance\n                        (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-\n                        evidence producer (fslc ai eval/replay/drift, fslc db\n                        observe, fslc domain replay, ...); repeatable\n  --approval RECORD     digest-bound approval record to check; repeatable\n",
+        "help": "usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] [--approval RECORD] [--trust-key PUBLIC_KEY] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance\n                        (fslc replay)\n  --engine {bmc,induction}\n                        use k-induction so a requirement's assurance class can\n                        reach 'proved' (#171)\n  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-\n                        evidence producer (fslc ai eval/replay/drift, fslc db\n                        observe, fslc domain replay, ...); repeatable\n  --approval RECORD     digest-bound approval record to check; repeatable\n  --trust-key PUBLIC_KEY\n                        trusted SPKI Ed25519 public key; repeatable\n",
         "actions": [
           {
             "dest": "help",
@@ -1534,6 +1537,15 @@
             "required": false,
             "flags": [
               "--approval"
+            ],
+            "repeatable": true,
+            "action": "store"
+          },
+          {
+            "dest": "trust_key",
+            "required": false,
+            "flags": [
+              "--trust-key"
             ],
             "repeatable": true,
             "action": "store"

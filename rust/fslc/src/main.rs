@@ -412,6 +412,7 @@ fn command() -> Result<(Value, i32), String> {
                     let mut deadlock = "ignore".to_owned();
                     let mut engine = "bmc".to_owned();
                     let mut output = None;
+                    let mut signing_key = None;
                     while let Some(option) = args.next() {
                         match option.as_str() {
                             "--kind" => kind = Some(required_option_value(&mut args, "--kind")?),
@@ -426,6 +427,12 @@ fn command() -> Result<(Value, i32), String> {
                             }
                             "--requirement" => requirements
                                 .push(required_option_value(&mut args, "--requirement")?),
+                            "--signing-key" => {
+                                signing_key = Some(PathBuf::from(required_option_value(
+                                    &mut args,
+                                    "--signing-key",
+                                )?));
+                            }
                             "--depth" => {
                                 depth = required_option_value(&mut args, "--depth")?
                                     .parse()
@@ -469,24 +476,36 @@ fn command() -> Result<(Value, i32), String> {
                             engine,
                         },
                         output.as_deref(),
+                        signing_key.as_deref(),
                     ))
                 }
                 "check" => {
-                    if args.next().as_deref() != Some("--record") {
-                        return Err("approval check requires --record RECORD.json".to_owned());
+                    let mut record = None;
+                    let mut trust_keys = Vec::new();
+                    while let Some(option) = args.next() {
+                        match option.as_str() {
+                            "--record" => {
+                                record = Some(PathBuf::from(required_option_value(
+                                    &mut args, "--record",
+                                )?));
+                            }
+                            "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                                &mut args,
+                                "--trust-key",
+                            )?)),
+                            _ => return Err(format!("unknown approval check option '{option}'")),
+                        }
                     }
-                    let record = PathBuf::from(
-                        args.next()
-                            .ok_or_else(|| "--record requires a path".to_owned())?,
-                    );
-                    if args.next().is_some() {
-                        return Err("unexpected approval check argument".to_owned());
-                    }
-                    Ok(run_approval_check(&path, &record))
+                    Ok(run_approval_check(
+                        &path,
+                        &record.ok_or_else(|| "approval check requires --record".to_owned())?,
+                        &trust_keys,
+                    ))
                 }
                 "diff" => {
                     let mut record = None;
                     let mut depth = 8_usize;
+                    let mut trust_keys = Vec::new();
                     while let Some(option) = args.next() {
                         match option.as_str() {
                             "--record" => {
@@ -501,6 +520,10 @@ fn command() -> Result<(Value, i32), String> {
                                         "--depth must be a non-negative integer".to_owned()
                                     })?;
                             }
+                            "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                                &mut args,
+                                "--trust-key",
+                            )?)),
                             _ => return Err(format!("unknown approval diff option '{option}'")),
                         }
                     }
@@ -508,6 +531,7 @@ fn command() -> Result<(Value, i32), String> {
                         &path,
                         &record.ok_or_else(|| "approval diff requires --record".to_owned())?,
                         depth,
+                        &trust_keys,
                     ))
                 }
                 _ => Err(format!("unknown approval subcommand '{subcommand}'")),
@@ -1000,6 +1024,7 @@ fn command() -> Result<(Value, i32), String> {
             let mut impl_log = None;
             let mut evidence = Vec::new();
             let mut approval_records = Vec::new();
+            let mut trust_keys = Vec::new();
             let mut deadlock = if command == "ledger" {
                 "ignore".to_owned()
             } else {
@@ -1054,6 +1079,9 @@ fn command() -> Result<(Value, i32), String> {
                     "--approval" if command == "ledger" => approval_records.push(PathBuf::from(
                         required_option_value(&mut args, "--approval")?,
                     )),
+                    "--trust-key" if command == "ledger" => trust_keys.push(PathBuf::from(
+                        required_option_value(&mut args, "--trust-key")?,
+                    )),
                     "--strict" => strict = true,
                     _ => return Err(format!("unknown {command} option '{option}'")),
                 }
@@ -1071,6 +1099,7 @@ fn command() -> Result<(Value, i32), String> {
                     impl_log.as_deref(),
                     &evidence,
                     &approval_records,
+                    &trust_keys,
                     output.as_deref(),
                 ),
                 _ => unreachable!(),
@@ -8101,6 +8130,7 @@ fn approval_artifact(
             None,
             &[],
             &[],
+            &[],
             None,
         ),
         "html" => run_html_report(path, inputs.depth, &inputs.deadlock, &inputs.engine, None),
@@ -8138,6 +8168,7 @@ fn run_approval_create(
     selected_requirements: &[String],
     inputs: &approval::GenerationInputs,
     output_path: Option<&Path>,
+    signing_key: Option<&Path>,
 ) -> (Value, i32) {
     if !matches!(kind, "ledger" | "html" | "scenarios") {
         return (
@@ -8247,22 +8278,63 @@ fn run_approval_create(
         },
         Path::to_path_buf,
     );
-    if let Err(error) = approval::write_record(&destination, &record) {
-        return (error_output("io", &error), 2);
-    }
+    let record = if let Some(signing_key) = signing_key {
+        let record = match approval::sign_record(record, signing_key) {
+            Ok(record) => record,
+            Err(error) => return (error_output("io", &error), 2),
+        };
+        if let Err(error) = approval::write_record_v2(&destination, &record) {
+            return (error_output("io", &error), 2);
+        }
+        serde_json::to_value(record).expect("approval v2 serializes")
+    } else {
+        if let Err(error) = approval::write_record(&destination, &record) {
+            return (error_output("io", &error), 2);
+        }
+        serde_json::to_value(record).expect("approval v1 serializes")
+    };
     let mut output = envelope();
     output.insert("result".to_owned(), json!("created"));
     output.insert("kind".to_owned(), json!("approval_record"));
     output.insert("output".to_owned(), json!(destination));
-    output.insert(
-        "record".to_owned(),
-        serde_json::to_value(record).unwrap_or(Value::Null),
-    );
+    output.insert("record".to_owned(), record);
     (Value::Object(output), 0)
 }
 
-fn approval_evaluation(path: &Path, record_path: &Path) -> Result<Value, Value> {
-    let record = approval::read_record(record_path).map_err(|error| error_output("io", &error))?;
+fn approval_evaluation(
+    path: &Path,
+    record_path: &Path,
+    trust: &approval::TrustStore,
+) -> Result<Value, Value> {
+    let versioned =
+        approval::read_versioned_record(record_path).map_err(|error| error_output("io", &error))?;
+    let (record, signature_status, key_id) = match &versioned {
+        approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
+        approval::VersionedApprovalRecord::V2(record) => {
+            let verified = trust
+                .verify(record)
+                .map_err(|error| error_output("io", &error))?;
+            if !verified {
+                return Ok(json!({
+                    "status": "signature-invalid",
+                    "signature_status": "signature-invalid",
+                    "key_id": record.signature.key_id,
+                    "reasons": ["signature_invalid"],
+                    "record": record_path.display().to_string(),
+                    "target_kind": record.target.kind,
+                    "approver": record.approval.approver,
+                    "approved_at": record.approval.approved_at,
+                    "requirements": record.approval.requirements,
+                    "baseline_digest": record.spec.digest,
+                }));
+            }
+            (
+                versioned.binding(),
+                "signed",
+                json!(record.signature.key_id),
+            )
+        }
+    };
     let (repo, relative_path, _head) =
         approval::git_location(path).map_err(|error| error_output("io", &error))?;
     if record.spec.path != relative_path {
@@ -8282,17 +8354,27 @@ fn approval_evaluation(path: &Path, record_path: &Path) -> Result<Value, Value> 
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
-    Ok(approval::evaluate(
+    let mut evaluation = approval::evaluate(
         &record,
         record_path,
         &current_spec_digest,
         &current_artifact_digest,
         env!("CARGO_PKG_VERSION"),
-    ))
+    );
+    let output = evaluation
+        .as_object_mut()
+        .expect("approval evaluation object");
+    output.insert("signature_status".to_owned(), json!(signature_status));
+    output.insert("key_id".to_owned(), key_id);
+    Ok(evaluation)
 }
 
-fn run_approval_check(path: &Path, record_path: &Path) -> (Value, i32) {
-    let evaluation = match approval_evaluation(path, record_path) {
+fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -> (Value, i32) {
+    let trust = match approval::TrustStore::load(trust_keys) {
+        Ok(trust) => trust,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    let evaluation = match approval_evaluation(path, record_path, &trust) {
         Ok(evaluation) => evaluation,
         Err(error) => return (error, 2),
     };
@@ -8301,14 +8383,22 @@ fn run_approval_check(path: &Path, record_path: &Path) -> (Value, i32) {
     if let Some(fields) = evaluation.as_object() {
         output.extend(fields.clone());
     }
-    (Value::Object(output), 0)
+    let status =
+        i32::from(evaluation.get("status").and_then(Value::as_str) == Some("signature-invalid"));
+    (Value::Object(output), status)
 }
 
-fn approval_overlay(path: &Path, record_paths: &[PathBuf]) -> Result<Value, Value> {
+fn approval_overlay(
+    path: &Path,
+    record_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+) -> Result<Value, Value> {
+    let trust =
+        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
-        let evaluation = approval_evaluation(path, record_path)?;
+        let evaluation = approval_evaluation(path, record_path, &trust)?;
         for requirement in evaluation
             .get("requirements")
             .and_then(Value::as_array)
@@ -8332,6 +8422,7 @@ fn run_ledger_report(
     impl_log: Option<&Path>,
     evidence_paths: &[PathBuf],
     approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     let model = match load_model(path) {
@@ -8375,7 +8466,7 @@ fn run_ledger_report(
     let approvals = if approval_paths.is_empty() {
         None
     } else {
-        match approval_overlay(path, approval_paths) {
+        match approval_overlay(path, approval_paths, trust_keys) {
             Ok(approvals) => Some(approvals),
             Err(error) => return (error, 2),
         }
@@ -11319,10 +11410,39 @@ fn materialize_git_tree(repo: &Path, revision: &str, destination: &Path) -> Resu
     Ok(())
 }
 
-fn run_approval_diff(path: &Path, record_path: &Path, depth: usize) -> (Value, i32) {
-    let record = match approval::read_record(record_path) {
+#[allow(clippy::too_many_lines)]
+fn run_approval_diff(
+    path: &Path,
+    record_path: &Path,
+    depth: usize,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
+    let versioned = match approval::read_versioned_record(record_path) {
         Ok(record) => record,
         Err(error) => return (error_output("io", &error), 2),
+    };
+    let trust = match approval::TrustStore::load(trust_keys) {
+        Ok(trust) => trust,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    let (record, signature_status, key_id) = match &versioned {
+        approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
+        approval::VersionedApprovalRecord::V2(record) => match trust.verify(record) {
+            Ok(true) => (
+                versioned.binding(),
+                "signed",
+                json!(record.signature.key_id),
+            ),
+            Ok(false) => {
+                let mut output = envelope();
+                output.insert("result".to_owned(), json!("approval_diff"));
+                output.insert("status".to_owned(), json!("signature-invalid"));
+                output.insert("signature_status".to_owned(), json!("signature-invalid"));
+                output.insert("key_id".to_owned(), json!(record.signature.key_id));
+                return (Value::Object(output), 1);
+            }
+            Err(error) => return (error_output("io", &error), 2),
+        },
     };
     let (repo, relative_path, _head) = match approval::git_location(path) {
         Ok(location) => location,
@@ -11395,6 +11515,8 @@ fn run_approval_diff(path: &Path, record_path: &Path, depth: usize) -> (Value, i
                 "record": record_path.display().to_string(),
                 "baseline_digest": record.spec.digest,
                 "baseline_commit": record.spec.git_commit,
+                "signature_status": signature_status,
+                "key_id": key_id,
             }),
         );
     }

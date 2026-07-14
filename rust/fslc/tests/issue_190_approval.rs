@@ -6,6 +6,8 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ed25519_dalek::SigningKey;
+use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use serde_json::{Value, json};
 
 static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
@@ -125,6 +127,30 @@ fn normalize_digests(text: &str) -> String {
     String::from_utf8(output).expect("normalized ledger remains UTF-8")
 }
 
+#[allow(clippy::default_trait_access)]
+fn write_signing_keys(root: &Path, seed: u8, prefix: &str) -> (PathBuf, PathBuf) {
+    let signing = SigningKey::from_bytes(&[seed; 32]);
+    let private = root.join(format!("{prefix}-private.pem"));
+    let public = root.join(format!("{prefix}-public.pem"));
+    std::fs::write(
+        &private,
+        signing
+            .to_pkcs8_pem(Default::default())
+            .expect("encode private key")
+            .as_bytes(),
+    )
+    .expect("write private key");
+    std::fs::write(
+        &public,
+        signing
+            .verifying_key()
+            .to_public_key_pem(Default::default())
+            .expect("encode public key"),
+    )
+    .expect("write public key");
+    (private, public)
+}
+
 #[test]
 #[allow(clippy::too_many_lines)]
 fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
@@ -165,6 +191,7 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
         &["approval", "check", "spec.fsl", "--record", "approval.json"],
     ));
     assert_eq!(approved["status"], "approved");
+    assert_eq!(approved["signature_status"], "unsigned");
     assert_eq!(approved["reasons"], json!([]));
 
     let mut invalid_record: Value = serde_json::from_slice(
@@ -395,6 +422,203 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
     assert!(removed.contains("REQ-190"));
     assert!(removed.contains("現行仕様に要件IDなし"));
     assert!(removed.contains("drifted"));
+
+    std::fs::remove_dir_all(root).expect("remove temporary repository");
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn signed_v2_records_require_a_matching_trust_anchor_and_fail_closed() {
+    let root = approval_repo();
+    let (private, public) = write_signing_keys(&root, 7, "approval");
+    let (_, wrong_public) = write_signing_keys(&root, 9, "wrong");
+    successful(
+        &root,
+        &["ledger", "spec.fsl", "--depth", "2", "-o", "review.md"],
+    );
+    let created = json_output(&successful(
+        &root,
+        &[
+            "approval",
+            "create",
+            "spec.fsl",
+            "--kind",
+            "ledger",
+            "--artifact",
+            "review.md",
+            "--approver",
+            "alice",
+            "--depth",
+            "2",
+            "--signing-key",
+            private.to_str().expect("private path"),
+            "-o",
+            "signed.json",
+        ],
+    ));
+    assert_eq!(created["record"]["schema"], "fslc.approval.v2");
+    assert_eq!(created["record"]["signature"]["algorithm"], "ed25519");
+
+    let missing_trust = failed(
+        &root,
+        &["approval", "check", "spec.fsl", "--record", "signed.json"],
+    );
+    assert_eq!(missing_trust["kind"], "io");
+
+    let checked = json_output(&successful(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "signed.json",
+            "--trust-key",
+            public.to_str().expect("public path"),
+        ],
+    ));
+    assert_eq!(checked["status"], "approved");
+    assert_eq!(checked["signature_status"], "signed");
+
+    let wrong_trust = failed(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "signed.json",
+            "--trust-key",
+            wrong_public.to_str().expect("wrong public path"),
+        ],
+    );
+    assert_eq!(wrong_trust["kind"], "io");
+
+    let record = created["record"].clone();
+    let mut reordered = serde_json::Map::new();
+    for key in ["signature", "approval", "target", "spec", "schema"] {
+        reordered.insert(key.to_owned(), record[key].clone());
+    }
+    std::fs::write(
+        root.join("reordered.json"),
+        serde_json::to_vec_pretty(&Value::Object(reordered)).expect("serialize reordered record"),
+    )
+    .expect("write reordered record");
+    successful(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "reordered.json",
+            "--trust-key",
+            public.to_str().expect("public path"),
+        ],
+    );
+
+    let mut tampered = record;
+    tampered["approval"]["approver"] = json!("mallory");
+    std::fs::write(
+        root.join("tampered.json"),
+        serde_json::to_vec_pretty(&tampered).expect("serialize tampered record"),
+    )
+    .expect("write tampered record");
+    let invalid_output = run(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "tampered.json",
+            "--trust-key",
+            public.to_str().expect("public path"),
+        ],
+    );
+    assert_eq!(invalid_output.status.code(), Some(1));
+    let invalid = json_output(&invalid_output);
+    assert_eq!(invalid["status"], "signature-invalid");
+    assert_eq!(invalid["signature_status"], "signature-invalid");
+
+    successful(
+        &root,
+        &[
+            "ledger",
+            "spec.fsl",
+            "--depth",
+            "2",
+            "--approval",
+            "tampered.json",
+            "--trust-key",
+            public.to_str().expect("public path"),
+            "-o",
+            "invalid-ledger.md",
+        ],
+    );
+    let invalid_ledger =
+        std::fs::read_to_string(root.join("invalid-ledger.md")).expect("invalid ledger");
+    assert!(invalid_ledger.contains("❌ signature-invalid"));
+    assert!(!invalid_ledger.contains("✅ approved"));
+
+    successful(
+        &root,
+        &[
+            "ledger",
+            "spec.fsl",
+            "--depth",
+            "2",
+            "--approval",
+            "signed.json",
+            "--trust-key",
+            public.to_str().expect("public path"),
+            "-o",
+            "signed-ledger.md",
+        ],
+    );
+    let ledger = std::fs::read_to_string(root.join("signed-ledger.md")).expect("signed ledger");
+    assert!(ledger.contains("✅ approved (signed)"));
+
+    let diff = json_output(&successful(
+        &root,
+        &[
+            "approval",
+            "diff",
+            "spec.fsl",
+            "--record",
+            "signed.json",
+            "--depth",
+            "2",
+            "--trust-key",
+            public.to_str().expect("public path"),
+        ],
+    ));
+    assert_eq!(diff["approval"]["signature_status"], "signed");
+
+    let original = std::fs::read_to_string(root.join("spec.fsl")).expect("read fixture");
+    std::fs::write(
+        root.join("spec.fsl"),
+        original.replace("approved = true", "approved = false"),
+    )
+    .expect("write semantic change");
+    successful(
+        &root,
+        &[
+            "ledger",
+            "spec.fsl",
+            "--depth",
+            "2",
+            "--approval",
+            "signed.json",
+            "--trust-key",
+            public.to_str().expect("public path"),
+            "-o",
+            "signed-drift-ledger.md",
+        ],
+    );
+    let signed_drift =
+        std::fs::read_to_string(root.join("signed-drift-ledger.md")).expect("signed drift ledger");
+    assert!(signed_drift.contains("⚠ drifted (signed; since sha256:"));
 
     std::fs::remove_dir_all(root).expect("remove temporary repository");
 }
