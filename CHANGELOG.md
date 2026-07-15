@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc fmt` now formats one registered FSL document or stdin to canonical
+  stdout without mutating it; `--check` accepts multiple paths and reports a
+  machine-readable 0/1/2 result. A lossless token/trivia tree preserves line
+  comments, blank lines, raw spelling, spans, and annotation attachment while
+  domain enum/logical and quantifier legacy forms normalize to accepted
+  equivalents. Corpus-wide idempotence and location-free semantic round trips
+  cover every registered dialect; opaque agent bodies and ambiguous
+  comment-bearing structural rewrites fail at exact spans (issue #248).
 - `fslc verify --engine auto` composes the explicit-state and BMC engines:
   explicit runs first (faster, and can prove `closure: true`) and falls back
   transparently to BMC exactly when explicit cannot decide the spec on its

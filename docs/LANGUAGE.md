@@ -663,6 +663,8 @@ variable.
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)

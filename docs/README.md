@@ -26,6 +26,7 @@
 | [`DESIGN-requirements-stage.md`](DESIGN-requirements-stage.md) | Shared typed `stage()` resolution and lowering for business and requirements expressions |
 | [`DESIGN-collection-aggregates.md`](DESIGN-collection-aggregates.md) | Shared finite Binder/Aggregate IR, Set/Seq/range semantics, KPI metadata projections, and Public Kernel normalization |
 | [`DESIGN-dialect-dispatch.md`](DESIGN-dialect-dispatch.md) | Shared-lexer dialect registry, significant-token rules, document annotations, diagnostics, and frontend contract |
+| [`DESIGN-formatter.md`](DESIGN-formatter.md) | Lossless token/trivia boundary, canonical formatting policy, non-mutating CLI contract, and safe refusal range |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
 | [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
