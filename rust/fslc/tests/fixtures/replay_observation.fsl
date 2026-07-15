@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ReplayObservation {
+  state { value: Int }
+  init { value = 0 }
+
+  action commit() {
+    value = 2
+  }
+
+  invariant NoTransientState { value != 1 }
+}

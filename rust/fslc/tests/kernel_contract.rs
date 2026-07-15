@@ -590,8 +590,11 @@ fn published_schema_ids_match_the_rust_api_constants() {
     assert_eq!(testgen_trace["$id"], fsl_core::TESTGEN_TRACE_V1_SCHEMA_ID);
     assert_eq!(replay_trace["$id"], fsl_core::REPLAY_TRACE_V1_SCHEMA_ID);
     assert_eq!(
-        replay_trace["properties"]["schema_version"]["const"],
-        fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+        replay_trace["properties"]["schema_version"]["enum"],
+        json!([
+            fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION,
+            fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+        ])
     );
     assert_eq!(
         replay_trace["properties"]["kernel_schema_version"]["enum"],
@@ -599,6 +602,18 @@ fn published_schema_ids_match_the_rust_api_constants() {
             fsl_core::KERNEL_V1_SCHEMA_VERSION,
             fsl_core::KERNEL_V2_SCHEMA_VERSION
         ])
+    );
+    assert_eq!(
+        replay_trace["$defs"]["event"]["properties"]["action"]["type"],
+        json!(["string", "null"])
+    );
+    assert_eq!(
+        replay_trace["$defs"]["event"]["allOf"][0]["then"]["properties"]["params"]["maxProperties"],
+        0
+    );
+    assert_eq!(
+        replay_trace["allOf"][0]["then"]["properties"]["events"]["items"]["properties"]["action"]["type"],
+        "string"
     );
     let kinds = kernel["$defs"]["expression"]["properties"]["kind"]["enum"]
         .as_array()

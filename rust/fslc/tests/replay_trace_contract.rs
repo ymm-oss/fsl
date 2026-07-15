@@ -19,10 +19,14 @@ fn replay(trace: &str) -> Output {
 }
 
 fn replay_path(trace: &Path) -> Output {
+    replay_spec_path(&fixture("replay_trace.fsl"), trace)
+}
+
+fn replay_spec_path(spec: &Path, trace: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args([
             "replay",
-            fixture("replay_trace.fsl").to_str().expect("spec path"),
+            spec.to_str().expect("spec path"),
             "--trace",
             trace.to_str().expect("trace path"),
         ])
@@ -30,7 +34,55 @@ fn replay_path(trace: &Path) -> Output {
         .expect("run replay")
 }
 
+#[test]
+fn observation_points_are_stuttering_equivalent_and_unobserved_intermediates_are_ignored() {
+    let with_stutters = replay_spec_path(
+        &fixture("replay_observation.fsl"),
+        &fixture("replay_observation.valid.v1.json"),
+    );
+    assert!(with_stutters.status.success());
+    let with_stutters = json(&with_stutters);
+    assert_eq!(with_stutters["trace_schema_version"], "1.1.0");
+    assert_eq!(with_stutters["steps_checked"], 3);
+    assert_eq!(with_stutters["final_state"]["value"], 2);
+
+    let mut without_stutters: Value = serde_json::from_str(
+        &std::fs::read_to_string(fixture("replay_observation.valid.v1.json")).expect("fixture"),
+    )
+    .expect("trace JSON");
+    let action = without_stutters["events"][1].clone();
+    without_stutters["events"] = json!([action]);
+    without_stutters["events"][0]["tick"] = json!(1);
+    let path = write_trace(&without_stutters);
+    let output = replay_spec_path(&fixture("replay_observation.fsl"), &path);
+    std::fs::remove_file(path).expect("remove trace");
+    assert!(output.status.success());
+    assert_eq!(json(&output)["final_state"], with_stutters["final_state"]);
+}
+
+#[test]
+fn reporting_a_transient_intermediate_as_an_observation_is_nonconformant() {
+    let output = replay_spec_path(
+        &fixture("replay_observation.fsl"),
+        &fixture("replay_observation.transient-observed.v1.json"),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let value = json(&output);
+    assert_eq!(value["failed_at_event"], 0);
+    assert_eq!(value["violation"]["kind"], "state_mismatch");
+    assert_eq!(value["violation"]["action"], Value::Null);
+    assert_eq!(value["violation"]["transition"], "stutter");
+    assert_eq!(value["violation"]["mismatches"][0]["path"], "value");
+}
+
 fn replay_value(value: &Value) -> Output {
+    let path = write_trace(value);
+    let output = replay_path(&path);
+    std::fs::remove_file(path).expect("remove trace");
+    output
+}
+
+fn write_trace(value: &Value) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "fsl-replay-trace-{}-{}.json",
         std::process::id(),
@@ -38,9 +90,7 @@ fn replay_value(value: &Value) -> Output {
     ));
     std::fs::write(&path, serde_json::to_vec(value).expect("serialize trace"))
         .expect("write trace");
-    let output = replay_path(&path);
-    std::fs::remove_file(path).expect("remove trace");
-    output
+    path
 }
 
 fn json(output: &Output) -> Value {
@@ -120,6 +170,29 @@ fn versioned_parameter_type_errors_are_input_errors_but_rejected_calls_are_nonco
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(json(&output)["violation"]["kind"], "requires_failed");
 
+    let mut partial = valid.clone();
+    partial["events"]
+        .as_array_mut()
+        .expect("events")
+        .truncate(1);
+    partial["events"][0]["action"] = json!("partial");
+    partial["events"][0]["params"] = json!({"i":0});
+    partial["events"][0]["state"] = partial["initial"].clone();
+    let output = replay_value(&partial);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(json(&output)["violation"]["kind"], "partial_op");
+
+    let mut named_stutter = valid.clone();
+    named_stutter["events"]
+        .as_array_mut()
+        .expect("events")
+        .truncate(1);
+    named_stutter["events"][0]["action"] = json!("stutter");
+    named_stutter["events"][0]["params"] = json!({});
+    named_stutter["events"][0]["state"] = named_stutter["initial"].clone();
+    named_stutter["events"][0]["state"]["phase"] = json!("Done");
+    assert!(replay_value(&named_stutter).status.success());
+
     let mut malformed_after_rejection = valid;
     malformed_after_rejection["events"][0]["action"] = json!("finish");
     malformed_after_rejection["events"][0]["params"] = json!({});
@@ -185,6 +258,9 @@ fn release_bundles_include_the_schema_spec_and_positive_and_negative_goldens() {
         "replay_trace.valid.v1.json",
         "replay_trace.state-mismatch.v1.json",
         "replay_trace.bad-tick.v1.json",
+        "replay_observation.fsl",
+        "replay_observation.valid.v1.json",
+        "replay_observation.transient-observed.v1.json",
     ] {
         assert_eq!(workflow.matches(artifact).count(), 2, "{artifact}");
     }

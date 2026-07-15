@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Replay-trace schema `1.1.0` adds explicit `action: null` observation points.
+  Equal-state stutters preserve the projected action trace; reported transient
+  implementation states are nonconformant while unreported intermediates are
+  outside invariant judgment. Replay now delegates action outcomes, partial
+  guards, and rollback to `Monitor::attempt`, with differential fixtures in both
+  Public Kernel release bundles (issue #224).
 - `fslc replay --trace` now consumes the closed `replay-trace.v1` external
   compiler contract: trace/Kernel versions, exact spec action/parameters,
   canonical ticks, complete typed initial and post-action state, and optional

@@ -59,8 +59,9 @@ pub use origin::{
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,
     KERNEL_V2_SCHEMA_ID, KERNEL_V2_SCHEMA_VERSION, PublicKernelError, PublicKernelVersion,
-    REPLAY_TRACE_V1_SCHEMA_ID, REPLAY_TRACE_V1_SCHEMA_VERSION, TESTGEN_TRACE_V1_SCHEMA_ID,
-    TESTGEN_TRACE_V1_SCHEMA_VERSION, public_kernel_contract, public_kernel_contract_for_version,
+    REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION, REPLAY_TRACE_V1_SCHEMA_ID,
+    REPLAY_TRACE_V1_SCHEMA_VERSION, TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION,
+    public_kernel_contract, public_kernel_contract_for_version,
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,

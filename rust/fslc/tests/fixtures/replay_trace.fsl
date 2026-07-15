@@ -23,5 +23,11 @@ spec ReplayTrace {
     requires selected is some(i)
     phase = Done
   }
+  action partial(i: Id) {
+    requires 1 / i > 0
+  }
+  action stutter() {
+    phase = Done
+  }
   invariant Nonnegative { forall i: Id { count[i] >= 0 } }
 }

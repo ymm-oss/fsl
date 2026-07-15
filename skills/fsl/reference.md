@@ -854,8 +854,11 @@ fslc compat check <f> [--include-ai]                    # dbsystem compatibility
 Native generated-code replay uses `replay-trace.v1`: a closed root carrying
 trace and Kernel versions, exact spec identity, complete tick-0 `initial`, and
 events with exact Public Kernel `action`/`params`, canonical ticks `1..N`, and
-complete post-action `state`. Optional `timestamp` is opaque and ignored. Trace
-v1 accepts Kernel 1.0.0/2.0.0. Ill-shaped/incomplete input is exit 2; typed
+complete post-transition `state`. Trace schema 1.1 adds explicit stutter as
+`action:null` plus empty params; its state must equal the unchanged Monitor
+state. Equal-state stutters may be inserted/deleted, while unreported concrete
+intermediates are outside invariant judgment. Optional `timestamp` is opaque
+and ignored. Trace v1 accepts Kernel 1.0.0/2.0.0. Ill-shaped/incomplete input is exit 2; typed
 state divergence is exit 1 with leaf mismatches. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/DESIGN-replay-trace.md`.
