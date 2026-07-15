@@ -30,8 +30,7 @@ def test_spec_level_kind_tag_surfaces_in_explain_and_readable():
         "id": "ui",
         "text": "return-request screen flow (behavioral slice only)",
     }
-    # The full CLI envelope path (with_faithfulness / trace_type_for) walks every
-    # nested dict; a `spec_kind` dict under a reserved key would crash it. Guard.
+    # The full CLI envelope preserves nested spec metadata without routing it as a diagnostic.
     enveloped = run_explain(str(ui), depth=3)
     assert enveloped["result"] == "explained"
     readable = explain_file(str(ui), depth=3, readable=True)["readable"]

@@ -21,6 +21,7 @@ def faithfulness_class_for(diagnostic):
     kind = diagnostic.get("kind")
     violation_kind = diagnostic.get("violation_kind")
     result = diagnostic.get("result")
+    classification = diagnostic.get("classification")
 
     if kind == "partial_op" or violation_kind == "partial_op":
         return "partial_op_unguarded"
@@ -30,12 +31,12 @@ def faithfulness_class_for(diagnostic):
             result == "reachable_failed"
             or kind == "reachable_failed"
             or diagnostic.get("covered") is False
-            or diagnostic.get("classification") in {
+            or (isinstance(classification, str) and classification in {
                 "insufficient_depth",
                 "over_constrained",
-            }):
+            })):
         return "intent_unexercised"
-    if kind in {
+    if isinstance(kind, str) and kind in {
             "leadsTo_refinement_failed",
             "leadsto_refinement_failed",
             "liveness_not_refined",
@@ -96,14 +97,30 @@ def trace_type_for(diagnostic):
     return None
 
 
+def _copy_payload(value):
+    if isinstance(value, list):
+        return [_copy_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _copy_payload(item) for key, item in value.items()}
+    return value
+
+
 def with_faithfulness(value):
-    """Return value with additive faithfulness routing fields on diagnostics."""
+    """Add routing fields to a result and its immediate diagnostic slots."""
     if isinstance(value, list):
         return [with_faithfulness(v) for v in value]
     if not isinstance(value, dict):
         return value
 
-    out = {k: with_faithfulness(v) for k, v in value.items()}
+    out = {key: _copy_payload(item) for key, item in value.items()}
+    for key in ("warnings", "unreached"):
+        if isinstance(value.get(key), list):
+            out[key] = [with_faithfulness(item) for item in value[key]]
+    if isinstance(value.get("action_coverage"), dict):
+        out["action_coverage"] = {
+            name: with_faithfulness(item)
+            for name, item in value["action_coverage"].items()
+        }
     cls = faithfulness_class_for(out)
     if cls is not None:
         out.setdefault("faithfulness_class", cls)
