@@ -6,6 +6,44 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Replay-trace schema `1.2.0` opts into solver-free bounded `leadsTo`
+  monitoring over initial, action, and stutter observations. Inclusive deadline
+  failures carry property/binding/timing evidence; successful output separates
+  safety from bounded liveness, preserves finite-prefix `pending`, and names
+  unchecked unbounded properties. Native BMC and a test-only Python oracle
+  cross-check the monitor, and positive/overdue NFR fixtures ship in both Public
+  Kernel release bundles (issue #225).
+- Replay-trace schema `1.1.0` adds explicit `action: null` observation points.
+  Equal-state stutters preserve the projected action trace; reported transient
+  implementation states are nonconformant while unreported intermediates are
+  outside invariant judgment. Replay now delegates action outcomes, partial
+  guards, and rollback to `Monitor::attempt`, with differential fixtures in both
+  Public Kernel release bundles (issue #224).
+- `fslc replay --trace` now consumes the closed `replay-trace.v1` external
+  compiler contract: trace/Kernel versions, exact spec action/parameters,
+  canonical ticks, complete typed initial and post-action state, and optional
+  opaque producer timestamps. Typed observation differences return leaf-level
+  nonconformance while malformed/incomplete contracts fail closed. Positive and
+  negative goldens plus the schema ship in both Public Kernel release bundles;
+  legacy action-only arrays/`{events}` remain an explicit unversioned adapter
+  (issue #221).
+- `fslc lint` now reports edition-aware diagnostics with stable taxonomy,
+  severity, spans, canonical replacements, and machine applicability. `fslc
+  migrate` is dry-run by default and `--write` atomically applies only a fully
+  parsed, checked, location-free Public-Kernel-equivalent file set. Shared
+  formatter edits cover legacy enums/operators and quantifiers; typed metadata,
+  unambiguous local action correspondences, and implicit defaults use semantic
+  planners. Unsafe comment movement, branch/duplicate mappings, and invalid
+  `&&` are explicit refusals. The retained LSP exposes applicable diagnostics
+  as quick-fix Code Actions (issue #249).
+- `fslc fmt` now formats one registered FSL document or stdin to canonical
+  stdout without mutating it; `--check` accepts multiple paths and reports a
+  machine-readable 0/1/2 result. A lossless token/trivia tree preserves line
+  comments, blank lines, raw spelling, spans, and annotation attachment while
+  domain enum/logical and quantifier legacy forms normalize to accepted
+  equivalents. Corpus-wide idempotence and location-free semantic round trips
+  cover every registered dialect; opaque agent bodies and ambiguous
+  comment-bearing structural rewrites fail at exact spans (issue #248).
 - `fslc verify --engine auto` composes the explicit-state and BMC engines:
   explicit runs first (faster, and can prove `closure: true`) and falls back
   transparently to BMC exactly when explicit cannot decide the spec on its
@@ -60,6 +98,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   recomputing a generic one. Output contract, cache-sharing with plain
   `--engine explicit`/`bmc` runs, and the `engine_fallback: {from, reason,
   kind}` shape are unchanged.
+- Native domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds now share
+  one versioned input adapter over Public Kernel v1 and the public
+  `domain-scaffold-metadata.v1` compatibility bridge. Target emitters no longer
+  receive `DomainSpec`; incompatible schemas and missing lowered member
+  counterparts are rejected, all five outputs match pre-migration goldens, the
+  valid domain corpus generates for every target, and `domain testgen` reuses
+  the same TypeScript adapter/effect emitter instead of a duplicate
+  implementation (issue #213).
 - Native pytest, Vitest, Swift, Kotlin, Dart, and PHPUnit test generation now
   shares one fail-closed adapter over Public Kernel v1 metadata, scenario JSON,
   and the new versioned `testgen-trace.v1` fixed-seed conformance trace. Target emitters no longer

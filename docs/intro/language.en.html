@@ -287,8 +287,10 @@ domain expression.</p>
 stable <code>deprecated_domain_enum_union</code> warning over the complete declaration,
 including a canonical replacement. <code>fslc check</code>, <code>fslc verify</code>, and
 <code>fslc domain check</code> accept <code>--edition current|next</code>; <code>next</code> rejects the legacy
-union spelling. Empty enums and duplicate members are errors, reported at the
-declaration and duplicate member respectively.</p>
+union spelling. <code>fslc lint</code> reports the edition finding without mutation, and
+<code>fslc migrate --edition next</code> supplies the checked canonical edit. Empty enums
+and duplicate members are errors, reported at the declaration and duplicate
+member respectively.</p>
 <p>The native Rust frontend also retains a private origin chain for domain state,
 actions, guards, statements, and properties. Verification, counterexample, and
 <code>explain</code> diagnostics use the original domain declaration as their primary
@@ -303,7 +305,8 @@ target bindings, source-node reverse lookup, and explicit assurance/completeness
 preserves the established Bool <code>false</code>, enum first-member, range lower-bound, or
 external-placeholder <code>0</code> choice and emits <code>implicit_initial_value</code>. The warning
 contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion.</p>
+machine-applicable explicit-initializer insertion. The next edition requires the
+initializer to be explicit.</p>
 <p>Use <code>fslc domain check</code> for stable fsl-domain findings and the nested kernel
 result (<code>verified_under_assumptions</code> on success), <code>fslc domain analyze</code> for the
 aggregate/effect summary, <code>fslc domain expand</code> to inspect a generated kernel FSL
@@ -314,6 +317,14 @@ scaffolds, and <code>fslc domain replay --logs events.jsonl</code> for runtime c
 event / effect evidence. The v0 implementation proves the finite modeled
 lifecycle; replay is observation evidence and saga history adds
 <code>DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY</code>.
+The native scaffold emitters consume checked Public Kernel v1 JSON plus the
+versioned <code>domain-scaffold-metadata.v1</code> compatibility bridge; they do not
+receive the private domain AST or reparse source expressions. Kernel/metadata
+version and dialect mismatches, duplicate Kernel members, and missing lowered
+type/state/action counterparts fail closed. Source expressions and effect/saga
+topology remain authoritative in the companion because Public Kernel v1 does
+not encode them. All five target outputs are locked to pre-migration goldens,
+and the valid domain corpus is generated for every target.
 It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
 production exactly-once semantics. See <code>docs/DESIGN-domain.md</code> and
 <code>docs/DESIGN-effect.md</code>.</p>
@@ -735,6 +746,10 @@ variable.</p></div></details>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+fslc lint      &lt;path&gt;... [--edition current|next] # stable edition diagnostics; never mutates
+fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
+fslc fmt       &lt;file.fsl|-&gt; [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
@@ -789,6 +804,14 @@ fslc db import &lt;file.sql&gt; [--name Name] [-o out.fsl]            # minimal 
 fslc ai check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runtime event replay evidence
 </code></pre>
+<p>Edition lint findings use the stable taxonomies <code>deprecated</code>,
+<code>non_canonical</code>, <code>ambiguous_intent</code>, and <code>unsupported_in_edition</code>. Migration
+handles legacy domain enums/operators, declaration string metadata, colon
+quantifiers, unambiguous local inline action mappings, and implicit defaults.
+It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;</code> remains an
+invalid token and is therefore reported with an <code>and</code> suggestion but is never
+machine-applied. See <code>docs/DESIGN-migration.md</code> for atomicity and bulk-update
+steps.</p>
 <p>The native Rust-only <code>kernel</code> command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,
 source spans, requirement/lowering origin, simultaneous-update semantics, and
@@ -1432,6 +1455,31 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 </code></pre>
+<p>External compilers emit the native replay contract as a closed versioned JSON
+object (<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>):</p>
+<pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.2.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}
+</code></pre>
+<p><code>initial</code> is the complete tick-0 state and every event has the exact Public
+Kernel action/parameter names plus its complete post-state. Since trace schema
+1.1, <code>action:null</code> with <code>{}</code> params is an explicit stutter observation whose
+complete state must equal the current logical state; 1.0 remains action-only.
+Inserting or deleting equal-state stutters preserves the projected action trace
+and final state. Ticks are exactly <code>1..N</code>, including stutters. Optional non-empty
+<code>timestamp</code> is ignored opaque producer metadata, not
+formal time. Trace v1 accepts Kernel <code>1.0.0</code> and <code>2.0.0</code>. Malformed contracts
+fail as input errors; typed initial/post-state divergence is nonconformant with
+leaf mismatch evidence. Invariants apply to observation points and atomic
+Monitor successors, not to unreported implementation intermediates. Bare arrays
+and <code>{events:[...]}</code> remain the explicit
+unversioned action-only adapter. Testgen and verifier trace JSON are not replay
+input. See <code>docs/DESIGN-replay-trace.md</code>.</p>
+<p>Trace schema 1.2 additionally checks every <code>leadsTo P ~&gt; within K Q</code> at the
+initial state and each action/stutter observation. The deadline <code>p + K</code> is
+inclusive: <code>Q</code> there succeeds, while absence of <code>Q</code> fails with bounded-liveness
+evidence. Safety is evaluated first. Successful output separates
+<code>checks.safety</code> from <code>checks.bounded_liveness</code>; an unfinished finite obligation
+is <code>pending</code>, and unbounded <code>leadsTo</code> properties are named but not claimed as
+checked. Schemas 1.0/1.1 retain their earlier safety-only meaning.</p>
 <p>The <code>--from-log</code> form reuses the exact refinement mapping grammar to translate
 external JSONL records into spec actions and logical state; it does not add a
 second mapping language. Each non-empty line is

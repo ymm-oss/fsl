@@ -51,6 +51,23 @@ fn within_deadline_miss_is_detected_at_every_depth_at_or_beyond_the_deadline() {
         assert_eq!(details.pending_since, 1, "depth {depth}: {leadsto:?}");
         assert_eq!(details.deadline, Some(2), "depth {depth}: {leadsto:?}");
         assert!(!details.stutter, "depth {depth}: {leadsto:?}");
+
+        let mut runtime = fsl_runtime::BoundedLivenessMonitor::new(model.clone())
+            .expect("runtime liveness monitor");
+        let mut runtime_violation = None;
+        for (step, observation) in leadsto.trace.iter().enumerate() {
+            runtime_violation = runtime
+                .observe(&observation.state, step)
+                .expect("runtime observation");
+            if runtime_violation.is_some() {
+                break;
+            }
+        }
+        let runtime = runtime_violation.expect("runtime deadline violation");
+        assert_eq!(runtime.property, leadsto.name);
+        assert_eq!(runtime.bindings, details.bindings);
+        assert_eq!(runtime.pending_since, details.pending_since);
+        assert_eq!(Some(runtime.deadline), details.deadline);
     }
 }
 
@@ -74,4 +91,19 @@ fn within_deadline_met_stays_verified_beyond_the_deadlock_step() {
             "depth {depth}: {result:?}"
         );
     }
+}
+
+#[test]
+fn bounded_leadsto_where_filters_fail_closed_in_bmc() {
+    let source = LATE_Q.replace(
+        "leadsTo Progress { x == 1 ~> within 1 x == 3 }",
+        "leadsTo Progress { forall i: Count where i > 0 { x == 1 ~> within 1 x == 3 } }",
+    );
+    let kernel =
+        parse_kernel_source(&source, &FsResolver::new(std::env::temp_dir())).expect("parse");
+    let model = build_model(kernel).expect("build model");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect_err("where filters must fail closed");
+    assert!(error.message.contains("where filters"), "{error}");
 }

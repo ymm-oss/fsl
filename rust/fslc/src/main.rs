@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 use std::future::Future;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
@@ -246,6 +247,19 @@ fn main() {
     if print_cli_metadata() {
         return;
     }
+    if let Some((output, status)) = fmt_command() {
+        match output {
+            FmtCliOutput::Source(source) => print!("{source}"),
+            FmtCliOutput::Json(value) => println!(
+                "{}",
+                serde_json::to_string_pretty(&value).expect("serialize fmt output")
+            ),
+        }
+        if status != 0 {
+            std::process::exit(status);
+        }
+        return;
+    }
     let (output, reported_status) = match command() {
         Ok(result) => result,
         Err(error) => (error_output("usage", &error), 2),
@@ -258,6 +272,482 @@ fn main() {
     if status != 0 {
         std::process::exit(status);
     }
+}
+
+enum FmtCliOutput {
+    Source(String),
+    Json(Value),
+}
+
+fn fmt_command() -> Option<(FmtCliOutput, i32)> {
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() != Some("fmt") {
+        return None;
+    }
+    Some(match parse_fmt_options(args) {
+        Ok(options) => run_fmt(&options),
+        Err(error) => (FmtCliOutput::Json(error_output("usage", &error)), 2),
+    })
+}
+
+struct FmtOptions {
+    paths: Vec<PathBuf>,
+    check: bool,
+    edition: fsl_syntax::FormatEdition,
+}
+
+fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, String> {
+    let mut args = args.peekable();
+    let mut paths = Vec::new();
+    let mut check = false;
+    let mut edition = fsl_syntax::FormatEdition::Current;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--check" => check = true,
+            "--edition" => {
+                edition = fsl_syntax::FormatEdition::parse(&required_option_value(
+                    &mut args,
+                    "--edition",
+                )?)?;
+            }
+            option if option.starts_with('-') && option != "-" => {
+                return Err(format!("unknown fmt option '{option}'"));
+            }
+            path => paths.push(PathBuf::from(path)),
+        }
+    }
+    if paths.is_empty() {
+        return Err("usage: fslc fmt FILE [--check] [--edition current|next]".to_owned());
+    }
+    if !check && paths.len() != 1 {
+        return Err("fmt accepts multiple paths only with --check".to_owned());
+    }
+    if paths.iter().filter(|path| path.as_os_str() == "-").count() > 1
+        || paths.len() > 1 && paths.iter().any(|path| path.as_os_str() == "-")
+    {
+        return Err("stdin '-' cannot be repeated or mixed with file paths".to_owned());
+    }
+    Ok(FmtOptions {
+        paths,
+        check,
+        edition,
+    })
+}
+
+fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
+    let mut files = Vec::new();
+    let mut any_changed = false;
+    for path in &options.paths {
+        let source = match read_fmt_source(path) {
+            Ok(source) => source,
+            Err(error) => return (FmtCliOutput::Json(error_output("io", &error)), 2),
+        };
+        let formatted = match fsl_syntax::format_source(&source, options.edition) {
+            Ok(formatted) => formatted,
+            Err(fsl_syntax::FormatError::Parse(error)) => {
+                return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
+            }
+            Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
+        };
+        if let Err(error) = validate_fmt_semantics(&source, path) {
+            return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
+        }
+        if let Err(error) = validate_fmt_semantics(&formatted, path) {
+            return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
+        }
+        let changed = source != formatted;
+        any_changed |= changed;
+        if options.check {
+            files.push(json!({"path":path.to_string_lossy(),"changed":changed}));
+        } else {
+            return (FmtCliOutput::Source(formatted), 0);
+        }
+    }
+    (
+        FmtCliOutput::Json(json!({
+            "fsl":"1.0",
+            "result":"format_check",
+            "edition":options.edition.as_str(),
+            "changed":any_changed,
+            "files":files
+        })),
+        i32::from(any_changed),
+    )
+}
+
+fn read_fmt_source(path: &Path) -> Result<String, String> {
+    if path.as_os_str() == "-" {
+        let mut source = String::new();
+        std::io::stdin()
+            .read_to_string(&mut source)
+            .map_err(|error| error.to_string())?;
+        Ok(source)
+    } else {
+        std::fs::read_to_string(path).map_err(|error| error.to_string())
+    }
+}
+
+struct MigrationOptions {
+    paths: Vec<PathBuf>,
+    edition: fslc_rust::migration::Edition,
+    write: bool,
+}
+
+fn parse_migration_options(
+    args: impl Iterator<Item = String>,
+    migrate: bool,
+) -> Result<MigrationOptions, String> {
+    let mut args = args.peekable();
+    let mut paths = Vec::new();
+    let mut edition = if migrate {
+        fslc_rust::migration::Edition::Next
+    } else {
+        fslc_rust::migration::Edition::Current
+    };
+    let mut write = false;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--edition" => {
+                edition = fslc_rust::migration::Edition::parse(&required_option_value(
+                    &mut args,
+                    "--edition",
+                )?)?;
+            }
+            "--write" if migrate => write = true,
+            option if option.starts_with('-') => {
+                return Err(format!(
+                    "unknown {} option '{option}'",
+                    if migrate { "migrate" } else { "lint" }
+                ));
+            }
+            path => paths.push(PathBuf::from(path)),
+        }
+    }
+    if paths.is_empty() {
+        return Err(if migrate {
+            "usage: fslc migrate FILE... [--edition current|next] [--write]".to_owned()
+        } else {
+            "usage: fslc lint FILE... [--edition current|next]".to_owned()
+        });
+    }
+    let mut unique = std::collections::BTreeSet::new();
+    if paths.iter().any(|path| !unique.insert(path.clone())) {
+        return Err("the same migration path cannot be supplied twice".to_owned());
+    }
+    Ok(MigrationOptions {
+        paths,
+        edition,
+        write,
+    })
+}
+
+fn run_lint(options: &MigrationOptions) -> (Value, i32) {
+    let mut files = Vec::new();
+    let mut finding_count = 0_usize;
+    for path in &options.paths {
+        let (_, plan) = match load_migration_plan(path, options.edition) {
+            Ok(loaded) => loaded,
+            Err(error) => return (error, 2),
+        };
+        finding_count += plan.diagnostics.len();
+        files.push(json!({
+            "path": path,
+            "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+        }));
+    }
+    (
+        json!({
+            "fsl":"1.0",
+            "result":"lint",
+            "edition":options.edition.as_str(),
+            "finding_count":finding_count,
+            "files":files,
+        }),
+        i32::from(finding_count > 0),
+    )
+}
+
+fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
+    let mut planned = Vec::new();
+    let mut files = Vec::new();
+    let mut refused = false;
+    for path in &options.paths {
+        let (source, plan) = match load_migration_plan(path, options.edition) {
+            Ok(loaded) => loaded,
+            Err(error) => return (error, 2),
+        };
+        refused |= plan.refused();
+        let migrated = plan.migrated_source.as_ref();
+        if let Some(migrated) = migrated
+            && let Err(error) = validate_migration_semantics(&source, migrated, path)
+        {
+            return (semantic_error_output(&error), 2);
+        }
+        files.push(json!({
+            "path":path,
+            "changed":migrated.is_some(),
+            "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+            "edits":migrated.map(|replacement| vec![json!({"start":0,"end":source.len(),"replacement":replacement})]).unwrap_or_default(),
+        }));
+        planned.push((path.clone(), migrated.cloned()));
+    }
+    if refused {
+        return (
+            json!({
+                "fsl":"1.0",
+                "result":"migration_refused",
+                "edition":options.edition.as_str(),
+                "written":false,
+                "files":files,
+            }),
+            2,
+        );
+    }
+    if options.write {
+        let writes = planned
+            .iter()
+            .filter_map(|(path, source)| {
+                source
+                    .as_ref()
+                    .map(|source| (path.as_path(), source.as_str()))
+            })
+            .collect::<Vec<_>>();
+        if let Err(error) = atomic_write_migrations(&writes) {
+            return (error_output("io", &error), 2);
+        }
+    }
+    let changed = planned
+        .iter()
+        .filter(|(_, source)| source.is_some())
+        .count();
+    (
+        json!({
+            "fsl":"1.0",
+            "result":"migrated",
+            "edition":options.edition.as_str(),
+            "changed":changed,
+            "written":options.write,
+            "files":files,
+        }),
+        0,
+    )
+}
+
+fn load_migration_plan(
+    path: &Path,
+    edition: fslc_rust::migration::Edition,
+) -> Result<(String, fslc_rust::migration::MigrationPlan), Value> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+    let plan = fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), edition)
+        .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+    Ok((source, plan))
+}
+
+fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Result<(), String> {
+    let before = migration_kernel_contract(before, path)?;
+    let after = migration_kernel_contract(after, path)?;
+    if before == after {
+        Ok(())
+    } else {
+        Err(format!(
+            "migration changed the checked Public Kernel for '{}'",
+            path.display()
+        ))
+    }
+}
+
+fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String> {
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
+        .map_err(|error| error.to_string())?;
+    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    if matches!(
+        fsl_syntax::parse_surface_document(source),
+        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
+    ) {
+        fsl_core::requirements_implements(source, &resolver, &model)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path.to_string_lossy(),
+        source_dialect(source),
+    )
+    .map_err(|error| error.to_string())?;
+    remove_migration_locations(&mut contract);
+    remove_legacy_metadata_projection(&mut contract);
+    Ok(json!({
+        "kernel": contract,
+        "annotations": migration_annotation_contract(&model),
+    }))
+}
+
+fn remove_migration_locations(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for key in ["span", "source_node_id", "source_node_ids", "reverse_index"] {
+                object.remove(key);
+            }
+            object.values_mut().for_each(remove_migration_locations);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_migration_locations),
+        _ => {}
+    }
+}
+
+fn remove_legacy_metadata_projection(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("requirement");
+            if let Some(Value::Object(origin)) = object.get_mut("origin") {
+                origin.remove("declaration");
+            }
+            object
+                .values_mut()
+                .for_each(remove_legacy_metadata_projection);
+        }
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(remove_legacy_metadata_projection),
+        _ => {}
+    }
+}
+
+fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
+    let mut targets = vec!["spec".to_owned(), "init".to_owned()];
+    targets.extend(
+        model
+            .actions
+            .iter()
+            .map(|action| fsl_core::action_target(&action.name)),
+    );
+    for (kind, properties) in [
+        ("invariant", &model.invariants),
+        ("trans", &model.transitions),
+        ("reachable", &model.reachables),
+    ] {
+        targets.extend(
+            properties
+                .iter()
+                .map(|property| fsl_core::property_target(kind, &property.name)),
+        );
+    }
+    targets.extend(
+        model
+            .leadstos
+            .iter()
+            .map(|property| fsl_core::property_target("leadsTo", &property.name)),
+    );
+    targets.sort();
+    targets.dedup();
+    Value::Object(
+        targets
+            .into_iter()
+            .filter_map(|target| {
+                let mut annotations = model
+                    .annotations_for(&target)
+                    .source_order()
+                    .iter()
+                    .map(fsl_syntax::Annotation::render_source)
+                    .collect::<Vec<_>>();
+                annotations.sort();
+                (!annotations.is_empty()).then(|| (target, json!(annotations)))
+            })
+            .collect(),
+    )
+}
+
+fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
+    let mut output = match fsl_syntax::parse_surface_document(source) {
+        Err(error) => surface_parse_error_output(&error),
+        Ok(_) => semantic_error_output(message),
+    };
+    let object = output.as_object_mut().expect("error envelope");
+    object.insert("file".to_owned(), json!(path));
+    if let Some(Value::Object(location)) = object.get_mut("loc") {
+        location.insert("file".to_owned(), json!(path));
+    }
+    output
+}
+
+fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
+    if writes.is_empty() {
+        return Ok(());
+    }
+    let nonce = format!("{}", std::process::id());
+    let mut prepared = Vec::new();
+    for (index, (path, source)) in writes.iter().enumerate() {
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "migration write target '{}' is not a regular file",
+                path.display()
+            ));
+        }
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let temp = parent.join(format!(".fslc-migrate-{nonce}-{index}.tmp"));
+        let backup = parent.join(format!(".fslc-migrate-{nonce}-{index}.bak"));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = file
+            .write_all(source.as_bytes())
+            .and_then(|()| file.sync_all())
+            .and_then(|()| std::fs::set_permissions(&temp, metadata.permissions()))
+        {
+            let _ = std::fs::remove_file(&temp);
+            for (_, temp, _) in &prepared {
+                let _ = std::fs::remove_file(temp);
+            }
+            return Err(error.to_string());
+        }
+        prepared.push((path.to_path_buf(), temp, backup));
+    }
+    for (path, _, backup) in &prepared {
+        if let Err(error) = std::fs::hard_link(path, backup) {
+            for (_, temp, backup) in &prepared {
+                let _ = std::fs::remove_file(temp);
+                let _ = std::fs::remove_file(backup);
+            }
+            return Err(error.to_string());
+        }
+    }
+    for (committed, (path, temp, _)) in prepared.iter().enumerate() {
+        if let Err(error) = std::fs::rename(temp, path) {
+            for (path, _, backup) in prepared.iter().take(committed) {
+                let _ = std::fs::rename(backup, path);
+            }
+            for (_, temp, backup) in &prepared {
+                let _ = std::fs::remove_file(temp);
+                let _ = std::fs::remove_file(backup);
+            }
+            return Err(error.to_string());
+        }
+    }
+    for (_, _, backup) in &prepared {
+        let _ = std::fs::remove_file(backup);
+    }
+    Ok(())
+}
+
+fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
+    let dialect = fsl_syntax::dialect_keyword(source).map_err(|error| error.to_string())?;
+    if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
+        return Ok(());
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let source_file = path.to_string_lossy();
+    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, source_file)
+        .map_err(|error| error.to_string())?;
+    fsl_core::build_model(kernel)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn print_cli_metadata() -> bool {
@@ -339,6 +829,14 @@ fn command() -> Result<(Value, i32), String> {
                 requirements.as_deref(),
                 &edition,
             )))
+        }
+        "lint" => {
+            let options = parse_migration_options(args, false)?;
+            Ok(run_lint(&options))
+        }
+        "migrate" => {
+            let options = parse_migration_options(args, true)?;
+            Ok(run_migrate(&options))
         }
         "kernel" => {
             let mut path = None;
@@ -2163,123 +2661,359 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         Ok(data) => data,
         Err(error) => return (error_output("io", &format!("invalid JSON: {error}")), 2),
     };
-    let events = match data {
-        Value::Array(events) => events,
-        Value::Object(mut object) => match object.remove("events") {
-            Some(Value::Array(events)) => events,
-            _ => {
+    let trace = match fslc_rust::replay_trace::parse_replay_trace(data) {
+        Ok(trace) => trace,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    let versioned = matches!(
+        trace.contract,
+        fslc_rust::replay_trace::ReplayTraceContract::V1 { .. }
+    );
+    let (observed_initial, validated_events) = match &trace.contract {
+        fslc_rust::replay_trace::ReplayTraceContract::Legacy => (None, Vec::new()),
+        fslc_rust::replay_trace::ReplayTraceContract::V1 { spec, initial, .. } => {
+            if spec != &model.name {
                 return (
-                    error_output("io", "trace JSON must be an array or {\"events\": [...] }"),
+                    error_output(
+                        "io",
+                        &format!(
+                            "replay trace spec '{spec}' does not match checked spec '{}'",
+                            model.name
+                        ),
+                    ),
                     2,
                 );
             }
-        },
-        _ => {
-            return (
-                error_output("io", "trace JSON must be an array or {\"events\": [...] }"),
-                2,
-            );
+            let initial = match replay_snapshot_json(initial, &model) {
+                Ok(initial) => initial,
+                Err(error) => return (error_output("io", &error), 2),
+            };
+            let events = match validate_versioned_replay_events(&model, &trace.events) {
+                Ok(events) => events,
+                Err(error) => return (error_output("io", &error), 2),
+            };
+            (Some(initial), events)
         }
     };
     let mut monitor = match fsl_runtime::Monitor::new(model.clone()) {
         Ok(monitor) => monitor,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    for (index, event) in events.iter().enumerate() {
-        let Value::Object(event) = event else {
-            return (error_output("io", "trace event must be an object"), 2);
-        };
-        let Some(action_name) = event.get("action").and_then(Value::as_str) else {
-            return (error_output("io", "trace event requires string action"), 2);
-        };
-        let params = match event.get("params") {
-            None => Map::new(),
-            Some(Value::Object(params)) => params.clone(),
-            Some(_) => return (error_output("io", "trace params must be an object"), 2),
-        };
-        let Some(action) = model
-            .actions
-            .iter()
-            .find(|action| action.name == action_name || display(&action.name) == action_name)
-        else {
-            return replay_failure(
+    let mut bounded_liveness = if matches!(
+        &trace.contract,
+        fslc_rust::replay_trace::ReplayTraceContract::V1 { schema_version, .. }
+            if schema_version == fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+    ) {
+        match fsl_runtime::BoundedLivenessMonitor::new(model.clone()) {
+            Ok(monitor) => Some(monitor),
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        }
+    } else {
+        None
+    };
+    if let Some(observed) = observed_initial {
+        let expected = fslc_rust::state_json(&monitor.state);
+        let mismatches = json_mismatches(&expected, &observed, "");
+        if !mismatches.is_empty() {
+            return replay_failure_with_state(
                 &model,
-                &monitor,
-                index,
+                None,
                 json!({
-                    "kind": "bad_call",
-                    "message": format!("unknown action '{action_name}'"),
-                    "action": action_name,
-                    "params": params,
+                    "kind":"initial_state_mismatch",
+                    "check":"safety",
+                    "tick":0,
+                    "expected_state":expected,
+                    "observed_state":observed,
+                    "mismatches":mismatches,
                 }),
+                expected,
             );
-        };
-        let parsed = match parse_params(&model, action, &params) {
-            Ok(params) => params,
-            Err(message) => {
-                return replay_failure(
+        }
+        match monitor.current_violation() {
+            Ok(Some(violation)) => {
+                return replay_failure_with_state(
                     &model,
-                    &monitor,
-                    index,
+                    None,
                     json!({
-                        "kind": "bad_call",
-                        "message": message,
-                        "action": action_name,
-                        "params": params,
+                        "kind":violation.kind,
+                        "check":"safety",
+                        "name":display(&violation.name),
+                        "tick":0,
                     }),
+                    expected,
                 );
             }
-        };
-        let enabled = match monitor.enabled() {
-            Ok(enabled) => enabled,
+            Ok(None) => {}
             Err(error) => return (error_output("internal", &error.to_string()), 3),
+        }
+        if let Some(liveness) = &mut bounded_liveness {
+            match liveness.observe(&monitor.state, 0) {
+                Ok(Some(violation)) => {
+                    return replay_bounded_liveness_failure(
+                        &model,
+                        None,
+                        &violation,
+                        fslc_rust::state_json(&monitor.state),
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => return (error_output("internal", &error.to_string()), 3),
+            }
+        }
+    }
+    for (index, event) in trace.events.iter().enumerate() {
+        let state_before = fslc_rust::state_json(&monitor.state);
+        let (action_evidence, transition) = match &event.step {
+            fslc_rust::replay_trace::ReplayStep::Stutter => {
+                match monitor.current_violation() {
+                    Ok(Some(violation)) => {
+                        return replay_failure(
+                            &model,
+                            &monitor,
+                            index,
+                            json!({
+                                "kind":violation.kind,
+                                "check":"safety",
+                                "name":display(&violation.name),
+                                "action":Value::Null,
+                                "params":{},
+                                "transition":"stutter",
+                            }),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                }
+                (Value::Null, "stutter")
+            }
+            fslc_rust::replay_trace::ReplayStep::Action {
+                name: action_name,
+                params,
+            } => {
+                let Some(action) = model.actions.iter().find(|action| {
+                    action.name == *action_name
+                        || !versioned && display(&action.name) == *action_name
+                }) else {
+                    return replay_failure(
+                        &model,
+                        &monitor,
+                        index,
+                        json!({
+                            "kind": "bad_call",
+                            "check":"safety",
+                            "message": format!("unknown action '{action_name}'"),
+                            "action": action_name,
+                            "params": params,
+                        }),
+                    );
+                };
+                let parsed = if versioned {
+                    let ValidatedReplayStep::Action(parsed) = &validated_events[index].step else {
+                        unreachable!("parsed replay step changed during validation")
+                    };
+                    parsed
+                        .clone()
+                        .expect("known versioned action was validated")
+                } else {
+                    match parse_params(&model, action, params) {
+                        Ok(params) => params,
+                        Err(message) => {
+                            return replay_failure(
+                                &model,
+                                &monitor,
+                                index,
+                                json!({
+                                    "kind": "bad_call",
+                                    "check":"safety",
+                                    "message": message,
+                                    "action": action_name,
+                                    "params": params,
+                                }),
+                            );
+                        }
+                    }
+                };
+                let stepped = match monitor.attempt(&action.name, &parsed) {
+                    Ok(stepped) => stepped,
+                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                };
+                if let Some(violation) = stepped.violation {
+                    return replay_failure(
+                        &model,
+                        &monitor,
+                        index,
+                        json!({
+                            "kind": violation.kind,
+                            "check":"safety",
+                            "name": display(&violation.name),
+                            "action": display(&action.name),
+                            "params": params,
+                        }),
+                    );
+                }
+                (json!(action.name), "action")
+            }
         };
-        let Some(instance) = enabled
-            .iter()
-            .find(|instance| instance.action == action.name && instance.params == parsed)
-        else {
-            return replay_failure(
-                &model,
-                &monitor,
-                index,
-                json!({
-                    "kind": "requires_failed",
-                    "action": display(&action.name),
-                    "params": params,
-                }),
-            );
-        };
-        let stepped = match monitor.step(instance) {
-            Ok(stepped) => stepped,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
-        };
-        if let Some(violation) = stepped.violation {
-            return replay_failure(
-                &model,
-                &monitor,
-                index,
-                json!({
-                    "kind": violation.kind,
-                    "name": display(&violation.name),
-                    "action": display(&action.name),
-                    "params": params,
-                }),
-            );
+        if let Some(state) = &event.state {
+            let observed = if versioned {
+                validated_events[index].state.clone()
+            } else {
+                match replay_snapshot_json(state, &model) {
+                    Ok(observed) => observed,
+                    Err(error) => return (error_output("io", &error), 2),
+                }
+            };
+            let expected = fslc_rust::state_json(&monitor.state);
+            let mismatches = json_mismatches(&expected, &observed, "");
+            if !mismatches.is_empty() {
+                return replay_failure_with_state(
+                    &model,
+                    Some(index),
+                    json!({
+                        "kind":"state_mismatch",
+                        "check":"safety",
+                        "tick":event.tick,
+                        "action":action_evidence,
+                        "transition":transition,
+                        "expected_state":expected,
+                        "observed_state":observed,
+                        "mismatches":mismatches,
+                    }),
+                    state_before,
+                );
+            }
+        }
+        if let Some(liveness) = &mut bounded_liveness {
+            match liveness.observe(&monitor.state, index + 1) {
+                Ok(Some(violation)) => {
+                    return replay_bounded_liveness_failure(
+                        &model,
+                        Some(index),
+                        &violation,
+                        state_before,
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => return (error_output("internal", &error.to_string()), 3),
+            }
         }
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("conformant"));
     output.insert("spec".to_owned(), json!(model.name));
-    output.insert("steps_checked".to_owned(), json!(events.len()));
+    output.insert("steps_checked".to_owned(), json!(trace.events.len()));
     output.insert(
         "final_state".to_owned(),
         fslc_rust::state_json(&monitor.state),
     );
+    let bounded_status = bounded_liveness
+        .as_ref()
+        .map(fsl_runtime::BoundedLivenessMonitor::status);
     output.insert(
         "note".to_owned(),
-        json!("leadsTo properties are not checked by replay (finite logs only)"),
+        json!(if bounded_status.is_some() {
+            "bounded leadsTo deadlines were checked over this finite observation prefix; unbounded leadsTo properties remain unchecked"
+        } else {
+            "leadsTo properties are not checked by replay (finite logs only)"
+        }),
     );
+    if let fslc_rust::replay_trace::ReplayTraceContract::V1 {
+        schema_version,
+        kernel_schema_version,
+        ..
+    } = trace.contract
+    {
+        output.insert(
+            "trace_schema_version".to_owned(),
+            json!(schema_version.clone()),
+        );
+        output.insert(
+            "kernel_schema_version".to_owned(),
+            json!(kernel_schema_version),
+        );
+        output.insert(
+            "checks".to_owned(),
+            json!({
+                "safety":{
+                    "status":"passed",
+                    "observations_checked":trace.events.len() + 1,
+                },
+                "bounded_liveness":bounded_status.as_ref().map_or_else(
+                    || json!({
+                        "status":"not_checked",
+                        "reason":format!(
+                            "trace schema_version '{}' requires '{}' for bounded liveness",
+                            schema_version,
+                            fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION,
+                        ),
+                    }),
+                    bounded_liveness_status_json,
+                ),
+            }),
+        );
+    }
     (Value::Object(output), 0)
+}
+
+fn bounded_liveness_status_json(status: &fsl_runtime::BoundedLivenessStatus) -> Value {
+    json!({
+        "status":if status.pending.is_empty() { "passed" } else { "pending" },
+        "checked_properties":status.checked_properties,
+        "unbounded_properties":status.unbounded_properties,
+        "pending":status.pending.iter().map(|pending| json!({
+            "property":pending.property,
+            "bindings":replay_liveness_bindings_json(&pending.bindings),
+            "pending_since":pending.pending_since,
+            "deadline":pending.deadline,
+            "within":pending.within,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn replay_liveness_bindings_json(bindings: &fsl_runtime::Bindings) -> Value {
+    Value::Object(
+        bindings
+            .iter()
+            .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+            .collect(),
+    )
+}
+
+fn replay_bounded_liveness_failure(
+    model: &KernelModel,
+    index: Option<usize>,
+    violation: &fsl_runtime::BoundedLivenessViolation,
+    state_before: Value,
+) -> (Value, i32) {
+    let (mut output, code) = replay_failure_with_state(
+        model,
+        index,
+        json!({
+            "kind":"leadsTo",
+            "check":"bounded_liveness",
+            "property":violation.property,
+            "bindings":replay_liveness_bindings_json(&violation.bindings),
+            "pending_since":violation.pending_since,
+            "deadline":violation.deadline,
+            "within":violation.within,
+            "tick":violation.step,
+        }),
+        state_before,
+    );
+    output["note"] = json!(
+        "a bounded leadsTo deadline was missed on this finite observation prefix; unbounded leadsTo properties remain unchecked"
+    );
+    output["hint"] = json!(
+        "the implementation did not reach the leadsTo response by its inclusive observation deadline"
+    );
+    (output, code)
+}
+
+fn replay_snapshot_json(
+    snapshot: &Map<String, Value>,
+    model: &KernelModel,
+) -> Result<Value, String> {
+    load_snapshot_value_object(snapshot, model).map(|state| fslc_rust::state_json(&state))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -2749,18 +3483,33 @@ fn replay_failure(
     index: usize,
     violation: Value,
 ) -> (Value, i32) {
+    replay_failure_with_state(
+        model,
+        Some(index),
+        violation,
+        fslc_rust::state_json(&monitor.state),
+    )
+}
+
+fn replay_failure_with_state(
+    model: &KernelModel,
+    index: Option<usize>,
+    violation: Value,
+    state_before: Value,
+) -> (Value, i32) {
     let mut output = envelope();
     output.insert("result".to_owned(), json!("nonconformant"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("failed_at_event".to_owned(), json!(index));
     output.insert("violation".to_owned(), violation);
-    output.insert(
-        "state_before".to_owned(),
-        fslc_rust::state_json(&monitor.state),
-    );
+    output.insert("state_before".to_owned(), state_before);
     output.insert(
         "hint".to_owned(),
-        json!("the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)"),
+        json!(if index.is_none() {
+            "the implementation initial state is not a valid specification state"
+        } else {
+            "the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)"
+        }),
     );
     output.insert(
         "note".to_owned(),
@@ -3448,74 +4197,51 @@ fn run_check_with_tags(
     apply_domain_edition((output, status), path, edition)
 }
 
-fn domain_enum_union_warnings(path: &Path) -> Vec<Value> {
-    let Ok(fsl_syntax::SurfaceDocument::Domain(domain)) = parse_surface_document(path) else {
-        return Vec::new();
-    };
-    domain
-        .types
-        .iter()
-        .filter(|ty| ty.source_form == fsl_syntax::DomainTypeSourceForm::LegacyEnumUnion)
-        .map(|ty| {
-            let replacement = format!("enum {} {{ {} }}", ty.name, ty.members.join(", "));
-            json!({
-                "kind": "deprecated_domain_enum_union",
-                "code": "deprecated_domain_enum_union",
-                "severity": "warning",
-                "message": format!("domain enum union syntax for '{}' is deprecated; use `{replacement}`", ty.name),
-                "loc": {
-                    "file": path,
-                    "line": ty.span.start.line,
-                    "column": ty.span.start.column,
-                    "end_line": ty.span.end.line,
-                    "end_column": ty.span.end.column,
-                },
-                "canonical_replacement": replacement,
-                "suggestion": {
-                    "kind": "replace",
-                    "replacement": replacement,
-                    "span": {
-                        "start": ty.span.start.offset,
-                        "end": ty.span.end.offset,
-                    },
-                },
-            })
-        })
-        .collect()
-}
-
-fn implicit_initial_value_warnings(path: &Path) -> Vec<Value> {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    fslc_rust::frontend_output::implicit_initial_value_warnings(&source, &path.to_string_lossy())
-}
-
 fn apply_domain_edition(
     (mut output, status): (Value, i32),
     path: &Path,
     edition: &str,
 ) -> (Value, i32) {
-    let mut legacy_additions = domain_enum_union_warnings(path);
-    if edition == "next" && !legacy_additions.is_empty() {
-        for finding in &mut legacy_additions {
-            finding["severity"] = json!("error");
-            finding["message"] = json!(format!(
-                "{}; legacy domain enum unions are not accepted in the next edition",
-                finding["message"]
-                    .as_str()
-                    .unwrap_or("deprecated domain enum union")
-            ));
-        }
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return (output, status);
+    };
+    let migration_edition = if edition == "next" {
+        fslc_rust::migration::Edition::Next
+    } else {
+        fslc_rust::migration::Edition::Current
+    };
+    let Ok(plan) =
+        fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), migration_edition)
+    else {
+        return (output, status);
+    };
+    let mut additions = plan
+        .diagnostics
+        .iter()
+        .filter(|finding| edition == "next" || finding.code == "deprecated_domain_enum_union")
+        .map(|finding| finding.json(&path.to_string_lossy(), migration_edition))
+        .collect::<Vec<_>>();
+    if edition != "next" {
+        additions.extend(fslc_rust::frontend_output::implicit_initial_value_warnings(
+            &source,
+            &path.to_string_lossy(),
+        ));
+    }
+    if edition == "next" && !additions.is_empty() {
+        let kind = if additions.iter().all(|finding| {
+            finding.get("code").and_then(Value::as_str) == Some("deprecated_domain_enum_union")
+        }) {
+            "deprecated_domain_enum_union"
+        } else {
+            "unsupported_in_edition"
+        };
         let mut error = envelope();
         error.insert("result".to_owned(), json!("error"));
-        error.insert("kind".to_owned(), json!("deprecated_domain_enum_union"));
+        error.insert("kind".to_owned(), json!(kind));
         error.insert("edition".to_owned(), json!(edition));
-        error.insert("findings".to_owned(), Value::Array(legacy_additions));
+        error.insert("findings".to_owned(), Value::Array(additions));
         return (Value::Object(error), 2);
     }
-    let mut additions = legacy_additions;
-    additions.extend(implicit_initial_value_warnings(path));
     if !additions.is_empty()
         && let Value::Object(envelope) = &mut output
     {
@@ -4231,6 +4957,21 @@ fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> 
     }
 }
 
+fn domain_scaffold_inputs(
+    path: &Path,
+    domain: &fsl_syntax::DomainSpec,
+) -> Result<(Value, Value), String> {
+    let (source, kernel, model) = load_kernel_model(path)?;
+    let contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path.to_string_lossy(),
+        source_dialect(&source),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((contract, fsl_tools::domain_scaffold_metadata(domain)))
+}
+
 fn snake_case(value: &str) -> String {
     let characters = value.chars().collect::<Vec<_>>();
     let mut output = String::new();
@@ -4324,7 +5065,11 @@ fn run_domain_generate(
             2,
         );
     }
-    let mut result = match fsl_tools::domain_scaffold(&domain, target) {
+    let (kernel, metadata) = match domain_scaffold_inputs(path, &domain) {
+        Ok(input) => input,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut result = match fsl_tools::domain_scaffold(&kernel, &metadata, target) {
         Ok(result) => result,
         Err(error) => return (error_output("semantics", &error), 2),
     };
@@ -4489,7 +5234,14 @@ fn run_domain_testgen(
     }
     if target == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
-        let adapter_files = fsl_tools::domain_adapter_files(&domain);
+        let (kernel, metadata) = match domain_scaffold_inputs(path, &domain) {
+            Ok(input) => input,
+            Err(error) => return (semantic_error_output(&error), 2),
+        };
+        let adapter_files = match fsl_tools::domain_adapter_files(&kernel, &metadata) {
+            Ok(files) => files,
+            Err(error) => return (semantic_error_output(&error), 2),
+        };
         let adapter_count = adapter_files.len();
         for (index, (relative, source)) in adapter_files.into_iter().enumerate() {
             let _ = writeln!(prefix, "// --- scaffold: {relative} ---");
@@ -11927,6 +12679,84 @@ fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
+enum ValidatedReplayStep {
+    Action(Option<std::collections::BTreeMap<String, FslValue>>),
+    Stutter,
+}
+
+struct ValidatedReplayEvent {
+    step: ValidatedReplayStep,
+    state: Value,
+}
+
+fn validate_versioned_replay_events(
+    model: &KernelModel,
+    events: &[fslc_rust::replay_trace::ReplayEvent],
+) -> Result<Vec<ValidatedReplayEvent>, String> {
+    events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let state = replay_snapshot_json(
+                event
+                    .state
+                    .as_ref()
+                    .expect("versioned replay event requires state"),
+                model,
+            )?;
+            let step = match &event.step {
+                fslc_rust::replay_trace::ReplayStep::Stutter => ValidatedReplayStep::Stutter,
+                fslc_rust::replay_trace::ReplayStep::Action { name, params } => {
+                    let params = model
+                        .actions
+                        .iter()
+                        .find(|action| action.name == *name)
+                        .map(|action| parse_versioned_params(model, action, params, index))
+                        .transpose()?;
+                    ValidatedReplayStep::Action(params)
+                }
+            };
+            Ok(ValidatedReplayEvent { step, state })
+        })
+        .collect()
+}
+
+fn parse_versioned_params(
+    model: &KernelModel,
+    action: &fsl_core::ActionDef,
+    values: &Map<String, Value>,
+    event_index: usize,
+) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
+    if values.len() != action.params.len() {
+        return Err(format!(
+            "event {event_index} parameter mismatch for action '{}'",
+            action.name
+        ));
+    }
+    action
+        .params
+        .iter()
+        .map(|param| {
+            let value = values.get(param.name()).ok_or_else(|| {
+                format!("event {event_index} missing parameter '{}'", param.name())
+            })?;
+            let ty = match param {
+                ParamDef::Typed { ty, .. } => ty.clone(),
+                ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+            };
+            Ok((
+                param.name().to_owned(),
+                snapshot_value(
+                    model,
+                    &ty,
+                    value,
+                    &format!("events[{event_index}].params.{}", param.name()),
+                )?,
+            ))
+        })
+        .collect()
+}
+
 fn parse_params(
     model: &KernelModel,
     action: &fsl_core::ActionDef,
@@ -12290,6 +13120,20 @@ fn error_output(kind: &str, message: &str) -> Value {
 
 fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {
     fslc_rust::frontend_output::render_surface_parse_error(envelope(), error)
+}
+
+fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
+    let span = error.span();
+    let mut output = error_output("format", &error.to_string());
+    output
+        .as_object_mut()
+        .expect("format error envelope")
+        .extend([
+            ("code".to_owned(), json!("FSL-FMT-UNSAFE")),
+            ("loc".to_owned(), span.python_loc()),
+            ("span".to_owned(), json!(span)),
+        ]);
+    output
 }
 
 fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {

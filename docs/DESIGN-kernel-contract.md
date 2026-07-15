@@ -282,10 +282,24 @@ reject an unsupported major. Objects marked `additionalProperties:false` are
 closed in v1; adding fields there is a major change. Existing fields keep
 their meaning for the whole major line. Deprecations remain emitted for at least
 two minor releases and are documented before removal in the next major.
-Conformance vectors and testgen traces have their own versions and record the
-Kernel schema version they exercise. A schema change requires coupled updates to the schemas,
+Conformance vectors, testgen traces, and public replay traces have their own
+versions and record the Kernel schema version they exercise. Replay-trace v1 is
+shared by Kernel v1/v2 because v2 adds provenance without changing execution
+values; its complete tick/state contract is defined by
+[`DESIGN-replay-trace.md`](DESIGN-replay-trace.md). A schema change requires coupled updates to the schemas,
 golden vectors, Rust tests, this document, `docs/LANGUAGE.md`, the shared skill,
 and `CHANGELOG.md`.
+
+Replay observation actions execute through `Monitor::attempt`. Solver-free BFS
+also uses Monitor transitions, while
+`fsl-verifier/src/agreement.rs::{transition_matches_step,transition_outcome_matches_step}`
+checks Monitor successors and failures against symbolic transition semantics.
+Stutter performs no transition and requires full equality with the current
+Monitor state, so it introduces no second runtime or solver semantics.
+Replay schema 1.2 additionally runs the solver-free `BoundedLivenessMonitor` on
+the same observations. Its inclusive `leadsTo ... within` deadline is
+differentially checked against the native BMC deadline probe; requirements
+`deadline` remains an ordinary lowered safety invariant.
 
 Public Kernel v2 is the separately negotiated provenance publication contract
 defined by [`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md). Use
@@ -299,10 +313,12 @@ truthfully retained.
 
 Native releases attach independently checksummed `fsl-kernel-contract-v1` and
 `fsl-kernel-contract-v2` bundles. The v1 bundle contains only v1 artifacts and
-continues to contain all four v1 schemas, the comprehensive input fixture and
+continues to contain all six v1 schemas (including the shared replay trace and domain scaffold
+metadata bridge), the comprehensive input fixture and
 its golden public Kernel JSON, the golden failure vectors, the golden
 conformance coverage matrix
-(JSON and Markdown), and this guide. Target-specific generators remain
+(JSON and Markdown), the replay positive/negative fixtures, and this guide. The
+v2 bundle carries the same replay schema and fixtures. Target-specific generators remain
 supported. General pytest, Vitest, Swift, Kotlin, Dart, and PHPUnit generators
 completed their Public Kernel v1 input migration in
 [#214](https://github.com/ymm-oss/fsl/issues/214); their shared adapter also
@@ -310,8 +326,18 @@ consumes scenario JSON and the versioned fixed-seed testgen trace. Compose retai
 explicit names/order-only producer because both public Kernel majors reject
 incomplete multi-file provenance. All target emitters still consume the same
 normalized adapter, and that producer is retired when truthful compose export
-exists. Domain scaffolds remain tracked by
-[#213](https://github.com/ymm-oss/fsl/issues/213). The native Rust typestate
+exists. Domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds completed
+their Public Kernel v1 input migration in
+[#213](https://github.com/ymm-oss/fsl/issues/213). Because the closed Kernel
+contract intentionally omits unused domain declarations, source expressions,
+and saga/effect source topology, their shared adapter also consumes the
+versioned `domain-scaffold-metadata.v1` public compatibility companion. The
+adapter rejects incompatible versions and missing lowered member counterparts;
+the companion is authoritative for topology that v1 cannot represent. It is supported for at
+least two minor releases and may be removed only in a following major after an
+equivalent external generator or negotiated public topology contract exists.
+No target emitter receives `DomainSpec`, and `domain testgen` reuses the same
+adapter/effect output. The native Rust typestate
 analysis and TypeScript output migration completed in
 [#215](https://github.com/ymm-oss/fsl/issues/215): the CLI now feeds public
 Kernel JSON v1 to the generator, rejects incompatible schema versions, and no

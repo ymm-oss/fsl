@@ -413,6 +413,7 @@ version = "2.7.0"
 dependencies = [
  "fsl-core",
  "fsl-syntax",
+ "serde",
  "serde_json",
 ]
 

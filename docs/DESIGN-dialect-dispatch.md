@@ -67,7 +67,9 @@ spans. It is trivia only at byte offset zero.
   dispatch frontend validates the declaration header, balanced outer envelope,
   and trailing EOF, but deliberately leaves the body opaque. Structural agent
   grammar/graph analysis remains the `fslc ai check` surface. Kernel
-  verification rejects the evidence-only document, as before.
+  verification rejects the evidence-only document, as before. The canonical
+  formatter accepts an empty envelope and refuses a nonempty opaque body rather
+  than guessing its internal structure.
 - AI project/statistical block detection remains an AI-frontend feature scan;
   its first significant identifier must belong to the known AI project block
   set, but those evidence blocks are not dialect registry entries.

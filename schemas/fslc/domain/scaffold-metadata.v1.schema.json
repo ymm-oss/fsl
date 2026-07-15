@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/domain/scaffold-metadata.v1.schema.json",
+  "title": "FSL domain scaffold source-topology compatibility metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "name", "types", "aggregates", "effects", "sagas"],
+  "properties": {
+    "$schema": {"const": "https://fsl.dev/schemas/fslc/domain/scaffold-metadata.v1.schema.json"},
+    "schema_version": {"const": "1.0.0"},
+    "name": {"type": "string", "minLength": 1},
+    "types": {"type": "array", "items": {"$ref": "#/$defs/type"}},
+    "aggregates": {"type": "array", "items": {"$ref": "#/$defs/aggregate"}},
+    "effects": {"type": "array", "items": {"$ref": "#/$defs/effect"}},
+    "sagas": {"type": "array", "items": {"$ref": "#/$defs/saga"}}
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type_name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type_name": {"type": "string", "minLength": 1}
+      }
+    },
+    "type": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "members", "fields"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["enum", "range", "value_object", "external"]},
+        "members": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "inputs"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fields"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+      }
+    },
+    "reject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "condition"],
+      "properties": {
+        "error": {"type": "string", "minLength": 1},
+        "condition": {"type": "string"}
+      }
+    },
+    "decide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "requires", "rejects", "emits"],
+      "properties": {
+        "command": {"type": "string", "minLength": 1},
+        "requires": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "rejects": {"type": "array", "items": {"$ref": "#/$defs/reject"}},
+        "emits": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "value"],
+      "properties": {
+        "target": {"type": "string", "minLength": 1},
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
+    "evolve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "assignments"],
+      "properties": {
+        "event": {"type": "string", "minLength": 1},
+        "assignments": {"type": "array", "items": {"$ref": "#/$defs/assignment"}}
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "id_type", "state", "commands", "events", "errors", "decides", "evolves"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "id_type": {"type": ["string", "null"]},
+        "state": {"type": "array", "items": {"$ref": "#/$defs/field"}},
+        "commands": {"type": "array", "items": {"$ref": "#/$defs/command"}},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
+        "errors": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "decides": {"type": "array", "items": {"$ref": "#/$defs/decide"}},
+        "evolves": {"type": "array", "items": {"$ref": "#/$defs/evolve"}}
+      }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "handles", "request_event", "outcomes", "retry_max_attempts"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "handles": {"type": ["string", "null"], "minLength": 1},
+        "request_event": {"type": ["string", "null"], "minLength": 1},
+        "outcomes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "retry_max_attempts": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "saga_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "emits", "timeout_event"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "emits": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "timeout_event": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "compensation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger_event", "after_event", "emits"],
+      "properties": {
+        "trigger_event": {"type": "string", "minLength": 1},
+        "after_event": {"type": "string", "minLength": 1},
+        "emits": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "saga": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "starts_on", "steps", "compensations"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "starts_on": {"type": ["string", "null"], "minLength": 1},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/saga_step"}},
+        "compensations": {"type": "array", "items": {"$ref": "#/$defs/compensation"}}
+      }
+    }
+  }
+}

@@ -231,6 +231,33 @@ The generated code is a scaffold, not production architecture proof. It keeps
 `decide` and `evolve` pure and gives the adapter boundary that existing
 `testgen` conformance tests can be wired to.
 
+All five target emitters consume Public Kernel v1 JSON rather than
+`DomainSpec` or another private Rust AST. Public Kernel remains the authority
+for the checked spec identity, dialect, and lowered member names. A
+small closed companion,
+`schemas/fslc/domain/scaffold-metadata.v1.schema.json`, carries only the
+source-level grouping and spelling that lowering intentionally erases (including
+unused commands/events/errors and effect/saga topology). The adapter validates
+both schema versions and confirms that companion declarations with lowered
+type, state, and action counterparts are present before an emitter runs; it
+never reparses the source and has no fallback to the private model.
+
+The companion is a versioned public migration contract for information that
+Public Kernel v1 does not encode. In particular, source expressions, unused
+declarations, effect request routing, and saga start topology are
+authoritative in the companion and cannot be cross-validated against v1.
+Malformed versions, duplicate Kernel members, and missing lowered counterparts
+fail closed. The full valid domain corpus is generated for every target to
+guard the accepted language surface. The v1 bridge is supported for at least
+two minor releases. It
+may be removed only in a following major after
+target generators have moved to the external compiler boundary or a negotiated
+public contract can represent the missing domain topology. The former direct
+`DomainSpec` emitter path was retired only after TypeScript, Python, Kotlin,
+Swift, and Rust output matched the pre-migration goldens. `domain testgen` now
+reuses the same TypeScript adapter/effect emitter instead of maintaining a
+second implementation.
+
 ## Runtime Replay
 
 `fslc domain replay` accepts JSON arrays, `{"events":[...]}`, or JSONL. Runtime
@@ -264,5 +291,5 @@ tests, or external evidence.
 
 Remaining work is production hardening rather than dialect absence: richer
 history-aware saga state, stronger cross-aggregate routing proofs, production
-outbox/inbox adapters, and fuller non-TypeScript generators should build on this
-IR rather than adding a second semantics.
+outbox/inbox adapters, and fuller non-TypeScript generators should consume the
+public Kernel boundary rather than adding a second semantics.

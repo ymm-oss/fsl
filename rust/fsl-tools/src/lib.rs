@@ -26,6 +26,7 @@ pub use db::{DbToolError, check_db, observe_db, validate_db};
 pub use db_import::{DbImport, import_db};
 pub use domain::{
     analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
+    domain_scaffold_metadata,
 };
 pub use html::render_html_report;
 pub use ledger::{render_ledger, render_ledger_with_approvals};

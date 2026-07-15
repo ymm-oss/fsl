@@ -3,32 +3,385 @@
 
 //! Native multi-target generators for the fsl-domain frontend.
 
-use fsl_syntax::{
-    DomainAggregate, DomainAssignment, DomainEvent, DomainField, DomainSaga, DomainSpec,
-};
+use serde::Deserialize;
+use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::public_kernel::{public_kernel_v1_root, required_array, required_object, required_str};
+
+pub(crate) const METADATA_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/domain/scaffold-metadata.v1.schema.json";
+pub(crate) const METADATA_SCHEMA_VERSION: &str = "1.0.0";
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DomainScaffoldMetadata {
+    #[serde(rename = "$schema")]
+    schema: String,
+    schema_version: String,
+    name: String,
+    types: Vec<ScaffoldType>,
+    aggregates: Vec<ScaffoldAggregate>,
+    effects: Vec<ScaffoldEffect>,
+    sagas: Vec<ScaffoldSaga>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldType {
+    name: String,
+    kind: String,
+    members: Vec<String>,
+    fields: Vec<ScaffoldField>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldField {
+    name: String,
+    type_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldCommand {
+    name: String,
+    inputs: Vec<ScaffoldField>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldEvent {
+    name: String,
+    fields: Vec<ScaffoldField>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldReject {
+    error: String,
+    condition: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldDecide {
+    command: String,
+    requires: Vec<String>,
+    rejects: Vec<ScaffoldReject>,
+    emits: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldAssignment {
+    target: String,
+    value: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldEvolve {
+    event: String,
+    assignments: Vec<ScaffoldAssignment>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldAggregate {
+    name: String,
+    id_type: Option<String>,
+    state: Vec<ScaffoldField>,
+    commands: Vec<ScaffoldCommand>,
+    events: Vec<ScaffoldEvent>,
+    errors: Vec<String>,
+    decides: Vec<ScaffoldDecide>,
+    evolves: Vec<ScaffoldEvolve>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldEffect {
+    name: String,
+    handles: Option<String>,
+    request_event: Option<String>,
+    outcomes: Vec<String>,
+    retry_max_attempts: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldSagaStep {
+    name: String,
+    emits: Vec<String>,
+    timeout_event: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldCompensation {
+    trigger_event: String,
+    after_event: String,
+    emits: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaffoldSaga {
+    name: String,
+    starts_on: Option<String>,
+    steps: Vec<ScaffoldSagaStep>,
+    compensations: Vec<ScaffoldCompensation>,
+}
+
+fn validate_public_kernel(kernel: &Value, metadata: &DomainScaffoldMetadata) -> Result<(), String> {
+    let root = public_kernel_v1_root(kernel)?;
+    let spec = required_object(
+        root.get("spec")
+            .ok_or_else(|| "public Kernel root.spec is required".to_owned())?,
+        "root.spec",
+    )?;
+    let name = required_str(spec, "name", "root.spec")?;
+    if name != metadata.name {
+        return Err(format!(
+            "public Kernel spec '{}' does not match domain scaffold metadata '{}'",
+            name, metadata.name
+        ));
+    }
+    let source = required_object(
+        spec.get("source")
+            .ok_or_else(|| "public Kernel root.spec.source is required".to_owned())?,
+        "root.spec.source",
+    )?;
+    let dialect = required_str(source, "dialect", "root.spec.source")?;
+    if dialect != "domain" {
+        return Err(format!(
+            "domain scaffold requires public Kernel dialect 'domain', got '{dialect}'"
+        ));
+    }
+
+    validate_metadata_names(metadata)?;
+    validate_kernel_members(root, metadata)
+}
+
+fn validate_kernel_members(
+    root: &Map<String, Value>,
+    metadata: &DomainScaffoldMetadata,
+) -> Result<(), String> {
+    let types = object_map(root, "types")?;
+    let states = object_map(root, "state")?;
+    let actions = object_map(root, "actions")?;
+    let require = |items: &BTreeMap<String, &Map<String, Value>>, kind: &str, name: String| {
+        items
+            .contains_key(&name)
+            .then_some(())
+            .ok_or_else(|| format!("public Kernel is missing lowered domain {kind} '{name}'"))
+    };
+
+    for ty in &metadata.types {
+        require(&types, "type", ty.name.clone())?;
+    }
+    for aggregate in &metadata.aggregates {
+        for field in &aggregate.state {
+            require(
+                &states,
+                "state",
+                format!("{}_{}", snake(&aggregate.name), snake(&field.name)),
+            )?;
+        }
+        for decide in &aggregate.decides {
+            require(
+                &actions,
+                "action",
+                format!("{}_{}", snake(&aggregate.name), snake(&decide.command)),
+            )?;
+        }
+    }
+    validate_effect_actions(&actions, metadata)?;
+    validate_saga_actions(&actions, metadata)
+}
+
+fn validate_effect_actions(
+    actions: &BTreeMap<String, &Map<String, Value>>,
+    metadata: &DomainScaffoldMetadata,
+) -> Result<(), String> {
+    for effect in &metadata.effects {
+        for outcome in &effect.outcomes {
+            let name = format!("{}_complete_{}", snake(&effect.name), snake(outcome));
+            if !actions.contains_key(&name) {
+                return Err(format!(
+                    "public Kernel is missing lowered domain action '{name}'"
+                ));
+            }
+        }
+        if effect.retry_max_attempts.is_some() {
+            let name = format!("{}_retry", snake(&effect.name));
+            if !actions.contains_key(&name) {
+                return Err(format!(
+                    "public Kernel is missing lowered domain action '{name}'"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_saga_actions(
+    actions: &BTreeMap<String, &Map<String, Value>>,
+    metadata: &DomainScaffoldMetadata,
+) -> Result<(), String> {
+    for saga in &metadata.sagas {
+        let saga_name = snake(&saga.name);
+        for step in &saga.steps {
+            let name = format!("saga_{saga_name}_{}", snake(&step.name));
+            if !actions.contains_key(&name) {
+                return Err(format!(
+                    "public Kernel is missing lowered domain action '{name}'"
+                ));
+            }
+            if step.timeout_event.is_some() && !actions.contains_key(&format!("{name}_timeout")) {
+                return Err(format!(
+                    "public Kernel is missing lowered domain action '{name}_timeout'"
+                ));
+            }
+        }
+        for item in &saga.compensations {
+            let name = format!(
+                "saga_{saga_name}_compensate_{}_after_{}",
+                snake(&item.trigger_event),
+                snake(&item.after_event)
+            );
+            if !actions.contains_key(&name) {
+                return Err(format!(
+                    "public Kernel is missing lowered domain action '{name}'"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn object_map<'a>(
+    root: &'a Map<String, Value>,
+    key: &str,
+) -> Result<BTreeMap<String, &'a Map<String, Value>>, String> {
+    let mut output = BTreeMap::new();
+    for item in required_array(root, key, "root")? {
+        let object = required_object(item, &format!("root.{key}[]"))?;
+        let name = required_str(object, "name", &format!("root.{key}[]"))?.to_owned();
+        if output.insert(name.clone(), object).is_some() {
+            return Err(format!("public Kernel root.{key} has duplicate '{name}'"));
+        }
+    }
+    Ok(output)
+}
+
+fn validate_metadata_names(metadata: &DomainScaffoldMetadata) -> Result<(), String> {
+    let require = |kind: &str, name: &str| {
+        if name.is_empty() {
+            Err(format!(
+                "domain scaffold metadata {kind} name must not be empty"
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    require("domain", &metadata.name)?;
+    for ty in &metadata.types {
+        require("type", &ty.name)?;
+        if !matches!(
+            ty.kind.as_str(),
+            "enum" | "range" | "value_object" | "external"
+        ) {
+            return Err(format!(
+                "unsupported domain scaffold metadata type kind '{}'",
+                ty.kind
+            ));
+        }
+        for field in &ty.fields {
+            require("type field", &field.name)?;
+            require("type field type", &field.type_name)?;
+        }
+    }
+    for aggregate in &metadata.aggregates {
+        require("aggregate", &aggregate.name)?;
+        for field in &aggregate.state {
+            require("state", &field.name)?;
+            require("state type", &field.type_name)?;
+        }
+        for command in &aggregate.commands {
+            require("command", &command.name)?;
+            for field in &command.inputs {
+                require("command input", &field.name)?;
+                require("command input type", &field.type_name)?;
+            }
+        }
+        for event in &aggregate.events {
+            require("event", &event.name)?;
+            for field in &event.fields {
+                require("event field", &field.name)?;
+                require("event field type", &field.type_name)?;
+            }
+        }
+        for error in &aggregate.errors {
+            require("error", error)?;
+        }
+        for decide in &aggregate.decides {
+            require("decide command", &decide.command)?;
+        }
+        for evolution in &aggregate.evolves {
+            require("evolve event", &evolution.event)?;
+        }
+    }
+    for effect in &metadata.effects {
+        require("effect", &effect.name)?;
+    }
+    for saga in &metadata.sagas {
+        require("saga", &saga.name)?;
+        for step in &saga.steps {
+            require("saga step", &step.name)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn generate(
-    domain: &DomainSpec,
+    kernel: &Value,
+    metadata: &Value,
     target: &str,
 ) -> Result<BTreeMap<String, String>, String> {
+    let domain = serde_json::from_value::<DomainScaffoldMetadata>(metadata.clone())
+        .map_err(|error| format!("invalid domain scaffold metadata: {error}"))?;
+    if domain.schema != METADATA_SCHEMA_ID {
+        return Err(format!(
+            "unsupported domain scaffold metadata $schema '{}'; expected '{METADATA_SCHEMA_ID}'",
+            domain.schema
+        ));
+    }
+    if domain.schema_version != METADATA_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported domain scaffold metadata schema_version '{}'; expected '{METADATA_SCHEMA_VERSION}'",
+            domain.schema_version
+        ));
+    }
+    validate_public_kernel(kernel, &domain)?;
     match target {
-        "typescript" => Ok(generate_typescript(domain)),
+        "typescript" => Ok(generate_typescript(&domain)),
         "python" => Ok(BTreeMap::from([(
             "domain_scaffold.py".to_owned(),
-            generate_python(domain),
+            generate_python(&domain),
         )])),
         "kotlin" => Ok(BTreeMap::from([(
             "DomainScaffold.kt".to_owned(),
-            generate_kotlin(domain),
+            generate_kotlin(&domain),
         )])),
         "swift" => Ok(BTreeMap::from([(
             "DomainScaffold.swift".to_owned(),
-            generate_swift(domain),
+            generate_swift(&domain),
         )])),
         "rust" => Ok(BTreeMap::from([(
             "domain_scaffold.rs".to_owned(),
-            generate_rust(domain),
+            generate_rust(&domain),
         )])),
         _ => Err(format!("unsupported domain generation target: {target}")),
     }
@@ -45,7 +398,7 @@ fn snake(name: &str) -> String {
     output
 }
 
-fn generate_python(domain: &DomainSpec) -> String {
+fn generate_python(domain: &DomainScaffoldMetadata) -> String {
     let mut lines = vec![
         "# Auto-generated by fslc domain generate. Treat as scaffold.".to_owned(),
         "from dataclasses import dataclass".to_owned(),
@@ -117,7 +470,7 @@ fn generate_python(domain: &DomainSpec) -> String {
     format!("{}\n", lines.join("\n").trim_end())
 }
 
-fn generate_kotlin(domain: &DomainSpec) -> String {
+fn generate_kotlin(domain: &DomainScaffoldMetadata) -> String {
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Treat as scaffold.".to_owned(),
         String::new(),
@@ -160,7 +513,7 @@ fn lower_first(name: &str) -> String {
     })
 }
 
-fn generate_swift(domain: &DomainSpec) -> String {
+fn generate_swift(domain: &DomainScaffoldMetadata) -> String {
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Treat as scaffold.".to_owned(),
         String::new(),
@@ -211,7 +564,7 @@ fn generate_swift(domain: &DomainSpec) -> String {
     format!("{}\n", lines.join("\n").trim_end())
 }
 
-fn generate_rust(domain: &DomainSpec) -> String {
+fn generate_rust(domain: &DomainScaffoldMetadata) -> String {
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Treat as scaffold.".to_owned(),
         String::new(),
@@ -320,7 +673,7 @@ fn type_name(raw: &str) -> String {
     raw.to_owned()
 }
 
-fn field_line(field: &DomainField) -> String {
+fn field_line(field: &ScaffoldField) -> String {
     format!("  {}: {}", camel(&field.name), type_name(&field.type_name))
 }
 
@@ -338,7 +691,7 @@ fn type_references(raw: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn external_references(aggregate: &DomainAggregate) -> BTreeSet<String> {
+fn external_references(aggregate: &ScaffoldAggregate) -> BTreeSet<String> {
     let mut references = BTreeSet::new();
     if let Some(id_type) = &aggregate.id_type {
         references.insert(id_type.clone());
@@ -359,7 +712,7 @@ fn external_references(aggregate: &DomainAggregate) -> BTreeSet<String> {
     references
 }
 
-fn generate_typescript(domain: &DomainSpec) -> BTreeMap<String, String> {
+fn generate_typescript(domain: &DomainScaffoldMetadata) -> BTreeMap<String, String> {
     let mut files = BTreeMap::new();
     files.insert("types.ts".to_owned(), emit_types(domain));
     for aggregate in &domain.aggregates {
@@ -380,7 +733,7 @@ fn generate_typescript(domain: &DomainSpec) -> BTreeMap<String, String> {
     files
 }
 
-fn emit_types(domain: &DomainSpec) -> String {
+fn emit_types(domain: &DomainScaffoldMetadata) -> String {
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Treat as scaffold.".to_owned(),
         String::new(),
@@ -463,7 +816,7 @@ fn emit_types(domain: &DomainSpec) -> String {
                 aggregate
                     .errors
                     .iter()
-                    .map(|error| format!("  | {{ type: \"{}\" }}", error.name)),
+                    .map(|error| format!("  | {{ type: \"{error}\" }}")),
             );
         }
         lines.push(String::new());
@@ -471,7 +824,7 @@ fn emit_types(domain: &DomainSpec) -> String {
     format!("{}\n", lines.join("\n").trim_end())
 }
 
-fn event_construct(event: &DomainEvent, aggregate: &DomainAggregate) -> String {
+fn event_construct(event: &ScaffoldEvent, aggregate: &ScaffoldAggregate) -> String {
     let mut fields = vec![format!("type: \"{}\"", event.name)];
     fields.extend(event.fields.iter().map(|field| {
         let name = camel(&field.name);
@@ -484,7 +837,7 @@ fn event_construct(event: &DomainEvent, aggregate: &DomainAggregate) -> String {
     }
 }
 
-fn emit_decide(aggregate: &DomainAggregate) -> String {
+fn emit_decide(aggregate: &ScaffoldAggregate) -> String {
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Fill policy gaps before production use."
             .to_owned(),
@@ -568,12 +921,12 @@ fn is_identifier(value: &str) -> bool {
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-fn render_ts_assignment(assignment: &DomainAssignment) -> Option<String> {
-    let target = assignment.target.render_source();
+fn render_ts_assignment(assignment: &ScaffoldAssignment) -> Option<String> {
+    let target = assignment.target.clone();
     if !is_identifier(&target) {
         return None;
     }
-    let value = assignment.value.render_source();
+    let value = assignment.value.clone();
     let expression = value.trim();
     let expression = if is_identifier(expression) {
         format!("\"{expression}\"")
@@ -583,7 +936,7 @@ fn render_ts_assignment(assignment: &DomainAssignment) -> Option<String> {
     Some(format!("{}: {expression}", camel(&target)))
 }
 
-fn emit_evolve(aggregate: &DomainAggregate) -> String {
+fn emit_evolve(aggregate: &ScaffoldAggregate) -> String {
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Keep pure: no I/O, clocks, repositories, or network calls."
             .to_owned(),
@@ -616,8 +969,7 @@ fn emit_evolve(aggregate: &DomainAggregate) -> String {
             } else {
                 lines.push(format!(
                     "      // {} = {}",
-                    assignment.target.render_source(),
-                    assignment.value.render_source()
+                    assignment.target, assignment.value
                 ));
             }
         }
@@ -652,7 +1004,7 @@ fn action_name(name: &str) -> String {
     output
 }
 
-fn emit_adapter(aggregate: &DomainAggregate) -> String {
+fn emit_adapter(aggregate: &ScaffoldAggregate) -> String {
     let name = &aggregate.name;
     let mut lines = vec![
         "// Auto-generated by fslc domain generate. Wire this adapter to fslc testgen output."
@@ -714,7 +1066,7 @@ fn emit_adapter(aggregate: &DomainAggregate) -> String {
     lines.join("\n")
 }
 
-fn all_event_union(domain: &DomainSpec) -> String {
+fn all_event_union(domain: &DomainScaffoldMetadata) -> String {
     let union = domain
         .aggregates
         .iter()
@@ -728,7 +1080,7 @@ fn all_event_union(domain: &DomainSpec) -> String {
     }
 }
 
-fn event_type_for(domain: &DomainSpec, event_name: &str) -> String {
+fn event_type_for(domain: &DomainScaffoldMetadata, event_name: &str) -> String {
     domain
         .aggregates
         .iter()
@@ -749,7 +1101,7 @@ fn event_type_for(domain: &DomainSpec, event_name: &str) -> String {
         )
 }
 
-fn emit_effects(domain: &DomainSpec) -> String {
+fn emit_effects(domain: &DomainScaffoldMetadata) -> String {
     let imports = domain
         .aggregates
         .iter()
@@ -792,11 +1144,11 @@ fn emit_effects(domain: &DomainSpec) -> String {
     lines.join("\n")
 }
 
-fn saga_initial_emits(saga: &DomainSaga) -> &[String] {
+fn saga_initial_emits(saga: &ScaffoldSaga) -> &[String] {
     saga.steps.first().map_or(&[], |step| step.emits.as_slice())
 }
 
-fn event_placeholder(domain: &DomainSpec, event_name: &str) -> String {
+fn event_placeholder(domain: &DomainScaffoldMetadata, event_name: &str) -> String {
     for aggregate in &domain.aggregates {
         if let Some(event) = aggregate
             .events
@@ -817,7 +1169,7 @@ fn event_placeholder(domain: &DomainSpec, event_name: &str) -> String {
     format!("{{ type: \"{event_name}\" }} as DomainEvent")
 }
 
-fn emit_actions(domain: &DomainSpec, events: &[String]) -> String {
+fn emit_actions(domain: &DomainScaffoldMetadata, events: &[String]) -> String {
     events
         .iter()
         .map(|event| {
@@ -830,7 +1182,7 @@ fn emit_actions(domain: &DomainSpec, events: &[String]) -> String {
         .join(", ")
 }
 
-fn emit_process_manager(domain: &DomainSpec) -> String {
+fn emit_process_manager(domain: &DomainScaffoldMetadata) -> String {
     let imports = domain
         .aggregates
         .iter()
@@ -886,4 +1238,105 @@ fn emit_process_manager(domain: &DomainSpec) -> String {
         ]);
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use fsl_core::{FsResolver, build_model, parse_kernel_source, public_kernel_contract};
+    use fsl_syntax::{SurfaceDocument, parse_surface_document};
+
+    fn inputs() -> (Value, Value) {
+        let source =
+            include_str!("../../fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl");
+        let SurfaceDocument::Domain(domain) =
+            parse_surface_document(source).expect("parse domain fixture")
+        else {
+            panic!("expected domain fixture");
+        };
+        let kernel = parse_kernel_source(source, &FsResolver::new(Path::new(".")))
+            .expect("lower domain fixture");
+        let model = build_model(kernel.clone()).expect("check domain fixture");
+        let public = public_kernel_contract(&kernel, &model, "fixture.fsl", "domain")
+            .expect("export public Kernel");
+        (public, crate::domain::domain_scaffold_metadata(&domain))
+    }
+
+    #[test]
+    fn adapter_fails_closed_on_kernel_and_metadata_versions() {
+        let (mut kernel, mut metadata) = inputs();
+        metadata["schema_version"] = Value::String("2.0.0".to_owned());
+        assert!(
+            generate(&kernel, &metadata, "typescript")
+                .expect_err("reject metadata major")
+                .contains("unsupported domain scaffold metadata schema_version")
+        );
+
+        let (_, valid_metadata) = inputs();
+        kernel["schema_version"] = Value::String("2.0.0".to_owned());
+        assert!(
+            generate(&kernel, &valid_metadata, "typescript")
+                .expect_err("reject Kernel major")
+                .contains("unsupported public Kernel schema_version")
+        );
+    }
+
+    #[test]
+    fn adapter_rejects_metadata_that_is_not_grounded_in_the_kernel() {
+        let (mut kernel, metadata) = inputs();
+        kernel["actions"]
+            .as_array_mut()
+            .expect("actions")
+            .retain(|action| action["name"] != "order_approve");
+        assert_eq!(
+            generate(&kernel, &metadata, "typescript").expect_err("reject missing action"),
+            "public Kernel is missing lowered domain action 'order_approve'"
+        );
+    }
+
+    #[test]
+    fn adapter_rejects_missing_or_duplicate_kernel_members() {
+        let (kernel, metadata) = inputs();
+        for (key, name) in [
+            ("state", "order_status"),
+            ("actions", "order_approve"),
+            ("types", "Status"),
+        ] {
+            let mut changed = kernel.clone();
+            changed[key]
+                .as_array_mut()
+                .expect("Kernel collection")
+                .retain(|item| item["name"] != name);
+            assert!(
+                generate(&changed, &metadata, "typescript").is_err(),
+                "missing {key}"
+            );
+
+            let mut changed = kernel.clone();
+            let duplicate = changed[key][0].clone();
+            changed[key]
+                .as_array_mut()
+                .expect("Kernel collection")
+                .push(duplicate);
+            assert!(
+                generate(&changed, &metadata, "typescript").is_err(),
+                "duplicate {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn published_metadata_schema_matches_the_adapter_version() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../schemas/fslc/domain/scaffold-metadata.v1.schema.json"
+        ))
+        .expect("metadata schema JSON");
+        assert_eq!(schema["$id"], METADATA_SCHEMA_ID);
+        assert_eq!(
+            schema["properties"]["schema_version"]["const"],
+            METADATA_SCHEMA_VERSION
+        );
+    }
 }

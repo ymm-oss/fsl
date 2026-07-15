@@ -26,6 +26,8 @@
 | [`DESIGN-requirements-stage.md`](DESIGN-requirements-stage.md) | Shared typed `stage()` resolution and lowering for business and requirements expressions |
 | [`DESIGN-collection-aggregates.md`](DESIGN-collection-aggregates.md) | Shared finite Binder/Aggregate IR, Set/Seq/range semantics, KPI metadata projections, and Public Kernel normalization |
 | [`DESIGN-dialect-dispatch.md`](DESIGN-dialect-dispatch.md) | Shared-lexer dialect registry, significant-token rules, document annotations, diagnostics, and frontend contract |
+| [`DESIGN-formatter.md`](DESIGN-formatter.md) | Lossless token/trivia boundary, canonical formatting policy, non-mutating CLI contract, and safe refusal range |
+| [`DESIGN-migration.md`](DESIGN-migration.md) | Edition lint taxonomy, checked rewrite rules, explicit refusal boundaries, atomic write contract, and bulk-update procedure |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
 | [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
@@ -66,6 +68,7 @@
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests (`tests/test_coupled_change_meta.py`): LSP index coverage (grammar production ↔ visitor handler, corpus-driven, two-stage) and DESIGN-doc coverage (dialect/CLI command ↔ `docs/DESIGN-*.md`) |
 | [`DESIGN-rust-port.md`](DESIGN-rust-port.md) | Accepted phased architecture for a native Rust CLI and browser Web Worker/WASM port, including solver/runtime dependency boundaries, shared semantic diagnostics, and cross-implementation parity gates |
 | [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md) | **Versioned normalized Kernel JSON boundary for external compilers**: typed expressions, spans and requirement origin, rollback semantics, schema compatibility, native conformance vectors, and release bundle |
+| [`DESIGN-replay-trace.md`](DESIGN-replay-trace.md) | **Versioned backward contract for generated-code traces**: exact actions/params, logical ticks, complete state observations, Kernel-version pairing, legacy migration, goldens, and release bundles |
 | [`DESIGN-origin-chain.md`](DESIGN-origin-chain.md) | Private source-origin propagation from dialect declarations through typed lowering, verification diagnostics, and counterexamples without changing public Kernel v1 |
 | [`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md) | Accepted Public Kernel v2 provenance graph: portable source identity, exact coordinates, cardinality/reverse lookup, assurance/completeness, negotiation, and v1 migration boundary |
 | [`RUST-PORTING.md`](RUST-PORTING.md) | Executable migration method for issue #195: reference authority, per-slice rewrite loop, differential/oracle/replay gates, Phase-0 evidence, and decisions |

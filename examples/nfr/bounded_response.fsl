@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec BoundedResponse {
+  type Stage = 0..3
+  state { stage: Stage }
+  init { stage = 0 }
+
+  action advance() {
+    requires stage < 3
+    stage = stage + 1
+  }
+
+  leadsTo RespondsInTwo { stage == 1 ~> within 2 stage == 3 }
+  leadsTo EventuallyResponds { stage == 1 ~> stage == 3 }
+}

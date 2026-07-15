@@ -251,8 +251,10 @@ Domain declarations use `enum Name { Member, ... }` for finite variants and
 stable `deprecated_domain_enum_union` warning over the complete declaration,
 including a canonical replacement. `fslc check`, `fslc verify`, and
 `fslc domain check` accept `--edition current|next`; `next` rejects the legacy
-union spelling. Empty enums and duplicate members are errors, reported at the
-declaration and duplicate member respectively.
+union spelling. `fslc lint` reports the edition finding without mutation, and
+`fslc migrate --edition next` supplies the checked canonical edit. Empty enums
+and duplicate members are errors, reported at the declaration and duplicate
+member respectively.
 
 The native Rust frontend also retains a private origin chain for domain state,
 actions, guards, statements, and properties. Verification, counterexample, and
@@ -269,7 +271,8 @@ When a domain aggregate state field omits its initializer, the current edition
 preserves the established Bool `false`, enum first-member, range lower-bound, or
 external-placeholder `0` choice and emits `implicit_initial_value`. The warning
 contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion.
+machine-applicable explicit-initializer insertion. The next edition requires the
+initializer to be explicit.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
@@ -281,6 +284,14 @@ scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
 event / effect evidence. The v0 implementation proves the finite modeled
 lifecycle; replay is observation evidence and saga history adds
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`.
+The native scaffold emitters consume checked Public Kernel v1 JSON plus the
+versioned `domain-scaffold-metadata.v1` compatibility bridge; they do not
+receive the private domain AST or reparse source expressions. Kernel/metadata
+version and dialect mismatches, duplicate Kernel members, and missing lowered
+type/state/action counterparts fail closed. Source expressions and effect/saga
+topology remain authoritative in the companion because Public Kernel v1 does
+not encode them. All five target outputs are locked to pre-migration goldens,
+and the valid domain corpus is generated for every target.
 It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
 production exactly-once semantics. See `docs/DESIGN-domain.md` and
 `docs/DESIGN-effect.md`.
@@ -655,6 +666,10 @@ variable.
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc lint      <path>... [--edition current|next] # stable edition diagnostics; never mutates
+fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
+fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
@@ -709,6 +724,15 @@ fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DD
 fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
+
+Edition lint findings use the stable taxonomies `deprecated`,
+`non_canonical`, `ambiguous_intent`, and `unsupported_in_edition`. Migration
+handles legacy domain enums/operators, declaration string metadata, colon
+quantifiers, unambiguous local inline action mappings, and implicit defaults.
+It refuses source/comment movement that cannot be proven safe. `&&` remains an
+invalid token and is therefore reported with an `and` suggestion but is never
+machine-applied. See `docs/DESIGN-migration.md` for atomicity and bulk-update
+steps.
 
 The native Rust-only `kernel` command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,
@@ -1388,6 +1412,36 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 ```
+
+External compilers emit the native replay contract as a closed versioned JSON
+object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):
+
+```json
+{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.2.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":null,"params":{},"state":{"stock":{"0":1},"cart":{"0":0}}},{"tick":2,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
+```
+
+`initial` is the complete tick-0 state and every event has the exact Public
+Kernel action/parameter names plus its complete post-state. Since trace schema
+1.1, `action:null` with `{}` params is an explicit stutter observation whose
+complete state must equal the current logical state; 1.0 remains action-only.
+Inserting or deleting equal-state stutters preserves the projected action trace
+and final state. Ticks are exactly `1..N`, including stutters. Optional non-empty
+`timestamp` is ignored opaque producer metadata, not
+formal time. Trace v1 accepts Kernel `1.0.0` and `2.0.0`. Malformed contracts
+fail as input errors; typed initial/post-state divergence is nonconformant with
+leaf mismatch evidence. Invariants apply to observation points and atomic
+Monitor successors, not to unreported implementation intermediates. Bare arrays
+and `{events:[...]}` remain the explicit
+unversioned action-only adapter. Testgen and verifier trace JSON are not replay
+input. See `docs/DESIGN-replay-trace.md`.
+
+Trace schema 1.2 additionally checks every `leadsTo P ~> within K Q` at the
+initial state and each action/stutter observation. The deadline `p + K` is
+inclusive: `Q` there succeeds, while absence of `Q` fails with bounded-liveness
+evidence. Safety is evaluated first. Successful output separates
+`checks.safety` from `checks.bounded_liveness`; an unfinished finite obligation
+is `pending`, and unbounded `leadsTo` properties are named but not claimed as
+checked. Schemas 1.0/1.1 retain their earlier safety-only meaning.
 
 The `--from-log` form reuses the exact refinement mapping grammar to translate
 external JSONL records into spec actions and logical state; it does not add a

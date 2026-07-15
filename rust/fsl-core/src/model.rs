@@ -294,6 +294,74 @@ impl KernelModel {
     }
 }
 
+/// Enumerate the solver-independent static bindings of a `leadsTo` property.
+///
+/// # Errors
+///
+/// Returns [`ModelError`] for dynamic/filtering binders or unsupported
+/// collection domains.
+pub fn static_leadsto_bindings(
+    model: &KernelModel,
+    property: &LeadsToDef,
+) -> Result<Vec<BTreeMap<String, Value>>, ModelError> {
+    let mut expanded = vec![BTreeMap::new()];
+    for binder in &property.binders {
+        if match binder {
+            Binder::Typed { where_expr, .. }
+            | Binder::Range { where_expr, .. }
+            | Binder::Collection { where_expr, .. } => where_expr.is_some(),
+        } {
+            return Err(model_error(
+                "where filters are not implemented in bounded leadsTo",
+            ));
+        }
+        let (name, values) = match binder {
+            Binder::Typed {
+                name, type_name, ..
+            } => (
+                name,
+                model.domain_values(&TypeRef::Named(type_name.name.clone()))?,
+            ),
+            Binder::Range { name, lo, hi, .. } => {
+                let lo = static_leadsto_int(lo, model)?;
+                let hi = static_leadsto_int(hi, model)?;
+                (name, (lo..=hi).map(Value::Int).collect())
+            }
+            Binder::Collection { .. } => {
+                return Err(model_error(
+                    "collection binders are not implemented in bounded leadsTo",
+                ));
+            }
+        };
+        let mut next = Vec::new();
+        for binding in expanded {
+            for value in &values {
+                let mut candidate = binding.clone();
+                candidate.insert(name.clone(), value.clone());
+                next.push(candidate);
+            }
+        }
+        expanded = next;
+    }
+    Ok(expanded)
+}
+
+fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelError> {
+    match expr {
+        Expr::Num(value) => Ok(*value),
+        Expr::Var(name) => match model.consts.get(name) {
+            Some(Value::Int(value)) => Ok(*value),
+            _ => Err(model_error(format!("'{name}' is not an integer constant"))),
+        },
+        Expr::Neg(value) => static_leadsto_int(value, model)?
+            .checked_neg()
+            .ok_or_else(|| model_error("integer overflow in leadsTo binder")),
+        _ => Err(model_error(
+            "leadsTo range binder must use static integer bounds",
+        )),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModelError {
     pub message: String,

@@ -14,6 +14,13 @@ This is finite runtime evidence, not a proof. It does not check `leadsTo`, infer
 missing state, query production systems, or replace the existing fsl-db,
 fsl-ai, and fsl-domain evidence commands.
 
+Normalized generated-code traces whose names already match Public Kernel use
+the versioned complete-state contract in
+[`DESIGN-replay-trace.md`](DESIGN-replay-trace.md). This mapping path remains
+for production records with external names and schemas. Its mapping target
+`-> stutter` is separate syntax; public replay traces encode an observation
+stutter as JSON `action:null` and never reserve the action name `stutter`.
+
 ## 2. Record and mapping contracts
 
 Every non-empty JSONL line is one object:

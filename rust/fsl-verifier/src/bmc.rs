@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
     FslValue, KernelBinder, KernelModel, LeadsToDef, TraceAction, TraceChange, TraceStep,
+    static_leadsto_bindings,
 };
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
@@ -643,30 +644,9 @@ pub(crate) fn leadsto_bindings<S: SmtSolver>(
     model: &KernelModel,
     property: &LeadsToDef,
 ) -> Result<Vec<LeadstoBinding<S::Term>>, VerifyError> {
-    let mut expanded = vec![LeadstoBinding {
-        concrete: BTreeMap::new(),
-        symbolic: Bindings::new(),
-    }];
+    let mut expanded = vec![Bindings::new()];
     for binder in &property.binders {
         let symbolic = binder_values(solver, model, binder)?;
-        let concrete = match binder {
-            KernelBinder::Typed { type_name, .. } => {
-                model.domain_values(&fsl_core::TypeRef::Named(type_name.name.clone()))?
-            }
-            KernelBinder::Range { lo, hi, .. } => {
-                let lo = static_int(lo, model)?;
-                let hi = static_int(hi, model)?;
-                (lo..=hi).map(FslValue::Int).collect()
-            }
-            KernelBinder::Collection { .. } => {
-                return Err(VerifyError::new(
-                    "collection binders are not implemented in bounded leadsTo",
-                ));
-            }
-        };
-        if concrete.len() != symbolic.len() {
-            return Err(VerifyError::new("leadsTo binder expansion mismatch"));
-        }
         let name = match binder {
             KernelBinder::Typed { name, .. }
             | KernelBinder::Range { name, .. }
@@ -674,34 +654,23 @@ pub(crate) fn leadsto_bindings<S: SmtSolver>(
         };
         let mut next = Vec::new();
         for binding in expanded {
-            for (value, (_, term)) in concrete.iter().zip(&symbolic) {
+            for (_, term) in &symbolic {
                 let mut candidate = binding.clone();
-                candidate.concrete.insert(name.clone(), value.clone());
-                candidate.symbolic.insert(name.clone(), term.clone());
+                candidate.insert(name.clone(), term.clone());
                 next.push(candidate);
             }
         }
         expanded = next;
     }
-    Ok(expanded)
-}
-
-fn static_int(expr: &fsl_core::KernelExpr, model: &KernelModel) -> Result<i64, VerifyError> {
-    match expr {
-        fsl_core::KernelExpr::Num(value) => Ok(*value),
-        fsl_core::KernelExpr::Var(name) => match model.consts.get(name) {
-            Some(FslValue::Int(value)) => Ok(*value),
-            _ => Err(VerifyError::new(format!(
-                "'{name}' is not an integer constant"
-            ))),
-        },
-        fsl_core::KernelExpr::Neg(value) => static_int(value, model)?
-            .checked_neg()
-            .ok_or_else(|| VerifyError::new("integer overflow in leadsTo binder")),
-        _ => Err(VerifyError::new(
-            "leadsTo range binder must use static integer bounds",
-        )),
+    let concrete = static_leadsto_bindings(model, property)?;
+    if concrete.len() != expanded.len() {
+        return Err(VerifyError::new("leadsTo binder expansion mismatch"));
     }
+    Ok(concrete
+        .into_iter()
+        .zip(expanded)
+        .map(|(concrete, symbolic)| LeadstoBinding { concrete, symbolic })
+        .collect())
 }
 
 pub(crate) fn leadsto_condition<S: SmtSolver>(

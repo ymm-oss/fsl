@@ -16,6 +16,7 @@ mod db;
 mod dispatch;
 mod domain;
 mod lexer;
+mod lossless;
 mod parser;
 mod surface;
 mod syntax_expr;
@@ -47,6 +48,11 @@ pub use domain::{
     DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
 pub use lexer::{LexError, Token, TokenKind, lex};
+pub use lossless::{
+    CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,
+    LosslessKind, LosslessNode, SourceEdit, apply_source_edits, canonical_rewrites, format_source,
+    lossless_document, source_position, source_span,
+};
 pub use parser::{ParseError, parse_expr, parse_surface_document, parse_surface_spec};
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,

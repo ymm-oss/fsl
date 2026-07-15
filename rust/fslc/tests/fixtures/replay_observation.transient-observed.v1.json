@@ -1,0 +1,11 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
+  "schema_version": "1.1.0",
+  "kernel_schema_version": "1.0.0",
+  "spec": "ReplayObservation",
+  "initial": {"value": 0},
+  "events": [
+    {"tick": 1, "action": null, "params": {}, "state": {"value": 1}},
+    {"tick": 2, "action": "commit", "params": {}, "state": {"value": 2}}
+  ]
+}

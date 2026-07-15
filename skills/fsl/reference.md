@@ -217,7 +217,9 @@ Use `enum Name { Member, ... }` for finite domain variants and
 `type Name = A | B` spelling is accepted by the current 2.x edition with the
 stable `deprecated_domain_enum_union` warning and a canonical replacement.
 Pass `--edition next` to `check`, `verify`, or `domain check` to reject legacy
-enum unions during migration.
+enum unions. Use `fslc lint <path>... --edition next` for stable non-mutating
+edition diagnostics and `fslc migrate <path>... --edition next` to review
+machine edits; add `--write` only after reviewing the complete validated set.
 
 ```fsl
 domain <Name> {
@@ -291,6 +293,13 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
+Native domain generation is grounded in Public Kernel v1. A closed
+`domain-scaffold-metadata.v1` companion retains source grouping/spelling that
+lowering cannot publish. Versions, dialect, duplicate Kernel members, and
+missing lowered type/state/action counterparts fail closed; source expressions
+and effect/saga topology are authoritative in the companion because v1 has no
+equivalent nodes. Emitters never receive `DomainSpec`, never reparse source
+text, and the five targets preserve their pre-migration bytes.
 
 The Rust frontend keeps an internal origin chain across direct domain lowering,
 checked-model construction, verification, counterexamples, and `explain`.
@@ -774,6 +783,10 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 
 ```
 fslc check <f>                                  # syntax / names / types only
+fslc lint <path>... [--edition current|next]    # stable edition findings; never mutates
+fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
+fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
+fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
@@ -837,6 +850,24 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+Native generated-code replay uses `replay-trace.v1`: a closed root carrying
+trace and Kernel versions, exact spec identity, complete tick-0 `initial`, and
+events with exact Public Kernel `action`/`params`, canonical ticks `1..N`, and
+complete post-transition `state`. Trace schema 1.1 adds explicit stutter as
+`action:null` plus empty params; its state must equal the unchanged Monitor
+state. Equal-state stutters may be inserted/deleted, while unreported concrete
+intermediates are outside invariant judgment. Optional `timestamp` is opaque
+and ignored. Trace v1 accepts Kernel 1.0.0/2.0.0. Ill-shaped/incomplete input is exit 2; typed
+state divergence is exit 1 with leaf mismatches. Bare arrays/`{events}` are the
+unversioned action-only compatibility adapter; testgen/verifier traces are not
+replay input. See `docs/DESIGN-replay-trace.md`.
+
+Schema 1.2 opts into solver-free bounded-liveness replay. Every
+`leadsTo P ~> within K Q` is observed at tick 0 and after each action/stutter;
+`Q` at the inclusive deadline succeeds and absence of `Q` fails. Safety is
+reported first and separately. A finite unfinished obligation is `pending`, and
+unbounded `leadsTo` is listed as unchecked. Schema 1.0/1.1 stays safety-only.
 
 Use native `fslc kernel` as the stable compiler boundary after dialect lowering
 and type checking. Do not consume the frozen Python AST JSON or reparse expression

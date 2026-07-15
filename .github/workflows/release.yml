@@ -148,13 +148,26 @@ jobs:
           cp schemas/fslc/kernel/kernel.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp schemas/fslc/kernel/conformance.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp schemas/fslc/kernel/testgen-trace.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
+          cp schemas/fslc/kernel/replay-trace.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp schemas/fslc/kernel/conformance-coverage.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
+          cp schemas/fslc/domain/scaffold-metadata.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp rust/fslc/tests/fixtures/kernel_contract.fsl dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/kernel_contract.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.fsl dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_coverage.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_coverage.v1.md dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.fsl dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.valid.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.state-mismatch.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.bad-tick.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_observation.fsl dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_observation.valid.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp rust/fslc/tests/fixtures/replay_observation.transient-observed.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp examples/nfr/bounded_response.fsl dist/fsl-kernel-contract-v1/fixtures/
+          cp examples/nfr/bounded_response.within.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp examples/nfr/bounded_response.overdue.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp docs/DESIGN-replay-trace.md dist/fsl-kernel-contract-v1/
           cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v1/README.md
           tar -czf dist/fsl-kernel-contract-v1.tar.gz -C dist fsl-kernel-contract-v1
           ( cd dist && shasum -a 256 fsl-kernel-contract-v1.tar.gz > fsl-kernel-contract-v1.tar.gz.sha256 )
@@ -166,11 +179,23 @@ jobs:
           cp schemas/fslc/kernel/kernel.v2.schema.json dist/fsl-kernel-contract-v2/schemas/
           cp schemas/fslc/kernel/conformance.v2.schema.json dist/fsl-kernel-contract-v2/schemas/
           cp schemas/fslc/kernel/conformance-coverage.v2.schema.json dist/fsl-kernel-contract-v2/schemas/
+          cp schemas/fslc/kernel/replay-trace.v1.schema.json dist/fsl-kernel-contract-v2/schemas/
           cp rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/domain_characterization/
           cp rust/fslc/tests/fixtures/kernel_origin.v2.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.v2.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp rust/fslc/tests/fixtures/conformance_coverage.v2.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.valid.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.state-mismatch.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_trace.bad-tick.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_observation.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_observation.valid.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp rust/fslc/tests/fixtures/replay_observation.transient-observed.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp examples/nfr/bounded_response.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp examples/nfr/bounded_response.within.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp examples/nfr/bounded_response.overdue.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp docs/DESIGN-replay-trace.md dist/fsl-kernel-contract-v2/docs/
           cp docs/DESIGN-kernel-origin-v2.md dist/fsl-kernel-contract-v2/README.md
           cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v2/docs/
           tar -czf dist/fsl-kernel-contract-v2.tar.gz -C dist fsl-kernel-contract-v2
