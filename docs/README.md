@@ -29,7 +29,7 @@
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
 | [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
-| [`DESIGN-explicit-engine.md`](DESIGN-explicit-engine.md) | `verify --engine explicit` (Rust-native): Z3-free concrete-state BFS, closure ⇒ `proved`, `unknown_budget` truncation, deterministic-init and binder-domain fail-closed gates |
+| [`DESIGN-explicit-engine.md`](DESIGN-explicit-engine.md) | `verify --engine explicit` (Rust-native): Z3-free concrete-state BFS, closure ⇒ `proved`, `unknown_budget` truncation, deterministic-init and binder-domain fail-closed gates; plus the `--engine auto` composite (explicit first, transparent BMC fallback, `engine`/`engine_fallback` tracking) |
 | [`DESIGN-from-state.md`](DESIGN-from-state.md) | Predictive BMC from a complete Monitor/replay logical-state snapshot (`verify --from-state`), including type validation, faithfulness metadata, cache/symmetry boundaries, and induction exclusion |
 | [`DESIGN-trans.md`](DESIGN-trans.md) | `trans` (transition invariant / two-state safety) |
 | [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |

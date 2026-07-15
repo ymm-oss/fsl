@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc verify --engine auto`: opt-in composite engine that runs the explicit
+  engine first and transparently falls back to symbolic BMC when explicit
+  fail-closes (`leadsTo`, nondeterministic `init`, …) or exceeds
+  `--explicit-budget`. Results stamp the deciding engine (`engine`) and, on
+  fallback, an `engine_fallback: {from, reason}` trace; verdicts are cached
+  under the engine that actually decided and shared with plain
+  `--engine explicit`/`--engine bmc` runs. The default engine is unchanged
+  (issue #226).
 - Finite quantifiers, `count`, `sum`, `unique`, and `exactlyOne` now share one
   Binder/Aggregate IR across typed, range, Set, and Seq domains. Optional
   filters use one scope/type-check path; empty aggregates are zero and Seq

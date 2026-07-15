@@ -740,6 +740,9 @@ fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching 
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
+               [--engine auto]                   # explicit first, transparent BMC fallback on
+                                                 #   fail-closed rejection or budget exhaustion;
+                                                 #   result carries engine / engine_fallback
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
                [--lemma &quot;&lt;expr&gt;&quot;]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
@@ -949,6 +952,14 @@ result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc 
 </tbody>
 </table>
 <p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>.</p>
+<p><code>--engine auto</code> can produce any of these results except <code>unknown_budget</code> and
+<code>unknown_cti</code>: it runs the explicit engine first and transparently falls back
+to BMC when explicit fail-closes (e.g. <code>leadsTo</code>, nondeterministic <code>init</code>) or
+exceeds its state budget. The result stamps the deciding engine as
+<code>engine: "explicit" | "bmc"</code>; a fallback additionally records
+<code>engine_fallback: {"from": "explicit", "reason": "..."}</code> so callers can tell
+a bounded <code>verified</code> (BMC) from an unbounded <code>proved</code> (explicit closure) and
+why the stronger engine did not decide.</p>
 <p>A <code>violated</code> result with <code>violation_kind</code> <code>invariant</code>/<code>type_bound</code> additionally
 carries <strong>blame assignment</strong> (issue #170), localizing the counterexample
 instead of just showing it: top-level <code>blame.conjuncts[]</code> (<code>{index, text,

@@ -660,6 +660,9 @@ fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vector
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
+               [--engine auto]                   # explicit first, transparent BMC fallback on
+                                                 #   fail-closed rejection or budget exhaustion;
+                                                 #   result carries engine / engine_fallback
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
                [--lemma "<expr>"]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
@@ -847,6 +850,15 @@ result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.
+
+`--engine auto` can produce any of these results except `unknown_budget` and
+`unknown_cti`: it runs the explicit engine first and transparently falls back
+to BMC when explicit fail-closes (e.g. `leadsTo`, nondeterministic `init`) or
+exceeds its state budget. The result stamps the deciding engine as
+`engine: "explicit" | "bmc"`; a fallback additionally records
+`engine_fallback: {"from": "explicit", "reason": "..."}` so callers can tell
+a bounded `verified` (BMC) from an unbounded `proved` (explicit closure) and
+why the stronger engine did not decide.
 
 A `violated` result with `violation_kind` `invariant`/`type_bound` additionally
 carries **blame assignment** (issue #170), localizing the counterexample

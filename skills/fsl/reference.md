@@ -776,7 +776,7 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 fslc check <f>                                  # syntax / names / types only
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit] [--k N=1]
+fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--explicit-budget N=1000000]        # explicit only; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property in isolation
@@ -881,6 +881,19 @@ assigned), and `init forall` binder domains that reference state variables
 (range bounds and collections must be compile-time constants) — use
 `--engine bmc` for those specs. `--from-state`, `--lemma`, and `--k` do not
 apply to this engine.
+
+`--engine auto` composes the two: it runs explicit first and falls back to
+BMC transparently when explicit fail-closes or exceeds `--explicit-budget`,
+so it always returns a terminal verdict (never `unknown_budget`). The result
+stamps the deciding engine (`engine: "explicit" | "bmc"`); on fallback it
+also records `engine_fallback: {"from": "explicit", "reason": "..."}` —
+check `engine` to distinguish an unbounded `proved` (explicit closure) from
+a bounded `verified` (BMC). Real explicit verdicts, including `violated`,
+are never re-run under BMC. Cached verdicts are shared with plain
+`--engine explicit`/`--engine bmc` runs. `--from-state` and `--lemma`
+remain unavailable with `auto`; induction is not part of the composition —
+use `--engine induction` explicitly for unbounded proofs of non-closing
+specs.
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`

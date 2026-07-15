@@ -199,10 +199,43 @@ BMC over the corpus). The engine's cost is O(reachable states × transition
 degree) with hash-set memory; it deliberately does not try to compete beyond
 the budget cap — that regime belongs to the symbolic engines.
 
-## 10. Future work
+## 10. Composite engine `--engine auto` (issue #226)
 
-- `--engine auto`: run explicit first; on `unknown_budget`, fall back to the
-  symbolic pipeline transparently.
+`fslc verify <spec> --engine auto` composes the two engines behind one opt-in
+flag: run explicit first, and fall back to symbolic BMC transparently when —
+and only when — explicit produced no verdict:
+
+- a fail-closed rejection (every kind-`semantics` gate from §5/§7: `leadsTo`,
+  nondeterministic `init`, partial component initialization, binder domains
+  referencing state variables, …), or
+- `unknown_budget` (the `--explicit-budget` cap was reached before closure).
+
+Every real explicit verdict — `proved`, `verified`, `violated`, deadlock under
+`--deadlock error`, `reachable_failed` — is returned unchanged and is never
+re-run under BMC. The fallback does not suppress errors: a spec no engine
+supports still reports the BMC-side `error`. The default engine is unchanged;
+`auto` is Rust-only opt-in (same policy as `explicit`), so corpus CLI parity
+and existing snapshots are unaffected.
+
+Engine tracking is part of the result contract: the deciding engine is stamped
+as `engine: "explicit" | "bmc"`, and a fallback additionally records
+`engine_fallback: {"from": "explicit", "reason": "<verbatim gate or budget
+message>"}` so an LLM repair loop can distinguish verdict strength
+(bounded vs unbounded) and why the stronger engine did not decide.
+
+Verdict caching is keyed by the engine that actually decided, never by the
+literal string `auto`: an explicit verdict stores under the explicit key, a
+post-fallback BMC verdict stores under the bmc key as the plain BMC envelope
+(so direct `--engine bmc` hits see no auto-only fields) with the fallback
+trace persisted on the cache entry. An auto re-run consults the explicit key
+first (skipping cached `unknown_budget`, which auto never reports) and then
+the bmc key before re-running anything; a bmc-key hit re-attaches
+`engine`/`engine_fallback`. `--from-state` and `--lemma` remain rejected for
+`auto` (they are BMC-/induction-specific), `--k` is ignored as with explicit,
+and induction is not part of the composition.
+
+## 11. Future work
+
 - Parallel exploration (sharded frontier) if real specs approach the budget.
 - WASM exposure of the explicit engine (Z3-free verification in the browser).
 - Definitive-verdict upgrades: under closure, report unreachable `reachable`
