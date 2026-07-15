@@ -17,8 +17,8 @@ use serde_json::{Value as JsonValue, json};
 mod explicit;
 
 pub use explicit::{
-    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, verify_explicit,
-    verify_explicit_selected,
+    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, explicit_unsupported_reason,
+    verify_explicit, verify_explicit_selected,
 };
 
 pub type State = BTreeMap<String, Value>;

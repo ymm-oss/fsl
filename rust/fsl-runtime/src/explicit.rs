@@ -68,6 +68,27 @@ pub fn verify_explicit(
     verify_explicit_selected(model, depth, max_states, None)
 }
 
+/// Fail-closed gate: `Some(reason)` when the explicit engine cannot verify
+/// this model at all (checked statically, before any exploration starts).
+///
+/// Used both by [`verify_explicit_selected`] (to reject unsupported models
+/// the same way it always has) and by the `--engine auto` dispatcher (to
+/// decide, before spending any exploration budget, whether to fall back to
+/// the symbolic engine).
+#[must_use]
+pub fn explicit_unsupported_reason(model: &KernelModel) -> Option<String> {
+    if let Err(error) = check_deterministic_init(model) {
+        return Some(error.message);
+    }
+    if !model.leadstos.is_empty() {
+        return Some(
+            "the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property"
+                .to_owned(),
+        );
+    }
+    None
+}
+
 /// Verify with an optional set of selected implicit state-bound properties.
 ///
 /// # Errors
@@ -83,11 +104,8 @@ pub fn verify_explicit_selected(
     if max_states == 0 {
         return Err(runtime_error("explicit state budget must be at least 1"));
     }
-    check_deterministic_init(&model)?;
-    if !model.leadstos.is_empty() {
-        return Err(runtime_error(
-            "the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property",
-        ));
+    if let Some(reason) = explicit_unsupported_reason(&model) {
+        return Err(runtime_error(reason));
     }
 
     let initial = Monitor::new(model)?;

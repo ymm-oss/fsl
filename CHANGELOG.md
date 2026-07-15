@@ -6,6 +6,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc verify --engine auto` composes the explicit-state and BMC engines:
+  explicit runs first (faster, and can prove `closure: true`) and falls back
+  transparently to BMC exactly when explicit cannot decide the spec on its
+  own (an unsupported feature such as `leadsTo` or nondeterministic init, or
+  `unknown_budget`). Every result carries `engine: "explicit"`/`"bmc"` naming
+  whichever engine decided, and a fallback additionally carries
+  `engine_fallback: {from, reason, kind}` so a caller can distinguish a
+  bounded BMC verdict from an unbounded explicit one, and a permanent
+  unsupported-feature gate from a transient budget one, without parsing
+  prose. `auto` shares verdict-cache entries with plain `--engine
+  explicit`/`bmc` runs of the same spec — the cache key is always the engine
+  that actually decided, never `auto` itself — and does not change the
+  default engine or extend to any other subcommand's `--engine` option
+  (Rust-only, issue #226).
 - `Option<T>` now supports structural `==` / `!=` between complete Option
   values, including `some(expr)`. Concrete and symbolic evaluation compare the
   presence tag first and ignore the payload when absent; `is some(binding)`

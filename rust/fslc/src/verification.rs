@@ -11,6 +11,14 @@ pub(super) enum VerificationEngine {
 }
 
 impl VerificationEngine {
+    /// Parse one of the three engines this type actually dispatches to.
+    ///
+    /// `"auto"` is a valid `--engine` value (see `parse_verify_options`) but
+    /// is never passed here: `run_verify_cli` resolves it into a concrete
+    /// `"explicit"`/`"bmc"` sub-request before `execute_cli_verification`/
+    /// `run_verify` ever call this parser, so this error message correctly
+    /// never mentions it — reaching this function with `"auto"` would itself
+    /// be the bug to fix, not a case this message should paper over.
     pub(super) fn parse(value: &str) -> Result<Self, String> {
         match value {
             "bmc" => Ok(Self::Bmc),
@@ -1767,6 +1775,9 @@ pub(super) fn run_verify_cli(path: &Path, options: &CliVerifyOptions) -> Command
     if !options.lemmas.is_empty() {
         return run_induction_with_lemmas(path, options);
     }
+    if options.engine == "auto" {
+        return run_auto_verification(path, options);
+    }
     let prepared = match prepare_cli_verification(path, options) {
         Ok(prepared) => prepared,
         Err(output) => return output,
@@ -1786,6 +1797,137 @@ pub(super) fn run_verify_cli(path: &Path, options: &CliVerifyOptions) -> Command
         output,
         status,
     )
+}
+
+/// `--engine auto`: try the explicit-state engine first, since it is
+/// strictly faster and can prove closure; fall back transparently to BMC
+/// when explicit cannot handle this model at all (a static, pre-exploration
+/// gate — leadsTo properties, nondeterministic/partial init, ...) or when it
+/// hits its state budget. Every verdict is stamped with the engine that
+/// actually decided it, and a fallback additionally carries `engine_fallback`
+/// so a caller can tell a bounded BMC verdict from an unbounded explicit one.
+///
+/// Both sub-attempts share one `prepare_cli_verification` pass (parse/
+/// specialized-document/requirement-trace/property-selection validation is
+/// engine-independent) but cache and execute independently, keyed as if
+/// `--engine explicit`/`--engine bmc` had been passed directly — an `auto`
+/// run and a plain run of whichever engine actually decides share the same
+/// cache entries, and `auto` itself is never part of a cache key.
+fn run_auto_verification(path: &Path, options: &CliVerifyOptions) -> CommandResult {
+    let prepared = match prepare_cli_verification(path, options) {
+        Ok(prepared) => prepared,
+        Err(output) => return output,
+    };
+    let explicit_options = CliVerifyOptions {
+        engine: "explicit".to_owned(),
+        ..options.clone()
+    };
+    let explicit_cache_keys = cache_enabled(&explicit_options)
+        .then(|| verify_cache_keys(path, &explicit_options).ok())
+        .flatten();
+    if let Some((cached_output, cached_status)) =
+        cached_verification(&explicit_options, explicit_cache_keys.as_ref())
+    {
+        if cached_output.get("result").and_then(Value::as_str) != Some("unknown_budget") {
+            return (cached_output, cached_status);
+        }
+        return fallback_to_bmc(
+            path,
+            options,
+            &prepared,
+            &budget_fallback_reason(),
+            "budget",
+        );
+    }
+    if let Some(reason) = explicit_gate_reason(path, options, &prepared) {
+        return fallback_to_bmc(path, options, &prepared, &reason, "unsupported");
+    }
+    let (output, status) = execute_cli_verification(path, &explicit_options, &prepared);
+    let (output, status) = finalize_cli_verification(
+        path,
+        &explicit_options,
+        &prepared,
+        explicit_cache_keys.as_ref(),
+        output,
+        status,
+    );
+    if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
+        return fallback_to_bmc(
+            path,
+            options,
+            &prepared,
+            &budget_fallback_reason(),
+            "budget",
+        );
+    }
+    (output, status)
+}
+
+fn budget_fallback_reason() -> String {
+    "explicit-state exploration exceeded the state budget; falling back to symbolic BMC".to_owned()
+}
+
+/// Static, pre-exploration check for whether the explicit engine can handle
+/// this model at all, built from the same selection `execute_cli_verification`
+/// would use. `None` (including on a model-load failure) means "let the
+/// explicit engine run and report its own error" — this function only ever
+/// short-circuits into a fallback, never swallows a real error.
+fn explicit_gate_reason(
+    path: &Path,
+    options: &CliVerifyOptions,
+    prepared: &PreparedCliVerification,
+) -> Option<String> {
+    let selection = ModelSelection {
+        path,
+        scope: prepared.has_scope.then_some(&options.scope),
+        property: options.property.as_deref(),
+        excluded: &options.exclude_properties,
+    };
+    let model = load_selected_model(selection).ok()?;
+    if model.actions.is_empty() {
+        return Some("spec has no actions".to_owned());
+    }
+    fsl_runtime::explicit_unsupported_reason(&model)
+}
+
+fn fallback_to_bmc(
+    path: &Path,
+    options: &CliVerifyOptions,
+    prepared: &PreparedCliVerification,
+    reason: &str,
+    kind: &str,
+) -> CommandResult {
+    let bmc_options = CliVerifyOptions {
+        engine: "bmc".to_owned(),
+        ..options.clone()
+    };
+    let cache_keys = cache_enabled(&bmc_options)
+        .then(|| verify_cache_keys(path, &bmc_options).ok())
+        .flatten();
+    let (mut output, status) =
+        if let Some(cached) = cached_verification(&bmc_options, cache_keys.as_ref()) {
+            cached
+        } else {
+            let (output, status) = execute_cli_verification(path, &bmc_options, prepared);
+            finalize_cli_verification(
+                path,
+                &bmc_options,
+                prepared,
+                cache_keys.as_ref(),
+                output,
+                status,
+            )
+        };
+    if output.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(envelope) = output.as_object_mut()
+    {
+        envelope.insert("engine".to_owned(), json!("bmc"));
+        envelope.insert(
+            "engine_fallback".to_owned(),
+            json!({"from": "explicit", "reason": reason, "kind": kind}),
+        );
+    }
+    (output, status)
 }
 
 fn prepare_cli_verification(

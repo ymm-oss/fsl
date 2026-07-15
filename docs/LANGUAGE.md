@@ -649,6 +649,9 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
+               [--engine auto]                   # explicit first, transparent fallback to bmc when
+                                                 #   explicit can't decide (leadsTo, nondeterministic init,
+                                                 #   unknown_budget); "engine"/"engine_fallback" in the result
                [--lemma "<expr>"]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
@@ -833,6 +836,18 @@ result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
 | `unknown_budget` | `--engine explicit` exceeded `--explicit-budget` before closing | Raise the budget, or use `--engine bmc`/`induction` for this spec |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
+
+`--engine auto` composes explicit and bmc: it tries explicit first (faster,
+and can reach `proved`+`closure:true`) and falls back transparently to bmc
+when explicit cannot decide the spec on its own — an unsupported feature
+(`leadsTo`, nondeterministic/partial init) or `unknown_budget`. Every result
+carries `engine: "explicit"` or `engine: "bmc"` naming whichever engine
+actually decided it; a fallback additionally carries
+`engine_fallback: {from: "explicit", reason: "...", kind: "unsupported"|"budget"}`
+so a caller can tell a bounded bmc verdict from an unbounded explicit one
+without re-deriving it. `auto` never changes the default engine (still
+`bmc`) and is Rust-only, like `explicit` itself. See
+`docs/DESIGN-explicit-engine.md` §6a.
 
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.
 

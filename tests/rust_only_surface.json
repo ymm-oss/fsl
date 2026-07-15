@@ -408,7 +408,8 @@
         "choices": [
           "bmc",
           "induction",
-          "explicit"
+          "explicit",
+          "auto"
         ],
         "default": "bmc",
         "action": "store"
@@ -433,7 +434,7 @@
         "verify"
       ],
       "python_sha256": "4ef502e9d7641bf3025096fe525cb4134c03f58b16316c17de318bab98e4863f",
-      "rust_sha256": "18818b8474ecd22d722894bb7c5dd738a5201c34a52db163cd4b8e045b0540e3"
+      "rust_sha256": "6948d2b88109341606ef5d4b4e323bf551b960faa473a5b0b201077360a5634b"
     }
   ]
 }

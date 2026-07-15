@@ -263,7 +263,7 @@ def test_rust_parser_rejects_unlisted_engine_choice(rust_contract):
         check=False,
     )
     assert proc.returncode == 2
-    assert "--engine must be bmc, induction, or explicit" in proc.stdout
+    assert "--engine must be bmc, induction, explicit, or auto" in proc.stdout
 
 
 def test_unknown_help_path_is_rejected(rust_contract):
