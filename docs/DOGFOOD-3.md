@@ -42,11 +42,12 @@ file + path classification in Monitor.
   seat-reservation domain we initially considered needed something equivalent to
   `map seats[s] = (st == Sold ? some(holder) : none)`, and since FSL had no conditional expression, it could not be
   expressed as a mapping, so we changed the domain.
-  → Implemented as an **`if-then-else` expression restricted to mapping expressions** (DESIGN-refinement §2.5).
+  → Initially implemented as an **`if-then-else` expression restricted to mapping expressions** (DESIGN-refinement §2.5).
   The abandoned seat-reservation domain itself became a second concrete example, and we confirmed that
   `map seats[s] = if slots[s].st == Sold then slots[s].holder else none` passes refines in
   `specs/seat_booking{,_impl}.fsl` + `seat_refines.fsl` (the abstract side's count aggregation evaluates correctly
-  over the conditional mapping value). It is not opened up to the ordinary spec expression grammar.
+  over the conditional mapping value). Issue #245 later promoted the same node
+  to the shared expression grammar; this paragraph records the original v2.2 limitation.
 - **F10: the Adapter wiring convention is clear enough.** observe()'s projection (display-name keys, Seq as list,
   Option as None|value) follows the LANGUAGE.md convention with no hesitation. It is practically powerful that the
   random walk automatically reconciles settle's "nothing to settle" guard with the spec's `requires pending > 0`.

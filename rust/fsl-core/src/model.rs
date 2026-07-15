@@ -301,6 +301,13 @@ impl ModelError {
     }
 }
 
+fn with_type_diagnostic_origin(mut error: ModelError, span: Span) -> ModelError {
+    if error.origin.is_none() {
+        error.origin = Some(Box::new(type_diagnostic_origin(span)));
+    }
+    error
+}
+
 impl fmt::Display for ModelError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let location = self
@@ -707,19 +714,23 @@ impl ModelBuilder {
             .collect::<BTreeMap<_, _>>();
         for (index, statement) in model.init.iter().enumerate() {
             crate::public_kernel::validate_statement_types(statement, &model).map_err(|error| {
-                if let Some((name, span)) = inline_initializers.get(&index) {
+                let origin = error.span.map(type_diagnostic_origin);
+                if let Some((name, _)) = inline_initializers.get(&index) {
                     model_error(format!(
                         "invalid inline initializer for '{name}': {}",
                         error.message
                     ))
-                    .with_origin(Some(source_origin(name, *span, None)))
+                    .with_origin(origin)
                 } else {
                     model_error(format!("invalid init statement: {}", error.message))
+                        .with_origin(origin)
                 }
             })?;
         }
-        crate::public_kernel::validate_model_expression_types(&model)
-            .map_err(|error| model_error(format!("invalid model expression: {}", error.message)))?;
+        crate::public_kernel::validate_model_expression_types(&model).map_err(|error| {
+            let origin = error.span.map(type_diagnostic_origin);
+            model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
+        })?;
         Ok(model)
     }
 
@@ -1217,6 +1228,25 @@ fn source_origin(name: &str, primary: Span, secondary: Option<Span>) -> OriginCh
     }
 }
 
+fn type_diagnostic_origin(span: Span) -> OriginChain {
+    OriginChain {
+        id: OriginId(format!(
+            "kernel:type-diagnostic:{}:{}",
+            span.start.offset, span.end.offset
+        )),
+        dialect: "kernel".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(span),
+            dialect: "kernel".to_owned(),
+            declaration_path: Vec::new(),
+        }),
+        secondary: Vec::new(),
+        lowering_steps: Vec::new(),
+        generated: false,
+    }
+}
+
 fn lvalue_root(target: &LValue) -> &str {
     match target {
         LValue::Var(name) | LValue::Index(name, _) => name,
@@ -1298,10 +1328,11 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Method { receiver, args, .. } => std::iter::once(receiver.as_ref())
             .chain(args.iter())
             .collect(),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => vec![condition, then_expr, else_expr],
         Expr::Quantified { binder, body, .. } => binder_exprs(binder)
             .into_iter()
@@ -1375,36 +1406,175 @@ fn synthetic_span() -> fsl_syntax::Span {
 }
 
 fn eval_const(expr: &Expr, consts: &BTreeMap<String, Value>) -> Result<Value, ModelError> {
+    eval_const_typed(expr, consts, true)?
+        .value
+        .ok_or_else(|| model_error("constant expression produced no value"))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConstType {
+    Int,
+    Bool,
+}
+
+struct TypedConst {
+    ty: ConstType,
+    value: Option<Value>,
+}
+
+fn require_const_type(actual: ConstType, expected: ConstType) -> Result<(), ModelError> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(model_error("constant expression type mismatch"))
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn eval_const_typed(
+    expr: &Expr,
+    consts: &BTreeMap<String, Value>,
+    evaluate: bool,
+) -> Result<TypedConst, ModelError> {
+    let typed = |ty, value| TypedConst {
+        ty,
+        value: evaluate.then_some(value),
+    };
     match expr {
-        Expr::Num(value) => Ok(Value::Int(*value)),
-        Expr::Bool(value) => Ok(Value::Bool(*value)),
-        Expr::Var(name) => consts
-            .get(name)
-            .cloned()
-            .ok_or_else(|| model_error(format!("unknown constant '{name}'"))),
-        Expr::Neg(expr) => Ok(Value::Int(checked_neg(as_int(&eval_const(
-            expr, consts,
-        )?)?)?)),
-        Expr::Not(expr) => Ok(Value::Bool(!as_bool(&eval_const(expr, consts)?)?)),
+        Expr::Num(value) => Ok(typed(ConstType::Int, Value::Int(*value))),
+        Expr::Bool(value) => Ok(typed(ConstType::Bool, Value::Bool(*value))),
+        Expr::Var(name) => match consts.get(name).cloned() {
+            Some(value @ Value::Int(_)) => Ok(typed(ConstType::Int, value)),
+            Some(value @ Value::Bool(_)) => Ok(typed(ConstType::Bool, value)),
+            Some(_) => Err(model_error("unsupported constant value type")),
+            None => Err(model_error(format!("unknown constant '{name}'"))),
+        },
+        Expr::Neg(value) => {
+            let value = eval_const_typed(value, consts, evaluate)?;
+            require_const_type(value.ty, ConstType::Int)?;
+            let value = value
+                .value
+                .map(|value| checked_neg(as_int(&value)?).map(Value::Int))
+                .transpose()?;
+            Ok(TypedConst {
+                ty: ConstType::Int,
+                value,
+            })
+        }
+        Expr::Not(value) => {
+            let value = eval_const_typed(value, consts, evaluate)?;
+            require_const_type(value.ty, ConstType::Bool)?;
+            let value = value
+                .value
+                .map(|value| as_bool(&value).map(|value| Value::Bool(!value)))
+                .transpose()?;
+            Ok(TypedConst {
+                ty: ConstType::Bool,
+                value,
+            })
+        }
         Expr::Binary { op, left, right } => {
-            let left = eval_const(left, consts)?;
-            let right = eval_const(right, consts)?;
-            eval_const_binary(op, &left, &right)
+            let left = eval_const_typed(left, consts, evaluate)?;
+            let right = eval_const_typed(right, consts, evaluate)?;
+            let result_type = match op.as_str() {
+                "+" | "-" | "*" | "/" | "%" => {
+                    require_const_type(left.ty, ConstType::Int)?;
+                    require_const_type(right.ty, ConstType::Int)?;
+                    ConstType::Int
+                }
+                "<" | "<=" | ">" | ">=" => {
+                    require_const_type(left.ty, ConstType::Int)?;
+                    require_const_type(right.ty, ConstType::Int)?;
+                    ConstType::Bool
+                }
+                "and" | "or" | "=>" => {
+                    require_const_type(left.ty, ConstType::Bool)?;
+                    require_const_type(right.ty, ConstType::Bool)?;
+                    ConstType::Bool
+                }
+                "==" | "!=" => {
+                    require_const_type(left.ty, right.ty)?;
+                    ConstType::Bool
+                }
+                _ => return Err(model_error(format!("unsupported constant operator '{op}'"))),
+            };
+            let value = left
+                .value
+                .zip(right.value)
+                .map(|(left, right)| eval_const_binary(op, &left, &right))
+                .transpose()?;
+            Ok(TypedConst {
+                ty: result_type,
+                value,
+            })
+        }
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            spans,
+        } => {
+            let condition = eval_const_typed(condition, consts, evaluate)
+                .map_err(|error| with_type_diagnostic_origin(error, spans.condition))?;
+            require_const_type(condition.ty, ConstType::Bool)
+                .map_err(|error| with_type_diagnostic_origin(error, spans.condition))?;
+            let selected = condition.value.as_ref().map(as_bool).transpose()?;
+            let then_expr = eval_const_typed(then_expr, consts, evaluate && selected == Some(true))
+                .map_err(|error| with_type_diagnostic_origin(error, spans.then_expr))?;
+            let else_expr =
+                eval_const_typed(else_expr, consts, evaluate && selected == Some(false))
+                    .map_err(|error| with_type_diagnostic_origin(error, spans.else_expr))?;
+            require_const_type(else_expr.ty, then_expr.ty)
+                .map_err(|error| with_type_diagnostic_origin(error, spans.else_expr))?;
+            Ok(TypedConst {
+                ty: then_expr.ty,
+                value: if selected == Some(true) {
+                    then_expr.value
+                } else {
+                    else_expr.value
+                },
+            })
         }
         Expr::BinaryNamed { name, left, right } if name == "min" || name == "max" => {
-            let left = as_int(&eval_const(left, consts)?)?;
-            let right = as_int(&eval_const(right, consts)?)?;
-            Ok(Value::Int(if name == "min" {
-                left.min(right)
-            } else {
-                left.max(right)
-            }))
+            let left = eval_const_typed(left, consts, evaluate)?;
+            let right = eval_const_typed(right, consts, evaluate)?;
+            require_const_type(left.ty, ConstType::Int)?;
+            require_const_type(right.ty, ConstType::Int)?;
+            let value = left
+                .value
+                .zip(right.value)
+                .map(|(left, right)| {
+                    let left = as_int(&left)?;
+                    let right = as_int(&right)?;
+                    Ok(Value::Int(if name == "min" {
+                        left.min(right)
+                    } else {
+                        left.max(right)
+                    }))
+                })
+                .transpose()?;
+            Ok(TypedConst {
+                ty: ConstType::Int,
+                value,
+            })
         }
-        Expr::UnaryNamed { name, expr, .. } if name == "abs" => Ok(Value::Int(
-            as_int(&eval_const(expr, consts)?)?
-                .checked_abs()
-                .ok_or_else(|| model_error("integer overflow in abs"))?,
-        )),
+        Expr::UnaryNamed { name, expr, .. } if name == "abs" => {
+            let value = eval_const_typed(expr, consts, evaluate)?;
+            require_const_type(value.ty, ConstType::Int)?;
+            let value = value
+                .value
+                .map(|value| {
+                    as_int(&value)?
+                        .checked_abs()
+                        .map(Value::Int)
+                        .ok_or_else(|| model_error("integer overflow in abs"))
+                })
+                .transpose()?;
+            Ok(TypedConst {
+                ty: ConstType::Int,
+                value,
+            })
+        }
         _ => Err(model_error("expression is not constant")),
     }
 }

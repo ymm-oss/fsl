@@ -56,6 +56,14 @@ impl PublicKernelVersion {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublicKernelError {
     pub message: String,
+    pub span: Option<Span>,
+}
+
+impl PublicKernelError {
+    fn with_span(mut self, span: Span) -> Self {
+        self.span.get_or_insert(span);
+        self
+    }
 }
 
 impl fmt::Display for PublicKernelError {
@@ -69,6 +77,7 @@ impl std::error::Error for PublicKernelError {}
 fn error(message: impl Into<String>) -> PublicKernelError {
     PublicKernelError {
         message: message.into(),
+        span: None,
     }
 }
 
@@ -80,6 +89,18 @@ fn span_json(path: &str, span: Span) -> Value {
         "end_line": span.end.line,
         "end_column": span.end.column,
     })
+}
+
+fn unknown_span() -> Span {
+    let position = SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
+    Span {
+        start: position,
+        end: position,
+    }
 }
 
 fn statement_span(statement: &Statement) -> Span {
@@ -143,6 +164,24 @@ fn base_env(model: &KernelModel) -> TypeEnv {
     env
 }
 
+pub(crate) fn validate_expression_type(
+    expr: &Expr,
+    expected: &TypeRef,
+    bindings: &[(String, TypeRef)],
+    model: &KernelModel,
+) -> Result<(), PublicKernelError> {
+    let mut env = base_env(model);
+    env.extend(bindings.iter().cloned());
+    expr_json(expr, &env, model, "", unknown_span(), Some(expected)).map(|_| ())
+}
+
+pub(crate) fn expression_binder_type(
+    binder: &Binder,
+    model: &KernelModel,
+) -> Result<TypeRef, PublicKernelError> {
+    binder_type(binder, &base_env(model), model)
+}
+
 fn qualified_name(name: &fsl_syntax::QualifiedName) -> Result<String, PublicKernelError> {
     if name.namespace.is_some() {
         return Err(error(
@@ -160,8 +199,8 @@ fn binder_type(
     match binder {
         Binder::Typed { type_name, .. } => Ok(TypeRef::Named(qualified_name(type_name)?)),
         Binder::Range { lo, hi, .. } => {
-            ensure_assignable(lo, &TypeRef::Int, env, model)?;
-            ensure_assignable(hi, &TypeRef::Int, env, model)?;
+            ensure_assignable(lo, &TypeRef::Int, env, model, unknown_span())?;
+            ensure_assignable(hi, &TypeRef::Int, env, model, unknown_span())?;
             match (lo.as_ref(), hi.as_ref()) {
                 (Expr::Num(lo), Expr::Num(hi)) => Ok(TypeRef::Range(*lo, *hi)),
                 _ => Ok(TypeRef::Int),
@@ -283,7 +322,7 @@ fn infer_type(
         Expr::Not(_) | Expr::Is { .. } | Expr::Quantified { .. } | Expr::BinderNamed { .. } => {
             Ok(TypeRef::Bool)
         }
-        Expr::IfThenElse { then_expr, .. } => infer_type(then_expr, env, model, expected),
+        Expr::Conditional { then_expr, .. } => infer_type(then_expr, env, model, expected),
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
             "old" => infer_type(expr, env, model, expected),
             "abs" => Ok(TypeRef::Int),
@@ -331,41 +370,45 @@ fn ensure_assignable(
     expected: &TypeRef,
     env: &TypeEnv,
     model: &KernelModel,
+    span: Span,
 ) -> Result<(), PublicKernelError> {
-    let resolved = resolve(model, expected)?;
+    let resolved = resolve(model, expected).map_err(|error| error.with_span(span))?;
     match (expr, &resolved) {
         (Expr::None, TypeRef::Option(_)) => return Ok(()),
         (Expr::Some(item), TypeRef::Option(expected_item)) => {
-            return ensure_assignable(item, expected_item, env, model);
+            return ensure_assignable(item, expected_item, env, model, span);
         }
         (Expr::Set(items), TypeRef::Set(expected_item))
         | (Expr::Seq(items), TypeRef::Seq(expected_item, _)) => {
             for item in items {
-                ensure_assignable(item, expected_item, env, model)?;
+                ensure_assignable(item, expected_item, env, model, span)?;
             }
             return Ok(());
         }
         (
-            Expr::IfThenElse {
+            Expr::Conditional {
+                condition,
                 then_expr,
                 else_expr,
-                ..
+                spans,
             },
             _,
         ) => {
-            ensure_assignable(then_expr, expected, env, model)?;
-            ensure_assignable(else_expr, expected, env, model)?;
+            ensure_assignable(condition, &TypeRef::Bool, env, model, spans.condition)?;
+            ensure_assignable(then_expr, expected, env, model, spans.then_expr)?;
+            ensure_assignable(else_expr, expected, env, model, spans.else_expr)?;
             return Ok(());
         }
         _ => {}
     }
-    let actual = infer_type(expr, env, model, None)?;
-    if types_compatible(&actual, expected, model)? {
+    let actual = infer_type(expr, env, model, None).map_err(|error| error.with_span(span))?;
+    if types_compatible(&actual, expected, model).map_err(|error| error.with_span(span))? {
         Ok(())
     } else {
         Err(error(format!(
             "expression of type {actual:?} is not assignable to {expected:?}"
-        )))
+        ))
+        .with_span(span))
     }
 }
 
@@ -467,13 +510,14 @@ fn expr_json(
     span: Span,
     expected: Option<&TypeRef>,
 ) -> Result<Value, PublicKernelError> {
-    let ty = infer_type(expr, env, model, expected)?;
+    let ty = infer_type(expr, env, model, expected).map_err(|error| error.with_span(span))?;
     if let Some(expected) = expected
-        && !types_compatible(&ty, expected, model)?
+        && !types_compatible(&ty, expected, model).map_err(|error| error.with_span(span))?
     {
         return Err(error(format!(
             "expression of type {ty:?} is not assignable to {expected:?}"
-        )));
+        ))
+        .with_span(span));
     }
     let mut output = Map::from_iter([
         ("kind".to_owned(), Value::String("unknown".to_owned())),
@@ -638,23 +682,31 @@ fn expr_json(
                 expr_json(operand, env, model, path, span, None)?,
             );
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            spans,
         } => {
             output.insert("kind".to_owned(), json!("ite"));
             output.insert(
                 "condition".to_owned(),
-                expr_json(condition, env, model, path, span, Some(&TypeRef::Bool))?,
+                expr_json(
+                    condition,
+                    env,
+                    model,
+                    path,
+                    spans.condition,
+                    Some(&TypeRef::Bool),
+                )?,
             );
             output.insert(
                 "then".to_owned(),
-                expr_json(then_expr, env, model, path, span, Some(&ty))?,
+                expr_json(then_expr, env, model, path, spans.then_expr, Some(&ty))?,
             );
             output.insert(
                 "else".to_owned(),
-                expr_json(else_expr, env, model, path, span, Some(&ty))?,
+                expr_json(else_expr, env, model, path, spans.else_expr, Some(&ty))?,
             );
         }
         Expr::Is { expr, pattern } => {
@@ -861,7 +913,7 @@ fn statement_json(
             span,
         } => {
             let ty = lvalue_type(target, env, model)?;
-            ensure_assignable(value, &ty, env, model)?;
+            ensure_assignable(value, &ty, env, model, *span)?;
             Ok(json!({
                 "kind":"assign","type":{"kind":"statement"},"span":span_json(path,*span),
                 "target":lvalue_json(target,env,model,path,*span)?,
@@ -1078,6 +1130,7 @@ fn walk_partial(
     model: &KernelModel,
     path: &str,
     span: Span,
+    path_condition: Option<&Expr>,
     output: &mut Vec<Value>,
 ) -> Result<(), PublicKernelError> {
     if let Expr::Method {
@@ -1113,6 +1166,7 @@ fn walk_partial(
                 right: Box::new(Expr::Num(0)),
             }
         };
+        let failure = guard_failure(failure, path_condition);
         output.push(json!({
             "operation":name,
             "failure_condition":expr_json(&failure,env,model,path,span,Some(&TypeRef::Bool))?,
@@ -1144,6 +1198,7 @@ fn walk_partial(
                 right: Box::new(size),
             }),
         };
+        let failure = guard_failure(failure, path_condition);
         output.push(json!({
             "operation":"index",
             "failure_condition":expr_json(&failure,env,model,path,span,Some(&TypeRef::Bool))?,
@@ -1159,12 +1214,27 @@ fn walk_partial(
             left: right.clone(),
             right: Box::new(Expr::Num(0)),
         };
+        let failure = guard_failure(failure, path_condition);
         output.push(json!({
             "operation":if op == "/" {"divide"} else {"remainder"},
             "failure_condition":expr_json(&failure,env,model,path,span,Some(&TypeRef::Bool))?,
             "state_effect_on_failure":"rollback",
             "span":span_json(path,span),
         }));
+    }
+    if let Expr::Conditional {
+        condition,
+        then_expr,
+        else_expr,
+        ..
+    } = expr
+    {
+        walk_partial(condition, env, model, path, span, path_condition, output)?;
+        let then_path = extend_path_condition(path_condition, condition.as_ref(), false);
+        walk_partial(then_expr, env, model, path, span, Some(&then_path), output)?;
+        let else_path = extend_path_condition(path_condition, condition.as_ref(), true);
+        walk_partial(else_expr, env, model, path, span, Some(&else_path), output)?;
+        return Ok(());
     }
     let mut children: Vec<&Expr> = Vec::new();
     match expr {
@@ -1182,11 +1252,7 @@ fn walk_partial(
             children.push(receiver);
             children.extend(args);
         }
-        Expr::IfThenElse {
-            condition,
-            then_expr,
-            else_expr,
-        } => children.extend([condition.as_ref(), then_expr.as_ref(), else_expr.as_ref()]),
+        Expr::Conditional { .. } => unreachable!("handled above"),
         Expr::Is { expr, .. } => children.push(expr),
         Expr::Quantified { body, .. } => children.push(body),
         Expr::Count { condition, .. } => children.push(condition),
@@ -1212,9 +1278,33 @@ fn walk_partial(
         | Expr::BinderNamed { .. } => {}
     }
     for child in children {
-        walk_partial(child, env, model, path, span, output)?;
+        walk_partial(child, env, model, path, span, path_condition, output)?;
     }
     Ok(())
+}
+
+fn guard_failure(failure: Expr, path_condition: Option<&Expr>) -> Expr {
+    match path_condition {
+        Some(condition) => Expr::Binary {
+            op: "and".to_owned(),
+            left: Box::new(condition.clone()),
+            right: Box::new(failure),
+        },
+        None => failure,
+    }
+}
+
+fn extend_path_condition(path: Option<&Expr>, condition: &Expr, negated: bool) -> Expr {
+    let condition = if negated {
+        Expr::Not(Box::new(condition.clone()))
+    } else {
+        condition.clone()
+    };
+    path.map_or(condition.clone(), |path| Expr::Binary {
+        op: "and".to_owned(),
+        left: Box::new(path.clone()),
+        right: Box::new(condition),
+    })
 }
 
 fn statement_partial(
@@ -1226,7 +1316,7 @@ fn statement_partial(
 ) -> Result<(), PublicKernelError> {
     match statement {
         Statement::Assign { value, span, .. } => {
-            walk_partial(value, env, model, path, *span, output)?;
+            walk_partial(value, env, model, path, *span, None, output)?;
         }
         Statement::If {
             condition,
@@ -1234,7 +1324,7 @@ fn statement_partial(
             else_statements,
             span,
         } => {
-            walk_partial(condition, env, model, path, *span, output)?;
+            walk_partial(condition, env, model, path, *span, None, output)?;
             for item in then_statements.iter().chain(else_statements) {
                 statement_partial(item, env, model, path, output)?;
             }
@@ -1680,6 +1770,7 @@ pub fn public_kernel_contract(
                             model,
                             source_path,
                             span,
+                            None,
                             &mut partial,
                         )?;
                         requires.push(value.clone());
@@ -1701,6 +1792,7 @@ pub fn public_kernel_contract(
                             model,
                             source_path,
                             action.span,
+                            None,
                             &mut partial,
                         )?;
                         let ty = infer_type(expression, &local, model, None)?;
@@ -1737,6 +1829,7 @@ pub fn public_kernel_contract(
                     model,
                     source_path,
                     action.span,
+                    None,
                     &mut partial,
                 )?;
             }
@@ -1920,5 +2013,27 @@ mod tests {
         let error = build_model(kernel).expect_err("mismatched Option payloads must fail check");
 
         assert!(error.message.contains("is not assignable"));
+    }
+
+    #[test]
+    fn conditional_partial_operation_is_guarded_by_its_branch() {
+        let source = "spec S { type N = 0..1 state { x: N, gate: Bool } init { x = 0 gate = true } action choose() { x = if gate then 1 else 1 / 0 } invariant I { true } }";
+        let kernel = parse_direct_kernel_spec(source).expect("parse");
+        let model = build_model(kernel.clone()).expect("model");
+        let contract =
+            public_kernel_contract(&kernel, &model, "s.fsl", "kernel").expect("contract");
+        let partial = &contract["actions"][0]["partial_operations"][0];
+        let value = &contract["actions"][0]["updates"][0]["value"];
+
+        assert_eq!(value["kind"], "ite");
+        assert_eq!(value["condition"]["name"], "gate");
+        assert_eq!(partial["operation"], "divide");
+        assert_eq!(partial["failure_condition"]["kind"], "binary");
+        assert_eq!(partial["failure_condition"]["operator"], "and");
+        assert_eq!(partial["failure_condition"]["left"]["kind"], "not");
+        assert_eq!(
+            partial["failure_condition"]["left"]["operand"]["name"],
+            "gate"
+        );
     }
 }

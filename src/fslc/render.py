@@ -111,7 +111,7 @@ def _expr_prec(expr):
         return _PREC_IS
     if tag == "neg":
         return _PREC_NEG
-    if tag in ("forall", "exists"):
+    if tag in ("ite", "forall", "exists"):
         return _PREC_QUANT
     return _PREC_ATOM
 

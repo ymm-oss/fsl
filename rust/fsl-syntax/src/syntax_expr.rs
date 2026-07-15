@@ -149,7 +149,7 @@ pub enum SyntaxExprKind {
     Neg(Box<SyntaxExpr>),
     Not(Box<SyntaxExpr>),
     Group(Box<SyntaxExpr>),
-    IfThenElse {
+    Conditional {
         condition: Box<SyntaxExpr>,
         then_expr: Box<SyntaxExpr>,
         else_expr: Box<SyntaxExpr>,
@@ -254,7 +254,7 @@ impl SyntaxExpr {
             SyntaxExprKind::Neg(value) => format!("-{}", value.render_source()),
             SyntaxExprKind::Not(value) => format!("not {}", value.render_source()),
             SyntaxExprKind::Group(value) => format!("({})", value.render_source()),
-            SyntaxExprKind::IfThenElse {
+            SyntaxExprKind::Conditional {
                 condition,
                 then_expr,
                 else_expr,
@@ -396,11 +396,16 @@ impl SyntaxExpr {
             SyntaxExprKind::Neg(value) => Expr::Neg(Box::new(value.into_kernel()?)),
             SyntaxExprKind::Not(value) => Expr::Not(Box::new(value.into_kernel()?)),
             SyntaxExprKind::Group(value) => value.into_kernel()?,
-            SyntaxExprKind::IfThenElse {
+            SyntaxExprKind::Conditional {
                 condition,
                 then_expr,
                 else_expr,
-            } => Expr::IfThenElse {
+            } => Expr::Conditional {
+                spans: Box::new(crate::ConditionalSpans {
+                    condition: condition.span,
+                    then_expr: then_expr.span,
+                    else_expr: else_expr.span,
+                }),
                 condition: Box::new(condition.into_kernel()?),
                 then_expr: Box::new(then_expr.into_kernel()?),
                 else_expr: Box::new(else_expr.into_kernel()?),
@@ -785,6 +790,22 @@ impl SyntaxParser<'_> {
     }
 
     fn prefix(&mut self) -> Result<SyntaxExpr, ParseError> {
+        if self.eat_ident("if") {
+            let start = self.previous_span();
+            let condition = self.expression(0)?;
+            self.expect_ident_value("then")?;
+            let then_expr = self.expression(0)?;
+            self.expect_ident_value("else")?;
+            let else_expr = self.expression(0)?;
+            return Ok(SyntaxExpr {
+                span: join(start, else_expr.span),
+                kind: SyntaxExprKind::Conditional {
+                    condition: Box::new(condition),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                },
+            });
+        }
         if self.peek_ident("forall") || self.peek_ident("exists") {
             let start = self.peek().span;
             let quantifier = self.expect_ident()?;

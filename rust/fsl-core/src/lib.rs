@@ -1051,11 +1051,13 @@ impl PredicateExpander {
             },
             Expr::Neg(expr) => Expr::Neg(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Not(expr) => Expr::Not(Box::new(self.expand_expr(*expr, stack)?)),
-            Expr::IfThenElse {
+            Expr::Conditional {
                 condition,
                 then_expr,
                 else_expr,
-            } => Expr::IfThenElse {
+                spans,
+            } => Expr::Conditional {
+                spans,
                 condition: Box::new(self.expand_expr(*condition, stack)?),
                 then_expr: Box::new(self.expand_expr(*then_expr, stack)?),
                 else_expr: Box::new(self.expand_expr(*else_expr, stack)?),
@@ -1172,10 +1174,11 @@ fn visit_expr_children(
                 visitor(arg)?;
             }
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             visitor(condition)?;
             visitor(then_expr)?;
@@ -1361,11 +1364,13 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
         },
         Expr::Neg(expr) => Expr::Neg(Box::new(substitute(*expr, replacements))),
         Expr::Not(expr) => Expr::Not(Box::new(substitute(*expr, replacements))),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
-        } => Expr::IfThenElse {
+            spans,
+        } => Expr::Conditional {
+            spans,
             condition: Box::new(substitute(*condition, replacements)),
             then_expr: Box::new(substitute(*then_expr, replacements)),
             else_expr: Box::new(substitute(*else_expr, replacements)),

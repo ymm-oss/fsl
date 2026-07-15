@@ -3,7 +3,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from lark.exceptions import UnexpectedInput
 
 from fslc import parse, build_spec, FslError
 from fslc.cli import run_refine, exit_code
@@ -255,15 +254,21 @@ def test_seat_conditional_map_type_mismatch_is_type_error(tmp_path):
     assert exit_code(r) == 2
 
 
-def test_ite_syntax_is_not_allowed_in_normal_specs():
+def test_ite_syntax_is_shared_with_normal_specs():
     src = """
-spec BadIte {
+spec GeneralIte {
   state { x: Int }
   init { x = if true then 1 else 0 }
+  action stay() { x = x }
 }
 """
-    with pytest.raises(UnexpectedInput):
-        parse(src)
+    spec = build_spec(parse(src))
+    assert spec["init"][0][2] == (
+        "ite",
+        ("bool", True),
+        ("num", 1),
+        ("num", 0),
+    )
 
 
 def test_stutter_violation_when_reserve_changes_abs_stock(tmp_path):

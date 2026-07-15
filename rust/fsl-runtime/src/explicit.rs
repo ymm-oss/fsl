@@ -746,10 +746,11 @@ fn collect_state_references(
                 collect_state_references(argument, state_names, output);
             }
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             collect_state_references(condition, state_names, output);
             collect_state_references(then_expr, state_names, output);

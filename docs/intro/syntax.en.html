@@ -311,10 +311,11 @@ requires stock[i] &gt; 0</code></pre>
         <p>Always guard <code>at(i)</code> with a range condition.</p>
       </div>
       <div class="syntax-card">
-        <h3>Mapping-only conditional</h3>
-        <pre><code>map holder[s: SeatId] =
-  if slots[s].st == Sold then slots[s].buyer else none</code></pre>
-        <p><code>if c then a else b</code> is allowed in refinement mapping expressions.</p>
+        <h3>Conditional expression</h3>
+        <pre><code>invariant EffectiveLimit {
+  limit == if premium then PREMIUM_LIMIT else STANDARD_LIMIT
+}</code></pre>
+        <p><code>if c then a else b</code> is allowed anywhere an expression is accepted. Both branches have one type; only the selected branch is evaluated.</p>
       </div>
     </div>
   </div>

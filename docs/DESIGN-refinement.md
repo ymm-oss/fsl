@@ -211,10 +211,10 @@ expression bug).
   range but with a different value is reported as before as an
   init-correspondence violation (`abs_state_mismatch`).
 
-## 2.5 Conditional Expressions in Mapping Expressions (v2.2 — Resolving DOGFOOD-3 F9)
+## 2.5 Shared Conditional Expressions (v2.7 — issue #245)
 
-**Only in the expressions of the mapping file** is a conditional expression
-allowed:
+Refinement mappings use the same conditional expression as every other FSL
+expression context:
 
 ```fsl
 refinement SeatImplRefinesBooking {
@@ -232,10 +232,9 @@ refinement SeatImplRefinesBooking {
 }
 ```
 
-- Syntax: `if <expr> then <expr> else <expr>` (else required; nesting allowed.
-  `then`/`else` are keywords only inside the mapping-expression grammar). It
-  **cannot be used in ordinary .fsl spec files** (grammatically, it appears only
-  in expressions inside refinement).
+- Syntax: `if <expr> then <expr> else <expr>` (else required; nesting is
+  right-associative). The shared parser accepts it in ordinary specs,
+  refinements, requirements, and lowered domain expressions.
 - Typing rule: both arms of then/else are the same logical type. Option vs
   Option (including none), enum vs enum, Int/domain vs Int/domain, Bool vs Bool,
   struct vs struct are allowed. A type mismatch is `kind: "type"` at check time.
@@ -244,13 +243,15 @@ refinement SeatImplRefinesBooking {
   per field (the same convention as the existing merge of an if statement). The
   value of a none arm is don't care (a free variable is fine — if present is
   false it is not read).
-- Allowed positions: the right-hand side of `map`, and the argument expressions
-  of `action ... -> b(<expr list>)`.
-- An AST node `("ite", c, a, b)` is added to eval_expr (a general-purpose
-  implementation), but it is not generated from the body-spec grammar. If in the
-  future this is opened to general expressions, additional design such as the
-  path condition of partial_op would be needed, so it is not opened in this
-  release (this limitation is also stated in LANGUAGE.md).
+- The surface and Kernel AST use one `Conditional` node. Refinement no longer
+  has a separate expression parser.
+- Concrete evaluation executes only the selected branch. Static name/type
+  checking visits both branches. Symbolic evaluation uses one typed `ite`.
+- A partial operation in a branch is guarded by that branch's path condition,
+  so an unselected division, remainder, or sequence operation cannot fail.
+- Public Kernel JSON continues to use the existing `kind: "ite"` node. Because
+  the node and its semantics already existed in both v1 and v2 schemas, this
+  change does not alter either schema version.
 
 ## 3. CLI / JSON
 

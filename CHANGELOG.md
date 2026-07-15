@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Conditional expressions (`if condition then a else b`) are now accepted in
+  every expression context. The shared parser replaces the refinement-only
+  path; concrete, explicit, symbolic, analysis, mutation, formatter, LSP, and
+  Public Kernel paths use one node, and partial operations are evaluated only
+  on the selected branch (issue #245).
 - `Option<T>` now supports structural `==` / `!=` between complete Option
   values, including `some(expr)`. Concrete and symbolic evaluation compare the
   presence tag first and ignore the payload when absent; `is some(binding)`

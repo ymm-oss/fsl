@@ -125,6 +125,12 @@
       "result": "error"
     }
   },
+  "examples/conditional_expressions.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/consulting/asis_expense.fsl": {
     "check": {
       "result": "ok",

@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ConditionalConstTypeError {
+  const Limit = if true then 1 else Missing
+  type N = 0..Limit
+  state { x: N }
+  init { x = 0 }
+  action stay() { x = x }
+  invariant Safe { true }
+}
