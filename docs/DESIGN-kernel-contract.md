@@ -282,8 +282,11 @@ reject an unsupported major. Objects marked `additionalProperties:false` are
 closed in v1; adding fields there is a major change. Existing fields keep
 their meaning for the whole major line. Deprecations remain emitted for at least
 two minor releases and are documented before removal in the next major.
-Conformance vectors and testgen traces have their own versions and record the
-Kernel schema version they exercise. A schema change requires coupled updates to the schemas,
+Conformance vectors, testgen traces, and public replay traces have their own
+versions and record the Kernel schema version they exercise. Replay-trace v1 is
+shared by Kernel v1/v2 because v2 adds provenance without changing execution
+values; its complete tick/state contract is defined by
+[`DESIGN-replay-trace.md`](DESIGN-replay-trace.md). A schema change requires coupled updates to the schemas,
 golden vectors, Rust tests, this document, `docs/LANGUAGE.md`, the shared skill,
 and `CHANGELOG.md`.
 
@@ -299,11 +302,12 @@ truthfully retained.
 
 Native releases attach independently checksummed `fsl-kernel-contract-v1` and
 `fsl-kernel-contract-v2` bundles. The v1 bundle contains only v1 artifacts and
-continues to contain all five v1 schemas (including the domain scaffold
+continues to contain all six v1 schemas (including the shared replay trace and domain scaffold
 metadata bridge), the comprehensive input fixture and
 its golden public Kernel JSON, the golden failure vectors, the golden
 conformance coverage matrix
-(JSON and Markdown), and this guide. Target-specific generators remain
+(JSON and Markdown), the replay positive/negative fixtures, and this guide. The
+v2 bundle carries the same replay schema and fixtures. Target-specific generators remain
 supported. General pytest, Vitest, Swift, Kotlin, Dart, and PHPUnit generators
 completed their Public Kernel v1 input migration in
 [#214](https://github.com/ymm-oss/fsl/issues/214); their shared adapter also

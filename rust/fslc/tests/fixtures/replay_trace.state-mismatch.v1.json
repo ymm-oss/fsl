@@ -1,0 +1,23 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
+  "schema_version": "1.0.0",
+  "kernel_schema_version": "2.0.0",
+  "spec": "ReplayTrace",
+  "initial": {
+    "count": {"0": 0, "1": 0},
+    "phase": "Idle",
+    "selected": null
+  },
+  "events": [
+    {
+      "tick": 1,
+      "action": "select",
+      "params": {"i": 0},
+      "state": {
+        "count": {"0": 0, "1": 0},
+        "phase": "Idle",
+        "selected": 0
+      }
+    }
+  ]
+}

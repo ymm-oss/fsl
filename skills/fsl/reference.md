@@ -851,6 +851,15 @@ fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifa
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
 
+Native generated-code replay uses `replay-trace.v1`: a closed root carrying
+trace and Kernel versions, exact spec identity, complete tick-0 `initial`, and
+events with exact Public Kernel `action`/`params`, canonical ticks `1..N`, and
+complete post-action `state`. Optional `timestamp` is opaque and ignored. Trace
+v1 accepts Kernel 1.0.0/2.0.0. Ill-shaped/incomplete input is exit 2; typed
+state divergence is exit 1 with leaf mismatches. Bare arrays/`{events}` are the
+unversioned action-only compatibility adapter; testgen/verifier traces are not
+replay input. See `docs/DESIGN-replay-trace.md`.
+
 Use native `fslc kernel` as the stable compiler boundary after dialect lowering
 and type checking. Do not consume the frozen Python AST JSON or reparse expression
 strings: every exported expression has a structural type and span, actions and

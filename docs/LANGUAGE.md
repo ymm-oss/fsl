@@ -1413,6 +1413,22 @@ fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # se
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 ```
 
+External compilers emit the native replay contract as a closed versioned JSON
+object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):
+
+```json
+{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.0.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
+```
+
+`initial` is the complete tick-0 state and every event has the exact Public
+Kernel action/parameter names plus its complete post-state. Ticks are exactly
+`1..N`. Optional non-empty `timestamp` is ignored opaque producer metadata, not
+formal time. Trace v1 accepts Kernel `1.0.0` and `2.0.0`. Malformed contracts
+fail as input errors; typed initial/post-state divergence is nonconformant with
+leaf mismatch evidence. Bare arrays and `{events:[...]}` remain the explicit
+unversioned action-only adapter. Testgen and verifier trace JSON are not replay
+input. See `docs/DESIGN-replay-trace.md`.
+
 The `--from-log` form reuses the exact refinement mapping grammar to translate
 external JSONL records into spec actions and logical state; it does not add a
 second mapping language. Each non-empty line is

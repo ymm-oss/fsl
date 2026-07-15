@@ -2661,45 +2661,69 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         Ok(data) => data,
         Err(error) => return (error_output("io", &format!("invalid JSON: {error}")), 2),
     };
-    let events = match data {
-        Value::Array(events) => events,
-        Value::Object(mut object) => match object.remove("events") {
-            Some(Value::Array(events)) => events,
-            _ => {
+    let trace = match fslc_rust::replay_trace::parse_replay_trace(data) {
+        Ok(trace) => trace,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+    let versioned = matches!(
+        trace.contract,
+        fslc_rust::replay_trace::ReplayTraceContract::V1 { .. }
+    );
+    let (observed_initial, validated_events) = match &trace.contract {
+        fslc_rust::replay_trace::ReplayTraceContract::Legacy => (None, Vec::new()),
+        fslc_rust::replay_trace::ReplayTraceContract::V1 { spec, initial, .. } => {
+            if spec != &model.name {
                 return (
-                    error_output("io", "trace JSON must be an array or {\"events\": [...] }"),
+                    error_output(
+                        "io",
+                        &format!(
+                            "replay trace spec '{spec}' does not match checked spec '{}'",
+                            model.name
+                        ),
+                    ),
                     2,
                 );
             }
-        },
-        _ => {
-            return (
-                error_output("io", "trace JSON must be an array or {\"events\": [...] }"),
-                2,
-            );
+            let initial = match replay_snapshot_json(initial, &model) {
+                Ok(initial) => initial,
+                Err(error) => return (error_output("io", &error), 2),
+            };
+            let events = match validate_versioned_replay_events(&model, &trace.events) {
+                Ok(events) => events,
+                Err(error) => return (error_output("io", &error), 2),
+            };
+            (Some(initial), events)
         }
     };
     let mut monitor = match fsl_runtime::Monitor::new(model.clone()) {
         Ok(monitor) => monitor,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    for (index, event) in events.iter().enumerate() {
-        let Value::Object(event) = event else {
-            return (error_output("io", "trace event must be an object"), 2);
-        };
-        let Some(action_name) = event.get("action").and_then(Value::as_str) else {
-            return (error_output("io", "trace event requires string action"), 2);
-        };
-        let params = match event.get("params") {
-            None => Map::new(),
-            Some(Value::Object(params)) => params.clone(),
-            Some(_) => return (error_output("io", "trace params must be an object"), 2),
-        };
-        let Some(action) = model
-            .actions
-            .iter()
-            .find(|action| action.name == action_name || display(&action.name) == action_name)
-        else {
+    if let Some(observed) = observed_initial {
+        let expected = fslc_rust::state_json(&monitor.state);
+        let mismatches = json_mismatches(&expected, &observed, "");
+        if !mismatches.is_empty() {
+            return replay_failure_with_state(
+                &model,
+                None,
+                json!({
+                    "kind":"initial_state_mismatch",
+                    "tick":0,
+                    "expected_state":expected,
+                    "observed_state":observed,
+                    "mismatches":mismatches,
+                }),
+                expected,
+            );
+        }
+    }
+    for (index, event) in trace.events.iter().enumerate() {
+        let action_name = &event.action;
+        let params = &event.params;
+        let state_before = fslc_rust::state_json(&monitor.state);
+        let Some(action) = model.actions.iter().find(|action| {
+            action.name == *action_name || !versioned && display(&action.name) == *action_name
+        }) else {
             return replay_failure(
                 &model,
                 &monitor,
@@ -2712,20 +2736,27 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                 }),
             );
         };
-        let parsed = match parse_params(&model, action, &params) {
-            Ok(params) => params,
-            Err(message) => {
-                return replay_failure(
-                    &model,
-                    &monitor,
-                    index,
-                    json!({
-                        "kind": "bad_call",
-                        "message": message,
-                        "action": action_name,
-                        "params": params,
-                    }),
-                );
+        let parsed = if versioned {
+            validated_events[index]
+                .0
+                .clone()
+                .expect("known versioned action was validated")
+        } else {
+            match parse_params(&model, action, params) {
+                Ok(params) => params,
+                Err(message) => {
+                    return replay_failure(
+                        &model,
+                        &monitor,
+                        index,
+                        json!({
+                            "kind": "bad_call",
+                            "message": message,
+                            "action": action_name,
+                            "params": params,
+                        }),
+                    );
+                }
             }
         };
         let enabled = match monitor.enabled() {
@@ -2764,11 +2795,38 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                 }),
             );
         }
+        if let Some(state) = &event.state {
+            let observed = if versioned {
+                validated_events[index].1.clone()
+            } else {
+                match replay_snapshot_json(state, &model) {
+                    Ok(observed) => observed,
+                    Err(error) => return (error_output("io", &error), 2),
+                }
+            };
+            let expected = fslc_rust::state_json(&monitor.state);
+            let mismatches = json_mismatches(&expected, &observed, "");
+            if !mismatches.is_empty() {
+                return replay_failure_with_state(
+                    &model,
+                    Some(index),
+                    json!({
+                        "kind":"state_mismatch",
+                        "tick":event.tick,
+                        "action":action.name,
+                        "expected_state":expected,
+                        "observed_state":observed,
+                        "mismatches":mismatches,
+                    }),
+                    state_before,
+                );
+            }
+        }
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("conformant"));
     output.insert("spec".to_owned(), json!(model.name));
-    output.insert("steps_checked".to_owned(), json!(events.len()));
+    output.insert("steps_checked".to_owned(), json!(trace.events.len()));
     output.insert(
         "final_state".to_owned(),
         fslc_rust::state_json(&monitor.state),
@@ -2777,7 +2835,28 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         "note".to_owned(),
         json!("leadsTo properties are not checked by replay (finite logs only)"),
     );
+    if let fslc_rust::replay_trace::ReplayTraceContract::V1 {
+        kernel_schema_version,
+        ..
+    } = trace.contract
+    {
+        output.insert(
+            "trace_schema_version".to_owned(),
+            json!(fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION),
+        );
+        output.insert(
+            "kernel_schema_version".to_owned(),
+            json!(kernel_schema_version),
+        );
+    }
     (Value::Object(output), 0)
+}
+
+fn replay_snapshot_json(
+    snapshot: &Map<String, Value>,
+    model: &KernelModel,
+) -> Result<Value, String> {
+    load_snapshot_value_object(snapshot, model).map(|state| fslc_rust::state_json(&state))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -3247,18 +3326,33 @@ fn replay_failure(
     index: usize,
     violation: Value,
 ) -> (Value, i32) {
+    replay_failure_with_state(
+        model,
+        Some(index),
+        violation,
+        fslc_rust::state_json(&monitor.state),
+    )
+}
+
+fn replay_failure_with_state(
+    model: &KernelModel,
+    index: Option<usize>,
+    violation: Value,
+    state_before: Value,
+) -> (Value, i32) {
     let mut output = envelope();
     output.insert("result".to_owned(), json!("nonconformant"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("failed_at_event".to_owned(), json!(index));
     output.insert("violation".to_owned(), violation);
-    output.insert(
-        "state_before".to_owned(),
-        fslc_rust::state_json(&monitor.state),
-    );
+    output.insert("state_before".to_owned(), state_before);
     output.insert(
         "hint".to_owned(),
-        json!("the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)"),
+        json!(if index.is_none() {
+            "the implementation initial state does not match the specification init"
+        } else {
+            "the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)"
+        }),
     );
     output.insert(
         "note".to_owned(),
@@ -12420,6 +12514,70 @@ fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
             None => false,
         },
     }
+}
+
+type ValidatedReplayEvent = (Option<std::collections::BTreeMap<String, FslValue>>, Value);
+
+fn validate_versioned_replay_events(
+    model: &KernelModel,
+    events: &[fslc_rust::replay_trace::ReplayEvent],
+) -> Result<Vec<ValidatedReplayEvent>, String> {
+    events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let state = replay_snapshot_json(
+                event
+                    .state
+                    .as_ref()
+                    .expect("versioned replay event requires state"),
+                model,
+            )?;
+            let params = model
+                .actions
+                .iter()
+                .find(|action| action.name == event.action)
+                .map(|action| parse_versioned_params(model, action, &event.params, index))
+                .transpose()?;
+            Ok((params, state))
+        })
+        .collect()
+}
+
+fn parse_versioned_params(
+    model: &KernelModel,
+    action: &fsl_core::ActionDef,
+    values: &Map<String, Value>,
+    event_index: usize,
+) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
+    if values.len() != action.params.len() {
+        return Err(format!(
+            "event {event_index} parameter mismatch for action '{}'",
+            action.name
+        ));
+    }
+    action
+        .params
+        .iter()
+        .map(|param| {
+            let value = values.get(param.name()).ok_or_else(|| {
+                format!("event {event_index} missing parameter '{}'", param.name())
+            })?;
+            let ty = match param {
+                ParamDef::Typed { ty, .. } => ty.clone(),
+                ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+            };
+            Ok((
+                param.name().to_owned(),
+                snapshot_value(
+                    model,
+                    &ty,
+                    value,
+                    &format!("events[{event_index}].params.{}", param.name()),
+                )?,
+            ))
+        })
+        .collect()
 }
 
 fn parse_params(

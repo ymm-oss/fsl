@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ReplayTrace {
+  type Id = 0..1
+  enum Phase { Idle, Done }
+  state {
+    count: Map<Id, Int>,
+    phase: Phase,
+    selected: Option<Id>
+  }
+  init {
+    count[0] = 0
+    count[1] = 0
+    phase = Idle
+    selected = none
+  }
+  action select(i: Id) {
+    requires phase == Idle
+    count[i] = count[i] + 1
+    selected = some(i)
+  }
+  action finish() {
+    requires selected is some(i)
+    phase = Done
+  }
+  invariant Nonnegative { forall i: Id { count[i] >= 0 } }
+}

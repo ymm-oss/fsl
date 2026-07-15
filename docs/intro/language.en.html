@@ -1455,6 +1455,18 @@ fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 </code></pre>
+<p>External compilers emit the native replay contract as a closed versioned JSON
+object (<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>):</p>
+<pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.0.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}
+</code></pre>
+<p><code>initial</code> is the complete tick-0 state and every event has the exact Public
+Kernel action/parameter names plus its complete post-state. Ticks are exactly
+<code>1..N</code>. Optional non-empty <code>timestamp</code> is ignored opaque producer metadata, not
+formal time. Trace v1 accepts Kernel <code>1.0.0</code> and <code>2.0.0</code>. Malformed contracts
+fail as input errors; typed initial/post-state divergence is nonconformant with
+leaf mismatch evidence. Bare arrays and <code>{events:[...]}</code> remain the explicit
+unversioned action-only adapter. Testgen and verifier trace JSON are not replay
+input. See <code>docs/DESIGN-replay-trace.md</code>.</p>
 <p>The <code>--from-log</code> form reuses the exact refinement mapping grammar to translate
 external JSONL records into spec actions and logical state; it does not add a
 second mapping language. Each non-empty line is

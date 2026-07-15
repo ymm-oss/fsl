@@ -118,6 +118,10 @@ Input (the assumed shape of the log the real system emits — the same shape as 
 ```
 
 A JSON whose top level is just an array (`[ {...}, ... ]`) is also accepted.
+These two shapes are the explicit unversioned compatibility adapter. External
+compilers use the closed, versioned, complete-state contract in
+[`DESIGN-replay-trace.md`](DESIGN-replay-trace.md); `testgen-trace.v1` below is
+a distinct generated-test oracle and is not accepted as replay input.
 
 Output:
 
