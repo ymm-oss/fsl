@@ -152,7 +152,10 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    separately). An empty body auto-generates identity maps when process/action/
    stage names match. `maps auto` is allowed for same-name kernel-wrapper
    state/actions, explicit maps override it, and auto-mapped process transitions
-   are statically actor-checked. The refine-violation JSON passes through the
+   are statically actor-checked. Explicit `implements` items, action/branch
+   `maps`, and implicit identity/stutter mappings all lower to the shared typed
+   action-correspondence IR; there is no dialect-specific action validator. The
+   refine-violation JSON passes through the
    `requirement` of the impl action involved (extension of §1.2).
 8. `acceptance <ID> "<text>" { <action call>...  expect <expr> }` and
    `expect <Entity> <id> in <Stage>` →

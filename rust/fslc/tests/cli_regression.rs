@@ -70,6 +70,29 @@ fn native_check_and_verify_share_the_core_duplicate_write_gate() {
 }
 
 #[test]
+fn native_check_and_verify_reject_duplicate_correspondence_origins() {
+    let fixture = "rust/fslc/tests/fixtures/action_correspondence_duplicate.fsl";
+
+    for args in [
+        vec!["check", fixture],
+        vec!["verify", fixture, "--no-cache"],
+    ] {
+        let command = args[0];
+        let (value, status) = run_cli(&args);
+        assert_eq!(status, 2, "{command}: {value}");
+        assert_eq!(value["result"], "error", "{command}");
+        assert_eq!(value["kind"], "type", "{command}");
+        let message = value["message"].as_str().expect("diagnostic message");
+        assert!(message.contains("implements_block"), "{command}: {message}");
+        assert!(
+            message.contains("inline_maps_clause"),
+            "{command}: {message}"
+        );
+        assert_eq!(message.matches(" at ").count(), 2, "{command}: {message}");
+    }
+}
+
+#[test]
 fn native_cli_preserves_bmc_outcomes() {
     let (verified, status) = run_cli(&[
         "verify",

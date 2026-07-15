@@ -15,8 +15,9 @@ use serde_json::Value;
 
 pub use fsl_syntax::{
     Annotation, AnnotationError, AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue,
-    Annotations, Binder as KernelBinder, Expr as KernelExpr, LValue as KernelLValue, Pattern,
-    QualifiedName, RequirementLink, Statement as KernelStatement, SymbolPath,
+    Annotations, Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr,
+    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Statement as KernelStatement,
+    SymbolPath,
 };
 
 mod compose;
@@ -61,8 +62,8 @@ pub use public_kernel::{
     public_kernel_contract, public_kernel_contract_for_version,
 };
 pub use refinement::{
-    ActionMap, ActionMapTarget, ImplementsContract, ProgressMap, Refinement, RefinementError,
-    StateMap, parse_refinement, requirements_implements,
+    ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
+    Refinement, RefinementError, StateMap, parse_refinement, requirements_implements,
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{

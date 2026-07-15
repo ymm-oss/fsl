@@ -225,6 +225,26 @@ pub enum ActionTarget {
     Action(String, Vec<Expr>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CorrespondenceOrigin {
+    InlineMapsClause,
+    ImplementsBlock,
+    RefinementFile,
+    Auto,
+}
+
+impl CorrespondenceOrigin {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InlineMapsClause => "inline_maps_clause",
+            Self::ImplementsBlock => "implements_block",
+            Self::RefinementFile => "refinement_file",
+            Self::Auto => "auto",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RefinementItem {
     Impl(String),
@@ -240,6 +260,7 @@ pub enum RefinementItem {
         name: String,
         params: Vec<RefinementParam>,
         target: ActionTarget,
+        origin: CorrespondenceOrigin,
         span: Span,
     },
     PreserveProgress {
@@ -1038,6 +1059,7 @@ impl RefinementItem {
                 name,
                 params,
                 target,
+                origin: _,
                 span,
             } => json!([
                 "action_map",

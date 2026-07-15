@@ -48,14 +48,14 @@ pub use lexer::{LexError, Token, TokenKind, lex};
 pub use parser::{ParseError, parse_expr, parse_surface_document, parse_surface_spec};
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
-    BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, GovernanceArtifactRef,
-    GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param,
-    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementBranch, RequirementsItem, SpecItem, StateField, Statement,
-    SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance,
-    SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr,
-    VerifyItem,
+    BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, CorrespondenceOrigin,
+    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
+    MapsClause, MetaTag, Param, PreservationItem, ProcessCover, ProcessField, ProcessFields,
+    ProcessItem, ProcessTransition, RefinementItem, RefinementParam, RequirementAction,
+    RequirementActionItem, RequirementBlockItem, RequirementBranch, RequirementsItem, SpecItem,
+    StateField, Statement, SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
+    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
+    TimeItem, TypeExpr, VerifyItem,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use fsl_core::{
-    ActionDef, ActionGuard, ActionMapTarget, FslValue as Value, KernelBinder as Binder,
+    ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value, KernelBinder as Binder,
     KernelExpr as Expr, KernelLValue as LValue, KernelModel, KernelStatement as Statement,
     ModelError, ParamDef, Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
     display_name, insert_requirement_metadata, model_warnings, state_summary,
@@ -1295,12 +1295,12 @@ pub fn check_refinement(
         &eval_model,
     )?;
     let action_map = mapping
-        .action_maps
+        .action_correspondences
         .iter()
         .map(|(name, mapping)| {
             let target = match &mapping.target {
-                ActionMapTarget::Stutter => "stutter".to_owned(),
-                ActionMapTarget::Action { name, .. } => name.clone(),
+                ActionCorrespondenceTarget::Stutter => "stutter".to_owned(),
+                ActionCorrespondenceTarget::Action { action, .. } => action.0.clone(),
             };
             (name.clone(), target)
         })
@@ -1419,9 +1419,9 @@ pub fn check_refinement(
                 mapping,
                 &eval_model,
             )?;
-            let action_map = &mapping.action_maps[&enabled.action];
+            let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
-                ActionMapTarget::Stutter => {
+                ActionCorrespondenceTarget::Stutter => {
                     if alpha_before != alpha_after {
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
@@ -1435,7 +1435,8 @@ pub fn check_refinement(
                         return Ok(check);
                     }
                 }
-                ActionMapTarget::Action { name, args } => {
+                ActionCorrespondenceTarget::Action { action, args } => {
+                    let name = &action.0;
                     let abs_action = abstraction
                         .actions
                         .iter()

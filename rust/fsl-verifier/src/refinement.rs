@@ -87,7 +87,16 @@ pub async fn check_refinement_progress<S: SmtSolver>(
     let checked = mapping
         .progress
         .iter()
-        .map(|declaration| (declaration.leads_to.clone(), declaration.actions.clone()))
+        .map(|declaration| {
+            (
+                declaration.leads_to.clone(),
+                declaration
+                    .actions
+                    .iter()
+                    .map(|action| action.0.clone())
+                    .collect(),
+            )
+        })
         .collect();
     Ok(ProgressCheck {
         violation: result.leadsto_violation,

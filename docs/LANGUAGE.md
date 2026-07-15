@@ -1126,6 +1126,13 @@ refinement CartImplRefinesCart {
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
 
+All four authoring routes—standalone `action`, inline `implements` action,
+requirement-action `maps`, and auto/identity synthesis—resolve to the same typed
+action-correspondence IR. The common validation checks impl identity and typed
+parameters, target identity/arity, argument expressions, and auto-mapped actor
+compatibility. A duplicate diagnostic names both origin kinds and source
+locations; explicit entries still take precedence over auto synthesis.
+
 Refinement maps and action arguments use the same expression grammar and type
 rules as ordinary specs, including `if <condition> then <expr> else <expr>`.
 Both branches are name- and type-checked even when the condition is constant.
@@ -1559,8 +1566,9 @@ verify {
   `maps <abs_act>(...)` clause on the requirement-level action; `maps auto`
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
   An impl action with both a `maps` clause and a matching inline `action ...`
-  item is a duplicate-correspondence, `kind: "type"` check-time error (same as
-  a mapping file that lists the same action twice). Auto-mapped process
+  item is a duplicate-correspondence, `kind: "type"` check-time error naming
+  both origins and locations (same as a mapping file that lists the same action
+  twice). Auto-mapped process
   transitions are actor-checked; a transition whose actor differs from the
   business action's actor is a check-time error.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
@@ -2176,8 +2184,10 @@ DESIGN-*.md).
   directories in batch mode;
   directories are expanded recursively for `*.fsl` and sorted deterministically.
   Standalone refinement mappings can be viewed with `--projection
-  refinement_graph`; project manifests can be viewed with `--projection
-  traceability_graph`. `--format dot` and `--format mermaid` export graph-shaped
+  refinement_graph`; this is an unresolved structural view because the command
+  has no impl/abs model paths. Project manifests can be viewed with `--projection
+  traceability_graph`; their action edges use the checked correspondence IR and
+  include synthesized auto mappings. `--format dot` and `--format mermaid` export graph-shaped
   projections for review diagrams while keeping JSON as the default. `--profile
   ai-review` emits review findings such as `disconnected_requirement`,
   `unanchored_property`, `progressless_cycle`, `unwritten_state`,

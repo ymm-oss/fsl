@@ -136,9 +136,14 @@ structural sources:
   properties, scenarios, KPI/control nodes.
 - `property_state_graph`: user properties connected to state variables they read.
 - `refinement_graph`: standalone refinement mappings with impl/abs spec names,
-  state maps, action maps, stutters, and preserve-progress declarations.
+  state maps, action maps, correspondence origins, stutters, and
+  preserve-progress declarations. This command has only the mapping file, so it
+  is an unresolved structural projection and does not claim typed validation or
+  synthesize `maps auto` actions.
 - `traceability_graph`: project-manifest graph over business/requirements/design
-  files and refinement mappings.
+  files and refinement mappings. The project supplies both endpoint models, so
+  action edges are built from the checked `ActionCorrespondence` IR, including
+  synthesized auto correspondences.
 
 Direct `.toml` inputs to `fslc analyze` are treated as project manifests; the
 default filename is `fsl-project.toml`, but review copies with other names are

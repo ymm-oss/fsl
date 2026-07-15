@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements CorrespondenceImpl {
+  implements CorrespondenceAbs from "action_correspondence_abs.fsl" {
+    map done = paid
+    action pay(x: N) -> settle(x)
+  }
+  type N = 0..1
+  state { paid: Bool }
+  init { paid = false }
+  action pay(x: N) maps settle(x) { paid = true }
+}

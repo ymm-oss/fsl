@@ -582,6 +582,13 @@ refinement <Name> {
 }
 ```
 
+Standalone action items, inline `implements` items, requirement-action `maps`,
+and auto/identity synthesis share one typed action-correspondence validator.
+Typed impl parameters, target arity/argument expressions, and auto actor
+compatibility are checked identically. Duplicate diagnostics identify both
+origin kinds and line/column sites; auto synthesis never replaces an explicit
+entry.
+
 Give impl and abs distinct enum/struct type names. Refinement merges type
 metadata by name; a same-named enum/struct with a different member list/field
 set on each side is rejected as `kind: "type"` (exit 2) rather than silently
@@ -1471,7 +1478,7 @@ verify {
   `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
   clause on an action and a matching inline `action ...` item for the same impl
   action name is a duplicate-correspondence error (`kind: "type"`,
-  "duplicate action map for '<name>'"). An inline `action` item cannot target
+  with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
   `name__b<N>` alias. Auto-mapped process transitions are statically
   actor-checked; an actor mismatch is a check-time type error.

@@ -10006,6 +10006,11 @@ fn project_traceability_output(path: &Path) -> Result<Value, String> {
         let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
             return Err("expected refinement mapping".to_owned());
         };
+        let mapping_source = std::fs::read_to_string(&mapping_path)
+            .map_err(|error| format!("failed to read {}: {error}", mapping_path.display()))?;
+        let checked_refinement =
+            fsl_core::parse_refinement(&mapping_source, &implementation.model, &abstraction.model)
+                .map_err(|error| error.message)?;
         let display = analysis_display_path(&mapping_path);
         let refinement_id = format!("refinement:{layer}->{target}:{}", refinement.name);
         let file_id = format!("file:{layer}->{target}:{display}");
@@ -10096,76 +10101,6 @@ fn project_traceability_output(path: &Path) -> Result<Value, String> {
                         );
                     }
                 }
-                fsl_syntax::RefinementItem::Action {
-                    name,
-                    target: action_target,
-                    span,
-                    ..
-                } => {
-                    let map_id = format!("action_map:{layer}->{target}:{name}");
-                    let mut map_node = project_analysis_node(&map_id, "action_map", name);
-                    if let Value::Object(object) = &mut map_node {
-                        object.insert("loc".to_owned(), span.python_loc());
-                        object.insert("layer".to_owned(), json!(layer));
-                        object.insert("target_layer".to_owned(), json!(target));
-                    }
-                    insert_analysis_item(&mut nodes, map_node);
-                    insert_analysis_item(
-                        &mut edges,
-                        project_analysis_edge(&refinement_id, "declares", &map_id),
-                    );
-                    let impl_id = format!("{layer}:action:{name}");
-                    insert_analysis_item(
-                        &mut edges,
-                        project_analysis_edge(&map_id, "maps_action", &impl_id),
-                    );
-                    match action_target {
-                        fsl_syntax::ActionTarget::Stutter => {
-                            let stutter_id = format!("stutter_map:{layer}->{target}:{name}");
-                            let mut stutter =
-                                project_analysis_node(&stutter_id, "stutter_map", name);
-                            stutter
-                                .as_object_mut()
-                                .expect("node object")
-                                .insert("loc".to_owned(), span.python_loc());
-                            insert_analysis_item(&mut nodes, stutter);
-                            insert_analysis_item(
-                                &mut edges,
-                                project_analysis_edge(&map_id, "stutters", &stutter_id),
-                            );
-                        }
-                        fsl_syntax::ActionTarget::Action(abs_action, _) => {
-                            let abs_id = format!("{target}:action:{abs_action}");
-                            insert_analysis_item(
-                                &mut edges,
-                                project_analysis_edge(&impl_id, "maps_action", &abs_id),
-                            );
-                            if let Some(requirements) =
-                                abstraction.covers.get(&format!("action:{abs_action}"))
-                            {
-                                for requirement in requirements {
-                                    let mut anchor = project_analysis_edge(
-                                        &format!("{target}:{requirement}"),
-                                        "lower_anchor",
-                                        &impl_id,
-                                    );
-                                    if let Value::Object(object) = &mut anchor {
-                                        object.insert(
-                                            "formal_status".to_owned(),
-                                            json!("not_a_violation"),
-                                        );
-                                        object.insert(
-                                            "via".to_owned(),
-                                            json!("refinement_action_map"),
-                                        );
-                                        object.insert("layer".to_owned(), json!(layer));
-                                    }
-                                    insert_analysis_item(&mut edges, anchor);
-                                }
-                            }
-                        }
-                    }
-                }
                 fsl_syntax::RefinementItem::PreserveProgress { span, .. } => {
                     let id = format!("preserve_progress:{layer}->{target}:{}", refinement.name);
                     let mut node =
@@ -10180,6 +10115,66 @@ fn project_traceability_output(path: &Path) -> Result<Value, String> {
                     );
                 }
                 _ => {}
+            }
+        }
+        for correspondence in checked_refinement.action_correspondences.values() {
+            let name = &correspondence.impl_action.0;
+            let map_id = format!("action_map:{layer}->{target}:{name}");
+            let mut map_node = project_analysis_node(&map_id, "action_map", name);
+            if let Value::Object(object) = &mut map_node {
+                object.insert("loc".to_owned(), correspondence.span.python_loc());
+                object.insert("layer".to_owned(), json!(layer));
+                object.insert("target_layer".to_owned(), json!(target));
+                object.insert("origin".to_owned(), json!(correspondence.origin.as_str()));
+            }
+            insert_analysis_item(&mut nodes, map_node);
+            insert_analysis_item(
+                &mut edges,
+                project_analysis_edge(&refinement_id, "declares", &map_id),
+            );
+            let impl_id = format!("{layer}:action:{name}");
+            insert_analysis_item(
+                &mut edges,
+                project_analysis_edge(&map_id, "maps_action", &impl_id),
+            );
+            match &correspondence.target {
+                fsl_core::ActionCorrespondenceTarget::Stutter => {
+                    let stutter_id = format!("stutter_map:{layer}->{target}:{name}");
+                    let mut stutter = project_analysis_node(&stutter_id, "stutter_map", name);
+                    stutter
+                        .as_object_mut()
+                        .expect("node object")
+                        .insert("loc".to_owned(), correspondence.span.python_loc());
+                    insert_analysis_item(&mut nodes, stutter);
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(&map_id, "stutters", &stutter_id),
+                    );
+                }
+                fsl_core::ActionCorrespondenceTarget::Action { action, .. } => {
+                    let abs_id = format!("{target}:action:{}", action.0);
+                    insert_analysis_item(
+                        &mut edges,
+                        project_analysis_edge(&impl_id, "maps_action", &abs_id),
+                    );
+                    if let Some(requirements) =
+                        abstraction.covers.get(&format!("action:{}", action.0))
+                    {
+                        for requirement in requirements {
+                            let mut anchor = project_analysis_edge(
+                                &format!("{target}:{requirement}"),
+                                "lower_anchor",
+                                &impl_id,
+                            );
+                            if let Value::Object(object) = &mut anchor {
+                                object.insert("formal_status".to_owned(), json!("not_a_violation"));
+                                object.insert("via".to_owned(), json!("refinement_action_map"));
+                                object.insert("layer".to_owned(), json!(layer));
+                            }
+                            insert_analysis_item(&mut edges, anchor);
+                        }
+                    }
+                }
             }
         }
     }
@@ -11786,7 +11781,9 @@ fn run_refine(
             "progress".to_owned(),
             json!({
                 "leadsTo": display(&violation.name),
-                "actions": declaration.map(|item| item.actions.clone()).unwrap_or_default(),
+                "actions": declaration
+                    .map(|item| item.actions.iter().map(|action| action.0.clone()).collect::<Vec<_>>())
+                    .unwrap_or_default(),
             }),
         );
         output.insert(
@@ -12083,12 +12080,17 @@ fn run_verify(
         return (semantic_error_output(&error), 2);
     }
     let mut has_trace_contract = false;
+    let mut implements = None;
     if let Ok(model) = load_model(path) {
         match validate_requirement_traces(path, &model) {
             Ok((Some(failure), _)) => return (failure, 2),
             Ok((None, has_contract)) => has_trace_contract = has_contract,
             Err(error) => return (semantic_error_output(&error), 2),
         }
+        implements = match implements_result(path, &model, depth) {
+            Ok(implements) => implements,
+            Err(error) => return (error_output("type", &error), 2),
+        };
     }
     let deadlock = match DeadlockMode::parse(deadlock_mode) {
         Ok(mode) => mode,
@@ -12124,8 +12126,7 @@ fn run_verify(
     };
     if let Value::Object(envelope) = &mut output
         && envelope.get("result").and_then(Value::as_str) != Some("error")
-        && let Ok(model) = load_model(path)
-        && let Ok(Some(implements)) = implements_result(path, &model, depth)
+        && let Some(implements) = implements
     {
         envelope.insert("implements".to_owned(), implements);
         if let Some(Value::Array(warnings)) = envelope.get_mut("warnings") {
