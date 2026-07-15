@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Required product CI now has one Rust-native integration entrypoint covering the workspace,
+  dependency boundaries, CLI/schema contracts, native/browser agreement, and WASM. The redundant
+  Python CLI parity job and its frozen-surface exception snapshot are removed; compatibility and LSP
+  Python tests remain explicit manual evidence. Generated artifact digests are path-portable across
+  the supported native runner matrix (issue #307).
 - `fslc analyze --projection code_audit --code <path>` now maps checked
   executable Kernel requirement targets to a closed, language-independent
   `@fsl.trace` annotation convention. Deterministic JSON reports complete,

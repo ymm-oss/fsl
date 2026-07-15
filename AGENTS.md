@@ -50,17 +50,15 @@ cargo test --manifest-path rust/Cargo.toml --workspace --locked
 cargo build --manifest-path rust/Cargo.toml --workspace --locked
 ```
 
-The compatibility gate requires a local editable Python install:
+The complete required product gate has one Rust-native entrypoint and does not execute Python:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/python -m pytest tests/test_rust_cli_contract.py -q
+./tools/check-native-integration.sh
 ```
 
-Use the commands in `.github/workflows/ci.yml` for the exact current CI matrix. Native solver
-changes should also run the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests. WASM
-changes must run the `rust/fsl-wasm` npm/browser gate described by that workflow.
+Python is optional and is used only for changes explicitly scoped to the frozen compatibility
+reference, retained LSP, or Python-based repository hooks. Native solver changes should also run
+the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
 
 ## Correctness invariants
 
