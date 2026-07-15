@@ -171,6 +171,12 @@ file as-is (if the parse result is a compose, it is expanded before normal proce
 A compose can also be passed to the impl side of `fslc refine` (since after expansion it
 is a single spec).
 
+Public Kernel v1/v2 still reject compose export until component file provenance is
+truthful. Native `testgen` therefore selects the documented explicit compose metadata
+constructor before export; it passes checked names/order plus the versioned
+single-path testgen trace into the same normalized target adapter and preserves
+compose support without weakening the public contract.
+
 ## 4. Implementation notes
 
 - grammar.py: `compose_def` (use / internal / sync action). `alias.x` collides with the

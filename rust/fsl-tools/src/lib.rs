@@ -13,6 +13,7 @@ mod domain_codegen;
 mod html;
 mod ledger;
 mod mutate;
+mod public_kernel;
 mod refinement_analysis;
 mod testgen;
 mod typestate;
@@ -30,7 +31,9 @@ pub use html::render_html_report;
 pub use ledger::{render_ledger, render_ledger_with_approvals};
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;
-pub use testgen::{emit_dart, emit_kotlin, emit_phpunit, emit_swift, emit_vitest};
+pub use testgen::{
+    TestgenInput, compose_testgen_input, generate_testgen, public_kernel_testgen_input,
+};
 pub use typestate::analyze_typestate;
 pub use undecided::undecided_declarations;
 

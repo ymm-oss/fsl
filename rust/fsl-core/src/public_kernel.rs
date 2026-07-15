@@ -17,6 +17,9 @@ pub const KERNEL_V1_SCHEMA_VERSION: &str = "1.0.0";
 pub const KERNEL_V1_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json";
 pub const KERNEL_V2_SCHEMA_VERSION: &str = "2.0.0";
 pub const KERNEL_V2_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json";
+pub const TESTGEN_TRACE_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const TESTGEN_TRACE_V1_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/kernel/testgen-trace.v1.schema.json";
 
 /// Backwards-compatible aliases for the default Public Kernel v1 contract.
 pub const KERNEL_SCHEMA_VERSION: &str = KERNEL_V1_SCHEMA_VERSION;
