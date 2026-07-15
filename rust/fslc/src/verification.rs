@@ -8,23 +8,17 @@ pub(super) enum VerificationEngine {
     Bmc,
     Induction,
     Explicit,
+    Auto,
 }
 
 impl VerificationEngine {
-    /// Parse one of the three engines this type actually dispatches to.
-    ///
-    /// `"auto"` is a valid `--engine` value (see `parse_verify_options`) but
-    /// is never passed here: `run_verify_cli` resolves it into a concrete
-    /// `"explicit"`/`"bmc"` sub-request before `execute_cli_verification`/
-    /// `run_verify` ever call this parser, so this error message correctly
-    /// never mentions it — reaching this function with `"auto"` would itself
-    /// be the bug to fix, not a case this message should paper over.
     pub(super) fn parse(value: &str) -> Result<Self, String> {
         match value {
             "bmc" => Ok(Self::Bmc),
             "induction" => Ok(Self::Induction),
             "explicit" => Ok(Self::Explicit),
-            _ => Err("--engine must be bmc, induction, or explicit".to_owned()),
+            "auto" => Ok(Self::Auto),
+            _ => Err("--engine must be bmc, induction, explicit, or auto".to_owned()),
         }
     }
 }
@@ -528,6 +522,103 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         request.deadlock,
         started,
     )
+}
+
+/// Composite engine: try explicit-state exploration first and fall back to
+/// symbolic BMC when explicit cannot decide — either a fail-closed semantics
+/// rejection (leadsTo, nondeterministic init, partial component init, …) or a
+/// state-budget exhaustion (`unknown_budget`). Every real explicit verdict
+/// (violated, deadlock, `reachable_failed`, verified, proved) is returned
+/// unchanged and is never re-run under BMC.
+///
+/// The model is loaded once. The same static, pre-exploration gate that
+/// `verify_explicit_selected` checks internally (`explicit_unsupported_reason`)
+/// is consulted first so a known-unsupported model falls back without ever
+/// starting BFS; an `Err` from the real run past that gate (which should not
+/// happen, since the gate mirrors the engine's own check) is surfaced as a
+/// genuine error rather than silently folded into the fallback narrative —
+/// an unexpected explicit-engine defect must never be mistaken for an
+/// ordinary, documented unsupported-feature case.
+pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
+    let started = Instant::now();
+    let model = match load_selected_model(request.selection) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    if model.actions.is_empty() {
+        return (semantic_error_output("spec has no actions"), 2);
+    }
+    if let Some(reason) = fsl_runtime::explicit_unsupported_reason(&model) {
+        return auto_fallback_to_bmc(request, &reason, "unsupported");
+    }
+    let checked_bounds = selected_implicit_bounds(
+        &model,
+        request.selection.property,
+        request.selection.excluded,
+    );
+    let result = match fsl_runtime::verify_explicit_selected(
+        model.clone(),
+        request.depth,
+        request.budget,
+        checked_bounds.as_ref(),
+    ) {
+        Ok(result) => result,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let (output, status) = render_explicit_result(
+        &model,
+        &result,
+        checked_bounds.as_ref(),
+        request.deadlock,
+        started,
+    );
+    if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
+        return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
+    }
+    (output, status)
+}
+
+fn auto_fallback_to_bmc(request: ExplicitRequest<'_>, reason: &str, kind: &str) -> (Value, i32) {
+    let (mut output, status) = run_bmc_filtered(BmcRequest {
+        selection: request.selection,
+        depth: request.depth,
+        deadlock: request.deadlock,
+        initial_state: None,
+    });
+    annotate_auto_fallback(&mut output, reason, kind);
+    (output, status)
+}
+
+fn annotate_auto_fallback(output: &mut Value, reason: &str, kind: &str) {
+    let Some(envelope) = output.as_object_mut() else {
+        return;
+    };
+    if envelope.get("result").and_then(Value::as_str) == Some("error") {
+        return;
+    }
+    envelope.insert("engine".to_owned(), json!("bmc"));
+    envelope.insert(
+        "engine_fallback".to_owned(),
+        json!({"from": "explicit", "reason": reason, "kind": kind}),
+    );
+}
+
+/// Builds the budget-exhaustion fallback reason from the explicit engine's
+/// own `states_explored` count so the message names the actual state count
+/// observed, not a generic placeholder.
+fn budget_fallback_reason(explicit_output: &Value) -> String {
+    match explicit_output
+        .get("states_explored")
+        .and_then(Value::as_u64)
+    {
+        Some(states_explored) => format!(
+            "explicit-state exploration reached its {states_explored}-state budget; falling back to symbolic BMC"
+        ),
+        None => {
+            "explicit-state exploration exceeded the state budget; falling back to symbolic BMC"
+                .to_owned()
+        }
+    }
 }
 
 fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult) -> fsl_verifier::BmcResult {
@@ -1583,12 +1674,25 @@ fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Resul
 }
 
 fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String, String), String> {
-    verify_cache_keys_with_solver_version(path, options, fsl_solver_z3::version())
+    verify_cache_keys_for_engine(path, options, &options.engine)
+}
+
+/// Cache keys are always computed for a concrete engine. The `auto` engine
+/// never keys entries under the literal string "auto": lookups consult the
+/// explicit and bmc keys, and stores use whichever engine actually decided,
+/// so verdicts are shared with plain `--engine explicit`/`--engine bmc` runs.
+fn verify_cache_keys_for_engine(
+    path: &Path,
+    options: &CliVerifyOptions,
+    engine: &str,
+) -> Result<(String, String), String> {
+    verify_cache_keys_with_solver_version(path, options, engine, fsl_solver_z3::version())
 }
 
 fn verify_cache_keys_with_solver_version(
     path: &Path,
     options: &CliVerifyOptions,
+    engine: &str,
     solver_version: &str,
 ) -> Result<(String, String), String> {
     let canonical = path.canonicalize().map_err(|error| error.to_string())?;
@@ -1599,7 +1703,7 @@ fn verify_cache_keys_with_solver_version(
     let mut digest = Sha256::new();
     digest.update(b"fslc-rust-verify-cache-v1\0");
     digest.update(env!("CARGO_PKG_VERSION").as_bytes());
-    if options.engine == "explicit" {
+    if engine == "explicit" {
         digest.update(b"\0backend=native-explicit\0");
     } else {
         digest.update(b"\0backend=native-z3\0solver=");
@@ -1629,7 +1733,7 @@ fn verify_cache_keys_with_solver_version(
     let base_options = json!({
         "path": canonical,
         "deadlock": options.deadlock,
-        "engine": options.engine,
+        "engine": engine,
         "explicit_budget": options.explicit_budget,
         "k": options.k_ind,
         "vacuity": options.vacuity,
@@ -1658,6 +1762,14 @@ fn verify_cache_path(key: &str) -> Option<PathBuf> {
 }
 
 fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
+    verify_cache_lookup_with_fallback(key, xdepth, depth).map(|(output, _)| output)
+}
+
+fn verify_cache_lookup_with_fallback(
+    key: &str,
+    xdepth: &str,
+    depth: usize,
+) -> Option<(Value, Option<Value>)> {
     let path = verify_cache_path(key)?;
     if let Ok(bytes) = std::fs::read(path)
         && let Ok(entry) = serde_json::from_slice::<Value>(&bytes)
@@ -1669,7 +1781,7 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
             "cache".to_owned(),
             json!({"hit": true, "key": key, "source": "exact"}),
         );
-        return Some(output);
+        return Some((output, entry.get("engine_fallback").cloned()));
     }
     let pointer_path = cache_root()?
         .join("verify/v1/xdepth")
@@ -1687,10 +1799,10 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
         "cache".to_owned(),
         json!({"hit": true, "key": target, "source": "cross_depth"}),
     );
-    Some(output)
+    Some((output, entry.get("engine_fallback").cloned()))
 }
 
-fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
+fn verify_cache_store(key: &str, xdepth: &str, output: &Value, engine_fallback: Option<&Value>) {
     if !matches!(
         output.get("result").and_then(Value::as_str),
         Some(
@@ -1715,7 +1827,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     }
     let temporary = parent.join(format!(".{}.{}.tmp", key, std::process::id()));
     let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
-    let entry = json!({
+    let mut entry = json!({
         "schema": "fslc-rust-cache.v1",
         "key": key,
         "backend": if explicit { "native-explicit" } else { "native-z3" },
@@ -1726,6 +1838,11 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         },
         "output": output,
     });
+    if let Some(engine_fallback) = engine_fallback
+        && let Some(entry) = entry.as_object_mut()
+    {
+        entry.insert("engine_fallback".to_owned(), engine_fallback.clone());
+    }
     if serde_json::to_vec(&entry)
         .ok()
         .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
@@ -1776,157 +1893,39 @@ pub(super) fn run_verify_cli(path: &Path, options: &CliVerifyOptions) -> Command
     if !options.lemmas.is_empty() {
         return run_induction_with_lemmas(path, options);
     }
-    if options.engine == "auto" {
-        return run_auto_verification(path, options);
-    }
     let prepared = match prepare_cli_verification(path, options) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
-    let cache_keys = cache_enabled(options)
+    // `auto` never keys a cache entry under the literal string "auto": a
+    // lookup consults the explicit/bmc keys directly
+    // (`cached_auto_verification`) and a store writes under whichever engine
+    // actually decided (`store_auto_verification`), so verdicts are shared
+    // with plain `--engine explicit`/`--engine bmc` runs of the same spec.
+    let is_auto = options.engine == "auto";
+    let cache_keys = (!is_auto && cache_enabled(options))
         .then(|| verify_cache_keys(path, options).ok())
         .flatten();
     if let Some(output) = cached_verification(options, cache_keys.as_ref()) {
         return output;
     }
+    if is_auto
+        && cache_enabled(options)
+        && let Some(output) = cached_auto_verification(path, options)
+    {
+        return output;
+    }
     let (output, status) = execute_cli_verification(path, options, &prepared);
-    finalize_cli_verification(
+    let (output, status) = finalize_cli_verification(
         path,
         options,
         &prepared,
         cache_keys.as_ref(),
         output,
         status,
-    )
-}
-
-/// `--engine auto`: try the explicit-state engine first, since it is
-/// strictly faster and can prove closure; fall back transparently to BMC
-/// when explicit cannot handle this model at all (a static, pre-exploration
-/// gate — leadsTo properties, nondeterministic/partial init, ...) or when it
-/// hits its state budget. Every verdict is stamped with the engine that
-/// actually decided it, and a fallback additionally carries `engine_fallback`
-/// so a caller can tell a bounded BMC verdict from an unbounded explicit one.
-///
-/// Both sub-attempts share one `prepare_cli_verification` pass (parse/
-/// specialized-document/requirement-trace/property-selection validation is
-/// engine-independent) but cache and execute independently, keyed as if
-/// `--engine explicit`/`--engine bmc` had been passed directly — an `auto`
-/// run and a plain run of whichever engine actually decides share the same
-/// cache entries, and `auto` itself is never part of a cache key.
-fn run_auto_verification(path: &Path, options: &CliVerifyOptions) -> CommandResult {
-    let prepared = match prepare_cli_verification(path, options) {
-        Ok(prepared) => prepared,
-        Err(output) => return output,
-    };
-    let explicit_options = CliVerifyOptions {
-        engine: "explicit".to_owned(),
-        ..options.clone()
-    };
-    let explicit_cache_keys = cache_enabled(&explicit_options)
-        .then(|| verify_cache_keys(path, &explicit_options).ok())
-        .flatten();
-    if let Some((cached_output, cached_status)) =
-        cached_verification(&explicit_options, explicit_cache_keys.as_ref())
-    {
-        if cached_output.get("result").and_then(Value::as_str) != Some("unknown_budget") {
-            return (cached_output, cached_status);
-        }
-        return fallback_to_bmc(
-            path,
-            options,
-            &prepared,
-            &budget_fallback_reason(),
-            "budget",
-        );
-    }
-    if let Some(reason) = explicit_gate_reason(path, options, &prepared) {
-        return fallback_to_bmc(path, options, &prepared, &reason, "unsupported");
-    }
-    let (output, status) = execute_cli_verification(path, &explicit_options, &prepared);
-    let (output, status) = finalize_cli_verification(
-        path,
-        &explicit_options,
-        &prepared,
-        explicit_cache_keys.as_ref(),
-        output,
-        status,
     );
-    if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
-        return fallback_to_bmc(
-            path,
-            options,
-            &prepared,
-            &budget_fallback_reason(),
-            "budget",
-        );
-    }
-    (output, status)
-}
-
-fn budget_fallback_reason() -> String {
-    "explicit-state exploration exceeded the state budget; falling back to symbolic BMC".to_owned()
-}
-
-/// Static, pre-exploration check for whether the explicit engine can handle
-/// this model at all, built from the same selection `execute_cli_verification`
-/// would use. `None` (including on a model-load failure) means "let the
-/// explicit engine run and report its own error" — this function only ever
-/// short-circuits into a fallback, never swallows a real error.
-fn explicit_gate_reason(
-    path: &Path,
-    options: &CliVerifyOptions,
-    prepared: &PreparedCliVerification,
-) -> Option<String> {
-    let selection = ModelSelection {
-        path,
-        scope: prepared.has_scope.then_some(&options.scope),
-        property: options.property.as_deref(),
-        excluded: &options.exclude_properties,
-    };
-    let model = load_selected_model(selection).ok()?;
-    if model.actions.is_empty() {
-        return Some("spec has no actions".to_owned());
-    }
-    fsl_runtime::explicit_unsupported_reason(&model)
-}
-
-fn fallback_to_bmc(
-    path: &Path,
-    options: &CliVerifyOptions,
-    prepared: &PreparedCliVerification,
-    reason: &str,
-    kind: &str,
-) -> CommandResult {
-    let bmc_options = CliVerifyOptions {
-        engine: "bmc".to_owned(),
-        ..options.clone()
-    };
-    let cache_keys = cache_enabled(&bmc_options)
-        .then(|| verify_cache_keys(path, &bmc_options).ok())
-        .flatten();
-    let (mut output, status) =
-        if let Some(cached) = cached_verification(&bmc_options, cache_keys.as_ref()) {
-            cached
-        } else {
-            let (output, status) = execute_cli_verification(path, &bmc_options, prepared);
-            finalize_cli_verification(
-                path,
-                &bmc_options,
-                prepared,
-                cache_keys.as_ref(),
-                output,
-                status,
-            )
-        };
-    if output.get("result").and_then(Value::as_str) != Some("error")
-        && let Some(envelope) = output.as_object_mut()
-    {
-        envelope.insert("engine".to_owned(), json!("bmc"));
-        envelope.insert(
-            "engine_fallback".to_owned(),
-            json!({"from": "explicit", "reason": reason, "kind": kind}),
-        );
+    if is_auto && cache_enabled(options) {
+        store_auto_verification(path, options, &output);
     }
     (output, status)
 }
@@ -2037,11 +2036,68 @@ fn cached_verification(
         return None;
     }
     let output = verify_cache_lookup(key, xdepth, options.depth)?;
-    let status = match output.get("result").and_then(Value::as_str) {
+    let status = cached_output_status(&output);
+    Some((output, status))
+}
+
+fn cached_output_status(output: &Value) -> i32 {
+    match output.get("result").and_then(Value::as_str) {
         Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
         _ => 0,
-    };
+    }
+}
+
+/// Cache lookup for `--engine auto`: consult both concrete engines' entries
+/// before re-running anything. A cached explicit verdict wins (it may be a
+/// closure proof), except `unknown_budget`, which auto never reports — the
+/// bmc key is consulted instead and, failing that, the run proceeds fresh.
+fn cached_auto_verification(path: &Path, options: &CliVerifyOptions) -> Option<CommandResult> {
+    if std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1") {
+        return None;
+    }
+    if let Ok((key, xdepth)) = verify_cache_keys_for_engine(path, options, "explicit")
+        && let Some(output) = verify_cache_lookup(&key, &xdepth, options.depth)
+        && output.get("result").and_then(Value::as_str) != Some("unknown_budget")
+    {
+        let status = cached_output_status(&output);
+        return Some((output, status));
+    }
+    let (key, xdepth) = verify_cache_keys_for_engine(path, options, "bmc").ok()?;
+    let (mut output, engine_fallback) =
+        verify_cache_lookup_with_fallback(&key, &xdepth, options.depth)?;
+    if let Some(envelope) = output.as_object_mut() {
+        envelope.insert("engine".to_owned(), json!("bmc"));
+        if let Some(engine_fallback) = engine_fallback {
+            envelope.insert("engine_fallback".to_owned(), engine_fallback);
+        }
+    }
+    let status = cached_output_status(&output);
     Some((output, status))
+}
+
+/// Cache store for `--engine auto`: entries are keyed by the engine that
+/// actually decided. A post-fallback BMC verdict is stored as the plain BMC
+/// envelope (so direct `--engine bmc` hits see no auto-only fields) with the
+/// fallback trace persisted on the cache entry for future auto lookups.
+fn store_auto_verification(path: &Path, options: &CliVerifyOptions, output: &Value) {
+    match output.get("engine").and_then(Value::as_str) {
+        Some("explicit") => {
+            if let Ok((key, xdepth)) = verify_cache_keys_for_engine(path, options, "explicit") {
+                verify_cache_store(&key, &xdepth, output, None);
+            }
+        }
+        Some("bmc") => {
+            let mut plain = output.clone();
+            let engine_fallback = plain.as_object_mut().and_then(|envelope| {
+                envelope.remove("engine");
+                envelope.remove("engine_fallback")
+            });
+            if let Ok((key, xdepth)) = verify_cache_keys_for_engine(path, options, "bmc") {
+                verify_cache_store(&key, &xdepth, &plain, engine_fallback.as_ref());
+            }
+        }
+        _ => {}
+    }
 }
 
 fn execute_cli_verification(
@@ -2079,6 +2135,12 @@ fn execute_cli_verification(
                 auxiliary: &[],
             }),
             Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
+                selection,
+                depth: options.depth,
+                deadlock,
+                budget: options.explicit_budget,
+            }),
+            Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
                 selection,
                 depth: options.depth,
                 deadlock,
@@ -2147,7 +2209,7 @@ fn finalize_cli_verification(
                 3,
             );
         }
-        verify_cache_store(key, xdepth, &output);
+        verify_cache_store(key, xdepth, &output, None);
     }
     (output, status)
 }
@@ -2296,9 +2358,9 @@ mod tests {
         let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
         let options = CliVerifyOptions::default();
 
-        let current = verify_cache_keys_with_solver_version(&path, &options, "Z3 4.16.0.0")
+        let current = verify_cache_keys_with_solver_version(&path, &options, "bmc", "Z3 4.16.0.0")
             .expect("current solver cache keys");
-        let updated = verify_cache_keys_with_solver_version(&path, &options, "Z3 4.17.0.0")
+        let updated = verify_cache_keys_with_solver_version(&path, &options, "bmc", "Z3 4.17.0.0")
             .expect("updated solver cache keys");
 
         assert_ne!(current, updated);
