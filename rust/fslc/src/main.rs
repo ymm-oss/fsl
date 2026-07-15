@@ -2716,88 +2716,115 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                 expected,
             );
         }
+        match monitor.current_violation() {
+            Ok(Some(violation)) => {
+                return replay_failure_with_state(
+                    &model,
+                    None,
+                    json!({
+                        "kind":violation.kind,
+                        "name":display(&violation.name),
+                        "tick":0,
+                    }),
+                    expected,
+                );
+            }
+            Ok(None) => {}
+            Err(error) => return (error_output("internal", &error.to_string()), 3),
+        }
     }
     for (index, event) in trace.events.iter().enumerate() {
-        let action_name = &event.action;
-        let params = &event.params;
         let state_before = fslc_rust::state_json(&monitor.state);
-        let Some(action) = model.actions.iter().find(|action| {
-            action.name == *action_name || !versioned && display(&action.name) == *action_name
-        }) else {
-            return replay_failure(
-                &model,
-                &monitor,
-                index,
-                json!({
-                    "kind": "bad_call",
-                    "message": format!("unknown action '{action_name}'"),
-                    "action": action_name,
-                    "params": params,
-                }),
-            );
-        };
-        let parsed = if versioned {
-            validated_events[index]
-                .0
-                .clone()
-                .expect("known versioned action was validated")
-        } else {
-            match parse_params(&model, action, params) {
-                Ok(params) => params,
-                Err(message) => {
+        let (action_evidence, transition) = match &event.step {
+            fslc_rust::replay_trace::ReplayStep::Stutter => {
+                match monitor.current_violation() {
+                    Ok(Some(violation)) => {
+                        return replay_failure(
+                            &model,
+                            &monitor,
+                            index,
+                            json!({
+                                "kind":violation.kind,
+                                "name":display(&violation.name),
+                                "action":Value::Null,
+                                "params":{},
+                                "transition":"stutter",
+                            }),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                }
+                (Value::Null, "stutter")
+            }
+            fslc_rust::replay_trace::ReplayStep::Action {
+                name: action_name,
+                params,
+            } => {
+                let Some(action) = model.actions.iter().find(|action| {
+                    action.name == *action_name
+                        || !versioned && display(&action.name) == *action_name
+                }) else {
                     return replay_failure(
                         &model,
                         &monitor,
                         index,
                         json!({
                             "kind": "bad_call",
-                            "message": message,
+                            "message": format!("unknown action '{action_name}'"),
                             "action": action_name,
                             "params": params,
                         }),
                     );
+                };
+                let parsed = if versioned {
+                    let ValidatedReplayStep::Action(parsed) = &validated_events[index].step else {
+                        unreachable!("parsed replay step changed during validation")
+                    };
+                    parsed
+                        .clone()
+                        .expect("known versioned action was validated")
+                } else {
+                    match parse_params(&model, action, params) {
+                        Ok(params) => params,
+                        Err(message) => {
+                            return replay_failure(
+                                &model,
+                                &monitor,
+                                index,
+                                json!({
+                                    "kind": "bad_call",
+                                    "message": message,
+                                    "action": action_name,
+                                    "params": params,
+                                }),
+                            );
+                        }
+                    }
+                };
+                let stepped = match monitor.attempt(&action.name, &parsed) {
+                    Ok(stepped) => stepped,
+                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                };
+                if let Some(violation) = stepped.violation {
+                    return replay_failure(
+                        &model,
+                        &monitor,
+                        index,
+                        json!({
+                            "kind": violation.kind,
+                            "name": display(&violation.name),
+                            "action": display(&action.name),
+                            "params": params,
+                        }),
+                    );
                 }
+                (json!(action.name), "action")
             }
         };
-        let enabled = match monitor.enabled() {
-            Ok(enabled) => enabled,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
-        };
-        let Some(instance) = enabled
-            .iter()
-            .find(|instance| instance.action == action.name && instance.params == parsed)
-        else {
-            return replay_failure(
-                &model,
-                &monitor,
-                index,
-                json!({
-                    "kind": "requires_failed",
-                    "action": display(&action.name),
-                    "params": params,
-                }),
-            );
-        };
-        let stepped = match monitor.step(instance) {
-            Ok(stepped) => stepped,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
-        };
-        if let Some(violation) = stepped.violation {
-            return replay_failure(
-                &model,
-                &monitor,
-                index,
-                json!({
-                    "kind": violation.kind,
-                    "name": display(&violation.name),
-                    "action": display(&action.name),
-                    "params": params,
-                }),
-            );
-        }
         if let Some(state) = &event.state {
             let observed = if versioned {
-                validated_events[index].1.clone()
+                validated_events[index].state.clone()
             } else {
                 match replay_snapshot_json(state, &model) {
                     Ok(observed) => observed,
@@ -2813,7 +2840,8 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                     json!({
                         "kind":"state_mismatch",
                         "tick":event.tick,
-                        "action":action.name,
+                        "action":action_evidence,
+                        "transition":transition,
                         "expected_state":expected,
                         "observed_state":observed,
                         "mismatches":mismatches,
@@ -2836,14 +2864,12 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         json!("leadsTo properties are not checked by replay (finite logs only)"),
     );
     if let fslc_rust::replay_trace::ReplayTraceContract::V1 {
+        schema_version,
         kernel_schema_version,
         ..
     } = trace.contract
     {
-        output.insert(
-            "trace_schema_version".to_owned(),
-            json!(fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION),
-        );
+        output.insert("trace_schema_version".to_owned(), json!(schema_version));
         output.insert(
             "kernel_schema_version".to_owned(),
             json!(kernel_schema_version),
@@ -3349,7 +3375,7 @@ fn replay_failure_with_state(
     output.insert(
         "hint".to_owned(),
         json!(if index.is_none() {
-            "the implementation initial state does not match the specification init"
+            "the implementation initial state is not a valid specification state"
         } else {
             "the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)"
         }),
@@ -12516,7 +12542,15 @@ fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
-type ValidatedReplayEvent = (Option<std::collections::BTreeMap<String, FslValue>>, Value);
+enum ValidatedReplayStep {
+    Action(Option<std::collections::BTreeMap<String, FslValue>>),
+    Stutter,
+}
+
+struct ValidatedReplayEvent {
+    step: ValidatedReplayStep,
+    state: Value,
+}
 
 fn validate_versioned_replay_events(
     model: &KernelModel,
@@ -12533,13 +12567,19 @@ fn validate_versioned_replay_events(
                     .expect("versioned replay event requires state"),
                 model,
             )?;
-            let params = model
-                .actions
-                .iter()
-                .find(|action| action.name == event.action)
-                .map(|action| parse_versioned_params(model, action, &event.params, index))
-                .transpose()?;
-            Ok((params, state))
+            let step = match &event.step {
+                fslc_rust::replay_trace::ReplayStep::Stutter => ValidatedReplayStep::Stutter,
+                fslc_rust::replay_trace::ReplayStep::Action { name, params } => {
+                    let params = model
+                        .actions
+                        .iter()
+                        .find(|action| action.name == *name)
+                        .map(|action| parse_versioned_params(model, action, params, index))
+                        .transpose()?;
+                    ValidatedReplayStep::Action(params)
+                }
+            };
+            Ok(ValidatedReplayEvent { step, state })
         })
         .collect()
 }

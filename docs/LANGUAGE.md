@@ -1417,15 +1417,21 @@ External compilers emit the native replay contract as a closed versioned JSON
 object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):
 
 ```json
-{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.0.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
+{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.1.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":null,"params":{},"state":{"stock":{"0":1},"cart":{"0":0}}},{"tick":2,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
 ```
 
 `initial` is the complete tick-0 state and every event has the exact Public
-Kernel action/parameter names plus its complete post-state. Ticks are exactly
-`1..N`. Optional non-empty `timestamp` is ignored opaque producer metadata, not
+Kernel action/parameter names plus its complete post-state. Since trace schema
+1.1, `action:null` with `{}` params is an explicit stutter observation whose
+complete state must equal the current logical state; 1.0 remains action-only.
+Inserting or deleting equal-state stutters preserves the projected action trace
+and final state. Ticks are exactly `1..N`, including stutters. Optional non-empty
+`timestamp` is ignored opaque producer metadata, not
 formal time. Trace v1 accepts Kernel `1.0.0` and `2.0.0`. Malformed contracts
 fail as input errors; typed initial/post-state divergence is nonconformant with
-leaf mismatch evidence. Bare arrays and `{events:[...]}` remain the explicit
+leaf mismatch evidence. Invariants apply to observation points and atomic
+Monitor successors, not to unreported implementation intermediates. Bare arrays
+and `{events:[...]}` remain the explicit
 unversioned action-only adapter. Testgen and verifier trace JSON are not replay
 input. See `docs/DESIGN-replay-trace.md`.
 

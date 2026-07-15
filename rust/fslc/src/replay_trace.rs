@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 pub enum ReplayTraceContract {
     Legacy,
     V1 {
+        schema_version: String,
         kernel_schema_version: String,
         spec: String,
         initial: Map<String, Value>,
@@ -20,9 +21,17 @@ pub enum ReplayTraceContract {
 pub struct ReplayEvent {
     pub tick: Option<u64>,
     pub timestamp: Option<String>,
-    pub action: String,
-    pub params: Map<String, Value>,
+    pub step: ReplayStep,
     pub state: Option<Map<String, Value>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReplayStep {
+    Action {
+        name: String,
+        params: Map<String, Value>,
+    },
+    Stutter,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,7 +58,7 @@ struct ReplayEventV1 {
     tick: u64,
     #[serde(default)]
     timestamp: Option<String>,
-    action: String,
+    action: Value,
     params: Map<String, Value>,
     state: Map<String, Value>,
 }
@@ -108,10 +117,14 @@ fn parse_v1(data: Value) -> Result<ReplayTraceInput, String> {
             fsl_core::REPLAY_TRACE_V1_SCHEMA_ID
         ));
     }
-    if trace.schema_version != fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION {
+    if !matches!(
+        trace.schema_version.as_str(),
+        fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION | fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+    ) {
         return Err(format!(
-            "unsupported replay trace schema_version '{}'; expected '{}'",
+            "unsupported replay trace schema_version '{}'; expected '{}' or '{}'",
             trace.schema_version,
+            fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION,
             fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
         ));
     }
@@ -139,11 +152,7 @@ fn parse_v1(data: Value) -> Result<ReplayTraceInput, String> {
                     event.tick
                 ));
             }
-            if event.action.is_empty() {
-                return Err(format!(
-                    "replay trace event {index} action must not be empty"
-                ));
-            }
+            let step = parse_v1_step(event.action, event.params, index, &trace.schema_version)?;
             if event.timestamp.as_ref().is_some_and(String::is_empty) {
                 return Err(format!(
                     "replay trace event {index} timestamp must not be empty"
@@ -152,20 +161,54 @@ fn parse_v1(data: Value) -> Result<ReplayTraceInput, String> {
             Ok(ReplayEvent {
                 tick: Some(event.tick),
                 timestamp: event.timestamp,
-                action: event.action,
-                params: event.params,
+                step,
                 state: Some(event.state),
             })
         })
         .collect::<Result<_, _>>()?;
     Ok(ReplayTraceInput {
         contract: ReplayTraceContract::V1 {
+            schema_version: trace.schema_version,
             kernel_schema_version: trace.kernel_schema_version,
             spec: trace.spec,
             initial: trace.initial,
         },
         events,
     })
+}
+
+fn parse_v1_step(
+    action: Value,
+    params: Map<String, Value>,
+    index: usize,
+    schema_version: &str,
+) -> Result<ReplayStep, String> {
+    match action {
+        Value::String(action) if !action.is_empty() => Ok(ReplayStep::Action {
+            name: action,
+            params,
+        }),
+        Value::String(_) => Err(format!(
+            "replay trace event {index} action must not be empty"
+        )),
+        Value::Null
+            if schema_version == fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION && params.is_empty() =>
+        {
+            Ok(ReplayStep::Stutter)
+        }
+        Value::Null if schema_version == fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION => {
+            Err(format!(
+                "replay trace event {index} stutter requires schema_version '{}'",
+                fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+            ))
+        }
+        Value::Null => Err(format!(
+            "replay trace event {index} stutter params must be empty"
+        )),
+        _ => Err(format!(
+            "replay trace event {index} action must be a string or null"
+        )),
+    }
 }
 
 fn parse_legacy_event(event: Value) -> Result<ReplayEvent, String> {
@@ -184,8 +227,10 @@ fn parse_legacy_event(event: Value) -> Result<ReplayEvent, String> {
     Ok(ReplayEvent {
         tick: None,
         timestamp: None,
-        action,
-        params,
+        step: ReplayStep::Action {
+            name: action,
+            params,
+        },
         state: None,
     })
 }
@@ -194,7 +239,7 @@ fn parse_legacy_event(event: Value) -> Result<ReplayEvent, String> {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{ReplayTraceContract, parse_replay_trace};
+    use super::{ReplayStep, ReplayTraceContract, parse_replay_trace};
 
     fn versioned() -> Value {
         json!({
@@ -216,7 +261,10 @@ mod tests {
             let parsed = parse_replay_trace(input).expect("legacy trace");
             assert_eq!(parsed.contract, ReplayTraceContract::Legacy);
             assert_eq!(parsed.events.len(), 1);
-            assert_eq!(parsed.events[0].action, "advance");
+            assert!(matches!(
+                &parsed.events[0].step,
+                ReplayStep::Action { name, .. } if name == "advance"
+            ));
         }
         assert!(
             parse_replay_trace(json!({"spec":"S","events":[]}))
@@ -280,5 +328,29 @@ mod tests {
             let parsed = parse_replay_trace(input).expect("supported Kernel version");
             assert!(matches!(parsed.contract, ReplayTraceContract::V1 { .. }));
         }
+    }
+
+    #[test]
+    fn v1_1_adds_explicit_stutter_without_reserving_an_action_name() {
+        let mut stutter = versioned();
+        stutter["events"][0]["action"] = Value::Null;
+        let parsed = parse_replay_trace(stutter.clone()).expect("v1.1 stutter");
+        assert_eq!(parsed.events[0].step, ReplayStep::Stutter);
+
+        stutter["schema_version"] = json!(fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION);
+        assert!(parse_replay_trace(stutter).is_err());
+
+        let mut params = versioned();
+        params["events"][0]["action"] = Value::Null;
+        params["events"][0]["params"] = json!({"unexpected":true});
+        assert!(parse_replay_trace(params).is_err());
+
+        let mut named = versioned();
+        named["events"][0]["action"] = json!("stutter");
+        let parsed = parse_replay_trace(named).expect("ordinary action name");
+        assert!(matches!(
+            &parsed.events[0].step,
+            ReplayStep::Action { name, .. } if name == "stutter"
+        ));
     }
 }

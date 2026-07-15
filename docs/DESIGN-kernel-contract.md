@@ -290,6 +290,13 @@ values; its complete tick/state contract is defined by
 golden vectors, Rust tests, this document, `docs/LANGUAGE.md`, the shared skill,
 and `CHANGELOG.md`.
 
+Replay observation actions execute through `Monitor::attempt`. Solver-free BFS
+also uses Monitor transitions, while
+`fsl-verifier/src/agreement.rs::{transition_matches_step,transition_outcome_matches_step}`
+checks Monitor successors and failures against symbolic transition semantics.
+Stutter performs no transition and requires full equality with the current
+Monitor state, so it introduces no second runtime or solver semantics.
+
 Public Kernel v2 is the separately negotiated provenance publication contract
 defined by [`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md). Use
 `fslc kernel SPEC --kernel-version 2`; omission remains v1. Its companion

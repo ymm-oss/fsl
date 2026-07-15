@@ -7,7 +7,7 @@
   "required": ["$schema", "schema_version", "kernel_schema_version", "spec", "initial", "events"],
   "properties": {
     "$schema": { "const": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json" },
-    "schema_version": { "const": "1.0.0" },
+    "schema_version": { "enum": ["1.0.0", "1.1.0"] },
     "kernel_schema_version": { "enum": ["1.0.0", "2.0.0"] },
     "spec": { "type": "string", "minLength": 1 },
     "initial": { "$ref": "#/$defs/state" },
@@ -25,10 +25,36 @@
       "properties": {
         "tick": { "type": "integer", "minimum": 1 },
         "timestamp": { "type": "string", "minLength": 1 },
-        "action": { "type": "string", "minLength": 1 },
+        "action": { "type": ["string", "null"], "minLength": 1 },
         "params": { "type": "object" },
         "state": { "$ref": "#/$defs/state" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "action": { "type": "null" } },
+            "required": ["action"]
+          },
+          "then": { "properties": { "params": { "maxProperties": 0 } } }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schema_version": { "const": "1.0.0" } },
+        "required": ["schema_version"]
+      },
+      "then": {
+        "properties": {
+          "events": {
+            "items": {
+              "properties": { "action": { "type": "string" } }
+            }
+          }
+        }
       }
     }
-  }
+  ]
 }
