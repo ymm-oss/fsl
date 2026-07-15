@@ -381,6 +381,98 @@
         }
       ],
       "commands": []
+    },
+    {
+      "path": [
+        "lint"
+      ],
+      "parent_index": 23,
+      "prog": "fslc lint",
+      "help_sha256": "d0f4839d59c145f0c426fe1fe2937a7430b5956c2ad85c6f3a3c03146f62319e",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "path",
+          "required": true,
+          "positional": true,
+          "nargs": "+",
+          "action": "store"
+        },
+        {
+          "dest": "edition",
+          "required": false,
+          "flags": [
+            "--edition"
+          ],
+          "choices": [
+            "current",
+            "next"
+          ],
+          "default": "current",
+          "action": "store"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "path": [
+        "migrate"
+      ],
+      "parent_index": 24,
+      "prog": "fslc migrate",
+      "help_sha256": "ec4e87d743a3cd19d8be891064a9c5f6bb5ce9fa66ae92816f21de6bffc821ee",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "path",
+          "required": true,
+          "positional": true,
+          "nargs": "+",
+          "action": "store"
+        },
+        {
+          "dest": "edition",
+          "required": false,
+          "flags": [
+            "--edition"
+          ],
+          "choices": [
+            "current",
+            "next"
+          ],
+          "default": "next",
+          "action": "store"
+        },
+        {
+          "dest": "write",
+          "required": false,
+          "flags": [
+            "--write"
+          ],
+          "nargs": 0,
+          "default": false,
+          "action": "store_true"
+        }
+      ],
+      "commands": []
     }
   ],
   "rust_only_actions": [
@@ -470,7 +562,7 @@
     {
       "path": [],
       "python_sha256": "731a3fd77cc65de2bd63dbf5fe84d72edd9361089f618aa0998fd294bd6f4392",
-      "rust_sha256": "0f31a4e2140917ea26fbc2505158bb2bffdcb48b3d52935b0ef87c1d6a88d899"
+      "rust_sha256": "c1adcda68a995fcadc1e061323fceca5aba2b2d0a3d24d652a3fb05d0e103b6b"
     },
     {
       "path": [

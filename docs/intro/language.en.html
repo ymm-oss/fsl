@@ -287,8 +287,10 @@ domain expression.</p>
 stable <code>deprecated_domain_enum_union</code> warning over the complete declaration,
 including a canonical replacement. <code>fslc check</code>, <code>fslc verify</code>, and
 <code>fslc domain check</code> accept <code>--edition current|next</code>; <code>next</code> rejects the legacy
-union spelling. Empty enums and duplicate members are errors, reported at the
-declaration and duplicate member respectively.</p>
+union spelling. <code>fslc lint</code> reports the edition finding without mutation, and
+<code>fslc migrate --edition next</code> supplies the checked canonical edit. Empty enums
+and duplicate members are errors, reported at the declaration and duplicate
+member respectively.</p>
 <p>The native Rust frontend also retains a private origin chain for domain state,
 actions, guards, statements, and properties. Verification, counterexample, and
 <code>explain</code> diagnostics use the original domain declaration as their primary
@@ -303,7 +305,8 @@ target bindings, source-node reverse lookup, and explicit assurance/completeness
 preserves the established Bool <code>false</code>, enum first-member, range lower-bound, or
 external-placeholder <code>0</code> choice and emits <code>implicit_initial_value</code>. The warning
 contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion.</p>
+machine-applicable explicit-initializer insertion. The next edition requires the
+initializer to be explicit.</p>
 <p>Use <code>fslc domain check</code> for stable fsl-domain findings and the nested kernel
 result (<code>verified_under_assumptions</code> on success), <code>fslc domain analyze</code> for the
 aggregate/effect summary, <code>fslc domain expand</code> to inspect a generated kernel FSL
@@ -743,6 +746,8 @@ variable.</p></div></details>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+fslc lint      &lt;path&gt;... [--edition current|next] # stable edition diagnostics; never mutates
+fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
@@ -799,6 +804,14 @@ fslc db import &lt;file.sql&gt; [--name Name] [-o out.fsl]            # minimal 
 fslc ai check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runtime event replay evidence
 </code></pre>
+<p>Edition lint findings use the stable taxonomies <code>deprecated</code>,
+<code>non_canonical</code>, <code>ambiguous_intent</code>, and <code>unsupported_in_edition</code>. Migration
+handles legacy domain enums/operators, declaration string metadata, colon
+quantifiers, unambiguous local inline action mappings, and implicit defaults.
+It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;</code> remains an
+invalid token and is therefore reported with an <code>and</code> suggestion but is never
+machine-applied. See <code>docs/DESIGN-migration.md</code> for atomicity and bulk-update
+steps.</p>
 <p>The native Rust-only <code>kernel</code> command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,
 source spans, requirement/lowering origin, simultaneous-update semantics, and

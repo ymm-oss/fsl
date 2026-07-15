@@ -3,7 +3,7 @@
   "root": {
     "path": [],
     "prog": "fslc",
-    "help": "usage: fslc [-h] [-V] {version,check,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
     "actions": [
       {
         "dest": "help",
@@ -2305,6 +2305,74 @@
             "choices": ["current", "next"],
             "default": "current",
             "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": ["lint"],
+        "prog": "fslc lint",
+        "help": "usage: fslc lint [-h] [--edition {current,next}] path [path ...]\n\nReport stable edition diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "path",
+            "required": true,
+            "positional": true,
+            "nargs": "+",
+            "action": "store"
+          },
+          {
+            "dest": "edition",
+            "required": false,
+            "flags": ["--edition"],
+            "choices": ["current", "next"],
+            "default": "current",
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
+        "path": ["migrate"],
+        "prog": "fslc migrate",
+        "help": "usage: fslc migrate [-h] [--edition {current,next}] [--write] path [path ...]\n\nPlan machine-applicable edition edits without mutation. --write applies the validated file set atomically.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        target edition (default: next)\n  --write               atomically replace every validated input file\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "path",
+            "required": true,
+            "positional": true,
+            "nargs": "+",
+            "action": "store"
+          },
+          {
+            "dest": "edition",
+            "required": false,
+            "flags": ["--edition"],
+            "choices": ["current", "next"],
+            "default": "next",
+            "action": "store"
+          },
+          {
+            "dest": "write",
+            "required": false,
+            "flags": ["--write"],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
           }
         ],
         "commands": []

@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc lint` now reports edition-aware diagnostics with stable taxonomy,
+  severity, spans, canonical replacements, and machine applicability. `fslc
+  migrate` is dry-run by default and `--write` atomically applies only a fully
+  parsed, checked, location-free Public-Kernel-equivalent file set. Shared
+  formatter edits cover legacy enums/operators and quantifiers; typed metadata,
+  unambiguous local action correspondences, and implicit defaults use semantic
+  planners. Unsafe comment movement, branch/duplicate mappings, and invalid
+  `&&` are explicit refusals. The retained LSP exposes applicable diagnostics
+  as quick-fix Code Actions (issue #249).
 - `fslc fmt` now formats one registered FSL document or stdin to canonical
   stdout without mutating it; `--check` accepts multiple paths and reports a
   machine-readable 0/1/2 result. A lossless token/trivia tree preserves line

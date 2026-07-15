@@ -106,6 +106,7 @@ def check_source(
                 if type_def.source_form != "legacy_enum_union":
                     continue
                 replacement = f"enum {type_def.name} {{ {', '.join(type_def.members)} }}"
+                suggestion = _legacy_enum_suggestion(source, type_def.name, replacement)
                 domain_warnings.append({
                     "kind": "deprecated_domain_enum_union",
                     "code": "deprecated_domain_enum_union",
@@ -117,6 +118,10 @@ def check_source(
                     "loc": type_def.loc,
                     "canonical_replacement": replacement,
                     "hint": f"replace the declaration with `{replacement}`",
+                    "taxonomy": "deprecated",
+                    "edition": "current",
+                    "machine_applicable": suggestion is not None,
+                    "suggestion": suggestion,
                 })
         ast, display_names = parse_src(source, base_dir)
         if ast[0] == "refinement":
@@ -334,6 +339,13 @@ def _create_server():
         )
         items = [_to_completion_item(types, c) for c in candidates]
         return types.CompletionList(is_incomplete=False, items=items)
+
+    @server.feature(
+        types.TEXT_DOCUMENT_CODE_ACTION,
+        types.CodeActionOptions(code_action_kinds=[types.CodeActionKind.QuickFix]),
+    )
+    def code_action(ls, params):
+        return _migration_code_actions(types, params.text_document.uri, params.context.diagnostics)
 
     @server.feature(
         types.TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
@@ -680,8 +692,89 @@ def _make_diagnostic(types, source: str, item: Dict[str, Any], severity, index: 
         message=message,
         severity=severity,
         source="fslc",
-        code=item.get("kind"),
+        code=item.get("code") or item.get("kind"),
+        data={
+            key: item.get(key)
+            for key in (
+                "taxonomy",
+                "edition",
+                "canonical_replacement",
+                "machine_applicable",
+                "suggestion",
+            )
+            if item.get(key) is not None
+        } or None,
     )
+
+
+def _legacy_enum_suggestion(source: str, name: str, replacement: str) -> Optional[Dict[str, Any]]:
+    member = r"[A-Za-z_][A-Za-z0-9_]*"
+    pattern = re.compile(
+        rf"\btype\s+{re.escape(name)}\s*=\s*{member}(?:\s*\|\s*{member})+"
+    )
+    match = pattern.search(source)
+    if match is None:
+        return None
+    return {
+        "kind": "replace",
+        "replacement": replacement,
+        "machine_applicable": True,
+        "loc": _offset_range(source, match.start(), match.end()),
+    }
+
+
+def _offset_range(source: str, start: int, end: int) -> Dict[str, int]:
+    def point(offset: int) -> Tuple[int, int]:
+        prefix = source[:offset]
+        return prefix.count("\n") + 1, len(prefix.rsplit("\n", 1)[-1]) + 1
+
+    line, column = point(start)
+    end_line, end_column = point(end)
+    return {
+        "line": line,
+        "column": column,
+        "end_line": end_line,
+        "end_column": end_column,
+    }
+
+
+def _migration_code_actions(types, uri: str, diagnostics: List[Any]) -> List[Any]:
+    actions = []
+    for diagnostic in diagnostics:
+        data = diagnostic.data or {}
+        suggestion = data.get("suggestion") or {}
+        loc = suggestion.get("loc") or {}
+        if not data.get("machine_applicable") or not suggestion.get("replacement") or not loc:
+            continue
+        edit_range = types.Range(
+            start=types.Position(
+                line=max(int(loc.get("line", 1)) - 1, 0),
+                character=max(int(loc.get("column", 1)) - 1, 0),
+            ),
+            end=types.Position(
+                line=max(int(loc.get("end_line", loc.get("line", 1))) - 1, 0),
+                character=max(int(loc.get("end_column", loc.get("column", 1))) - 1, 0),
+            ),
+        )
+        actions.append(
+            types.CodeAction(
+                title=f"Replace with {data.get('canonical_replacement', 'canonical syntax')}",
+                kind=types.CodeActionKind.QuickFix,
+                diagnostics=[diagnostic],
+                edit=types.WorkspaceEdit(
+                    changes={
+                        uri: [
+                            types.TextEdit(
+                                range=edit_range,
+                                new_text=suggestion["replacement"],
+                            )
+                        ]
+                    }
+                ),
+                is_preferred=True,
+            )
+        )
+    return actions
 
 
 def _range_from_finding_nodes(finding: Dict[str, Any], index: Optional[DocumentIndex]) -> Optional[Range]:

@@ -22,11 +22,50 @@ pub struct LosslessNode {
     pub span: Span,
 }
 
+impl LosslessNode {
+    #[must_use]
+    pub fn ident(&self) -> Option<&str> {
+        match &self.kind {
+            LosslessKind::Token(TokenKind::Ident(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn symbol(&self) -> Option<&str> {
+        match &self.kind {
+            LosslessKind::Token(TokenKind::Symbol(value)) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LosslessDocument {
     source: String,
     nodes: Vec<LosslessNode>,
     error: Option<LexError>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceEdit {
+    pub span: Span,
+    pub replacement: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CanonicalRewriteKind {
+    DomainEnum,
+    LogicalOperator,
+    Quantifier,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonicalRewrite {
+    pub kind: CanonicalRewriteKind,
+    pub span: Span,
+    pub canonical_replacement: String,
+    pub edits: Vec<SourceEdit>,
 }
 
 impl LosslessDocument {
@@ -123,8 +162,8 @@ pub fn lossless_document(source: &str) -> LosslessDocument {
                     kind: LosslessKind::Error,
                     text: source.to_owned(),
                     span: Span {
-                        start: position(source, 0),
-                        end: position(source, source.len()),
+                        start: source_position(source, 0),
+                        end: source_position(source, source.len()),
                     },
                 }],
                 error: Some(error),
@@ -176,8 +215,8 @@ fn push_trivia(source: &str, start: usize, end: usize, nodes: &mut Vec<LosslessN
                     .len_utf8();
             }
         }
-        let start_pos = position(source, node_start);
-        let end_pos = position(source, offset);
+        let start_pos = source_position(source, node_start);
+        let end_pos = source_position(source, offset);
         nodes.push(LosslessNode {
             kind: if comment {
                 LosslessKind::LineComment
@@ -193,7 +232,14 @@ fn push_trivia(source: &str, start: usize, end: usize, nodes: &mut Vec<LosslessN
     }
 }
 
-fn position(source: &str, offset: usize) -> crate::SourcePos {
+#[must_use]
+/// Convert a valid UTF-8 byte boundary into a one-based source position.
+///
+/// # Panics
+///
+/// Panics when `offset` is not a source boundary or the line/column count
+/// exceeds `u32`.
+pub fn source_position(source: &str, offset: usize) -> crate::SourcePos {
     let prefix = &source[..offset];
     let line = u32::try_from(prefix.bytes().filter(|byte| *byte == b'\n').count())
         .expect("FSL source line count exceeds u32")
@@ -214,6 +260,20 @@ fn position(source: &str, offset: usize) -> crate::SourcePos {
     }
 }
 
+#[must_use]
+/// Build a source span from two valid UTF-8 byte boundaries.
+///
+/// # Panics
+///
+/// Panics under the same invalid-boundary or oversized-source conditions as
+/// [`source_position`].
+pub fn source_span(source: &str, start: usize, end: usize) -> Span {
+    Span {
+        start: source_position(source, start),
+        end: source_position(source, end),
+    }
+}
+
 /// Format one complete registered FSL document without mutating the source.
 ///
 /// # Errors
@@ -222,15 +282,14 @@ fn position(source: &str, offset: usize) -> crate::SourcePos {
 /// domain enum with an interior comment are refused until that structural
 /// rewrite can preserve the comment attachment unambiguously.
 pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, FormatError> {
-    let tree = lossless_document(source);
-    if let Some(error) = tree.error() {
-        return Err(FormatError::Lex(error.clone()));
-    }
-    let parsed = parse_document(SourceFile::new(source)).map_err(FormatError::Parse)?;
-    refuse_opaque_agent(&tree, parsed.keyword)?;
-    let rewritten = rewrite_domain_enum(&tree, parsed.keyword)?;
-    let rewritten = rewrite_domain_logical(&lossless_document(&rewritten), parsed.keyword)?;
-    let rewritten = rewrite_quantifiers(&lossless_document(&rewritten))?;
+    let rewrites = canonical_rewrites(source)?;
+    let rewritten = apply_source_edits(
+        source,
+        rewrites
+            .into_iter()
+            .flat_map(|rewrite| rewrite.edits)
+            .collect(),
+    )?;
     let tree = lossless_document(&rewritten);
     let mut formatter = Formatter::new();
     formatter.write(tree.nodes());
@@ -239,9 +298,28 @@ pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, Fo
     Ok(output)
 }
 
-fn rewrite_domain_logical(tree: &LosslessDocument, dialect: &str) -> Result<String, FormatError> {
+/// Plan the syntax-only canonical rewrites shared by formatting and migration.
+///
+/// # Errors
+///
+/// Returns the original parse failure or an unsafe-rewrite error when source
+/// trivia cannot be attached unambiguously.
+pub fn canonical_rewrites(source: &str) -> Result<Vec<CanonicalRewrite>, FormatError> {
+    let tree = lossless_document(source);
+    if let Some(error) = tree.error() {
+        return Err(FormatError::Lex(error.clone()));
+    }
+    let parsed = parse_document(SourceFile::new(source)).map_err(FormatError::Parse)?;
+    refuse_opaque_agent(&tree, parsed.keyword)?;
+    let mut rewrites = plan_domain_enum(&tree, parsed.keyword)?;
+    rewrites.extend(plan_domain_logical(&tree, parsed.keyword));
+    rewrites.extend(plan_quantifiers(&tree)?);
+    Ok(rewrites)
+}
+
+fn plan_domain_logical(tree: &LosslessDocument, dialect: &str) -> Vec<CanonicalRewrite> {
     if dialect != "domain" {
-        return Ok(tree.source().to_owned());
+        return Vec::new();
     }
     let tokens = tree
         .nodes()
@@ -250,33 +328,41 @@ fn rewrite_domain_logical(tree: &LosslessDocument, dialect: &str) -> Result<Stri
         .collect::<Vec<_>>();
     let mut edits = Vec::new();
     for (index, node) in tokens.iter().enumerate() {
-        let Some(symbol) = token_symbol(node) else {
+        let Some(symbol) = node.symbol() else {
             continue;
         };
         if symbol == "||" {
-            edits.push((
-                node.span.start.offset,
-                node.span.end.offset,
-                "or".to_owned(),
-            ));
+            edits.push(CanonicalRewrite {
+                kind: CanonicalRewriteKind::LogicalOperator,
+                span: node.span,
+                canonical_replacement: "or".to_owned(),
+                edits: vec![SourceEdit {
+                    span: node.span,
+                    replacement: "or".to_owned(),
+                }],
+            });
         } else if symbol == "->" {
             let await_branch = index >= 2
-                && token_ident(tokens[index - 2]) == Some("on")
-                && token_ident(tokens[index - 1]).is_some()
+                && tokens[index - 2].ident() == Some("on")
+                && tokens[index - 1].ident().is_some()
                 && tokens
                     .get(index + 1)
-                    .and_then(|node| token_ident(node))
+                    .and_then(|node| node.ident())
                     .is_some();
             if !await_branch {
-                edits.push((
-                    node.span.start.offset,
-                    node.span.end.offset,
-                    "=>".to_owned(),
-                ));
+                edits.push(CanonicalRewrite {
+                    kind: CanonicalRewriteKind::LogicalOperator,
+                    span: node.span,
+                    canonical_replacement: "=>".to_owned(),
+                    edits: vec![SourceEdit {
+                        span: node.span,
+                        replacement: "=>".to_owned(),
+                    }],
+                });
             }
         }
     }
-    apply_edits(tree.source(), edits)
+    edits
 }
 
 fn refuse_opaque_agent(tree: &LosslessDocument, dialect: &str) -> Result<(), FormatError> {
@@ -288,12 +374,8 @@ fn refuse_opaque_agent(tree: &LosslessDocument, dialect: &str) -> Result<(), For
         .iter()
         .filter(|node| matches!(node.kind, LosslessKind::Token(_)))
         .collect::<Vec<_>>();
-    let open = tokens
-        .iter()
-        .position(|node| token_symbol(node) == Some("{"));
-    let close = tokens
-        .iter()
-        .rposition(|node| token_symbol(node) == Some("}"));
+    let open = tokens.iter().position(|node| node.symbol() == Some("{"));
+    let close = tokens.iter().rposition(|node| node.symbol() == Some("}"));
     if let (Some(open), Some(close)) = (open, close)
         && close > open + 1
     {
@@ -309,7 +391,7 @@ fn refuse_opaque_agent(tree: &LosslessDocument, dialect: &str) -> Result<(), For
     Ok(())
 }
 
-fn rewrite_quantifiers(tree: &LosslessDocument) -> Result<String, FormatError> {
+fn plan_quantifiers(tree: &LosslessDocument) -> Result<Vec<CanonicalRewrite>, FormatError> {
     let tokens = tree
         .nodes()
         .iter()
@@ -317,10 +399,10 @@ fn rewrite_quantifiers(tree: &LosslessDocument) -> Result<String, FormatError> {
         .collect::<Vec<_>>();
     let mut edits = Vec::new();
     for (start, token) in tokens.iter().enumerate() {
-        if !matches!(token_ident(token), Some("forall" | "exists")) {
+        if !matches!(token.ident(), Some("forall" | "exists")) {
             continue;
         }
-        let typed = tokens.get(start + 2).and_then(|node| token_symbol(node)) == Some(":");
+        let typed = tokens.get(start + 2).and_then(|node| node.symbol()) == Some(":");
         let mut colons = Vec::new();
         let mut brace = None;
         let mut index = start + 1;
@@ -328,7 +410,7 @@ fn rewrite_quantifiers(tree: &LosslessDocument) -> Result<String, FormatError> {
             if node.span.start.line > token.span.start.line {
                 break;
             }
-            match token_symbol(node) {
+            match node.symbol() {
                 Some(":") => colons.push(index),
                 Some("{") => {
                     brace = Some(index);
@@ -342,11 +424,15 @@ fn rewrite_quantifiers(tree: &LosslessDocument) -> Result<String, FormatError> {
         let separator = colons.get(usize::from(typed)).copied();
         if let Some(separator) = separator {
             if brace == Some(separator + 1) {
-                edits.push((
-                    tokens[separator].span.start.offset,
-                    tokens[separator].span.end.offset,
-                    String::new(),
-                ));
+                edits.push(CanonicalRewrite {
+                    kind: CanonicalRewriteKind::Quantifier,
+                    span: token.span,
+                    canonical_replacement: "braced quantifier".to_owned(),
+                    edits: vec![SourceEdit {
+                        span: tokens[separator].span,
+                        replacement: String::new(),
+                    }],
+                });
                 continue;
             }
             let body_start = separator + 1;
@@ -356,16 +442,24 @@ fn rewrite_quantifiers(tree: &LosslessDocument) -> Result<String, FormatError> {
                     span: token.span,
                 });
             };
-            edits.push((
-                tokens[separator].span.start.offset,
-                tokens[separator].span.end.offset,
-                " {".to_owned(),
-            ));
-            edits.push((
-                tokens[body_end].span.end.offset,
-                tokens[body_end].span.end.offset,
-                " }".to_owned(),
-            ));
+            edits.push(CanonicalRewrite {
+                kind: CanonicalRewriteKind::Quantifier,
+                span: token.span,
+                canonical_replacement: "braced quantifier".to_owned(),
+                edits: vec![
+                    SourceEdit {
+                        span: tokens[separator].span,
+                        replacement: " {".to_owned(),
+                    },
+                    SourceEdit {
+                        span: Span {
+                            start: tokens[body_end].span.end,
+                            end: tokens[body_end].span.end,
+                        },
+                        replacement: " }".to_owned(),
+                    },
+                ],
+            });
         } else if brace.is_none() {
             return Err(FormatError::Unsafe {
                 message: "cannot canonicalize a quantifier without braces or a separator colon"
@@ -374,7 +468,7 @@ fn rewrite_quantifiers(tree: &LosslessDocument) -> Result<String, FormatError> {
             });
         }
     }
-    apply_edits(tree.source(), edits)
+    Ok(edits)
 }
 
 fn quantifier_body_end(tokens: &[&LosslessNode], start: usize) -> Option<usize> {
@@ -386,7 +480,7 @@ fn quantifier_body_end(tokens: &[&LosslessNode], start: usize) -> Option<usize> 
         if node.span.start.line > line && depth == 0 {
             break;
         }
-        match token_symbol(node) {
+        match node.symbol() {
             Some("(" | "[" | "{") => depth += 1,
             Some("}" | ";") if depth == 0 => break,
             Some(")" | "]" | "}") => depth -= 1,
@@ -397,33 +491,53 @@ fn quantifier_body_end(tokens: &[&LosslessNode], start: usize) -> Option<usize> 
     end
 }
 
-fn apply_edits(
-    source: &str,
-    mut edits: Vec<(usize, usize, String)>,
-) -> Result<String, FormatError> {
-    edits.sort_by_key(|(start, end, _)| (*start, *end));
-    if edits
-        .windows(2)
-        .any(|pair| pair[0].1 > pair[1].0 && pair[0].0 != pair[0].1)
-    {
+/// Apply non-overlapping byte edits against one source snapshot.
+///
+/// # Errors
+///
+/// Returns an unsafe-format error when edits overlap or address invalid byte
+/// boundaries.
+pub fn apply_source_edits(source: &str, mut edits: Vec<SourceEdit>) -> Result<String, FormatError> {
+    if let Some(edit) = edits.iter().find(|edit| {
+        edit.span.start.offset > edit.span.end.offset
+            || edit.span.end.offset > source.len()
+            || !source.is_char_boundary(edit.span.start.offset)
+            || !source.is_char_boundary(edit.span.end.offset)
+    }) {
+        return Err(FormatError::Unsafe {
+            message: "formatter edit is outside a UTF-8 source boundary".to_owned(),
+            span: edit.span,
+        });
+    }
+    edits.sort_by_key(|edit| (edit.span.start.offset, edit.span.end.offset));
+    if edits.windows(2).any(|pair| {
+        pair[0].span.end.offset > pair[1].span.start.offset
+            && pair[0].span.start.offset != pair[0].span.end.offset
+    }) {
         return Err(FormatError::Unsafe {
             message: "overlapping formatter edits are not safe".to_owned(),
             span: Span {
-                start: position(source, edits[0].0),
-                end: position(source, edits[1].1),
+                start: edits[0].span.start,
+                end: edits[1].span.end,
             },
         });
     }
     let mut output = source.to_owned();
-    for (start, end, replacement) in edits.into_iter().rev() {
-        output.replace_range(start..end, &replacement);
+    for edit in edits.into_iter().rev() {
+        output.replace_range(
+            edit.span.start.offset..edit.span.end.offset,
+            &edit.replacement,
+        );
     }
     Ok(output)
 }
 
-fn rewrite_domain_enum(tree: &LosslessDocument, dialect: &str) -> Result<String, FormatError> {
+fn plan_domain_enum(
+    tree: &LosslessDocument,
+    dialect: &str,
+) -> Result<Vec<CanonicalRewrite>, FormatError> {
     if dialect != "domain" {
-        return Ok(tree.source().to_owned());
+        return Ok(Vec::new());
     }
     let tokens = tree
         .nodes()
@@ -433,9 +547,9 @@ fn rewrite_domain_enum(tree: &LosslessDocument, dialect: &str) -> Result<String,
     let mut replacements = Vec::new();
     let mut cursor = 0;
     while cursor + 4 < tokens.len() {
-        if token_ident(tokens[cursor]) != Some("type")
-            || token_ident(tokens[cursor + 1]).is_none()
-            || token_symbol(tokens[cursor + 2]) != Some("=")
+        if tokens[cursor].ident() != Some("type")
+            || tokens[cursor + 1].ident().is_none()
+            || tokens[cursor + 2].symbol() != Some("=")
         {
             cursor += 1;
             continue;
@@ -443,10 +557,10 @@ fn rewrite_domain_enum(tree: &LosslessDocument, dialect: &str) -> Result<String,
         let start = cursor;
         let mut index = cursor + 3;
         let mut members = Vec::new();
-        while let Some(member) = tokens.get(index).and_then(|node| token_ident(node)) {
+        while let Some(member) = tokens.get(index).and_then(|node| node.ident()) {
             members.push(member);
             index += 1;
-            if tokens.get(index).and_then(|node| token_symbol(node)) == Some("|") {
+            if tokens.get(index).and_then(|node| node.symbol()) == Some("|") {
                 index += 1;
                 continue;
             }
@@ -456,7 +570,7 @@ fn rewrite_domain_enum(tree: &LosslessDocument, dialect: &str) -> Result<String,
             cursor += 1;
             continue;
         }
-        let semicolon = tokens.get(index).and_then(|node| token_symbol(node)) == Some(";");
+        let semicolon = tokens.get(index).and_then(|node| node.symbol()) == Some(";");
         let end = if semicolon { index } else { index - 1 };
         let span = Span {
             start: tokens[start].span.start,
@@ -470,35 +584,20 @@ fn rewrite_domain_enum(tree: &LosslessDocument, dialect: &str) -> Result<String,
                 span,
             });
         }
-        replacements.push((
+        let replacement = format!(
+            "enum {} {{ {} }}",
+            tokens[start + 1].ident().expect("checked name"),
+            members.join(", ")
+        );
+        replacements.push(CanonicalRewrite {
+            kind: CanonicalRewriteKind::DomainEnum,
             span,
-            format!(
-                "enum {} {{ {} }}",
-                token_ident(tokens[start + 1]).expect("checked name"),
-                members.join(", ")
-            ),
-        ));
+            canonical_replacement: replacement.clone(),
+            edits: vec![SourceEdit { span, replacement }],
+        });
         cursor = index + usize::from(semicolon);
     }
-    let mut output = tree.source().to_owned();
-    for (span, replacement) in replacements.into_iter().rev() {
-        output.replace_range(span.start.offset..span.end.offset, &replacement);
-    }
-    Ok(output)
-}
-
-fn token_ident(node: &LosslessNode) -> Option<&str> {
-    match &node.kind {
-        LosslessKind::Token(TokenKind::Ident(value)) => Some(value),
-        _ => None,
-    }
-}
-
-fn token_symbol(node: &LosslessNode) -> Option<&str> {
-    match &node.kind {
-        LosslessKind::Token(TokenKind::Symbol(value)) => Some(value),
-        _ => None,
-    }
+    Ok(replacements)
 }
 
 struct Formatter {

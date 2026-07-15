@@ -63,10 +63,11 @@ inventing a new implicit value.
 
 The edit inserts ` = <selected value>` immediately after the field type. Applying
 it preserves surrounding comments/trivia and yields the value already selected by
-the current semantics. The lossless formatter (#248) and edition migrator (#249)
-own whole-source rewriting and consume this diagnostic contract; this feature does
-not introduce an incomplete formatter or migrator command.
+the current semantics. The lossless formatter and edition migrator consume this
+diagnostic contract. `fslc migrate --edition next` inserts the selected value
+only after comparing the checked before/after Public Kernel; `--write` applies
+it with the other validated file edits.
 
-The next edition severity is reported as `error` for migration planning, but this
-design does not remove implicit-default parsing. Breaking removal remains gated by
-the edition migration policy.
+The next edition severity is `error`; `check --edition next` requires the
+initializer to be explicit. The current edition continues to parse the omitted
+form and report its warning.
