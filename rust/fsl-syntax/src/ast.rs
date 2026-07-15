@@ -39,6 +39,13 @@ pub struct QualifiedName {
     pub name: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConditionalSpans {
+    pub condition: Span,
+    pub then_expr: Span,
+    pub else_expr: Span,
+}
+
 impl QualifiedName {
     #[must_use]
     pub fn python_ast(&self) -> Value {
@@ -100,10 +107,11 @@ pub enum Expr {
     },
     Neg(Box<Expr>),
     Not(Box<Expr>),
-    IfThenElse {
+    Conditional {
         condition: Box<Expr>,
         then_expr: Box<Expr>,
         else_expr: Box<Expr>,
+        spans: Box<ConditionalSpans>,
     },
     Is {
         expr: Box<Expr>,
@@ -221,10 +229,11 @@ impl Expr {
             }
             Self::Neg(expr) => json!(["neg", expr.python_ast()]),
             Self::Not(expr) => json!(["not", expr.python_ast()]),
-            Self::IfThenElse {
+            Self::Conditional {
                 condition,
                 then_expr,
                 else_expr,
+                ..
             } => json!([
                 "ite",
                 condition.python_ast(),

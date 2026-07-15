@@ -135,6 +135,7 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                 name,
                 params,
                 target,
+                origin,
                 span,
             } => {
                 let id = format!("action_map:{name}");
@@ -144,6 +145,7 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                         "params".to_owned(),
                         json!(params.iter().map(|param| &param.name).collect::<Vec<_>>()),
                     );
+                    object.insert("origin".to_owned(), json!(origin.as_str()));
                 }
                 insert_node(&mut nodes, value);
                 insert_edge(&mut edges, edge(&ref_id, "declares", &id));

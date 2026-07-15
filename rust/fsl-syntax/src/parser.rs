@@ -7,14 +7,14 @@ use crate::annotation_parse;
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Annotations, Binder,
-    BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr,
-    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
-    MapsClause, MetaTag, Param, PreservationItem, ProcessCover, ProcessField, ProcessFields,
-    ProcessItem, ProcessTransition, QualifiedName, RefinementItem, RefinementParam,
-    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
-    RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
-    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
-    TimeItem, Token, TokenKind, TypeExpr, VerifyItem, lex,
+    BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute,
+    CorrespondenceOrigin, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
+    HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessCover,
+    ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName, RefinementItem,
+    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
+    RequirementBranch, RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness,
+    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
+    SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr, VerifyItem, lex,
 };
 
 fn join_span(start: Span, end: Span) -> Span {
@@ -241,7 +241,7 @@ impl Parser {
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.refinement_item()?);
+            items.push(self.refinement_item(CorrespondenceOrigin::RefinementFile)?);
         }
         Ok(SurfaceRefinement { name, items })
     }
@@ -500,7 +500,7 @@ impl Parser {
             if self.peek_ident("impl") || self.peek_ident("abs") {
                 return Err(self.error("impl and abs are not valid inside implements"));
             }
-            items.push(self.refinement_item()?);
+            items.push(self.refinement_item(CorrespondenceOrigin::ImplementsBlock)?);
         }
         Ok(RequirementsItem::Implements {
             name,
@@ -610,7 +610,7 @@ impl Parser {
         } else {
             let name = self.expect_ident()?;
             self.expect_symbol("(")?;
-            ActionTarget::Action(name, self.ref_expr_list(")")?)
+            ActionTarget::Action(name, self.expression_list(")")?)
         };
         Ok(MapsClause { target, span })
     }
@@ -705,7 +705,7 @@ impl Parser {
         self.expect_symbol("(")?;
         Ok(AcceptanceStep {
             name,
-            args: self.ref_expr_list(")")?,
+            args: self.expression_list(")")?,
             span,
         })
     }
@@ -1232,7 +1232,10 @@ impl Parser {
             || self.peek_symbol("{")
     }
 
-    fn refinement_item(&mut self) -> Result<RefinementItem, ParseError> {
+    fn refinement_item(
+        &mut self,
+        origin: CorrespondenceOrigin,
+    ) -> Result<RefinementItem, ParseError> {
         if self.eat_ident("impl") {
             return Ok(RefinementItem::Impl(self.expect_ident()?));
         }
@@ -1258,7 +1261,7 @@ impl Parser {
             return Ok(RefinementItem::Map {
                 name,
                 binder,
-                expr: Box::new(self.ref_expr()?),
+                expr: Box::new(self.expression(0)?),
                 span,
             });
         }
@@ -1291,12 +1294,13 @@ impl Parser {
             } else {
                 let target_name = self.expect_ident()?;
                 self.expect_symbol("(")?;
-                ActionTarget::Action(target_name, self.ref_expr_list(")")?)
+                ActionTarget::Action(target_name, self.expression_list(")")?)
             };
             return Ok(RefinementItem::Action {
                 name,
                 params,
                 target,
+                origin,
                 span,
             });
         }
@@ -1322,54 +1326,6 @@ impl Parser {
             return Ok(RefinementItem::PreserveProgress { responses, span });
         }
         Err(self.error("expected refinement item"))
-    }
-
-    fn ref_expr(&mut self) -> Result<Expr, ParseError> {
-        if self.eat_ident("if") {
-            let condition = self.expression(0)?;
-            self.expect_ident_value("then")?;
-            let then_expr = self.ref_expr()?;
-            self.expect_ident_value("else")?;
-            let else_expr = self.ref_expr()?;
-            return Ok(Expr::IfThenElse {
-                condition: Box::new(condition),
-                then_expr: Box::new(then_expr),
-                else_expr: Box::new(else_expr),
-            });
-        }
-        if matches!(&self.peek().kind, TokenKind::Ident(_)) && self.peek_n_is_symbol(1, "{") {
-            let name = self.expect_ident()?;
-            self.expect_symbol("{")?;
-            let mut fields = Vec::new();
-            loop {
-                let field = self.expect_ident()?;
-                self.expect_symbol(":")?;
-                fields.push((field, self.ref_expr()?));
-                if self.eat_symbol("}") {
-                    break;
-                }
-                self.expect_symbol(",")?;
-                if self.eat_symbol("}") {
-                    break;
-                }
-            }
-            return Ok(Expr::Struct { name, fields });
-        }
-        self.expression(0)
-    }
-
-    fn ref_expr_list(&mut self, close: &str) -> Result<Vec<Expr>, ParseError> {
-        let mut items = Vec::new();
-        if self.eat_symbol(close) {
-            return Ok(items);
-        }
-        loop {
-            items.push(self.ref_expr()?);
-            if self.eat_symbol(close) {
-                return Ok(items);
-            }
-            self.expect_symbol(",")?;
-        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1625,7 +1581,7 @@ impl Parser {
     fn next_is_type_delimiter(&self) -> bool {
         matches!(
             &self.peek_n(1).kind,
-            TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ">" | "}" | "->" | "=")
+            TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ")" | ">" | "}" | "->" | "=")
         )
     }
 
@@ -2096,10 +2052,6 @@ impl Parser {
         matches!(&self.peek().kind, TokenKind::Symbol(value) if value == expected)
     }
 
-    fn peek_n_is_symbol(&self, offset: usize, expected: &str) -> bool {
-        matches!(&self.peek_n(offset).kind, TokenKind::Symbol(value) if value == expected)
-    }
-
     fn bump(&mut self) -> &Token {
         let index = self.cursor;
         if !matches!(self.tokens[index].kind, TokenKind::Eof) {
@@ -2219,6 +2171,41 @@ mod tests {
                     ["num", 7]
                 ],
                 ["not", ["bool", false]]
+            ])
+        );
+    }
+
+    #[test]
+    fn conditional_is_available_at_every_expression_precedence() {
+        assert_eq!(
+            ast("1 + if true then 2 else 3 * 4"),
+            json!([
+                "bin",
+                "+",
+                ["num", 1],
+                [
+                    "ite",
+                    ["bool", true],
+                    ["num", 2],
+                    ["bin", "*", ["num", 3], ["num", 4]]
+                ]
+            ])
+        );
+        assert_eq!(
+            ast("if true then if false then 1 else 2 else 3"),
+            json!([
+                "ite",
+                ["bool", true],
+                ["ite", ["bool", false], ["num", 1], ["num", 2]],
+                ["num", 3]
+            ])
+        );
+        assert_eq!(
+            ast("max(if true then 1 else 2, 3)"),
+            json!([
+                "max",
+                ["ite", ["bool", true], ["num", 1], ["num", 2]],
+                ["num", 3]
             ])
         );
     }

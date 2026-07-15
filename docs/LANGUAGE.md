@@ -439,10 +439,8 @@ exactly one `level[k]`, every enabled action strictly decreases the total, so
 induction returns `"proved"` with `"completeness": "unbounded"`. This idiom
 only covers designs where *every* enabled action decreases the total. For
 per-entity progress under interleaving, prefer the `helpful` form above.
-(Conditional expressions can't substitute for a per-branch measure either:
-`if/then/else` is legal only in
-refinement-mapping expressions (§10), not in the general expression grammar
-that `decreases` draws from.)
+(A conditional measure can select between integer expressions, but it does not
+by itself prove the per-entity decrease required by the `helpful` form.)
 
 ## 2. Types
 
@@ -515,6 +513,14 @@ variable capture instead of inventing internal binder names. See
   as `a / b` with whitespace)
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
+- Conditional: `if condition then when_true else when_false`. The condition is
+  `Bool`; both branches are checked and must have the same logical type. It is
+  available anywhere an expression is accepted, including guards, assignments,
+  properties, function arguments, ranking expressions, constants, and
+  refinement mappings. Conditional expressions associate to the right and each
+  branch extends to the enclosing delimiter; use parentheses when a following
+  operator should apply to the whole conditional. Concrete evaluation executes
+  only the selected branch, while name and type checking always visits both.
 - Quantification (bounded): `forall x: T { expr }` / `exists x: T { expr }` (can be filtered with `where expr`),
   the v0 form `forall i in lo..hi: expr` is also allowed. Expression quantifiers
   can also range over a Set or Seq value: `forall x in active { ... }` /
@@ -1135,12 +1141,16 @@ refinement CartImplRefinesCart {
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
 
-Only in the expressions of a refinement mapping file may you use
-`if <expr> then <expr> else <expr>`. This is valid only in the right-hand side
-of `map` and in the argument expressions of `action ... -> abs(<expr list>)`,
-and is not part of the expression grammar of an ordinary `.fsl` spec file. The
-two arms of then/else must have the same logical type
-(Bool, Int/domain/enum, Option, struct).
+All four authoring routes—standalone `action`, inline `implements` action,
+requirement-action `maps`, and auto/identity synthesis—resolve to the same typed
+action-correspondence IR. The common validation checks impl identity and typed
+parameters, target identity/arity, argument expressions, and auto-mapped actor
+compatibility. A duplicate diagnostic names both origin kinds and source
+locations; explicit entries still take precedence over auto synthesis.
+
+Refinement maps and action arguments use the same expression grammar and type
+rules as ordinary specs, including `if <condition> then <expr> else <expr>`.
+Both branches are name- and type-checked even when the condition is constant.
 
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
@@ -1571,8 +1581,9 @@ verify {
   `maps <abs_act>(...)` clause on the requirement-level action; `maps auto`
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
   An impl action with both a `maps` clause and a matching inline `action ...`
-  item is a duplicate-correspondence, `kind: "type"` check-time error (same as
-  a mapping file that lists the same action twice). Auto-mapped process
+  item is a duplicate-correspondence, `kind: "type"` check-time error naming
+  both origins and locations (same as a mapping file that lists the same action
+  twice). Auto-mapped process
   transitions are actor-checked; a transition whose actor differs from the
   business action's actor is a check-time error.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
@@ -2188,8 +2199,10 @@ DESIGN-*.md).
   directories in batch mode;
   directories are expanded recursively for `*.fsl` and sorted deterministically.
   Standalone refinement mappings can be viewed with `--projection
-  refinement_graph`; project manifests can be viewed with `--projection
-  traceability_graph`. `--format dot` and `--format mermaid` export graph-shaped
+  refinement_graph`; this is an unresolved structural view because the command
+  has no impl/abs model paths. Project manifests can be viewed with `--projection
+  traceability_graph`; their action edges use the checked correspondence IR and
+  include synthesized auto mappings. `--format dot` and `--format mermaid` export graph-shaped
   projections for review diagrams while keeping JSON as the default. `--profile
   ai-review` emits review findings such as `disconnected_requirement`,
   `unanchored_property`, `progressless_cycle`, `unwritten_state`,

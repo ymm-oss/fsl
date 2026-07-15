@@ -309,7 +309,7 @@ fn map_key(value: &FslValue) -> String {
 pub fn expr_text(expr: &Expr) -> String {
     fn precedence(expr: &Expr) -> u8 {
         match expr {
-            Expr::Quantified { .. } => 0,
+            Expr::Conditional { .. } | Expr::Quantified { .. } => 0,
             Expr::Binary { op, .. } => match op.as_str() {
                 "=>" => 1,
                 "or" => 2,
@@ -427,10 +427,11 @@ pub fn expr_text(expr: &Expr) -> String {
         }
         Expr::Neg(value) => format!("-{}", operand(value, 9)),
         Expr::Not(value) => format!("not {}", operand(value, 4)),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => format!(
             "if {} then {} else {}",
             expr_text(condition),

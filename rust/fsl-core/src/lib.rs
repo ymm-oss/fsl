@@ -15,8 +15,9 @@ use serde_json::Value;
 
 pub use fsl_syntax::{
     Annotation, AnnotationError, AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue,
-    Annotations, Binder as KernelBinder, Expr as KernelExpr, LValue as KernelLValue, Pattern,
-    QualifiedName, RequirementLink, Statement as KernelStatement, SymbolPath,
+    Annotations, Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr,
+    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Statement as KernelStatement,
+    SymbolPath,
 };
 
 mod compose;
@@ -61,8 +62,8 @@ pub use public_kernel::{
     public_kernel_contract, public_kernel_contract_for_version,
 };
 pub use refinement::{
-    ActionMap, ActionMapTarget, ImplementsContract, ProgressMap, Refinement, RefinementError,
-    StateMap, parse_refinement, requirements_implements,
+    ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
+    Refinement, RefinementError, StateMap, parse_refinement, requirements_implements,
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
@@ -1051,11 +1052,13 @@ impl PredicateExpander {
             },
             Expr::Neg(expr) => Expr::Neg(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Not(expr) => Expr::Not(Box::new(self.expand_expr(*expr, stack)?)),
-            Expr::IfThenElse {
+            Expr::Conditional {
                 condition,
                 then_expr,
                 else_expr,
-            } => Expr::IfThenElse {
+                spans,
+            } => Expr::Conditional {
+                spans,
                 condition: Box::new(self.expand_expr(*condition, stack)?),
                 then_expr: Box::new(self.expand_expr(*then_expr, stack)?),
                 else_expr: Box::new(self.expand_expr(*else_expr, stack)?),
@@ -1172,10 +1175,11 @@ fn visit_expr_children(
                 visitor(arg)?;
             }
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             visitor(condition)?;
             visitor(then_expr)?;
@@ -1361,11 +1365,13 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
         },
         Expr::Neg(expr) => Expr::Neg(Box::new(substitute(*expr, replacements))),
         Expr::Not(expr) => Expr::Not(Box::new(substitute(*expr, replacements))),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
-        } => Expr::IfThenElse {
+            spans,
+        } => Expr::Conditional {
+            spans,
             condition: Box::new(substitute(*condition, replacements)),
             then_expr: Box::new(substitute(*then_expr, replacements)),
             else_expr: Box::new(substitute(*else_expr, replacements)),

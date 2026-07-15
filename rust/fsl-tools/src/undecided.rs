@@ -27,10 +27,11 @@ fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> 
                 collect(left, roots);
                 collect(right, roots);
             }
-            KernelExpr::IfThenElse {
+            KernelExpr::Conditional {
                 condition,
                 then_expr,
                 else_expr,
+                ..
             }
             | KernelExpr::TernaryNamed {
                 first: condition,

@@ -70,6 +70,29 @@ fn native_check_and_verify_share_the_core_duplicate_write_gate() {
 }
 
 #[test]
+fn native_check_and_verify_reject_duplicate_correspondence_origins() {
+    let fixture = "rust/fslc/tests/fixtures/action_correspondence_duplicate.fsl";
+
+    for args in [
+        vec!["check", fixture],
+        vec!["verify", fixture, "--no-cache"],
+    ] {
+        let command = args[0];
+        let (value, status) = run_cli(&args);
+        assert_eq!(status, 2, "{command}: {value}");
+        assert_eq!(value["result"], "error", "{command}");
+        assert_eq!(value["kind"], "type", "{command}");
+        let message = value["message"].as_str().expect("diagnostic message");
+        assert!(message.contains("implements_block"), "{command}: {message}");
+        assert!(
+            message.contains("inline_maps_clause"),
+            "{command}: {message}"
+        );
+        assert_eq!(message.matches(" at ").count(), 2, "{command}: {message}");
+    }
+}
+
+#[test]
 fn native_cli_preserves_bmc_outcomes() {
     let (verified, status) = run_cli(&[
         "verify",
@@ -97,6 +120,92 @@ fn native_cli_preserves_bmc_outcomes() {
     assert_eq!(violated["result"], "violated");
     assert_eq!(violated["violation_kind"], "invariant");
     assert_eq!(violated["invariant"], "NoNegativeStock");
+}
+
+#[test]
+fn general_conditionals_cross_cli_verification_and_replay_paths() {
+    let spec = "examples/conditional_expressions.fsl";
+    let (checked, status) = run_cli(&["check", spec]);
+    assert_eq!(status, 0);
+    assert_eq!(checked["result"], "ok");
+
+    let (conformance, status) = run_cli(&["conformance", spec, "--depth", "1"]);
+    assert_eq!(status, 0);
+    assert_eq!(conformance["schema_version"], "1.0.0");
+    assert_eq!(conformance["kernel_schema_version"], "1.0.0");
+    assert_eq!(conformance["vectors"][0]["outcome"]["state"]["count"], 2);
+
+    let (bounded, status) = run_cli(&[
+        "verify",
+        spec,
+        "--depth",
+        "3",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0);
+    assert_eq!(bounded["result"], "verified");
+
+    let (induction, status) = run_cli(&[
+        "verify",
+        spec,
+        "--engine",
+        "induction",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0);
+    assert_eq!(induction["result"], "proved");
+
+    let trace = std::env::temp_dir().join(format!(
+        "fsl-conditional-replay-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&trace, r#"[{"action":"advance","params":{}}]"#).expect("write replay trace");
+    let trace_path = trace.to_str().expect("UTF-8 trace path");
+    let (replayed, status) = run_cli(&["replay", spec, "--trace", trace_path]);
+    std::fs::remove_file(trace).expect("remove replay trace");
+    assert_eq!(status, 0);
+    assert_eq!(replayed["result"], "conformant");
+    assert_eq!(replayed["steps_checked"], 1);
+}
+
+#[test]
+fn conditional_type_diagnostics_point_to_the_invalid_child_expression() {
+    for (fixture, location) in [
+        (
+            "rust/fslc/tests/fixtures/conditional_type_error.fsl",
+            "at 7:29",
+        ),
+        (
+            "rust/fslc/tests/fixtures/conditional_const_type_error.fsl",
+            "at 4:37",
+        ),
+    ] {
+        let (value, status) = run_cli(&["check", fixture]);
+
+        assert_eq!(status, 2, "{fixture}");
+        assert_eq!(value["result"], "error", "{fixture}");
+        assert_eq!(value["kind"], "semantics", "{fixture}");
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|message| message.ends_with(location)),
+            "{fixture}: {value}"
+        );
+    }
+}
+
+#[test]
+fn formatter_parenthesizes_a_conditional_used_as_an_operator_operand() {
+    let expression = fsl_syntax::parse_expr("(if c then a else b) + 1").expect("parse expression");
+
+    assert_eq!(
+        fslc_rust::expr_text(&expression),
+        "(if c then a else b) + 1"
+    );
 }
 
 #[test]

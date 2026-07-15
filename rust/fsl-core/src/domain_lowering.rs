@@ -1051,11 +1051,13 @@ impl<'a> Resolver<'a> {
                     ty: result_type,
                 }
             }
-            SyntaxExprKind::IfThenElse {
+            SyntaxExprKind::Conditional {
                 condition,
                 then_expr,
                 else_expr,
             } => {
+                let (condition_span, then_span, else_span) =
+                    (condition.span, then_expr.span, else_expr.span);
                 let condition = self.resolve_expr(
                     condition,
                     Some(&LogicalType::Bool),
@@ -1073,7 +1075,12 @@ impl<'a> Resolver<'a> {
                     expanding_can,
                 )?;
                 ResolvedExpr {
-                    expr: Expr::IfThenElse {
+                    expr: Expr::Conditional {
+                        spans: Box::new(fsl_syntax::ConditionalSpans {
+                            condition: condition_span,
+                            then_expr: then_span,
+                            else_expr: else_span,
+                        }),
                         condition: Box::new(condition.expr),
                         then_expr: Box::new(then_expr.expr),
                         else_expr: Box::new(else_expr.expr),
@@ -2904,7 +2911,7 @@ fn expression_lowering_steps(expression: &SyntaxExpr) -> Vec<LoweringStep> {
                     visit(argument, output);
                 }
             }
-            SyntaxExprKind::IfThenElse {
+            SyntaxExprKind::Conditional {
                 condition,
                 then_expr,
                 else_expr,
@@ -3244,10 +3251,11 @@ fn bind_expression_tree(
             bind_expression_tree(registry, &child("left"), left, origin);
             bind_expression_tree(registry, &child("right"), right, origin);
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             bind_expression_tree(registry, &child("condition"), condition, origin);
             bind_expression_tree(registry, &child("then"), then_expr, origin);

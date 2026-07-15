@@ -692,11 +692,13 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
         },
         Expr::Neg(expr) => Expr::Neg(Box::new(rewrite_expr(*expr, component, bound))),
         Expr::Not(expr) => Expr::Not(Box::new(rewrite_expr(*expr, component, bound))),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
-        } => Expr::IfThenElse {
+            spans,
+        } => Expr::Conditional {
+            spans,
             condition: Box::new(rewrite_expr(*condition, component, bound)),
             then_expr: Box::new(rewrite_expr(*then_expr, component, bound)),
             else_expr: Box::new(rewrite_expr(*else_expr, component, bound)),
@@ -1163,11 +1165,13 @@ fn resolve_alias_expr(
         },
         Expr::Neg(expr) => Expr::Neg(Box::new(resolve_alias_expr(*expr, components)?)),
         Expr::Not(expr) => Expr::Not(Box::new(resolve_alias_expr(*expr, components)?)),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
-        } => Expr::IfThenElse {
+            spans,
+        } => Expr::Conditional {
+            spans,
             condition: Box::new(resolve_alias_expr(*condition, components)?),
             then_expr: Box::new(resolve_alias_expr(*then_expr, components)?),
             else_expr: Box::new(resolve_alias_expr(*else_expr, components)?),

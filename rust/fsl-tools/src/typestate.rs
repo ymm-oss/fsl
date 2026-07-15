@@ -284,9 +284,16 @@ fn parse_expr(value: &Value, context: &str) -> Result<Expr, String> {
             .collect::<Result<Vec<_>, String>>()?;
             Ok(Expr::Struct { fields })
         }
-        "ite" => Ok(Expr::Placeholder("if_expr".to_owned())),
+        "ite" => Err(format!(
+            "public Kernel {context} uses conditional expressions, which typestate does not support"
+        )),
         "forall" | "exists" => Ok(Expr::Placeholder("quant".to_owned())),
-        _ => Ok(Expr::Placeholder(kind.to_owned())),
+        "count" | "sum" | "old" | "abs" | "min" | "max" | "rel_acyclic" | "rel_functional"
+        | "rel_injective" | "rel_domain" | "rel_range" | "rel_reachable" | "unique"
+        | "exactly_one" => Ok(Expr::Placeholder(kind.to_owned())),
+        _ => Err(format!(
+            "public Kernel {context}.kind has unknown expression kind '{kind}'"
+        )),
     }
 }
 

@@ -38,12 +38,12 @@ refinement_def: "refinement" NAME "{" refinement_item* "}"
 refinement_impl: "impl" NAME
 refinement_abs: "abs" NAME
 maps_auto_def: "maps" "auto"
-map_def: "map" NAME ["[" binder "]"] "=" ref_expr
+map_def: "map" NAME ["[" binder "]"] "=" expr
 refinement_action: "action" NAME "(" [refinement_param ("," refinement_param)*] ")" "->" action_target
 refinement_param: NAME [":" type]
 action_target: stutter_target | mapped_action_target
 stutter_target: "stutter"
-mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
+mapped_action_target: NAME "(" [expr ("," expr)*] ")"
 preserve_progress_def: "preserve" "progress" "{" progress_item* "}"
 ?progress_item: progress_respond
 progress_respond: "respond" NAME "by" NAME ("," NAME)* ","?
@@ -155,6 +155,7 @@ postfix_suffix: "[" expr "]" -> idx_suffix
                | "." "size" "(" ")" -> method_size
                | "." NAME -> field_suffix
 ?atom: INT -> num
+     | _IF expr "then" expr _ELSE expr -> ite
      | "true" -> true_lit
      | "false" -> false_lit
      | "none" -> none_lit
@@ -183,11 +184,6 @@ postfix_suffix: "[" expr "]" -> idx_suffix
 struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
 expr_list: expr ("," expr)*
 
-?ref_expr: _IF ref_expr "then" ref_expr _ELSE ref_expr -> ite
-         | NAME ref_struct_fields -> struct_lit
-         | expr
-ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> struct_fields
-
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
@@ -205,10 +201,10 @@ branches_def: "branches" "{" branch_when+ "}"
 branch_when: "when" expr "{" stmt* "}" maps_clause
 maps_clause: "maps" req_action_target
 req_action_target: stutter_target | req_mapped_action_target
-req_mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
+req_mapped_action_target: NAME "(" [expr ("," expr)*] ")"
 acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expect "}"
 acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
-acceptance_arg: ref_expr
+acceptance_arg: expr
 acceptance_expect: "expect" expr -> acceptance_expect
                  | "expect" NAME INT "in" NAME -> acceptance_expect_stage
 forbidden_def: "forbidden" REQ_ID STRING "{" acceptance_step* "expect" "rejected" "}"

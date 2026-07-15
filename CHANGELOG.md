@@ -20,6 +20,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   that actually decided, never `auto` itself — and does not change the
   default engine or extend to any other subcommand's `--engine` option
   (Rust-only, issue #226).
+- Conditional expressions (`if condition then a else b`) are now accepted in
+  every expression context. The shared parser replaces the refinement-only
+  path; concrete, explicit, symbolic, analysis, mutation, formatter, LSP, and
+  Public Kernel paths use one node, and partial operations are evaluated only
+  on the selected branch (issue #245).
 - `Option<T>` now supports structural `==` / `!=` between complete Option
   values, including `some(expr)`. Concrete and symbolic evaluation compare the
   presence tag first and ignore the payload when absent; `is some(binding)`
@@ -32,6 +37,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Standalone refinement files, requirements `implements` blocks, action-level
+  `maps` clauses, and synthesized auto/identity mappings now lower through one
+  typed `ActionCorrespondence` IR. Impl parameter annotations, target arity and
+  argument types, actor compatibility, duplicate origins/spans, progress lookup,
+  and concrete refinement execution share that validation path; requirements
+  auto-mapping no longer has a separate indexing path (issue #238).
 - Native/WASM parity now runs every Worker-supported surface document from the
   shared `specs/` and `examples/` corpus and structurally compares complete
   envelopes. Only schema-validated timing/backend identity and replay-validated

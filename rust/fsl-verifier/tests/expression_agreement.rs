@@ -43,6 +43,8 @@ spec Agreement {
   action advance() { requires x < 2  x = x + 1  flag = not flag }
   invariant Arithmetic { (x / 2) * 2 + (x % 2) == x }
   invariant Mixed { (x < 0) or flag or not flag }
+  invariant Conditional { (if flag then x else -x) >= -2 }
+  invariant UnselectedPartialOperation { if true then x == x else x / 0 == 0 }
   invariant OptionTruthTable {
     empty == none and empty == also_empty and empty != first and first != none and
     first == same and first != different and first == some(-2)

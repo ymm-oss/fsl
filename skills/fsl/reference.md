@@ -572,7 +572,7 @@ refinement <Name> {
   maps auto                                      // optional identity defaults for same-named compatible state/actions
   map <abs_var> = <expr over impl state>          // scalar abstract variable
   map <abs_var>[<x>: <KeyType>] = <expr>          // per-element mapping of a Map
-  // conditional expressions allowed only inside mapping/argument expressions: if <c> then <a> else <b> (else required)
+  // map and action arguments use the same expressions as specs, including if <c> then <a> else <b>
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
   // formal params may be bare names or name: Type annotations matching the impl action
   // explicit map/action entries override maps auto; incompatible same-name candidates are type errors
@@ -581,6 +581,13 @@ refinement <Name> {
   }
 }
 ```
+
+Standalone action items, inline `implements` items, requirement-action `maps`,
+and auto/identity synthesis share one typed action-correspondence validator.
+Typed impl parameters, target arity/argument expressions, and auto actor
+compatibility are checked identically. Duplicate diagnostics identify both
+origin kinds and line/column sites; auto synthesis never replaces an explicit
+entry.
 
 Give impl and abs distinct enum/struct type names. Refinement merges type
 metadata by name; a same-named enum/struct with a different member list/field
@@ -653,10 +660,11 @@ cannot be assigned both inline and in `init`.
 - Relation: `.contains(a,b) .add(a,b) .remove(a,b)`,
   `reachable(r,a,b) acyclic(r) functional(r) injective(r) domain(r) range(r)`.
   `reachable`/`acyclic` require a self-relation (`relation T -> T`).
+- conditional expression: `if c then a else b` in any expression position;
+  `c` is Bool, both branches have one logical type and are checked statically,
+  while only the selected branch is evaluated
 - ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q`,
-  `P ~> within K Q`, plus optional `decreases <int expr>` for induction ranking /
-  mapping-expression only:
-  `if c then a else b`
+  `P ~> within K Q`, plus optional `decreases <int expr>` for induction ranking
 
 ## 4. Statements (init / action body)
 
@@ -1482,7 +1490,7 @@ verify {
   `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
   clause on an action and a matching inline `action ...` item for the same impl
   action name is a duplicate-correspondence error (`kind: "type"`,
-  "duplicate action map for '<name>'"). An inline `action` item cannot target
+  with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
   `name__b<N>` alias. Auto-mapped process transitions are statically
   actor-checked; an actor mismatch is a check-time type error.

@@ -1,5 +1,5 @@
 """Tests for enum member names (and const/bool literals) as acceptance/forbidden
-action arguments (#67). Grammar already parsed these as `ref_expr`; the only
+action arguments (#67). The expression grammar already parsed these; the only
 rejection point was `_literal_value` in `fslc.acceptance`, whose `var` branch
 only resolved `spec["consts"]`."""
 from fslc.acceptance import _literal_value, validate_acceptance, validate_forbidden
