@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec CollectionAggregates {
+  type Item = 0..2
+
+  state {
+    selected: Set<Item>,
+    queue: Seq<Item, 4>,
+    empty_queue: Seq<Item, 4>
+  }
+
+  init {
+    selected = Set { 0, 2 }
+    queue = Seq { 1, 1, 2 }
+    empty_queue = Seq {}
+  }
+
+  action keep() {
+    selected = selected
+  }
+
+  invariant CollectionValues {
+    unique(item in selected where item > 0)
+      and exactlyOne(item in queue where item == 2)
+      and not unique(item in queue where item == 1)
+      and unique(item in empty_queue)
+      and not exactlyOne(item in empty_queue)
+  }
+}

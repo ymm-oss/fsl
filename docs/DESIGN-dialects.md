@@ -127,8 +127,10 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    Bool, or enum type". Carried fields are never auto-mapped for refinement —
    only the stage map (`e_stage`) participates in `maps auto`.
 3. `kpi k = count E in S` → no kernel state/action/invariant. The declaration is
-   recorded as metadata for the projection
-   `count(c: E where e_stage[c] == S)`.
+   validated and retained as typed `ProjectionDef` metadata whose expression is
+   the shared `Aggregate::Count` plus a typed Binder for
+   `count(c: E where e_stage[c] == S)`. Native `explain` reads this projection;
+   no ghost counter or consistency invariant is generated.
 4. `requirement <ID> "<text>" { items }` → lift the contained action /
    invariant / reachable / leadsTo to top level and attach
    `meta = {id: ID, text}` to each element (the Stage 1 mechanism). The ID is
@@ -251,9 +253,10 @@ verify {
       requirement is also acceptable — for implementation simplicity it is fine
       to put "by Manager" into meta.text)
    - duplicate transition labels with the same name are a type error.
-3. `kpi k = count X in S` → no kernel state/action/invariant. The declaration is
-   recorded as metadata for the projection
-   `count(c: X where x_stage[c] == S)`.
+3. `kpi k = count X in S` follows the same typed `ProjectionDef`/
+   `Aggregate::Count` path as requirements KPI declarations. Unknown entities
+   and stages are rejected before model construction; native `explain` exposes
+   the retained metadata. No kernel state/action/invariant is generated.
 4. `control <ID> "<text>" [owner NAME] [severity NAME] [applies_to NAME]...`
    records business/governance metadata only. It does not generate kernel state
    or properties by itself. A control becomes checkable when a policy or goal

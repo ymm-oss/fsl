@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Finite quantifiers, `count`, `sum`, `unique`, and `exactlyOne` now share one
+  Binder/Aggregate IR across typed, range, Set, and Seq domains. Optional
+  filters use one scope/type-check path; empty aggregates are zero and Seq
+  duplicates preserve positional multiplicity. Legacy colon quantifiers remain
+  detectable as non-canonical input, business/requirements KPI declarations
+  survive as typed metadata projections, and collection aggregates normalize to
+  existing Public Kernel v1/v2 expression shapes (issues #242 and #217).
 - Requirements expressions now accept `stage(entity)` and qualified
   `<process-path>.stage(entity)` through the same structural node and resolver
   as business expressions. Entity-typed binders/parameters select the process;

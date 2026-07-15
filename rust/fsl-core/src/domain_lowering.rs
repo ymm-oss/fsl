@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
-    ActionItem, Annotations, Binder, DomainAggregate, DomainDecide, DomainEffect, DomainField,
-    DomainLoc, DomainSaga, DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, Expr,
-    LValue, MetaTag, Param, Pattern, QualifiedName, Span, SpecItem, StateField, Statement,
-    SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue, SyntaxPattern,
-    SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
+    ActionItem, AggregateKind, Annotations, Binder, DomainAggregate, DomainDecide, DomainEffect,
+    DomainField, DomainLoc, DomainSaga, DomainSagaStep, DomainSpec, DomainType,
+    DomainTypeSourceForm, Expr, LValue, MetaTag, Param, Pattern, QualifiedName, Span, SpecItem,
+    StateField, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue,
+    SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
 };
 
 use crate::CoreError;
@@ -1111,6 +1111,7 @@ impl<'a> Resolver<'a> {
                 quantifier,
                 binder,
                 body,
+                ..
             } => {
                 let (binder, nested) =
                     self.resolve_binder(binder, scope, aggregate, expanding_can)?;
@@ -1130,64 +1131,19 @@ impl<'a> Resolver<'a> {
                     ty: LogicalType::Bool,
                 }
             }
-            SyntaxExprKind::Count {
-                name,
-                type_name,
-                condition,
+            SyntaxExprKind::Aggregate {
+                kind,
+                binder,
+                value,
             } => {
-                let logical = self.qualified_logical_type(type_name)?;
-                let mut nested = scope.clone();
-                nested.insert(
-                    name.text.clone(),
-                    Symbol {
-                        kernel_name: name.text.clone(),
-                        ty: logical,
-                    },
-                );
-                let condition = self.resolve_expr(
-                    condition,
-                    Some(&LogicalType::Bool),
-                    &nested,
-                    aggregate,
-                    expanding_can,
-                )?;
-                ResolvedExpr {
-                    expr: Expr::Count {
-                        name: name.text.clone(),
-                        type_name: Self::qualified_name(type_name),
-                        condition: Box::new(condition.expr),
-                    },
-                    ty: LogicalType::Int,
-                }
-            }
-            SyntaxExprKind::Sum {
-                name,
-                type_name,
-                body,
-                condition,
-            } => {
-                let logical = self.qualified_logical_type(type_name)?;
-                let mut nested = scope.clone();
-                nested.insert(
-                    name.text.clone(),
-                    Symbol {
-                        kernel_name: name.text.clone(),
-                        ty: logical,
-                    },
-                );
-                let body = self.resolve_expr(
-                    body,
-                    Some(&LogicalType::Int),
-                    &nested,
-                    aggregate,
-                    expanding_can,
-                )?;
-                let condition = condition
+                let (binder, nested) =
+                    self.resolve_binder(binder, scope, aggregate, expanding_can)?;
+                let value = value
                     .as_deref()
-                    .map(|condition| {
+                    .map(|value| {
                         self.resolve_expr(
-                            condition,
-                            Some(&LogicalType::Bool),
+                            value,
+                            Some(&LogicalType::Int),
                             &nested,
                             aggregate,
                             expanding_can,
@@ -1196,27 +1152,16 @@ impl<'a> Resolver<'a> {
                     })
                     .transpose()?;
                 ResolvedExpr {
-                    expr: Expr::Sum {
-                        name: name.text.clone(),
-                        type_name: Self::qualified_name(type_name),
-                        body: Box::new(body.expr),
-                        condition,
-                    },
-                    ty: LogicalType::Int,
-                }
-            }
-            SyntaxExprKind::BinderNamed { name, binder } => {
-                let (binder, _) = self.resolve_binder(binder, scope, aggregate, expanding_can)?;
-                ResolvedExpr {
-                    expr: Expr::BinderNamed {
-                        name: if name.text == "exactlyOne" {
-                            "exactly_one".to_owned()
-                        } else {
-                            name.text.clone()
-                        },
+                    expr: Expr::Aggregate {
+                        kind: *kind,
                         binder,
+                        value,
                     },
-                    ty: LogicalType::Bool,
+                    ty: if matches!(kind, AggregateKind::Count | AggregateKind::Sum) {
+                        LogicalType::Int
+                    } else {
+                        LogicalType::Bool
+                    },
                 }
             }
             SyntaxExprKind::Num(_)
@@ -1310,7 +1255,13 @@ impl<'a> Resolver<'a> {
                     nested,
                 ))
             }
-            SyntaxBinder::Range { name, lo, hi, .. } => {
+            SyntaxBinder::Range {
+                name,
+                lo,
+                hi,
+                where_expr,
+                ..
+            } => {
                 let lo = self.resolve_expr(
                     lo,
                     Some(&LogicalType::Int),
@@ -1333,11 +1284,25 @@ impl<'a> Resolver<'a> {
                         ty: LogicalType::Int,
                     },
                 );
+                let where_expr = where_expr
+                    .as_deref()
+                    .map(|value| {
+                        self.resolve_expr(
+                            value,
+                            Some(&LogicalType::Bool),
+                            &nested,
+                            aggregate,
+                            expanding_can,
+                        )
+                        .map(|value| Box::new(value.expr))
+                    })
+                    .transpose()?;
                 Ok((
                     Binder::Range {
                         name: name.text.clone(),
                         lo: Box::new(lo.expr),
                         hi: Box::new(hi.expr),
+                        where_expr,
                     },
                     nested,
                 ))
@@ -2922,20 +2887,15 @@ fn expression_lowering_steps(expression: &SyntaxExpr) -> Vec<LoweringStep> {
             }
             SyntaxExprKind::Is { expr, .. } => visit(expr, output),
             SyntaxExprKind::Quantified { body, .. } => visit(body, output),
-            SyntaxExprKind::Count { condition, .. } => visit(condition, output),
-            SyntaxExprKind::Sum {
-                body, condition, ..
-            } => {
-                visit(body, output);
-                if let Some(condition) = condition {
-                    visit(condition, output);
+            SyntaxExprKind::Aggregate { value, .. } => {
+                if let Some(value) = value {
+                    visit(value, output);
                 }
             }
             SyntaxExprKind::Num(_)
             | SyntaxExprKind::Bool(_)
             | SyntaxExprKind::None
-            | SyntaxExprKind::Name(_)
-            | SyntaxExprKind::BinderNamed { .. } => {}
+            | SyntaxExprKind::Name(_) => {}
         }
     }
 
@@ -3266,18 +3226,12 @@ fn bind_expression_tree(
         | Expr::UnaryNamed { expr, .. } => {
             bind_expression_tree(registry, &child("operand"), expr, origin);
         }
-        Expr::Quantified { body, .. }
-        | Expr::Count {
-            condition: body, ..
-        } => {
+        Expr::Quantified { body, .. } => {
             bind_expression_tree(registry, &child("body"), body, origin);
         }
-        Expr::Sum {
-            body, condition, ..
-        } => {
-            bind_expression_tree(registry, &child("body"), body, origin);
-            if let Some(condition) = condition {
-                bind_expression_tree(registry, &child("condition"), condition, origin);
+        Expr::Aggregate { value, .. } => {
+            if let Some(value) = value {
+                bind_expression_tree(registry, &child("value"), value, origin);
             }
         }
         Expr::TernaryNamed {
@@ -3290,7 +3244,7 @@ fn bind_expression_tree(
             bind_expression_tree(registry, &child("second"), second, origin);
             bind_expression_tree(registry, &child("third"), third, origin);
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::BinderNamed { .. } => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => {}
     }
 }
 

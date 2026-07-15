@@ -158,6 +158,17 @@ detects, for a fixed list of feature rows, whether each is:
 
 No row is ever hardcoded to a fixed level: every detector inspects the
 generated JSON (expression trees, `outcome.kind`, state snapshots) directly.
+
+Collection/range aggregates are source and private checked-IR features, not a
+new Public Kernel v1/v2 representation. Before export, finite `count`/`sum`
+over Set, Seq, or range binders is normalized to existing `ite`, arithmetic,
+membership, `.size()`, and `.at()` expression nodes. Seq expansion includes the
+structural `index < size` guard for every capacity slot, so inactive slots are
+not counted and partial-operation evidence remains guarded. Existing typed
+aggregate JSON keeps its exact `{binding, domain, condition}` shape (`sum`
+without a filter retains `condition: null`). Adding `{binder: ...}` to the
+published `count`/`sum` kinds would be a representation change and therefore
+requires a future Public Kernel major version.
 `coverage_matrix()` is itself the enforcement gate: if any feature row falls
 short of its required level, it returns `Err` naming every shortfall instead
 of producing a matrix that silently under-reports coverage. This is how

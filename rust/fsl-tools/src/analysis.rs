@@ -107,9 +107,14 @@ fn binder_reads(
         Binder::Typed { where_expr, .. } => where_expr
             .as_deref()
             .map_or_else(BTreeSet::new, |expr| expr_reads_bound(expr, state, bound)),
-        Binder::Range { lo, hi, .. } => {
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => {
             let mut reads = expr_reads_bound(lo, state, bound);
             reads.extend(expr_reads_bound(hi, state, bound));
+            if let Some(expr) = where_expr {
+                reads.extend(expr_reads_bound(expr, state, bound));
+            }
             reads
         }
         Binder::Collection {
@@ -207,24 +212,12 @@ fn expr_reads_bound(
             reads.extend(binder_reads(binder, state, &next));
             reads.extend(expr_reads_bound(body, state, &next));
         }
-        Expr::Count {
-            name, condition, ..
-        } => {
+        Expr::Aggregate { binder, value, .. } => {
             let mut next = bound.clone();
-            next.insert(name.clone());
-            reads.extend(expr_reads_bound(condition, state, &next));
-        }
-        Expr::Sum {
-            name,
-            body,
-            condition,
-            ..
-        } => {
-            let mut next = bound.clone();
-            next.insert(name.clone());
-            reads.extend(expr_reads_bound(body, state, &next));
-            if let Some(condition) = condition {
-                reads.extend(expr_reads_bound(condition, state, &next));
+            next.insert(binder_name(binder).to_owned());
+            reads.extend(binder_reads(binder, state, &next));
+            if let Some(value) = value {
+                reads.extend(expr_reads_bound(value, state, &next));
             }
         }
         Expr::TernaryNamed {
@@ -237,7 +230,6 @@ fn expr_reads_bound(
             reads.extend(expr_reads_bound(second, state, bound));
             reads.extend(expr_reads_bound(third, state, bound));
         }
-        Expr::BinderNamed { binder, .. } => reads.extend(binder_reads(binder, state, bound)),
         Expr::Num(_) | Expr::Bool(_) | Expr::None => {}
     }
     reads

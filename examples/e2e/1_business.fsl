@@ -48,9 +48,9 @@ business ExpenseToBe {
     transition pay          Approved  -> Paid      by Finance
   }
 
-  // Management metric: the number of completed payments. Because kpi
-  // auto-generates a same-named counter-consistency invariant, undercounting
-  // and double-counting of payments are also part of the verification target.
+  // Management metric: the number of completed payments. KPI declarations are
+  // typed projection metadata for explain/scenarios; they do not add ghost
+  // state or an automatic invariant.
   kpi paid_claims = count Claim in Paid
 
   // ── Control policies ─────────────────────────────────────────────

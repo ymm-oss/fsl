@@ -521,14 +521,20 @@ variable capture instead of inventing internal binder names. See
   branch extends to the enclosing delimiter; use parentheses when a following
   operator should apply to the whole conditional. Concrete evaluation executes
   only the selected branch, while name and type checking always visits both.
-- Quantification (bounded): `forall x: T { expr }` / `exists x: T { expr }` (can be filtered with `where expr`),
-  the v0 form `forall i in lo..hi: expr` is also allowed. Expression quantifiers
-  can also range over a Set or Seq value: `forall x in active { ... }` /
-  `exists x in queue { ... }`; for Seq this ranges over the live prefix values.
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
-- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
-  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
-  matching binding, while `exactlyOne` means exactly one.
+- Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each optionally
+  followed by `where predicate`. The predicate is `Bool` and is scoped after
+  `x` is bound. Maps and unbounded collections are not binder domains.
+- Quantification (bounded): the canonical forms are `forall binder { expr }`
+  and `exists binder { expr }`. The 2.x legacy colon/no-braces spelling such as
+  `forall i in lo..hi: expr` remains accepted but is non-canonical. A Seq binder
+  visits its live prefix in position order and preserves duplicate values.
+- Aggregation: `count(binder)` and `sum(binder of value)`. Examples include
+  `count(x: T where p)`, `count(x in queue where p)`,
+  `sum(x in queue of x.amount where p)`, and range equivalents. Empty domains
+  produce `0`; Seq duplicates contribute once per live position, while Set
+  membership contributes once per distinct member.
+- Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
+  means at most one matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
   Equality is structural: `none` equals only `none`, while two `some` values are
   equal exactly when their payloads are equal. `x is some(v)` remains the form

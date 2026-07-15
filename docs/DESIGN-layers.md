@@ -106,8 +106,10 @@ verify {
 Expansion rules: `process` → enum + `Map<CaseId, Stage>` + an action per
 transition (`by <actor>` is action metadata; a transition whose actor has a
 parameter becomes a parameter of the actor type). `kpi name = count Entity in
-Stage` → declarative projection metadata only, not a ghost counter and not an
-automatic `_kpi_*` invariant. `control ID "text"` is governance metadata only;
+Stage` → a typed `ProjectionDef` containing the shared Aggregate/Binder IR,
+available to native explain but not a ghost counter or automatic `_kpi_*`
+invariant. Entity/stage resolution is checked during lowering. `control ID
+"text"` is governance metadata only;
 `policy/goal ... satisfies CTRL` attaches that control to the generated
 invariant/leadsTo/reachable so violations identify both the broken policy and the
 control it was meant to satisfy. Readable `every ... must eventually ...`
@@ -196,8 +198,9 @@ verify {
   to the stage enum, entity stage map, carried field maps, deterministic init,
   and fair transition actions. Transition `with`/`when`/`set`/`covers` lower to
   action params, requires, assignments, and metadata.
-- `kpi name = count E in S` records a declarative projection available to
-  explain/scenarios without adding a ghost counter.
+- `kpi name = count E in S` records the same typed Aggregate/Binder projection
+  as the business layer, available to explain/scenarios without adding a ghost
+  counter.
 - `requirement` block → **attach `req_id` / `req_text` metadata** to the
   contained kernel elements (action/invariant/leadsTo). All JSON output
   (violated / unknown_cti / coverage diagnostics / scenarios) carries

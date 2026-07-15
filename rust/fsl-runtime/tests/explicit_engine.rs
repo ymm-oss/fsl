@@ -98,6 +98,18 @@ fn deterministic_init_rejects_state_dependent_forall_domains() {
         "init forall over a state collection is not supported; state variable 's' is not allowed"
     );
 
+    let state_range_filter = model(
+        "spec StateRangeFilter { type Slot = 0..2 state { n: Slot, m: Map<Slot, Bool> } \
+         init { forall i in 0..2 where n == 0 { m[i] = true } n = 0 } \
+         action stay() { n = n } }",
+    );
+    let error = fsl_runtime::verify_explicit(state_range_filter, 2, 100)
+        .expect_err("state-dependent init range filter rejected");
+    assert_eq!(
+        error.message,
+        "init references state variable 'n' before it is assigned"
+    );
+
     let const_range = model(
         "spec ConstRange { const CAP = 2 type Slot = 0..2 \
          state { m: Map<Slot, Bool> } \

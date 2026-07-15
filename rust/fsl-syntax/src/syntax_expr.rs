@@ -12,7 +12,10 @@
 use std::fmt;
 use std::ops::Deref;
 
-use crate::{Binder, Expr, ParseError, Pattern, QualifiedName, Span, SymbolPath, Token, TokenKind};
+use crate::{
+    AggregateKind, Binder, Expr, ParseError, Pattern, QualifiedName, Span, SymbolPath, Token,
+    TokenKind,
+};
 
 /// An unresolved source identifier with its exact token span.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,6 +76,7 @@ pub enum SyntaxBinder {
         name: SyntaxIdent,
         lo: Box<SyntaxExpr>,
         hi: Box<SyntaxExpr>,
+        where_expr: Option<Box<SyntaxExpr>>,
         span: Span,
     },
     Collection {
@@ -162,21 +166,13 @@ pub enum SyntaxExprKind {
         quantifier: SyntaxIdent,
         binder: SyntaxBinder,
         body: Box<SyntaxExpr>,
+        braced: bool,
+        legacy_colon: bool,
     },
-    Count {
-        name: SyntaxIdent,
-        type_name: SyntaxQualifiedName,
-        condition: Box<SyntaxExpr>,
-    },
-    Sum {
-        name: SyntaxIdent,
-        type_name: SyntaxQualifiedName,
-        body: Box<SyntaxExpr>,
-        condition: Option<Box<SyntaxExpr>>,
-    },
-    BinderNamed {
-        name: SyntaxIdent,
+    Aggregate {
+        kind: AggregateKind,
         binder: SyntaxBinder,
+        value: Option<Box<SyntaxExpr>>,
     },
 }
 
@@ -203,6 +199,11 @@ pub(crate) enum ExpressionMode {
 }
 
 impl SyntaxExpr {
+    /// Render this parsed expression using canonical source spelling.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a manually constructed `sum` aggregate omits its required value.
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn render_source(&self) -> String {
@@ -274,42 +275,30 @@ impl SyntaxExpr {
                 quantifier,
                 binder,
                 body,
+                ..
             } => format!(
                 "{} {} {{ {} }}",
                 quantifier.text,
                 binder.render_source(),
                 body.render_source()
             ),
-            SyntaxExprKind::Count {
-                name,
-                type_name,
-                condition,
-            } => format!(
-                "count({}: {} where {})",
-                name.text,
-                type_name.render_source(),
-                condition.render_source()
-            ),
-            SyntaxExprKind::Sum {
-                name,
-                type_name,
-                body,
-                condition,
-            } => {
-                let suffix = condition.as_deref().map_or_else(String::new, |condition| {
-                    format!(" where {}", condition.render_source())
-                });
-                format!(
-                    "sum({}: {} of {}{})",
-                    name.text,
-                    type_name.render_source(),
-                    body.render_source(),
-                    suffix
-                )
-            }
-            SyntaxExprKind::BinderNamed { name, binder } => {
-                format!("{}({})", name.text, binder.render_source())
-            }
+            SyntaxExprKind::Aggregate {
+                kind,
+                binder,
+                value,
+            } => match kind {
+                AggregateKind::Count => format!("count({})", binder.render_source()),
+                AggregateKind::Sum => format!(
+                    "sum({} of {}{})",
+                    binder.render_source_base(),
+                    value.as_deref().expect("sum has a value").render_source(),
+                    binder.where_expr().map_or_else(String::new, |filter| {
+                        format!(" where {}", filter.render_source())
+                    })
+                ),
+                AggregateKind::Unique => format!("unique({})", binder.render_source()),
+                AggregateKind::ExactlyOne => format!("exactlyOne({})", binder.render_source()),
+            },
         }
     }
 
@@ -456,40 +445,22 @@ impl SyntaxExpr {
                 quantifier,
                 binder,
                 body,
+                ..
             } => Expr::Quantified {
                 quantifier: quantifier.text,
                 binder: binder.into_kernel()?,
                 body: Box::new(body.into_kernel()?),
             },
-            SyntaxExprKind::Count {
-                name,
-                type_name,
-                condition,
-            } => Expr::Count {
-                name: name.text,
-                type_name: type_name.into_kernel(),
-                condition: Box::new(condition.into_kernel()?),
-            },
-            SyntaxExprKind::Sum {
-                name,
-                type_name,
-                body,
-                condition,
-            } => Expr::Sum {
-                name: name.text,
-                type_name: type_name.into_kernel(),
-                body: Box::new(body.into_kernel()?),
-                condition: condition
+            SyntaxExprKind::Aggregate {
+                kind,
+                binder,
+                value,
+            } => Expr::Aggregate {
+                kind,
+                binder: binder.into_kernel()?,
+                value: value
                     .map(|value| value.into_kernel().map(Box::new))
                     .transpose()?,
-            },
-            SyntaxExprKind::BinderNamed { name, binder } => Expr::BinderNamed {
-                name: if name.text == "exactlyOne" {
-                    "exactly_one".to_owned()
-                } else {
-                    name.text
-                },
-                binder: binder.into_kernel()?,
             },
         })
     }
@@ -617,20 +588,19 @@ impl fmt::Display for SyntaxTypeExpr {
 
 impl SyntaxBinder {
     fn render_source(&self) -> String {
+        let mut output = self.render_source_base();
+        if let Some(filter) = self.where_expr() {
+            output.push_str(" where ");
+            output.push_str(&filter.render_source());
+        }
+        output
+    }
+
+    fn render_source_base(&self) -> String {
         match self {
             Self::Typed {
-                name,
-                type_name,
-                where_expr,
-                ..
-            } => format!(
-                "{}: {}{}",
-                name.text,
-                type_name.render_source(),
-                where_expr.as_deref().map_or_else(String::new, |value| {
-                    format!(" where {}", value.render_source())
-                })
-            ),
+                name, type_name, ..
+            } => format!("{}: {}", name.text, type_name.render_source()),
             Self::Range { name, lo, hi, .. } => format!(
                 "{} in {}..{}",
                 name.text,
@@ -638,18 +608,16 @@ impl SyntaxBinder {
                 hi.render_source()
             ),
             Self::Collection {
-                name,
-                collection,
-                where_expr,
-                ..
-            } => format!(
-                "{} in {}{}",
-                name.text,
-                collection.render_source(),
-                where_expr.as_deref().map_or_else(String::new, |value| {
-                    format!(" where {}", value.render_source())
-                })
-            ),
+                name, collection, ..
+            } => format!("{} in {}", name.text, collection.render_source()),
+        }
+    }
+
+    fn where_expr(&self) -> Option<&SyntaxExpr> {
+        match self {
+            Self::Typed { where_expr, .. }
+            | Self::Range { where_expr, .. }
+            | Self::Collection { where_expr, .. } => where_expr.as_deref(),
         }
     }
 
@@ -667,10 +635,19 @@ impl SyntaxBinder {
                     .map(|value| value.into_kernel().map(Box::new))
                     .transpose()?,
             },
-            Self::Range { name, lo, hi, .. } => Binder::Range {
+            Self::Range {
+                name,
+                lo,
+                hi,
+                where_expr,
+                ..
+            } => Binder::Range {
                 name: name.text,
                 lo: Box::new(lo.into_kernel()?),
                 hi: Box::new(hi.into_kernel()?),
+                where_expr: where_expr
+                    .map(|value| value.into_kernel().map(Box::new))
+                    .transpose()?,
             },
             Self::Collection {
                 name,
@@ -845,8 +822,9 @@ impl SyntaxParser<'_> {
             let start = self.peek().span;
             let quantifier = self.expect_ident()?;
             let binder = self.binder()?;
-            self.eat_symbol(":");
-            let body = if self.eat_symbol("{") {
+            let legacy_colon = self.eat_symbol(":");
+            let braced = self.eat_symbol("{");
+            let body = if braced {
                 let body = self.expression(0)?;
                 self.expect_symbol("}")?;
                 body
@@ -859,6 +837,8 @@ impl SyntaxParser<'_> {
                     quantifier,
                     binder,
                     body: Box::new(body),
+                    braced,
+                    legacy_colon,
                 },
                 span,
             });
@@ -928,17 +908,18 @@ impl SyntaxParser<'_> {
                 self.sum(token.span)
             }
             TokenKind::Ident(name) if name == "unique" || name == "exactlyOne" => {
-                let ident = SyntaxIdent {
-                    text: name,
-                    span: token.span,
-                };
                 self.expect_symbol("(")?;
                 let binder = self.binder()?;
                 self.expect_symbol(")")?;
                 Ok(SyntaxExpr {
-                    kind: SyntaxExprKind::BinderNamed {
-                        name: ident,
+                    kind: SyntaxExprKind::Aggregate {
+                        kind: if name == "unique" {
+                            AggregateKind::Unique
+                        } else {
+                            AggregateKind::ExactlyOne
+                        },
                         binder,
+                        value: None,
                     },
                     span: join(token.span, self.previous_span()),
                 })
@@ -1107,12 +1088,20 @@ impl SyntaxParser<'_> {
         let first = self.expression(0)?;
         if self.eat_symbol("..") {
             let hi = Box::new(self.expression(0)?);
-            let span = join(start, hi.span);
+            let where_expr = if self.eat_ident("where") {
+                Some(Box::new(self.expression(0)?))
+            } else {
+                None
+            };
+            let end = where_expr
+                .as_deref()
+                .map_or(hi.span, |expression| expression.span);
             return Ok(SyntaxBinder::Range {
                 name,
                 lo: Box::new(first),
                 hi,
-                span,
+                where_expr,
+                span: join(start, end),
             });
         }
         let where_expr = if self.eat_ident("where") {
@@ -1133,17 +1122,13 @@ impl SyntaxParser<'_> {
 
     fn count(&mut self, start: Span) -> Result<SyntaxExpr, ParseError> {
         self.expect_symbol("(")?;
-        let name = self.expect_ident()?;
-        self.expect_symbol(":")?;
-        let type_name = self.qualified_name()?;
-        self.expect_ident_value("where")?;
-        let condition = self.expression(0)?;
+        let binder = self.binder()?;
         self.expect_symbol(")")?;
         Ok(SyntaxExpr {
-            kind: SyntaxExprKind::Count {
-                name,
-                type_name,
-                condition: Box::new(condition),
+            kind: SyntaxExprKind::Aggregate {
+                kind: AggregateKind::Count,
+                binder,
+                value: None,
             },
             span: join(start, self.previous_span()),
         })
@@ -1151,23 +1136,45 @@ impl SyntaxParser<'_> {
 
     fn sum(&mut self, start: Span) -> Result<SyntaxExpr, ParseError> {
         self.expect_symbol("(")?;
-        let name = self.expect_ident()?;
-        self.expect_symbol(":")?;
-        let type_name = self.qualified_name()?;
+        let mut binder = self.binder()?;
         self.expect_ident_value("of")?;
         let body = self.expression(0)?;
-        let condition = if self.eat_ident("where") {
+        let where_expr = if self.eat_ident("where") {
+            let where_span = self.previous_span();
+            let already_filtered = match &binder {
+                SyntaxBinder::Typed { where_expr, .. }
+                | SyntaxBinder::Range { where_expr, .. }
+                | SyntaxBinder::Collection { where_expr, .. } => where_expr.is_some(),
+            };
+            if already_filtered {
+                return Err(ParseError::new(
+                    "sum binder cannot contain two 'where' filters",
+                    where_span,
+                ));
+            }
             Some(Box::new(self.expression(0)?))
         } else {
             None
         };
+        if where_expr.is_some() {
+            match &mut binder {
+                SyntaxBinder::Typed {
+                    where_expr: filter, ..
+                }
+                | SyntaxBinder::Range {
+                    where_expr: filter, ..
+                }
+                | SyntaxBinder::Collection {
+                    where_expr: filter, ..
+                } => *filter = where_expr,
+            }
+        }
         self.expect_symbol(")")?;
         Ok(SyntaxExpr {
-            kind: SyntaxExprKind::Sum {
-                name,
-                type_name,
-                body: Box::new(body),
-                condition,
+            kind: SyntaxExprKind::Aggregate {
+                kind: AggregateKind::Sum,
+                binder,
+                value: Some(Box::new(body)),
             },
             span: join(start, self.previous_span()),
         })

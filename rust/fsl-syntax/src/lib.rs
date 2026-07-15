@@ -28,7 +28,9 @@ pub use annotation::{
     Annotation, AnnotationError, AnnotationRegistry, AnnotationValue, Annotations, RequirementLink,
     SymbolPath,
 };
-pub use ast::{Binder, ConditionalSpans, Expr, Pattern, QualifiedName, SourcePos, Span};
+pub use ast::{
+    AggregateKind, Binder, ConditionalSpans, Expr, Pattern, QualifiedName, SourcePos, Span,
+};
 pub use db::{
     DbArtifact, DbCheck, DbCheckRule, DbColumn, DbColumnRef, DbDatabase, DbEnvironment,
     DbEnvironmentArtifact, DbFlag, DbFlagCondition, DbMigration, DbMigrationOp, DbSystem, DbTable,

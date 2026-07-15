@@ -83,13 +83,19 @@ fn mutate_binder(
                 }
             }
         }
-        Binder::Range { name, lo, hi } => {
+        Binder::Range {
+            name,
+            lo,
+            hi,
+            where_expr,
+        } => {
             for mutation in expr_mutations(lo, enums) {
                 output.push((
                     Binder::Range {
                         name: name.clone(),
                         lo: Box::new(mutation.expr.clone()),
                         hi: hi.clone(),
+                        where_expr: where_expr.clone(),
                     },
                     mutation,
                 ));
@@ -100,9 +106,23 @@ fn mutate_binder(
                         name: name.clone(),
                         lo: lo.clone(),
                         hi: Box::new(mutation.expr.clone()),
+                        where_expr: where_expr.clone(),
                     },
                     mutation,
                 ));
+            }
+            if let Some(condition) = where_expr {
+                for mutation in expr_mutations(condition, enums) {
+                    output.push((
+                        Binder::Range {
+                            name: name.clone(),
+                            lo: lo.clone(),
+                            hi: hi.clone(),
+                            where_expr: Some(Box::new(mutation.expr.clone())),
+                        },
+                        mutation,
+                    ));
+                }
             }
         }
         Binder::Collection {
@@ -401,47 +421,28 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
-        Expr::Count {
-            name,
-            type_name,
-            condition,
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
         } => {
-            for mutation in expr_mutations(condition, enums) {
+            for (replacement, mutation) in mutate_binder(binder, enums) {
                 output.push(ExprMutation {
-                    expr: Expr::Count {
-                        name: name.clone(),
-                        type_name: type_name.clone(),
-                        condition: Box::new(mutation.expr.clone()),
+                    expr: Expr::Aggregate {
+                        kind: *kind,
+                        binder: replacement,
+                        value: value.clone(),
                     },
                     ..mutation
                 });
             }
-        }
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => {
-            for mutation in expr_mutations(body, enums) {
-                output.push(ExprMutation {
-                    expr: Expr::Sum {
-                        name: name.clone(),
-                        type_name: type_name.clone(),
-                        body: Box::new(mutation.expr.clone()),
-                        condition: condition.clone(),
-                    },
-                    ..mutation
-                });
-            }
-            if let Some(condition) = condition {
-                for mutation in expr_mutations(condition, enums) {
+            if let Some(value) = value {
+                for mutation in expr_mutations(value, enums) {
                     output.push(ExprMutation {
-                        expr: Expr::Sum {
-                            name: name.clone(),
-                            type_name: type_name.clone(),
-                            body: body.clone(),
-                            condition: Some(Box::new(mutation.expr.clone())),
+                        expr: Expr::Aggregate {
+                            kind: *kind,
+                            binder: binder.clone(),
+                            value: Some(Box::new(mutation.expr.clone())),
                         },
                         ..mutation
                     });
@@ -539,17 +540,6 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                         first: first.clone(),
                         second: second.clone(),
                         third: Box::new(mutation.expr.clone()),
-                    },
-                    ..mutation
-                });
-            }
-        }
-        Expr::BinderNamed { name, binder } => {
-            for (replacement, mutation) in mutate_binder(binder, enums) {
-                output.push(ExprMutation {
-                    expr: Expr::BinderNamed {
-                        name: name.clone(),
-                        binder: replacement,
                     },
                     ..mutation
                 });

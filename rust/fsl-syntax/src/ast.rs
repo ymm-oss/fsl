@@ -68,12 +68,21 @@ pub enum Binder {
         name: String,
         lo: Box<Expr>,
         hi: Box<Expr>,
+        where_expr: Option<Box<Expr>>,
     },
     Collection {
         name: String,
         collection: Box<Expr>,
         where_expr: Option<Box<Expr>>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AggregateKind {
+    Count,
+    Sum,
+    Unique,
+    ExactlyOne,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -123,16 +132,10 @@ pub enum Expr {
         binder: Binder,
         body: Box<Expr>,
     },
-    Count {
-        name: String,
-        type_name: QualifiedName,
-        condition: Box<Expr>,
-    },
-    Sum {
-        name: String,
-        type_name: QualifiedName,
-        body: Box<Expr>,
-        condition: Option<Box<Expr>>,
+    Aggregate {
+        kind: AggregateKind,
+        binder: Binder,
+        value: Option<Box<Expr>>,
     },
     Stage {
         process: Option<Box<SymbolPath>>,
@@ -155,10 +158,6 @@ pub enum Expr {
         first: Box<Expr>,
         second: Box<Expr>,
         third: Box<Expr>,
-    },
-    BinderNamed {
-        name: String,
-        binder: Binder,
     },
 }
 
@@ -186,9 +185,23 @@ impl Binder {
                 type_name.python_ast(),
                 where_expr.as_deref().map(Expr::python_ast)
             ]),
-            Self::Range { name, lo, hi } => {
-                json!(["binder_range", name, lo.python_ast(), hi.python_ast()])
-            }
+            Self::Range {
+                name,
+                lo,
+                hi,
+                where_expr,
+            } => where_expr.as_deref().map_or_else(
+                || json!(["binder_range", name, lo.python_ast(), hi.python_ast()]),
+                |where_expr| {
+                    json!([
+                        "binder_range",
+                        name,
+                        lo.python_ast(),
+                        hi.python_ast(),
+                        where_expr.python_ast()
+                    ])
+                },
+            ),
             Self::Collection {
                 name,
                 collection,
@@ -256,28 +269,56 @@ impl Expr {
                 binder,
                 body,
             } => json!([quantifier, binder.python_ast(), body.python_ast()]),
-            Self::Count {
-                name,
-                type_name,
-                condition,
-            } => json!([
-                "count",
-                name,
-                type_name.python_ast(),
-                condition.python_ast()
-            ]),
-            Self::Sum {
-                name,
-                type_name,
-                body,
-                condition,
-            } => json!([
-                "sum",
-                name,
-                type_name.python_ast(),
-                body.python_ast(),
-                condition.as_deref().map(Expr::python_ast)
-            ]),
+            Self::Aggregate {
+                kind,
+                binder,
+                value,
+            } => match (kind, binder, value.as_deref()) {
+                (
+                    AggregateKind::Count,
+                    Binder::Typed {
+                        name,
+                        type_name,
+                        where_expr: Some(condition),
+                    },
+                    None,
+                ) => json!([
+                    "count",
+                    name,
+                    type_name.python_ast(),
+                    condition.python_ast()
+                ]),
+                (
+                    AggregateKind::Sum,
+                    Binder::Typed {
+                        name,
+                        type_name,
+                        where_expr,
+                    },
+                    Some(body),
+                ) => json!([
+                    "sum",
+                    name,
+                    type_name.python_ast(),
+                    body.python_ast(),
+                    where_expr.as_deref().map(Expr::python_ast)
+                ]),
+                (AggregateKind::Unique, binder, None) => json!(["unique", binder.python_ast()]),
+                (AggregateKind::ExactlyOne, binder, None) => {
+                    json!(["exactly_one", binder.python_ast()])
+                }
+                _ => json!([
+                    "aggregate",
+                    match kind {
+                        AggregateKind::Count => "count",
+                        AggregateKind::Sum => "sum",
+                        AggregateKind::Unique => "unique",
+                        AggregateKind::ExactlyOne => "exactly_one",
+                    },
+                    binder.python_ast(),
+                    value.as_deref().map(Expr::python_ast)
+                ]),
+            },
             Self::Stage {
                 process,
                 entity,
@@ -319,7 +360,6 @@ impl Expr {
                 second.python_ast(),
                 third.python_ast()
             ]),
-            Self::BinderNamed { name, binder } => json!([name, binder.python_ast()]),
         }
     }
 }

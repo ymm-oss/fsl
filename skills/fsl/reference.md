@@ -640,14 +640,15 @@ cannot be assigned both inline and in `init`.
   (in `a//b` everything after `//` becomes a comment, so write division with a
   space: `a / b`)
 - Comparison: `== != < <= > >=` / logic: `and or not =>`
-- Quantification: `forall x: T { expr }`, `exists x: T { expr }` (`where expr`
-  allowed), `forall x in set_or_seq { expr }` / `exists x in set_or_seq { expr }`
-  for expression-only Set/Seq iteration, and the v0 form
-  `forall i in lo..hi: expr` (range is a constant expression: `0..CAP-1` recommended)
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
-- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
-  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
-  matching binding; `exactlyOne` means exactly one.
+- Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each with an
+  optional `where BoolExpr`. Maps and unbounded domains are rejected.
+- Quantification: canonical `forall binder { expr }` / `exists binder { expr }`.
+  The 2.x colon/no-braces spelling remains accepted as non-canonical input.
+- Aggregation: `count(binder)` and `sum(binder of value)`, including collection
+  and range binders. Empty domains yield `0`; Seq duplicates count once per live
+  slot and Set members once per distinct value.
+- Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
+  means at most one match; `exactlyOne` means exactly one.
 - Option: `x == none` `x != none` `x == some(e)` `x != some(e)` use structural
   equality (presence first, then payload when present). `x is some(v)` is still
   required when `v` must be bound for the rest of the formula; equality creates

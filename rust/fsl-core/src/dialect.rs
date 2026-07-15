@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use fsl_syntax::{
-    ActionItem, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
+    ActionItem, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
     BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
     LValue, MetaTag, Param, PreservationItem, ProcessField, ProcessItem, ProcessTransition,
     QualifiedName, RequirementAction, RequirementActionItem, RequirementBlockItem,
@@ -15,7 +15,8 @@ use fsl_syntax::{
 
 use crate::{
     CoreError, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
-    TERMINAL_TARGET, action_target, lower_direct_spec, state_target, substitute_expr,
+    ProjectionDef, TERMINAL_TARGET, action_target, lower_direct_spec, state_target,
+    substitute_expr,
 };
 
 #[derive(Clone)]
@@ -28,6 +29,53 @@ struct Process {
     initial: String,
     transitions: Vec<ProcessTransition>,
     span: fsl_syntax::Span,
+}
+
+fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
+    let BusinessItem::Kpi {
+        name,
+        case_name,
+        stage,
+        span,
+    } = item
+    else {
+        unreachable!("KPI projection requires a KPI item");
+    };
+    let candidates = processes
+        .iter()
+        .filter(|process| process.entity == *case_name)
+        .collect::<Vec<_>>();
+    let [process] = candidates.as_slice() else {
+        return Err(core_error(
+            if candidates.is_empty() {
+                format!("KPI '{name}' uses unknown entity '{case_name}'")
+            } else {
+                format!("KPI '{name}' has ambiguous process for entity '{case_name}'")
+            },
+            *span,
+        ));
+    };
+    if !process.stages.contains(stage) {
+        return Err(core_error(
+            format!("KPI '{name}' uses unknown stage '{stage}'"),
+            *span,
+        ));
+    }
+    Ok(ProjectionDef {
+        name: name.clone(),
+        entity: case_name.clone(),
+        stage: stage.clone(),
+        expr: Expr::Aggregate {
+            kind: AggregateKind::Count,
+            binder: Binder::Typed {
+                name: "c".to_owned(),
+                type_name: qualified(case_name),
+                where_expr: Some(Box::new(stage_is(process, "c", stage))),
+            },
+            value: None,
+        },
+        span: *span,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -344,32 +392,16 @@ impl StageResolver<'_> {
                     body: Box::new(self.expression(*body, &nested)?),
                 }
             }
-            Expr::Count {
-                name,
-                type_name,
-                condition,
+            Expr::Aggregate {
+                kind,
+                binder,
+                value,
             } => {
-                let mut nested = environment.clone();
-                nested.insert(name.clone(), qualified_type_name(&type_name));
-                Expr::Count {
-                    name,
-                    type_name,
-                    condition: Box::new(self.expression(*condition, &nested)?),
-                }
-            }
-            Expr::Sum {
-                name,
-                type_name,
-                body,
-                condition,
-            } => {
-                let mut nested = environment.clone();
-                nested.insert(name.clone(), qualified_type_name(&type_name));
-                Expr::Sum {
-                    name,
-                    type_name,
-                    body: Box::new(self.expression(*body, &nested)?),
-                    condition: condition
+                let (binder, nested) = self.binder(binder, environment)?;
+                Expr::Aggregate {
+                    kind,
+                    binder,
+                    value: value
                         .map(|value| self.expression(*value, &nested).map(Box::new))
                         .transpose()?,
                 }
@@ -395,10 +427,6 @@ impl StageResolver<'_> {
                 second: Box::new(self.expression(*second, environment)?),
                 third: Box::new(self.expression(*third, environment)?),
             },
-            Expr::BinderNamed { name, binder } => {
-                let (binder, _) = self.binder(binder, environment)?;
-                Expr::BinderNamed { name, binder }
-            }
             other => other,
         })
     }
@@ -424,12 +452,20 @@ impl StageResolver<'_> {
                         .transpose()?,
                 }
             }
-            Binder::Range { name, lo, hi } => {
+            Binder::Range {
+                name,
+                lo,
+                hi,
+                where_expr,
+            } => {
                 nested.insert(name.clone(), "Int".to_owned());
                 Binder::Range {
                     name,
                     lo: Box::new(self.expression(*lo, environment)?),
                     hi: Box::new(self.expression(*hi, environment)?),
+                    where_expr: where_expr
+                        .map(|value| self.expression(*value, &nested).map(Box::new))
+                        .transpose()?,
                 }
             }
             Binder::Collection {
@@ -1131,6 +1167,12 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             annotations: goal_annotations.clone(),
         });
     }
+    let projections = business
+        .items
+        .iter()
+        .filter(|item| matches!(item, BusinessItem::Kpi { .. }))
+        .map(|item| kpi_projection(item, &processes))
+        .collect::<Result<Vec<_>, _>>()?;
     let origins = resolve_stage_items(&mut items, &processes, "business")?;
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
@@ -1140,6 +1182,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         },
         origins,
     )?;
+    kernel.set_projections(projections);
     for (target, annotation) in explicit_annotations {
         kernel.bind_annotation(target, annotation);
     }
@@ -1397,6 +1440,7 @@ fn action_enabled_expression(action: &SpecItem) -> Option<Expr> {
                 name: name.clone(),
                 lo: Box::new(lo.clone()),
                 hi: Box::new(hi.clone()),
+                where_expr: None,
             },
         };
         expression = Expr::Quantified {
@@ -2025,6 +2069,15 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         .iter()
         .map(|process| process.process.clone())
         .collect::<Vec<_>>();
+    let projections = requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Kpi(item) => Some(item),
+            _ => None,
+        })
+        .map(|item| kpi_projection(item, &stage_processes))
+        .collect::<Result<Vec<_>, _>>()?;
     let origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
@@ -2034,6 +2087,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         },
         origins,
     )?;
+    kernel.set_projections(projections);
     for (target, annotation) in extra_annotations {
         kernel.bind_annotation(target, annotation);
     }
