@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Requirements expressions now accept `stage(entity)` and qualified
+  `<process-path>.stage(entity)` through the same structural node and resolver
+  as business expressions. Entity-typed binders/parameters select the process;
+  qualified process declarations disambiguate shared entity types; generated
+  stage maps remain Kernel detail while public origins, explain output, and
+  violations retain the source accessor (issue #243).
 - Conditional expressions (`if condition then a else b`) are now accepted in
   every expression context. The shared parser replaces the refinement-only
   path; concrete, explicit, symbolic, analysis, mutation, formatter, LSP, and

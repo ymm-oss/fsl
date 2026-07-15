@@ -1334,6 +1334,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Some(expr)
         | Expr::Neg(expr)
         | Expr::Not(expr)
+        | Expr::Stage { entity: expr, .. }
         | Expr::UnaryNamed { expr, .. }
         | Expr::Is { expr, .. }
         | Expr::Field(expr, _) => vec![expr],

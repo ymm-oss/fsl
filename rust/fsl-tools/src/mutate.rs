@@ -464,6 +464,24 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
+        Expr::Stage {
+            process,
+            entity,
+            entity_span,
+            span,
+        } => {
+            for mutation in expr_mutations(entity, enums) {
+                output.push(ExprMutation {
+                    expr: Expr::Stage {
+                        process: process.clone(),
+                        entity: Box::new(mutation.expr.clone()),
+                        entity_span: *entity_span,
+                        span: *span,
+                    },
+                    ..mutation
+                });
+            }
+        }
         Expr::BinaryNamed { name, left, right } => {
             for mutation in expr_mutations(left, enums) {
                 output.push(ExprMutation {

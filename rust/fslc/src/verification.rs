@@ -949,6 +949,7 @@ fn render_bmc_violation(
     output.insert(
         "blame".to_owned(),
         violation_blame_json(
+            model,
             violation.kind.as_str(),
             violation.name.as_str(),
             property.map(|property| &property.expr),

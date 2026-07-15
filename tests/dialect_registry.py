@@ -84,4 +84,10 @@ MONITOR_EXCLUSIONS: dict[str, str] = {
         "not parse @... before a nested declaration. Native coverage lives "
         "in rust/fsl-syntax tests"
     ),
+    "examples/requirements_stage.fsl": (
+        "native-only requirements stage() syntax (issue #243); the frozen "
+        "Python reference intentionally retains the pre-Rust compatibility "
+        "surface. Native Monitor, symbolic, CLI, origin, and parser coverage "
+        "lives in the Rust workspace tests"
+    ),
 }

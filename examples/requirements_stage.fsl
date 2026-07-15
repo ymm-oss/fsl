@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements ClaimLifecycle {
+  process Claim {
+    stages Draft, Approved, Rejected
+    initial Draft
+    transition approve Draft -> Approved by Manager
+    transition reject Draft -> Rejected by Manager
+  }
+
+  invariant KnownStage {
+    forall c: Claim {
+      stage(c) == Draft or stage(c) == Approved or stage(c) == Rejected
+    }
+  }
+
+  terminal {
+    forall c: Claim { stage(c) == Approved or stage(c) == Rejected }
+  }
+}
+
+verify { instances Claim = 2 }

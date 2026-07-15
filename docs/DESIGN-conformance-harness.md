@@ -37,9 +37,9 @@ exhaustively; the registry says what may exist there.
   eval/regress/drift/compat`, `formal_result:"not_run"`) and `ai-agent`
   (`is_ai_agent_source`; structural analysis, `agent_analyzed`, not formal proof).
 - `MONITOR_EXCLUSIONS: dict[str, str]` — repo-relative path → reason, for
-  individual files the Monitor legitimately rejects. Today exactly one:
-  `examples/self/no_actions.fsl` (deliberate no-action edge fixture; BMC side
-  covered by `tests/test_self_examples.py`).
+  individual files the frozen Python Monitor legitimately rejects. Each entry
+  names its active native or BMC-side coverage, and a stale entry fails the
+  harness once the Monitor starts accepting it.
 
 ## Classification (automatic, in the harness)
 

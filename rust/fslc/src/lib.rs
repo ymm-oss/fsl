@@ -307,6 +307,17 @@ fn map_key(value: &FslValue) -> String {
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn expr_text(expr: &Expr) -> String {
+    expr_text_with_origins(None, expr)
+}
+
+/// Render an expression with source-level names recovered from lowering origins.
+#[must_use]
+pub fn source_expr_text(model: &KernelModel, expr: &Expr) -> String {
+    expr_text_with_origins(Some(model), expr)
+}
+
+#[allow(clippy::too_many_lines)]
+fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
     fn precedence(expr: &Expr) -> u8 {
         match expr {
             Expr::Conditional { .. } | Expr::Quantified { .. } => 0,
@@ -326,8 +337,8 @@ pub fn expr_text(expr: &Expr) -> String {
         }
     }
 
-    fn operand(expr: &Expr, minimum: u8) -> String {
-        let rendered = expr_text(expr);
+    fn operand(model: Option<&KernelModel>, expr: &Expr, minimum: u8) -> String {
+        let rendered = expr_text_with_origins(model, expr);
         if precedence(expr) < minimum {
             format!("({rendered})")
         } else {
@@ -335,7 +346,7 @@ pub fn expr_text(expr: &Expr) -> String {
         }
     }
 
-    fn binder_text(binder: &Binder) -> String {
+    fn binder_text(model: Option<&KernelModel>, binder: &Binder) -> String {
         match binder {
             Binder::Typed {
                 name,
@@ -344,21 +355,25 @@ pub fn expr_text(expr: &Expr) -> String {
             } => {
                 let mut text = format!("{name}: {}", display_name(&type_name.name));
                 if let Some(condition) = where_expr {
-                    let _ = write!(text, " where {}", expr_text(condition));
+                    let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
                 }
                 text
             }
             Binder::Range { name, lo, hi } => {
-                format!("{name} in {}..{}", expr_text(lo), expr_text(hi))
+                format!(
+                    "{name} in {}..{}",
+                    expr_text_with_origins(model, lo),
+                    expr_text_with_origins(model, hi)
+                )
             }
             Binder::Collection {
                 name,
                 collection,
                 where_expr,
             } => {
-                let mut text = format!("{name} in {}", expr_text(collection));
+                let mut text = format!("{name} in {}", expr_text_with_origins(model, collection));
                 if let Some(condition) = where_expr {
-                    let _ = write!(text, " where {}", expr_text(condition));
+                    let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
                 }
                 text
             }
@@ -369,14 +384,22 @@ pub fn expr_text(expr: &Expr) -> String {
         Expr::Num(value) => value.to_string(),
         Expr::Bool(value) => value.to_string(),
         Expr::None => "none".to_owned(),
-        Expr::Some(value) => format!("some({})", expr_text(value)),
+        Expr::Some(value) => format!("some({})", expr_text_with_origins(model, value)),
         Expr::Set(values) => format!(
             "Set {{{}}}",
-            values.iter().map(expr_text).collect::<Vec<_>>().join(", ")
+            values
+                .iter()
+                .map(|value| expr_text_with_origins(model, value))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::Seq(values) => format!(
             "Seq {{{}}}",
-            values.iter().map(expr_text).collect::<Vec<_>>().join(", ")
+            values
+                .iter()
+                .map(|value| expr_text_with_origins(model, value))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::Struct { name, fields } => format!(
             "{} {{ {} }}",
@@ -387,7 +410,7 @@ pub fn expr_text(expr: &Expr) -> String {
                 fields
             }
             .into_iter()
-            .map(|(name, value)| format!("{name}: {}", expr_text(value)))
+            .map(|(name, value)| { format!("{name}: {}", expr_text_with_origins(model, value)) })
             .collect::<Vec<_>>()
             .join(", ")
         ),
@@ -395,19 +418,56 @@ pub fn expr_text(expr: &Expr) -> String {
         Expr::Call { name, args, .. } => format!(
             "{}({})",
             display_name(name),
-            args.iter().map(expr_text).collect::<Vec<_>>().join(", ")
+            args.iter()
+                .map(|argument| expr_text_with_origins(model, argument))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
-        Expr::Index(base, index) => format!("{}[{}]", operand(base, 10), expr_text(index)),
-        Expr::Field(base, field) => format!("{}.{field}", operand(base, 10)),
+        Expr::Index(base, index) => {
+            let stage_qualifier = model.and_then(|model| {
+                let Expr::Var(name) = base.as_ref() else {
+                    return None;
+                };
+                let origin = model.state_origin(name)?;
+                origin
+                    .lowering_steps
+                    .iter()
+                    .any(|step| step.kind == "synthesize_stage_map")
+                    .then(|| {
+                        origin
+                            .lowering_steps
+                            .iter()
+                            .find(|step| step.kind == "qualified_process_path")
+                            .and_then(|step| step.detail.as_deref())
+                    })
+            });
+            if let Some(qualifier) = stage_qualifier {
+                format!(
+                    "{}stage({})",
+                    qualifier.map_or_else(String::new, |path| format!("{path}.")),
+                    expr_text_with_origins(model, index)
+                )
+            } else {
+                format!(
+                    "{}[{}]",
+                    operand(model, base, 10),
+                    expr_text_with_origins(model, index)
+                )
+            }
+        }
+        Expr::Field(base, field) => format!("{}.{field}", operand(model, base, 10)),
         Expr::Method {
             receiver,
             name,
             args,
         } => format!(
             "{}.{}({})",
-            operand(receiver, 10),
+            operand(model, receiver, 10),
             name,
-            args.iter().map(expr_text).collect::<Vec<_>>().join(", ")
+            args.iter()
+                .map(|argument| expr_text_with_origins(model, argument))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Expr::Binary { op, left, right } => {
             let (left_minimum, right_minimum) = match op.as_str() {
@@ -421,12 +481,12 @@ pub fn expr_text(expr: &Expr) -> String {
             };
             format!(
                 "{} {op} {}",
-                operand(left, left_minimum),
-                operand(right, right_minimum)
+                operand(model, left, left_minimum),
+                operand(model, right, right_minimum)
             )
         }
-        Expr::Neg(value) => format!("-{}", operand(value, 9)),
-        Expr::Not(value) => format!("not {}", operand(value, 4)),
+        Expr::Neg(value) => format!("-{}", operand(model, value, 9)),
+        Expr::Not(value) => format!("not {}", operand(model, value, 4)),
         Expr::Conditional {
             condition,
             then_expr,
@@ -434,19 +494,23 @@ pub fn expr_text(expr: &Expr) -> String {
             ..
         } => format!(
             "if {} then {} else {}",
-            expr_text(condition),
-            expr_text(then_expr),
-            expr_text(else_expr)
+            expr_text_with_origins(model, condition),
+            expr_text_with_origins(model, then_expr),
+            expr_text_with_origins(model, else_expr)
         ),
         Expr::Is { expr, pattern } => match pattern {
-            Pattern::None => format!("{} is none", operand(expr, 6)),
-            Pattern::Some(name) => format!("{} is some({name})", operand(expr, 6)),
+            Pattern::None => format!("{} is none", operand(model, expr, 6)),
+            Pattern::Some(name) => format!("{} is some({name})", operand(model, expr, 6)),
         },
         Expr::Quantified {
             quantifier,
             binder,
             body,
-        } => format!("{quantifier} {}: {}", binder_text(binder), expr_text(body)),
+        } => format!(
+            "{quantifier} {}: {}",
+            binder_text(model, binder),
+            expr_text_with_origins(model, body)
+        ),
         Expr::Count {
             name,
             type_name,
@@ -454,7 +518,7 @@ pub fn expr_text(expr: &Expr) -> String {
         } => format!(
             "count({name}: {} where {})",
             display_name(&type_name.name),
-            expr_text(condition)
+            expr_text_with_origins(model, condition)
         ),
         Expr::Sum {
             name,
@@ -464,10 +528,16 @@ pub fn expr_text(expr: &Expr) -> String {
         } => format!(
             "sum({name}: {} of {}{})",
             display_name(&type_name.name),
-            expr_text(body),
-            condition
-                .as_ref()
-                .map_or_else(String::new, |value| format!(" where {}", expr_text(value)))
+            expr_text_with_origins(model, body),
+            condition.as_ref().map_or_else(String::new, |value| {
+                format!(" where {}", expr_text_with_origins(model, value))
+            })
+        ),
+        Expr::Stage {
+            process, entity, ..
+        } => process.as_ref().map_or_else(
+            || format!("stage({})", expr_text_with_origins(model, entity)),
+            |process| format!("{process}.stage({})", expr_text_with_origins(model, entity)),
         ),
         Expr::UnaryNamed { name, expr, .. } => {
             let public = match name.as_str() {
@@ -478,10 +548,15 @@ pub fn expr_text(expr: &Expr) -> String {
                 "rel_range" => "range",
                 other => other,
             };
-            format!("{public}({})", expr_text(expr))
+            format!("{public}({})", expr_text_with_origins(model, expr))
         }
         Expr::BinaryNamed { name, left, right } => {
-            format!("{}({}, {})", name, expr_text(left), expr_text(right))
+            format!(
+                "{}({}, {})",
+                name,
+                expr_text_with_origins(model, left),
+                expr_text_with_origins(model, right)
+            )
         }
         Expr::TernaryNamed {
             name,
@@ -491,10 +566,12 @@ pub fn expr_text(expr: &Expr) -> String {
         } => format!(
             "{}({}, {}, {})",
             name,
-            expr_text(first),
-            expr_text(second),
-            expr_text(third)
+            expr_text_with_origins(model, first),
+            expr_text_with_origins(model, second),
+            expr_text_with_origins(model, third)
         ),
-        Expr::BinderNamed { name, binder } => format!("{name}({})", binder_text(binder)),
+        Expr::BinderNamed { name, binder } => {
+            format!("{name}({})", binder_text(model, binder))
+        }
     }
 }

@@ -169,13 +169,17 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
 9. The name of the expanded spec is the name of `requirements`. All other items
    (type/enum/struct/state/init/top-level actions, etc.) pass through unchanged.
 10. `terminal { <expr> }` is one of these pass-through items (added as a
-    `requirements_item` grammar alternative, #69) — it takes the generic
-    `_expand_item` fallback (`return [item], []`), so no dialects.py case was
-    added for it specifically. Only one `terminal` block is allowed per spec
-    (the kernel's own rule, unchanged). If the spec uses `process E { ... }`,
-    the predicate is written against the synthesized stage map
-    (`e_stage[c]`, rule 2 above) — the natural-language `stage(c)` form is
-    business-only (§3.2 rule 7).
+    `requirements_item` grammar alternative (#69). Only one `terminal` block
+    is allowed per spec (the kernel's own rule, unchanged). The shared stage
+    resolver accepts `stage(c)` in this and every other requirements expression
+    context, derives the process from `c`'s entity type, and rewrites it to
+    `e_stage[c]`. Requirements never derive terminal states from process sinks.
+11. A qualified process declaration (`process claims.Claim`) keeps its shared
+    `SymbolPath`. Several process paths may have the same final entity segment;
+    unqualified `stage(c)` then reports every candidate, while
+    `claims.Claim.stage(c)` selects the exact path. Business and requirements
+    use the same `Expr::Stage` node and resolver, and public Kernel provenance
+    records both the lowered state symbol and source accessor span.
 
 ### 2.3 Tests (tests/test_req_dialect.py)
 

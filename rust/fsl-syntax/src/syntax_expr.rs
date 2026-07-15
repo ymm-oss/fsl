@@ -334,9 +334,22 @@ impl SyntaxExpr {
             SyntaxExprKind::Call { callee, args } => {
                 let name = callee.text;
                 let call_span = callee.span;
+                let argument_span = args.first().map_or(call_span, |argument| argument.span);
+                if name == "stage" && args.len() != 1 {
+                    return Err(ParseError::new(
+                        "stage expects exactly one argument",
+                        call_span,
+                    ));
+                }
                 let args = convert_list(args)?;
                 match (name.as_str(), args.as_slice()) {
-                    ("stage" | "old" | "abs", [expr]) => Expr::UnaryNamed {
+                    ("stage", [entity]) => Expr::Stage {
+                        process: None,
+                        entity: Box::new(entity.clone()),
+                        entity_span: argument_span,
+                        span,
+                    },
+                    ("old" | "abs", [expr]) => Expr::UnaryNamed {
                         name,
                         expr: Box::new(expr.clone()),
                         span: call_span,
@@ -377,11 +390,33 @@ impl SyntaxExpr {
                 receiver,
                 method,
                 args,
-            } => Expr::Method {
-                receiver: Box::new(receiver.into_kernel()?),
-                name: method.text,
-                args: convert_list(args)?,
-            },
+            } => {
+                if method.text == "stage" {
+                    let process = expression_path(&receiver).ok_or_else(|| {
+                        ParseError::new("stage qualifier must be a symbol path", receiver.span)
+                    })?;
+                    let entity_span = args.first().map_or(method.span, |argument| argument.span);
+                    let mut args = convert_list(args)?;
+                    if args.len() != 1 {
+                        return Err(ParseError::new(
+                            "stage expects exactly one argument",
+                            method.span,
+                        ));
+                    }
+                    Expr::Stage {
+                        process: Some(Box::new(process)),
+                        entity: Box::new(args.remove(0)),
+                        entity_span,
+                        span,
+                    }
+                } else {
+                    Expr::Method {
+                        receiver: Box::new(receiver.into_kernel()?),
+                        name: method.text,
+                        args: convert_list(args)?,
+                    }
+                }
+            }
             SyntaxExprKind::Binary { op, left, right } => Expr::Binary {
                 op: op.canonical,
                 left: Box::new(left.into_kernel()?),
@@ -987,7 +1022,15 @@ impl SyntaxParser<'_> {
                 let args = self.expression_list(")")?;
                 if !matches!(
                     name.text.as_str(),
-                    "contains" | "add" | "remove" | "push" | "pop" | "head" | "at" | "size"
+                    "contains"
+                        | "add"
+                        | "remove"
+                        | "push"
+                        | "pop"
+                        | "head"
+                        | "at"
+                        | "size"
+                        | "stage"
                 ) {
                     return Err(self.error("unknown FSL collection method"));
                 }
@@ -1298,6 +1341,31 @@ impl SyntaxParser<'_> {
         let end = self.previous_span().end;
         ParseError::new(message, Span { start: end, end })
     }
+}
+
+fn expression_path(expression: &SyntaxExpr) -> Option<SymbolPath> {
+    fn segments(expression: &SyntaxExpr, output: &mut Vec<SyntaxIdent>) -> bool {
+        match &expression.kind {
+            SyntaxExprKind::Name(name) => {
+                output.push(name.clone());
+                true
+            }
+            SyntaxExprKind::Field { receiver, field } => {
+                if !segments(receiver, output) {
+                    return false;
+                }
+                output.push(field.clone());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    let mut path = Vec::new();
+    if !segments(expression, &mut path) {
+        return None;
+    }
+    SymbolPath::from_idents(path, expression.span).ok()
 }
 
 fn join(first: Span, last: Span) -> Span {

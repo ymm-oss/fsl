@@ -542,7 +542,7 @@ pub fn render_boundary_output(
     if violation.kind == "type_bound" {
         output.insert(
             "blame".to_owned(),
-            violation_blame_json(&violation.kind, &violation.name, None, violating),
+            violation_blame_json(model, &violation.kind, &violation.name, None, violating),
         );
     }
     output.insert(
@@ -692,6 +692,7 @@ fn render_violation(
     output.insert(
         "blame".to_owned(),
         violation_blame_json(
+            model,
             &violation.kind,
             &violation.name,
             property.map(|property| &property.expr),
@@ -1191,6 +1192,7 @@ fn violation_bindings_json(
 }
 
 fn violation_blame_json(
+    model: &KernelModel,
     kind: &str,
     name: &str,
     expr: Option<&KernelExpr>,
@@ -1211,7 +1213,7 @@ fn violation_blame_json(
     };
     let mut conjunct = json!({
         "index": 0,
-        "text": crate::expr_text(expr),
+        "text": crate::source_expr_text(model, expr),
         "holds": false,
     });
     if !violating_bindings.is_null()

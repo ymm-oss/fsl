@@ -715,11 +715,11 @@ variable.</p></div></details>
   states</strong>, <code>terminal</code> lets you select <strong>which stops are intentional</strong>.
   Example: <code>terminal { status == Done or status == Failed }</code>.</li>
 <li><strong>requirements</strong>: <code>terminal { }</code> is a <code>requirements_item</code> and passes
-    through unchanged to the kernel spec (§13.2). Inside a spec that uses
-    <code>process E { ... }</code>, write the predicate against the synthesized stage
-    map — the lowercased process/entity name + <code>_stage</code> (e.g. <code>process Claim</code>
-    → <code>claim_stage</code>), so <code>terminal { forall c: Claim { claim_stage[c] ==
-    Approved or claim_stage[c] == Rejected } }</code>.</li>
+    through to the kernel spec (§13.2). Inside a spec that uses <code>process E {
+    ... }</code>, use the source-level accessor, for example <code>terminal { forall c:
+    Claim { stage(c) == Approved or stage(c) == Rejected } }</code>. It resolves from
+    <code>c</code>'s entity type and lowers to the generated stage map; the generated
+    <code>claim_stage</code> name is not part of requirements source syntax.</li>
 <li><strong>business</strong>: no <code>terminal</code> syntax exists at all — it is derived
     automatically from each process's sink stages (stages with no outgoing
     <code>transition</code>); see §13.3.</li>
@@ -1610,11 +1610,18 @@ verify {
   <code>submit[a &lt;= AUTO_LIMIT]</code>), and the <code>maps</code> clause provides the action
   correspondence to the upper layer.</li>
 <li><code>terminal { &lt;expr&gt; }</code> is allowed at the top level of a <code>requirements</code> spec
-  and passes through to the kernel unchanged (§6) — there is exactly one
-  <code>terminal</code> block per spec, same as the kernel. If the spec uses
-  <code>process E { ... }</code>, the predicate must reference the synthesized stage map
-  (<code>&lt;entity-lowercased&gt;_stage</code>, e.g. <code>claim_stage</code> for <code>process Claim</code>), not
-  <code>stage(c)</code> (that natural-language form is business-only, §13.3).</li>
+  and lowers to the kernel (§6) — there is exactly one <code>terminal</code> block per
+  spec, same as the kernel. <code>stage(c)</code> is available in all requirements
+  expression contexts when <code>c</code> is a typed entity parameter or binder. The
+  entity type selects its process and stage enum, and the checked expression
+  lowers to the generated stage-map index. No sink stage becomes terminal
+  automatically in requirements.</li>
+<li>A process may use a qualified path when one entity participates in several
+  processes: <code>process claims.Claim { ... }</code>. Unqualified <code>stage(c)</code> is an error
+  when several processes correspond to <code>Claim</code>; use
+  <code>claims.Claim.stage(c)</code> (arbitrary-depth <code>SymbolPath</code>) to select one. A
+  missing process, non-entity argument, unknown stage member, or unresolved
+  qualifier is a source-located type error.</li>
 </ul>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation

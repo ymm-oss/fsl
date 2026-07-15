@@ -104,6 +104,7 @@ pub fn eval(
         Expr::Call { name, .. } => {
             Err(runtime_error(format!("unexpanded predicate call '{name}'")))
         }
+        Expr::Stage { .. } => Err(runtime_error("unlowered stage access")),
         Expr::Index(base, index) => {
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;

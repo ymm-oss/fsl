@@ -4748,8 +4748,8 @@ fn model_skeleton(model: &KernelModel) -> Value {
                     .and_then(|site| site.declaration_path.last())
                     .map_or_else(|| fslc_rust::display_name(&action.name), String::clone),
                 "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
-                "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
-                "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
+                "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::source_expr_text(model,expr))).collect::<Vec<_>>(),
+                "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::source_expr_text(model,expr))).collect::<Vec<_>>(),
                 "writes": statement_writes(&action.statements), "requirement": Value::Null,
             });
             if let Value::Object(value) = &mut value {
@@ -4789,7 +4789,7 @@ fn model_skeleton(model: &KernelModel) -> Value {
                     .and_then(|site| site.declaration_path.last())
                     .map_or_else(|| fslc_rust::display_name(&property.name), String::clone),
                 "kind":kind,
-                "body_text":fslc_rust::expr_text(&property.expr),
+                "body_text":fslc_rust::source_expr_text(model,&property.expr),
                 "requirement":Value::Null
             });
             if let Value::Object(value) = &mut value {
@@ -4808,7 +4808,7 @@ fn model_skeleton(model: &KernelModel) -> Value {
         }));
     }
     for property in &model.leadstos {
-        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::expr_text(&property.before),fslc_rust::expr_text(&property.after)),"requirement":Value::Null});
+        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
         if let Value::Object(value) = &mut value {
             insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
         }
@@ -5303,6 +5303,7 @@ fn expression_state_roots(
             | KernelExpr::Neg(value)
             | KernelExpr::Not(value)
             | KernelExpr::Field(value, _)
+            | KernelExpr::Stage { entity: value, .. }
             | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
             KernelExpr::Index(base, index)
             | KernelExpr::BinaryNamed {
@@ -5681,6 +5682,7 @@ fn invariant_violation_explanation(
     explanation.insert(
         "blame".to_owned(),
         violation_blame_json(
+            model,
             violation.kind.as_str(),
             violation.name.as_str(),
             property.map(|property| &property.expr),
@@ -6021,6 +6023,7 @@ fn expression_mutant_count(
         | KernelExpr::Neg(value)
         | KernelExpr::Not(value)
         | KernelExpr::Field(value, _)
+        | KernelExpr::Stage { entity: value, .. }
         | KernelExpr::UnaryNamed { expr: value, .. } => {
             expression_mutant_count(value, enum_siblings)
         }
@@ -12301,6 +12304,7 @@ fn violation_bindings_json(
 }
 
 fn violation_blame_json(
+    model: &KernelModel,
     kind: &str,
     name: &str,
     expr: Option<&KernelExpr>,
@@ -12321,7 +12325,7 @@ fn violation_blame_json(
     };
     let mut conjunct = json!({
         "index": 0,
-        "text": fslc_rust::expr_text(expr),
+        "text": fslc_rust::source_expr_text(model, expr),
         "holds": false,
     });
     if !violating_bindings.is_null()
