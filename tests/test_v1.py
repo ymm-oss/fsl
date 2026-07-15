@@ -498,7 +498,7 @@ def test_parse_error_includes_expected_tokens():
         broken.unlink(missing_ok=True)
 
 
-def test_option_some_equality_is_type_error():
+def test_option_some_equality_is_structural():
     src = """
 spec P {
   type K = 0..1
@@ -508,14 +508,82 @@ spec P {
     requires c == some(0)
     c = none
   }
-  invariant I { true }
+  invariant I { c == none or c == some(0) }
 }
 """
-    with pytest.raises(FslError) as exc:
-        verify(build_spec(parse(src)), 8)
-    assert exc.value.kind == "type"
-    assert exc.value.hint is not None
-    assert "is some(v)" in exc.value.hint
+    assert verify(build_spec(parse(src)), 8)["result"] == "verified"
+
+
+def test_option_equality_rejects_mismatched_payload_types():
+    src = """
+spec Mismatch {
+  enum A { A1 }
+  enum B { B1 }
+  state { a: Option<A>, b: Option<B> }
+  init { a = none b = none }
+  action stay() { a = a b = b }
+  invariant Bad { a == b }
+}
+"""
+    with pytest.raises(FslError, match="matching payload types"):
+        verify(build_spec(parse(src)), 1)
+
+
+@pytest.mark.parametrize(
+    "declarations, expression",
+    [
+        ("type K = 0..1", "value == some(true)"),
+        ("enum A { A1 } enum B { B1 }", "some(A1) != some(B1)"),
+    ],
+)
+def test_option_equality_rejects_mismatched_constructor_payloads(
+    declarations, expression
+):
+    state_type = "K" if declarations.startswith("type") else "A"
+    src = f"""
+spec ConstructorMismatch {{
+  {declarations}
+  state {{ value: Option<{state_type}> }}
+  init {{ value = none }}
+  action stay() {{ value = value }}
+  invariant Bad {{ {expression} }}
+}}
+"""
+    with pytest.raises(FslError, match="matching payload types"):
+        build_spec(parse(src))
+
+
+def test_option_equality_type_check_tracks_let_scope_and_numeric_domains():
+    src = """
+spec Compatible {
+  type A = 0..1
+  type B = 0..2
+  state { a: Option<A>, b: Option<B> }
+  init { a = none b = none }
+  action stay() {
+    let x = a
+    requires x == b
+    a = a
+    b = b
+  }
+  invariant NumericDomains { a == b }
+}
+"""
+    assert verify(build_spec(parse(src)), 1)["result"] == "verified"
+
+
+def test_option_equality_checks_assignment_index_expressions():
+    src = """
+spec IndexedMismatch {
+  enum A { A1 }
+  enum B { B1 }
+  state { a: Option<A>, b: Option<B>, flags: Map<Bool, Bool> }
+  init { a = none b = none forall key: Bool { flags[key] = false } }
+  action bad() { flags[a == b] = true }
+}
+"""
+    with pytest.raises(FslError, match="matching payload types"):
+        build_spec(parse(src))
 
 
 def test_struct_option_scalar_field_allowed_at_check():

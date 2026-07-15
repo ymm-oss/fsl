@@ -289,7 +289,7 @@ init {
       <tr><td>Logic</td><td><code>and or not =&gt;</code></td><td><code>paid =&gt; approved</code></td></tr>
       <tr><td>Quantifiers</td><td><code>forall</code>, <code>exists</code></td><td><code>forall i: ItemId { stock[i] &gt;= 0 }</code></td></tr>
       <tr><td>Aggregation</td><td><code>count</code>, <code>sum</code></td><td><code>sum(i: Idx of log.at(i) where i &lt; log.size())</code></td></tr>
-      <tr><td>Option</td><td><code>none</code>, <code>some(e)</code>, <code>x is some(v)</code></td><td><code>cart[u] is some(i) and stock[i] &gt; 0</code></td></tr>
+      <tr><td>Option</td><td><code>none</code>, <code>some(e)</code>, structural <code>==</code>/<code>!=</code>, <code>x is some(v)</code></td><td><code>cart[u] == some(i)</code> compares; <code>is some(i)</code> binds</td></tr>
       <tr><td>Set</td><td><code>Set {}</code>, <code>.add</code>, <code>.remove</code>, <code>.contains</code>, <code>.size()</code></td><td><code>active.contains(u)</code></td></tr>
       <tr><td>Seq</td><td><code>Seq {}</code>, <code>.push</code>, <code>.pop</code>, <code>.head</code>, <code>.at</code>, <code>.size()</code></td><td><code>i &lt; q.size() =&gt; q.at(i) == j</code></td></tr>
       <tr><td>Relation</td><td><code>relation A -&gt; B</code>, <code>.add</code>, <code>.remove</code>, <code>.contains</code>, <code>reachable</code>, <code>acyclic</code></td><td><code>acyclic(delegates)</code></td></tr>
@@ -301,7 +301,7 @@ init {
         <h3>Option extraction</h3>
         <pre><code>requires cart[u] is some(i)
 requires stock[i] &gt; 0</code></pre>
-        <p>Do not write <code>x == some(e)</code>. Bind the contained value with <code>is some(v)</code>.</p>
+        <p>Use <code>x == some(e)</code> to compare a complete Option value. Use <code>is some(v)</code> when the following expression needs a bound payload.</p>
       </div>
       <div class="syntax-card">
         <h3>Index guard for Seq</h3>

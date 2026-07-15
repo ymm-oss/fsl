@@ -14,6 +14,7 @@ use crate::value::{
 };
 
 type BinderCandidates<T> = Vec<(String, SymbolicValue<T>)>;
+type SymbolicPair<T> = (SymbolicValue<T>, SymbolicValue<T>);
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn eval<S: SmtSolver>(
@@ -469,8 +470,14 @@ fn eval_binary<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    let left = eval(solver, model, left, state, bindings, old_state)?;
-    let right = eval(solver, model, right, state, bindings, old_state)?;
+    let (left, right) = if matches!(op, "==" | "!=") {
+        eval_equality_operands(solver, model, left, right, state, bindings, old_state)?
+    } else {
+        (
+            eval(solver, model, left, state, bindings, old_state)?,
+            eval(solver, model, right, state, bindings, old_state)?,
+        )
+    };
     match op {
         "and" => Ok(bool_value(
             solver,
@@ -518,6 +525,76 @@ fn eval_binary<S: SmtSolver>(
         }
         _ => Err(VerifyError::new(format!("unknown operator '{op}'"))),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_equality_operands<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    left: &Expr,
+    right: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<SymbolicPair<S::Term>, VerifyError> {
+    match eval(solver, model, left, state, bindings, old_state) {
+        Ok(left_value) => {
+            if let Some(left_ty) = left_value.ty() {
+                let right_value =
+                    eval_expected(solver, model, right, left_ty, state, bindings, old_state)?;
+                Ok((left_value, right_value))
+            } else {
+                let right_value = eval(solver, model, right, state, bindings, old_state)?;
+                let right_ty = right_value
+                    .ty()
+                    .ok_or_else(|| VerifyError::new("equality requires a typed operand"))?;
+                let left_value =
+                    eval_expected(solver, model, left, right_ty, state, bindings, old_state)?;
+                Ok((left_value, right_value))
+            }
+        }
+        Err(_) if requires_expected_type(left) => {
+            let right_value = eval(solver, model, right, state, bindings, old_state)?;
+            let right_ty = right_value
+                .ty()
+                .ok_or_else(|| VerifyError::new("equality requires a typed operand"))?;
+            let left_value =
+                eval_expected(solver, model, left, right_ty, state, bindings, old_state)?;
+            Ok((left_value, right_value))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn requires_expected_type(expr: &Expr) -> bool {
+    match expr {
+        Expr::None => true,
+        Expr::Some(inner) => requires_expected_type(inner),
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_expected<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    expected: &TypeRef,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    if let (Expr::Some(inner), TypeRef::Option(inner_ty)) = (expr, expected) {
+        return Ok(SymbolicValue::Option {
+            ty: expected.clone(),
+            present: solver.bool_value(true),
+            value: Box::new(eval_expected(
+                solver, model, inner, inner_ty, state, bindings, old_state,
+            )?),
+        });
+    }
+    let value = eval(solver, model, expr, state, bindings, old_state)?;
+    coerce(solver, model, value, expected)
 }
 
 fn eval_pattern<S: SmtSolver>(

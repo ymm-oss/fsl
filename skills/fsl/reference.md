@@ -635,8 +635,10 @@ cannot be assigned both inline and in `init`.
 - Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
   `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
   matching binding; `exactlyOne` means exactly one.
-- Option: `x == none` `x != none` `x is some(v)` (v is usable afterward within that
-  formula). **`x == some(e)` and arithmetic/ordering on Option are type errors**
+- Option: `x == none` `x != none` `x == some(e)` `x != some(e)` use structural
+  equality (presence first, then payload when present). `x is some(v)` is still
+  required when `v` must be bound for the rest of the formula; equality creates
+  no binding. Arithmetic and ordering on Option are type errors.
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`

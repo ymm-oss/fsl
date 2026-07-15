@@ -9,11 +9,6 @@ of JSON output actually confirmed with `fslc`.
 ```
 
 ```json
-// type_option_some_equality.fsl
-{"result":"error","kind":"type","message":"Option == and != are only defined against none","hint":"use `x is some(v)` to compare the contained value"}
-```
-
-```json
 // type_undeclared_type.fsl
 {"result":"error","kind":"type","message":"unknown type 'UserId'"}
 ```

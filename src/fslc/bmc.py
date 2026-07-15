@@ -20,6 +20,8 @@ from .model import (
     display_label,
     domain_range,
     eval_const,
+    binder_static_type as _binder_static_type,
+    expr_static_type as _expr_static_type,
     phys_z3_sort,
     resolve_action_name,
     validate_state_snapshot,
@@ -42,9 +44,8 @@ from .values import (
     eval_sum,
     iter_binder_terms,
     logical_map_access,
+    option_compare,
     option_logical_eq,
-    option_none_cmp,
-    reject_option_binop,
     seq_compare,
     struct_compare,
 )
@@ -747,19 +748,17 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         a = eval_expr(e[2], state, binds, spec, old_state, in_ensures)
         b = eval_expr(e[3], state, binds, spec, old_state, in_ensures)
         if op in ("==", "!="):
-            none_cmp = _option_none_cmp(a, b, op)
-            if none_cmp is not None:
-                return none_cmp
+            option_cmp = _option_compare(a, b, op)
+            if option_cmp is not None:
+                return option_cmp
             struct_cmp = _struct_compare(a, b, op, spec)
             if struct_cmp is not None:
                 return struct_cmp
             seq_cmp = _seq_compare(a, b, op, spec)
             if seq_cmp is not None:
                 return seq_cmp
-            _reject_option_binop(a, b, op)
         else:
-            _reject_option_binop(a, b, op)
-        a, b = _unify_option_cmp(a, b)
+            _option_compare(a, b, op)
         if op == "+":
             return a + b
         if op == "-":
@@ -947,12 +946,8 @@ def _option_logical_eq(a, b):
     return option_logical_eq(a, b, _SYM)
 
 
-def _option_none_cmp(a, b, op):
-    return option_none_cmp(a, b, op, _SYM)
-
-
-def _reject_option_binop(a, b, op):
-    return reject_option_binop(a, b, op)
+def _option_compare(a, b, op):
+    return option_compare(a, b, op, _SYM)
 
 
 def _z3_div(a, b):
@@ -961,16 +956,6 @@ def _z3_div(a, b):
 
 def _z3_mod(a, b):
     return z3.If(b == 0, z3.IntVal(0), a % b)
-
-
-def _unify_option_cmp(a, b):
-    if isinstance(a, tuple) and a[0] == "option_val":
-        if isinstance(b, tuple) and b[0] == "none":
-            return a[1], z3.BoolVal(False)
-    if isinstance(b, tuple) and b[0] == "option_val":
-        if isinstance(a, tuple) and a[0] == "none":
-            return z3.BoolVal(False), b[1]
-    return a, b
 
 
 def _logical_map_access(logical, idx, state, spec):
@@ -2172,127 +2157,6 @@ def compute_changes(prev, curr):
         elif pa != pb:
             changes[k] = {"from": pa, "to": pb}
     return changes
-
-
-def _binder_static_type(binder, spec):
-    if binder[0] == "binder_typed":
-        ty_name = binder[2]
-        if ty_name in spec["types"]:
-            return spec["types"][ty_name]["ty"]
-    if binder[0] == "binder_collection":
-        coll_ty = _expr_static_type(binder[2], spec, {})
-        if coll_ty and coll_ty[0] in ("set", "seq"):
-            return coll_ty[1]
-    return ("int",)
-
-
-def _merge_ite_static_types(a, b):
-    if a is None:
-        return b
-    if b is None:
-        return a
-    if a == b:
-        return a
-    if a[0] == "option" and b[0] == "option":
-        inner_a, inner_b = a[1], b[1]
-        if inner_a == ("int",):
-            return b
-        if inner_b == ("int",):
-            return a
-        return ("option", _merge_ite_static_types(inner_a, inner_b))
-    if a[0] in ("int", "domain", "enum") and b[0] in ("int", "domain", "enum"):
-        if a[0] == "int":
-            return b
-        return a
-    _err(f"if arms must have the same type: {a} vs {b}", kind="type")
-
-
-def _expr_static_type(e, spec, env):
-    tag = e[0]
-    if tag == "num":
-        return ("int",)
-    if tag == "bool":
-        return ("bool",)
-    if tag == "none":
-        return ("option", ("int",))
-    if tag == "var":
-        n = e[1]
-        if n in env:
-            return env[n]
-        if n in spec["state"]:
-            return spec["state"][n]
-        for name, info in spec["types"].items():
-            if info["kind"] == "enum" and n in info["members"]:
-                return ("enum", name)
-        return None
-    if tag == "some":
-        inner = _expr_static_type(e[1], spec, env)
-        return ("option", inner or ("int",))
-    if tag == "struct_lit":
-        return ("struct", e[1])
-    if tag == "index":
-        base = e[1]
-        if isinstance(base, str):
-            base_ty = spec["state"].get(base) or env.get(base)
-        elif base[0] == "var":
-            base_ty = spec["state"].get(base[1]) or env.get(base[1])
-        else:
-            base_ty = _expr_static_type(base, spec, env)
-        if base_ty and base_ty[0] == "map":
-            return base_ty[2]
-        return None
-    if tag == "field":
-        base_ty = _expr_static_type(e[1], spec, env)
-        if base_ty and base_ty[0] == "struct":
-            return spec["types"][base_ty[1]]["fields"].get(e[2])
-        return None
-    if tag == "method":
-        method = e[2]
-        base_ty = _expr_static_type(e[1], spec, env)
-        if base_ty and base_ty[0] == "relation":
-            if method == "contains":
-                return ("bool",)
-            if method in ("add", "remove"):
-                return base_ty
-            _err(f"unknown method '{method}' on relation", kind="type")
-        if method in ("contains",):
-            return ("bool",)
-        if method == "size":
-            return ("int",)
-        if method in ("add", "remove", "push", "pop"):
-            return base_ty
-        if method == "head":
-            if base_ty and base_ty[0] == "seq":
-                return base_ty[1]
-            return ("int",)
-        if method == "at":
-            if base_ty and base_ty[0] == "seq":
-                return base_ty[1]
-            return ("int",)
-        return None
-    if tag == "bin":
-        if e[1] in ("+", "-", "*", "/", "%"):
-            return ("int",)
-        return ("bool",)
-    if tag == "ite":
-        c_ty = _expr_static_type(e[1], spec, env)
-        if c_ty and c_ty != ("bool",):
-            _err(f"if condition must be Bool, got {c_ty}", kind="type")
-        a_ty = _expr_static_type(e[2], spec, env)
-        b_ty = _expr_static_type(e[3], spec, env)
-        return _merge_ite_static_types(a_ty, b_ty)
-    if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
-        return ("bool",)
-    if tag in ("rel_reachable", "rel_acyclic", "rel_functional", "rel_injective"):
-        return ("bool",)
-    if tag in ("rel_domain", "rel_range"):
-        rel_ty = _expr_static_type(e[1], spec, env)
-        if not rel_ty or rel_ty[0] != "relation":
-            _relation_type_error(f"{'domain' if tag == 'rel_domain' else 'range'}() expects a relation")
-        return ("set", rel_ty[1] if tag == "rel_domain" else rel_ty[2])
-    if tag in ("count", "sum", "min", "max", "abs"):
-        return ("int",)
-    return None
 
 
 def _collect_pattern_binding_types(e, spec, env, out):

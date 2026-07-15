@@ -10,10 +10,11 @@ existing lowerings; no new semantics are introduced.
   `Option<scalar>`**. Set / Map / Seq / struct / `Option<Option<…>>` continue to be
   rejected at check time (the hint is updated to reflect "or use Option<scalar>" added
   to the current wording).
-- Expressions and statements use exactly the same vocabulary as the existing Option:
-  `s.v == none` / `!= none` / `s.v is some(x)`, `s.v = some(e)` / `= none`, literals
-  `S { v: none }` / `S { v: some(e) }`. `s.v == some(e)` remains a type error as before
-  (the BUG10 rule applies as-is).
+- Expressions and statements use the same vocabulary as scalar Option:
+  `s.v == none` / `!= none` / `s.v == some(e)` / `!= some(e)` /
+  `s.v is some(x)`, `s.v = some(e)` / `= none`, and literals
+  `S { v: none }` / `S { v: some(e) }`. Equality is structural and does not bind;
+  `is some(x)` retains its lexical binding role.
 - Whole-struct `==` / `!=`: Option fields use **logical equivalence**
   (both present and equal ∧ present ⇒ values equal). Same convention as `_logical_eq`.
 
@@ -69,7 +70,7 @@ It also automatically enters the induction step premise (via invariants).
 1. `tests/test_option_struct.py`:
    - For both scalar struct and Map<_, struct>: init literal, field assignment
      (some/none), `is some(x)` guard, `== none` requires, whole-struct `==`, automatic
-     bounds (only when present), `s.v == some(e)` is a type error, JSON display
+     bounds (only when present), structural `s.v == some(e)`, JSON display
      (null / value, no leakage of `__present`/`__value`).
    - induction: an option-field-bearing spec becomes proved (no ghost CTI =
      confirmation of the bounds premise).

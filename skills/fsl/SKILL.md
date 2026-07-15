@@ -448,7 +448,7 @@ existing result/kind fields:
 | warning / `always_true_requires` | Under the context of the preceding requires, this requires clause is not effective as a constraint | Decide whether the clause is redundant or whether a path to the state where the clause bites is missing. Do not delete it automatically |
 | warning / `tautology_over_frozen` | An invariant that depends only on frozen variables no action ever assigns to, and is dynamically always true (a dead ghost = hollow) | Make the variable `const`, or suspect a missing action that should change it. A sign that the invariant "thinks it is checking a contract but checks nothing" |
 | `error` / `parse` | Syntax error | Follow `loc` and `expected` (candidate tokens) |
-| `error` / `type` | Type error | Follow the `hint` (e.g. `x == some(e)` → bind with `x is some(v)` and compare) |
+| `error` / `type` | Type error | Follow the `hint`; Option equality requires compatible payload types, while ordering remains invalid |
 | `error` / `semantics` | Double assignment, etc. | Do not assign to the same variable twice on the same path (an if's then/else are separate paths, so it is allowed) |
 | `error` / `vacuous` | init is unsatisfiable (contradictory assignments, etc.) | Review init. Check that you are not giving one state variable contradictory values. A violation from an out-of-range value is different and becomes `violated`/`type_bound` |
 | `refinement_failed` / `abs_requires_failed` | A detailed-layer transition breaks an upper-layer guard (e.g. a shortcut skipping approval) | Read `impl_action` and `impl_trace`. Add a guard to the detailed layer, or review the interpretation of the correspondence (`maps` / mapping) |
@@ -561,8 +561,9 @@ domain truth. See reference.md §10, "Authoring specs as readable documentation.
 
 ## Rules to always follow (structural pitfalls)
 
-- **No sentinel values (-1, etc.) → use `Option<T>`**. `x == some(e)` is a type
-  error — extract with `x is some(v)`. `== none` / `!= none` are allowed.
+- **No sentinel values (-1, etc.) → use `Option<T>`**. Use structural
+  `==` / `!=` when comparing complete Option values; use `x is some(v)` when
+  the payload must be bound for a following expression.
 - **Do not hand-write "non-negative"-style invariants** → `type Qty = 0..N` checks
   them automatically.
 - A **double assignment on the same execution path is an error**. Assigning to the

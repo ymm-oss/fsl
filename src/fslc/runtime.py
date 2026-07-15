@@ -29,9 +29,8 @@ from .values import (
     eval_quant,
     eval_sum,
     logical_map_access,
+    option_compare,
     option_logical_eq,
-    option_none_cmp,
-    reject_option_binop,
     seq_compare,
     struct_compare,
 )
@@ -638,18 +637,17 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         a = eval_concrete(e[2], state, binds, spec, old_state, in_ensures)
         b = eval_concrete(e[3], state, binds, spec, old_state, in_ensures)
         if op in ("==", "!="):
-            none_cmp = _option_none_cmp(a, b, op)
-            if none_cmp is not None:
-                return none_cmp
+            option_cmp = _option_compare(a, b, op)
+            if option_cmp is not None:
+                return option_cmp
             struct_cmp = _struct_compare(a, b, op, spec)
             if struct_cmp is not None:
                 return struct_cmp
             seq_cmp = _seq_compare(a, b, op, spec)
             if seq_cmp is not None:
                 return seq_cmp
-            _reject_option_binop(a, b, op)
         else:
-            _reject_option_binop(a, b, op)
+            _option_compare(a, b, op)
         if op == "+":
             return a + b
         if op == "-":
@@ -941,12 +939,8 @@ def _option_logical_eq(a, b):
     return option_logical_eq(a, b, _CONC)
 
 
-def _option_none_cmp(a, b, op):
-    return option_none_cmp(a, b, op, _CONC)
-
-
-def _reject_option_binop(a, b, op):
-    return reject_option_binop(a, b, op)
+def _option_compare(a, b, op):
+    return option_compare(a, b, op, _CONC)
 
 
 

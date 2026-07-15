@@ -356,6 +356,292 @@ def resolve_type_ref(ty, types, consts=None):
     _err(f"unknown type form {ty}", kind="type")
 
 
+def binder_static_type(binder, spec, preserve_names=False):
+    if binder[0] == "binder_typed":
+        ty_name = binder[2]
+        if ty_name in spec["types"]:
+            return ("named", ty_name) if preserve_names else spec["types"][ty_name]["ty"]
+    if binder[0] == "binder_collection":
+        coll_ty = expr_static_type(binder[2], spec, {}, preserve_names)
+        if coll_ty and coll_ty[0] in ("set", "seq"):
+            return coll_ty[1]
+    return ("int",)
+
+
+def _merge_ite_static_types(a, b, preserve_names=False):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if a == b:
+        return a
+    if a[0] == "option" and b[0] == "option":
+        inner_a, inner_b = a[1], b[1]
+        if inner_a is None:
+            return b
+        if inner_b is None:
+            return a
+        if inner_a == ("int",):
+            return b
+        if inner_b == ("int",):
+            return a
+        return ("option", _merge_ite_static_types(inner_a, inner_b, preserve_names))
+    if preserve_names:
+        _err(f"if arms must have the same type: {a} vs {b}", kind="type")
+    if a[0] in ("int", "domain", "enum") and b[0] in ("int", "domain", "enum"):
+        if a[0] == "int":
+            return b
+        return a
+    _err(f"if arms must have the same type: {a} vs {b}", kind="type")
+
+
+def expr_static_type(e, spec, env, preserve_names=False):
+    tag = e[0]
+    if tag == "num":
+        return ("int",)
+    if tag == "bool":
+        return ("bool",)
+    if tag == "none":
+        return ("option", None if preserve_names else ("int",))
+    if tag == "var":
+        n = e[1]
+        if n in env:
+            return env[n]
+        if n in spec["state"]:
+            return spec["state_type_refs"][n] if preserve_names else spec["state"][n]
+        for name, info in spec["types"].items():
+            if info["kind"] == "enum" and n in info["members"]:
+                return ("enum", name)
+        return None
+    if tag == "some":
+        return ("option", expr_static_type(e[1], spec, env, preserve_names))
+    if tag == "struct_lit":
+        return ("struct", e[1])
+    if tag == "index":
+        base = e[1]
+        if isinstance(base, str):
+            base_ty = (
+                spec["state_type_refs"].get(base)
+                if preserve_names
+                else spec["state"].get(base)
+            ) or env.get(base)
+        elif base[0] == "var":
+            name = base[1]
+            base_ty = (
+                spec["state_type_refs"].get(name)
+                if preserve_names
+                else spec["state"].get(name)
+            ) or env.get(name)
+        else:
+            base_ty = expr_static_type(base, spec, env, preserve_names)
+        if base_ty and base_ty[0] == "map":
+            return base_ty[2]
+        return None
+    if tag == "field":
+        base_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if base_ty and base_ty[0] in ("struct", "named"):
+            type_name = base_ty[1]
+            if spec["types"].get(type_name, {}).get("kind") != "struct":
+                return None
+            fields = spec["types"][type_name][
+                "field_refs" if preserve_names else "fields"
+            ]
+            return fields.get(e[2])
+        return None
+    if tag == "method":
+        method = e[2]
+        base_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if base_ty and base_ty[0] == "relation":
+            if method == "contains":
+                return ("bool",)
+            if method in ("add", "remove"):
+                return base_ty
+            _err(f"unknown method '{method}' on relation", kind="type")
+        if method == "contains":
+            return ("bool",)
+        if method == "size":
+            return ("int",)
+        if method in ("add", "remove", "push", "pop"):
+            return base_ty
+        if method in ("head", "at"):
+            return base_ty[1] if base_ty and base_ty[0] == "seq" else ("int",)
+        return None
+    if tag == "bin":
+        return ("int",) if e[1] in ("+", "-", "*", "/", "%") else ("bool",)
+    if tag == "ite":
+        condition_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if condition_ty and condition_ty != ("bool",):
+            _err(f"if condition must be Bool, got {condition_ty}", kind="type")
+        return _merge_ite_static_types(
+            expr_static_type(e[2], spec, env, preserve_names),
+            expr_static_type(e[3], spec, env, preserve_names),
+            preserve_names,
+        )
+    if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
+        return ("bool",)
+    if tag in ("rel_reachable", "rel_acyclic", "rel_functional", "rel_injective"):
+        return ("bool",)
+    if tag in ("rel_domain", "rel_range"):
+        rel_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if not rel_ty or rel_ty[0] != "relation":
+            _err(f"{tag[4:]}() expects a relation", kind="type")
+        return ("set", rel_ty[1] if tag == "rel_domain" else rel_ty[2])
+    if tag in ("count", "sum", "min", "max", "abs"):
+        return ("int",)
+    if tag == "old":
+        return expr_static_type(e[1], spec, env, preserve_names)
+    return None
+
+
+def _normalized_type_identity(ty, spec):
+    if ty is None:
+        return None
+    if ty[0] == "named":
+        info = spec["types"][ty[1]]
+        return (info["kind"], ty[1])
+    if ty[0] == "option":
+        return ("option", _normalized_type_identity(ty[1], spec))
+    return ty
+
+
+def _option_payload_types_compatible(left, right, spec):
+    left = _normalized_type_identity(left, spec)
+    right = _normalized_type_identity(right, spec)
+    if left is None or right is None or left == right:
+        return True
+    if left[0] == "option" and right[0] == "option":
+        return _option_payload_types_compatible(left[1], right[1], spec)
+    return left[0] in ("int", "domain") and right[0] in ("int", "domain")
+
+
+def _extend_pattern_type(expr, spec, env):
+    if expr[0] == "is" and expr[2][0] == "pat_some":
+        option_ty = expr_static_type(expr[1], spec, env, True)
+        if option_ty and option_ty[0] == "option":
+            env[expr[2][1]] = option_ty[1]
+    elif expr[0] == "bin":
+        _extend_pattern_type(expr[2], spec, env)
+        _extend_pattern_type(expr[3], spec, env)
+
+
+def _validate_option_equalities_expr(expr, spec, env):
+    if not isinstance(expr, tuple):
+        return
+    tag = expr[0]
+    if tag == "bin":
+        if expr[1] in ("==", "!="):
+            left = expr_static_type(expr[2], spec, env, True)
+            right = expr_static_type(expr[3], spec, env, True)
+            if (left and left[0] == "option") or (right and right[0] == "option"):
+                if not left or not right or left[0] != "option" or right[0] != "option":
+                    _err("Option comparison requires two Option values", kind="type")
+                if not _option_payload_types_compatible(left[1], right[1], spec):
+                    _err("Option comparison requires matching payload types", kind="type")
+        _validate_option_equalities_expr(expr[2], spec, env)
+        right_env = dict(env)
+        _extend_pattern_type(expr[2], spec, right_env)
+        _validate_option_equalities_expr(expr[3], spec, right_env)
+        return
+    if tag in ("forall", "exists"):
+        binder, body = expr[1], expr[2]
+        local = {**env, binder[1]: binder_static_type(binder, spec, True)}
+        if len(binder) > 3 and binder[3] is not None:
+            _validate_option_equalities_expr(binder[3], spec, local)
+        _validate_option_equalities_expr(body, spec, local)
+        return
+    if tag in ("unique", "exactly_one"):
+        binder = expr[1]
+        local = {**env, binder[1]: binder_static_type(binder, spec, True)}
+        if len(binder) > 3 and binder[3] is not None:
+            _validate_option_equalities_expr(binder[3], spec, local)
+        return
+    if tag in ("count", "sum"):
+        type_name = expr[2]
+        local = {**env, expr[1]: ("named", type_name)}
+        for child in expr[3:]:
+            _validate_option_equalities_expr(child, spec, local)
+        return
+    for child in expr[1:]:
+        if isinstance(child, tuple):
+            _validate_option_equalities_expr(child, spec, env)
+        elif isinstance(child, dict):
+            for value in child.values():
+                _validate_option_equalities_expr(value, spec, env)
+        elif isinstance(child, list):
+            for value in child:
+                _validate_option_equalities_expr(value, spec, env)
+
+
+def _validate_option_equalities_statements(statements, spec, env):
+    for statement in statements:
+        if statement[0] == "assign":
+            _validate_option_equalities_lvalue(statement[1], spec, env)
+            _validate_option_equalities_expr(statement[2], spec, env)
+        elif statement[0] == "if":
+            _validate_option_equalities_expr(statement[1], spec, env)
+            _validate_option_equalities_statements(statement[2], spec, env)
+            _validate_option_equalities_statements(statement[3], spec, env)
+        elif statement[0] == "forall_stmt":
+            binder = statement[1]
+            local = {**env, binder[1]: binder_static_type(binder, spec, True)}
+            if len(binder) > 3 and binder[3] is not None:
+                _validate_option_equalities_expr(binder[3], spec, local)
+            _validate_option_equalities_statements(statement[2], spec, local)
+
+
+def _validate_option_equalities_lvalue(lvalue, spec, env):
+    if lvalue[0] == "index":
+        _validate_option_equalities_expr(lvalue[2], spec, env)
+    elif lvalue[0] == "field_lv":
+        _validate_option_equalities_lvalue(lvalue[1], spec, env)
+
+
+def validate_option_equalities(spec):
+    _validate_option_equalities_statements(spec["init"], spec, {})
+    for action in spec["actions"]:
+        env = {
+            param[0]: (
+                ("bool",)
+                if param[3] == "Bool"
+                else (("named", param[3]) if param[3] else ("int",))
+            )
+            for param in action["params"]
+        }
+        guards = [("requires", item) for item in action["requires"]] + [
+            ("let", item) for item in action["lets"]
+        ]
+        guards.sort(
+            key=lambda entry: (
+                (entry[1].get("loc") or {}).get("line", 0),
+                (entry[1].get("loc") or {}).get("column", 0),
+            )
+        )
+        for kind, item in guards:
+            expr = item["expr"]
+            _validate_option_equalities_expr(expr, spec, env)
+            if kind == "let":
+                env[item["name"]] = expr_static_type(expr, spec, env, True)
+            else:
+                _extend_pattern_type(expr, spec, env)
+        _validate_option_equalities_statements(action["stmts"], spec, env)
+        for ensure in action["ensures"]:
+            _validate_option_equalities_expr(ensure["expr"], spec, env)
+    for property_ in (
+        spec["invariants"] + spec["transitions"] + spec["reachables"]
+    ):
+        _validate_option_equalities_expr(property_["expr"], spec, {})
+    for leadsto in spec["leadstos"]:
+        env = {}
+        for binder in leadsto["binders"]:
+            env[binder[1]] = binder_static_type(binder, spec, True)
+        _validate_option_equalities_expr(leadsto["P"], spec, env)
+        _validate_option_equalities_expr(leadsto["Q"], spec, env)
+        if leadsto["decreases"] is not None:
+            _validate_option_equalities_expr(leadsto["decreases"], spec, env)
+    if spec["terminal"] is not None:
+        _validate_option_equalities_expr(spec["terminal"], spec, {})
+
+
 def collect_types(items, consts):
     types_meta = {}
     enum_members = {}
@@ -1434,7 +1720,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         if info.get("symmetric") and info["kind"] in ("domain", "enum")
     }
 
-    return {
+    spec = {
         "name": name,
         "consts": consts,
         "types": types_meta,
@@ -1464,6 +1750,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "symmetry": symmetry,
         "kind": spec_kind,
     }
+    validate_option_equalities(spec)
+    return spec
 
 
 def check_spec(tree, display_names=None):

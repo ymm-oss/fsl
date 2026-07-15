@@ -424,44 +424,81 @@ domain InvalidStruct {
 }
 
 #[test]
-fn rejects_option_comparisons_other_than_none() {
-    let some_comparison = lowering_error(
+fn supports_structural_option_equality_without_binding() {
+    let kernel = lower(
         r"
-domain InvalidSomeComparison {
-  type Status = Pending | Done
-  aggregate Item {
-    state { current: Option<Status> = none; }
-    command Touch {}
-    event Touched {}
-    decide Touch { emits Touched }
-    evolve Touched { current = none }
-    invariant bad { current == some(Pending) }
-  }
-}
-",
-    );
-    assert!(some_comparison.message.contains("use 'is some(binding)'"));
-
-    let option_comparison = lowering_error(
-        r"
-domain InvalidOptionComparison {
+domain OptionEquality {
   type Status = Pending | Done
   aggregate Item {
     state {
       current: Option<Status> = none;
-      previous: Option<Status> = none;
+      previous: Option<Status> = some(Pending);
+    }
+    command Touch {}
+    event Touched {}
+    decide Touch { emits Touched }
+    evolve Touched { current = some(Pending) }
+    invariant constructor { current == some(Pending) or current == none }
+    invariant values { current != previous or current == previous }
+  }
+}
+",
+    );
+    let model = build_model(kernel).expect("Option equality should build");
+
+    assert_eq!(model.invariants.len(), 2);
+}
+
+#[test]
+fn rejects_option_equality_with_mismatched_inner_types() {
+    let mismatch = lowering_error(
+        r"
+domain InvalidOptionComparison {
+  type Status = Pending | Done
+  type Outcome = Accepted | Rejected
+  aggregate Item {
+    state {
+      current: Option<Status> = none;
+      outcome: Option<Outcome> = none;
     }
     command Touch {}
     event Touched {}
     decide Touch { emits Touched }
     evolve Touched {}
-    invariant bad { current == previous }
+    invariant bad { current == outcome }
   }
 }
 ",
     );
-    assert!(option_comparison.message.contains("use 'is some(binding)'"));
+    assert!(
+        mismatch.message.contains("domain expression type mismatch"),
+        "{}",
+        mismatch.message
+    );
+}
 
+#[test]
+fn option_equality_does_not_introduce_a_binding() {
+    let error = lowering_error(
+        r"
+domain EqualityDoesNotBind {
+  type Status = Pending | Done
+  aggregate Item {
+    state { current: Option<Status> = some(Pending); }
+    command Touch {}
+    event Touched {}
+    decide Touch { emits Touched }
+    evolve Touched {}
+    invariant bad { current == some(Pending) and value == Pending }
+  }
+}
+",
+    );
+    assert!(error.message.contains("unknown domain symbol 'value'"));
+}
+
+#[test]
+fn rejects_option_ordering() {
     let option_ordering = lowering_error(
         r"
 domain InvalidOptionOrdering {

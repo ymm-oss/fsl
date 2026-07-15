@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- `Option<T>` now supports structural `==` / `!=` between complete Option
+  values, including `some(expr)`. Concrete and symbolic evaluation compare the
+  presence tag first and ignore the payload when absent; `is some(binding)`
+  remains the distinct binding form (issue #246).
+
 ### Fixed
 - Python compatibility envelopes now scope faithfulness routing to actual
   diagnostics, so user state fields named `kind`, `classification`, or other
