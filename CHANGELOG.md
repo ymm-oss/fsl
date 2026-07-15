@@ -99,6 +99,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- `fslc verify --engine auto` (issue #226) now dispatches through a
+  `VerificationEngine::Auto` variant alongside the other engines instead of
+  resolving before the shared parser, loads the model once per attempt (the
+  static fail-closed gate and the real explicit-state run share it, removing
+  a redundant load/gate re-check on the common decide-by-explicit path), and
+  persists the fallback trace on the BMC cache entry itself so a repeat
+  `auto` cache hit restores the exact original `engine_fallback` rather than
+  recomputing a generic one. Output contract, cache-sharing with plain
+  `--engine explicit`/`bmc` runs, and the `engine_fallback: {from, reason,
+  kind}` shape are unchanged.
 - Native domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds now share
   one versioned input adapter over Public Kernel v1 and the public
   `domain-scaffold-metadata.v1` compatibility bridge. Target emitters no longer

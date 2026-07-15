@@ -20,8 +20,8 @@ mod verification;
 
 use verification::{
     BmcRequest, DeadlockMode, ExplicitRequest, InductionRequest, ModelSelection,
-    VerificationEngine, run_bmc_filtered, run_explicit_filtered, run_induction_filtered,
-    run_verify_cli,
+    VerificationEngine, run_auto_filtered, run_bmc_filtered, run_explicit_filtered,
+    run_induction_filtered, run_verify_cli,
 };
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
@@ -12483,6 +12483,12 @@ fn run_verify(
             auxiliary: &[],
         }),
         Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
+            selection,
+            depth,
+            deadlock,
+            budget: explicit_budget,
+        }),
+        Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
             selection,
             depth,
             deadlock,

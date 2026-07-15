@@ -116,7 +116,7 @@ fn auto_falls_back_to_bmc_when_the_explicit_budget_is_exceeded() {
     assert!(
         output["engine_fallback"]["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("budget"))
+            .is_some_and(|reason| reason.contains("1-state budget"))
     );
 }
 
@@ -125,6 +125,27 @@ fn auto_reports_a_violation_found_by_explicit_without_a_fallback_stamp() {
     let (output, status) = verify_auto("specs/cart_buggy.fsl", 8, &[]);
     assert_eq!(status, 1);
     assert_eq!(output["result"], "violated");
+    assert_eq!(output["engine"], "explicit");
+    assert!(output.get("engine_fallback").is_none());
+}
+
+#[test]
+fn auto_reports_an_explicit_deadlock_verdict_without_a_fallback_stamp() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/explicit_deadlock.fsl");
+    let (output, status) = run_cli(&[
+        "verify".to_owned(),
+        fixture.to_str().expect("UTF-8 fixture path").to_owned(),
+        "--engine".to_owned(),
+        "auto".to_owned(),
+        "--depth".to_owned(),
+        "4".to_owned(),
+        "--deadlock".to_owned(),
+        "error".to_owned(),
+        "--no-cache".to_owned(),
+    ]);
+    assert_eq!(status, 1);
+    assert_eq!(output["violation_kind"], "deadlock");
     assert_eq!(output["engine"], "explicit");
     assert!(output.get("engine_fallback").is_none());
 }
@@ -225,6 +246,17 @@ fn auto_cache_shares_entries_with_plain_explicit_and_bmc_runs() {
         assert_eq!(second["cache"]["hit"], true);
         assert_eq!(second["engine"], "bmc");
         assert!(second["engine_fallback"].is_object());
+        // The fallback trace is persisted on the cache entry itself, so a
+        // repeat `auto` cache hit restores the exact original reason/kind
+        // rather than a freshly recomputed (and potentially different) one.
+        assert_eq!(
+            first["engine_fallback"]["reason"],
+            second["engine_fallback"]["reason"]
+        );
+        assert_eq!(
+            first["engine_fallback"]["kind"],
+            second["engine_fallback"]["kind"]
+        );
 
         // Cache purity: a plain `--engine bmc` run hits the exact entry the
         // fallback wrote, and must never see `engine`/`engine_fallback`
