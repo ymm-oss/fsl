@@ -23,6 +23,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Standalone refinement files, requirements `implements` blocks, action-level
+  `maps` clauses, and synthesized auto/identity mappings now lower through one
+  typed `ActionCorrespondence` IR. Impl parameter annotations, target arity and
+  argument types, actor compatibility, duplicate origins/spans, progress lookup,
+  and concrete refinement execution share that validation path; requirements
+  auto-mapping no longer has a separate indexing path (issue #238).
 - Native/WASM parity now runs every Worker-supported surface document from the
   shared `specs/` and `examples/` corpus and structurally compares complete
   envelopes. Only schema-validated timing/backend identity and replay-validated

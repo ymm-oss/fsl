@@ -58,6 +58,14 @@ refinement CartImplRefinesCart {
   order). They may be written bare (`u`) or with a type annotation matching the
   impl action declaration (`u: UserId`). The abs-side arguments are expressions
   using them and the impl state.
+- Every surface route lowers to one typed `ActionCorrespondence`:
+  `impl_action: ActionRef`, resolved `impl_params: Vec<ParamDef>`, a typed
+  action/stutter target, `CorrespondenceOrigin`, and a source span. Standalone
+  files, inline `implements`, requirement-action `maps`, and auto synthesis use
+  the same resolver for impl/target existence, parameter annotations, arity,
+  argument expression types, actor compatibility, and duplicate detection.
+  Progress declarations and the concrete Monitor consume the same action
+  identity. Success JSON remains the existing name-to-target projection.
 - `preserve progress { respond <AbsLeadsTo> by <impl_action>, ... }` is an
   optional liveness-preserving refinement check. It does not change ordinary
   safety refinement. When present, fslc pulls the named abstract `leadsTo` P/Q
@@ -134,26 +142,17 @@ requirements Impl {
 }
 ```
 
-This is not a new mechanism: `refinement_action`'s transformer output
-(`("action_map", name, params, target, loc)`) is the same AST node the
-separate-file parser already produces, and the inline desugar
-(dialects.py `_expand_requirements_with_display`) already merges
-`implements["maps"]` (the block's items) into the same `mapping_items` list
-as the auto-derived action maps from requirement-action `maps` clauses and
-process transitions, before building the same `("refinement", ...)` AST that
-`refine.py.build_refinement` consumes for both the inline and separate-file
-paths. Adding the grammar alternative was the entire change; `dialects.py`
-and `refine.py` needed none.
+The Rust frontend preserves the route as `CorrespondenceOrigin`, then lowers
+the shared surface item into the typed IR described in §1. Requirement-action
+`maps` clauses and branch maps are adapted to the same item before validation;
+implicit identity/stutter correspondences call the same resolver directly.
 
 Two consequences fall out of reusing the same merge, not from new logic:
 
-- **Duplicate correspondence.** `build_refinement` already rejects a second
-  `action_map` entry for the same impl action name
-  (`kind: "type"`, `"duplicate action map for '<name>'"`). Since the inline
-  block's items are merged ahead of the auto-derived ones, an impl action that
-  has *both* a `maps` clause and a matching inline `action ...` item now hits
-  that same pre-existing check — mirroring what a separate-file mapping that
-  lists an action twice already does.
+- **Duplicate correspondence.** A second correspondence for the same impl
+  action is rejected before semantic resolution. The diagnostic reports both
+  origin kinds and both line/column sites, whether the conflict is within a
+  standalone file or between `implements` and an action-level `maps` clause.
 - **Branch-split action names.** `branches` splits an action into aliased
   kernel actions (`name__b1`, `name__b2`, ...; dialects.py
   `_split_branch_action`), so the impl spec `build_refinement` type-checks

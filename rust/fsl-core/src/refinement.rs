@@ -4,12 +4,14 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use fsl_syntax::{
-    ActionTarget, Binder, Expr, QualifiedName, RefinementItem, RefinementParam, RequirementAction,
-    RequirementActionItem, RequirementBlockItem, RequirementsItem, Span, SurfaceDocument,
-    SurfaceRefinement,
+    ActionTarget, Binder, CorrespondenceOrigin, Expr, MetaTag, QualifiedName, RefinementItem,
+    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
+    RequirementsItem, Span, SurfaceDocument, SurfaceRefinement,
 };
 
-use crate::{FileResolver, KernelModel, ParamDef, TypeRef, build_model, parse_kernel_source};
+use crate::{
+    ActionDef, FileResolver, KernelModel, ParamDef, TypeRef, build_model, parse_kernel_source,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StateMap {
@@ -20,23 +22,27 @@ pub struct StateMap {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ActionMapTarget {
+pub struct ActionRef(pub String);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ActionCorrespondenceTarget {
     Stutter,
-    Action { name: String, args: Vec<Expr> },
+    Action { action: ActionRef, args: Vec<Expr> },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActionMap {
-    pub name: String,
-    pub params: Vec<String>,
-    pub target: ActionMapTarget,
-    pub span: Option<Span>,
+pub struct ActionCorrespondence {
+    pub impl_action: ActionRef,
+    pub impl_params: Vec<ParamDef>,
+    pub target: ActionCorrespondenceTarget,
+    pub origin: CorrespondenceOrigin,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgressMap {
     pub leads_to: String,
-    pub actions: Vec<String>,
+    pub actions: Vec<ActionRef>,
     pub span: Span,
 }
 
@@ -46,7 +52,7 @@ pub struct Refinement {
     pub impl_name: String,
     pub abs_name: String,
     pub state_maps: BTreeMap<String, StateMap>,
-    pub action_maps: BTreeMap<String, ActionMap>,
+    pub action_correspondences: BTreeMap<String, ActionCorrespondence>,
     pub progress: Vec<ProgressMap>,
 }
 
@@ -89,7 +95,7 @@ pub fn parse_refinement(
     let SurfaceDocument::Refinement(surface) = document else {
         return Err(refinement_error("expected refinement document", None));
     };
-    build_refinement(surface, implementation, abstraction)
+    build_refinement(surface, implementation, abstraction, None)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -97,18 +103,21 @@ fn build_refinement(
     surface: SurfaceRefinement,
     implementation: &KernelModel,
     abstraction: &KernelModel,
+    implicit_actions: Option<Span>,
 ) -> Result<Refinement, RefinementError> {
     let mut impl_name = None;
     let mut abs_name = None;
-    let mut maps_auto = false;
+    let mut maps_auto = None;
     let mut state_maps = BTreeMap::new();
-    let mut action_maps = BTreeMap::new();
+    let mut action_correspondences = BTreeMap::new();
+    let mut action_sources = Vec::new();
     let mut progress = Vec::new();
+    let type_context = refinement_type_context(implementation, abstraction);
     for item in surface.items {
         match item {
             RefinementItem::Impl(name) => impl_name = Some(name),
             RefinementItem::Abs(name) => abs_name = Some(name),
-            RefinementItem::MapsAuto(_) => maps_auto = true,
+            RefinementItem::MapsAuto(span) => maps_auto = Some(span),
             RefinementItem::Map {
                 name,
                 binder,
@@ -143,83 +152,20 @@ fn build_refinement(
                 name,
                 params,
                 target,
+                origin,
                 span,
-            } => {
-                let Some(action) = implementation
-                    .actions
-                    .iter()
-                    .find(|action| action.name == name)
-                else {
-                    return Err(refinement_error(
-                        format!("unknown impl action '{name}'"),
-                        Some(span),
-                    ));
-                };
-                let param_names = params
-                    .iter()
-                    .map(|param| param.name.clone())
-                    .collect::<Vec<_>>();
-                let expected = action
-                    .params
-                    .iter()
-                    .map(|param| param.name().to_owned())
-                    .collect::<Vec<_>>();
-                if param_names != expected {
-                    return Err(refinement_error(
-                        format!(
-                            "action '{name}' parameter names/order must match impl ({expected:?})"
-                        ),
-                        Some(span),
-                    ));
-                }
-                let target = match target {
-                    ActionTarget::Stutter => ActionMapTarget::Stutter,
-                    ActionTarget::Action(target, args) => {
-                        let Some(abs_action) = abstraction
-                            .actions
-                            .iter()
-                            .find(|action| action.name == target)
-                        else {
-                            return Err(refinement_error(
-                                format!("unknown abstract action '{target}'"),
-                                Some(span),
-                            ));
-                        };
-                        if args.len() != abs_action.params.len() {
-                            return Err(refinement_error(
-                                format!(
-                                    "action '{name}' -> '{target}' expects {} arguments",
-                                    abs_action.params.len()
-                                ),
-                                Some(span),
-                            ));
-                        }
-                        ActionMapTarget::Action { name: target, args }
-                    }
-                };
-                if action_maps
-                    .insert(
-                        name.clone(),
-                        ActionMap {
-                            name: name.clone(),
-                            params: param_names,
-                            target,
-                            span: Some(span),
-                        },
-                    )
-                    .is_some()
-                {
-                    return Err(refinement_error(
-                        format!("duplicate action map for '{name}'"),
-                        Some(span),
-                    ));
-                }
-            }
+            } => action_sources.push(ActionCorrespondenceSource {
+                impl_action: name,
+                impl_params: params,
+                target,
+                origin,
+                span,
+            }),
             RefinementItem::PreserveProgress { responses, .. } => {
                 progress.extend(responses.into_iter().map(|(leads_to, actions, span)| {
                     ProgressMap {
                         leads_to,
-                        actions,
+                        actions: actions.into_iter().map(ActionRef).collect(),
                         span,
                     }
                 }));
@@ -248,15 +194,38 @@ fn build_refinement(
             None,
         ));
     }
-    if maps_auto {
-        apply_auto_maps(
+    validate_correspondence_duplicates(&action_sources)?;
+    for source in action_sources {
+        insert_action_correspondence(
+            &mut action_correspondences,
+            source,
             implementation,
             abstraction,
-            &mut state_maps,
-            &mut action_maps,
+            &type_context,
         )?;
     }
-    validate_refinement_expressions(implementation, abstraction, &state_maps, &action_maps)?;
+    if let Some(auto_span) = maps_auto {
+        apply_auto_state_maps(implementation, abstraction, &mut state_maps)?;
+        apply_auto_action_correspondences(
+            implementation,
+            abstraction,
+            &mut action_correspondences,
+            &type_context,
+            auto_span,
+            false,
+        )?;
+    }
+    if let Some(span) = implicit_actions {
+        apply_auto_action_correspondences(
+            implementation,
+            abstraction,
+            &mut action_correspondences,
+            &type_context,
+            span,
+            true,
+        )?;
+    }
+    validate_refinement_expressions(abstraction, &state_maps, &type_context)?;
     for (name, _) in &abstraction.state {
         if !state_maps.contains_key(name) {
             return Err(refinement_error(
@@ -266,7 +235,7 @@ fn build_refinement(
         }
     }
     for action in &implementation.actions {
-        if !action_maps.contains_key(&action.name) {
+        if !action_correspondences.contains_key(&action.name) {
             return Err(refinement_error(
                 format!(
                     "missing action correspondence for impl action '{}'",
@@ -288,13 +257,9 @@ fn build_refinement(
             ));
         }
         for action in &declaration.actions {
-            if !implementation
-                .actions
-                .iter()
-                .any(|candidate| candidate.name == *action)
-            {
+            if !action_correspondences.contains_key(&action.0) {
                 return Err(refinement_error(
-                    format!("unknown impl progress action '{action}'"),
+                    format!("unknown impl progress action '{}'", action.0),
                     Some(declaration.span),
                 ));
             }
@@ -305,23 +270,18 @@ fn build_refinement(
         impl_name,
         abs_name,
         state_maps,
-        action_maps,
+        action_correspondences,
         progress,
     })
 }
 
 fn validate_refinement_expressions(
-    implementation: &KernelModel,
     abstraction: &KernelModel,
     state_maps: &BTreeMap<String, StateMap>,
-    action_maps: &BTreeMap<String, ActionMap>,
+    context: &KernelModel,
 ) -> Result<(), RefinementError> {
-    let context = refinement_type_context(implementation, abstraction);
     for state_map in state_maps.values() {
-        validate_state_map(state_map, abstraction, &context)?;
-    }
-    for action_map in action_maps.values() {
-        validate_action_map(action_map, implementation, abstraction, &context)?;
+        validate_state_map(state_map, abstraction, context)?;
     }
     Ok(())
 }
@@ -415,57 +375,6 @@ fn invalid_state_map(
     )
 }
 
-fn validate_action_map(
-    action_map: &ActionMap,
-    implementation: &KernelModel,
-    abstraction: &KernelModel,
-    context: &KernelModel,
-) -> Result<(), RefinementError> {
-    let ActionMapTarget::Action { name, args } = &action_map.target else {
-        return Ok(());
-    };
-    let implementation_action = implementation
-        .actions
-        .iter()
-        .find(|action| action.name == action_map.name)
-        .expect("action maps were checked against implementation actions");
-    let abstraction_action = abstraction
-        .actions
-        .iter()
-        .find(|action| action.name == *name)
-        .expect("action maps were checked against abstraction actions");
-    let bindings = implementation_action
-        .params
-        .iter()
-        .map(|param| (param.name().to_owned(), parameter_type(param)))
-        .collect::<Vec<_>>();
-    for (index, (argument, parameter)) in args.iter().zip(&abstraction_action.params).enumerate() {
-        crate::public_kernel::validate_expression_type(
-            argument,
-            &parameter_type(parameter),
-            &bindings,
-            context,
-        )
-        .map_err(|error| {
-            refinement_error(
-                format!(
-                    "invalid argument {} for action '{}' -> '{}': {}",
-                    index + 1,
-                    action_map.name,
-                    name,
-                    error.message
-                ),
-                Some(
-                    error
-                        .span
-                        .expect("mapped argument type errors carry source spans"),
-                ),
-            )
-        })?;
-    }
-    Ok(())
-}
-
 fn parameter_type(parameter: &ParamDef) -> TypeRef {
     match parameter {
         ParamDef::Typed { ty, .. } => ty.clone(),
@@ -473,11 +382,10 @@ fn parameter_type(parameter: &ParamDef) -> TypeRef {
     }
 }
 
-fn apply_auto_maps(
+fn apply_auto_state_maps(
     implementation: &KernelModel,
     abstraction: &KernelModel,
     state_maps: &mut BTreeMap<String, StateMap>,
-    action_maps: &mut BTreeMap<String, ActionMap>,
 ) -> Result<(), RefinementError> {
     for (name, abs_ty) in &abstraction.state {
         if state_maps.contains_key(name) || implementation.state_type(name).is_none() {
@@ -519,39 +427,261 @@ fn apply_auto_maps(
             },
         );
     }
+    Ok(())
+}
+
+fn apply_auto_action_correspondences(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    action_correspondences: &mut BTreeMap<String, ActionCorrespondence>,
+    context: &KernelModel,
+    span: Span,
+    stutter_unmatched: bool,
+) -> Result<(), RefinementError> {
     for impl_action in &implementation.actions {
-        if action_maps.contains_key(&impl_action.name) {
+        if action_correspondences.contains_key(&impl_action.name) {
             continue;
         }
-        let Some(abs_action) = abstraction
+        let abs_action = abstraction
             .actions
             .iter()
-            .find(|action| action.name == impl_action.name)
-        else {
-            continue;
-        };
-        if impl_action.params.len() != abs_action.params.len() {
+            .find(|action| action.name == impl_action.name);
+        if abs_action.is_none() && !stutter_unmatched {
             continue;
         }
         let params = impl_action
             .params
             .iter()
-            .map(|param| param.name().to_owned())
+            .map(|param| RefinementParam {
+                name: param.name().to_owned(),
+                ty: None,
+            })
             .collect::<Vec<_>>();
-        action_maps.insert(
-            impl_action.name.clone(),
-            ActionMap {
-                name: impl_action.name.clone(),
-                params: params.clone(),
-                target: ActionMapTarget::Action {
-                    name: impl_action.name.clone(),
-                    args: params.into_iter().map(Expr::Var).collect(),
-                },
-                span: None,
+        insert_action_correspondence(
+            action_correspondences,
+            ActionCorrespondenceSource {
+                impl_action: impl_action.name.clone(),
+                impl_params: params,
+                target: abs_action.map_or(ActionTarget::Stutter, |abs_action| {
+                    ActionTarget::Action(
+                        abs_action.name.clone(),
+                        abs_action
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, parameter)| {
+                                impl_action
+                                    .params
+                                    .iter()
+                                    .find(|candidate| candidate.name() == parameter.name())
+                                    .or_else(|| impl_action.params.get(index))
+                                    .map(|candidate| Expr::Var(candidate.name().to_owned()))
+                            })
+                            .collect(),
+                    )
+                }),
+                origin: CorrespondenceOrigin::Auto,
+                span,
             },
-        );
+            implementation,
+            abstraction,
+            context,
+        )?;
     }
     Ok(())
+}
+
+struct ActionCorrespondenceSource {
+    impl_action: String,
+    impl_params: Vec<RefinementParam>,
+    target: ActionTarget,
+    origin: CorrespondenceOrigin,
+    span: Span,
+}
+
+fn validate_correspondence_duplicates(
+    sources: &[ActionCorrespondenceSource],
+) -> Result<(), RefinementError> {
+    let mut first_by_action = BTreeMap::new();
+    for source in sources {
+        if let Some(previous) = first_by_action.insert(source.impl_action.as_str(), source) {
+            return Err(refinement_error(
+                format!(
+                    "duplicate action correspondence for '{}': {} at {}:{} conflicts with {} at {}:{}",
+                    source.impl_action,
+                    previous.origin.as_str(),
+                    previous.span.start.line,
+                    previous.span.start.column,
+                    source.origin.as_str(),
+                    source.span.start.line,
+                    source.span.start.column,
+                ),
+                Some(source.span),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn insert_action_correspondence(
+    correspondences: &mut BTreeMap<String, ActionCorrespondence>,
+    source: ActionCorrespondenceSource,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    context: &KernelModel,
+) -> Result<(), RefinementError> {
+    let implementation_action = implementation
+        .actions
+        .iter()
+        .find(|action| action.name == source.impl_action)
+        .ok_or_else(|| {
+            refinement_error(
+                format!("unknown impl action '{}'", source.impl_action),
+                Some(source.span),
+            )
+        })?;
+    validate_impl_params(&source, implementation_action, context)?;
+    let target = lower_action_target(&source, implementation_action, abstraction, context)?;
+    correspondences.insert(
+        source.impl_action.clone(),
+        ActionCorrespondence {
+            impl_action: ActionRef(source.impl_action),
+            impl_params: implementation_action.params.clone(),
+            target,
+            origin: source.origin,
+            span: source.span,
+        },
+    );
+    Ok(())
+}
+
+fn validate_impl_params(
+    source: &ActionCorrespondenceSource,
+    action: &ActionDef,
+    context: &KernelModel,
+) -> Result<(), RefinementError> {
+    if action.params.len() != source.impl_params.len()
+        || action
+            .params
+            .iter()
+            .zip(&source.impl_params)
+            .any(|(actual, declared)| actual.name() != declared.name)
+    {
+        return Err(refinement_error(
+            format!(
+                "action map parameters for '{}' must match the impl action parameter names and order",
+                source.impl_action
+            ),
+            Some(source.span),
+        ));
+    }
+    for (actual, declared) in action.params.iter().zip(&source.impl_params) {
+        let Some(annotation) = &declared.ty else {
+            continue;
+        };
+        let resolved = context
+            .resolve_surface_type(annotation)
+            .map_err(|error| refinement_error(error.message, Some(source.span)))?;
+        if resolved != parameter_type(actual) {
+            return Err(refinement_error(
+                format!(
+                    "action map parameter '{}.{}' type does not match the impl action",
+                    source.impl_action, declared.name
+                ),
+                Some(source.span),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn lower_action_target(
+    source: &ActionCorrespondenceSource,
+    implementation_action: &ActionDef,
+    abstraction: &KernelModel,
+    context: &KernelModel,
+) -> Result<ActionCorrespondenceTarget, RefinementError> {
+    let target = match &source.target {
+        ActionTarget::Stutter => ActionCorrespondenceTarget::Stutter,
+        ActionTarget::Action(name, args) => {
+            let abstraction_action = abstraction
+                .actions
+                .iter()
+                .find(|action| action.name == *name)
+                .ok_or_else(|| {
+                    refinement_error(
+                        format!("unknown abstract action '{name}'"),
+                        Some(source.span),
+                    )
+                })?;
+            if abstraction_action.params.len() != args.len() {
+                return Err(refinement_error(
+                    format!(
+                        "action map '{}' -> '{}' has {} arguments, expected {}",
+                        source.impl_action,
+                        name,
+                        args.len(),
+                        abstraction_action.params.len()
+                    ),
+                    Some(source.span),
+                ));
+            }
+            let bindings = implementation_action
+                .params
+                .iter()
+                .map(|param| (param.name().to_owned(), parameter_type(param)))
+                .collect::<Vec<_>>();
+            for (index, (argument, parameter)) in
+                args.iter().zip(&abstraction_action.params).enumerate()
+            {
+                crate::public_kernel::validate_expression_type(
+                    argument,
+                    &parameter_type(parameter),
+                    &bindings,
+                    context,
+                )
+                .map_err(|error| {
+                    refinement_error(
+                        format!(
+                            "invalid argument {} for action '{}' -> '{}': {}",
+                            index + 1,
+                            source.impl_action,
+                            name,
+                            error.message
+                        ),
+                        error.span.or(Some(source.span)),
+                    )
+                })?;
+            }
+            if source.origin == CorrespondenceOrigin::Auto
+                && let (Some(impl_actor), Some(abs_actor)) = (
+                    action_actor(implementation_action.meta.as_ref()),
+                    action_actor(abstraction_action.meta.as_ref()),
+                )
+                && impl_actor != abs_actor
+            {
+                return Err(refinement_error(
+                    format!(
+                        "maps auto actor mismatch for action '{}': impl actor '{}' != abstract actor '{}'",
+                        source.impl_action, impl_actor, abs_actor
+                    ),
+                    Some(source.span),
+                ));
+            }
+            ActionCorrespondenceTarget::Action {
+                action: ActionRef(name.clone()),
+                args: args.clone(),
+            }
+        }
+    };
+    Ok(target)
+}
+
+fn action_actor(meta: Option<&MetaTag>) -> Option<&str> {
+    meta.and_then(|tag| tag.text.as_deref())
+        .and_then(|text| text.strip_prefix("by "))
+        .map(str::trim)
+        .filter(|actor| !actor.is_empty())
 }
 
 fn refinement_error(message: impl Into<String>, span: Option<Span>) -> RefinementError {
@@ -583,6 +713,7 @@ fn append_requirement_action_maps(action: &RequirementAction, items: &mut Vec<Re
                 name: format!("{}__b{}", action.name, index + 1),
                 params: params.clone(),
                 target: branch.maps.target.clone(),
+                origin: CorrespondenceOrigin::InlineMapsClause,
                 span: branch.maps.span,
             });
         }
@@ -591,6 +722,7 @@ fn append_requirement_action_maps(action: &RequirementAction, items: &mut Vec<Re
             name: action.name.clone(),
             params,
             target: mapping.target.clone(),
+            origin: CorrespondenceOrigin::InlineMapsClause,
             span: mapping.span,
         });
     }
@@ -714,55 +846,6 @@ pub fn requirements_implements(
             span,
         });
     }
-    let explicit_actions = items
-        .iter()
-        .filter_map(|item| match item {
-            RefinementItem::Action { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    for action in &implementation.actions {
-        if explicit_actions.contains(&action.name) {
-            continue;
-        }
-        let params = action
-            .params
-            .iter()
-            .map(|param| RefinementParam {
-                name: param.name().to_owned(),
-                ty: None,
-            })
-            .collect::<Vec<_>>();
-        let target = abstraction
-            .actions
-            .iter()
-            .find(|candidate| candidate.name == action.name)
-            .map_or(ActionTarget::Stutter, |abstract_action| {
-                let args = abstract_action
-                    .params
-                    .iter()
-                    .enumerate()
-                    .map(|(index, param)| {
-                        let name = action
-                            .params
-                            .iter()
-                            .find(|candidate| candidate.name() == param.name())
-                            .map_or_else(
-                                || action.params[index].name().to_owned(),
-                                |candidate| candidate.name().to_owned(),
-                            );
-                        Expr::Var(name)
-                    })
-                    .collect();
-                ActionTarget::Action(abstract_action.name.clone(), args)
-            });
-        items.push(RefinementItem::Action {
-            name: action.name.clone(),
-            params,
-            target,
-            span: action.span,
-        });
-    }
     let refinement = build_refinement(
         SurfaceRefinement {
             name: format!("{}Implements{}", implementation.name, abstraction.name),
@@ -770,6 +853,7 @@ pub fn requirements_implements(
         },
         implementation,
         &abstraction,
+        Some(span),
     )?;
     Ok(Some(ImplementsContract {
         abstraction,

@@ -7,14 +7,14 @@ use crate::annotation_parse;
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Annotations, Binder,
-    BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, Expr,
-    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
-    MapsClause, MetaTag, Param, PreservationItem, ProcessCover, ProcessField, ProcessFields,
-    ProcessItem, ProcessTransition, QualifiedName, RefinementItem, RefinementParam,
-    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
-    RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
-    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
-    TimeItem, Token, TokenKind, TypeExpr, VerifyItem, lex,
+    BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute,
+    CorrespondenceOrigin, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
+    HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessCover,
+    ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName, RefinementItem,
+    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
+    RequirementBranch, RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness,
+    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
+    SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr, VerifyItem, lex,
 };
 
 fn join_span(start: Span, end: Span) -> Span {
@@ -241,7 +241,7 @@ impl Parser {
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
-            items.push(self.refinement_item()?);
+            items.push(self.refinement_item(CorrespondenceOrigin::RefinementFile)?);
         }
         Ok(SurfaceRefinement { name, items })
     }
@@ -500,7 +500,7 @@ impl Parser {
             if self.peek_ident("impl") || self.peek_ident("abs") {
                 return Err(self.error("impl and abs are not valid inside implements"));
             }
-            items.push(self.refinement_item()?);
+            items.push(self.refinement_item(CorrespondenceOrigin::ImplementsBlock)?);
         }
         Ok(RequirementsItem::Implements {
             name,
@@ -1232,7 +1232,10 @@ impl Parser {
             || self.peek_symbol("{")
     }
 
-    fn refinement_item(&mut self) -> Result<RefinementItem, ParseError> {
+    fn refinement_item(
+        &mut self,
+        origin: CorrespondenceOrigin,
+    ) -> Result<RefinementItem, ParseError> {
         if self.eat_ident("impl") {
             return Ok(RefinementItem::Impl(self.expect_ident()?));
         }
@@ -1297,6 +1300,7 @@ impl Parser {
                 name,
                 params,
                 target,
+                origin,
                 span,
             });
         }
@@ -1577,7 +1581,7 @@ impl Parser {
     fn next_is_type_delimiter(&self) -> bool {
         matches!(
             &self.peek_n(1).kind,
-            TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ">" | "}" | "->" | "=")
+            TokenKind::Symbol(symbol) if matches!(symbol.as_str(), "," | ")" | ">" | "}" | "->" | "=")
         )
     }
 

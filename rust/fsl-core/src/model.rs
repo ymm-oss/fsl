@@ -145,6 +145,10 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    pub(crate) fn resolve_surface_type(&self, ty: &TypeExpr) -> Result<TypeRef, ModelError> {
+        resolve_type(ty, &self.types, &self.consts)
+    }
+
     /// Enumerate a finite scalar domain.
     ///
     /// # Errors
@@ -849,33 +853,7 @@ impl ModelBuilder {
     }
 
     fn resolve_type(&self, ty: &TypeExpr) -> Result<TypeRef, ModelError> {
-        Ok(match ty {
-            TypeExpr::Int => TypeRef::Int,
-            TypeExpr::Bool => TypeRef::Bool,
-            TypeExpr::Name(name) => {
-                if !self.types.contains_key(name) {
-                    return Err(model_error(format!("unknown type '{name}'")));
-                }
-                TypeRef::Named(name.clone())
-            }
-            TypeExpr::Range(lo, hi) => TypeRef::Range(self.const_int(lo)?, self.const_int(hi)?),
-            TypeExpr::Map(key, value) => TypeRef::Map(
-                Box::new(self.resolve_type(key)?),
-                Box::new(self.resolve_type(value)?),
-            ),
-            TypeExpr::Relation(source, target) => TypeRef::Relation(
-                Box::new(self.resolve_type(source)?),
-                Box::new(self.resolve_type(target)?),
-            ),
-            TypeExpr::Set(inner) => TypeRef::Set(Box::new(self.resolve_type(inner)?)),
-            TypeExpr::Seq(inner, cap) => {
-                let cap = self.const_int(cap)?;
-                let cap = usize::try_from(cap)
-                    .map_err(|_| model_error("sequence capacity must be non-negative"))?;
-                TypeRef::Seq(Box::new(self.resolve_type(inner)?), cap)
-            }
-            TypeExpr::Option(inner) => TypeRef::Option(Box::new(self.resolve_type(inner)?)),
-        })
+        resolve_type(ty, &self.types, &self.consts)
     }
 
     fn action(
@@ -1097,6 +1075,46 @@ impl ModelBuilder {
             Value::Int(value) => Ok(value),
             _ => Err(model_error("constant expression must be an integer")),
         }
+    }
+}
+
+fn resolve_type(
+    ty: &TypeExpr,
+    types: &BTreeMap<String, TypeDef>,
+    consts: &BTreeMap<String, Value>,
+) -> Result<TypeRef, ModelError> {
+    Ok(match ty {
+        TypeExpr::Int => TypeRef::Int,
+        TypeExpr::Bool => TypeRef::Bool,
+        TypeExpr::Name(name) => {
+            if !types.contains_key(name) {
+                return Err(model_error(format!("unknown type '{name}'")));
+            }
+            TypeRef::Named(name.clone())
+        }
+        TypeExpr::Range(lo, hi) => TypeRef::Range(const_int(lo, consts)?, const_int(hi, consts)?),
+        TypeExpr::Map(key, value) => TypeRef::Map(
+            Box::new(resolve_type(key, types, consts)?),
+            Box::new(resolve_type(value, types, consts)?),
+        ),
+        TypeExpr::Relation(source, target) => TypeRef::Relation(
+            Box::new(resolve_type(source, types, consts)?),
+            Box::new(resolve_type(target, types, consts)?),
+        ),
+        TypeExpr::Set(inner) => TypeRef::Set(Box::new(resolve_type(inner, types, consts)?)),
+        TypeExpr::Seq(inner, cap) => {
+            let cap = usize::try_from(const_int(cap, consts)?)
+                .map_err(|_| model_error("sequence capacity must be non-negative"))?;
+            TypeRef::Seq(Box::new(resolve_type(inner, types, consts)?), cap)
+        }
+        TypeExpr::Option(inner) => TypeRef::Option(Box::new(resolve_type(inner, types, consts)?)),
+    })
+}
+
+fn const_int(expr: &Expr, consts: &BTreeMap<String, Value>) -> Result<i64, ModelError> {
+    match eval_const(expr, consts)? {
+        Value::Int(value) => Ok(value),
+        _ => Err(model_error("constant expression must be an integer")),
     }
 }
 
