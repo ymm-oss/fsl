@@ -4863,7 +4863,12 @@ fn model_skeleton(model: &KernelModel) -> Value {
                 None
             }
         }).collect::<Map<_,_>>(),
-        "stage_flows":model_stage_flows(model),"kpis":[]
+        "stage_flows":model_stage_flows(model),
+        "kpis":model.projections.iter().map(|projection| json!({
+            "name":projection.name,
+            "entity":projection.entity,
+            "stage":projection.stage,
+        })).collect::<Vec<_>>()
     })
 }
 
@@ -5358,16 +5363,12 @@ fn expression_state_roots(
                 collect_binder(binder, roots);
                 collect(body, roots);
             }
-            KernelExpr::Count { condition, .. } => collect(condition, roots),
-            KernelExpr::Sum {
-                body, condition, ..
-            } => {
-                collect(body, roots);
-                if let Some(condition) = condition {
-                    collect(condition, roots);
+            KernelExpr::Aggregate { binder, value, .. } => {
+                collect_binder(binder, roots);
+                if let Some(value) = value {
+                    collect(value, roots);
                 }
             }
-            KernelExpr::BinderNamed { binder, .. } => collect_binder(binder, roots),
             KernelExpr::Num(_) | KernelExpr::Bool(_) | KernelExpr::None => {}
         }
     }
@@ -5381,9 +5382,14 @@ fn expression_state_roots(
                     collect(expr, roots);
                 }
             }
-            fsl_core::KernelBinder::Range { lo, hi, .. } => {
+            fsl_core::KernelBinder::Range {
+                lo, hi, where_expr, ..
+            } => {
                 collect(lo, roots);
                 collect(hi, roots);
+                if let Some(expr) = where_expr {
+                    collect(expr, roots);
+                }
             }
             fsl_core::KernelBinder::Collection {
                 collection,
@@ -6081,9 +6087,7 @@ fn expression_mutant_count(
         KernelExpr::Bool(_)
         | KernelExpr::None
         | KernelExpr::Quantified { .. }
-        | KernelExpr::Count { .. }
-        | KernelExpr::Sum { .. }
-        | KernelExpr::BinderNamed { .. } => 0,
+        | KernelExpr::Aggregate { .. } => 0,
     }
 }
 

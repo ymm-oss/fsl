@@ -490,13 +490,16 @@ fn compute_binder_values(
             let ty = TypeRef::Named(super::qualified_type(type_name)?);
             Ok(Some(model.domain_values(&ty)?))
         }
-        Binder::Range { lo, hi, .. } => {
-            match (const_int_bound(lo, model), const_int_bound(hi, model)) {
-                (Some(lo), Some(hi)) => Ok(Some((lo..=hi).map(Value::Int).collect())),
-                _ => Ok(None),
-            }
-        }
-        Binder::Typed { .. } | Binder::Collection { .. } => Ok(None),
+        Binder::Range {
+            lo,
+            hi,
+            where_expr: None,
+            ..
+        } => match (const_int_bound(lo, model), const_int_bound(hi, model)) {
+            (Some(lo), Some(hi)) => Ok(Some((lo..=hi).map(Value::Int).collect())),
+            _ => Ok(None),
+        },
+        Binder::Typed { .. } | Binder::Range { .. } | Binder::Collection { .. } => Ok(None),
     }
 }
 
@@ -614,10 +617,12 @@ fn walk_init(
                     }
                     Binder::Typed { .. } => {}
                 }
-                if let Binder::Typed { where_expr, .. } | Binder::Collection { where_expr, .. } =
-                    binder
-                    && let Some(where_expr) = where_expr
-                {
+                let where_expr = match binder {
+                    Binder::Typed { where_expr, .. }
+                    | Binder::Range { where_expr, .. }
+                    | Binder::Collection { where_expr, .. } => where_expr,
+                };
+                if let Some(where_expr) = where_expr {
                     check_init_expr(where_expr, &definitely_assigned, model)?;
                 }
                 let binder_values = compute_binder_values(binder, model)?;
@@ -761,15 +766,10 @@ fn collect_state_references(
             collect_binder_references(binder, state_names, output);
             collect_state_references(body, state_names, output);
         }
-        Expr::Count { condition, .. } => {
-            collect_state_references(condition, state_names, output);
-        }
-        Expr::Sum {
-            body, condition, ..
-        } => {
-            collect_state_references(body, state_names, output);
-            if let Some(condition) = condition {
-                collect_state_references(condition, state_names, output);
+        Expr::Aggregate { binder, value, .. } => {
+            collect_binder_references(binder, state_names, output);
+            if let Some(value) = value {
+                collect_state_references(value, state_names, output);
             }
         }
         Expr::TernaryNamed {
@@ -781,9 +781,6 @@ fn collect_state_references(
             collect_state_references(first, state_names, output);
             collect_state_references(second, state_names, output);
             collect_state_references(third, state_names, output);
-        }
-        Expr::BinderNamed { binder, .. } => {
-            collect_binder_references(binder, state_names, output);
         }
     }
 }
@@ -799,9 +796,14 @@ fn collect_binder_references(
                 collect_state_references(where_expr, state_names, output);
             }
         }
-        Binder::Range { lo, hi, .. } => {
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => {
             collect_state_references(lo, state_names, output);
             collect_state_references(hi, state_names, output);
+            if let Some(where_expr) = where_expr {
+                collect_state_references(where_expr, state_names, output);
+            }
         }
         Binder::Collection {
             collection,

@@ -582,14 +582,20 @@ variable capture instead of inventing internal binder names. See
   branch extends to the enclosing delimiter; use parentheses when a following
   operator should apply to the whole conditional. Concrete evaluation executes
   only the selected branch, while name and type checking always visits both.</li>
-<li>Quantification (bounded): <code>forall x: T { expr }</code> / <code>exists x: T { expr }</code> (can be filtered with <code>where expr</code>),
-  the v0 form <code>forall i in lo..hi: expr</code> is also allowed. Expression quantifiers
-  can also range over a Set or Seq value: <code>forall x in active { ... }</code> /
-  <code>exists x in queue { ... }</code>; for Seq this ranges over the live prefix values.</li>
-<li>Aggregation: <code>count(x: T where expr)</code>, <code>sum(x: T of expr [where expr])</code></li>
-<li>Cardinality predicates: <code>unique(x: T where expr)</code> / <code>exactlyOne(x: T where expr)</code>;
-  <code>x in set_or_seq [where expr]</code> is also allowed. <code>unique</code> means at most one
-  matching binding, while <code>exactlyOne</code> means exactly one.</li>
+<li>Finite binders: <code>x: T</code>, <code>x in lo..hi</code>, or <code>x in set_or_seq</code>, each optionally
+  followed by <code>where predicate</code>. The predicate is <code>Bool</code> and is scoped after
+  <code>x</code> is bound. Maps and unbounded collections are not binder domains.</li>
+<li>Quantification (bounded): the canonical forms are <code>forall binder { expr }</code>
+  and <code>exists binder { expr }</code>. The 2.x legacy colon/no-braces spelling such as
+  <code>forall i in lo..hi: expr</code> remains accepted but is non-canonical. A Seq binder
+  visits its live prefix in position order and preserves duplicate values.</li>
+<li>Aggregation: <code>count(binder)</code> and <code>sum(binder of value)</code>. Examples include
+  <code>count(x: T where p)</code>, <code>count(x in queue where p)</code>,
+  <code>sum(x in queue of x.amount where p)</code>, and range equivalents. Empty domains
+  produce <code>0</code>; Seq duplicates contribute once per live position, while Set
+  membership contributes once per distinct member.</li>
+<li>Cardinality predicates: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>. <code>unique</code>
+  means at most one matching binding, while <code>exactlyOne</code> means exactly one.</li>
 <li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
   Equality is structural: <code>none</code> equals only <code>none</code>, while two <code>some</code> values are
   equal exactly when their payloads are equal. <code>x is some(v)</code> remains the form

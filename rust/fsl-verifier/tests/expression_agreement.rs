@@ -116,3 +116,66 @@ spec NestedOptionEquality {
     assert!(explicit.violation.is_none(), "{explicit:?}");
     assert!(explicit.closure, "{explicit:?}");
 }
+
+#[test]
+fn binder_aggregates_agree_for_ranges_sets_and_duplicate_sequences() {
+    let source = r"
+spec BinderAggregateAgreement {
+  type Item = 0..2
+  state {
+    selected: Set<Item>,
+    queue: Seq<Item, 4>,
+    empty: Seq<Item, 4>
+  }
+  init {
+    selected = Set { 0, 2 }
+    queue = Seq { 1, 1, 2 }
+    empty = Seq {}
+  }
+  action stay() { selected = selected }
+  invariant AggregateValues {
+    count(item in selected) == 2 and
+    count(item in selected where item > 0) == 1 and
+    sum(item in selected of item) == 2 and
+    count(item in queue) == 3 and
+    count(item in queue where item == 1) == 2 and
+    sum(item in queue of item) == 4 and
+    sum(item in queue of item where item > 1) == 2 and
+    count(item in empty) == 0 and
+    sum(item in empty of item) == 0 and
+    count(item in 0..2 where item > 0) == 2 and
+    sum(item in 0..2 of item where item > 0) == 3 and
+    count(item in queue where count(other in queue where other == item) >= 1) == 3 and
+    count(item in queue where count(item in selected where item == 0) == 1) == 3 and
+    unique(item in queue where item == 2) and
+    exactlyOne(item in selected where item == 0)
+  }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let property = model
+        .invariants
+        .iter()
+        .find(|property| property.name == "AggregateValues")
+        .expect("aggregate invariant");
+    let concrete = fsl_runtime::eval(
+        &property.expr,
+        &fsl_runtime::Monitor::new(model.clone())
+            .expect("create monitor")
+            .state,
+        &mut BTreeMap::new(),
+        &model,
+        None,
+    )
+    .expect("evaluate aggregate invariant");
+    assert_eq!(concrete, fsl_core::FslValue::Bool(true));
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let symbolic = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect("verify symbolically");
+    assert!(symbolic.violation.is_none(), "{symbolic:?}");
+    let explicit = fsl_runtime::verify_explicit(model, 2, 10).expect("verify explicitly");
+    assert!(explicit.violation.is_none(), "{explicit:?}");
+    assert!(explicit.closure, "{explicit:?}");
+}

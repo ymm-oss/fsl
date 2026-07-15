@@ -1997,10 +1997,16 @@ impl Parser {
         let first = self.expression(0)?;
         if self.eat_symbol("..") {
             let hi = self.expression(0)?;
+            let where_expr = if self.eat_ident("where") {
+                Some(Box::new(self.expression(0)?))
+            } else {
+                None
+            };
             return Ok(Binder::Range {
                 name,
                 lo: Box::new(first),
                 hi: Box::new(hi),
+                where_expr,
             });
         }
         let where_expr = if self.eat_ident("where") {

@@ -380,6 +380,64 @@ fn public_helper_nodes_retain_their_own_spans() {
 }
 
 #[test]
+fn binder_source_forms_retain_legacy_colons_and_render_canonical_aggregates() {
+    let source = r"domain BinderForms {
+  type Id = 0..2
+  aggregate A {
+    state { values: Set<Id> }
+    invariant canonical { forall item: Id { item >= 0 } }
+    invariant legacy { forall item: Id: item >= 0 }
+    invariant aggregates { count(item in values where item > 0) >= 0 and sum(item in values of item where item > 0) >= 0 }
+  }
+}";
+    let domain = parse_domain(source).expect("parse binder forms");
+    let SyntaxExprKind::Quantified {
+        braced,
+        legacy_colon,
+        ..
+    } = &domain.aggregates[0].invariants[0].expr.kind
+    else {
+        panic!("expected canonical quantifier");
+    };
+    assert!(*braced);
+    assert!(!*legacy_colon);
+
+    let legacy = &domain.aggregates[0].invariants[1].expr;
+    let SyntaxExprKind::Quantified {
+        braced,
+        legacy_colon,
+        ..
+    } = &legacy.kind
+    else {
+        panic!("expected legacy quantifier");
+    };
+    assert!(!*braced);
+    assert!(*legacy_colon);
+    assert_eq!(legacy.render_source(), "forall item: Id { item >= 0 }");
+    let reparsed = parse_domain(&format!(
+        "domain RoundTrip {{ type Id = 0..2 aggregate A {{ invariant I {{ {} }} }} }}",
+        legacy.render_source()
+    ))
+    .expect("parse canonical rendering");
+    assert_eq!(
+        reparsed.aggregates[0].invariants[0].expr.render_source(),
+        legacy.render_source()
+    );
+
+    assert_eq!(
+        domain.aggregates[0].invariants[2].expr.render_source(),
+        "count(item in values where item > 0) >= 0 and sum(item in values of item where item > 0) >= 0"
+    );
+}
+
+#[test]
+fn sum_rejects_two_where_filters_instead_of_overwriting_one() {
+    let error = parse_expr("sum(item in values where item > 0 of item where item < 2)")
+        .expect_err("duplicate sum filters must fail");
+    assert!(error.message.contains("two 'where' filters"));
+}
+
+#[test]
 fn canonical_enum_and_legacy_union_retain_source_form_spans_and_comments() {
     let source = r"domain Types {
   enum Status {

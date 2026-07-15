@@ -168,6 +168,7 @@ fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations)
         },
         origins: crate::OriginRegistry::default(),
         annotations: fsl_syntax::AnnotationRegistry::default(),
+        projections: Vec::new(),
     };
     kernel.annotations.extend(crate::SPEC_TARGET, annotations);
     kernel
@@ -721,38 +722,18 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
                 body: Box::new(rewrite_expr(*body, component, &nested)),
             }
         }
-        Expr::Count {
-            name,
-            mut type_name,
-            condition,
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
         } => {
-            if type_name.namespace.is_none() && component.names.types.contains(&type_name.name) {
-                type_name.name = prefix(&component.alias, &type_name.name);
-            }
+            let binder = rewrite_binder(binder, component, bound);
             let mut nested = bound.clone();
-            nested.insert(name.clone());
-            Expr::Count {
-                name,
-                type_name,
-                condition: Box::new(rewrite_expr(*condition, component, &nested)),
-            }
-        }
-        Expr::Sum {
-            name,
-            mut type_name,
-            body,
-            condition,
-        } => {
-            if type_name.namespace.is_none() && component.names.types.contains(&type_name.name) {
-                type_name.name = prefix(&component.alias, &type_name.name);
-            }
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
-            Expr::Sum {
-                name,
-                type_name,
-                body: Box::new(rewrite_expr(*body, component, &nested)),
-                condition: condition.map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+            nested.insert(binder_name(&binder).to_owned());
+            Expr::Aggregate {
+                kind,
+                binder,
+                value: value.map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
             }
         }
         Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
@@ -775,10 +756,6 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
             first: Box::new(rewrite_expr(*first, component, bound)),
             second: Box::new(rewrite_expr(*second, component, bound)),
             third: Box::new(rewrite_expr(*third, component, bound)),
-        },
-        Expr::BinderNamed { name, binder } => Expr::BinderNamed {
-            name,
-            binder: rewrite_binder(binder, component, bound),
         },
         other => other,
     }
@@ -803,11 +780,22 @@ fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>
                     .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
             }
         }
-        Binder::Range { name, lo, hi } => Binder::Range {
+        Binder::Range {
             name,
-            lo: Box::new(rewrite_expr(*lo, component, bound)),
-            hi: Box::new(rewrite_expr(*hi, component, bound)),
-        },
+            lo,
+            hi,
+            where_expr,
+        } => {
+            let mut nested = bound.clone();
+            nested.insert(name.clone());
+            Binder::Range {
+                name,
+                lo: Box::new(rewrite_expr(*lo, component, bound)),
+                hi: Box::new(rewrite_expr(*hi, component, bound)),
+                where_expr: where_expr
+                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+            }
+        }
         Binder::Collection {
             name,
             collection,
@@ -1078,10 +1066,18 @@ fn resolve_alias_binder(
                 .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
                 .transpose()?,
         },
-        Binder::Range { name, lo, hi } => Binder::Range {
+        Binder::Range {
+            name,
+            lo,
+            hi,
+            where_expr,
+        } => Binder::Range {
             name,
             lo: Box::new(resolve_alias_expr(*lo, components)?),
             hi: Box::new(resolve_alias_expr(*hi, components)?),
+            where_expr: where_expr
+                .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
+                .transpose()?,
         },
         Binder::Collection {
             name,
@@ -1189,25 +1185,14 @@ fn resolve_alias_expr(
             binder: resolve_alias_binder(binder, components)?,
             body: Box::new(resolve_alias_expr(*body, components)?),
         },
-        Expr::Count {
-            name,
-            type_name,
-            condition,
-        } => Expr::Count {
-            name,
-            type_name: resolve_alias_qualified_name(type_name, components)?,
-            condition: Box::new(resolve_alias_expr(*condition, components)?),
-        },
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => Expr::Sum {
-            name,
-            type_name: resolve_alias_qualified_name(type_name, components)?,
-            body: Box::new(resolve_alias_expr(*body, components)?),
-            condition: condition
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
+        } => Expr::Aggregate {
+            kind,
+            binder: resolve_alias_binder(binder, components)?,
+            value: value
                 .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
                 .transpose()?,
         },
@@ -1231,10 +1216,6 @@ fn resolve_alias_expr(
             first: Box::new(resolve_alias_expr(*first, components)?),
             second: Box::new(resolve_alias_expr(*second, components)?),
             third: Box::new(resolve_alias_expr(*third, components)?),
-        },
-        Expr::BinderNamed { name, binder } => Expr::BinderNamed {
-            name,
-            binder: resolve_alias_binder(binder, components)?,
         },
         other => other,
     })

@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use fsl_core::{
-    FslValue, KernelBinder as Binder, KernelExpr as Expr, KernelModel, ParamDef, Pattern,
+    FslValue, KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
+    KernelModel, ParamDef, Pattern,
 };
 use serde_json::{Value, json};
 
@@ -512,19 +513,19 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
     }
 
     fn binder_text(model: Option<&KernelModel>, binder: &Binder) -> String {
+        let mut text = binder_base_text(model, binder);
+        if let Some(condition) = binder_filter(binder) {
+            let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
+        }
+        text
+    }
+
+    fn binder_base_text(model: Option<&KernelModel>, binder: &Binder) -> String {
         match binder {
             Binder::Typed {
-                name,
-                type_name,
-                where_expr,
-            } => {
-                let mut text = format!("{name}: {}", display_name(&type_name.name));
-                if let Some(condition) = where_expr {
-                    let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
-                }
-                text
-            }
-            Binder::Range { name, lo, hi } => {
+                name, type_name, ..
+            } => format!("{name}: {}", display_name(&type_name.name)),
+            Binder::Range { name, lo, hi, .. } => {
                 format!(
                     "{name} in {}..{}",
                     expr_text_with_origins(model, lo),
@@ -532,16 +533,16 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
                 )
             }
             Binder::Collection {
-                name,
-                collection,
-                where_expr,
-            } => {
-                let mut text = format!("{name} in {}", expr_text_with_origins(model, collection));
-                if let Some(condition) = where_expr {
-                    let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
-                }
-                text
-            }
+                name, collection, ..
+            } => format!("{name} in {}", expr_text_with_origins(model, collection)),
+        }
+    }
+
+    fn binder_filter(binder: &Binder) -> Option<&Expr> {
+        match binder {
+            Binder::Typed { where_expr, .. }
+            | Binder::Range { where_expr, .. }
+            | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
         }
     }
 
@@ -672,32 +673,27 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
             binder,
             body,
         } => format!(
-            "{quantifier} {}: {}",
+            "{quantifier} {} {{ {} }}",
             binder_text(model, binder),
             expr_text_with_origins(model, body)
         ),
-        Expr::Count {
-            name,
-            type_name,
-            condition,
-        } => format!(
-            "count({name}: {} where {})",
-            display_name(&type_name.name),
-            expr_text_with_origins(model, condition)
-        ),
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => format!(
-            "sum({name}: {} of {}{})",
-            display_name(&type_name.name),
-            expr_text_with_origins(model, body),
-            condition.as_ref().map_or_else(String::new, |value| {
-                format!(" where {}", expr_text_with_origins(model, value))
-            })
-        ),
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
+        } => match kind {
+            AggregateKind::Count => format!("count({})", binder_text(model, binder)),
+            AggregateKind::Sum => format!(
+                "sum({} of {}{})",
+                binder_base_text(model, binder),
+                expr_text_with_origins(model, value.as_deref().expect("sum has a value")),
+                binder_filter(binder).map_or_else(String::new, |filter| {
+                    format!(" where {}", expr_text_with_origins(model, filter))
+                })
+            ),
+            AggregateKind::Unique => format!("unique({})", binder_text(model, binder)),
+            AggregateKind::ExactlyOne => format!("exactlyOne({})", binder_text(model, binder)),
+        },
         Expr::Stage {
             process, entity, ..
         } => process.as_ref().map_or_else(
@@ -735,8 +731,5 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
             expr_text_with_origins(model, second),
             expr_text_with_origins(model, third)
         ),
-        Expr::BinderNamed { name, binder } => {
-            format!("{name}({})", binder_text(model, binder))
-        }
     }
 }

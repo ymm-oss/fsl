@@ -216,7 +216,7 @@ fn requirements_stage_is_readable_in_explain_and_violation_evidence() {
     assert_eq!(status, 0, "{explained}");
     assert_eq!(
         explained["skeleton"]["properties"][0]["body_text"],
-        "forall c: Claim: stage(c) == Draft"
+        "forall c: Claim { stage(c) == Draft }"
     );
     assert_eq!(
         explained["skeleton"]["properties"][0]["origin"]["lowering_steps"][0]["detail"],
@@ -235,7 +235,7 @@ fn requirements_stage_is_readable_in_explain_and_violation_evidence() {
     assert_eq!(status, 1, "{violated}");
     assert_eq!(
         violated["blame"]["conjuncts"][0]["text"],
-        "forall c: Claim: stage(c) == Draft"
+        "forall c: Claim { stage(c) == Draft }"
     );
 }
 
@@ -243,7 +243,7 @@ fn requirements_stage_is_readable_in_explain_and_violation_evidence() {
 fn qualified_requirements_stage_keeps_its_process_path_in_evidence() {
     let fixture = "rust/fslc/tests/fixtures/requirements_stage_qualified.fsl";
     let expected =
-        "forall c: Claim: claims.Claim.stage(c) == Draft and legacy.Claim.stage(c) == Imported";
+        "forall c: Claim { claims.Claim.stage(c) == Draft and legacy.Claim.stage(c) == Imported }";
     let (explained, status) = run_cli(&["explain", fixture, "--depth", "1"]);
 
     assert_eq!(status, 0, "{explained}");
