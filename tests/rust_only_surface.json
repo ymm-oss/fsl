@@ -294,6 +294,56 @@
     },
     {
       "path": [
+        "fmt"
+      ],
+      "parent_index": 22,
+      "prog": "fslc fmt",
+      "help_sha256": "c654a55723b639a9249c635de5185066a1f1efd9804884de095a96eeefa22b0b",
+      "actions": [
+        {
+          "dest": "help",
+          "required": false,
+          "flags": [
+            "-h",
+            "--help"
+          ],
+          "nargs": 0,
+          "action": "store"
+        },
+        {
+          "dest": "path",
+          "required": true,
+          "positional": true,
+          "nargs": "+",
+          "action": "store"
+        },
+        {
+          "dest": "check",
+          "required": false,
+          "flags": [
+            "--check"
+          ],
+          "nargs": 0,
+          "action": "store_true"
+        },
+        {
+          "dest": "edition",
+          "required": false,
+          "flags": [
+            "--edition"
+          ],
+          "choices": [
+            "current",
+            "next"
+          ],
+          "default": "current",
+          "action": "store"
+        }
+      ],
+      "commands": []
+    },
+    {
+      "path": [
         "kernel"
       ],
       "parent_index": 21,
@@ -420,7 +470,7 @@
     {
       "path": [],
       "python_sha256": "731a3fd77cc65de2bd63dbf5fe84d72edd9361089f618aa0998fd294bd6f4392",
-      "rust_sha256": "cc7761e0e5839fa09423b77dba131e92100dfdca3b04c9e1c1316aff5b469949"
+      "rust_sha256": "0f31a4e2140917ea26fbc2505158bb2bffdcb48b3d52935b0ef87c1d6a88d899"
     },
     {
       "path": [

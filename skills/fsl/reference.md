@@ -781,6 +781,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 
 ```
 fslc check <f>                                  # syntax / names / types only
+fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
+fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]

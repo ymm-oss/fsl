@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 use std::future::Future;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
@@ -246,6 +247,19 @@ fn main() {
     if print_cli_metadata() {
         return;
     }
+    if let Some((output, status)) = fmt_command() {
+        match output {
+            FmtCliOutput::Source(source) => print!("{source}"),
+            FmtCliOutput::Json(value) => println!(
+                "{}",
+                serde_json::to_string_pretty(&value).expect("serialize fmt output")
+            ),
+        }
+        if status != 0 {
+            std::process::exit(status);
+        }
+        return;
+    }
     let (output, reported_status) = match command() {
         Ok(result) => result,
         Err(error) => (error_output("usage", &error), 2),
@@ -258,6 +272,134 @@ fn main() {
     if status != 0 {
         std::process::exit(status);
     }
+}
+
+enum FmtCliOutput {
+    Source(String),
+    Json(Value),
+}
+
+fn fmt_command() -> Option<(FmtCliOutput, i32)> {
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() != Some("fmt") {
+        return None;
+    }
+    Some(match parse_fmt_options(args) {
+        Ok(options) => run_fmt(&options),
+        Err(error) => (FmtCliOutput::Json(error_output("usage", &error)), 2),
+    })
+}
+
+struct FmtOptions {
+    paths: Vec<PathBuf>,
+    check: bool,
+    edition: fsl_syntax::FormatEdition,
+}
+
+fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, String> {
+    let mut args = args.peekable();
+    let mut paths = Vec::new();
+    let mut check = false;
+    let mut edition = fsl_syntax::FormatEdition::Current;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--check" => check = true,
+            "--edition" => {
+                edition = fsl_syntax::FormatEdition::parse(&required_option_value(
+                    &mut args,
+                    "--edition",
+                )?)?;
+            }
+            option if option.starts_with('-') && option != "-" => {
+                return Err(format!("unknown fmt option '{option}'"));
+            }
+            path => paths.push(PathBuf::from(path)),
+        }
+    }
+    if paths.is_empty() {
+        return Err("usage: fslc fmt FILE [--check] [--edition current|next]".to_owned());
+    }
+    if !check && paths.len() != 1 {
+        return Err("fmt accepts multiple paths only with --check".to_owned());
+    }
+    if paths.iter().filter(|path| path.as_os_str() == "-").count() > 1
+        || paths.len() > 1 && paths.iter().any(|path| path.as_os_str() == "-")
+    {
+        return Err("stdin '-' cannot be repeated or mixed with file paths".to_owned());
+    }
+    Ok(FmtOptions {
+        paths,
+        check,
+        edition,
+    })
+}
+
+fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
+    let mut files = Vec::new();
+    let mut any_changed = false;
+    for path in &options.paths {
+        let source = match read_fmt_source(path) {
+            Ok(source) => source,
+            Err(error) => return (FmtCliOutput::Json(error_output("io", &error)), 2),
+        };
+        let formatted = match fsl_syntax::format_source(&source, options.edition) {
+            Ok(formatted) => formatted,
+            Err(fsl_syntax::FormatError::Parse(error)) => {
+                return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
+            }
+            Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
+        };
+        if let Err(error) = validate_fmt_semantics(&source, path) {
+            return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
+        }
+        if let Err(error) = validate_fmt_semantics(&formatted, path) {
+            return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
+        }
+        let changed = source != formatted;
+        any_changed |= changed;
+        if options.check {
+            files.push(json!({"path":path.to_string_lossy(),"changed":changed}));
+        } else {
+            return (FmtCliOutput::Source(formatted), 0);
+        }
+    }
+    (
+        FmtCliOutput::Json(json!({
+            "fsl":"1.0",
+            "result":"format_check",
+            "edition":options.edition.as_str(),
+            "changed":any_changed,
+            "files":files
+        })),
+        i32::from(any_changed),
+    )
+}
+
+fn read_fmt_source(path: &Path) -> Result<String, String> {
+    if path.as_os_str() == "-" {
+        let mut source = String::new();
+        std::io::stdin()
+            .read_to_string(&mut source)
+            .map_err(|error| error.to_string())?;
+        Ok(source)
+    } else {
+        std::fs::read_to_string(path).map_err(|error| error.to_string())
+    }
+}
+
+fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
+    let dialect = fsl_syntax::dialect_keyword(source).map_err(|error| error.to_string())?;
+    if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
+        return Ok(());
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let source_file = path.to_string_lossy();
+    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, source_file)
+        .map_err(|error| error.to_string())?;
+    fsl_core::build_model(kernel)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn print_cli_metadata() -> bool {
@@ -12310,6 +12452,20 @@ fn error_output(kind: &str, message: &str) -> Value {
 
 fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {
     fslc_rust::frontend_output::render_surface_parse_error(envelope(), error)
+}
+
+fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
+    let span = error.span();
+    let mut output = error_output("format", &error.to_string());
+    output
+        .as_object_mut()
+        .expect("format error envelope")
+        .extend([
+            ("code".to_owned(), json!("FSL-FMT-UNSAFE")),
+            ("loc".to_owned(), span.python_loc()),
+            ("span".to_owned(), json!(span)),
+        ]);
+    output
 }
 
 fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
