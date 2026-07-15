@@ -114,8 +114,11 @@ fn parse_verify_options(
             }
             "--engine" => {
                 options.engine = required_option_value(args, "--engine")?;
-                if !matches!(options.engine.as_str(), "bmc" | "induction" | "explicit") {
-                    return Err("--engine must be bmc, induction, or explicit".to_owned());
+                if !matches!(
+                    options.engine.as_str(),
+                    "bmc" | "induction" | "explicit" | "auto"
+                ) {
+                    return Err("--engine must be bmc, induction, explicit, or auto".to_owned());
                 }
             }
             "--explicit-budget" => {

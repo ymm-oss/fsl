@@ -5,7 +5,8 @@ This document is an implementation-level specification of `--engine explicit`
 concrete state space of a spec. Because every FSL domain is bounded and every
 quantifier is finite-domain, breadth-first exploration of concrete states is
 *equivalent* to BMC up to depth `k`, and reaching closure (no new states) is a
-*complete proof* of all invariants — no induction, no lemmas.
+*complete proof* of all invariants — no induction, no lemmas. §6a specifies
+the composite `--engine auto` (issue #226) built on top of it.
 
 The engine is **Rust-native only** (`rust/`), like `fslc approval`: the frozen
 Python reference implementation is intentionally unchanged. The Python tree
@@ -26,8 +27,6 @@ oracle `tests/oracle.py` are the specification this engine productizes.
   - Fail-closed truncation: exceeding the state budget yields an explicit
     `unknown_budget` verdict, never a silent `verified`.
 - **Non-goals (this design)**:
-  - `--engine auto` (explicit first, fall back to symbolic on blow-up) — a
-    follow-up once explicit is trusted.
   - Symbolic-side scaling work (symbolic action parameters, cone-of-influence
     slicing) — the explicit engine does not replace the Z3 path; it owns the
     small-state-space regime, the symbolic engines own the rest.
@@ -158,6 +157,61 @@ resolved before the kernel AST and remain accepted.
 - **Envelope / exit codes**: `unknown_budget` joins the exit-1 verdict list in
   `exit_code()`; everything else reuses existing vocabulary.
 
+## 6a. Auto engine dispatch (`--engine auto`, issue #226)
+
+`fslc verify <spec> --engine auto [--explicit-budget N]` composes explicit and
+BMC into one opt-in engine choice: it tries explicit first (faster, and able
+to prove `closure`) and falls back transparently to BMC exactly when explicit
+cannot decide the spec on its own. `auto` is accepted only by the `verify`
+subcommand's own `--engine` parser — no other subcommand's `bmc`/`induction`-only
+`--engine` option gains it, the same scope boundary `explicit` itself observed
+when it was introduced.
+
+**Selection rule**: before spending any exploration budget, a static
+pre-check (`fsl_runtime::explicit_unsupported_reason`, plus an
+`fslc`-side check that the model has at least one action) decides whether
+explicit can even attempt this spec — the same fail-closed gates §5
+describes (unsupported `leadsTo`, nondeterministic/partial init, non-constant
+`init forall` domains), checked without running BFS. If the gate finds a
+reason, dispatch goes straight to BMC. Otherwise explicit actually runs; if it
+returns `unknown_budget`, dispatch falls back to BMC after that attempt (the
+explicit result is still cached, so a repeat `auto` run never re-explores).
+Everywhere else — a real BFS-time error, a violation, a bounded `verified`, or
+a `proved` closure — explicit's own verdict is final; auto never second-guesses
+a verdict explicit actually reached (fail-loud, not fail-quiet).
+
+**Output contract**: whichever engine decided reports through its own
+existing envelope unchanged. A non-fallback result already carries
+`engine: "explicit"` exactly as a plain `--engine explicit` run would. A
+fallback result additionally carries two fields a plain `--engine bmc` run
+never has:
+
+```json
+"engine": "bmc",
+"engine_fallback": {"from": "explicit", "reason": "<why explicit could not decide>", "kind": "unsupported" | "budget"}
+```
+
+`kind` lets a caller distinguish a permanent gate (`unsupported` — this spec
+shape will never be explicit-decidable) from a transient one (`budget` — a
+larger `--explicit-budget` might let explicit decide it next time) without
+parsing `reason`'s prose.
+
+**Cache contract**: `auto` is never itself part of a cache key. Internally,
+the dispatcher computes and looks up the explicit cache key first (as if
+`--engine explicit` had been passed with all other options unchanged); on a
+non-`unknown_budget` hit it returns that entry directly. On a miss (or an
+`unknown_budget` hit), it falls back to the bmc cache key (as if `--engine
+bmc` had been passed). Each sub-attempt stores under its own real key, so an
+`auto` run and a plain run of whichever engine actually decides always share
+one cache entry — and a plain `--engine bmc` run that later hits a
+fallback-populated entry never sees `engine`/`engine_fallback` on it, because
+those two fields are stamped onto the *returned* value after the cache
+read/write, never persisted into the cached entry itself.
+
+**Non-goals**: no default-engine change (still Rust-only, opt-in); no
+`induction` participation in `auto`; no parallel/portfolio execution trying
+both engines at once — a possible future extension, not this one.
+
 ## 7. Soundness argument and gates
 
 The engine's claims reduce to: (a) the concrete step semantics are correct,
@@ -201,8 +255,9 @@ the budget cap — that regime belongs to the symbolic engines.
 
 ## 10. Future work
 
-- `--engine auto`: run explicit first; on `unknown_budget`, fall back to the
-  symbolic pipeline transparently.
+- `--engine auto` is implemented (issue #226; see §6a). A parallel/portfolio
+  variant that races explicit and BMC instead of trying them in sequence
+  remains a follow-up.
 - Parallel exploration (sharded frontier) if real specs approach the budget.
 - WASM exposure of the explicit engine (Z3-free verification in the browser).
 - Definitive-verdict upgrades: under closure, report unreachable `reachable`

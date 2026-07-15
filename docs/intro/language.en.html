@@ -741,6 +741,9 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
+               [--engine auto]                   # explicit first, transparent fallback to bmc when
+                                                 #   explicit can't decide (leadsTo, nondeterministic init,
+                                                 #   unknown_budget); &quot;engine&quot;/&quot;engine_fallback&quot; in the result
                [--lemma &quot;&lt;expr&gt;&quot;]...             # independently prove auxiliary candidates,
                                                  # then retry CTIs with proved lemmas only
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
@@ -948,6 +951,17 @@ result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc 
 </tr>
 </tbody>
 </table>
+<p><code>--engine auto</code> composes explicit and bmc: it tries explicit first (faster,
+and can reach <code>proved</code>+<code>closure:true</code>) and falls back transparently to bmc
+when explicit cannot decide the spec on its own — an unsupported feature
+(<code>leadsTo</code>, nondeterministic/partial init) or <code>unknown_budget</code>. Every result
+carries <code>engine: "explicit"</code> or <code>engine: "bmc"</code> naming whichever engine
+actually decided it; a fallback additionally carries
+<code>engine_fallback: {from: "explicit", reason: "...", kind: "unsupported"|"budget"}</code>
+so a caller can tell a bounded bmc verdict from an unbounded explicit one
+without re-deriving it. <code>auto</code> never changes the default engine (still
+<code>bmc</code>) and is Rust-only, like <code>explicit</code> itself. See
+<code>docs/DESIGN-explicit-engine.md</code> §6a.</p>
 <p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>.</p>
 <p>A <code>violated</code> result with <code>violation_kind</code> <code>invariant</code>/<code>type_bound</code> additionally
 carries <strong>blame assignment</strong> (issue #170), localizing the counterexample

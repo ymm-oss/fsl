@@ -776,8 +776,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 fslc check <f>                                  # syntax / names / types only
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit] [--k N=1]
-               [--explicit-budget N=1000000]        # explicit only; max visited states
+fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
+               [--explicit-budget N=1000000]        # explicit/auto; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property in isolation
                                                     #   (invariant / trans / leadsTo / reachable)
@@ -881,6 +881,18 @@ assigned), and `init forall` binder domains that reference state variables
 (range bounds and collections must be compile-time constants) — use
 `--engine bmc` for those specs. `--from-state`, `--lemma`, and `--k` do not
 apply to this engine.
+
+`--engine auto` tries explicit first and falls back to bmc transparently
+when explicit can't decide the spec (a fail-closed rejection above, or
+`unknown_budget`); everywhere else explicit's own verdict is final. Every
+result carries `engine: "explicit"` or `engine: "bmc"` naming whichever
+engine decided; a fallback additionally carries `engine_fallback: {from:
+"explicit", reason: "...", kind: "unsupported"|"budget"}` — `kind`
+distinguishes a permanent gate from one a larger `--explicit-budget` might
+clear. `auto` shares its cache entries with plain `--engine explicit`/`bmc`
+runs of the same spec (the cache key is always the engine that actually
+decided, never `auto` itself), does not change the default engine, and is
+Rust-only.
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
