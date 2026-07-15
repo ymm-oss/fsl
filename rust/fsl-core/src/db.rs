@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_syntax::{DbColumnRef, DbEnvironmentArtifact, DbSystem};
+use fsl_syntax::{Annotations, DbColumnRef, DbEnvironmentArtifact, DbSystem};
 
 fn safe(name: &str) -> String {
     let mut output = name
@@ -77,6 +77,18 @@ fn quote_meta(id: &str, text: &str) -> String {
     )
 }
 
+/// Render a declaration's typed annotations back to `@name(args...)` source
+/// lines so the synthesized kernel source carries them through the shared
+/// grammar's own annotation parser, rather than through the lossy legacy
+/// `"ID: text"` meta-string convention.
+fn annotation_lines(annotations: &Annotations, indent: &str) -> Vec<String> {
+    annotations
+        .source_order()
+        .iter()
+        .map(|annotation| format!("{indent}{}", annotation.render_source()))
+        .collect()
+}
+
 /// Render the executable kernel used by generic check/verify for a dbsystem.
 #[must_use]
 #[allow(clippy::too_many_lines)]
@@ -117,8 +129,19 @@ pub fn db_kernel_source(system: &DbSystem) -> String {
         .into_iter()
         .collect::<BTreeSet<_>>()
     } else {
-        system.check.rules.iter().map(String::as_str).collect()
+        system
+            .check
+            .rules
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .collect()
     };
+    let rule_annotations = system
+        .check
+        .rules
+        .iter()
+        .map(|rule| (rule.name.as_str(), &rule.annotations))
+        .collect::<BTreeMap<_, _>>();
 
     let mut lines = vec![format!(
         "spec {} \"db: database multi-environment compatibility\" {{",
@@ -167,6 +190,7 @@ pub fn db_kernel_source(system: &DbSystem) -> String {
                 migration.name, migration.from_schema, migration.to_schema
             ),
         );
+        lines.extend(annotation_lines(&migration.decl_annotations, "  "));
         lines.push(format!("  action {action}() {metadata} {{"));
         lines.push(format!(
             "    requires schema_version == {}",
@@ -258,9 +282,14 @@ pub fn db_kernel_source(system: &DbSystem) -> String {
     }
 
     if rules.contains("not_null_after_backfill") {
+        let annotations = rule_annotations
+            .get("not_null_after_backfill")
+            .map(|value| (*value).clone())
+            .unwrap_or_default();
         for key in columns.keys() {
             let member = column_member(key);
             let name = invariant_name(&["db_not_null_after_backfill", &key.0, &key.1]);
+            lines.extend(annotation_lines(&annotations, "  "));
             lines.push(format!(
                 "  invariant {name} {} {{ not column_not_null[{member}] or (column_exists[{member}] and column_backfilled[{member}]) }}",
                 quote_meta(
@@ -299,6 +328,13 @@ pub fn db_kernel_source(system: &DbSystem) -> String {
                 if !rules.contains(rule) && !rules.contains("removed_only_after_unused") {
                     continue;
                 }
+                let mut annotations = rule_annotations
+                    .get(rule)
+                    .map(|value| (*value).clone())
+                    .unwrap_or_default();
+                if let Some(extra) = rule_annotations.get("removed_only_after_unused") {
+                    annotations.extend(extra.source_order().iter().cloned());
+                }
                 for column in artifact.capabilities.get(capability).into_iter().flatten() {
                     let mut parts = vec![
                         prefix.to_owned(),
@@ -318,6 +354,7 @@ pub fn db_kernel_source(system: &DbSystem) -> String {
                         verb,
                         column_label(column)
                     );
+                    lines.extend(annotation_lines(&annotations, "  "));
                     lines.push(format!(
                         "  invariant {name} {} {{ {} }}",
                         quote_meta(id, &text),

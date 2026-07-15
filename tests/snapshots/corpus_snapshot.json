@@ -119,7 +119,25 @@
       "warnings": []
     }
   },
+  "examples/annotations/annotated_ai_component.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
   "examples/annotations/annotated_claims.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/annotations/annotated_dbsystem.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/annotations/annotated_domain.fsl": {
     "check": {
       "kind": "parse",
       "result": "error"

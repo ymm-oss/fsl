@@ -3,7 +3,8 @@
 
 use serde_json::{Value, json};
 
-use crate::{ParseError, Span, Token, TokenKind, lex};
+use crate::annotation_parse;
+use crate::{Annotations, ParseError, Span, Token, TokenKind, lex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AiLoc {
@@ -33,15 +34,24 @@ pub struct AiTool {
     pub irreversible: bool,
     pub preconditions: Vec<String>,
     pub effect: Option<String>,
+    pub annotations: Annotations,
+    pub loc: Option<AiLoc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiAuthorityRule {
+    pub name: String,
+    pub annotations: Annotations,
     pub loc: Option<AiLoc>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AiAuthority {
-    pub may_suggest: Vec<String>,
-    pub may_execute: Vec<String>,
-    pub requires_human_approval: Vec<String>,
-    pub forbidden: Vec<String>,
+    pub may_suggest: Vec<AiAuthorityRule>,
+    pub may_execute: Vec<AiAuthorityRule>,
+    pub requires_human_approval: Vec<AiAuthorityRule>,
+    pub forbidden: Vec<AiAuthorityRule>,
+    pub annotations: Annotations,
     pub loc: Option<AiLoc>,
 }
 
@@ -49,12 +59,21 @@ pub struct AiAuthority {
 pub struct AiFallback {
     pub reason: String,
     pub target: String,
+    pub annotations: Annotations,
     pub loc: AiLoc,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiCheckRule {
+    pub name: String,
+    pub annotations: Annotations,
+    pub loc: Option<AiLoc>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AiHardCheck {
-    pub rules: Vec<String>,
+    pub rules: Vec<AiCheckRule>,
+    pub annotations: Annotations,
     pub loc: Option<AiLoc>,
 }
 
@@ -99,13 +118,19 @@ impl AiTool {
     }
 }
 
+impl AiAuthorityRule {
+    fn names(rules: &[Self]) -> Vec<&str> {
+        rules.iter().map(|rule| rule.name.as_str()).collect()
+    }
+}
+
 impl AiAuthority {
     fn python_ast(&self) -> Value {
         json!({
-            "$type":"AiAuthority","may_suggest":self.may_suggest,
-            "may_execute":self.may_execute,
-            "requires_human_approval":self.requires_human_approval,
-            "forbidden":self.forbidden,"loc":self.loc.map(AiLoc::python_ast),
+            "$type":"AiAuthority","may_suggest":AiAuthorityRule::names(&self.may_suggest),
+            "may_execute":AiAuthorityRule::names(&self.may_execute),
+            "requires_human_approval":AiAuthorityRule::names(&self.requires_human_approval),
+            "forbidden":AiAuthorityRule::names(&self.forbidden),"loc":self.loc.map(AiLoc::python_ast),
         })
     }
 }
@@ -118,7 +143,11 @@ impl AiFallback {
 
 impl AiHardCheck {
     fn python_ast(&self) -> Value {
-        json!({"$type":"AiHardCheck","rules":self.rules,"loc":self.loc.map(AiLoc::python_ast)})
+        json!({
+            "$type":"AiHardCheck",
+            "rules":self.rules.iter().map(|rule| rule.name.as_str()).collect::<Vec<_>>(),
+            "loc":self.loc.map(AiLoc::python_ast),
+        })
     }
 }
 
@@ -141,6 +170,7 @@ pub(crate) fn parse_ai_component_tokens(
         source,
         tokens,
         cursor,
+        pending_annotations: Annotations::default(),
     };
     let component = parser.component()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
@@ -153,9 +183,72 @@ struct AiParser<'a> {
     source: &'a str,
     tokens: Vec<Token>,
     cursor: usize,
+    pending_annotations: Annotations,
 }
 
 impl AiParser<'_> {
+    /// Parse zero or more leading `@name(args...)` annotations into
+    /// `self.pending_annotations`, ready to be drained by whichever
+    /// declaration constructor runs next.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] for malformed annotation syntax, a failed
+    /// validation, or one or more annotations with no following declaration
+    /// in the same block.
+    fn take_leading_annotations(&mut self) -> Result<(), ParseError> {
+        while self.peek_symbol("@") {
+            let annotation = annotation_parse::annotation(&self.tokens, &mut self.cursor)?;
+            self.pending_annotations.push(annotation);
+        }
+        if let Some(first) = self.pending_annotations.source_order().first()
+            && (self.peek_symbol("}") || matches!(self.peek().kind, TokenKind::Eof))
+        {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation must be followed by a declaration in the same block",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Drain and validate the annotations collected for the declaration
+    /// currently under construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] when the drained group fails validation.
+    fn take_annotations(&mut self) -> Result<Annotations, ParseError> {
+        let annotations = std::mem::take(&mut self.pending_annotations);
+        annotations.validate().map_err(|error| {
+            ParseError::coded("FSL-ANNOTATION-INVALID", error.message, error.span)
+        })?;
+        Ok(annotations)
+    }
+
+    /// Reject any annotation left over after parsing a declaration that does
+    /// not accept annotations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] coded `FSL-ANNOTATION-TARGET` when annotations
+    /// remain pending.
+    fn expect_no_pending_annotations(&mut self) -> Result<(), ParseError> {
+        if let Some(first) = self.pending_annotations.source_order().first() {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation cannot attach to this declaration",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn component(&mut self) -> Result<AiComponent, ParseError> {
         let loc = self.loc();
         self.expect_ident_value("ai_component")?;
@@ -176,25 +269,33 @@ impl AiParser<'_> {
             loc,
         };
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             if self.eat_ident("model") {
+                self.expect_no_pending_annotations()?;
                 component.model = Some(self.atom()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("prompt") {
+                self.expect_no_pending_annotations()?;
                 component.prompt = Some(self.atom()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("retriever") {
+                self.expect_no_pending_annotations()?;
                 component.retriever = Some(self.atom()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("temperature") {
+                self.expect_no_pending_annotations()?;
                 component.temperature = Some(self.number()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("input") {
+                self.expect_no_pending_annotations()?;
                 component.input_schema = Some(self.atom()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("output") {
+                self.expect_no_pending_annotations()?;
                 component.output_schema = Some(self.atom()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("tools") {
+                let annotations = self.take_annotations()?;
                 for name in self.names()? {
                     component.tools.push(AiTool {
                         name,
@@ -202,6 +303,7 @@ impl AiParser<'_> {
                         irreversible: false,
                         preconditions: Vec::new(),
                         effect: None,
+                        annotations: annotations.clone(),
                         loc: None,
                     });
                 }
@@ -222,6 +324,7 @@ impl AiParser<'_> {
     }
 
     fn tool(&mut self) -> Result<AiTool, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let name = self.expect_ident()?;
@@ -233,6 +336,7 @@ impl AiParser<'_> {
             irreversible,
             preconditions: Vec::new(),
             effect: None,
+            annotations,
             loc: Some(loc),
         };
         while !self.eat_symbol("}") {
@@ -251,6 +355,7 @@ impl AiParser<'_> {
     }
 
     fn authority(&mut self) -> Result<AiAuthority, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         if !self.peek_symbol("{") {
@@ -259,16 +364,28 @@ impl AiParser<'_> {
         self.expect_symbol("{")?;
         let mut authority = AiAuthority {
             loc: Some(loc),
+            annotations,
             ..AiAuthority::default()
         };
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
+            let rule_loc = self.loc();
             let kind = self.expect_ident()?;
+            let rule_annotations = self.take_annotations()?;
             let names = self.names()?;
+            let rules = names
+                .into_iter()
+                .map(|name| AiAuthorityRule {
+                    name,
+                    annotations: rule_annotations.clone(),
+                    loc: Some(rule_loc),
+                })
+                .collect::<Vec<_>>();
             match kind.as_str() {
-                "may_suggest" => authority.may_suggest.extend(names),
-                "may_execute" => authority.may_execute.extend(names),
-                "requires_human_approval" => authority.requires_human_approval.extend(names),
-                "forbidden" => authority.forbidden.extend(names),
+                "may_suggest" => authority.may_suggest.extend(rules),
+                "may_execute" => authority.may_execute.extend(rules),
+                "requires_human_approval" => authority.requires_human_approval.extend(rules),
+                "forbidden" => authority.forbidden.extend(rules),
                 _ => return Err(self.error("unknown authority declaration")),
             }
             self.eat_symbol(";");
@@ -277,17 +394,26 @@ impl AiParser<'_> {
     }
 
     fn fallback(&mut self) -> Result<Vec<AiFallback>, ParseError> {
+        let block_annotations = self.take_annotations()?;
         self.bump();
         self.expect_symbol("{")?;
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
+            let item_annotations = self.take_annotations()?;
             let loc = self.loc();
             self.expect_ident_value("when")?;
             let reason = self.expect_ident()?;
             self.expect_ident_value("require")?;
+            let mut annotations = block_annotations.clone();
+            annotations.extend(item_annotations.source_order().iter().cloned());
+            annotations.validate().map_err(|error| {
+                ParseError::coded("FSL-ANNOTATION-INVALID", error.message, error.span)
+            })?;
             items.push(AiFallback {
                 reason,
                 target: self.expect_ident()?,
+                annotations,
                 loc,
             });
             self.eat_symbol(";");
@@ -296,18 +422,27 @@ impl AiParser<'_> {
     }
 
     fn check(&mut self) -> Result<AiHardCheck, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         self.expect_ident_value("hard")?;
         self.expect_symbol("{")?;
         let mut rules = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
+            let rule_loc = self.loc();
+            let rule_annotations = self.take_annotations()?;
             self.expect_ident_value("rule")?;
-            rules.push(self.expect_ident()?);
+            rules.push(AiCheckRule {
+                name: self.expect_ident()?,
+                annotations: rule_annotations,
+                loc: Some(rule_loc),
+            });
             self.eat_symbol(";");
         }
         Ok(AiHardCheck {
             rules,
+            annotations,
             loc: Some(loc),
         })
     }
