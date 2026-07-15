@@ -705,7 +705,7 @@ fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer r
 fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
-fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review (§15)
+fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
@@ -2276,7 +2276,11 @@ DESIGN-*.md).
   refinement_graph`; this is an unresolved structural view because the command
   has no impl/abs model paths. Project manifests can be viewed with `--projection
   traceability_graph`; their action edges use the checked correspondence IR and
-  include synthesized auto mappings. `--format dot` and `--format mermaid` export graph-shaped
+  include synthesized auto mappings. `--projection code_audit --code <path>`
+  maps exact executable Kernel requirement targets to language-independent
+  `@fsl.trace` source annotations; missing/orphan/mismatched pairs remain review
+  findings with `formal_status:not_a_violation`. It is single-spec and JSON-only.
+  `--format dot` and `--format mermaid` export graph-shaped
   projections for review diagrams while keeping JSON as the default. `--profile
   ai-review` emits review findings such as `disconnected_requirement`,
   `unanchored_property`, `progressless_cycle`, `unwritten_state`,

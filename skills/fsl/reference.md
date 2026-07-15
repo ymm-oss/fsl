@@ -817,7 +817,7 @@ fslc diff <old> <new> [--depth K] [--mapping <mapping>]
 fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
                                                   # materialize both full revision trees; omit spec for changed .fsl batch
 fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
-fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag review
+fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
@@ -983,6 +983,12 @@ directories expand recursively to sorted `*.fsl` files and partial failures stay
 visible in the batch JSON. Standalone refinement mappings use `--projection
 refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`.
+`--projection code_audit --code PATH` is the single-spec, JSON-only bridge from
+exact executable Kernel requirement targets to `@fsl.trace` implementation
+locations. Treat missing, orphan, and target-mismatch findings as review signals,
+not proof. `origin_assurance` describes Public Kernel provenance
+(`source_backed|generated_from_source|generated_only|unknown`), never formal
+verification strength. See `docs/DESIGN-code-audit.md`.
 `--profile ai-review` emits AI-readable review findings such as
 `disconnected_requirement`, `unanchored_property`, `progressless_cycle`,
 `unwritten_state`, `unread_state`, `unguarded_action`, and

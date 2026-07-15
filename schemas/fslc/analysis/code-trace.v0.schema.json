@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/analysis/code-trace.v0.schema.json",
+  "title": "FSL language-independent code trace annotation v0",
+  "type": "object",
+  "required": ["schema", "requirement_id", "kernel_target", "origin_assurance"],
+  "properties": {
+    "schema": {"const": "fsl-code-trace.v0"},
+    "requirement_id": {"type": "string", "minLength": 1},
+    "kernel_target": {"type": "string", "minLength": 1},
+    "origin_assurance": {
+      "enum": ["source_backed", "generated_from_source", "generated_only", "unknown"]
+    }
+  },
+  "additionalProperties": false
+}

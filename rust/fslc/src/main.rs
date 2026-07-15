@@ -15,6 +15,7 @@ use fsl_core::{
 use serde_json::{Map, Value, json};
 
 mod approval;
+mod code_audit;
 mod verification;
 
 use verification::{
@@ -1625,6 +1626,7 @@ fn command() -> Result<(Value, i32), String> {
             let mut output_format = "json".to_owned();
             let mut profile = None;
             let mut export_kind = None;
+            let mut code = None;
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--projection" => {
@@ -1640,6 +1642,9 @@ fn command() -> Result<(Value, i32), String> {
                     }
                     "--profile" => profile = args.next(),
                     "--export" => export_kind = args.next(),
+                    "--code" => {
+                        code = Some(PathBuf::from(required_option_value(&mut args, "--code")?));
+                    }
                     _ if !option.starts_with('-') => paths.push(PathBuf::from(option)),
                     _ => return Err(format!("unknown analyze option '{option}'")),
                 }
@@ -1652,6 +1657,7 @@ fn command() -> Result<(Value, i32), String> {
                     &output_format,
                     profile.as_deref(),
                     export_kind.as_deref(),
+                    code.as_deref(),
                 )
             } else {
                 run_analyze(
@@ -1661,6 +1667,7 @@ fn command() -> Result<(Value, i32), String> {
                     &output_format,
                     profile.as_deref(),
                     export_kind.as_deref(),
+                    code.as_deref(),
                 )
             };
             if output_format != "json"
@@ -10167,46 +10174,22 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
 
 fn add_requirements_layer_nodes(tsg: &mut Value, model: &KernelModel) {
     let mut requirements = std::collections::BTreeMap::<String, Vec<String>>::new();
-    for action in &model.actions {
-        for requirement in action
-            .annotations
-            .requirements()
-            .expect("checked model annotations are valid")
-        {
-            requirements
-                .entry(requirement.id)
-                .or_default()
-                .push(format!("action:{}", action.name));
-        }
-    }
-    for (kind, properties) in [
-        ("invariant", &model.invariants),
-        ("trans", &model.transitions),
-        ("reachable", &model.reachables),
-    ] {
-        for property in properties {
-            for requirement in property
-                .annotations
-                .requirements()
-                .expect("checked model annotations are valid")
-            {
-                requirements
-                    .entry(requirement.id)
-                    .or_default()
-                    .push(format!("{kind}:{}", property.name));
+    let graph_nodes = tsg["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| node["id"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    for (target, links) in model.requirement_targets() {
+        let graph_target = target
+            .strip_prefix("property:")
+            .unwrap_or(&target)
+            .to_owned();
+        for requirement in links {
+            let targets = requirements.entry(requirement.id).or_default();
+            if graph_nodes.contains(&graph_target) {
+                targets.push(graph_target.clone());
             }
-        }
-    }
-    for property in &model.leadstos {
-        for requirement in property
-            .annotations
-            .requirements()
-            .expect("checked model annotations are valid")
-        {
-            requirements
-                .entry(requirement.id)
-                .or_default()
-                .push(format!("leadsTo:{}", property.name));
         }
     }
     let mut node_additions = Vec::new();
@@ -10598,12 +10581,42 @@ fn run_analyze(
     output_format: &str,
     profile: Option<&str>,
     export_kind: Option<&str>,
+    code_path: Option<&Path>,
 ) -> (Value, i32) {
     if !matches!(output_format, "json" | "dot" | "mermaid") {
         return (
             error_output(
                 "semantics",
                 &format!("unsupported analyze format: {output_format}"),
+            ),
+            2,
+        );
+    }
+    if projection == "code_audit" {
+        if code_path.is_none() {
+            return (
+                error_output(
+                    "semantics",
+                    "--projection code_audit requires --code <dir|file>",
+                ),
+                2,
+            );
+        }
+        if output_format != "json" || focus.is_some() || profile.is_some() || export_kind.is_some()
+        {
+            return (
+                error_output(
+                    "semantics",
+                    "code_audit cannot be combined with --focus, --profile, --export, or non-JSON --format",
+                ),
+                2,
+            );
+        }
+    } else if code_path.is_some() {
+        return (
+            error_output(
+                "semantics",
+                "--code is supported only with --projection code_audit",
             ),
             2,
         );
@@ -10726,6 +10739,23 @@ fn run_analyze(
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error), 2),
     };
+    if projection == "code_audit" {
+        let analysis = match code_audit::analyze(&model, code_path.expect("checked above")) {
+            Ok(analysis) => analysis,
+            Err(code_audit::CodeAuditError::Io(message)) => {
+                return (error_output("io", &message), 2);
+            }
+            Err(code_audit::CodeAuditError::Semantics(message)) => {
+                return (error_output("semantics", &message), 2);
+            }
+        };
+        return finish_analysis(
+            analysis,
+            Some(("spec", &model.name)),
+            projection,
+            output_format,
+        );
+    }
     if let Some(profile) = profile {
         if profile != "ai-review" {
             return (
@@ -10838,7 +10868,17 @@ fn run_analyze_batch(
     output_format: &str,
     profile: Option<&str>,
     export_kind: Option<&str>,
+    code_path: Option<&Path>,
 ) -> (Value, i32) {
+    if projection == "code_audit" || code_path.is_some() {
+        return (
+            error_output(
+                "semantics",
+                "code_audit accepts exactly one specification file",
+            ),
+            2,
+        );
+    }
     if export_kind.is_some() {
         return (
             error_output(
@@ -10883,7 +10923,7 @@ fn run_analyze_batch(
     let mut entries = Vec::new();
     let mut errors = Vec::new();
     for path in files {
-        let (result, _) = run_analyze(&path, projection, None, "json", profile, None);
+        let (result, _) = run_analyze(&path, projection, None, "json", profile, None, None);
         entries.push(analysis_batch_entry(&path, &result));
         if result.get("result").and_then(Value::as_str) != Some("analyzed") {
             errors.push(json!({
@@ -13181,5 +13221,33 @@ mod exit_status_tests {
             normalized_exit_status(&error_output("semantics", "bad spec"), 2),
             2
         );
+    }
+
+    #[test]
+    fn requirement_edges_reference_existing_tsg_nodes() {
+        let source = r#"
+spec InitTraceability {
+  state { ready: Bool }
+  @requirement("REQ-INIT", "startup is traceable")
+  init { ready = false }
+}
+"#;
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("parse spec");
+        let model = fsl_core::build_model(kernel).expect("build model");
+        let mut tsg = fsl_tools::analyze_model(&model, "tsg", None).expect("build tsg");
+        add_requirements_layer_nodes(&mut tsg, &model);
+
+        let nodes = tsg["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|node| node["id"].as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(nodes.contains("requirement:REQ-INIT"));
+        for edge in tsg["edges"].as_array().unwrap() {
+            assert!(nodes.contains(edge["from"].as_str().unwrap()));
+            assert!(nodes.contains(edge["to"].as_str().unwrap()));
+        }
     }
 }

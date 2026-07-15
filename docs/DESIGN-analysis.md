@@ -71,6 +71,7 @@ fslc analyze spec.fsl --profile ai-review --format json
 fslc analyze specs/ examples/e2e/ --profile ai-review --format json
 fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
 fslc analyze tests/fixtures/chain/fsl-project.toml --projection traceability_graph --format json
+fslc analyze spec.fsl --projection code_audit --code src/ --format json
 fslc analyze spec.fsl --projection action_state_graph --format dot
 fslc analyze spec.fsl --projection requirement_property_graph --format mermaid
 ```
@@ -144,6 +145,11 @@ structural sources:
   files and refinement mappings. The project supplies both endpoint models, so
   action edges are built from the checked `ActionCorrespondence` IR, including
   synthesized auto correspondences.
+- `code_audit`: single-spec JSON projection from exact checked
+  requirement/Kernel-target pairs to language-independent `@fsl.trace`
+  implementation annotations. Missing, orphan, and target-mismatch entries are
+  review findings rather than verifier failures. Its annotation, scanner, and
+  coverage contracts are specified in `DESIGN-code-audit.md`.
 
 Direct `.toml` inputs to `fslc analyze` are treated as project manifests; the
 default filename is `fsl-project.toml`, but review copies with other names are
