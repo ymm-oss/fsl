@@ -14,6 +14,15 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn nfr_example(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("examples/nfr")
+        .join(name)
+}
+
 fn replay(trace: &str) -> Output {
     replay_path(&fixture(trace))
 }
@@ -73,6 +82,96 @@ fn reporting_a_transient_intermediate_as_an_observation_is_nonconformant() {
     assert_eq!(value["violation"]["action"], Value::Null);
     assert_eq!(value["violation"]["transition"], "stutter");
     assert_eq!(value["violation"]["mismatches"][0]["path"], "value");
+}
+
+#[test]
+fn trace_v1_2_checks_bounded_liveness_and_reports_finite_prefix_status() {
+    let spec = nfr_example("bounded_response.fsl");
+    let within = replay_spec_path(&spec, &nfr_example("bounded_response.within.v1.json"));
+    assert!(within.status.success());
+    let within = json(&within);
+    assert_eq!(within["checks"]["safety"]["status"], "passed");
+    assert_eq!(within["checks"]["bounded_liveness"]["status"], "passed");
+    assert_eq!(
+        within["checks"]["bounded_liveness"]["checked_properties"],
+        json!(["RespondsInTwo"])
+    );
+    assert_eq!(
+        within["checks"]["bounded_liveness"]["unbounded_properties"],
+        json!(["EventuallyResponds"])
+    );
+
+    let mut prefix: Value = serde_json::from_str(
+        &std::fs::read_to_string(nfr_example("bounded_response.within.v1.json")).expect("fixture"),
+    )
+    .expect("trace JSON");
+    prefix["events"].as_array_mut().expect("events").truncate(1);
+    let path = write_trace(&prefix);
+    let output = replay_spec_path(&spec, &path);
+    std::fs::remove_file(path).expect("remove trace");
+    assert!(output.status.success());
+    let output = json(&output);
+    assert_eq!(output["checks"]["bounded_liveness"]["status"], "pending");
+    assert_eq!(
+        output["checks"]["bounded_liveness"]["pending"][0]["pending_since"],
+        1
+    );
+    assert_eq!(
+        output["checks"]["bounded_liveness"]["pending"][0]["deadline"],
+        3
+    );
+}
+
+#[test]
+fn overdue_bounded_response_is_liveness_nonconformance_after_safety() {
+    let spec = nfr_example("bounded_response.fsl");
+    let overdue_path = nfr_example("bounded_response.overdue.v1.json");
+    let overdue = replay_spec_path(&spec, &overdue_path);
+    assert_eq!(overdue.status.code(), Some(1));
+    let overdue = json(&overdue);
+    assert_eq!(overdue["failed_at_event"], 2);
+    assert_eq!(overdue["violation"]["kind"], "leadsTo");
+    assert_eq!(overdue["violation"]["check"], "bounded_liveness");
+    assert_eq!(overdue["violation"]["property"], "RespondsInTwo");
+    assert_eq!(overdue["violation"]["pending_since"], 1);
+    assert_eq!(overdue["violation"]["deadline"], 3);
+    assert_eq!(overdue["violation"]["tick"], 3);
+
+    let mut action_at_deadline: Value =
+        serde_json::from_str(&std::fs::read_to_string(&overdue_path).expect("fixture"))
+            .expect("trace JSON");
+    action_at_deadline["events"][2] =
+        json!({"tick":3,"action":"advance","params":{},"state":{"stage":2}});
+    let path = write_trace(&action_at_deadline);
+    let output = replay_spec_path(&spec, &path);
+    std::fs::remove_file(path).expect("remove trace");
+    assert_eq!(output.status.code(), Some(1));
+    let action_at_deadline = json(&output);
+    assert_eq!(action_at_deadline["violation"]["check"], "bounded_liveness");
+    assert_eq!(action_at_deadline["state_before"]["stage"], 1);
+
+    let mut mismatch: Value =
+        serde_json::from_str(&std::fs::read_to_string(&overdue_path).expect("fixture"))
+            .expect("trace JSON");
+    mismatch["events"][2]["state"]["stage"] = json!(2);
+    let path = write_trace(&mismatch);
+    let output = replay_spec_path(&spec, &path);
+    std::fs::remove_file(path).expect("remove trace");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(json(&output)["violation"]["check"], "safety");
+
+    let mut old_semantics: Value =
+        serde_json::from_str(&std::fs::read_to_string(overdue_path).expect("fixture"))
+            .expect("trace JSON");
+    old_semantics["schema_version"] = json!("1.1.0");
+    let path = write_trace(&old_semantics);
+    let output = replay_spec_path(&spec, &path);
+    std::fs::remove_file(path).expect("remove trace");
+    assert!(output.status.success());
+    assert_eq!(
+        json(&output)["checks"]["bounded_liveness"]["status"],
+        "not_checked"
+    );
 }
 
 fn replay_value(value: &Value) -> Output {
@@ -261,6 +360,9 @@ fn release_bundles_include_the_schema_spec_and_positive_and_negative_goldens() {
         "replay_observation.fsl",
         "replay_observation.valid.v1.json",
         "replay_observation.transient-observed.v1.json",
+        "bounded_response.fsl",
+        "bounded_response.within.v1.json",
+        "bounded_response.overdue.v1.json",
     ] {
         assert_eq!(workflow.matches(artifact).count(), 2, "{artifact}");
     }

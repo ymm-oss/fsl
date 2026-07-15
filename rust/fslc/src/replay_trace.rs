@@ -119,12 +119,15 @@ fn parse_v1(data: Value) -> Result<ReplayTraceInput, String> {
     }
     if !matches!(
         trace.schema_version.as_str(),
-        fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION | fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+        fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION
+            | fsl_core::REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION
+            | fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
     ) {
         return Err(format!(
-            "unsupported replay trace schema_version '{}'; expected '{}' or '{}'",
+            "unsupported replay trace schema_version '{}'; expected '{}', '{}', or '{}'",
             trace.schema_version,
             fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION,
+            fsl_core::REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION,
             fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
         ));
     }
@@ -192,14 +195,18 @@ fn parse_v1_step(
             "replay trace event {index} action must not be empty"
         )),
         Value::Null
-            if schema_version == fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION && params.is_empty() =>
+            if matches!(
+                schema_version,
+                fsl_core::REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION
+                    | fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+            ) && params.is_empty() =>
         {
             Ok(ReplayStep::Stutter)
         }
         Value::Null if schema_version == fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION => {
             Err(format!(
                 "replay trace event {index} stutter requires schema_version '{}'",
-                fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+                fsl_core::REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION
             ))
         }
         Value::Null => Err(format!(
@@ -333,9 +340,14 @@ mod tests {
     #[test]
     fn v1_1_adds_explicit_stutter_without_reserving_an_action_name() {
         let mut stutter = versioned();
+        stutter["schema_version"] = json!(fsl_core::REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION);
         stutter["events"][0]["action"] = Value::Null;
         let parsed = parse_replay_trace(stutter.clone()).expect("v1.1 stutter");
         assert_eq!(parsed.events[0].step, ReplayStep::Stutter);
+
+        let mut current = stutter.clone();
+        current["schema_version"] = json!(fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION);
+        assert!(parse_replay_trace(current).is_ok());
 
         stutter["schema_version"] = json!(fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION);
         assert!(parse_replay_trace(stutter).is_err());

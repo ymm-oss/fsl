@@ -11,7 +11,7 @@ use fsl_core::{
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
     Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
-    insert_requirement_metadata, model_warnings, state_summary,
+    insert_requirement_metadata, model_warnings, state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
@@ -689,6 +689,48 @@ pub struct StepResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundedLivenessViolation {
+    pub property: String,
+    pub bindings: Bindings,
+    pub pending_since: usize,
+    pub deadline: usize,
+    pub within: usize,
+    pub step: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundedLivenessPending {
+    pub property: String,
+    pub bindings: Bindings,
+    pub pending_since: usize,
+    pub deadline: usize,
+    pub within: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundedLivenessStatus {
+    pub checked_properties: Vec<String>,
+    pub unbounded_properties: Vec<String>,
+    pub pending: Vec<BoundedLivenessPending>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BoundedLivenessProperty {
+    definition: fsl_core::LeadsToDef,
+    within: usize,
+    bindings: Vec<Bindings>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundedLivenessMonitor {
+    model: KernelModel,
+    properties: Vec<BoundedLivenessProperty>,
+    unbounded_properties: Vec<String>,
+    pending: BTreeMap<(usize, Bindings), (usize, usize)>,
+    next_step: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Monitor {
     pub model: KernelModel,
     pub state: State,
@@ -1009,6 +1051,147 @@ impl Monitor {
         checked_bounds: Option<&BTreeSet<String>>,
     ) -> Result<Option<Violation>, RuntimeError> {
         check_state_selected(&self.state, None, &self.model, self.step, checked_bounds)
+    }
+}
+
+impl BoundedLivenessMonitor {
+    /// Build a solver-free monitor for every `leadsTo ... within K` property.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] for negative deadlines, overflow, dynamic range
+    /// bounds, `where` filters, or collection binders unsupported by the
+    /// symbolic deadline checker.
+    pub fn new(model: KernelModel) -> Result<Self, RuntimeError> {
+        let mut properties = Vec::new();
+        let mut unbounded_properties = Vec::new();
+        for property in &model.leadstos {
+            let Some(within) = property.within else {
+                unbounded_properties.push(property.name.clone());
+                continue;
+            };
+            let within = usize::try_from(within)
+                .map_err(|_| runtime_error("leadsTo within must be non-negative"))?;
+            properties.push(BoundedLivenessProperty {
+                definition: property.clone(),
+                within,
+                bindings: static_leadsto_bindings(&model, property)?,
+            });
+        }
+        Ok(Self {
+            model,
+            properties,
+            unbounded_properties,
+            pending: BTreeMap::new(),
+            next_step: 0,
+        })
+    }
+
+    /// Observe one consecutive logical trace state.
+    ///
+    /// `step` counts every action and stutter observation. A response is valid
+    /// on its deadline state; failure is reported only when Q is still false.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] for non-consecutive steps or concrete expression
+    /// evaluation failures.
+    pub fn observe(
+        &mut self,
+        state: &State,
+        step: usize,
+    ) -> Result<Option<BoundedLivenessViolation>, RuntimeError> {
+        if step != self.next_step {
+            return Err(runtime_error(format!(
+                "bounded liveness expected step {}, got {step}",
+                self.next_step
+            )));
+        }
+        for (property_index, property) in self.properties.iter().enumerate() {
+            for binding in &property.bindings {
+                let key = (property_index, binding.clone());
+                let mut after_binding = binding.clone();
+                let after = as_bool(eval(
+                    &property.definition.after,
+                    state,
+                    &mut after_binding,
+                    &self.model,
+                    None,
+                )?)?;
+                if after {
+                    self.pending.remove(&key);
+                    continue;
+                }
+                if let Some((pending_since, deadline)) = self.pending.get(&key).copied() {
+                    if step >= deadline {
+                        return Ok(Some(BoundedLivenessViolation {
+                            property: property.definition.name.clone(),
+                            bindings: binding.clone(),
+                            pending_since,
+                            deadline,
+                            within: property.within,
+                            step,
+                        }));
+                    }
+                    continue;
+                }
+                let mut before_binding = binding.clone();
+                let before = as_bool(eval(
+                    &property.definition.before,
+                    state,
+                    &mut before_binding,
+                    &self.model,
+                    None,
+                )?)?;
+                if before {
+                    let deadline = step
+                        .checked_add(property.within)
+                        .ok_or_else(|| runtime_error("bounded liveness deadline exceeds usize"))?;
+                    self.pending.insert(key, (step, deadline));
+                    if property.within == 0 {
+                        return Ok(Some(BoundedLivenessViolation {
+                            property: property.definition.name.clone(),
+                            bindings: binding.clone(),
+                            pending_since: step,
+                            deadline: step,
+                            within: 0,
+                            step,
+                        }));
+                    }
+                }
+            }
+        }
+        self.next_step = step
+            .checked_add(1)
+            .ok_or_else(|| runtime_error("bounded liveness step exceeds usize"))?;
+        Ok(None)
+    }
+
+    #[must_use]
+    pub fn status(&self) -> BoundedLivenessStatus {
+        let pending = self
+            .pending
+            .iter()
+            .map(|((property_index, bindings), (pending_since, deadline))| {
+                let property = &self.properties[*property_index];
+                BoundedLivenessPending {
+                    property: property.definition.name.clone(),
+                    bindings: bindings.clone(),
+                    pending_since: *pending_since,
+                    deadline: *deadline,
+                    within: property.within,
+                }
+            })
+            .collect();
+        BoundedLivenessStatus {
+            checked_properties: self
+                .properties
+                .iter()
+                .map(|property| property.definition.name.clone())
+                .collect(),
+            unbounded_properties: self.unbounded_properties.clone(),
+            pending,
+        }
     }
 }
 

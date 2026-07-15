@@ -1160,6 +1160,12 @@
       "warnings": []
     }
   },
+  "examples/nfr/bounded_response.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/nfr/sla_worker.fsl": {
     "check": {
       "result": "ok",

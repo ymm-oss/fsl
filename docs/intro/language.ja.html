@@ -1457,7 +1457,7 @@ fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # se
 </code></pre>
 <p>External compilers emit the native replay contract as a closed versioned JSON
 object (<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>):</p>
-<pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.1.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}
+<pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.2.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}
 </code></pre>
 <p><code>initial</code> is the complete tick-0 state and every event has the exact Public
 Kernel action/parameter names plus its complete post-state. Since trace schema
@@ -1473,6 +1473,13 @@ Monitor successors, not to unreported implementation intermediates. Bare arrays
 and <code>{events:[...]}</code> remain the explicit
 unversioned action-only adapter. Testgen and verifier trace JSON are not replay
 input. See <code>docs/DESIGN-replay-trace.md</code>.</p>
+<p>Trace schema 1.2 additionally checks every <code>leadsTo P ~&gt; within K Q</code> at the
+initial state and each action/stutter observation. The deadline <code>p + K</code> is
+inclusive: <code>Q</code> there succeeds, while absence of <code>Q</code> fails with bounded-liveness
+evidence. Safety is evaluated first. Successful output separates
+<code>checks.safety</code> from <code>checks.bounded_liveness</code>; an unfinished finite obligation
+is <code>pending</code>, and unbounded <code>leadsTo</code> properties are named but not claimed as
+checked. Schemas 1.0/1.1 retain their earlier safety-only meaning.</p>
 <p>The <code>--from-log</code> form reuses the exact refinement mapping grammar to translate
 external JSONL records into spec actions and logical state; it does not add a
 second mapping language. Each non-empty line is

@@ -164,6 +164,9 @@ jobs:
           cp rust/fslc/tests/fixtures/replay_observation.fsl dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/replay_observation.valid.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/replay_observation.transient-observed.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp examples/nfr/bounded_response.fsl dist/fsl-kernel-contract-v1/fixtures/
+          cp examples/nfr/bounded_response.within.v1.json dist/fsl-kernel-contract-v1/fixtures/
+          cp examples/nfr/bounded_response.overdue.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp docs/DESIGN-replay-trace.md dist/fsl-kernel-contract-v1/
           cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v1/README.md
           tar -czf dist/fsl-kernel-contract-v1.tar.gz -C dist fsl-kernel-contract-v1
@@ -189,6 +192,9 @@ jobs:
           cp rust/fslc/tests/fixtures/replay_observation.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp rust/fslc/tests/fixtures/replay_observation.valid.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp rust/fslc/tests/fixtures/replay_observation.transient-observed.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp examples/nfr/bounded_response.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp examples/nfr/bounded_response.within.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
+          cp examples/nfr/bounded_response.overdue.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp docs/DESIGN-replay-trace.md dist/fsl-kernel-contract-v2/docs/
           cp docs/DESIGN-kernel-origin-v2.md dist/fsl-kernel-contract-v2/README.md
           cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v2/docs/

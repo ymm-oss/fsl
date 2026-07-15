@@ -2699,6 +2699,18 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         Ok(monitor) => monitor,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
+    let mut bounded_liveness = if matches!(
+        &trace.contract,
+        fslc_rust::replay_trace::ReplayTraceContract::V1 { schema_version, .. }
+            if schema_version == fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
+    ) {
+        match fsl_runtime::BoundedLivenessMonitor::new(model.clone()) {
+            Ok(monitor) => Some(monitor),
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        }
+    } else {
+        None
+    };
     if let Some(observed) = observed_initial {
         let expected = fslc_rust::state_json(&monitor.state);
         let mismatches = json_mismatches(&expected, &observed, "");
@@ -2708,6 +2720,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                 None,
                 json!({
                     "kind":"initial_state_mismatch",
+                    "check":"safety",
                     "tick":0,
                     "expected_state":expected,
                     "observed_state":observed,
@@ -2723,6 +2736,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                     None,
                     json!({
                         "kind":violation.kind,
+                        "check":"safety",
                         "name":display(&violation.name),
                         "tick":0,
                     }),
@@ -2731,6 +2745,20 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
             }
             Ok(None) => {}
             Err(error) => return (error_output("internal", &error.to_string()), 3),
+        }
+        if let Some(liveness) = &mut bounded_liveness {
+            match liveness.observe(&monitor.state, 0) {
+                Ok(Some(violation)) => {
+                    return replay_bounded_liveness_failure(
+                        &model,
+                        None,
+                        &violation,
+                        fslc_rust::state_json(&monitor.state),
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => return (error_output("internal", &error.to_string()), 3),
+            }
         }
     }
     for (index, event) in trace.events.iter().enumerate() {
@@ -2745,6 +2773,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                             index,
                             json!({
                                 "kind":violation.kind,
+                                "check":"safety",
                                 "name":display(&violation.name),
                                 "action":Value::Null,
                                 "params":{},
@@ -2771,6 +2800,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                         index,
                         json!({
                             "kind": "bad_call",
+                            "check":"safety",
                             "message": format!("unknown action '{action_name}'"),
                             "action": action_name,
                             "params": params,
@@ -2794,6 +2824,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                                 index,
                                 json!({
                                     "kind": "bad_call",
+                                    "check":"safety",
                                     "message": message,
                                     "action": action_name,
                                     "params": params,
@@ -2813,6 +2844,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                         index,
                         json!({
                             "kind": violation.kind,
+                            "check":"safety",
                             "name": display(&violation.name),
                             "action": display(&action.name),
                             "params": params,
@@ -2839,6 +2871,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                     Some(index),
                     json!({
                         "kind":"state_mismatch",
+                        "check":"safety",
                         "tick":event.tick,
                         "action":action_evidence,
                         "transition":transition,
@@ -2850,6 +2883,20 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                 );
             }
         }
+        if let Some(liveness) = &mut bounded_liveness {
+            match liveness.observe(&monitor.state, index + 1) {
+                Ok(Some(violation)) => {
+                    return replay_bounded_liveness_failure(
+                        &model,
+                        Some(index),
+                        &violation,
+                        state_before,
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => return (error_output("internal", &error.to_string()), 3),
+            }
+        }
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("conformant"));
@@ -2859,9 +2906,16 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         "final_state".to_owned(),
         fslc_rust::state_json(&monitor.state),
     );
+    let bounded_status = bounded_liveness
+        .as_ref()
+        .map(fsl_runtime::BoundedLivenessMonitor::status);
     output.insert(
         "note".to_owned(),
-        json!("leadsTo properties are not checked by replay (finite logs only)"),
+        json!(if bounded_status.is_some() {
+            "bounded leadsTo deadlines were checked over this finite observation prefix; unbounded leadsTo properties remain unchecked"
+        } else {
+            "leadsTo properties are not checked by replay (finite logs only)"
+        }),
     );
     if let fslc_rust::replay_trace::ReplayTraceContract::V1 {
         schema_version,
@@ -2869,13 +2923,90 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
         ..
     } = trace.contract
     {
-        output.insert("trace_schema_version".to_owned(), json!(schema_version));
+        output.insert(
+            "trace_schema_version".to_owned(),
+            json!(schema_version.clone()),
+        );
         output.insert(
             "kernel_schema_version".to_owned(),
             json!(kernel_schema_version),
         );
+        output.insert(
+            "checks".to_owned(),
+            json!({
+                "safety":{
+                    "status":"passed",
+                    "observations_checked":trace.events.len() + 1,
+                },
+                "bounded_liveness":bounded_status.as_ref().map_or_else(
+                    || json!({
+                        "status":"not_checked",
+                        "reason":format!(
+                            "trace schema_version '{}' requires '{}' for bounded liveness",
+                            schema_version,
+                            fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION,
+                        ),
+                    }),
+                    bounded_liveness_status_json,
+                ),
+            }),
+        );
     }
     (Value::Object(output), 0)
+}
+
+fn bounded_liveness_status_json(status: &fsl_runtime::BoundedLivenessStatus) -> Value {
+    json!({
+        "status":if status.pending.is_empty() { "passed" } else { "pending" },
+        "checked_properties":status.checked_properties,
+        "unbounded_properties":status.unbounded_properties,
+        "pending":status.pending.iter().map(|pending| json!({
+            "property":pending.property,
+            "bindings":replay_liveness_bindings_json(&pending.bindings),
+            "pending_since":pending.pending_since,
+            "deadline":pending.deadline,
+            "within":pending.within,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn replay_liveness_bindings_json(bindings: &fsl_runtime::Bindings) -> Value {
+    Value::Object(
+        bindings
+            .iter()
+            .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
+            .collect(),
+    )
+}
+
+fn replay_bounded_liveness_failure(
+    model: &KernelModel,
+    index: Option<usize>,
+    violation: &fsl_runtime::BoundedLivenessViolation,
+    state_before: Value,
+) -> (Value, i32) {
+    let (mut output, code) = replay_failure_with_state(
+        model,
+        index,
+        json!({
+            "kind":"leadsTo",
+            "check":"bounded_liveness",
+            "property":violation.property,
+            "bindings":replay_liveness_bindings_json(&violation.bindings),
+            "pending_since":violation.pending_since,
+            "deadline":violation.deadline,
+            "within":violation.within,
+            "tick":violation.step,
+        }),
+        state_before,
+    );
+    output["note"] = json!(
+        "a bounded leadsTo deadline was missed on this finite observation prefix; unbounded leadsTo properties remain unchecked"
+    );
+    output["hint"] = json!(
+        "the implementation did not reach the leadsTo response by its inclusive observation deadline"
+    );
+    (output, code)
 }
 
 fn replay_snapshot_json(
