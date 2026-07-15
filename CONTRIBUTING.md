@@ -24,8 +24,9 @@ that share one solver is insufficient.
 
 ## Development environment
 
-Install a stable Rust toolchain with `rustfmt` and `clippy`. Python 3.9+ is also required for the
-compatibility harness and LSP:
+Install a stable Rust toolchain with `rustfmt` and `clippy`, Node.js 22, and the pinned
+`wasm-bindgen-cli` used by CI. Python 3.9+ is optional unless changing the frozen compatibility
+reference, LSP, or Python-based repository hooks:
 
 ```bash
 python3 -m venv .venv
@@ -41,21 +42,17 @@ cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify spec
 
 ## Testing
 
-Start with the smallest relevant package or integration test. Before submitting a Rust workspace
-change, run the applicable parts of the CI gate:
+Start with the smallest relevant package or integration test. Before submitting a product change,
+run the single required CI-equivalent gate:
 
 ```bash
-cargo fmt --manifest-path rust/Cargo.toml --all -- --check
-cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
-cargo test --manifest-path rust/Cargo.toml --workspace --locked
-cargo build --manifest-path rust/Cargo.toml --workspace --locked
-.venv/bin/python -m pytest tests/test_rust_cli_contract.py -q
+./tools/check-native-integration.sh
 ```
 
 Native solver changes also require focused tests for `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust`.
-WASM/Worker changes require the npm and browser checks in `.github/workflows/ci.yml`. Public Kernel or
-CLI changes require the relevant parity, envelope, and bidirectional replay cases under `tests/` and
-`tools/`.
+Public Kernel or CLI changes require the relevant Rust envelope, schema, corpus, and bidirectional
+replay cases. See [`docs/DESIGN-rust-integration.md`](docs/DESIGN-rust-integration.md) for the contract
+inventory and explicitly optional Python surfaces.
 
 ## Guidelines for changes
 

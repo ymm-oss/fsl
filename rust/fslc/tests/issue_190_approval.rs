@@ -101,6 +101,7 @@ fn approval_repo() -> PathBuf {
         &["config", "user.email", "approval-test@example.com"],
     );
     git(&root, &["config", "user.name", "Approval Test"]);
+    git(&root, &["config", "commit.gpgsign", "false"]);
     git(&root, &["add", "spec.fsl"]);
     git(&root, &["commit", "-qm", "approval baseline"]);
     root

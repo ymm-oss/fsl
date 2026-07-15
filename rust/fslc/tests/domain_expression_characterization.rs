@@ -497,7 +497,7 @@ fn baseline() -> Value {
 
 #[test]
 fn domain_surface_lowering_public_kernel_and_diagnostics_match_baseline() {
-    let actual = baseline();
+    let mut actual = baseline();
     let path = fixture("baseline.v1.json");
     if std::env::var_os(UPDATE_ENV).is_some() {
         std::fs::write(
@@ -510,11 +510,16 @@ fn domain_surface_lowering_public_kernel_and_diagnostics_match_baseline() {
         .expect("write characterization baseline");
         return;
     }
-    let expected: Value = serde_json::from_str(
+    let mut expected: Value = serde_json::from_str(
         &std::fs::read_to_string(&path)
             .unwrap_or_else(|_| panic!("missing {}; run with {UPDATE_ENV}=1", path.display())),
     )
     .expect("parse characterization baseline");
+    // JSON object member order is not part of this semantic characterization.
+    // The separately built native CLI may serialize object members in a
+    // different order across targets without changing any JSON value.
+    actual.sort_all_objects();
+    expected.sort_all_objects();
     assert_eq!(actual, expected);
 }
 

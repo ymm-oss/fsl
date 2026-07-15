@@ -561,10 +561,15 @@ fn python_literal(value: &Value, key_order: &[String]) -> String {
     }
 }
 
+fn portable_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
 fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
     let absolute = std::fs::canonicalize(spec).unwrap_or_else(|_| spec.to_path_buf());
     let Some(parent) = output.and_then(Path::parent) else {
-        return absolute.display().to_string();
+        return portable_path(&absolute);
     };
     let base = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
     let left = base.components().collect::<Vec<_>>();
@@ -581,7 +586,7 @@ fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
     for component in &right[common..] {
         result.push(component.as_os_str());
     }
-    result.display().to_string()
+    portable_path(&result)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -811,10 +816,21 @@ fn vitest_scenario(scenario: &Value) -> String {
     lines.join("\n")
 }
 
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+fn testgen_template(template: &str, source_name: &str) -> String {
+    normalize_newlines(template).replace("__SOURCE__", source_name)
+}
+
 /// Emit a standalone Vitest conformance scaffold.
 #[must_use]
 fn emit_vitest(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let mut parts = vec![include_str!("testgen_vitest.txt").replace("__SOURCE__", source_name)];
+    let mut parts = vec![testgen_template(
+        include_str!("testgen_vitest.txt"),
+        source_name,
+    )];
     parts.extend(scenarios.iter().map(vitest_scenario));
     let steps = walk["steps"].as_array().cloned().unwrap_or_default();
     parts.push(
@@ -1019,7 +1035,10 @@ fn append_forbidden(lines: &mut Vec<String>, scenario: &Value, target: Target, i
 /// Emit a standalone Swift Testing conformance scaffold.
 #[must_use]
 fn emit_swift(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let mut parts = vec![include_str!("testgen_swift.txt").replace("__SOURCE__", source_name)];
+    let mut parts = vec![testgen_template(
+        include_str!("testgen_swift.txt"),
+        source_name,
+    )];
     let mut seen = BTreeMap::new();
     for scenario in scenarios {
         let (name, steps, states) = scenario_parts(scenario);
@@ -1078,7 +1097,7 @@ fn emit_swift(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
 /// Emit a standalone kotlin.test conformance scaffold.
 #[must_use]
 fn emit_kotlin(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let preamble = include_str!("testgen_kotlin.txt").replace("__SOURCE__", source_name);
+    let preamble = testgen_template(include_str!("testgen_kotlin.txt"), source_name);
     let mut lines = vec![format!("class {spec_name}ConformanceTest {{")];
     let mut seen = BTreeMap::new();
     for scenario in scenarios {
@@ -1149,7 +1168,7 @@ fn emit_kotlin(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &V
 /// Emit a standalone package:test Dart conformance scaffold.
 #[must_use]
 fn emit_dart(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let preamble = include_str!("testgen_dart.txt").replace("__SOURCE__", source_name);
+    let preamble = testgen_template(include_str!("testgen_dart.txt"), source_name);
     let mut lines = vec![
         "void main() {".to_owned(),
         "  final wired = _adapterWired();".to_owned(),
@@ -1220,11 +1239,11 @@ fn emit_dart(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
 /// Emit a standalone `PHPUnit` conformance scaffold.
 #[must_use]
 fn emit_phpunit(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let preamble = include_str!("testgen_php.txt").replace("__SOURCE__", source_name);
+    let preamble = testgen_template(include_str!("testgen_php.txt"), source_name);
     let mut lines = vec![
         format!("final class {spec_name}ConformanceTest extends TestCase"),
         "{".to_owned(),
-        include_str!("testgen_php_helpers.txt")
+        normalize_newlines(include_str!("testgen_php_helpers.txt"))
             .trim_end()
             .to_owned(),
     ];
@@ -1382,6 +1401,20 @@ mod tests {
         .expect("adapt explicit compose metadata");
 
         assert_eq!(public, compose);
+    }
+
+    #[test]
+    fn checked_in_templates_emit_the_same_text_after_windows_checkout() {
+        let unix = "Source: __SOURCE__\nbody\n";
+        let windows = "Source: __SOURCE__\r\nbody\r\n";
+        assert_eq!(
+            testgen_template(unix, "demo.fsl"),
+            testgen_template(windows, "demo.fsl")
+        );
+        assert_eq!(
+            portable_path(&Path::new("parent").join("child")),
+            "parent/child"
+        );
     }
 
     #[test]

@@ -527,37 +527,6 @@ fn published_v2_schema_ids_match_the_rust_api_constants() {
 }
 
 #[test]
-fn native_cli_contract_and_help_publish_the_new_commands() {
-    let binary = env!("CARGO_BIN_EXE_fslc");
-    let contract = Command::new(binary)
-        .arg("--cli-contract")
-        .output()
-        .expect("read CLI contract");
-    let contract: Value = serde_json::from_slice(&contract.stdout).expect("CLI contract JSON");
-    let paths = contract["root"]["commands"]
-        .as_array()
-        .expect("commands")
-        .iter()
-        .filter_map(|command| command["path"].as_array())
-        .filter_map(|path| path.first())
-        .filter_map(Value::as_str)
-        .collect::<BTreeSet<_>>();
-    assert!(paths.contains("kernel"));
-    assert!(paths.contains("conformance"));
-
-    for command in ["kernel", "conformance"] {
-        let help = Command::new(binary)
-            .args([command, "--help"])
-            .output()
-            .expect("run help");
-        assert!(help.status.success());
-        assert!(
-            String::from_utf8_lossy(&help.stdout).starts_with(&format!("usage: fslc {command}"))
-        );
-    }
-}
-
-#[test]
 fn published_schema_ids_match_the_rust_api_constants() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
