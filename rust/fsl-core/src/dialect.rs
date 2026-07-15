@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 use fsl_syntax::{
-    ActionItem, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
+    ActionItem, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
     BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
     LValue, MetaTag, Param, PreservationItem, ProcessField, ProcessItem, ProcessTransition,
     QualifiedName, RequirementAction, RequirementActionItem, RequirementBlockItem,
@@ -11,15 +13,69 @@ use fsl_syntax::{
     SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
 };
 
-use crate::{CoreError, KernelSpec, lower_direct_spec, substitute_expr};
+use crate::{
+    CoreError, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
+    ProjectionDef, TERMINAL_TARGET, action_target, lower_direct_spec, state_target,
+    substitute_expr,
+};
 
 #[derive(Clone)]
 struct Process {
     name: String,
+    entity: String,
+    path: Vec<String>,
+    qualifier: Option<String>,
     stages: Vec<String>,
     initial: String,
     transitions: Vec<ProcessTransition>,
     span: fsl_syntax::Span,
+}
+
+fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
+    let BusinessItem::Kpi {
+        name,
+        case_name,
+        stage,
+        span,
+    } = item
+    else {
+        unreachable!("KPI projection requires a KPI item");
+    };
+    let candidates = processes
+        .iter()
+        .filter(|process| process.entity == *case_name)
+        .collect::<Vec<_>>();
+    let [process] = candidates.as_slice() else {
+        return Err(core_error(
+            if candidates.is_empty() {
+                format!("KPI '{name}' uses unknown entity '{case_name}'")
+            } else {
+                format!("KPI '{name}' has ambiguous process for entity '{case_name}'")
+            },
+            *span,
+        ));
+    };
+    if !process.stages.contains(stage) {
+        return Err(core_error(
+            format!("KPI '{name}' uses unknown stage '{stage}'"),
+            *span,
+        ));
+    }
+    Ok(ProjectionDef {
+        name: name.clone(),
+        entity: case_name.clone(),
+        stage: stage.clone(),
+        expr: Expr::Aggregate {
+            kind: AggregateKind::Count,
+            binder: Binder::Typed {
+                name: "c".to_owned(),
+                type_name: qualified(case_name),
+                where_expr: Some(Box::new(stage_is(process, "c", stage))),
+            },
+            value: None,
+        },
+        span: *span,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,19 +158,622 @@ fn process_state(name: &str) -> String {
     format!("{}_stage", name.to_lowercase())
 }
 
+fn process_symbol(path: &fsl_syntax::SymbolPath) -> String {
+    if !path.has_namespace() {
+        return path.name().to_owned();
+    }
+    let source = path.segments().join(".");
+    let mut encoded = String::with_capacity(source.len() * 2);
+    for byte in source.as_bytes() {
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    format!("0q{encoded}")
+}
+
+fn process_path(document: &str, path: &fsl_syntax::SymbolPath) -> Vec<String> {
+    if path.has_namespace() {
+        path.segments().to_vec()
+    } else {
+        vec![document.to_owned(), path.name().to_owned()]
+    }
+}
+
 fn process_enum(name: &str) -> String {
     format!("{name}Stage")
+}
+
+fn stage_access(process: &Process, entity: Expr) -> Expr {
+    Expr::Index(
+        Box::new(Expr::Var(process_state(&process.name))),
+        Box::new(entity),
+    )
 }
 
 fn stage_is(process: &Process, binder: &str, stage: &str) -> Expr {
     Expr::Binary {
         op: "==".to_owned(),
-        left: Box::new(Expr::Index(
-            Box::new(Expr::Var(process_state(&process.name))),
-            Box::new(Expr::Var(binder.to_owned())),
-        )),
+        left: Box::new(stage_access(process, Expr::Var(binder.to_owned()))),
         right: Box::new(Expr::Var(stage.to_owned())),
     }
+}
+
+fn qualified_type_name(name: &QualifiedName) -> String {
+    name.namespace.as_ref().map_or_else(
+        || name.name.clone(),
+        |namespace| format!("{namespace}.{}", name.name),
+    )
+}
+
+struct StageResolver<'a> {
+    processes: &'a [Process],
+    occurrences: RefCell<Vec<StageOccurrence>>,
+}
+
+struct StageOccurrence {
+    span: fsl_syntax::Span,
+    source: String,
+    state: String,
+}
+
+impl StageResolver<'_> {
+    fn new(processes: &[Process]) -> StageResolver<'_> {
+        StageResolver {
+            processes,
+            occurrences: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn take_occurrences(&self) -> Vec<StageOccurrence> {
+        std::mem::take(&mut *self.occurrences.borrow_mut())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn expression(
+        &self,
+        expression: Expr,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<Expr, CoreError> {
+        Ok(match expression {
+            Expr::Stage {
+                process: qualifier,
+                entity,
+                entity_span,
+                span,
+            } => {
+                let Expr::Var(name) = entity.as_ref() else {
+                    return Err(core_error(
+                        "stage(...) expects a typed entity parameter or binder".to_owned(),
+                        entity_span,
+                    ));
+                };
+                let Some(entity_type) = environment.get(name) else {
+                    return Err(core_error(
+                        format!(
+                            "stage({name}) cannot be resolved; '{name}' is not a typed parameter or binder"
+                        ),
+                        entity_span,
+                    ));
+                };
+                let candidates = self
+                    .processes
+                    .iter()
+                    .filter(|candidate| candidate.entity == *entity_type)
+                    .collect::<Vec<_>>();
+                let candidates = if let Some(path) = &qualifier {
+                    let matching = candidates
+                        .iter()
+                        .copied()
+                        .filter(|candidate| {
+                            path.segments() == [candidate.entity.as_str()]
+                                || path.segments() == candidate.path
+                        })
+                        .collect::<Vec<_>>();
+                    if matching.is_empty() {
+                        return Err(core_error(
+                            format!(
+                                "process path '{path}' does not resolve for entity type '{entity_type}'"
+                            ),
+                            path.span(),
+                        ));
+                    }
+                    matching
+                } else {
+                    candidates
+                };
+                let [resolved] = candidates.as_slice() else {
+                    if candidates.is_empty() {
+                        return Err(core_error(
+                            format!(
+                                "stage({name}) refers to type '{entity_type}', which has no process"
+                            ),
+                            span,
+                        ));
+                    }
+                    let names = candidates
+                        .iter()
+                        .map(|candidate| candidate.path.join("."))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(core_error(
+                        format!(
+                            "stage({name}) is ambiguous for type '{entity_type}'; candidates: {names}; use <process>.stage({name})"
+                        ),
+                        span,
+                    ));
+                };
+                self.occurrences.borrow_mut().push(StageOccurrence {
+                    span,
+                    source: qualifier.as_ref().map_or_else(
+                        || format!("stage({name})"),
+                        |path| format!("{path}.stage({name})"),
+                    ),
+                    state: process_state(&resolved.name),
+                });
+                stage_access(resolved, *entity)
+            }
+            Expr::Some(value) => Expr::Some(Box::new(self.expression(*value, environment)?)),
+            Expr::Set(values) => Expr::Set(
+                values
+                    .into_iter()
+                    .map(|value| self.expression(value, environment))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Expr::Seq(values) => Expr::Seq(
+                values
+                    .into_iter()
+                    .map(|value| self.expression(value, environment))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Expr::Struct { name, fields } => Expr::Struct {
+                name,
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| Ok((name, self.expression(value, environment)?)))
+                    .collect::<Result<_, CoreError>>()?,
+            },
+            Expr::Call { name, args, span } => Expr::Call {
+                name,
+                args: args
+                    .into_iter()
+                    .map(|argument| self.expression(argument, environment))
+                    .collect::<Result<_, _>>()?,
+                span,
+            },
+            Expr::Index(base, index) => Expr::Index(
+                Box::new(self.expression(*base, environment)?),
+                Box::new(self.expression(*index, environment)?),
+            ),
+            Expr::Field(base, name) => {
+                Expr::Field(Box::new(self.expression(*base, environment)?), name)
+            }
+            Expr::Method {
+                receiver,
+                name,
+                args,
+            } => Expr::Method {
+                receiver: Box::new(self.expression(*receiver, environment)?),
+                name,
+                args: args
+                    .into_iter()
+                    .map(|argument| self.expression(argument, environment))
+                    .collect::<Result<_, _>>()?,
+            },
+            Expr::Binary { op, left, right } => Expr::Binary {
+                op,
+                left: Box::new(self.expression(*left, environment)?),
+                right: Box::new(self.expression(*right, environment)?),
+            },
+            Expr::Neg(value) => Expr::Neg(Box::new(self.expression(*value, environment)?)),
+            Expr::Not(value) => Expr::Not(Box::new(self.expression(*value, environment)?)),
+            Expr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                spans,
+            } => Expr::Conditional {
+                condition: Box::new(self.expression(*condition, environment)?),
+                then_expr: Box::new(self.expression(*then_expr, environment)?),
+                else_expr: Box::new(self.expression(*else_expr, environment)?),
+                spans,
+            },
+            Expr::Is { expr, pattern } => Expr::Is {
+                expr: Box::new(self.expression(*expr, environment)?),
+                pattern,
+            },
+            Expr::Quantified {
+                quantifier,
+                binder,
+                body,
+            } => {
+                let (binder, nested) = self.binder(binder, environment)?;
+                Expr::Quantified {
+                    quantifier,
+                    binder,
+                    body: Box::new(self.expression(*body, &nested)?),
+                }
+            }
+            Expr::Aggregate {
+                kind,
+                binder,
+                value,
+            } => {
+                let (binder, nested) = self.binder(binder, environment)?;
+                Expr::Aggregate {
+                    kind,
+                    binder,
+                    value: value
+                        .map(|value| self.expression(*value, &nested).map(Box::new))
+                        .transpose()?,
+                }
+            }
+            Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
+                name,
+                expr: Box::new(self.expression(*expr, environment)?),
+                span,
+            },
+            Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
+                name,
+                left: Box::new(self.expression(*left, environment)?),
+                right: Box::new(self.expression(*right, environment)?),
+            },
+            Expr::TernaryNamed {
+                name,
+                first,
+                second,
+                third,
+            } => Expr::TernaryNamed {
+                name,
+                first: Box::new(self.expression(*first, environment)?),
+                second: Box::new(self.expression(*second, environment)?),
+                third: Box::new(self.expression(*third, environment)?),
+            },
+            other => other,
+        })
+    }
+
+    fn binder(
+        &self,
+        binder: Binder,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(Binder, BTreeMap<String, String>), CoreError> {
+        let mut nested = environment.clone();
+        let binder = match binder {
+            Binder::Typed {
+                name,
+                type_name,
+                where_expr,
+            } => {
+                nested.insert(name.clone(), qualified_type_name(&type_name));
+                Binder::Typed {
+                    name,
+                    type_name,
+                    where_expr: where_expr
+                        .map(|value| self.expression(*value, &nested).map(Box::new))
+                        .transpose()?,
+                }
+            }
+            Binder::Range {
+                name,
+                lo,
+                hi,
+                where_expr,
+            } => {
+                nested.insert(name.clone(), "Int".to_owned());
+                Binder::Range {
+                    name,
+                    lo: Box::new(self.expression(*lo, environment)?),
+                    hi: Box::new(self.expression(*hi, environment)?),
+                    where_expr: where_expr
+                        .map(|value| self.expression(*value, &nested).map(Box::new))
+                        .transpose()?,
+                }
+            }
+            Binder::Collection {
+                name,
+                collection,
+                where_expr,
+            } => Binder::Collection {
+                name,
+                collection: Box::new(self.expression(*collection, environment)?),
+                where_expr: where_expr
+                    .map(|value| self.expression(*value, &nested).map(Box::new))
+                    .transpose()?,
+            },
+        };
+        Ok((binder, nested))
+    }
+}
+
+fn resolve_stage_expression(
+    resolver: &StageResolver<'_>,
+    expression: &mut Expr,
+    environment: &BTreeMap<String, String>,
+) -> Result<(), CoreError> {
+    *expression = resolver.expression(expression.clone(), environment)?;
+    Ok(())
+}
+
+fn resolve_stage_type(
+    resolver: &StageResolver<'_>,
+    ty: &mut TypeExpr,
+    environment: &BTreeMap<String, String>,
+) -> Result<(), CoreError> {
+    match ty {
+        TypeExpr::Range(lo, hi) => {
+            resolve_stage_expression(resolver, lo, environment)?;
+            resolve_stage_expression(resolver, hi, environment)
+        }
+        TypeExpr::Map(key, value) | TypeExpr::Relation(key, value) => {
+            resolve_stage_type(resolver, key, environment)?;
+            resolve_stage_type(resolver, value, environment)
+        }
+        TypeExpr::Set(item) | TypeExpr::Option(item) => {
+            resolve_stage_type(resolver, item, environment)
+        }
+        TypeExpr::Seq(item, size) => {
+            resolve_stage_type(resolver, item, environment)?;
+            resolve_stage_expression(resolver, size, environment)
+        }
+        TypeExpr::Int | TypeExpr::Bool | TypeExpr::Name(_) => Ok(()),
+    }
+}
+
+fn resolve_stage_parameters(
+    resolver: &StageResolver<'_>,
+    parameters: &mut [Param],
+) -> Result<BTreeMap<String, String>, CoreError> {
+    let mut environment = BTreeMap::new();
+    for parameter in parameters {
+        match parameter {
+            Param::Typed(name, ty) => {
+                environment.insert(name.clone(), qualified_type_name(ty));
+            }
+            Param::Range(name, lo, hi) => {
+                resolve_stage_expression(resolver, lo, &environment)?;
+                resolve_stage_expression(resolver, hi, &environment)?;
+                environment.insert(name.clone(), "Int".to_owned());
+            }
+        }
+    }
+    Ok(environment)
+}
+
+fn resolve_stage_lvalue(
+    resolver: &StageResolver<'_>,
+    target: &mut LValue,
+    environment: &BTreeMap<String, String>,
+) -> Result<(), CoreError> {
+    match target {
+        LValue::Index(_, index) => resolve_stage_expression(resolver, index, environment),
+        LValue::Field(base, _) => resolve_stage_lvalue(resolver, base, environment),
+        LValue::Var(_) => Ok(()),
+    }
+}
+
+fn resolve_stage_statements(
+    resolver: &StageResolver<'_>,
+    statements: &mut [Statement],
+    environment: &BTreeMap<String, String>,
+) -> Result<(), CoreError> {
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, value, .. } => {
+                resolve_stage_lvalue(resolver, target, environment)?;
+                resolve_stage_expression(resolver, value, environment)?;
+            }
+            Statement::If {
+                condition,
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                resolve_stage_expression(resolver, condition, environment)?;
+                resolve_stage_statements(resolver, then_statements, environment)?;
+                resolve_stage_statements(resolver, else_statements, environment)?;
+            }
+            Statement::ForAll {
+                binder, statements, ..
+            } => {
+                let (rewritten_binder, nested) = resolver.binder(binder.clone(), environment)?;
+                *binder = rewritten_binder;
+                resolve_stage_statements(resolver, statements, &nested)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_stage_action_items(
+    resolver: &StageResolver<'_>,
+    items: &mut [ActionItem],
+    environment: &BTreeMap<String, String>,
+) -> Result<(), CoreError> {
+    for item in items {
+        match item {
+            ActionItem::Requires(expression, _)
+            | ActionItem::Ensures(expression, _)
+            | ActionItem::Let(_, expression, _) => {
+                resolve_stage_expression(resolver, expression, environment)?;
+            }
+            ActionItem::Statement(statement) => {
+                resolve_stage_statements(resolver, std::slice::from_mut(statement), environment)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn stage_origin_targets(item: &SpecItem) -> Vec<String> {
+    match item {
+        SpecItem::Action { name, .. } => vec![action_target(name)],
+        SpecItem::Terminal { .. } => vec![TERMINAL_TARGET.to_owned()],
+        _ => property_targets(item),
+    }
+}
+
+fn stage_origin(target: &str, occurrence: &StageOccurrence, dialect: &str) -> OriginChain {
+    OriginChain {
+        id: OriginId(format!(
+            "{dialect}:stage-access:{}:{}",
+            occurrence.span.start.offset, occurrence.span.end.offset
+        )),
+        dialect: dialect.to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(occurrence.span),
+            dialect: dialect.to_owned(),
+            declaration_path: target.split(':').map(str::to_owned).collect(),
+        }),
+        secondary: Vec::new(),
+        lowering_steps: vec![LoweringStep {
+            kind: "resolve_stage_access".to_owned(),
+            detail: Some(format!(
+                "{} -> {}[entity]",
+                occurrence.source, occurrence.state
+            )),
+        }],
+        generated: false,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn resolve_stage_items(
+    items: &mut [SpecItem],
+    processes: &[Process],
+    dialect: &str,
+) -> Result<OriginRegistry, CoreError> {
+    let resolver = StageResolver::new(processes);
+    let mut origins = OriginRegistry::default();
+    for process in processes {
+        let target = state_target(&process_state(&process.name));
+        origins.bind(
+            target.clone(),
+            OriginChain {
+                id: OriginId(format!(
+                    "{dialect}:process-stage-map:{}:{}",
+                    process.span.start.offset, process.span.end.offset
+                )),
+                dialect: dialect.to_owned(),
+                primary: Some(OriginSite {
+                    source_file: None,
+                    span: Some(process.span),
+                    dialect: dialect.to_owned(),
+                    declaration_path: process.path.clone(),
+                }),
+                secondary: Vec::new(),
+                lowering_steps: std::iter::once(LoweringStep {
+                    kind: "synthesize_stage_map".to_owned(),
+                    detail: Some(process_state(&process.name)),
+                })
+                .chain(process.qualifier.as_ref().map(|qualifier| LoweringStep {
+                    kind: "qualified_process_path".to_owned(),
+                    detail: Some(qualifier.clone()),
+                }))
+                .collect(),
+                generated: true,
+            },
+        );
+    }
+    let empty = BTreeMap::new();
+    for item in items {
+        debug_assert!(resolver.take_occurrences().is_empty());
+        match item {
+            SpecItem::Const { value, .. } => {
+                resolve_stage_expression(&resolver, value, &empty)?;
+            }
+            SpecItem::Def { params, value, .. } => {
+                let environment = params
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
+                    .collect();
+                resolve_stage_expression(&resolver, value, &environment)?;
+            }
+            SpecItem::Type { lo, hi, .. } => {
+                resolve_stage_expression(&resolver, lo, &empty)?;
+                resolve_stage_expression(&resolver, hi, &empty)?;
+            }
+            SpecItem::Struct { fields, .. } => {
+                for (_, ty) in fields {
+                    resolve_stage_type(&resolver, ty, &empty)?;
+                }
+            }
+            SpecItem::State(fields) => {
+                for field in fields {
+                    resolve_stage_type(&resolver, &mut field.ty, &empty)?;
+                    if let Some(initializer) = &mut field.initializer {
+                        resolve_stage_expression(&resolver, initializer, &empty)?;
+                    }
+                }
+            }
+            SpecItem::Init { statements, .. } => {
+                resolve_stage_statements(&resolver, statements, &empty)?;
+            }
+            SpecItem::Action {
+                params,
+                items: action_items,
+                ..
+            } => {
+                let environment = resolve_stage_parameters(&resolver, params)?;
+                resolve_stage_action_items(&resolver, action_items, &environment)?;
+            }
+            SpecItem::Invariant { expr, .. }
+            | SpecItem::Trans { expr, .. }
+            | SpecItem::Reachable { expr, .. }
+            | SpecItem::Terminal { expr, .. } => {
+                resolve_stage_expression(&resolver, expr, &empty)?;
+            }
+            SpecItem::Until { before, after, .. } | SpecItem::Unless { before, after, .. } => {
+                resolve_stage_expression(&resolver, before, &empty)?;
+                resolve_stage_expression(&resolver, after, &empty)?;
+            }
+            SpecItem::LeadsTo {
+                binders,
+                before,
+                after,
+                decreases,
+                within,
+                helpful,
+                ..
+            } => {
+                let mut environment = empty.clone();
+                for binder in binders {
+                    let (rewritten_binder, nested) =
+                        resolver.binder(binder.clone(), &environment)?;
+                    *binder = rewritten_binder;
+                    environment = nested;
+                }
+                resolve_stage_expression(&resolver, before, &environment)?;
+                resolve_stage_expression(&resolver, after, &environment)?;
+                if let Some(expression) = decreases {
+                    resolve_stage_expression(&resolver, expression, &environment)?;
+                }
+                if let Some(expression) = within {
+                    resolve_stage_expression(&resolver, expression, &environment)?;
+                }
+                for action in helpful {
+                    for argument in &mut action.args {
+                        resolve_stage_expression(&resolver, argument, &environment)?;
+                    }
+                }
+            }
+            SpecItem::VerifyBounds { items, .. } => {
+                for item in items {
+                    if let VerifyItem::Values(_, lo, hi, _) = item {
+                        resolve_stage_expression(&resolver, lo, &empty)?;
+                        resolve_stage_expression(&resolver, hi, &empty)?;
+                    }
+                }
+            }
+            SpecItem::Enum { .. } | SpecItem::Entity(..) | SpecItem::Number(..) => {}
+        }
+        let occurrences = resolver.take_occurrences();
+        for target in stage_origin_targets(item) {
+            for occurrence in &occurrences {
+                origins.bind(target.clone(), stage_origin(&target, occurrence, dialect));
+            }
+        }
+    }
+    Ok(origins)
 }
 
 fn or_all(mut expressions: Vec<Expr>) -> Expr {
@@ -224,7 +883,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 *span,
             )
         })?;
-        if !entities.iter().any(|(entity, _)| entity == name) {
+        if !entities.iter().any(|(entity, _)| entity == name.name()) {
             return Err(core_error(
                 format!("process '{name}' has no matching entity declaration"),
                 *span,
@@ -242,7 +901,10 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             }
         }
         processes.push(Process {
-            name: name.clone(),
+            name: process_symbol(name),
+            entity: name.name().to_owned(),
+            path: process_path(&business.name, name),
+            qualifier: name.has_namespace().then(|| name.to_string()),
             stages,
             initial,
             transitions,
@@ -287,7 +949,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     StateField::generated(
                         process_state(&process.name),
                         TypeExpr::Map(
-                            Box::new(TypeExpr::Name(process.name.clone())),
+                            Box::new(TypeExpr::Name(process.entity.clone())),
                             Box::new(TypeExpr::Name(process_enum(&process.name))),
                         ),
                         process.span,
@@ -299,7 +961,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             statements: processes
                 .iter()
                 .map(|process| Statement::ForAll {
-                    binder: typed_binder("c", &process.name),
+                    binder: typed_binder("c", &process.entity),
                     statements: vec![Statement::Assign {
                         target: LValue::Index(
                             process_state(&process.name),
@@ -337,7 +999,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             );
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
-                params: vec![Param::Typed("c".to_owned(), qualified(&process.name))],
+                params: vec![Param::Typed("c".to_owned(), qualified(&process.entity))],
                 items: vec![
                     ActionItem::Requires(
                         stage_is(process, "c", &transition.source),
@@ -376,7 +1038,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 .collect::<Vec<_>>();
             Expr::Quantified {
                 quantifier: "forall".to_owned(),
-                binder: typed_binder("c", &process.name),
+                binder: typed_binder("c", &process.entity),
                 body: Box::new(or_all(sinks)),
             }
         })
@@ -389,7 +1051,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
     }
     let by_name = processes
         .iter()
-        .map(|process| (process.name.as_str(), process))
+        .map(|process| (process.entity.as_str(), process))
         .collect::<BTreeMap<_, _>>();
     for policy in policies {
         let BusinessItem::Policy {
@@ -505,11 +1167,22 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             annotations: goal_annotations.clone(),
         });
     }
-    let mut kernel = lower_direct_spec(SurfaceSpec {
-        name: business.name,
-        meta: None,
-        items,
-    })?;
+    let projections = business
+        .items
+        .iter()
+        .filter(|item| matches!(item, BusinessItem::Kpi { .. }))
+        .map(|item| kpi_projection(item, &processes))
+        .collect::<Result<Vec<_>, _>>()?;
+    let origins = resolve_stage_items(&mut items, &processes, "business")?;
+    let mut kernel = crate::lower_direct_spec_with_origins(
+        SurfaceSpec {
+            name: business.name,
+            meta: None,
+            items,
+        },
+        origins,
+    )?;
+    kernel.set_projections(projections);
     for (target, annotation) in explicit_annotations {
         kernel.bind_annotation(target, annotation);
     }
@@ -529,6 +1202,67 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
 struct RequirementsProcess {
     process: Process,
     fields: Vec<ProcessField>,
+}
+
+fn requirements_processes(
+    requirements: &SurfaceRequirements,
+) -> Result<Vec<RequirementsProcess>, CoreError> {
+    requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Process(item) => Some(item),
+            _ => None,
+        })
+        .map(|item| {
+            let BusinessItem::Process {
+                name,
+                fields,
+                items,
+                span,
+            } = item
+            else {
+                return Err(core_error(
+                    "expected process declaration".to_owned(),
+                    zero_span(),
+                ));
+            };
+            let mut stages = None;
+            let mut initial = None;
+            let mut transitions = Vec::new();
+            for item in items {
+                match item {
+                    ProcessItem::Stages(values, _) => stages = Some(values.clone()),
+                    ProcessItem::Initial(value, _) => initial = Some(value.clone()),
+                    ProcessItem::Transition(transition) => {
+                        transitions.push(transition.as_ref().clone());
+                    }
+                }
+            }
+            Ok(RequirementsProcess {
+                process: Process {
+                    name: process_symbol(name),
+                    entity: name.name().to_owned(),
+                    path: process_path(&requirements.name, name),
+                    qualifier: name.has_namespace().then(|| name.to_string()),
+                    stages: stages.ok_or_else(|| {
+                        core_error(format!("process '{name}' must declare stages"), *span)
+                    })?,
+                    initial: initial.ok_or_else(|| {
+                        core_error(
+                            format!("process '{name}' must declare initial stage"),
+                            *span,
+                        )
+                    })?,
+                    transitions,
+                    span: *span,
+                },
+                fields: fields
+                    .as_ref()
+                    .map_or_else(Vec::new, |fields| fields.fields.clone()),
+            })
+        })
+        .collect()
 }
 
 fn process_field_state(process: &str, field: &str) -> String {
@@ -706,6 +1440,7 @@ fn action_enabled_expression(action: &SpecItem) -> Option<Expr> {
                 name: name.clone(),
                 lo: Box::new(lo.clone()),
                 hi: Box::new(hi.clone()),
+                where_expr: None,
             },
         };
         expression = Expr::Quantified {
@@ -756,7 +1491,6 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     let mut numbers = Vec::new();
     let mut instance_bounds = BTreeMap::new();
     let mut value_bounds = BTreeMap::new();
-    let mut process_items = Vec::new();
     let mut requirement_items = Vec::new();
     let mut standalone_actions = Vec::new();
     let mut time_items = None;
@@ -782,7 +1516,6 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 }
             }
             RequirementsItem::Common(item) => common.push(item.clone()),
-            RequirementsItem::Process(item) => process_items.push(item),
             RequirementsItem::Requirement { .. } => requirement_items.push(item),
             RequirementsItem::Action(action) => standalone_actions.push(action),
             RequirementsItem::Time { items, span } => {
@@ -799,9 +1532,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     }
     for item in &requirements.items {
         if let RequirementsItem::Process(BusinessItem::Process { name, span, .. }) = item
-            && !entities.iter().any(|(candidate, _)| candidate == name)
+            && !entities
+                .iter()
+                .any(|(candidate, _)| candidate == name.name())
         {
-            entities.push((name.clone(), *span));
+            entities.push((name.name().to_owned(), *span));
         }
     }
     let mut items = Vec::new();
@@ -836,52 +1571,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     }
     items.extend(common);
 
-    let mut processes = Vec::new();
-    for item in process_items {
-        let BusinessItem::Process {
-            name,
-            fields,
-            items,
-            span,
-        } = item
-        else {
-            return Err(core_error(
-                "expected process declaration".to_owned(),
-                zero_span(),
-            ));
-        };
-        let mut stages = None;
-        let mut initial = None;
-        let mut transitions = Vec::new();
-        for item in items {
-            match item {
-                ProcessItem::Stages(values, _) => stages = Some(values.clone()),
-                ProcessItem::Initial(value, _) => initial = Some(value.clone()),
-                ProcessItem::Transition(transition) => {
-                    transitions.push(transition.as_ref().clone());
-                }
-            }
-        }
-        processes.push(RequirementsProcess {
-            process: Process {
-                name: name.clone(),
-                stages: stages.ok_or_else(|| {
-                    core_error(format!("process '{name}' must declare stages"), *span)
-                })?,
-                initial: initial.ok_or_else(|| {
-                    core_error(
-                        format!("process '{name}' must declare initial stage"),
-                        *span,
-                    )
-                })?,
-                transitions,
-                span: *span,
-            },
-            fields: fields
-                .as_ref()
-                .map_or_else(Vec::new, |fields| fields.fields.clone()),
-        });
-    }
+    let processes = requirements_processes(&requirements)?;
     for process in &processes {
         items.push(SpecItem::Enum {
             name: process_enum(&process.process.name),
@@ -896,7 +1586,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         state.push(StateField::generated(
             process_state(process_name),
             TypeExpr::Map(
-                Box::new(TypeExpr::Name(process_name.clone())),
+                Box::new(TypeExpr::Name(process.process.entity.clone())),
                 Box::new(TypeExpr::Name(process_enum(process_name))),
             ),
             process.process.span,
@@ -935,7 +1625,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             });
         }
         init.push(Statement::ForAll {
-            binder: typed_binder("c", process_name),
+            binder: typed_binder("c", &process.process.entity),
             statements: init_body,
             span: process.process.span,
         });
@@ -1014,7 +1704,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             );
             let mut params = vec![Param::Typed(
                 "c".to_owned(),
-                qualified(&process.process.name),
+                qualified(&process.process.entity),
             )];
             params.extend(transition.inputs.clone());
             items.push(SpecItem::Action {
@@ -1375,11 +2065,29 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             });
         }
     }
-    let mut kernel = lower_direct_spec(SurfaceSpec {
-        name: requirements.name,
-        meta: None,
-        items,
-    })?;
+    let stage_processes = processes
+        .iter()
+        .map(|process| process.process.clone())
+        .collect::<Vec<_>>();
+    let projections = requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Kpi(item) => Some(item),
+            _ => None,
+        })
+        .map(|item| kpi_projection(item, &stage_processes))
+        .collect::<Result<Vec<_>, _>>()?;
+    let origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    let mut kernel = crate::lower_direct_spec_with_origins(
+        SurfaceSpec {
+            name: requirements.name,
+            meta: None,
+            items,
+        },
+        origins,
+    )?;
+    kernel.set_projections(projections);
     for (target, annotation) in extra_annotations {
         kernel.bind_annotation(target, annotation);
     }
@@ -1580,6 +2288,11 @@ pub fn requirements_trace_contract(
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(None);
     };
+    let stage_processes = requirements_processes(&requirements)?
+        .into_iter()
+        .map(|process| process.process)
+        .collect::<Vec<_>>();
+    let stage_resolver = StageResolver::new(&stage_processes);
     let mut acceptance = Vec::new();
     let mut forbidden = Vec::new();
     for item in requirements.items {
@@ -1605,7 +2318,8 @@ pub fn requirements_trace_contract(
             } => {
                 let annotations = trace_case_annotations(&id, &text, span, &surface_annotations)?;
                 let expectation = match expectation {
-                    fsl_syntax::AcceptanceExpectation::Expr(expr, _) => {
+                    fsl_syntax::AcceptanceExpectation::Expr(mut expr, _) => {
+                        resolve_stage_expression(&stage_resolver, &mut expr, &BTreeMap::new())?;
                         RequirementsTraceExpectation::Expr(expr)
                     }
                     fsl_syntax::AcceptanceExpectation::Stage {

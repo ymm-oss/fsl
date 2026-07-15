@@ -14,10 +14,10 @@ use fsl_syntax::{
 use serde_json::Value;
 
 pub use fsl_syntax::{
-    Annotation, AnnotationError, AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue,
-    Annotations, Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr,
-    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Statement as KernelStatement,
-    SymbolPath,
+    AggregateKind as KernelAggregateKind, Annotation, AnnotationError,
+    AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue, Annotations,
+    Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr, LValue as KernelLValue,
+    Pattern, QualifiedName, RequirementLink, Statement as KernelStatement, SymbolPath,
 };
 
 mod compose;
@@ -59,7 +59,8 @@ pub use origin::{
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,
     KERNEL_V2_SCHEMA_ID, KERNEL_V2_SCHEMA_VERSION, PublicKernelError, PublicKernelVersion,
-    public_kernel_contract, public_kernel_contract_for_version,
+    TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION, public_kernel_contract,
+    public_kernel_contract_for_version,
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
@@ -145,6 +146,16 @@ pub struct KernelSpec {
     spec: SurfaceSpec,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
+    projections: Vec<ProjectionDef>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectionDef {
+    pub name: String,
+    pub entity: String,
+    pub stage: String,
+    pub expr: Expr,
+    pub span: fsl_syntax::Span,
 }
 
 /// Build a checked kernel model from an already parsed surface specification.
@@ -160,6 +171,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         spec,
         origins: OriginRegistry::default(),
         annotations: AnnotationRegistry::default(),
+        projections: Vec::new(),
     })
 }
 
@@ -192,6 +204,15 @@ impl KernelSpec {
     #[must_use]
     pub fn annotations(&self) -> &AnnotationRegistry {
         &self.annotations
+    }
+
+    #[must_use]
+    pub fn projections(&self) -> &[ProjectionDef] {
+        &self.projections
+    }
+
+    pub(crate) fn set_projections(&mut self, projections: Vec<ProjectionDef>) {
+        self.projections = projections;
     }
 
     #[must_use]
@@ -373,6 +394,7 @@ fn lower_direct_spec_with_origins(
         spec,
         origins,
         annotations: AnnotationRegistry::default(),
+        projections: Vec::new(),
     })
 }
 
@@ -936,10 +958,18 @@ impl PredicateExpander {
                     .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
                     .transpose()?,
             },
-            Binder::Range { name, lo, hi } => Binder::Range {
+            Binder::Range {
+                name,
+                lo,
+                hi,
+                where_expr,
+            } => Binder::Range {
                 name,
                 lo: Box::new(self.expand_expr(*lo, stack)?),
                 hi: Box::new(self.expand_expr(*hi, stack)?),
+                where_expr: where_expr
+                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .transpose()?,
             },
             Binder::Collection {
                 name,
@@ -1076,25 +1106,14 @@ impl PredicateExpander {
                 binder: self.expand_binder(binder, stack)?,
                 body: Box::new(self.expand_expr(*body, stack)?),
             },
-            Expr::Count {
-                name,
-                type_name,
-                condition,
-            } => Expr::Count {
-                name,
-                type_name,
-                condition: Box::new(self.expand_expr(*condition, stack)?),
-            },
-            Expr::Sum {
-                name,
-                type_name,
-                body,
-                condition,
-            } => Expr::Sum {
-                name,
-                type_name,
-                body: Box::new(self.expand_expr(*body, stack)?),
-                condition: condition
+            Expr::Aggregate {
+                kind,
+                binder,
+                value,
+            } => Expr::Aggregate {
+                kind,
+                binder: self.expand_binder(binder, stack)?,
+                value: value
                     .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
                     .transpose()?,
             },
@@ -1119,10 +1138,6 @@ impl PredicateExpander {
                 second: Box::new(self.expand_expr(*second, stack)?),
                 third: Box::new(self.expand_expr(*third, stack)?),
             },
-            Expr::BinderNamed { name, binder } => Expr::BinderNamed {
-                name,
-                binder: self.expand_binder(binder, stack)?,
-            },
             other => other,
         })
     }
@@ -1137,7 +1152,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
-fn visit_expr_children(
+pub(crate) fn visit_expr_children(
     expr: &Expr,
     visitor: &mut impl FnMut(&Expr) -> Result<(), CoreError>,
 ) -> Result<(), CoreError> {
@@ -1145,6 +1160,7 @@ fn visit_expr_children(
         Expr::Some(expr)
         | Expr::Neg(expr)
         | Expr::Not(expr)
+        | Expr::Stage { entity: expr, .. }
         | Expr::UnaryNamed { expr, .. }
         | Expr::Is { expr, .. } => visitor(expr)?,
         Expr::Set(items) | Expr::Seq(items) => {
@@ -1189,13 +1205,10 @@ fn visit_expr_children(
             visit_binder_exprs(binder, visitor)?;
             visitor(body)?;
         }
-        Expr::Count { condition, .. } => visitor(condition)?,
-        Expr::Sum {
-            body, condition, ..
-        } => {
-            visitor(body)?;
-            if let Some(condition) = condition {
-                visitor(condition)?;
+        Expr::Aggregate { binder, value, .. } => {
+            visit_binder_exprs(binder, visitor)?;
+            if let Some(value) = value {
+                visitor(value)?;
             }
         }
         Expr::TernaryNamed {
@@ -1208,7 +1221,6 @@ fn visit_expr_children(
             visitor(second)?;
             visitor(third)?;
         }
-        Expr::BinderNamed { binder, .. } => visit_binder_exprs(binder, visitor)?,
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => {}
     }
     Ok(())
@@ -1224,9 +1236,14 @@ fn visit_binder_exprs(
                 visitor(expr)?;
             }
         }
-        Binder::Range { lo, hi, .. } => {
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => {
             visitor(lo)?;
             visitor(hi)?;
+            if let Some(expr) = where_expr {
+                visitor(expr)?;
+            }
         }
         Binder::Collection {
             collection,
@@ -1250,11 +1267,8 @@ fn bound_vars(expr: &Expr) -> HashSet<String> {
 
 fn collect_bound_vars(expr: &Expr, out: &mut HashSet<String>) {
     match expr {
-        Expr::Quantified { binder, .. } | Expr::BinderNamed { binder, .. } => {
+        Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
             out.insert(binder_name(binder).to_owned());
-        }
-        Expr::Count { name, .. } | Expr::Sum { name, .. } => {
-            out.insert(name.clone());
         }
         _ => {}
     }
@@ -1276,22 +1290,60 @@ fn free_vars_bound(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
             HashSet::from([name.clone()])
         };
     }
-    let mut child_bound = bound.clone();
-    match expr {
-        Expr::Quantified { binder, .. } | Expr::BinderNamed { binder, .. } => {
-            child_bound.insert(binder_name(binder).to_owned());
+    if let Expr::Quantified { binder, body, .. } = expr {
+        let (mut out, nested_bound) = free_vars_binder(binder, bound);
+        out.extend(free_vars_bound(body, &nested_bound));
+        return out;
+    }
+    if let Expr::Aggregate { binder, value, .. } = expr {
+        let (mut out, nested_bound) = free_vars_binder(binder, bound);
+        if let Some(value) = value {
+            out.extend(free_vars_bound(value, &nested_bound));
         }
-        Expr::Count { name, .. } | Expr::Sum { name, .. } => {
-            child_bound.insert(name.clone());
-        }
-        _ => {}
+        return out;
     }
     let mut out = HashSet::new();
     let _ = visit_expr_children(expr, &mut |child| {
-        out.extend(free_vars_bound(child, &child_bound));
+        out.extend(free_vars_bound(child, bound));
         Ok(())
     });
     out
+}
+
+fn free_vars_binder(
+    binder: &Binder,
+    bound: &HashSet<String>,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut nested_bound = bound.clone();
+    nested_bound.insert(binder_name(binder).to_owned());
+    let mut out = HashSet::new();
+    match binder {
+        Binder::Typed { where_expr, .. } => {
+            if let Some(filter) = where_expr {
+                out.extend(free_vars_bound(filter, &nested_bound));
+            }
+        }
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => {
+            out.extend(free_vars_bound(lo, bound));
+            out.extend(free_vars_bound(hi, bound));
+            if let Some(filter) = where_expr {
+                out.extend(free_vars_bound(filter, &nested_bound));
+            }
+        }
+        Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => {
+            out.extend(free_vars_bound(collection, bound));
+            if let Some(filter) = where_expr {
+                out.extend(free_vars_bound(filter, &nested_bound));
+            }
+        }
+    }
+    (out, nested_bound)
 }
 
 fn binder_name(binder: &Binder) -> &str {
@@ -1384,31 +1436,31 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             quantifier,
             binder,
             body,
-        } => Expr::Quantified {
-            quantifier,
-            binder: substitute_binder(binder, replacements),
-            body: Box::new(substitute(*body, replacements)),
-        },
-        Expr::Count {
-            name,
-            type_name,
-            condition,
-        } => Expr::Count {
-            name,
-            type_name,
-            condition: Box::new(substitute(*condition, replacements)),
-        },
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => Expr::Sum {
-            name,
-            type_name,
-            body: Box::new(substitute(*body, replacements)),
-            condition: condition.map(|expr| Box::new(substitute(*expr, replacements))),
-        },
+        } => {
+            let (binder, mut contents, scoped) =
+                capture_avoiding_binding(binder, vec![*body], replacements);
+            Expr::Quantified {
+                quantifier,
+                binder: substitute_binder(binder, replacements),
+                body: Box::new(substitute(contents.remove(0), &scoped)),
+            }
+        }
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
+        } => {
+            let contents = value.map_or_else(Vec::new, |expr| vec![*expr]);
+            let (binder, mut contents, scoped) =
+                capture_avoiding_binding(binder, contents, replacements);
+            Expr::Aggregate {
+                kind,
+                binder: substitute_binder(binder, replacements),
+                value: contents
+                    .pop()
+                    .map(|expr| Box::new(substitute(expr, &scoped))),
+            }
+        }
         Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
             name,
             expr: Box::new(substitute(*expr, replacements)),
@@ -1430,10 +1482,6 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             second: Box::new(substitute(*second, replacements)),
             third: Box::new(substitute(*third, replacements)),
         },
-        Expr::BinderNamed { name, binder } => Expr::BinderNamed {
-            name,
-            binder: substitute_binder(binder, replacements),
-        },
         other => other,
     }
 }
@@ -1450,10 +1498,138 @@ pub fn substitute_expr<S: std::hash::BuildHasher>(
     substitute(expr, replacements)
 }
 
+fn without_replacement<S: std::hash::BuildHasher>(
+    replacements: &HashMap<String, Expr, S>,
+    binding: &str,
+) -> HashMap<String, Expr> {
+    replacements
+        .iter()
+        .filter(|(name, _)| name.as_str() != binding)
+        .map(|(name, expr)| (name.clone(), expr.clone()))
+        .collect()
+}
+
+fn capture_avoiding_binding<S: std::hash::BuildHasher>(
+    binder: Binder,
+    contents: Vec<Expr>,
+    replacements: &HashMap<String, Expr, S>,
+) -> (Binder, Vec<Expr>, HashMap<String, Expr>) {
+    let binding = binder_name(&binder).to_owned();
+    let scoped = without_replacement(replacements, &binding);
+    if !scoped
+        .values()
+        .any(|replacement| free_vars(replacement).contains(&binding))
+    {
+        return (binder, contents, scoped);
+    }
+
+    let mut names = HashSet::from([binding.clone()]);
+    names.extend(scoped.keys().cloned());
+    for replacement in scoped.values() {
+        collect_names(replacement, &mut names);
+    }
+    collect_binder_names(&binder, &mut names);
+    for content in &contents {
+        collect_names(content, &mut names);
+    }
+    let mut index = 0_u64;
+    let fresh = loop {
+        let candidate = format!("__{binding}_substitution_{index}");
+        if !names.contains(&candidate) {
+            break candidate;
+        }
+        index = index
+            .checked_add(1)
+            .expect("the identifier space is unbounded");
+    };
+    let rename = HashMap::from([(binding, Expr::Var(fresh.clone()))]);
+    let binder = rename_binder_binding(binder, fresh, &rename);
+    let contents = contents
+        .into_iter()
+        .map(|content| substitute(content, &rename))
+        .collect();
+    (binder, contents, scoped)
+}
+
+fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String, Expr>) -> Binder {
+    match binder {
+        Binder::Typed {
+            type_name,
+            where_expr,
+            ..
+        } => Binder::Typed {
+            name: fresh,
+            type_name,
+            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, rename))),
+        },
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => Binder::Range {
+            name: fresh,
+            lo,
+            hi,
+            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, rename))),
+        },
+        Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => Binder::Collection {
+            name: fresh,
+            collection,
+            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, rename))),
+        },
+    }
+}
+
+fn collect_binder_names(binder: &Binder, names: &mut HashSet<String>) {
+    names.insert(binder_name(binder).to_owned());
+    match binder {
+        Binder::Typed { where_expr, .. } => {
+            if let Some(filter) = where_expr {
+                collect_names(filter, names);
+            }
+        }
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => {
+            collect_names(lo, names);
+            collect_names(hi, names);
+            if let Some(filter) = where_expr {
+                collect_names(filter, names);
+            }
+        }
+        Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => {
+            collect_names(collection, names);
+            if let Some(filter) = where_expr {
+                collect_names(filter, names);
+            }
+        }
+    }
+}
+
+fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
+    if let Expr::Var(name) = expr {
+        names.insert(name.clone());
+    }
+    if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr {
+        collect_binder_names(binder, names);
+    }
+    let _ = visit_expr_children(expr, &mut |child| {
+        collect_names(child, names);
+        Ok(())
+    });
+}
+
 fn substitute_binder<S: std::hash::BuildHasher>(
     binder: Binder,
     replacements: &HashMap<String, Expr, S>,
 ) -> Binder {
+    let scoped = without_replacement(replacements, binder_name(&binder));
     match binder {
         Binder::Typed {
             name,
@@ -1462,12 +1638,18 @@ fn substitute_binder<S: std::hash::BuildHasher>(
         } => Binder::Typed {
             name,
             type_name,
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, replacements))),
+            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, &scoped))),
         },
-        Binder::Range { name, lo, hi } => Binder::Range {
+        Binder::Range {
+            name,
+            lo,
+            hi,
+            where_expr,
+        } => Binder::Range {
             name,
             lo: Box::new(substitute(*lo, replacements)),
             hi: Box::new(substitute(*hi, replacements)),
+            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, &scoped))),
         },
         Binder::Collection {
             name,
@@ -1476,7 +1658,7 @@ fn substitute_binder<S: std::hash::BuildHasher>(
         } => Binder::Collection {
             name,
             collection: Box::new(substitute(*collection, replacements)),
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, replacements))),
+            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, &scoped))),
         },
     }
 }

@@ -640,14 +640,15 @@ cannot be assigned both inline and in `init`.
   (in `a//b` everything after `//` becomes a comment, so write division with a
   space: `a / b`)
 - Comparison: `== != < <= > >=` / logic: `and or not =>`
-- Quantification: `forall x: T { expr }`, `exists x: T { expr }` (`where expr`
-  allowed), `forall x in set_or_seq { expr }` / `exists x in set_or_seq { expr }`
-  for expression-only Set/Seq iteration, and the v0 form
-  `forall i in lo..hi: expr` (range is a constant expression: `0..CAP-1` recommended)
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
-- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
-  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
-  matching binding; `exactlyOne` means exactly one.
+- Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each with an
+  optional `where BoolExpr`. Maps and unbounded domains are rejected.
+- Quantification: canonical `forall binder { expr }` / `exists binder { expr }`.
+  The 2.x colon/no-braces spelling remains accepted as non-canonical input.
+- Aggregation: `count(binder)` and `sum(binder of value)`, including collection
+  and range binders. Empty domains yield `0`; Seq duplicates count once per live
+  slot and Set members once per distinct value.
+- Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
+  means at most one match; `exactlyOne` means exactly one.
 - Option: `x == none` `x != none` `x == some(e)` `x != some(e)` use structural
   equality (presence first, then payload when present). `x is some(v)` is still
   required when `v` must be bound for the rest of the formula; equality creates
@@ -1249,13 +1250,21 @@ oracle, stepping through the implementation one step at a time. A failure = a
 divergence between implementation and spec (read the trace to decide which one is
 correct).
 
+The native pytest/Vitest/Swift/Kotlin/Dart/PHPUnit emitters share one validated
+input adapter: Public Kernel v1 metadata, scenario JSON, and the versioned
+fixed-seed `testgen-trace.v1` conformance trace. They never consume a private
+model or AST. Public Kernel/trace schema mismatches, malformed vectors, unknown
+state/action/parameter names, and spec-name mismatches fail closed. Compose is the explicit exception at the producer boundary because
+Public Kernel rejects incomplete multi-file provenance; checked names/order feed
+the same adapter until truthful compose export is available.
+
 `--target` chooses the harness; the scenario-collection core is shared, so both
 emit the same scenarios:
 - `pytest` (default): Python tests; the random walk imports `fslc.runtime.Monitor`
   and runs the fixed-seed walk live as the oracle. Output defaults to `test_<spec>.py`.
 - `vitest`: a self-contained TypeScript (Vitest) file with the same `Adapter`
   contract (`reset`/`step`/`observe`). Deterministic and forbidden scenarios map
-  directly; the random walk is **baked at generation time** (the Python Monitor
+  directly; the random walk is **baked at generation time** (the concrete Monitor
   runs the seed-fixed walk and the `(action, params, expected_state)` trace is
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
   Until `makeAdapter()` is wired the suite is skipped. Output defaults to
@@ -1518,10 +1527,14 @@ verify {
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.
 - `terminal { <expr> }` is allowed at the top level (pass-through to the
-  kernel, one block per spec, same as the kernel). In the process+data
-  profile, write the predicate against the synthesized stage map
-  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`) — not
-  `stage(c)`, which is business-only.
+  kernel, one block per spec, same as the kernel). In the process+data profile,
+  write `stage(c)` for a typed entity binder or parameter; it resolves to the
+  process stage enum and lowers to the synthesized stage map. Requirements do
+  not infer terminal states from sink stages.
+- If several qualified processes share an entity type, declare paths such as
+  `process claims.Claim` and use `claims.Claim.stage(c)` to disambiguate.
+  Arbitrary-depth paths use the shared `SymbolPath` parser; generated
+  `*_stage` names are not requirements source vocabulary.
 
 ### Drawing the layer boundary
 

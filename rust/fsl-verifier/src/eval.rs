@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use fsl_core::{
-    FslValue, KernelBinder as Binder, KernelExpr as Expr, KernelModel, Pattern, TypeDef, TypeRef,
+    FslValue, KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
+    KernelModel, Pattern, TypeDef, TypeRef,
 };
 use fsl_solver::SmtSolver;
 
@@ -66,6 +67,7 @@ pub(crate) fn eval<S: SmtSolver>(
         Expr::Call { name, .. } => Err(VerifyError::new(format!(
             "unexpanded predicate call '{name}'"
         ))),
+        Expr::Stage { .. } => Err(VerifyError::new("unlowered stage access")),
         Expr::Index(base, index) => {
             let base = eval(solver, model, base, state, bindings, old_state)?;
             let index = eval(solver, model, index, state, bindings, old_state)?;
@@ -133,57 +135,20 @@ pub(crate) fn eval<S: SmtSolver>(
         } => eval_quantified(
             solver, model, quantifier, binder, body, state, bindings, old_state,
         ),
-        Expr::Count {
-            name,
-            type_name,
-            condition,
-        } => {
-            let ty = qualified_type(type_name.namespace.as_deref(), &type_name.name)?;
-            let mut terms = Vec::new();
-            for value in model.domain_values(&TypeRef::Named(ty.clone()))? {
-                let mut local = bindings.clone();
-                local.insert(
-                    name.clone(),
-                    concrete_value(solver, model, &TypeRef::Named(ty.clone()), &value)?,
-                );
-                let condition = eval(solver, model, condition, state, &mut local, old_state)?;
-                terms.push(solver.ite(
-                    bool_term(&condition)?,
-                    &solver.int_value(1),
-                    &solver.int_value(0),
-                )?);
-            }
-            Ok(int_value(solver, sum_terms(solver, &terms)?))
-        }
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => {
-            let ty = qualified_type(type_name.namespace.as_deref(), &type_name.name)?;
-            let mut terms = Vec::new();
-            for value in model.domain_values(&TypeRef::Named(ty.clone()))? {
-                let mut local = bindings.clone();
-                local.insert(
-                    name.clone(),
-                    concrete_value(solver, model, &TypeRef::Named(ty.clone()), &value)?,
-                );
-                let body = eval(solver, model, body, state, &mut local, old_state)?;
-                let term = if let Some(condition) = condition {
-                    let condition = eval(solver, model, condition, state, &mut local, old_state)?;
-                    solver.ite(
-                        bool_term(&condition)?,
-                        int_term(&body)?,
-                        &solver.int_value(0),
-                    )?
-                } else {
-                    int_term(&body)?.clone()
-                };
-                terms.push(term);
-            }
-            Ok(int_value(solver, sum_terms(solver, &terms)?))
-        }
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
+        } => eval_aggregate(
+            solver,
+            model,
+            *kind,
+            binder,
+            value.as_deref(),
+            state,
+            bindings,
+            old_state,
+        ),
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
             "old" => eval(
                 solver,
@@ -226,29 +191,6 @@ pub(crate) fn eval<S: SmtSolver>(
         Expr::TernaryNamed { name, .. } => Err(VerifyError::new(format!(
             "unsupported ternary expression '{name}'"
         ))),
-        Expr::BinderNamed { name, binder } => {
-            if name != "unique" && name != "exactly_one" {
-                return Err(VerifyError::new(format!(
-                    "unsupported binder expression '{name}'"
-                )));
-            }
-            let terms = binder_conditions(solver, model, binder, state, bindings, old_state)?;
-            let counts = terms
-                .iter()
-                .map(|term| {
-                    solver
-                        .ite(term, &solver.int_value(1), &solver.int_value(0))
-                        .map_err(VerifyError::from)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let count = sum_terms(solver, &counts)?;
-            let condition = if name == "unique" {
-                solver.le(&count, &solver.int_value(1))?
-            } else {
-                solver.equal(&count, &solver.int_value(1))?
-            };
-            Ok(bool_value(solver, condition))
-        }
     }
 }
 
@@ -683,6 +625,61 @@ fn binder_conditions<S: SmtSolver>(
     Ok(terms)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn eval_aggregate<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    kind: AggregateKind,
+    binder: &Binder,
+    value: Option<&Expr>,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    if kind != AggregateKind::Sum {
+        let conditions = binder_conditions(solver, model, binder, state, bindings, old_state)?;
+        let counts = conditions
+            .iter()
+            .map(|condition| {
+                solver
+                    .ite(condition, &solver.int_value(1), &solver.int_value(0))
+                    .map_err(VerifyError::from)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let count = sum_terms(solver, &counts)?;
+        return Ok(match kind {
+            AggregateKind::Count => int_value(solver, count),
+            AggregateKind::Unique => bool_value(solver, solver.le(&count, &solver.int_value(1))?),
+            AggregateKind::ExactlyOne => {
+                bool_value(solver, solver.equal(&count, &solver.int_value(1))?)
+            }
+            AggregateKind::Sum => unreachable!(),
+        });
+    }
+
+    let value = value.ok_or_else(|| VerifyError::new("sum aggregate requires a value"))?;
+    let mut terms = Vec::new();
+    for (name, candidate, membership) in
+        binder_candidates(solver, model, binder, state, bindings, old_state)?
+    {
+        let mut local = bindings.clone();
+        local.insert(name, candidate);
+        let value = eval(solver, model, value, state, &mut local, old_state)?;
+        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
+        let condition = match (membership, where_term) {
+            (Some(membership), Some(where_term)) => Some(solver.and(&[membership, where_term])?),
+            (Some(condition), None) | (None, Some(condition)) => Some(condition),
+            (None, None) => None,
+        };
+        terms.push(if let Some(condition) = condition {
+            solver.ite(&condition, int_term(&value)?, &solver.int_value(0))?
+        } else {
+            int_term(&value)?.clone()
+        });
+    }
+    Ok(int_value(solver, sum_terms(solver, &terms)?))
+}
+
 type ConditionalBinderCandidates<T> = Vec<(String, SymbolicValue<T>, Option<T>)>;
 
 fn binder_candidates<S: SmtSolver>(
@@ -756,7 +753,7 @@ pub(crate) fn binder_values<S: SmtSolver>(
                 .map(|value| Ok((name.clone(), concrete_value(solver, model, &ty, &value)?)))
                 .collect()
         }
-        Binder::Range { name, lo, hi } => {
+        Binder::Range { name, lo, hi, .. } => {
             let lo = static_int(lo, model)?;
             let hi = static_int(hi, model)?;
             (lo..=hi)
@@ -786,10 +783,9 @@ pub(crate) fn binder_where<S: SmtSolver>(
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<Option<S::Term>, VerifyError> {
     let where_expr = match binder {
-        Binder::Typed { where_expr, .. } | Binder::Collection { where_expr, .. } => {
-            where_expr.as_deref()
-        }
-        Binder::Range { .. } => None,
+        Binder::Typed { where_expr, .. }
+        | Binder::Range { where_expr, .. }
+        | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
     };
     where_expr
         .map(|expr| {

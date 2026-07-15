@@ -143,6 +143,12 @@
       "result": "error"
     }
   },
+  "examples/collection_aggregates.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/conditional_expressions.fsl": {
     "check": {
       "result": "ok",
@@ -1287,6 +1293,12 @@
     "check": {
       "result": "ok",
       "warnings": []
+    }
+  },
+  "examples/requirements_stage.fsl": {
+    "check": {
+      "kind": "type",
+      "result": "error"
     }
   },
   "examples/self/fslc_monitor.fsl": {

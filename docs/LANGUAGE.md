@@ -521,14 +521,20 @@ variable capture instead of inventing internal binder names. See
   branch extends to the enclosing delimiter; use parentheses when a following
   operator should apply to the whole conditional. Concrete evaluation executes
   only the selected branch, while name and type checking always visits both.
-- Quantification (bounded): `forall x: T { expr }` / `exists x: T { expr }` (can be filtered with `where expr`),
-  the v0 form `forall i in lo..hi: expr` is also allowed. Expression quantifiers
-  can also range over a Set or Seq value: `forall x in active { ... }` /
-  `exists x in queue { ... }`; for Seq this ranges over the live prefix values.
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
-- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
-  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
-  matching binding, while `exactlyOne` means exactly one.
+- Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each optionally
+  followed by `where predicate`. The predicate is `Bool` and is scoped after
+  `x` is bound. Maps and unbounded collections are not binder domains.
+- Quantification (bounded): the canonical forms are `forall binder { expr }`
+  and `exists binder { expr }`. The 2.x legacy colon/no-braces spelling such as
+  `forall i in lo..hi: expr` remains accepted but is non-canonical. A Seq binder
+  visits its live prefix in position order and preserves duplicate values.
+- Aggregation: `count(binder)` and `sum(binder of value)`. Examples include
+  `count(x: T where p)`, `count(x in queue where p)`,
+  `sum(x in queue of x.amount where p)`, and range equivalents. Empty domains
+  produce `0`; Seq duplicates contribute once per live position, while Set
+  membership contributes once per distinct member.
+- Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
+  means at most one matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
   Equality is structural: `none` equals only `none`, while two `some` values are
   equal exactly when their payloads are equal. `x is some(v)` remains the form
@@ -632,11 +638,11 @@ variable.
   states**, `terminal` lets you select **which stops are intentional**.
   Example: `terminal { status == Done or status == Failed }`.
   - **requirements**: `terminal { }` is a `requirements_item` and passes
-    through unchanged to the kernel spec (§13.2). Inside a spec that uses
-    `process E { ... }`, write the predicate against the synthesized stage
-    map — the lowercased process/entity name + `_stage` (e.g. `process Claim`
-    → `claim_stage`), so `terminal { forall c: Claim { claim_stage[c] ==
-    Approved or claim_stage[c] == Rejected } }`.
+    through to the kernel spec (§13.2). Inside a spec that uses `process E {
+    ... }`, use the source-level accessor, for example `terminal { forall c:
+    Claim { stage(c) == Approved or stage(c) == Rejected } }`. It resolves from
+    `c`'s entity type and lowers to the generated stage map; the generated
+    `claim_stage` name is not part of requirements source syntax.
   - **business**: no `terminal` syntax exists at all — it is derived
     automatically from each process's sink stages (stages with no outgoing
     `transition`); see §13.3.
@@ -1317,13 +1323,20 @@ Recommended workflow: **`verify` / `prove` the spec → generate the scaffold wi
 is used as an oracle in random-walk testing.
 
 `testgen` separates a language-independent scenario-collection core (`scenarios`)
-from per-target emitters, so the same scenarios render to multiple harnesses:
+from per-target emitters, so the same scenarios render to multiple harnesses. In
+the native implementation all six emitters consume one validated adapter built
+from Public Kernel v1, scenario JSON, and the versioned fixed-seed
+`testgen-trace.v1` conformance trace; they do not read the private model or AST.
+Schema/version/spec mismatches, unknown state/action/parameter names, and
+malformed input fail closed. Compose uses an explicit checked names/order bridge because
+Public Kernel intentionally rejects incomplete multi-file provenance; it enters
+the same adapter rather than falling back after an export error.
 
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.
 - `--target vitest`: emits a self-contained TypeScript (Vitest) file. Deterministic
   scenarios and forbidden-rejection assertions translate directly; the random walk
-  is **baked at generation time** — the Python `Monitor` runs the fixed-seed walk and
+  is **baked at generation time** — the concrete Monitor runs the fixed-seed walk and
   the `(action, params, expected_state)` trace is embedded as a static fixture, so the
   generated tests need **no `fslc`/Python at runtime**. The output extension defaults
   to `<spec>.test.ts`.
@@ -1602,11 +1615,18 @@ verify {
   `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
   correspondence to the upper layer.
 - `terminal { <expr> }` is allowed at the top level of a `requirements` spec
-  and passes through to the kernel unchanged (§6) — there is exactly one
-  `terminal` block per spec, same as the kernel. If the spec uses
-  `process E { ... }`, the predicate must reference the synthesized stage map
-  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`), not
-  `stage(c)` (that natural-language form is business-only, §13.3).
+  and lowers to the kernel (§6) — there is exactly one `terminal` block per
+  spec, same as the kernel. `stage(c)` is available in all requirements
+  expression contexts when `c` is a typed entity parameter or binder. The
+  entity type selects its process and stage enum, and the checked expression
+  lowers to the generated stage-map index. No sink stage becomes terminal
+  automatically in requirements.
+- A process may use a qualified path when one entity participates in several
+  processes: `process claims.Claim { ... }`. Unqualified `stage(c)` is an error
+  when several processes correspond to `Claim`; use
+  `claims.Claim.stage(c)` (arbitrary-depth `SymbolPath`) to select one. A
+  missing process, non-entity argument, unknown stage member, or unresolved
+  qualifier is a source-located type error.
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 

@@ -20,6 +20,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   that actually decided, never `auto` itself — and does not change the
   default engine or extend to any other subcommand's `--engine` option
   (Rust-only, issue #226).
+- Finite quantifiers, `count`, `sum`, `unique`, and `exactlyOne` now share one
+  Binder/Aggregate IR across typed, range, Set, and Seq domains. Optional
+  filters use one scope/type-check path; empty aggregates are zero and Seq
+  duplicates preserve positional multiplicity. Legacy colon quantifiers remain
+  detectable as non-canonical input, business/requirements KPI declarations
+  survive as typed metadata projections, and collection aggregates normalize to
+  existing Public Kernel v1/v2 expression shapes (issues #242 and #217).
+- Requirements expressions now accept `stage(entity)` and qualified
+  `<process-path>.stage(entity)` through the same structural node and resolver
+  as business expressions. Entity-typed binders/parameters select the process;
+  qualified process declarations disambiguate shared entity types; generated
+  stage maps remain Kernel detail while public origins, explain output, and
+  violations retain the source accessor (issue #243).
 - Conditional expressions (`if condition then a else b`) are now accepted in
   every expression context. The shared parser replaces the refinement-only
   path; concrete, explicit, symbolic, analysis, mutation, formatter, LSP, and
@@ -37,6 +50,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Native pytest, Vitest, Swift, Kotlin, Dart, and PHPUnit test generation now
+  shares one fail-closed adapter over Public Kernel v1 metadata, scenario JSON,
+  and the new versioned `testgen-trace.v1` fixed-seed conformance trace. Target emitters no longer
+  receive the private model/AST, and their byte output is unchanged. Compose
+  uses an explicit checked names/order bridge until Public Kernel can publish
+  truthful multi-file provenance (issue #214).
 - Standalone refinement files, requirements `implements` blocks, action-level
   `maps` clauses, and synthesized auto/identity mappings now lower through one
   typed `ActionCorrespondence` IR. Impl parameter annotations, target arity and

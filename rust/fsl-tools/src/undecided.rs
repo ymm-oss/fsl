@@ -10,6 +10,7 @@ use fsl_core::{
 };
 use serde_json::{Value, json};
 
+#[allow(clippy::too_many_lines)]
 fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> {
     fn collect(expr: &KernelExpr, roots: &mut BTreeSet<String>) {
         match expr {
@@ -20,6 +21,7 @@ fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> 
             | KernelExpr::Neg(value)
             | KernelExpr::Not(value)
             | KernelExpr::Field(value, _)
+            | KernelExpr::Stage { entity: value, .. }
             | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
             KernelExpr::Index(left, right)
             | KernelExpr::Binary { left, right, .. }
@@ -66,16 +68,12 @@ fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> 
                 collect_binder(binder, roots);
                 collect(body, roots);
             }
-            KernelExpr::Count { condition, .. } => collect(condition, roots),
-            KernelExpr::Sum {
-                body, condition, ..
-            } => {
-                collect(body, roots);
-                if let Some(condition) = condition {
-                    collect(condition, roots);
+            KernelExpr::Aggregate { binder, value, .. } => {
+                collect_binder(binder, roots);
+                if let Some(value) = value {
+                    collect(value, roots);
                 }
             }
-            KernelExpr::BinderNamed { binder, .. } => collect_binder(binder, roots),
             KernelExpr::Num(_) | KernelExpr::Bool(_) | KernelExpr::None => {}
         }
     }
@@ -87,9 +85,14 @@ fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> 
                     collect(expr, roots);
                 }
             }
-            KernelBinder::Range { lo, hi, .. } => {
+            KernelBinder::Range {
+                lo, hi, where_expr, ..
+            } => {
                 collect(lo, roots);
                 collect(hi, roots);
+                if let Some(expr) = where_expr {
+                    collect(expr, roots);
+                }
             }
             KernelBinder::Collection {
                 collection,
@@ -148,9 +151,10 @@ fn statement_roots(model: &KernelModel, statements: &[KernelStatement]) -> BTree
             KernelStatement::ForAll {
                 binder, statements, ..
             } => {
-                let binder_expr = KernelExpr::BinderNamed {
-                    name: "forall".to_owned(),
+                let binder_expr = KernelExpr::Quantified {
+                    quantifier: "forall".to_owned(),
                     binder: binder.clone(),
+                    body: Box::new(KernelExpr::Bool(true)),
                 };
                 roots.extend(expression_roots(model, &binder_expr));
                 roots.extend(statement_roots(model, statements));

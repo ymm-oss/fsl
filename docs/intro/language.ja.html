@@ -582,14 +582,20 @@ variable capture instead of inventing internal binder names. See
   branch extends to the enclosing delimiter; use parentheses when a following
   operator should apply to the whole conditional. Concrete evaluation executes
   only the selected branch, while name and type checking always visits both.</li>
-<li>Quantification (bounded): <code>forall x: T { expr }</code> / <code>exists x: T { expr }</code> (can be filtered with <code>where expr</code>),
-  the v0 form <code>forall i in lo..hi: expr</code> is also allowed. Expression quantifiers
-  can also range over a Set or Seq value: <code>forall x in active { ... }</code> /
-  <code>exists x in queue { ... }</code>; for Seq this ranges over the live prefix values.</li>
-<li>Aggregation: <code>count(x: T where expr)</code>, <code>sum(x: T of expr [where expr])</code></li>
-<li>Cardinality predicates: <code>unique(x: T where expr)</code> / <code>exactlyOne(x: T where expr)</code>;
-  <code>x in set_or_seq [where expr]</code> is also allowed. <code>unique</code> means at most one
-  matching binding, while <code>exactlyOne</code> means exactly one.</li>
+<li>Finite binders: <code>x: T</code>, <code>x in lo..hi</code>, or <code>x in set_or_seq</code>, each optionally
+  followed by <code>where predicate</code>. The predicate is <code>Bool</code> and is scoped after
+  <code>x</code> is bound. Maps and unbounded collections are not binder domains.</li>
+<li>Quantification (bounded): the canonical forms are <code>forall binder { expr }</code>
+  and <code>exists binder { expr }</code>. The 2.x legacy colon/no-braces spelling such as
+  <code>forall i in lo..hi: expr</code> remains accepted but is non-canonical. A Seq binder
+  visits its live prefix in position order and preserves duplicate values.</li>
+<li>Aggregation: <code>count(binder)</code> and <code>sum(binder of value)</code>. Examples include
+  <code>count(x: T where p)</code>, <code>count(x in queue where p)</code>,
+  <code>sum(x in queue of x.amount where p)</code>, and range equivalents. Empty domains
+  produce <code>0</code>; Seq duplicates contribute once per live position, while Set
+  membership contributes once per distinct member.</li>
+<li>Cardinality predicates: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>. <code>unique</code>
+  means at most one matching binding, while <code>exactlyOne</code> means exactly one.</li>
 <li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
   Equality is structural: <code>none</code> equals only <code>none</code>, while two <code>some</code> values are
   equal exactly when their payloads are equal. <code>x is some(v)</code> remains the form
@@ -715,11 +721,11 @@ variable.</p></div></details>
   states</strong>, <code>terminal</code> lets you select <strong>which stops are intentional</strong>.
   Example: <code>terminal { status == Done or status == Failed }</code>.</li>
 <li><strong>requirements</strong>: <code>terminal { }</code> is a <code>requirements_item</code> and passes
-    through unchanged to the kernel spec (§13.2). Inside a spec that uses
-    <code>process E { ... }</code>, write the predicate against the synthesized stage
-    map — the lowercased process/entity name + <code>_stage</code> (e.g. <code>process Claim</code>
-    → <code>claim_stage</code>), so <code>terminal { forall c: Claim { claim_stage[c] ==
-    Approved or claim_stage[c] == Rejected } }</code>.</li>
+    through to the kernel spec (§13.2). Inside a spec that uses <code>process E {
+    ... }</code>, use the source-level accessor, for example <code>terminal { forall c:
+    Claim { stage(c) == Approved or stage(c) == Rejected } }</code>. It resolves from
+    <code>c</code>'s entity type and lowers to the generated stage map; the generated
+    <code>claim_stage</code> name is not part of requirements source syntax.</li>
 <li><strong>business</strong>: no <code>terminal</code> syntax exists at all — it is derived
     automatically from each process's sink stages (stages with no outgoing
     <code>transition</code>); see §13.3.</li>
@@ -1364,13 +1370,20 @@ implementation (see <code>DESIGN-bridge.md</code>).</p>
 <code>testgen</code> → wire the implementation into the <code>Adapter</code> → run the tests</strong>. <code>Monitor</code>
 is used as an oracle in random-walk testing.</p>
 <p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
-from per-target emitters, so the same scenarios render to multiple harnesses:</p>
+from per-target emitters, so the same scenarios render to multiple harnesses. In
+the native implementation all six emitters consume one validated adapter built
+from Public Kernel v1, scenario JSON, and the versioned fixed-seed
+<code>testgen-trace.v1</code> conformance trace; they do not read the private model or AST.
+Schema/version/spec mismatches, unknown state/action/parameter names, and
+malformed input fail closed. Compose uses an explicit checked names/order bridge because
+Public Kernel intentionally rejects incomplete multi-file provenance; it enters
+the same adapter rather than falling back after an export error.</p>
 <ul>
 <li><code>--target pytest</code> (default): emits Python tests that import <code>fslc.runtime.Monitor</code>
   and drive the random walk live as the oracle.</li>
 <li><code>--target vitest</code>: emits a self-contained TypeScript (Vitest) file. Deterministic
   scenarios and forbidden-rejection assertions translate directly; the random walk
-  is <strong>baked at generation time</strong> — the Python <code>Monitor</code> runs the fixed-seed walk and
+  is <strong>baked at generation time</strong> — the concrete Monitor runs the fixed-seed walk and
   the <code>(action, params, expected_state)</code> trace is embedded as a static fixture, so the
   generated tests need <strong>no <code>fslc</code>/Python at runtime</strong>. The output extension defaults
   to <code>&lt;spec&gt;.test.ts</code>.</li>
@@ -1624,11 +1637,18 @@ verify {
   <code>submit[a &lt;= AUTO_LIMIT]</code>), and the <code>maps</code> clause provides the action
   correspondence to the upper layer.</li>
 <li><code>terminal { &lt;expr&gt; }</code> is allowed at the top level of a <code>requirements</code> spec
-  and passes through to the kernel unchanged (§6) — there is exactly one
-  <code>terminal</code> block per spec, same as the kernel. If the spec uses
-  <code>process E { ... }</code>, the predicate must reference the synthesized stage map
-  (<code>&lt;entity-lowercased&gt;_stage</code>, e.g. <code>claim_stage</code> for <code>process Claim</code>), not
-  <code>stage(c)</code> (that natural-language form is business-only, §13.3).</li>
+  and lowers to the kernel (§6) — there is exactly one <code>terminal</code> block per
+  spec, same as the kernel. <code>stage(c)</code> is available in all requirements
+  expression contexts when <code>c</code> is a typed entity parameter or binder. The
+  entity type selects its process and stage enum, and the checked expression
+  lowers to the generated stage-map index. No sink stage becomes terminal
+  automatically in requirements.</li>
+<li>A process may use a qualified path when one entity participates in several
+  processes: <code>process claims.Claim { ... }</code>. Unqualified <code>stage(c)</code> is an error
+  when several processes correspond to <code>Claim</code>; use
+  <code>claims.Claim.stage(c)</code> (arbitrary-depth <code>SymbolPath</code>) to select one. A
+  missing process, non-entity argument, unknown stage member, or unresolved
+  qualifier is a source-located type error.</li>
 </ul>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation

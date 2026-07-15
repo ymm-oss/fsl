@@ -209,6 +209,63 @@ fn formatter_parenthesizes_a_conditional_used_as_an_operator_operand() {
 }
 
 #[test]
+fn requirements_stage_is_readable_in_explain_and_violation_evidence() {
+    let fixture = "rust/fslc/tests/fixtures/requirements_stage.fsl";
+    let (explained, status) = run_cli(&["explain", fixture, "--depth", "1"]);
+
+    assert_eq!(status, 0, "{explained}");
+    assert_eq!(
+        explained["skeleton"]["properties"][0]["body_text"],
+        "forall c: Claim { stage(c) == Draft }"
+    );
+    assert_eq!(
+        explained["skeleton"]["properties"][0]["origin"]["lowering_steps"][0]["detail"],
+        "stage(c) -> claim_stage[entity]"
+    );
+
+    let (violated, status) = run_cli(&[
+        "verify",
+        fixture,
+        "--depth",
+        "1",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 1, "{violated}");
+    assert_eq!(
+        violated["blame"]["conjuncts"][0]["text"],
+        "forall c: Claim { stage(c) == Draft }"
+    );
+}
+
+#[test]
+fn qualified_requirements_stage_keeps_its_process_path_in_evidence() {
+    let fixture = "rust/fslc/tests/fixtures/requirements_stage_qualified.fsl";
+    let expected =
+        "forall c: Claim { claims.Claim.stage(c) == Draft and legacy.Claim.stage(c) == Imported }";
+    let (explained, status) = run_cli(&["explain", fixture, "--depth", "1"]);
+
+    assert_eq!(status, 0, "{explained}");
+    assert_eq!(
+        explained["skeleton"]["properties"][0]["body_text"],
+        expected
+    );
+
+    let (violated, status) = run_cli(&[
+        "verify",
+        fixture,
+        "--depth",
+        "1",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 1, "{violated}");
+    assert_eq!(violated["blame"]["conjuncts"][0]["text"], expected);
+}
+
+#[test]
 fn typed_requirement_relations_reach_strict_tags_scenarios_and_diagnostics() {
     let spec = "rust/fslc/tests/fixtures/typed_annotation_outputs.fsl";
     let requirements = "rust/fslc/tests/fixtures/typed_annotation_requirements.txt";

@@ -14,7 +14,8 @@ use crate::{
     RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
     RequirementBranch, RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness,
     SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
-    SurfaceSpec, SyncAction, SyncRef, TimeItem, Token, TokenKind, TypeExpr, VerifyItem, lex,
+    SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem, Token, TokenKind,
+    TypeExpr, VerifyItem, lex,
 };
 
 fn join_span(start: Span, end: Span) -> Span {
@@ -956,7 +957,23 @@ impl Parser {
 
     fn business_process(&mut self) -> Result<BusinessItem, ParseError> {
         let span = self.bump().span;
-        let name = self.expect_ident()?;
+        let mut segments = Vec::new();
+        loop {
+            let segment_span = self.peek().span;
+            segments.push(SyntaxIdent {
+                text: self.expect_ident()?,
+                span: segment_span,
+            });
+            if !self.eat_symbol(".") {
+                break;
+            }
+        }
+        let path_span = join_span(
+            segments.first().expect("process path is non-empty").span,
+            segments.last().expect("process path is non-empty").span,
+        );
+        let name = SymbolPath::from_idents(segments, path_span)
+            .map_err(|error| ParseError::new(error.message, error.span))?;
         let fields = if self.peek_ident("with") {
             let fields_span = self.bump().span;
             let mut fields = Vec::new();
@@ -1980,10 +1997,16 @@ impl Parser {
         let first = self.expression(0)?;
         if self.eat_symbol("..") {
             let hi = self.expression(0)?;
+            let where_expr = if self.eat_ident("where") {
+                Some(Box::new(self.expression(0)?))
+            } else {
+                None
+            };
             return Ok(Binder::Range {
                 name,
                 lo: Box::new(first),
                 hi: Box::new(hi),
+                where_expr,
             });
         }
         let where_expr = if self.eat_ident("where") {

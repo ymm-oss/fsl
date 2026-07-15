@@ -127,8 +127,10 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    Bool, or enum type". Carried fields are never auto-mapped for refinement —
    only the stage map (`e_stage`) participates in `maps auto`.
 3. `kpi k = count E in S` → no kernel state/action/invariant. The declaration is
-   recorded as metadata for the projection
-   `count(c: E where e_stage[c] == S)`.
+   validated and retained as typed `ProjectionDef` metadata whose expression is
+   the shared `Aggregate::Count` plus a typed Binder for
+   `count(c: E where e_stage[c] == S)`. Native `explain` reads this projection;
+   no ghost counter or consistency invariant is generated.
 4. `requirement <ID> "<text>" { items }` → lift the contained action /
    invariant / reachable / leadsTo to top level and attach
    `meta = {id: ID, text}` to each element (the Stage 1 mechanism). The ID is
@@ -169,13 +171,17 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
 9. The name of the expanded spec is the name of `requirements`. All other items
    (type/enum/struct/state/init/top-level actions, etc.) pass through unchanged.
 10. `terminal { <expr> }` is one of these pass-through items (added as a
-    `requirements_item` grammar alternative, #69) — it takes the generic
-    `_expand_item` fallback (`return [item], []`), so no dialects.py case was
-    added for it specifically. Only one `terminal` block is allowed per spec
-    (the kernel's own rule, unchanged). If the spec uses `process E { ... }`,
-    the predicate is written against the synthesized stage map
-    (`e_stage[c]`, rule 2 above) — the natural-language `stage(c)` form is
-    business-only (§3.2 rule 7).
+    `requirements_item` grammar alternative (#69). Only one `terminal` block
+    is allowed per spec (the kernel's own rule, unchanged). The shared stage
+    resolver accepts `stage(c)` in this and every other requirements expression
+    context, derives the process from `c`'s entity type, and rewrites it to
+    `e_stage[c]`. Requirements never derive terminal states from process sinks.
+11. A qualified process declaration (`process claims.Claim`) keeps its shared
+    `SymbolPath`. Several process paths may have the same final entity segment;
+    unqualified `stage(c)` then reports every candidate, while
+    `claims.Claim.stage(c)` selects the exact path. Business and requirements
+    use the same `Expr::Stage` node and resolver, and public Kernel provenance
+    records both the lowered state symbol and source accessor span.
 
 ### 2.3 Tests (tests/test_req_dialect.py)
 
@@ -247,9 +253,10 @@ verify {
       requirement is also acceptable — for implementation simplicity it is fine
       to put "by Manager" into meta.text)
    - duplicate transition labels with the same name are a type error.
-3. `kpi k = count X in S` → no kernel state/action/invariant. The declaration is
-   recorded as metadata for the projection
-   `count(c: X where x_stage[c] == S)`.
+3. `kpi k = count X in S` follows the same typed `ProjectionDef`/
+   `Aggregate::Count` path as requirements KPI declarations. Unknown entities
+   and stages are rejected before model construction; native `explain` exposes
+   the retained metadata. No kernel state/action/invariant is generated.
 4. `control <ID> "<text>" [owner NAME] [severity NAME] [applies_to NAME]...`
    records business/governance metadata only. It does not generate kernel state
    or properties by itself. A control becomes checkable when a policy or goal

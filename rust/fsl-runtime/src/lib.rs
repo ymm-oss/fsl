@@ -7,10 +7,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use fsl_core::{
-    ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value, KernelBinder as Binder,
-    KernelExpr as Expr, KernelLValue as LValue, KernelModel, KernelStatement as Statement,
-    ModelError, ParamDef, Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
-    display_name, insert_requirement_metadata, model_warnings, state_summary,
+    ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value,
+    KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
+    KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
+    Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
+    insert_requirement_metadata, model_warnings, state_summary,
 };
 use serde_json::{Value as JsonValue, json};
 
@@ -104,6 +105,7 @@ pub fn eval(
         Expr::Call { name, .. } => {
             Err(runtime_error(format!("unexpanded predicate call '{name}'")))
         }
+        Expr::Stage { .. } => Err(runtime_error("unlowered stage access")),
         Expr::Index(base, index) => {
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;
@@ -205,43 +207,32 @@ pub fn eval(
                 Ok(Value::Bool(false))
             }
         }
-        Expr::Count {
-            name,
-            type_name,
-            condition,
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
         } => {
-            let ty = qualified_type(type_name)?;
-            let mut count = 0_i64;
-            for value in model.domain_values(&TypeRef::Named(ty))? {
-                let mut local = bindings.clone();
-                local.insert(name.clone(), value);
-                if as_bool(eval(condition, state, &mut local, model, old_state)?)? {
-                    count += 1;
-                }
-            }
-            Ok(Value::Int(count))
-        }
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => {
-            let ty = qualified_type(type_name)?;
+            let mut matches = 0_i64;
             let mut sum = 0_i64;
-            for value in model.domain_values(&TypeRef::Named(ty))? {
-                let mut local = bindings.clone();
-                local.insert(name.clone(), value);
-                if let Some(condition) = condition {
-                    if !as_bool(eval(condition, state, &mut local, model, old_state)?)? {
-                        continue;
-                    }
+            for (candidate, mut local) in binder_values(binder, state, bindings, model, old_state)?
+            {
+                local.insert(binder_name(binder).to_owned(), candidate);
+                if !binder_where_holds(binder, state, &mut local, model, old_state)? {
+                    continue;
                 }
-                sum = sum
-                    .checked_add(as_int(eval(body, state, &mut local, model, old_state)?)?)
-                    .ok_or_else(|| runtime_error("integer overflow in sum"))?;
+                matches += 1;
+                if let Some(value) = value {
+                    sum = sum
+                        .checked_add(as_int(eval(value, state, &mut local, model, old_state)?)?)
+                        .ok_or_else(|| runtime_error("integer overflow in sum"))?;
+                }
             }
-            Ok(Value::Int(sum))
+            Ok(match kind {
+                AggregateKind::Count => Value::Int(matches),
+                AggregateKind::Sum => Value::Int(sum),
+                AggregateKind::Unique => Value::Bool(matches <= 1),
+                AggregateKind::ExactlyOne => Value::Bool(matches == 1),
+            })
         }
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
             "old" => eval(
@@ -292,24 +283,6 @@ pub fn eval(
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
             "unsupported ternary function '{name}'"
         ))),
-        Expr::BinderNamed { name, binder } => {
-            let mut matches = 0_u32;
-            for (value, mut local) in binder_values(binder, state, bindings, model, old_state)? {
-                local.insert(binder_name(binder).to_owned(), value);
-                if binder_where_holds(binder, state, &mut local, model, old_state)? {
-                    matches += 1;
-                }
-            }
-            if name == "unique" {
-                Ok(Value::Bool(matches <= 1))
-            } else if name == "exactly_one" {
-                Ok(Value::Bool(matches == 1))
-            } else {
-                Err(runtime_error(format!(
-                    "unsupported binder function '{name}'"
-                )))
-            }
-        }
     }
 }
 
@@ -550,10 +523,9 @@ fn binder_where_holds(
     old_state: Option<&State>,
 ) -> Result<bool, RuntimeError> {
     let condition = match binder {
-        Binder::Typed { where_expr, .. } | Binder::Collection { where_expr, .. } => {
-            where_expr.as_deref()
-        }
-        Binder::Range { .. } => None,
+        Binder::Typed { where_expr, .. }
+        | Binder::Range { where_expr, .. }
+        | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
     };
     condition.map_or(Ok(true), |condition| {
         as_bool(eval(condition, state, bindings, model, old_state)?)

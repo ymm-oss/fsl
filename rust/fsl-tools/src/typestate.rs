@@ -4,8 +4,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION};
 use serde_json::{Map, Value, json};
+
+use crate::public_kernel::{public_kernel_v1_root, required_array, required_object, required_str};
 
 const EMPTY: &str = "Empty";
 const FILLED: &str = "Filled";
@@ -131,35 +132,6 @@ struct Entity {
     enum_name: Option<String>,
     states: Vec<String>,
     data_fields: Vec<(String, TypeRef)>,
-}
-
-fn required_object<'a>(value: &'a Value, context: &str) -> Result<&'a Map<String, Value>, String> {
-    value
-        .as_object()
-        .ok_or_else(|| format!("public Kernel {context} must be an object"))
-}
-
-fn required_array<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-    context: &str,
-) -> Result<&'a [Value], String> {
-    object
-        .get(key)
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .ok_or_else(|| format!("public Kernel {context}.{key} must be an array"))
-}
-
-fn required_str<'a>(
-    object: &'a Map<String, Value>,
-    key: &str,
-    context: &str,
-) -> Result<&'a str, String> {
-    object
-        .get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("public Kernel {context}.{key} must be a string"))
 }
 
 fn parse_type(value: &Value, context: &str) -> Result<TypeRef, String> {
@@ -395,19 +367,7 @@ fn action_source_order(object: &Map<String, Value>) -> (String, u64, u64) {
 
 #[allow(clippy::too_many_lines)]
 fn adapt_public_kernel(kernel: &Value) -> Result<PublicKernelView, String> {
-    let root = required_object(kernel, "root")?;
-    let schema = required_str(root, "$schema", "root")?;
-    if schema != KERNEL_SCHEMA_ID {
-        return Err(format!(
-            "unsupported public Kernel $schema '{schema}'; expected '{KERNEL_SCHEMA_ID}'"
-        ));
-    }
-    let version = required_str(root, "schema_version", "root")?;
-    if version != KERNEL_SCHEMA_VERSION {
-        return Err(format!(
-            "unsupported public Kernel schema_version '{version}'; expected '{KERNEL_SCHEMA_VERSION}'"
-        ));
-    }
+    let root = public_kernel_v1_root(kernel)?;
     let spec = required_object(
         root.get("spec")
             .ok_or_else(|| "public Kernel root.spec is required".to_owned())?,

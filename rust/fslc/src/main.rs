@@ -8,8 +8,8 @@ use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
 use fsl_core::{
-    Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement, ParamDef,
-    TypeDef, TypeRef, insert_requirement_metadata, model_warnings, requirement_metadata,
+    Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelSpec, KernelStatement,
+    ParamDef, TypeDef, TypeRef, insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use serde_json::{Map, Value, json};
 
@@ -4751,8 +4751,8 @@ fn model_skeleton(model: &KernelModel) -> Value {
                     .and_then(|site| site.declaration_path.last())
                     .map_or_else(|| fslc_rust::display_name(&action.name), String::clone),
                 "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
-                "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
-                "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::expr_text(expr))).collect::<Vec<_>>(),
+                "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::source_expr_text(model,expr))).collect::<Vec<_>>(),
+                "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::source_expr_text(model,expr))).collect::<Vec<_>>(),
                 "writes": statement_writes(&action.statements), "requirement": Value::Null,
             });
             if let Value::Object(value) = &mut value {
@@ -4792,7 +4792,7 @@ fn model_skeleton(model: &KernelModel) -> Value {
                     .and_then(|site| site.declaration_path.last())
                     .map_or_else(|| fslc_rust::display_name(&property.name), String::clone),
                 "kind":kind,
-                "body_text":fslc_rust::expr_text(&property.expr),
+                "body_text":fslc_rust::source_expr_text(model,&property.expr),
                 "requirement":Value::Null
             });
             if let Value::Object(value) = &mut value {
@@ -4811,7 +4811,7 @@ fn model_skeleton(model: &KernelModel) -> Value {
         }));
     }
     for property in &model.leadstos {
-        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::expr_text(&property.before),fslc_rust::expr_text(&property.after)),"requirement":Value::Null});
+        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
         if let Value::Object(value) = &mut value {
             insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
         }
@@ -4866,7 +4866,12 @@ fn model_skeleton(model: &KernelModel) -> Value {
                 None
             }
         }).collect::<Map<_,_>>(),
-        "stage_flows":model_stage_flows(model),"kpis":[]
+        "stage_flows":model_stage_flows(model),
+        "kpis":model.projections.iter().map(|projection| json!({
+            "name":projection.name,
+            "entity":projection.entity,
+            "stage":projection.stage,
+        })).collect::<Vec<_>>()
     })
 }
 
@@ -5306,6 +5311,7 @@ fn expression_state_roots(
             | KernelExpr::Neg(value)
             | KernelExpr::Not(value)
             | KernelExpr::Field(value, _)
+            | KernelExpr::Stage { entity: value, .. }
             | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
             KernelExpr::Index(base, index)
             | KernelExpr::BinaryNamed {
@@ -5360,16 +5366,12 @@ fn expression_state_roots(
                 collect_binder(binder, roots);
                 collect(body, roots);
             }
-            KernelExpr::Count { condition, .. } => collect(condition, roots),
-            KernelExpr::Sum {
-                body, condition, ..
-            } => {
-                collect(body, roots);
-                if let Some(condition) = condition {
-                    collect(condition, roots);
+            KernelExpr::Aggregate { binder, value, .. } => {
+                collect_binder(binder, roots);
+                if let Some(value) = value {
+                    collect(value, roots);
                 }
             }
-            KernelExpr::BinderNamed { binder, .. } => collect_binder(binder, roots),
             KernelExpr::Num(_) | KernelExpr::Bool(_) | KernelExpr::None => {}
         }
     }
@@ -5383,9 +5385,14 @@ fn expression_state_roots(
                     collect(expr, roots);
                 }
             }
-            fsl_core::KernelBinder::Range { lo, hi, .. } => {
+            fsl_core::KernelBinder::Range {
+                lo, hi, where_expr, ..
+            } => {
                 collect(lo, roots);
                 collect(hi, roots);
+                if let Some(expr) = where_expr {
+                    collect(expr, roots);
+                }
             }
             fsl_core::KernelBinder::Collection {
                 collection,
@@ -5684,6 +5691,7 @@ fn invariant_violation_explanation(
     explanation.insert(
         "blame".to_owned(),
         violation_blame_json(
+            model,
             violation.kind.as_str(),
             violation.name.as_str(),
             property.map(|property| &property.expr),
@@ -6024,6 +6032,7 @@ fn expression_mutant_count(
         | KernelExpr::Neg(value)
         | KernelExpr::Not(value)
         | KernelExpr::Field(value, _)
+        | KernelExpr::Stage { entity: value, .. }
         | KernelExpr::UnaryNamed { expr: value, .. } => {
             expression_mutant_count(value, enum_siblings)
         }
@@ -6081,9 +6090,7 @@ fn expression_mutant_count(
         KernelExpr::Bool(_)
         | KernelExpr::None
         | KernelExpr::Quantified { .. }
-        | KernelExpr::Count { .. }
-        | KernelExpr::Sum { .. }
-        | KernelExpr::BinderNamed { .. } => 0,
+        | KernelExpr::Aggregate { .. } => 0,
     }
 }
 
@@ -7341,476 +7348,6 @@ fn generated_content_result(
     (Value::Object(output), 0)
 }
 
-fn python_string(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
-}
-
-fn python_literal(value: &Value, key_order: &[String]) -> String {
-    match value {
-        Value::Null => "None".to_owned(),
-        Value::Bool(value) => if *value { "True" } else { "False" }.to_owned(),
-        Value::Number(value) => value.to_string(),
-        Value::String(value) => python_string(value),
-        Value::Array(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| python_literal(value, &[]))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Value::Object(values) => {
-            let ordered = key_order
-                .iter()
-                .filter(|key| values.contains_key(*key))
-                .chain(values.keys().filter(|key| !key_order.contains(key)))
-                .collect::<Vec<_>>();
-            format!(
-                "{{{}}}",
-                ordered
-                    .into_iter()
-                    .map(|key| format!(
-                        "{}: {}",
-                        python_string(key),
-                        python_literal(&values[key], &[])
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-    }
-}
-
-fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
-    let absolute = std::fs::canonicalize(spec).unwrap_or_else(|_| spec.to_path_buf());
-    let Some(parent) = output.and_then(Path::parent) else {
-        return absolute.display().to_string();
-    };
-    let base = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
-    let left = base.components().collect::<Vec<_>>();
-    let right = absolute.components().collect::<Vec<_>>();
-    let common = left
-        .iter()
-        .zip(&right)
-        .take_while(|(left, right)| left == right)
-        .count();
-    let mut result = PathBuf::new();
-    for _ in common..left.len() {
-        result.push("..");
-    }
-    for component in &right[common..] {
-        result.push(component.as_os_str());
-    }
-    result.display().to_string()
-}
-
-#[allow(clippy::too_many_lines)]
-fn emit_pytest(
-    model: &KernelModel,
-    spec_path: &Path,
-    output: Option<&Path>,
-    scenarios: &Value,
-) -> String {
-    let source_name = spec_path
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or("spec.fsl");
-    let path_expr = if output.is_some() {
-        format!(
-            "Path(__file__).resolve().parent / {}",
-            python_string(&relative_spec_path(spec_path, output))
-        )
-    } else {
-        python_string(&relative_spec_path(spec_path, None))
-    };
-    let mut text = format!(
-        r#""""Auto-generated conformance tests for FSL spec.
-Source: {source_name}
-Connect Adapter to your implementation, or use MonitorSelfAdapter for self-check.
-"""
-import random
-from pathlib import Path
-
-import pytest
-
-from fslc.runtime import Monitor
-
-SPEC_PATH = {path_expr}
-
-
-class Adapter:
-    """Connect your implementation to the spec actions/state.
-
-    Wiring convention:
-    - reset(): put implementation in the same initial state as spec init
-    - step(action, params): drive one spec action on the implementation
-    - observe(): return implementation state projected to spec logical state shape
-    """
-
-    def reset(self):
-        raise NotImplementedError("wire your implementation reset")
-
-    def step(self, action: str, params: dict):
-        raise NotImplementedError("wire your implementation step")
-
-    def observe(self) -> dict:
-        raise NotImplementedError("wire your implementation observe")
-
-
-def _adapter_ready(adapter):
-    try:
-        adapter.reset()
-        adapter.observe()
-        return True
-    except NotImplementedError:
-        return False
-
-
-@pytest.fixture
-def adapter():
-    return Adapter()
-
-
-def _assert_partial_expected(observed, expected):
-    for key, val in expected.items():
-        if isinstance(val, dict) and isinstance(observed.get(key), dict):
-            _assert_partial_expected(observed[key], val)
-        else:
-            assert observed[key] == val
-
-
-def _assert_rejected(result, expected_kind):
-    assert isinstance(result, dict), 'forbidden adapter.step must return a result dict'
-    assert result.get('ok') is False
-    if expected_kind is not None:
-        assert result.get('kind') == expected_kind
-"#
-    );
-    let state_order = model
-        .state
-        .iter()
-        .map(|(name, _)| fslc_rust::display_name(name))
-        .collect::<Vec<_>>();
-    let action_order = model
-        .actions
-        .iter()
-        .enumerate()
-        .map(|(index, action)| (fslc_rust::display_name(&action.name), index))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut items = scenarios
-        .get("scenarios")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    items.sort_by_key(|item| {
-        item["action"]
-            .as_str()
-            .and_then(|name| action_order.get(name))
-            .copied()
-            .unwrap_or(usize::MAX)
-    });
-    for (scenario_index, scenario) in items.into_iter().enumerate() {
-        let name = scenario["name"].as_str().unwrap_or("scenario");
-        let separator = if scenario_index == 0 { "\n\n" } else { "\n" };
-        let _ = write!(
-            text,
-            "{separator}def test_scenario_{name}(adapter):\n    {}\n    if not _adapter_ready(adapter):\n        pytest.skip('Adapter not implemented')\n    adapter.reset()\n",
-            python_string(&format!("Scenario: {name}"))
-        );
-        let steps = scenario["steps"].as_array().cloned().unwrap_or_default();
-        let states = scenario["expected_states"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        for (index, step) in steps.iter().enumerate() {
-            let action = step["action"].as_str().unwrap_or_default();
-            let param_order = model
-                .actions
-                .iter()
-                .find(|item| fslc_rust::display_name(&item.name) == action)
-                .map(|item| {
-                    item.params
-                        .iter()
-                        .map(|param| param.name().to_owned())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let _ = writeln!(
-                text,
-                "    adapter.step({}, {})",
-                python_string(action),
-                python_literal(&step["params"], &param_order)
-            );
-            let expected = states.get(index).cloned().unwrap_or_else(|| json!({}));
-            let _ = writeln!(
-                text,
-                "    _assert_partial_expected(adapter.observe(), {})",
-                python_literal(&expected, &state_order)
-            );
-        }
-    }
-    text.push_str(
-        r#"
-def test_random_walk_conformance(adapter):
-    if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
-    mon = Monitor(SPEC_PATH)
-    mon.reset()
-    adapter.reset()
-    assert adapter.observe() == mon.state
-    rng = random.Random(0)
-    for _ in range(100):
-        enabled = mon.enabled()
-        if not enabled:
-            break
-        choice = enabled[rng.randrange(len(enabled))]
-        action, params = choice['action'], dict(choice['params'])
-        adapter.step(action, params)
-        result = mon.step(action, params)
-        if not result.get('ok'):
-            pytest.fail(
-                f'spec oracle violation at {action} {params}: '
-                f"{result.get('kind')} {result.get('name', '')}"
-            )
-        assert adapter.observe() == mon.state
-
-"#,
-    );
-    text
-}
-
-struct PythonRandom {
-    state: [u32; 624],
-    index: usize,
-}
-
-impl PythonRandom {
-    fn seeded_zero() -> Self {
-        let mut random = Self {
-            state: [0; 624],
-            index: 624,
-        };
-        random.state[0] = 19_650_218;
-        for index in 1..624 {
-            let previous = random.state[index - 1];
-            random.state[index] = (previous ^ (previous >> 30))
-                .wrapping_mul(1_812_433_253)
-                .wrapping_add(u32::try_from(index).unwrap_or_default());
-        }
-        let mut index = 1_usize;
-        let mut key_index = 0_usize;
-        for _ in 0..624 {
-            let previous = random.state[index - 1];
-            random.state[index] = (random.state[index]
-                ^ ((previous ^ (previous >> 30)).wrapping_mul(1_664_525)))
-            .wrapping_add(0_u32)
-            .wrapping_add(u32::try_from(key_index).unwrap_or_default());
-            index += 1;
-            key_index += 1;
-            if index >= 624 {
-                random.state[0] = random.state[623];
-                index = 1;
-            }
-            if key_index >= 1 {
-                key_index = 0;
-            }
-        }
-        for _ in 0..623 {
-            let previous = random.state[index - 1];
-            random.state[index] = (random.state[index]
-                ^ ((previous ^ (previous >> 30)).wrapping_mul(1_566_083_941)))
-            .wrapping_sub(u32::try_from(index).unwrap_or_default());
-            index += 1;
-            if index >= 624 {
-                random.state[0] = random.state[623];
-                index = 1;
-            }
-        }
-        random.state[0] = 0x8000_0000;
-        random
-    }
-
-    fn next_u32(&mut self) -> u32 {
-        if self.index >= 624 {
-            for index in 0..624 {
-                let value = (self.state[index] & 0x8000_0000)
-                    | (self.state[(index + 1) % 624] & 0x7fff_ffff);
-                self.state[index] = self.state[(index + 397) % 624]
-                    ^ (value >> 1)
-                    ^ if value & 1 == 0 { 0 } else { 0x9908_b0df };
-            }
-            self.index = 0;
-        }
-        let mut value = self.state[self.index];
-        self.index += 1;
-        value ^= value >> 11;
-        value ^= (value << 7) & 0x9d2c_5680;
-        value ^= (value << 15) & 0xefc6_0000;
-        value ^= value >> 18;
-        value
-    }
-
-    fn below(&mut self, upper: usize) -> usize {
-        let bits = usize::BITS - upper.leading_zeros();
-        loop {
-            let value = self.next_u32() >> (32 - bits);
-            let value = usize::try_from(value).unwrap_or_default();
-            if value < upper {
-                return value;
-            }
-        }
-    }
-}
-
-fn ordered_object(value: &Value, order: &[String]) -> Value {
-    let Some(values) = value.as_object() else {
-        return value.clone();
-    };
-    let mut result = Map::new();
-    for key in order {
-        if let Some(value) = values.get(key) {
-            result.insert(key.clone(), value.clone());
-        }
-    }
-    for (key, value) in values {
-        if !result.contains_key(key) {
-            result.insert(key.clone(), value.clone());
-        }
-    }
-    Value::Object(result)
-}
-
-fn codegen_scenarios(model: &KernelModel, scenarios: &Value) -> Vec<Value> {
-    let state_order = model
-        .state
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    let action_order = model
-        .actions
-        .iter()
-        .enumerate()
-        .map(|(index, action)| (fslc_rust::display_name(&action.name), index))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut result = scenarios["scenarios"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    result.sort_by_key(|scenario| {
-        scenario
-            .get("action")
-            .and_then(Value::as_str)
-            .and_then(|name| action_order.get(name))
-            .copied()
-            .unwrap_or(usize::MAX)
-    });
-    for scenario in &mut result {
-        if let Value::Object(scenario) = scenario {
-            if let Some(Value::Array(states)) = scenario.get_mut("expected_states") {
-                for state in states {
-                    *state = ordered_object(state, &state_order);
-                }
-            }
-            if let Some(Value::Object(initial)) = scenario.get_mut("initial_state") {
-                let value = Value::Object(initial.clone());
-                *initial = ordered_object(&value, &state_order)
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            if let Some(Value::Array(steps)) = scenario.get_mut("steps") {
-                for step in steps {
-                    let action = step["action"].as_str().unwrap_or_default();
-                    let order = model
-                        .actions
-                        .iter()
-                        .find(|item| fslc_rust::display_name(&item.name) == action)
-                        .map(|item| {
-                            item.params
-                                .iter()
-                                .map(|param| param.name().to_owned())
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    if let Value::Object(step) = step {
-                        if let Some(params) = step.get_mut("params") {
-                            *params = ordered_object(params, &order);
-                        }
-                    }
-                }
-            }
-            if let Some(Value::Object(step)) = scenario.get_mut("forbidden_step") {
-                let action = step
-                    .get("action")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let order = model
-                    .actions
-                    .iter()
-                    .find(|item| fslc_rust::display_name(&item.name) == action)
-                    .map(|item| {
-                        item.params
-                            .iter()
-                            .map(|param| param.name().to_owned())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                if let Some(params) = step.get_mut("params") {
-                    *params = ordered_object(params, &order);
-                }
-            }
-        }
-    }
-    result
-}
-
-fn baked_random_walk(model: &KernelModel) -> Value {
-    let Ok(mut monitor) = fsl_runtime::Monitor::new(model.clone()) else {
-        return json!({"initial":{},"steps":[]});
-    };
-    let state_order = model
-        .state
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    let initial = ordered_object(&fslc_rust::state_json(&monitor.state), &state_order);
-    let mut steps = Vec::new();
-    let mut random = PythonRandom::seeded_zero();
-    for _ in 0..100 {
-        let Ok(enabled) = monitor.enabled() else {
-            break;
-        };
-        if enabled.is_empty() {
-            break;
-        }
-        let choice = &enabled[random.below(enabled.len())];
-        let action = choice.action.clone();
-        let param_order = model
-            .actions
-            .iter()
-            .find(|candidate| candidate.name == action)
-            .map(|candidate| {
-                candidate
-                    .params
-                    .iter()
-                    .map(|param| param.name().to_owned())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let params = choice
-            .params
-            .iter()
-            .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
-            .collect::<Map<_, _>>();
-        let params = ordered_object(&Value::Object(params), &param_order);
-        if monitor.step(choice).is_err() {
-            break;
-        }
-        steps.push(json!({"action":fslc_rust::display_name(&action),"params":params,"expected":ordered_object(&fslc_rust::state_json(&monitor.state),&state_order)}));
-    }
-    json!({"initial":initial,"steps":steps})
-}
-
 fn run_testgen(
     path: &Path,
     depth: usize,
@@ -7819,27 +7356,60 @@ fn run_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let model = match load_model(path) {
-        Ok(model) => model,
+    let (source, kernel, model) = match load_kernel_model(path) {
+        Ok(parts) => parts,
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let (scenarios, status) = run_scenarios_mode(path, depth, deadlock_mode, !strict);
     if status == 2 {
         return (scenarios, status);
     }
-    let source_name = path
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or("spec.fsl");
-    let generated_scenarios = codegen_scenarios(&model, &scenarios);
-    let walk = baked_random_walk(&model);
-    let content = match target {
-        "vitest" => fsl_tools::emit_vitest(source_name, &generated_scenarios, &walk),
-        "swift" => fsl_tools::emit_swift(source_name, &generated_scenarios, &walk),
-        "kotlin" => fsl_tools::emit_kotlin(source_name, &model.name, &generated_scenarios, &walk),
-        "dart" => fsl_tools::emit_dart(source_name, &generated_scenarios, &walk),
-        "phpunit" => fsl_tools::emit_phpunit(source_name, &model.name, &generated_scenarios, &walk),
-        _ => emit_pytest(&model, path, output_path, &scenarios),
+    let walk = match fslc_rust::testgen_trace_vectors(&model) {
+        Ok(walk) => walk,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let input = if source_dialect(&source) == "compose" {
+        fsl_tools::compose_testgen_input(
+            &model.name,
+            path,
+            output_path,
+            model.state.iter().map(|(name, _)| name.clone()).collect(),
+            model
+                .actions
+                .iter()
+                .map(|action| {
+                    (
+                        action.name.clone(),
+                        action
+                            .params
+                            .iter()
+                            .map(|param| param.name().to_owned())
+                            .collect(),
+                    )
+                })
+                .collect(),
+            &scenarios,
+            &walk,
+        )
+    } else {
+        fsl_core::public_kernel_contract(
+            &kernel,
+            &model,
+            &path.to_string_lossy(),
+            source_dialect(&source),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|contract| {
+            fsl_tools::public_kernel_testgen_input(&contract, path, output_path, &scenarios, &walk)
+        })
+    };
+    let input = match input {
+        Ok(input) => input,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let content = match fsl_tools::generate_testgen(&input, target) {
+        Ok(content) => content,
+        Err(error) => return (semantic_error_output(&error), 2),
     };
     let extension = match target {
         "vitest" => "test.ts",
@@ -7847,11 +7417,12 @@ fn run_testgen(
         "kotlin" => "kt",
         "dart" => "dart",
         "phpunit" => "php",
-        _ => "py",
+        "pytest" => "py",
+        _ => return (semantic_error_output("unknown testgen target"), 2),
     };
     let (mut result, status) = generated_content_result(
         "testgen",
-        &model.name,
+        input.spec_name(),
         format!(
             "test_{}.{}",
             path.file_stem()
@@ -12304,6 +11875,7 @@ fn violation_bindings_json(
 }
 
 fn violation_blame_json(
+    model: &KernelModel,
     kind: &str,
     name: &str,
     expr: Option<&KernelExpr>,
@@ -12324,7 +11896,7 @@ fn violation_blame_json(
     };
     let mut conjunct = json!({
         "index": 0,
-        "text": fslc_rust::expr_text(expr),
+        "text": fslc_rust::source_expr_text(model, expr),
         "holds": false,
     });
     if !violating_bindings.is_null()
@@ -12422,6 +11994,10 @@ fn parse_param_value(
 }
 
 fn load_model(path: &Path) -> Result<KernelModel, String> {
+    load_kernel_model(path).map(|(_, _, model)| model)
+}
+
+fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
@@ -12434,7 +12010,8 @@ fn load_model(path: &Path) -> Result<KernelModel, String> {
                     error.to_string()
                 }
             })?;
-    fsl_core::build_model(kernel).map_err(|error| error.to_string())
+    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    Ok((source, kernel, model))
 }
 
 #[allow(clippy::too_many_lines)]

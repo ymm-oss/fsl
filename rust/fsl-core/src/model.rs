@@ -11,7 +11,8 @@ use fsl_syntax::{
 
 use crate::{
     INIT_TARGET, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
-    SPEC_TARGET, TraceabilityRegistry, action_target, property_target, state_target, type_target,
+    ProjectionDef, SPEC_TARGET, TraceabilityRegistry, action_target, property_target, state_target,
+    type_target,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -139,6 +140,7 @@ pub struct KernelModel {
     pub reachables: Vec<PropertyDef>,
     pub leadstos: Vec<LeadsToDef>,
     pub terminal: Option<Expr>,
+    pub projections: Vec<ProjectionDef>,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     traceability: TraceabilityRegistry,
@@ -371,6 +373,7 @@ struct ModelBuilder {
     spec: SurfaceSpec,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
+    projections: Vec<ProjectionDef>,
     consts: BTreeMap<String, Value>,
     types: BTreeMap<String, TypeDef>,
     enum_members: BTreeMap<String, Value>,
@@ -382,11 +385,13 @@ impl ModelBuilder {
             spec,
             origins,
             annotations,
+            projections,
         } = kernel;
         Self {
             spec,
             origins,
             annotations,
+            projections,
             consts: BTreeMap::new(),
             types: BTreeMap::new(),
             enum_members: BTreeMap::new(),
@@ -708,6 +713,7 @@ impl ModelBuilder {
             reachables,
             leadstos,
             terminal,
+            projections: self.projections,
             origins: self.origins,
             annotations: self.annotations,
             traceability,
@@ -735,6 +741,21 @@ impl ModelBuilder {
             let origin = error.span.map(type_diagnostic_origin);
             model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
         })?;
+        for projection in &model.projections {
+            crate::public_kernel::validate_expression_type(
+                &projection.expr,
+                &TypeRef::Int,
+                &[],
+                &model,
+            )
+            .map_err(|error| {
+                model_error(format!(
+                    "invalid KPI projection '{}': {}",
+                    projection.name, error.message
+                ))
+                .with_origin(Some(type_diagnostic_origin(projection.span)))
+            })?;
+        }
         Ok(model)
     }
 
@@ -1309,9 +1330,7 @@ fn first_state_reference(expr: &Expr, state_names: &BTreeSet<String>) -> Option<
 fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     let unsupported = match expr {
         Expr::Quantified { .. } => Some("a quantified expression"),
-        Expr::Count { .. } | Expr::Sum { .. } | Expr::BinderNamed { .. } => {
-            Some("a binder or aggregate expression")
-        }
+        Expr::Aggregate { .. } => Some("a binder or aggregate expression"),
         Expr::UnaryNamed { name, .. }
             if name == "old" || name == "stage" || name.starts_with("rel_") =>
         {
@@ -1334,6 +1353,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Some(expr)
         | Expr::Neg(expr)
         | Expr::Not(expr)
+        | Expr::Stage { entity: expr, .. }
         | Expr::UnaryNamed { expr, .. }
         | Expr::Is { expr, .. }
         | Expr::Field(expr, _) => vec![expr],
@@ -1356,11 +1376,9 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             .into_iter()
             .chain(std::iter::once(body.as_ref()))
             .collect(),
-        Expr::Count { condition, .. } => vec![condition],
-        Expr::Sum {
-            body, condition, ..
-        } => std::iter::once(body.as_ref())
-            .chain(condition.as_deref())
+        Expr::Aggregate { binder, value, .. } => binder_exprs(binder)
+            .into_iter()
+            .chain(value.as_deref())
             .collect(),
         Expr::TernaryNamed {
             first,
@@ -1368,7 +1386,6 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             third,
             ..
         } => vec![first, second, third],
-        Expr::BinderNamed { binder, .. } => binder_exprs(binder),
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => Vec::new(),
     }
 }
@@ -1376,7 +1393,12 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
 fn binder_exprs(binder: &Binder) -> Vec<&Expr> {
     match binder {
         Binder::Typed { where_expr, .. } => where_expr.iter().map(AsRef::as_ref).collect(),
-        Binder::Range { lo, hi, .. } => vec![lo, hi],
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => std::iter::once(lo.as_ref())
+            .chain(std::iter::once(hi.as_ref()))
+            .chain(where_expr.as_deref())
+            .collect(),
         Binder::Collection {
             collection,
             where_expr,

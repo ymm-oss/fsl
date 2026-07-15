@@ -2,10 +2,13 @@
 
 //! Versioned normalized Kernel JSON for external compilers.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use fsl_syntax::{Binder, Expr, LValue, MetaTag, Pattern, SourcePos, Span, SpecItem, Statement};
+use fsl_syntax::{
+    AggregateKind, Binder, ConditionalSpans, Expr, LValue, MetaTag, Pattern, SourcePos, Span,
+    SpecItem, Statement,
+};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -17,6 +20,9 @@ pub const KERNEL_V1_SCHEMA_VERSION: &str = "1.0.0";
 pub const KERNEL_V1_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json";
 pub const KERNEL_V2_SCHEMA_VERSION: &str = "2.0.0";
 pub const KERNEL_V2_SCHEMA_ID: &str = "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json";
+pub const TESTGEN_TRACE_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const TESTGEN_TRACE_V1_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/kernel/testgen-trace.v1.schema.json";
 
 /// Backwards-compatible aliases for the default Public Kernel v1 contract.
 pub const KERNEL_SCHEMA_VERSION: &str = KERNEL_V1_SCHEMA_VERSION;
@@ -143,6 +149,7 @@ fn resolve<'a>(model: &'a KernelModel, ty: &'a TypeRef) -> Result<TypeRef, Publi
 }
 
 type TypeEnv = BTreeMap<String, TypeRef>;
+type FiniteBinderCandidates = (String, Vec<(Expr, Expr)>, Option<Expr>);
 
 fn base_env(model: &KernelModel) -> TypeEnv {
     let mut env = model.state.iter().cloned().collect::<TypeEnv>();
@@ -227,7 +234,9 @@ fn infer_type(
             Some(ty @ (TypeRef::Int | TypeRef::Range(_, _))) => Ok(ty),
             _ => Ok(TypeRef::Int),
         },
-        Expr::Bool(_) => Ok(TypeRef::Bool),
+        Expr::Bool(_) | Expr::Not(_) | Expr::Is { .. } | Expr::Quantified { .. } => {
+            Ok(TypeRef::Bool)
+        }
         Expr::None => match expected.map(|ty| resolve(model, ty)).transpose()? {
             Some(ty @ TypeRef::Option(_)) => Ok(ty),
             _ => Err(error("public Kernel cannot infer uncontextualized none")),
@@ -275,6 +284,7 @@ fn infer_type(
         Expr::Call { name, .. } => Err(error(format!(
             "unlowered predicate call '{name}' in public Kernel"
         ))),
+        Expr::Stage { .. } => Err(error("unlowered stage access in public Kernel")),
         Expr::Index(base, _) => match resolve(model, &infer_type(base, env, model, None)?)? {
             TypeRef::Map(_, value) | TypeRef::Relation(_, value) => Ok(*value),
             TypeRef::Seq(item, _) => Ok(*item),
@@ -316,12 +326,14 @@ fn infer_type(
                 Ok(TypeRef::Int)
             }
         }
-        Expr::Neg(_) | Expr::Count { .. } | Expr::Sum { .. } | Expr::BinaryNamed { .. } => {
-            Ok(TypeRef::Int)
-        }
-        Expr::Not(_) | Expr::Is { .. } | Expr::Quantified { .. } | Expr::BinderNamed { .. } => {
-            Ok(TypeRef::Bool)
-        }
+        Expr::Neg(_) | Expr::BinaryNamed { .. } => Ok(TypeRef::Int),
+        Expr::Aggregate { kind, .. } => Ok(
+            if matches!(kind, AggregateKind::Count | AggregateKind::Sum) {
+                TypeRef::Int
+            } else {
+                TypeRef::Bool
+            },
+        ),
         Expr::Conditional { then_expr, .. } => infer_type(then_expr, env, model, expected),
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
             "old" => infer_type(expr, env, model, expected),
@@ -449,13 +461,18 @@ fn binder_json(
         Binder::Typed {
             name, where_expr, ..
         } => ("typed", name, None, None, None, where_expr.as_deref()),
-        Binder::Range { name, lo, hi } => (
+        Binder::Range {
+            name,
+            lo,
+            hi,
+            where_expr,
+        } => (
             "range",
             name,
             Some(lo.as_ref()),
             Some(hi.as_ref()),
             None,
-            None,
+            where_expr.as_deref(),
         ),
         Binder::Collection {
             name,
@@ -499,6 +516,217 @@ fn binder_json(
         );
     }
     Ok(output)
+}
+
+fn normalize_aggregate(
+    kind: AggregateKind,
+    binder: &Binder,
+    value: Option<&Expr>,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<Expr, PublicKernelError> {
+    let (name, candidates, filter) = finite_binder_candidates(binder, env, model)?;
+    let mut terms = Vec::new();
+    for (candidate, membership) in candidates {
+        let replacements = HashMap::from([(name.clone(), candidate)]);
+        let condition = aggregate_condition(membership, filter.as_ref(), &replacements);
+        let selected = match kind {
+            AggregateKind::Count | AggregateKind::Unique | AggregateKind::ExactlyOne => {
+                Expr::Num(1)
+            }
+            AggregateKind::Sum => crate::substitute_expr(
+                value
+                    .ok_or_else(|| error("sum aggregate requires a value"))?
+                    .clone(),
+                &replacements,
+            ),
+        };
+        let span = unknown_span();
+        terms.push(Expr::Conditional {
+            condition: Box::new(condition),
+            then_expr: Box::new(selected),
+            else_expr: Box::new(Expr::Num(0)),
+            spans: Box::new(ConditionalSpans {
+                condition: span,
+                then_expr: span,
+                else_expr: span,
+            }),
+        });
+    }
+    Ok(aggregate_result(kind, terms))
+}
+
+fn finite_binder_candidates(
+    binder: &Binder,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<FiniteBinderCandidates, PublicKernelError> {
+    let (name, candidates, filter) = match binder {
+        Binder::Typed {
+            name, where_expr, ..
+        } => {
+            let candidates = model
+                .domain_values(&binder_type(binder, env, model)?)
+                .map_err(|model_error| error(model_error.to_string()))?
+                .into_iter()
+                .map(|candidate| Ok((value_expression(candidate)?, Expr::Bool(true))))
+                .collect::<Result<Vec<_>, PublicKernelError>>()?;
+            (name, candidates, where_expr.as_deref())
+        }
+        Binder::Range {
+            name,
+            lo,
+            hi,
+            where_expr,
+        } => {
+            let lo = static_public_int(lo, model)?;
+            let hi = static_public_int(hi, model)?;
+            let candidates = (lo..=hi)
+                .map(|candidate| (Expr::Num(candidate), Expr::Bool(true)))
+                .collect();
+            (name, candidates, where_expr.as_deref())
+        }
+        Binder::Collection {
+            name,
+            collection,
+            where_expr,
+        } => {
+            let collection_ty = resolve(model, &infer_type(collection, env, model, None)?)?;
+            let candidates = match collection_ty {
+                TypeRef::Set(element_ty) => model
+                    .domain_values(&element_ty)
+                    .map_err(|model_error| error(model_error.to_string()))?
+                    .into_iter()
+                    .map(|candidate| {
+                        let candidate = value_expression(candidate)?;
+                        let present = Expr::Method {
+                            receiver: collection.clone(),
+                            name: "contains".to_owned(),
+                            args: vec![candidate.clone()],
+                        };
+                        Ok((candidate, present))
+                    })
+                    .collect::<Result<Vec<_>, PublicKernelError>>()?,
+                TypeRef::Seq(_, capacity) => (0..capacity)
+                    .map(|index| {
+                        let index = i64::try_from(index)
+                            .map_err(|_| error("Seq capacity exceeds public integer range"))?;
+                        let candidate = Expr::Method {
+                            receiver: collection.clone(),
+                            name: "at".to_owned(),
+                            args: vec![Expr::Num(index)],
+                        };
+                        let present = Expr::Binary {
+                            op: "<".to_owned(),
+                            left: Box::new(Expr::Num(index)),
+                            right: Box::new(Expr::Method {
+                                receiver: collection.clone(),
+                                name: "size".to_owned(),
+                                args: Vec::new(),
+                            }),
+                        };
+                        Ok((candidate, present))
+                    })
+                    .collect::<Result<Vec<_>, PublicKernelError>>()?,
+                _ => return Err(error("collection binder requires Set or Seq")),
+            };
+            (name, candidates, where_expr.as_deref())
+        }
+    };
+    Ok((name.clone(), candidates, filter.cloned()))
+}
+
+fn aggregate_condition(
+    membership: Expr,
+    filter: Option<&Expr>,
+    replacements: &HashMap<String, Expr>,
+) -> Expr {
+    filter.map_or(membership.clone(), |filter| {
+        let span = unknown_span();
+        Expr::Conditional {
+            condition: Box::new(membership),
+            then_expr: Box::new(crate::substitute_expr(filter.clone(), replacements)),
+            else_expr: Box::new(Expr::Bool(false)),
+            spans: Box::new(ConditionalSpans {
+                condition: span,
+                then_expr: span,
+                else_expr: span,
+            }),
+        }
+    })
+}
+
+fn aggregate_result(kind: AggregateKind, terms: Vec<Expr>) -> Expr {
+    let total = terms
+        .into_iter()
+        .fold(Expr::Num(0), |left, right| Expr::Binary {
+            op: "+".to_owned(),
+            left: Box::new(left),
+            right: Box::new(right),
+        });
+    match kind {
+        AggregateKind::Count | AggregateKind::Sum => total,
+        AggregateKind::Unique => Expr::Binary {
+            op: "<=".to_owned(),
+            left: Box::new(total),
+            right: Box::new(Expr::Num(1)),
+        },
+        AggregateKind::ExactlyOne => Expr::Binary {
+            op: "==".to_owned(),
+            left: Box::new(total),
+            right: Box::new(Expr::Num(1)),
+        },
+    }
+}
+
+fn static_public_int(expr: &Expr, model: &KernelModel) -> Result<i64, PublicKernelError> {
+    match expr {
+        Expr::Num(value) => Ok(*value),
+        Expr::Var(name) => match model.consts.get(name) {
+            Some(crate::FslValue::Int(value)) => Ok(*value),
+            _ => Err(error(format!("'{name}' is not an integer const"))),
+        },
+        Expr::Neg(value) => static_public_int(value, model)?
+            .checked_neg()
+            .ok_or_else(|| error("integer overflow in range bound")),
+        _ => Err(error(
+            "public Kernel requires static aggregate range bounds",
+        )),
+    }
+}
+
+fn value_expression(value: crate::FslValue) -> Result<Expr, PublicKernelError> {
+    Ok(match value {
+        crate::FslValue::Int(value) => Expr::Num(value),
+        crate::FslValue::Bool(value) => Expr::Bool(value),
+        crate::FslValue::Enum { member, .. } => Expr::Var(member),
+        crate::FslValue::None => Expr::None,
+        crate::FslValue::Some(value) => Expr::Some(Box::new(value_expression(*value)?)),
+        crate::FslValue::Struct { type_name, fields } => Expr::Struct {
+            name: type_name,
+            fields: fields
+                .into_iter()
+                .map(|(name, value)| Ok((name, value_expression(value)?)))
+                .collect::<Result<Vec<_>, PublicKernelError>>()?,
+        },
+        crate::FslValue::Set(values) => Expr::Set(
+            values
+                .into_iter()
+                .map(value_expression)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        crate::FslValue::Seq(values) => Expr::Seq(
+            values
+                .into_iter()
+                .map(value_expression)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        crate::FslValue::Map(_) | crate::FslValue::Relation(_) => {
+            return Err(error(
+                "aggregate element has no public literal representation",
+            ));
+        }
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -600,6 +828,9 @@ fn expr_json(
                 "unlowered predicate call '{name}' in public Kernel"
             )));
         }
+        Expr::Stage { .. } => {
+            return Err(error("unlowered stage access in public Kernel"));
+        }
         Expr::Index(collection, index) => {
             let collection_ty = resolve(model, &infer_type(collection, env, model, None)?)?;
             let key_ty = match collection_ty {
@@ -630,6 +861,13 @@ fn expr_json(
             name,
             args,
         } => {
+            let receiver_ty = resolve(model, &infer_type(receiver, env, model, None)?)?;
+            let argument_type = match (name.as_str(), &receiver_ty) {
+                ("contains" | "add" | "remove", TypeRef::Set(item))
+                | ("contains" | "push", TypeRef::Seq(item, _)) => Some(item.as_ref()),
+                ("at", TypeRef::Seq(_, _)) => Some(&TypeRef::Int),
+                _ => None,
+            };
             output.insert("kind".to_owned(), json!("method"));
             output.insert(
                 "receiver".to_owned(),
@@ -640,7 +878,7 @@ fn expr_json(
                 "arguments".to_owned(),
                 Value::Array(
                     args.iter()
-                        .map(|arg| expr_json(arg, env, model, path, span, None))
+                        .map(|arg| expr_json(arg, env, model, path, span, argument_type))
                         .collect::<Result<_, _>>()?,
                 ),
             );
@@ -747,44 +985,72 @@ fn expr_json(
                 expr_json(body, &local, model, path, span, Some(&TypeRef::Bool))?,
             );
         }
-        Expr::Count {
-            name,
-            type_name,
-            condition,
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
         } => {
-            let domain = qualified_name(type_name)?;
+            if matches!(kind, AggregateKind::Count | AggregateKind::Sum)
+                && !matches!(binder, Binder::Typed { .. })
+            {
+                let normalized = normalize_aggregate(*kind, binder, value.as_deref(), env, model)?;
+                return expr_json(&normalized, env, model, path, span, expected);
+            }
+            let name = match binder {
+                Binder::Typed { name, .. }
+                | Binder::Range { name, .. }
+                | Binder::Collection { name, .. } => name,
+            };
+            let binder_ty = binder_type(binder, env, model)?;
             let mut local = env.clone();
-            local.insert(name.clone(), TypeRef::Named(domain.clone()));
-            output.insert("kind".to_owned(), json!("count"));
-            output.insert("binding".to_owned(), json!(name));
-            output.insert("domain".to_owned(), json!(domain));
+            local.insert(name.clone(), binder_ty);
             output.insert(
-                "condition".to_owned(),
-                expr_json(condition, &local, model, path, span, Some(&TypeRef::Bool))?,
+                "kind".to_owned(),
+                json!(match kind {
+                    AggregateKind::Count => "count",
+                    AggregateKind::Sum => "sum",
+                    AggregateKind::Unique => "unique",
+                    AggregateKind::ExactlyOne => "exactly_one",
+                }),
             );
-        }
-        Expr::Sum {
-            name,
-            type_name,
-            body,
-            condition,
-        } => {
-            let domain = qualified_name(type_name)?;
-            let mut local = env.clone();
-            local.insert(name.clone(), TypeRef::Named(domain.clone()));
-            output.insert("kind".to_owned(), json!("sum"));
-            output.insert("binding".to_owned(), json!(name));
-            output.insert("domain".to_owned(), json!(domain));
-            output.insert(
-                "value".to_owned(),
-                expr_json(body, &local, model, path, span, Some(&TypeRef::Int))?,
-            );
-            output.insert(
-                "condition".to_owned(),
-                condition.as_deref().map_or(Ok(Value::Null), |condition| {
-                    expr_json(condition, &local, model, path, span, Some(&TypeRef::Bool))
-                })?,
-            );
+            if let Binder::Typed {
+                type_name,
+                where_expr,
+                ..
+            } = binder
+                && matches!(kind, AggregateKind::Count | AggregateKind::Sum)
+            {
+                output.insert("binding".to_owned(), json!(name));
+                output.insert("domain".to_owned(), json!(qualified_name(type_name)?));
+                output.insert(
+                    "condition".to_owned(),
+                    match where_expr.as_deref() {
+                        Some(condition) => {
+                            expr_json(condition, &local, model, path, span, Some(&TypeRef::Bool))?
+                        }
+                        None if *kind == AggregateKind::Sum => Value::Null,
+                        None => expr_json(
+                            &Expr::Bool(true),
+                            &local,
+                            model,
+                            path,
+                            span,
+                            Some(&TypeRef::Bool),
+                        )?,
+                    },
+                );
+            } else {
+                output.insert(
+                    "binder".to_owned(),
+                    binder_json(binder, env, model, path, span)?,
+                );
+            }
+            if let Some(value) = value {
+                output.insert(
+                    "value".to_owned(),
+                    expr_json(value, &local, model, path, span, Some(&TypeRef::Int))?,
+                );
+            }
         }
         Expr::UnaryNamed { name, expr, .. } => {
             output.insert("kind".to_owned(), json!(name));
@@ -821,13 +1087,6 @@ fn expr_json(
             output.insert(
                 "target".to_owned(),
                 expr_json(third, env, model, path, span, None)?,
-            );
-        }
-        Expr::BinderNamed { name, binder } => {
-            output.insert("kind".to_owned(), json!(name));
-            output.insert(
-                "binder".to_owned(),
-                binder_json(binder, env, model, path, span)?,
             );
         }
     }
@@ -1236,6 +1495,35 @@ fn walk_partial(
         walk_partial(else_expr, env, model, path, span, Some(&else_path), output)?;
         return Ok(());
     }
+    if let Expr::Quantified {
+        quantifier,
+        binder,
+        body,
+    } = expr
+    {
+        walk_quantified_partial(
+            quantifier,
+            binder,
+            body,
+            env,
+            model,
+            path,
+            span,
+            path_condition,
+            output,
+        )?;
+        return Ok(());
+    }
+    if let Expr::Aggregate {
+        kind,
+        binder,
+        value,
+    } = expr
+    {
+        let normalized = normalize_aggregate(*kind, binder, value.as_deref(), env, model)?;
+        walk_partial(&normalized, env, model, path, span, path_condition, output)?;
+        return Ok(());
+    }
     let mut children: Vec<&Expr> = Vec::new();
     match expr {
         Expr::Some(item) | Expr::Neg(item) | Expr::Not(item) => children.push(item),
@@ -1247,38 +1535,91 @@ fn walk_partial(
             children.push(left);
             children.push(right);
         }
-        Expr::Field(value, _) | Expr::UnaryNamed { expr: value, .. } => children.push(value),
+        Expr::Field(value, _)
+        | Expr::Stage { entity: value, .. }
+        | Expr::UnaryNamed { expr: value, .. } => children.push(value),
         Expr::Method { receiver, args, .. } => {
             children.push(receiver);
             children.extend(args);
         }
-        Expr::Conditional { .. } => unreachable!("handled above"),
-        Expr::Is { expr, .. } => children.push(expr),
-        Expr::Quantified { body, .. } => children.push(body),
-        Expr::Count { condition, .. } => children.push(condition),
-        Expr::Sum {
-            body, condition, ..
-        } => {
-            children.push(body);
-            if let Some(condition) = condition {
-                children.push(condition);
-            }
+        Expr::Conditional { .. } | Expr::Quantified { .. } | Expr::Aggregate { .. } => {
+            unreachable!("handled above")
         }
+        Expr::Is { expr, .. } => children.push(expr),
         Expr::TernaryNamed {
             first,
             second,
             third,
             ..
         } => children.extend([first.as_ref(), second.as_ref(), third.as_ref()]),
-        Expr::Num(_)
-        | Expr::Bool(_)
-        | Expr::None
-        | Expr::Var(_)
-        | Expr::Call { .. }
-        | Expr::BinderNamed { .. } => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::Call { .. } => {}
     }
     for child in children {
         walk_partial(child, env, model, path, span, path_condition, output)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_quantified_partial(
+    quantifier: &str,
+    binder: &Binder,
+    body: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    path: &str,
+    span: Span,
+    path_condition: Option<&Expr>,
+    output: &mut Vec<Value>,
+) -> Result<(), PublicKernelError> {
+    let (name, candidates, filter) = finite_binder_candidates(binder, env, model)?;
+    let mut continuation = path_condition.cloned();
+    for (candidate, membership) in candidates {
+        let replacements = HashMap::from([(name.clone(), candidate)]);
+        let effective = aggregate_condition(membership, filter.as_ref(), &replacements);
+        let selected = crate::substitute_expr(body.clone(), &replacements);
+        let candidate_result = Expr::Conditional {
+            condition: Box::new(effective.clone()),
+            then_expr: Box::new(selected.clone()),
+            else_expr: Box::new(Expr::Bool(quantifier == "forall")),
+            spans: Box::new(ConditionalSpans {
+                condition: unknown_span(),
+                then_expr: unknown_span(),
+                else_expr: unknown_span(),
+            }),
+        };
+        walk_partial(
+            &candidate_result,
+            env,
+            model,
+            path,
+            span,
+            continuation.as_ref(),
+            output,
+        )?;
+        let selected_continues = if quantifier == "forall" {
+            selected
+        } else {
+            Expr::Not(Box::new(selected))
+        };
+        let candidate_continues = Expr::Conditional {
+            condition: Box::new(effective),
+            then_expr: Box::new(selected_continues),
+            else_expr: Box::new(Expr::Bool(true)),
+            spans: Box::new(ConditionalSpans {
+                condition: unknown_span(),
+                then_expr: unknown_span(),
+                else_expr: unknown_span(),
+            }),
+        };
+        continuation = Some(match continuation {
+            Some(previous) => Expr::Binary {
+                op: "and".to_owned(),
+                left: Box::new(previous),
+                right: Box::new(candidate_continues),
+            },
+            None => candidate_continues,
+        });
     }
     Ok(())
 }

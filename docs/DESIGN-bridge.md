@@ -138,11 +138,34 @@ exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
 fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
 
-The scenario-collection core (`scenarios()`) is language independent, so `testgen.py`
-splits into that shared core (`_collect_scenarios`) plus per-target emitters
-(`emit_pytest` / `emit_vitest` / `emit_swift`, …) chosen by `--target`. Adding a
-harness (Jest, Go, …) is a new emitter, not a redesign — the same kernel-stays-narrow
-principle as the dialect frontends.
+The native generator has one normalized input adapter for every target. For an
+ordinary source it validates Public Kernel v1, then combines its spec/action/
+parameter metadata with language-independent scenario JSON and the versioned
+`testgen-trace.v1` conformance trace (`initial`, then ordered
+`action`/`params`/`expected` steps). Pytest,
+Vitest, Swift, Kotlin, Dart, and PHPUnit consume only this adapter; no emitter
+receives the private `KernelModel` or AST. Incompatible Kernel schema ids or
+versions, malformed vectors, mismatched spec names, and unknown targets fail
+closed.
+
+The testgen trace is intentionally a distinct fixed-seed, single-path public
+contract rather than the exhaustive `fslc conformance` BFS corpus.
+Substituting the latter would turn O(100 × enabled actions) generation into a
+potential state-space expansion, change Option JSON shapes, and perturb stable
+target output ordering. Its schema is
+`schemas/fslc/kernel/testgen-trace.v1.schema.json`; it records its own and the
+Kernel schema versions plus the spec identity. The adapter cross-checks every
+state field, action, and exact parameter set against Public Kernel v1 before an
+emitter runs. The frozen Python implementation remains a compatibility reference
+and is unchanged.
+
+Public Kernel v1/v2 deliberately reject `compose` until component file identities
+can be retained truthfully. To preserve the independent compose/testgen contract,
+the CLI selects an explicit compose constructor before export and supplies only
+checked spec/state/action/parameter names and declaration order. It converges on
+the same normalized input and never exposes expressions or AST nodes to emitters.
+This bridge is retired when Public Kernel supports truthful compose provenance;
+it is not a catch-on-export-error fallback.
 
 The output is a **self-contained pytest file** (the primary dependencies are
 `fslc.runtime` and `pytest`. In addition, only the standard library needed for
@@ -164,7 +187,7 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
    still embeds the witnessed scenarios and returns warning JSON naming each
    missing target with a depth hint. `--strict` restores all-or-nothing
    `reachable_failed`.
-3. **Random-walk conformance test**: with `Monitor` as the oracle, choose actions
+3. **Random-walk conformance test**: with the concrete Monitor as the oracle, choose actions
    from `mon.enabled()` by pseudorandom (fixed seed, `random.Random(0)`) for
    N=100 steps, and on every step assert `adapter.step(...)` → `observe() == mon.state`.
    If the Monitor side produces a violation (invariant etc.), distinguish it in
