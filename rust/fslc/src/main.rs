@@ -896,249 +896,8 @@ fn command() -> Result<(Value, i32), String> {
             })?;
             Ok(run_conformance(&path, depth, version))
         }
-        "approval" => {
-            let subcommand = args.next().ok_or_else(|| {
-                "usage: fslc approval <create|check|diff> SPEC [options]".to_owned()
-            })?;
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| format!("fslc approval {subcommand} requires a spec"))?,
-            );
-            match subcommand.as_str() {
-                "create" => {
-                    let mut kind = None;
-                    let mut artifact = None;
-                    let mut approver = None;
-                    let mut requirements = Vec::new();
-                    let mut depth = 8_usize;
-                    let mut deadlock = "ignore".to_owned();
-                    let mut engine = "bmc".to_owned();
-                    let mut output = None;
-                    let mut signing_key = None;
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--kind" => kind = Some(required_option_value(&mut args, "--kind")?),
-                            "--artifact" => {
-                                artifact = Some(PathBuf::from(required_option_value(
-                                    &mut args,
-                                    "--artifact",
-                                )?));
-                            }
-                            "--approver" => {
-                                approver = Some(required_option_value(&mut args, "--approver")?);
-                            }
-                            "--requirement" => requirements
-                                .push(required_option_value(&mut args, "--requirement")?),
-                            "--signing-key" => {
-                                signing_key = Some(PathBuf::from(required_option_value(
-                                    &mut args,
-                                    "--signing-key",
-                                )?));
-                            }
-                            "--depth" => {
-                                depth = required_option_value(&mut args, "--depth")?
-                                    .parse()
-                                    .map_err(|_| {
-                                        "--depth must be a non-negative integer".to_owned()
-                                    })?;
-                            }
-                            "--deadlock" => {
-                                deadlock = required_option_value(&mut args, "--deadlock")?;
-                                if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                                    return Err(
-                                        "--deadlock must be warn, error, or ignore".to_owned()
-                                    );
-                                }
-                            }
-                            "--engine" => {
-                                engine = required_option_value(&mut args, "--engine")?;
-                                if !matches!(engine.as_str(), "bmc" | "induction") {
-                                    return Err("--engine must be bmc or induction".to_owned());
-                                }
-                            }
-                            "-o" | "--output" => {
-                                output = Some(PathBuf::from(required_option_value(
-                                    &mut args, "--output",
-                                )?));
-                            }
-                            _ => return Err(format!("unknown approval create option '{option}'")),
-                        }
-                    }
-                    Ok(run_approval_create(
-                        &path,
-                        &kind.ok_or_else(|| "approval create requires --kind".to_owned())?,
-                        &artifact
-                            .ok_or_else(|| "approval create requires --artifact".to_owned())?,
-                        &approver
-                            .ok_or_else(|| "approval create requires --approver".to_owned())?,
-                        &requirements,
-                        &approval::GenerationInputs {
-                            depth,
-                            deadlock,
-                            engine,
-                        },
-                        output.as_deref(),
-                        signing_key.as_deref(),
-                    ))
-                }
-                "check" => {
-                    let mut record = None;
-                    let mut trust_keys = Vec::new();
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--record" => {
-                                record = Some(PathBuf::from(required_option_value(
-                                    &mut args, "--record",
-                                )?));
-                            }
-                            "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
-                                &mut args,
-                                "--trust-key",
-                            )?)),
-                            _ => return Err(format!("unknown approval check option '{option}'")),
-                        }
-                    }
-                    Ok(run_approval_check(
-                        &path,
-                        &record.ok_or_else(|| "approval check requires --record".to_owned())?,
-                        &trust_keys,
-                    ))
-                }
-                "diff" => {
-                    let mut record = None;
-                    let mut depth = 8_usize;
-                    let mut trust_keys = Vec::new();
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--record" => {
-                                record = Some(PathBuf::from(required_option_value(
-                                    &mut args, "--record",
-                                )?));
-                            }
-                            "--depth" => {
-                                depth = required_option_value(&mut args, "--depth")?
-                                    .parse()
-                                    .map_err(|_| {
-                                        "--depth must be a non-negative integer".to_owned()
-                                    })?;
-                            }
-                            "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
-                                &mut args,
-                                "--trust-key",
-                            )?)),
-                            _ => return Err(format!("unknown approval diff option '{option}'")),
-                        }
-                    }
-                    Ok(run_approval_diff(
-                        &path,
-                        &record.ok_or_else(|| "approval diff requires --record".to_owned())?,
-                        depth,
-                        &trust_keys,
-                    ))
-                }
-                _ => Err(format!("unknown approval subcommand '{subcommand}'")),
-            }
-        }
-        "db" => {
-            let subcommand = args
-                .next()
-                .ok_or_else(|| "usage: fslc db <check|observe|import> ...".to_owned())?;
-            match subcommand.as_str() {
-                "check" => {
-                    let path = PathBuf::from(args.next().ok_or_else(|| {
-                        "usage: fslc db check SPEC [--depth N] [--engine ENGINE]".to_owned()
-                    })?);
-                    let mut depth = 8_usize;
-                    let mut deadlock = "warn".to_owned();
-                    let mut engine = "bmc".to_owned();
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--depth" => {
-                                depth = args
-                                    .next()
-                                    .ok_or_else(|| "--depth requires a value".to_owned())?
-                                    .parse()
-                                    .map_err(|_| {
-                                        "--depth must be a non-negative integer".to_owned()
-                                    })?;
-                            }
-                            "--deadlock" => {
-                                deadlock = args
-                                    .next()
-                                    .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                            }
-                            "--engine" => {
-                                engine = args
-                                    .next()
-                                    .ok_or_else(|| "--engine requires a value".to_owned())?;
-                                if !matches!(engine.as_str(), "bmc" | "induction") {
-                                    return Err("--engine must be bmc or induction".to_owned());
-                                }
-                            }
-                            _ => return Err(format!("unknown db check option '{option}'")),
-                        }
-                    }
-                    Ok(run_db_check(&path, depth, &deadlock, &engine))
-                }
-                "observe" => {
-                    let path = PathBuf::from(args.next().ok_or_else(|| {
-                        "usage: fslc db observe SPEC --trace EVENTS.json".to_owned()
-                    })?);
-                    if args.next().as_deref() != Some("--trace") {
-                        return Err("db observe requires --trace EVENTS.json".to_owned());
-                    }
-                    let trace = PathBuf::from(
-                        args.next()
-                            .ok_or_else(|| "--trace requires a path".to_owned())?,
-                    );
-                    if args.next().is_some() {
-                        return Err("unexpected db observe argument".to_owned());
-                    }
-                    Ok(run_db_observe(&path, &trace))
-                }
-                "import" => {
-                    let path = PathBuf::from(args.next().ok_or_else(|| {
-                        "usage: fslc db import SOURCE [--name NAME] [--source FORMAT] [-o PATH]"
-                            .to_owned()
-                    })?);
-                    let mut name = "ImportedDb".to_owned();
-                    let mut format = "auto".to_owned();
-                    let mut output = None;
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--name" => {
-                                name = args
-                                    .next()
-                                    .ok_or_else(|| "--name requires a value".to_owned())?;
-                            }
-                            "--source" => {
-                                format = args
-                                    .next()
-                                    .ok_or_else(|| "--source requires a value".to_owned())?;
-                            }
-                            "-o" | "--output" => {
-                                output = Some(PathBuf::from(
-                                    args.next()
-                                        .ok_or_else(|| "--output requires a path".to_owned())?,
-                                ));
-                            }
-                            _ => return Err(format!("unknown db import option '{option}'")),
-                        }
-                    }
-                    let result = run_db_import(&path, &name, &format, output.as_deref());
-                    if output.is_none()
-                        && result.0.get("result").and_then(Value::as_str) == Some("imported")
-                        && let Some(source) =
-                            result.0.get("dbsystem_source").and_then(Value::as_str)
-                    {
-                        print!("{source}");
-                        std::process::exit(0);
-                    }
-                    Ok(result)
-                }
-                _ => Err(format!("unknown db subcommand '{subcommand}'")),
-            }
-        }
+        "approval" => approval_command(args),
+        "db" => db_command(args),
         "compat" => {
             if args.next().as_deref() != Some("check") {
                 return Err("usage: fslc compat check DBSYSTEM [--include-ai]".to_owned());
@@ -1161,292 +920,8 @@ fn command() -> Result<(Value, i32), String> {
             }
             Ok((result, status))
         }
-        "ai" => {
-            let subcommand = args.next().ok_or_else(|| {
-                "usage: fslc ai <check|replay|eval|regress|compare|drift|compat> ...".to_owned()
-            })?;
-            if subcommand == "compare" {
-                let mut before = None;
-                let mut after = None;
-                let mut dataset = None;
-                let mut from_label = None;
-                let mut to_label = None;
-                while let Some(option) = args.next() {
-                    let value = args
-                        .next()
-                        .ok_or_else(|| format!("{option} requires a value"))?;
-                    match option.as_str() {
-                        "--from" => before = Some(PathBuf::from(value)),
-                        "--to" => after = Some(PathBuf::from(value)),
-                        "--dataset" => dataset = Some(value),
-                        "--from-label" => from_label = Some(value),
-                        "--to-label" => to_label = Some(value),
-                        _ => return Err(format!("unknown ai compare option '{option}'")),
-                    }
-                }
-                return Ok(run_ai_compare(
-                    &before.ok_or_else(|| "ai compare requires --from".to_owned())?,
-                    &after.ok_or_else(|| "ai compare requires --to".to_owned())?,
-                    dataset.as_deref(),
-                    from_label.as_deref(),
-                    to_label.as_deref(),
-                ));
-            }
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| format!("fslc ai {subcommand} requires a file"))?,
-            );
-            match subcommand.as_str() {
-                "check" => {
-                    let (depth, deadlock, engine, _) =
-                        parse_specialized_verify_options(&mut args, false)?;
-                    Ok(run_ai_check(&path, depth, &deadlock, &engine))
-                }
-                "replay" => {
-                    let mut logs = None;
-                    let mut component = None;
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--logs" => {
-                                logs = Some(PathBuf::from(required_option_value(
-                                    &mut args, "--logs",
-                                )?));
-                            }
-                            "--component" => {
-                                component = Some(required_option_value(&mut args, "--component")?);
-                            }
-                            _ => return Err(format!("unknown ai replay option '{option}'")),
-                        }
-                    }
-                    Ok(run_ai_replay(
-                        &path,
-                        &logs.ok_or_else(|| "ai replay requires --logs EVENTS.jsonl".to_owned())?,
-                        component.as_deref(),
-                    ))
-                }
-                "eval" => {
-                    let mut records = None;
-                    let mut dataset = None;
-                    let mut property = None;
-                    let mut slice = None;
-                    while let Some(option) = args.next() {
-                        let value = args
-                            .next()
-                            .ok_or_else(|| format!("{option} requires a value"))?;
-                        match option.as_str() {
-                            "--records" => records = Some(PathBuf::from(value)),
-                            "--dataset" => dataset = Some(value),
-                            "--property" => property = Some(value),
-                            "--slice" => slice = Some(value),
-                            _ => return Err(format!("unknown ai eval option '{option}'")),
-                        }
-                    }
-                    Ok(run_ai_eval(
-                        &path,
-                        records.as_deref(),
-                        dataset.as_deref(),
-                        property.as_deref(),
-                        slice.as_deref(),
-                    ))
-                }
-                "regress" => {
-                    let mut before = None;
-                    let mut after = None;
-                    let mut dataset = None;
-                    let mut migration = None;
-                    while let Some(option) = args.next() {
-                        let value = args
-                            .next()
-                            .ok_or_else(|| format!("{option} requires a value"))?;
-                        match option.as_str() {
-                            "--before-records" => before = Some(PathBuf::from(value)),
-                            "--after-records" => after = Some(PathBuf::from(value)),
-                            "--dataset" => dataset = Some(value),
-                            "--migration" => migration = Some(value),
-                            _ => return Err(format!("unknown ai regress option '{option}'")),
-                        }
-                    }
-                    Ok(run_ai_regress(
-                        &path,
-                        &before.ok_or_else(|| "ai regress requires --before-records".to_owned())?,
-                        &after.ok_or_else(|| "ai regress requires --after-records".to_owned())?,
-                        dataset.as_deref(),
-                        migration.as_deref(),
-                    ))
-                }
-                "drift" => {
-                    let mut logs = None;
-                    let mut baseline = None;
-                    let mut property = None;
-                    let mut window = None;
-                    let mut baseline_label = None;
-                    while let Some(option) = args.next() {
-                        let value = args
-                            .next()
-                            .ok_or_else(|| format!("{option} requires a value"))?;
-                        match option.as_str() {
-                            "--logs" => logs = Some(PathBuf::from(value)),
-                            "--baseline-logs" => baseline = Some(PathBuf::from(value)),
-                            "--property" => property = Some(value),
-                            "--window" => window = Some(value),
-                            "--baseline" => baseline_label = Some(value),
-                            _ => return Err(format!("unknown ai drift option '{option}'")),
-                        }
-                    }
-                    Ok(run_ai_drift(
-                        &path,
-                        &logs.ok_or_else(|| "ai drift requires --logs".to_owned())?,
-                        baseline.as_deref(),
-                        property.as_deref(),
-                        window.as_deref(),
-                        baseline_label.as_deref(),
-                    ))
-                }
-                "compat" => {
-                    let environment = match args.next() {
-                        None => None,
-                        Some(option) if option == "--environment" => Some(
-                            args.next()
-                                .ok_or_else(|| "--environment requires a value".to_owned())?,
-                        ),
-                        Some(option) => return Err(format!("unknown ai compat option '{option}'")),
-                    };
-                    Ok(run_ai_compat(&path, environment.as_deref()))
-                }
-                _ => Err(format!("unknown ai subcommand '{subcommand}'")),
-            }
-        }
-        "domain" => {
-            let subcommand = args.next().ok_or_else(|| {
-                "usage: fslc domain <check|analyze|expand|generate> ...".to_owned()
-            })?;
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| format!("fslc domain {subcommand} requires a file"))?,
-            );
-            match subcommand.as_str() {
-                "check" => {
-                    let (depth, deadlock, engine, edition) =
-                        parse_specialized_verify_options(&mut args, true)?;
-                    Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
-                }
-                "analyze" => Ok(run_domain_analyze(&path)),
-                "expand" => {
-                    let output = parse_optional_output(&mut args)?;
-                    let result = run_domain_expand(&path, output.as_deref());
-                    if output.is_none()
-                        && let Some(source) = result.0.get("kernel_source").and_then(Value::as_str)
-                    {
-                        print!("{source}");
-                        std::process::exit(0);
-                    }
-                    Ok(result)
-                }
-                "generate" => {
-                    let mut target = "typescript".to_owned();
-                    let mut profile = "functional-ddd".to_owned();
-                    let mut output = None;
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--profile" => {
-                                profile = args
-                                    .next()
-                                    .ok_or_else(|| "--profile requires a value".to_owned())?;
-                                if profile != "functional-ddd" {
-                                    return Err("--profile must be functional-ddd".to_owned());
-                                }
-                            }
-                            "--target" => {
-                                target = args
-                                    .next()
-                                    .ok_or_else(|| "--target requires a value".to_owned())?;
-                            }
-                            "-o" | "--output" => {
-                                output = Some(PathBuf::from(
-                                    args.next()
-                                        .ok_or_else(|| "--output requires a path".to_owned())?,
-                                ));
-                            }
-                            _ => return Err(format!("unknown domain generate option '{option}'")),
-                        }
-                    }
-                    Ok(run_domain_generate(
-                        &path,
-                        &profile,
-                        &target,
-                        output.as_deref(),
-                    ))
-                }
-                "replay" => {
-                    if args.next().as_deref() != Some("--logs") {
-                        return Err("domain replay requires --logs EVENTS.jsonl".to_owned());
-                    }
-                    let logs = PathBuf::from(
-                        args.next()
-                            .ok_or_else(|| "--logs requires a path".to_owned())?,
-                    );
-                    Ok(run_domain_replay(&path, &logs))
-                }
-                "testgen" => {
-                    let mut depth = 8_usize;
-                    let mut target = "vitest".to_owned();
-                    let mut deadlock = "warn".to_owned();
-                    let mut strict = false;
-                    let mut output = None;
-                    while let Some(option) = args.next() {
-                        match option.as_str() {
-                            "--depth" => {
-                                depth = args
-                                    .next()
-                                    .ok_or_else(|| "--depth requires a value".to_owned())?
-                                    .parse()
-                                    .map_err(|_| "--depth must be an integer".to_owned())?;
-                            }
-                            "--target" => {
-                                target = args
-                                    .next()
-                                    .ok_or_else(|| "--target requires a value".to_owned())?;
-                            }
-                            "--deadlock" => {
-                                deadlock = args
-                                    .next()
-                                    .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                                if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                                    return Err(
-                                        "--deadlock must be warn, error, or ignore".to_owned()
-                                    );
-                                }
-                            }
-                            "--strict" => strict = true,
-                            "-o" | "--output" => {
-                                output = Some(PathBuf::from(
-                                    args.next()
-                                        .ok_or_else(|| "--output requires a path".to_owned())?,
-                                ));
-                            }
-                            _ => return Err(format!("unknown domain testgen option '{option}'")),
-                        }
-                    }
-                    let result = run_domain_testgen(
-                        &path,
-                        depth,
-                        &target,
-                        &deadlock,
-                        strict,
-                        output.as_deref(),
-                    );
-                    if output.is_none()
-                        && result.0.get("result").and_then(Value::as_str) == Some("generated")
-                        && let Some(content) = result.0.get("content").and_then(Value::as_str)
-                    {
-                        print!("{content}");
-                        std::process::exit(result.1);
-                    }
-                    Ok(result)
-                }
-                _ => Err(format!("unknown domain subcommand '{subcommand}'")),
-            }
-        }
+        "ai" => ai_command(args),
+        "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
             let path = PathBuf::from(
                 args.next()
@@ -1594,15 +1069,17 @@ fn command() -> Result<(Value, i32), String> {
                 }
                 "html" => run_html_report(&path, depth, &deadlock, &engine, output.as_deref()),
                 "ledger" => run_ledger_report(
-                    &path,
-                    depth,
-                    &deadlock,
-                    &engine,
-                    impl_log.as_deref(),
-                    &evidence,
+                    &LedgerReportRequest {
+                        path: &path,
+                        depth,
+                        deadlock_mode: &deadlock,
+                        engine: &engine,
+                        impl_log: impl_log.as_deref(),
+                        evidence_paths: &evidence,
+                        output_path: output.as_deref(),
+                    },
                     &approval_records,
                     &trust_keys,
-                    output.as_deref(),
                 ),
                 _ => unreachable!(),
             };
@@ -1994,6 +1471,515 @@ fn command() -> Result<(Value, i32), String> {
             })
         }
         _ => Err(format!("unknown command '{command}'")),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc approval <create|check|diff> SPEC [options]".to_owned())?;
+    let path = PathBuf::from(
+        args.next()
+            .ok_or_else(|| format!("fslc approval {subcommand} requires a spec"))?,
+    );
+    match subcommand.as_str() {
+        "create" => {
+            let mut kind = None;
+            let mut artifact = None;
+            let mut approver = None;
+            let mut requirements = Vec::new();
+            let mut depth = 8_usize;
+            let mut deadlock = "ignore".to_owned();
+            let mut engine = "bmc".to_owned();
+            let mut output = None;
+            let mut signing_key = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--kind" => kind = Some(required_option_value(&mut args, "--kind")?),
+                    "--artifact" => {
+                        artifact = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--artifact",
+                        )?));
+                    }
+                    "--approver" => {
+                        approver = Some(required_option_value(&mut args, "--approver")?);
+                    }
+                    "--requirement" => {
+                        requirements.push(required_option_value(&mut args, "--requirement")?);
+                    }
+                    "--signing-key" => {
+                        signing_key = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--signing-key",
+                        )?));
+                    }
+                    "--depth" => {
+                        depth = required_option_value(&mut args, "--depth")?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "--deadlock" => {
+                        deadlock = required_option_value(&mut args, "--deadlock")?;
+                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                            return Err("--deadlock must be warn, error, or ignore".to_owned());
+                        }
+                    }
+                    "--engine" => {
+                        engine = required_option_value(&mut args, "--engine")?;
+                        if !matches!(engine.as_str(), "bmc" | "induction") {
+                            return Err("--engine must be bmc or induction".to_owned());
+                        }
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown approval create option '{option}'")),
+                }
+            }
+            Ok(run_approval_create(
+                &path,
+                &kind.ok_or_else(|| "approval create requires --kind".to_owned())?,
+                &artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?,
+                &approver.ok_or_else(|| "approval create requires --approver".to_owned())?,
+                &requirements,
+                &approval::GenerationInputs {
+                    depth,
+                    deadlock,
+                    engine,
+                },
+                output.as_deref(),
+                signing_key.as_deref(),
+            ))
+        }
+        "check" => {
+            let mut record = None;
+            let mut trust_keys = Vec::new();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--record" => {
+                        record = Some(PathBuf::from(required_option_value(&mut args, "--record")?));
+                    }
+                    "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--trust-key",
+                    )?)),
+                    _ => return Err(format!("unknown approval check option '{option}'")),
+                }
+            }
+            Ok(run_approval_check(
+                &path,
+                &record.ok_or_else(|| "approval check requires --record".to_owned())?,
+                &trust_keys,
+            ))
+        }
+        "diff" => {
+            let mut record = None;
+            let mut depth = 8_usize;
+            let mut trust_keys = Vec::new();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--record" => {
+                        record = Some(PathBuf::from(required_option_value(&mut args, "--record")?));
+                    }
+                    "--depth" => {
+                        depth = required_option_value(&mut args, "--depth")?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--trust-key",
+                    )?)),
+                    _ => return Err(format!("unknown approval diff option '{option}'")),
+                }
+            }
+            Ok(run_approval_diff(
+                &path,
+                &record.ok_or_else(|| "approval diff requires --record".to_owned())?,
+                depth,
+                &trust_keys,
+            ))
+        }
+        _ => Err(format!("unknown approval subcommand '{subcommand}'")),
+    }
+}
+
+fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc db <check|observe|import> ...".to_owned())?;
+    match subcommand.as_str() {
+        "check" => {
+            let path = PathBuf::from(args.next().ok_or_else(|| {
+                "usage: fslc db check SPEC [--depth N] [--engine ENGINE]".to_owned()
+            })?);
+            let mut depth = 8_usize;
+            let mut deadlock = "warn".to_owned();
+            let mut engine = "bmc".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "--deadlock" => {
+                        deadlock = args
+                            .next()
+                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                    }
+                    "--engine" => {
+                        engine = args
+                            .next()
+                            .ok_or_else(|| "--engine requires a value".to_owned())?;
+                        if !matches!(engine.as_str(), "bmc" | "induction") {
+                            return Err("--engine must be bmc or induction".to_owned());
+                        }
+                    }
+                    _ => return Err(format!("unknown db check option '{option}'")),
+                }
+            }
+            Ok(run_db_check(&path, depth, &deadlock, &engine))
+        }
+        "observe" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "usage: fslc db observe SPEC --trace EVENTS.json".to_owned())?,
+            );
+            if args.next().as_deref() != Some("--trace") {
+                return Err("db observe requires --trace EVENTS.json".to_owned());
+            }
+            let trace = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "--trace requires a path".to_owned())?,
+            );
+            if args.next().is_some() {
+                return Err("unexpected db observe argument".to_owned());
+            }
+            Ok(run_db_observe(&path, &trace))
+        }
+        "import" => {
+            let path = PathBuf::from(args.next().ok_or_else(|| {
+                "usage: fslc db import SOURCE [--name NAME] [--source FORMAT] [-o PATH]".to_owned()
+            })?);
+            let mut name = "ImportedDb".to_owned();
+            let mut format = "auto".to_owned();
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--name" => {
+                        name = args
+                            .next()
+                            .ok_or_else(|| "--name requires a value".to_owned())?;
+                    }
+                    "--source" => {
+                        format = args
+                            .next()
+                            .ok_or_else(|| "--source requires a value".to_owned())?;
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--output requires a path".to_owned())?,
+                        ));
+                    }
+                    _ => return Err(format!("unknown db import option '{option}'")),
+                }
+            }
+            let result = run_db_import(&path, &name, &format, output.as_deref());
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("imported")
+                && let Some(source) = result.0.get("dbsystem_source").and_then(Value::as_str)
+            {
+                print!("{source}");
+                std::process::exit(0);
+            }
+            Ok(result)
+        }
+        _ => Err(format!("unknown db subcommand '{subcommand}'")),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args.next().ok_or_else(|| {
+        "usage: fslc ai <check|replay|eval|regress|compare|drift|compat> ...".to_owned()
+    })?;
+    if subcommand == "compare" {
+        let mut before = None;
+        let mut after = None;
+        let mut dataset = None;
+        let mut from_label = None;
+        let mut to_label = None;
+        while let Some(option) = args.next() {
+            let value = args
+                .next()
+                .ok_or_else(|| format!("{option} requires a value"))?;
+            match option.as_str() {
+                "--from" => before = Some(PathBuf::from(value)),
+                "--to" => after = Some(PathBuf::from(value)),
+                "--dataset" => dataset = Some(value),
+                "--from-label" => from_label = Some(value),
+                "--to-label" => to_label = Some(value),
+                _ => return Err(format!("unknown ai compare option '{option}'")),
+            }
+        }
+        return Ok(run_ai_compare(
+            &before.ok_or_else(|| "ai compare requires --from".to_owned())?,
+            &after.ok_or_else(|| "ai compare requires --to".to_owned())?,
+            dataset.as_deref(),
+            from_label.as_deref(),
+            to_label.as_deref(),
+        ));
+    }
+    let path = PathBuf::from(
+        args.next()
+            .ok_or_else(|| format!("fslc ai {subcommand} requires a file"))?,
+    );
+    match subcommand.as_str() {
+        "check" => {
+            let (depth, deadlock, engine, _) = parse_specialized_verify_options(&mut args, false)?;
+            Ok(run_ai_check(&path, depth, &deadlock, &engine))
+        }
+        "replay" => {
+            let mut logs = None;
+            let mut component = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--logs" => {
+                        logs = Some(PathBuf::from(required_option_value(&mut args, "--logs")?));
+                    }
+                    "--component" => {
+                        component = Some(required_option_value(&mut args, "--component")?);
+                    }
+                    _ => return Err(format!("unknown ai replay option '{option}'")),
+                }
+            }
+            Ok(run_ai_replay(
+                &path,
+                &logs.ok_or_else(|| "ai replay requires --logs EVENTS.jsonl".to_owned())?,
+                component.as_deref(),
+            ))
+        }
+        "eval" => {
+            let mut records = None;
+            let mut dataset = None;
+            let mut property = None;
+            let mut slice = None;
+            while let Some(option) = args.next() {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{option} requires a value"))?;
+                match option.as_str() {
+                    "--records" => records = Some(PathBuf::from(value)),
+                    "--dataset" => dataset = Some(value),
+                    "--property" => property = Some(value),
+                    "--slice" => slice = Some(value),
+                    _ => return Err(format!("unknown ai eval option '{option}'")),
+                }
+            }
+            Ok(run_ai_eval(
+                &path,
+                records.as_deref(),
+                dataset.as_deref(),
+                property.as_deref(),
+                slice.as_deref(),
+            ))
+        }
+        "regress" => {
+            let mut before = None;
+            let mut after = None;
+            let mut dataset = None;
+            let mut migration = None;
+            while let Some(option) = args.next() {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{option} requires a value"))?;
+                match option.as_str() {
+                    "--before-records" => before = Some(PathBuf::from(value)),
+                    "--after-records" => after = Some(PathBuf::from(value)),
+                    "--dataset" => dataset = Some(value),
+                    "--migration" => migration = Some(value),
+                    _ => return Err(format!("unknown ai regress option '{option}'")),
+                }
+            }
+            Ok(run_ai_regress(
+                &path,
+                &before.ok_or_else(|| "ai regress requires --before-records".to_owned())?,
+                &after.ok_or_else(|| "ai regress requires --after-records".to_owned())?,
+                dataset.as_deref(),
+                migration.as_deref(),
+            ))
+        }
+        "drift" => {
+            let mut logs = None;
+            let mut baseline = None;
+            let mut property = None;
+            let mut window = None;
+            let mut baseline_label = None;
+            while let Some(option) = args.next() {
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("{option} requires a value"))?;
+                match option.as_str() {
+                    "--logs" => logs = Some(PathBuf::from(value)),
+                    "--baseline-logs" => baseline = Some(PathBuf::from(value)),
+                    "--property" => property = Some(value),
+                    "--window" => window = Some(value),
+                    "--baseline" => baseline_label = Some(value),
+                    _ => return Err(format!("unknown ai drift option '{option}'")),
+                }
+            }
+            Ok(run_ai_drift(
+                &path,
+                &logs.ok_or_else(|| "ai drift requires --logs".to_owned())?,
+                baseline.as_deref(),
+                property.as_deref(),
+                window.as_deref(),
+                baseline_label.as_deref(),
+            ))
+        }
+        "compat" => {
+            let environment = match args.next() {
+                None => None,
+                Some(option) if option == "--environment" => Some(
+                    args.next()
+                        .ok_or_else(|| "--environment requires a value".to_owned())?,
+                ),
+                Some(option) => return Err(format!("unknown ai compat option '{option}'")),
+            };
+            Ok(run_ai_compat(&path, environment.as_deref()))
+        }
+        _ => Err(format!("unknown ai subcommand '{subcommand}'")),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc domain <check|analyze|expand|generate> ...".to_owned())?;
+    let path = PathBuf::from(
+        args.next()
+            .ok_or_else(|| format!("fslc domain {subcommand} requires a file"))?,
+    );
+    match subcommand.as_str() {
+        "check" => {
+            let (depth, deadlock, engine, edition) =
+                parse_specialized_verify_options(&mut args, true)?;
+            Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
+        }
+        "analyze" => Ok(run_domain_analyze(&path)),
+        "expand" => {
+            let output = parse_optional_output(&mut args)?;
+            let result = run_domain_expand(&path, output.as_deref());
+            if output.is_none()
+                && let Some(source) = result.0.get("kernel_source").and_then(Value::as_str)
+            {
+                print!("{source}");
+                std::process::exit(0);
+            }
+            Ok(result)
+        }
+        "generate" => {
+            let mut target = "typescript".to_owned();
+            let mut profile = "functional-ddd".to_owned();
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--profile" => {
+                        profile = args
+                            .next()
+                            .ok_or_else(|| "--profile requires a value".to_owned())?;
+                        if profile != "functional-ddd" {
+                            return Err("--profile must be functional-ddd".to_owned());
+                        }
+                    }
+                    "--target" => {
+                        target = args
+                            .next()
+                            .ok_or_else(|| "--target requires a value".to_owned())?;
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--output requires a path".to_owned())?,
+                        ));
+                    }
+                    _ => return Err(format!("unknown domain generate option '{option}'")),
+                }
+            }
+            Ok(run_domain_generate(
+                &path,
+                &profile,
+                &target,
+                output.as_deref(),
+            ))
+        }
+        "replay" => {
+            if args.next().as_deref() != Some("--logs") {
+                return Err("domain replay requires --logs EVENTS.jsonl".to_owned());
+            }
+            let logs = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "--logs requires a path".to_owned())?,
+            );
+            Ok(run_domain_replay(&path, &logs))
+        }
+        "testgen" => {
+            let mut depth = 8_usize;
+            let mut target = "vitest".to_owned();
+            let mut deadlock = "warn".to_owned();
+            let mut strict = false;
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be an integer".to_owned())?;
+                    }
+                    "--target" => {
+                        target = args
+                            .next()
+                            .ok_or_else(|| "--target requires a value".to_owned())?;
+                    }
+                    "--deadlock" => {
+                        deadlock = args
+                            .next()
+                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                            return Err("--deadlock must be warn, error, or ignore".to_owned());
+                        }
+                    }
+                    "--strict" => strict = true,
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--output requires a path".to_owned())?,
+                        ));
+                    }
+                    _ => return Err(format!("unknown domain testgen option '{option}'")),
+                }
+            }
+            let result =
+                run_domain_testgen(&path, depth, &target, &deadlock, strict, output.as_deref());
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        _ => Err(format!("unknown domain subcommand '{subcommand}'")),
     }
 }
 
@@ -8269,17 +8255,15 @@ fn approval_artifact(
     inputs: &approval::GenerationInputs,
 ) -> Result<Vec<u8>, Value> {
     let (result, status) = match kind {
-        "ledger" => run_ledger_report(
+        "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
             path,
-            inputs.depth,
-            &inputs.deadlock,
-            &inputs.engine,
-            None,
-            &[],
-            &[],
-            &[],
-            None,
-        ),
+            depth: inputs.depth,
+            deadlock_mode: &inputs.deadlock,
+            engine: &inputs.engine,
+            impl_log: None,
+            evidence_paths: &[],
+            output_path: None,
+        }),
         "html" => run_html_report(path, inputs.depth, &inputs.deadlock, &inputs.engine, None),
         "scenarios" => run_scenarios(path, inputs.depth, &inputs.deadlock),
         _ => {
@@ -8560,32 +8544,70 @@ fn approval_overlay(
     Ok(json!({"requirements": requirements, "records": records}))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_ledger_report(
-    path: &Path,
+struct LedgerReportRequest<'a> {
+    path: &'a Path,
     depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
-    impl_log: Option<&Path>,
-    evidence_paths: &[PathBuf],
+    deadlock_mode: &'a str,
+    engine: &'a str,
+    impl_log: Option<&'a Path>,
+    evidence_paths: &'a [PathBuf],
+    output_path: Option<&'a Path>,
+}
+
+struct PreparedLedgerReport {
+    model: KernelModel,
+    verification: Value,
+    replay: Option<Value>,
+    evidence: Vec<(String, Value)>,
+    scenarios: Value,
+}
+
+fn run_ledger_report(
+    request: &LedgerReportRequest<'_>,
     approval_paths: &[PathBuf],
     trust_keys: &[PathBuf],
-    output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let model = match load_model(path) {
+    let prepared = match prepare_ledger_report(request) {
+        Ok(prepared) => prepared,
+        Err(error) => return (error, 2),
+    };
+    let approvals = if approval_paths.is_empty() {
+        None
+    } else {
+        match approval_overlay(request.path, approval_paths, trust_keys) {
+            Ok(approvals) => Some(approvals),
+            Err(error) => return (error, 2),
+        }
+    };
+    render_ledger_report(request, &prepared, approvals.as_ref())
+}
+
+fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {
+    let prepared = match prepare_ledger_report(request) {
+        Ok(prepared) => prepared,
+        Err(error) => return (error, 2),
+    };
+    render_ledger_report(request, &prepared, None)
+}
+
+fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLedgerReport, Value> {
+    let model = match load_model(request.path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return Err(semantic_error_output(&error)),
     };
     let (verification, _) = run_verify(
-        path,
-        depth,
-        deadlock_mode,
-        engine,
+        request.path,
+        request.depth,
+        request.deadlock_mode,
+        request.engine,
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
-    let replay = impl_log.map(|trace| run_replay(path, trace).0);
-    let evidence = match evidence_paths
+    let replay = request
+        .impl_log
+        .map(|trace| run_replay(request.path, trace).0);
+    let evidence = request
+        .evidence_paths
         .iter()
         .map(|evidence_path| {
             let source = std::fs::read_to_string(evidence_path)
@@ -8600,44 +8622,48 @@ fn run_ledger_report(
             }
             Ok((evidence_path.clone(), value))
         })
-        .collect::<Result<Vec<_>, Value>>()
-    {
-        Ok(evidence) => evidence,
-        Err(error) => return (error, 2),
-    };
-    let (scenarios, _) = run_scenarios(path, depth, deadlock_mode);
+        .collect::<Result<Vec<_>, Value>>()?;
+    let (scenarios, _) = run_scenarios(request.path, request.depth, request.deadlock_mode);
     let evidence = evidence
         .into_iter()
         .map(|(source, value)| (source.display().to_string(), value))
         .collect::<Vec<_>>();
-    let approvals = if approval_paths.is_empty() {
-        None
-    } else {
-        match approval_overlay(path, approval_paths, trust_keys) {
-            Ok(approvals) => Some(approvals),
-            Err(error) => return (error, 2),
-        }
-    };
+    Ok(PreparedLedgerReport {
+        model,
+        verification,
+        replay,
+        evidence,
+        scenarios,
+    })
+}
+
+fn render_ledger_report(
+    request: &LedgerReportRequest<'_>,
+    prepared: &PreparedLedgerReport,
+    approvals: Option<&Value>,
+) -> (Value, i32) {
     let content = fsl_tools::render_ledger_with_approvals(
-        &path.display().to_string(),
-        &model,
-        &verification,
-        &scenarios,
-        replay.as_ref(),
-        &evidence,
-        approvals.as_ref(),
+        &request.path.display().to_string(),
+        &prepared.model,
+        &prepared.verification,
+        &prepared.scenarios,
+        prepared.replay.as_ref(),
+        &prepared.evidence,
+        approvals,
     );
     generated_content_result(
         "audit_ledger",
-        &model.name,
+        &prepared.model.name,
         format!(
             "{}_ledger.md",
-            path.file_stem()
+            request
+                .path
+                .file_stem()
                 .and_then(std::ffi::OsStr::to_str)
                 .unwrap_or("audit")
         ),
         &content,
-        output_path,
+        request.output_path,
     )
 }
 
