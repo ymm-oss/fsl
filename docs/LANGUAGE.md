@@ -1302,13 +1302,20 @@ Recommended workflow: **`verify` / `prove` the spec → generate the scaffold wi
 is used as an oracle in random-walk testing.
 
 `testgen` separates a language-independent scenario-collection core (`scenarios`)
-from per-target emitters, so the same scenarios render to multiple harnesses:
+from per-target emitters, so the same scenarios render to multiple harnesses. In
+the native implementation all six emitters consume one validated adapter built
+from Public Kernel v1, scenario JSON, and the versioned fixed-seed
+`testgen-trace.v1` conformance trace; they do not read the private model or AST.
+Schema/version/spec mismatches, unknown state/action/parameter names, and
+malformed input fail closed. Compose uses an explicit checked names/order bridge because
+Public Kernel intentionally rejects incomplete multi-file provenance; it enters
+the same adapter rather than falling back after an export error.
 
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.
 - `--target vitest`: emits a self-contained TypeScript (Vitest) file. Deterministic
   scenarios and forbidden-rejection assertions translate directly; the random walk
-  is **baked at generation time** — the Python `Monitor` runs the fixed-seed walk and
+  is **baked at generation time** — the concrete Monitor runs the fixed-seed walk and
   the `(action, params, expected_state)` trace is embedded as a static fixture, so the
   generated tests need **no `fslc`/Python at runtime**. The output extension defaults
   to `<spec>.test.ts`.

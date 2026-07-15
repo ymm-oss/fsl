@@ -29,6 +29,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Native pytest, Vitest, Swift, Kotlin, Dart, and PHPUnit test generation now
+  shares one fail-closed adapter over Public Kernel v1 metadata, scenario JSON,
+  and the new versioned `testgen-trace.v1` fixed-seed conformance trace. Target emitters no longer
+  receive the private model/AST, and their byte output is unchanged. Compose
+  uses an explicit checked names/order bridge until Public Kernel can publish
+  truthful multi-file provenance (issue #214).
 - Standalone refinement files, requirements `implements` blocks, action-level
   `maps` clauses, and synthesized auto/identity mappings now lower through one
   typed `ActionCorrespondence` IR. Impl parameter annotations, target arity and

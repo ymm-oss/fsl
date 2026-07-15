@@ -1350,13 +1350,20 @@ implementation (see <code>DESIGN-bridge.md</code>).</p>
 <code>testgen</code> → wire the implementation into the <code>Adapter</code> → run the tests</strong>. <code>Monitor</code>
 is used as an oracle in random-walk testing.</p>
 <p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
-from per-target emitters, so the same scenarios render to multiple harnesses:</p>
+from per-target emitters, so the same scenarios render to multiple harnesses. In
+the native implementation all six emitters consume one validated adapter built
+from Public Kernel v1, scenario JSON, and the versioned fixed-seed
+<code>testgen-trace.v1</code> conformance trace; they do not read the private model or AST.
+Schema/version/spec mismatches, unknown state/action/parameter names, and
+malformed input fail closed. Compose uses an explicit checked names/order bridge because
+Public Kernel intentionally rejects incomplete multi-file provenance; it enters
+the same adapter rather than falling back after an export error.</p>
 <ul>
 <li><code>--target pytest</code> (default): emits Python tests that import <code>fslc.runtime.Monitor</code>
   and drive the random walk live as the oracle.</li>
 <li><code>--target vitest</code>: emits a self-contained TypeScript (Vitest) file. Deterministic
   scenarios and forbidden-rejection assertions translate directly; the random walk
-  is <strong>baked at generation time</strong> — the Python <code>Monitor</code> runs the fixed-seed walk and
+  is <strong>baked at generation time</strong> — the concrete Monitor runs the fixed-seed walk and
   the <code>(action, params, expected_state)</code> trace is embedded as a static fixture, so the
   generated tests need <strong>no <code>fslc</code>/Python at runtime</strong>. The output extension defaults
   to <code>&lt;spec&gt;.test.ts</code>.</li>

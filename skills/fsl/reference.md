@@ -1237,13 +1237,21 @@ oracle, stepping through the implementation one step at a time. A failure = a
 divergence between implementation and spec (read the trace to decide which one is
 correct).
 
+The native pytest/Vitest/Swift/Kotlin/Dart/PHPUnit emitters share one validated
+input adapter: Public Kernel v1 metadata, scenario JSON, and the versioned
+fixed-seed `testgen-trace.v1` conformance trace. They never consume a private
+model or AST. Public Kernel/trace schema mismatches, malformed vectors, unknown
+state/action/parameter names, and spec-name mismatches fail closed. Compose is the explicit exception at the producer boundary because
+Public Kernel rejects incomplete multi-file provenance; checked names/order feed
+the same adapter until truthful compose export is available.
+
 `--target` chooses the harness; the scenario-collection core is shared, so both
 emit the same scenarios:
 - `pytest` (default): Python tests; the random walk imports `fslc.runtime.Monitor`
   and runs the fixed-seed walk live as the oracle. Output defaults to `test_<spec>.py`.
 - `vitest`: a self-contained TypeScript (Vitest) file with the same `Adapter`
   contract (`reset`/`step`/`observe`). Deterministic and forbidden scenarios map
-  directly; the random walk is **baked at generation time** (the Python Monitor
+  directly; the random walk is **baked at generation time** (the concrete Monitor
   runs the seed-fixed walk and the `(action, params, expected_state)` trace is
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
   Until `makeAdapter()` is wired the suite is skipped. Output defaults to

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/kernel/testgen-trace.v1.schema.json",
+  "title": "FSL testgen deterministic conformance trace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "kernel_schema_version",
+    "result",
+    "spec",
+    "initial",
+    "steps"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://fsl.dev/schemas/fslc/kernel/testgen-trace.v1.schema.json"
+    },
+    "schema_version": { "const": "1.0.0" },
+    "kernel_schema_version": { "const": "1.0.0" },
+    "result": { "const": "testgen_trace" },
+    "spec": { "type": "string", "minLength": 1 },
+    "initial": { "$ref": "#/$defs/state" },
+    "steps": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "params", "expected"],
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "params": { "type": "object" },
+          "expected": { "$ref": "#/$defs/state" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "state": { "type": "object" }
+  }
+}
