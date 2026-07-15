@@ -4231,6 +4231,21 @@ fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> 
     }
 }
 
+fn domain_scaffold_inputs(
+    path: &Path,
+    domain: &fsl_syntax::DomainSpec,
+) -> Result<(Value, Value), String> {
+    let (source, kernel, model) = load_kernel_model(path)?;
+    let contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path.to_string_lossy(),
+        source_dialect(&source),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((contract, fsl_tools::domain_scaffold_metadata(domain)))
+}
+
 fn snake_case(value: &str) -> String {
     let characters = value.chars().collect::<Vec<_>>();
     let mut output = String::new();
@@ -4324,7 +4339,11 @@ fn run_domain_generate(
             2,
         );
     }
-    let mut result = match fsl_tools::domain_scaffold(&domain, target) {
+    let (kernel, metadata) = match domain_scaffold_inputs(path, &domain) {
+        Ok(input) => input,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut result = match fsl_tools::domain_scaffold(&kernel, &metadata, target) {
         Ok(result) => result,
         Err(error) => return (error_output("semantics", &error), 2),
     };
@@ -4489,7 +4508,14 @@ fn run_domain_testgen(
     }
     if target == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
-        let adapter_files = fsl_tools::domain_adapter_files(&domain);
+        let (kernel, metadata) = match domain_scaffold_inputs(path, &domain) {
+            Ok(input) => input,
+            Err(error) => return (semantic_error_output(&error), 2),
+        };
+        let adapter_files = match fsl_tools::domain_adapter_files(&kernel, &metadata) {
+            Ok(files) => files,
+            Err(error) => return (semantic_error_output(&error), 2),
+        };
         let adapter_count = adapter_files.len();
         for (index, (relative, source)) in adapter_files.into_iter().enumerate() {
             let _ = writeln!(prefix, "// --- scaffold: {relative} ---");

@@ -281,6 +281,14 @@ scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
 event / effect evidence. The v0 implementation proves the finite modeled
 lifecycle; replay is observation evidence and saga history adds
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`.
+The native scaffold emitters consume checked Public Kernel v1 JSON plus the
+versioned `domain-scaffold-metadata.v1` compatibility bridge; they do not
+receive the private domain AST or reparse source expressions. Kernel/metadata
+version and dialect mismatches, duplicate Kernel members, and missing lowered
+type/state/action counterparts fail closed. Source expressions and effect/saga
+topology remain authoritative in the companion because Public Kernel v1 does
+not encode them. All five target outputs are locked to pre-migration goldens,
+and the valid domain corpus is generated for every target.
 It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
 production exactly-once semantics. See `docs/DESIGN-domain.md` and
 `docs/DESIGN-effect.md`.

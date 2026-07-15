@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 fsl-core = { path = "../fsl-core" }
 fsl-syntax = { path = "../fsl-syntax" }
+serde.workspace = true
 serde_json.workspace = true
 
 [lints]

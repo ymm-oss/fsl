@@ -149,6 +149,7 @@ jobs:
           cp schemas/fslc/kernel/conformance.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp schemas/fslc/kernel/testgen-trace.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp schemas/fslc/kernel/conformance-coverage.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
+          cp schemas/fslc/domain/scaffold-metadata.v1.schema.json dist/fsl-kernel-contract-v1/schemas/
           cp rust/fslc/tests/fixtures/kernel_contract.fsl dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/kernel_contract.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp rust/fslc/tests/fixtures/conformance_failures.fsl dist/fsl-kernel-contract-v1/fixtures/
