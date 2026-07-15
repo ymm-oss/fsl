@@ -4,7 +4,8 @@
 
 Status: accepted. Typed IR implemented by issue #237; declaration-level
 `@...` syntax for the shared spec/business/requirements/compose frontend
-implemented by issue #241.
+implemented by issue #241; `domain`/`dbsystem`/`ai_component` nested
+declaration coverage implemented by issue #281.
 
 ## Decision
 
@@ -26,8 +27,10 @@ token-based dialect dispatch. `DESIGN-dialect-dispatch.md` is authoritative for
 annotations immediately before a top-level document. Issue #241 (see
 "Declaration-level syntax" below) added the same `@...` grammar immediately
 before a declaration nested inside a document, for the shared
-spec/business/requirements/compose frontend; `domain`/`dbsystem`/`ai_component`
-nested declarations are a tracked follow-up (#281), not yet supported.
+spec/business/requirements/compose frontend. Issue #281 (see "domain/db/ai
+nested declaration syntax" below) extended the same grammar to the three
+specialized frontends that do not share that parser: `domain`, `dbsystem`,
+and `ai_component`.
 
 ## Carrier and declaration coverage
 
@@ -134,14 +137,8 @@ silently mismatched.
 
 `domain`/`dbsystem`/`ai_component` nested declarations (aggregate
 command/decide/evolve/effect/saga steps, migration/compatibility rules, AI
-tool authority/approval rules) have no metadata channel — legacy or `@...` —
-today; only their one top-level document annotation works, via the same
-dispatch-level mechanism every dialect keyword gets. Extending `@...` there is
-a tracked follow-up (#281), not a gap in this issue's scope: those dialects need a
-first-ever nested annotation channel from scratch (and, for `ai_component`'s
-authority rules, restructuring a flat `Vec<String>` rule list into
-span-carrying nodes), which is independent design work with no legacy-compat
-constraint to preserve.
+tool authority/approval rules) gained the same `@...` grammar in issue #281;
+see "domain/db/ai nested declaration syntax" below.
 
 Within the shared frontend itself, `governance` and `refinement` declarations
 (`authority`, `control`, `delegates`, `preservation`, `impl`/`abs`/`map`/action
@@ -154,6 +151,129 @@ declaration" error, since those two dialects' item loops were not changed to
 hook the shared annotation-parsing mechanism), just not the more specific
 `FSL-ANNOTATION-TARGET` code the hooked dialects use for the same kind of
 mistake.
+
+## domain/db/ai nested declaration syntax (issue #281)
+
+`domain` (`rust/fsl-syntax/src/domain.rs`), `dbsystem`
+(`rust/fsl-syntax/src/db.rs`), and `ai_component` (`rust/fsl-syntax/src/ai.rs`)
+are specialized frontends with their own hand-rolled, token-cursor `*Parser`
+structs — none of them share `parser.rs`'s `Parser`. Each therefore carries
+its own `pending_annotations: Annotations` field and duplicates the same three
+helpers (`take_leading_annotations`/`take_annotations`/
+`expect_no_pending_annotations`) rather than reusing `parser.rs`'s `Parser`
+directly. All three still call the one shared `annotation_parse::annotation`
+free function (`pub(crate)`, same crate) to parse an individual `@name(...)`
+group, so there is still no per-dialect copy of the actual `@...` token
+grammar — only of the leading/pending-buffer bookkeeping around it.
+Unifying the four duplicated pending-annotation state machines behind one
+trait is deferred as acknowledged design debt; none of the four parser
+structs share a common base to hang it from without a larger refactor this
+issue did not need.
+
+Accepted declarations, one attachment point per dialect concept:
+
+| Dialect | Accepts `@...` on |
+| --- | --- |
+| `domain` | aggregate `command`, `decide`, `evolve`, `invariant`, `projection` (both aggregate-nested and top-level); `effect`; saga `step` |
+| `ai_component` | `tool` (including the `tools [a, b];` shorthand, broadcast per name); `authority` block and each of its `may_suggest`/`may_execute`/`requires_human_approval`/`forbidden` rule lines; `fallback` block and each `when` item; `check hard` block and each `rule` line |
+| `dbsystem` | `migration`; each `check compatibility { rule ...; }` line |
+
+`ai_component`'s `check hard { rule ...; }` and `dbsystem`'s `check compatibility { rule ...; }` are structurally the same "named-rule list inside a check block" shape and both accept an annotation on each individual `rule` line — matching `authority`'s per-rule-line granularity — but not symmetrically at the block level: `ai_component`'s `check hard { ... }` block itself also accepts a leading annotation (mirroring `authority`/`fallback`, which likewise accept one on their own block), while `dbsystem`'s `check compatibility { ... }` block itself does not (a leading annotation there still reports `FSL-ANNOTATION-TARGET`; only `migration` accepts one at the `dbsystem` top level). Per-rule annotations on either block do not currently reach any Kernel target through the rule name alone (`ai_component` has no real Kernel lowering at all; a `dbsystem` compatibility rule's annotations reach the checked model only when that rule is enabled and generates at least one invariant — see below), so the per-rule granularity here is primarily about API/traceability completeness (a user can name and independently track any individual rule the same way they can any individual tool or authority rule), not about an existing consumption path.
+
+Everywhere else in these three dialects a leading `@...` reports the coded
+`FSL-ANNOTATION-TARGET` diagnostic, the same as the shared frontend: a
+migration's individual `add`/`drop`/`rename`/... operation line, a `dbsystem`
+scalar declaration (`database`/`artifact`/`environment`), an `ai_component`
+scalar declaration (`model`/`prompt`/`retriever`/`temperature`/`input`/
+`output`), and a domain declaration outside the accepted list (`type`/`enum`/
+`value_object`/`state`/`event`/`error`/`on_stale`/`await`/saga
+`starts_on`/`compensation`/`outbox`/`inbox`) all reject a stray annotation at
+its own precise span rather than silently dropping it or falling through to a
+generic parse error.
+
+Union and broadcast follow the same "one generated Kernel target can be fed
+by more than one surface declaration" pattern issue #241 established for
+`until`'s dual bind:
+
+- A `command`/`decide` pair sharing one command name, plus every `evolve`
+  block matching an event that `decide` emits, union into the one synthesized
+  `{aggregate}_{command}` action (`domain_lowering.rs::lower_aggregate_actions`).
+- One `effect`'s annotations broadcast to every action it generates: each
+  `{effect}_complete_{event}` outcome action, the `{effect}_retry` action (if
+  `retry.max_attempts` is set), and the `{effect}_SuccessSticky` progress
+  property. An outcome-event `evolve` block's own annotations additionally
+  union into that event's `complete` action, and into a saga's
+  `saga_{saga}_observe_{event}` action when a saga step awaits the same
+  event — the same "the annotation follows whichever generated action
+  actually executes this declaration" rule the aggregate case uses.
+- One saga `step`'s annotations broadcast to both the `saga_{saga}_{step}`
+  action and its `_timeout` variant (if the step declares one).
+- An aggregate or saga `invariant`'s annotations flow to its one generated
+  `SpecItem::Invariant`. Domain-level `invariant` was not in issue #281's own
+  declaration list, but is the same kind of aggregate-direct declaration as
+  `command`/`decide`/`evolve`; leaving it out would reproduce the exact
+  policy/goal asymmetry issue #241's coupled-change review caught, so it was
+  included from the start here instead of as a follow-up gap.
+- `DomainProjection` and `ai_component`'s `tool`/`authority`/`fallback`/`check`
+  nodes are not lowered into any executable Kernel target at all (confirmed:
+  `lower_domain_surface` never reads `domain.projections`, and
+  `lower_ai_component` is a catalog-sentinel stub with no per-declaration
+  content). Their annotations are preserved on the frontend AST and reachable
+  through `python_ast()`/direct AST inspection, with no `AnnotationRegistry`
+  binding to reach — there is no Kernel target for one to attach to.
+
+`ai_component`'s `AiAuthority` restructuring: `may_suggest`/`may_execute`/
+`requires_human_approval`/`forbidden` change from `Vec<String>` to
+`Vec<AiAuthorityRule>`, where `AiAuthorityRule { name, annotations, loc }`.
+`AiAuthority::python_ast()` reconstructs the original plain `Vec<String>` JSON
+shape (`rule.name` only) so the public JSON projection is unchanged; the
+typed carrier is additive. Every Rust call site that used to compare a
+`&String` name directly (`rust/fslc/src/main.rs`'s specialized-document
+validation, `rust/fsl-tools/src/ai.rs`'s `check_ai`/`replay_ai`) was updated
+to compare `rule.name` instead.
+
+`dbsystem`'s existing `DbMigration`/`DbMigrationOp` already declare a field
+named `annotations: Vec<String>` — a pre-#281, unrelated legacy mechanism
+(the `destructive`/`irreversible`/`rollbackable`/`lossy`/`lossless` migration
+keyword flags, still projected into `python_ast()` under the same JSON key).
+The new typed carrier could not reuse that name, so `DbMigration` gained a
+second, distinctly named field: `decl_annotations: Annotations`. Compatibility
+rules changed shape instead of gaining a same-named field:
+`DbCheck.rules: Vec<String>` became `Vec<DbCheckRule>`, where
+`DbCheckRule { name, annotations, span }`; `DbCheck::python_ast()`
+reconstructs the original plain `Vec<String>` rule-name list.
+
+`db_kernel_source` (`rust/fsl-core/src/db.rs`) still synthesizes the
+dbsystem's executable kernel as FSL source text re-parsed through the shared
+spec grammar (`fsl_syntax::parse_surface_spec`) — issue #281 did not replace
+that architecture, which would have been a much larger change unrelated to
+annotations. What changed is *what floats through the text*: a migration's
+`decl_annotations` and a matching `DbCheckRule`'s `annotations` are rendered
+back to literal `@requirement(...)`/`@undecided(...)`/`@kind(...)`/custom
+`@ns.path(...)` source lines (`Annotation::render_source()`,
+`rust/fsl-syntax/src/annotation.rs`) immediately before the corresponding
+synthesized `action`/`invariant`, rather than being squeezed through the
+lossy `quote_meta("ID", "text")` single-`MetaTag` string convention the
+system-generated `DB-MIGRATION`/`DB-NOT-NULL`/`DB-COMPAT-READ`/
+`DB-COMPAT-WRITE` labels still use unchanged. Re-parsing then binds them as
+ordinary typed `Annotation`s through the exact same
+`collect_declaration_annotations` path every other dialect uses, so they
+reach `AnnotationRegistry`/`KernelModel`/TSG/the audit ledger with no new
+plumbing. Because the lexer has no string-escape syntax
+(`rust/fsl-syntax/src/lexer.rs::lex_string` stops at the first `"` or
+newline), `Annotation::render_source()` sanitizes backslash, `"`, and
+newline characters out of a `String` argument value before quoting it — the
+same character class `quote_meta` already sanitizes, extended to cover
+newlines too since this is a fresh code path rather than an existing one.
+This sanitization only affects a `String` value containing those characters;
+Integer, Boolean, and Symbol arguments round-trip exactly.
+
+`tools/check_rust_surface_parity.py`'s `SUPPORTED_SPECIALIZED_FRONTENDS`
+already includes `ai-component`/`db`/`domain`; since no new field was
+projected into any of these three dialects' `python_ast()`, corpus parity is
+unaffected by construction (the tool is not CI-wired — see the Python
+compatibility gate note in the repository's CLAUDE.md — but was still run
+manually against the corpus to confirm).
 
 ## Validation and semantic isolation
 
@@ -179,10 +299,17 @@ suppression, and exact declaration matching—remain unchanged.
 
 ## Non-goals
 
-- `@requirement`, `@undecided`, `@kind`, or arbitrary `@namespace` syntax on a
-  `domain`/`dbsystem`/`ai_component` nested declaration (tracked by follow-up
-  issue #281; their one top-level document annotation already works, same as
-  every other dialect keyword);
+- `@requirement`/`@undecided`/`@kind`/custom `@namespace` syntax on
+  `governance`/`refinement` declarations, or on a `domain`/`dbsystem`
+  declaration outside the accepted list above (`DomainType`/`DomainAward`/
+  `DomainAwait`/`DomainSagaCompensation`, a `DbMigrationOp`, dbsystem
+  `database`/`artifact`/`environment`) — these still report the coded
+  `FSL-ANNOTATION-TARGET` diagnostic rather than silently accepting or
+  dropping the annotation;
+- unifying the four duplicated `pending_annotations` parser state machines
+  (`parser.rs`, `domain.rs`, `ai.rs`, `db.rs`) behind one shared trait;
+- replacing `db_kernel_source`'s text-synthesis-and-reparse architecture with
+  direct `KernelSpec`/`SpecItem` construction;
 - formatter or source migrator behavior;
 - macro execution or verifier semantics selected by an annotation;
 - publishing annotations by mutating Public Kernel v1/v2.

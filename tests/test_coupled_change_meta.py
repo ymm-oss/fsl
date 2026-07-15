@@ -85,10 +85,11 @@ INTENTIONALLY_UNINDEXED = {
 _CORPUS_ROOTS = ("specs", "examples")
 _EXCLUDED_DIRS = (
     ROOT / "examples" / "gallery" / "errors",
-    # native-only declaration-level @annotation syntax (issue #241); the
-    # frozen LSP grammar (src/fslc/lsp/index.py) is not extended for it, same
-    # boundary as tests/dialect_registry.py's MONITOR_EXCLUSIONS entry for
-    # this file.
+    # native-only declaration-level @annotation syntax (issues #241 and
+    # #281, the latter extending it to domain/dbsystem/ai_component nested
+    # declarations); the frozen LSP grammar (src/fslc/lsp/index.py) is not
+    # extended for it, same boundary as tests/dialect_registry.py's
+    # MONITOR_EXCLUSIONS entries for these files.
     ROOT / "examples" / "annotations",
 )
 

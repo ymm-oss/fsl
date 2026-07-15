@@ -234,7 +234,7 @@ fn artifact_by_name<'a>(system: &'a DbSystem, name: &str) -> Option<&'a DbArtifa
 }
 
 fn rule_enabled(system: &DbSystem, rule: &str) -> bool {
-    system.check.rules.is_empty() || system.check.rules.iter().any(|item| item == rule)
+    system.check.rules.is_empty() || system.check.rules.iter().any(|item| item.name == rule)
 }
 
 #[allow(clippy::too_many_lines)]

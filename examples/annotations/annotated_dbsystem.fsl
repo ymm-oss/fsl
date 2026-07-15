@@ -1,0 +1,60 @@
+// ════════════════════════════════════════════════════════════════
+// Declaration-level @annotation syntax on dbsystem nested declarations
+// (issue #281) — sample corpus
+//
+// Demonstrates `@requirement(id, text?)` attached directly to a
+// `migration` and to a `rule` line inside `check compatibility { ... }`.
+// The typed annotation reaches the checked model through
+// `Annotation::render_source()` rather than the legacy `quote_meta`
+// string convention — see docs/DESIGN-annotations.md's "domain/db/ai
+// nested declaration syntax" section.
+//
+// Native-only: the frozen Python reference does not parse `@...` before
+// a dbsystem nested declaration, so this file is excluded from the
+// Python Monitor conformance sweep (tests/dialect_registry.py
+// MONITOR_EXCLUSIONS); native coverage lives in rust/fsl-syntax and
+// rust/fsl-core tests.
+//
+//   fslc check examples/annotations/annotated_dbsystem.fsl
+//   fslc verify examples/annotations/annotated_dbsystem.fsl --depth 6
+// ════════════════════════════════════════════════════════════════
+dbsystem AnnotatedCompat {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column nickname: Text absent;
+    }
+  }
+
+  @requirement("REQ-MIGRATION", "the nickname column rollout is traceable")
+  migration add_nickname from 0 to 1 {
+    add users.nickname nullable;
+  }
+
+  artifact server_v1 {
+    reads users.id;
+    writes users.id;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.nickname;
+    writes users.nickname;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v1 when schema 0..0;
+    supported server_v1 when schema 0..0;
+    active server_v2 when schema 1..1;
+    supported server_v2 when schema 1..1;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    @requirement("REQ-NOT-NULL", "not_null columns must be backfilled first")
+    rule not_null_after_backfill;
+  }
+}

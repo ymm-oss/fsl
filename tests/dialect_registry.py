@@ -66,4 +66,22 @@ MONITOR_EXCLUSIONS: dict[str, str] = {
         "declaration. Native coverage lives in rust/fsl-syntax and "
         "rust/fsl-core tests"
     ),
+    "examples/annotations/annotated_domain.fsl": (
+        "native-only declaration-level @annotation syntax on domain nested "
+        "declarations (issue #281); the frozen Python reference does not "
+        "parse @... before a nested declaration. Native coverage lives in "
+        "rust/fsl-syntax and rust/fsl-core tests"
+    ),
+    "examples/annotations/annotated_dbsystem.fsl": (
+        "native-only declaration-level @annotation syntax on dbsystem nested "
+        "declarations (issue #281); the frozen Python reference does not "
+        "parse @... before a nested declaration. Native coverage lives in "
+        "rust/fsl-syntax and rust/fsl-core tests"
+    ),
+    "examples/annotations/annotated_ai_component.fsl": (
+        "native-only declaration-level @annotation syntax on ai_component "
+        "nested declarations (issue #281); the frozen Python reference does "
+        "not parse @... before a nested declaration. Native coverage lives "
+        "in rust/fsl-syntax tests"
+    ),
 }
