@@ -561,10 +561,15 @@ fn python_literal(value: &Value, key_order: &[String]) -> String {
     }
 }
 
+fn portable_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
 fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
     let absolute = std::fs::canonicalize(spec).unwrap_or_else(|_| spec.to_path_buf());
     let Some(parent) = output.and_then(Path::parent) else {
-        return absolute.display().to_string();
+        return portable_path(&absolute);
     };
     let base = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
     let left = base.components().collect::<Vec<_>>();
@@ -581,7 +586,7 @@ fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
     for component in &right[common..] {
         result.push(component.as_os_str());
     }
-    result.display().to_string()
+    portable_path(&result)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1405,6 +1410,10 @@ mod tests {
         assert_eq!(
             testgen_template(unix, "demo.fsl"),
             testgen_template(windows, "demo.fsl")
+        );
+        assert_eq!(
+            portable_path(&Path::new("parent").join("child")),
+            "parent/child"
         );
     }
 
