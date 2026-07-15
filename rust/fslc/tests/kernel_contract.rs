@@ -593,6 +593,7 @@ fn published_schema_ids_match_the_rust_api_constants() {
         replay_trace["properties"]["schema_version"]["enum"],
         json!([
             fsl_core::REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION,
+            fsl_core::REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION,
             fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION
         ])
     );

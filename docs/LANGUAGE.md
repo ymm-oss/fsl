@@ -1417,7 +1417,7 @@ External compilers emit the native replay contract as a closed versioned JSON
 object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):
 
 ```json
-{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.1.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":null,"params":{},"state":{"stock":{"0":1},"cart":{"0":0}}},{"tick":2,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
+{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.2.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":null,"params":{},"state":{"stock":{"0":1},"cart":{"0":0}}},{"tick":2,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
 ```
 
 `initial` is the complete tick-0 state and every event has the exact Public
@@ -1434,6 +1434,14 @@ Monitor successors, not to unreported implementation intermediates. Bare arrays
 and `{events:[...]}` remain the explicit
 unversioned action-only adapter. Testgen and verifier trace JSON are not replay
 input. See `docs/DESIGN-replay-trace.md`.
+
+Trace schema 1.2 additionally checks every `leadsTo P ~> within K Q` at the
+initial state and each action/stutter observation. The deadline `p + K` is
+inclusive: `Q` there succeeds, while absence of `Q` fails with bounded-liveness
+evidence. Safety is evaluated first. Successful output separates
+`checks.safety` from `checks.bounded_liveness`; an unfinished finite obligation
+is `pending`, and unbounded `leadsTo` properties are named but not claimed as
+checked. Schemas 1.0/1.1 retain their earlier safety-only meaning.
 
 The `--from-log` form reuses the exact refinement mapping grammar to translate
 external JSONL records into spec actions and logical state; it does not add a

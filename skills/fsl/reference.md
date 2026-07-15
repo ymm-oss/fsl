@@ -863,6 +863,12 @@ state divergence is exit 1 with leaf mismatches. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/DESIGN-replay-trace.md`.
 
+Schema 1.2 opts into solver-free bounded-liveness replay. Every
+`leadsTo P ~> within K Q` is observed at tick 0 and after each action/stutter;
+`Q` at the inclusive deadline succeeds and absence of `Q` fails. Safety is
+reported first and separately. A finite unfinished obligation is `pending`, and
+unbounded `leadsTo` is listed as unchecked. Schema 1.0/1.1 stays safety-only.
+
 Use native `fslc kernel` as the stable compiler boundary after dialect lowering
 and type checking. Do not consume the frozen Python AST JSON or reparse expression
 strings: every exported expression has a structural type and span, actions and

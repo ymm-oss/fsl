@@ -296,6 +296,10 @@ also uses Monitor transitions, while
 checks Monitor successors and failures against symbolic transition semantics.
 Stutter performs no transition and requires full equality with the current
 Monitor state, so it introduces no second runtime or solver semantics.
+Replay schema 1.2 additionally runs the solver-free `BoundedLivenessMonitor` on
+the same observations. Its inclusive `leadsTo ... within` deadline is
+differentially checked against the native BMC deadline probe; requirements
+`deadline` remains an ordinary lowered safety invariant.
 
 Public Kernel v2 is the separately negotiated provenance publication contract
 defined by [`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md). Use

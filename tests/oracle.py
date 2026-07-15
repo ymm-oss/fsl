@@ -17,7 +17,7 @@ import subprocess
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fslc.cli import exit_code, run_verify
 from fslc.model import FslError, domain_range
@@ -54,6 +54,69 @@ class OracleResult:
 
 class UnsupportedOracle(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class BoundedPropertyOracle:
+    name: str
+    before: Callable[[dict[str, Any]], bool]
+    after: Callable[[dict[str, Any]], bool]
+    within: int
+
+
+def bounded_liveness_oracle(
+    observations: list[dict[str, Any]],
+    properties: list[BoundedPropertyOracle],
+) -> dict[str, Any]:
+    """Independent finite-prefix oracle for unbound ``leadsTo ... within``.
+
+    Observation index is the logical tick, including stutters. Q may hold on
+    the deadline observation. A remaining obligation is pending, not proof of
+    either satisfaction or failure.
+    """
+    pending: dict[str, int] = {}
+    for step, state in enumerate(observations):
+        for prop in properties:
+            if prop.within < 0:
+                raise UnsupportedOracle("leadsTo within must be non-negative")
+            if prop.after(state):
+                pending.pop(prop.name, None)
+                continue
+            pending_since = pending.get(prop.name)
+            if pending_since is not None:
+                deadline = pending_since + prop.within
+                if step >= deadline:
+                    return {
+                        "status": "violated",
+                        "property": prop.name,
+                        "pending_since": pending_since,
+                        "deadline": deadline,
+                        "within": prop.within,
+                        "tick": step,
+                    }
+                continue
+            if prop.before(state):
+                pending[prop.name] = step
+                if prop.within == 0:
+                    return {
+                        "status": "violated",
+                        "property": prop.name,
+                        "pending_since": step,
+                        "deadline": step,
+                        "within": 0,
+                        "tick": step,
+                    }
+    obligations = [
+        {
+            "property": prop.name,
+            "pending_since": pending[prop.name],
+            "deadline": pending[prop.name] + prop.within,
+            "within": prop.within,
+        }
+        for prop in properties
+        if prop.name in pending
+    ]
+    return {"status": "pending" if obligations else "passed", "pending": obligations}
 
 
 def normalize(value: Any) -> Any:

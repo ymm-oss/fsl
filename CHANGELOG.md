@@ -6,6 +6,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Replay-trace schema `1.2.0` opts into solver-free bounded `leadsTo`
+  monitoring over initial, action, and stutter observations. Inclusive deadline
+  failures carry property/binding/timing evidence; successful output separates
+  safety from bounded liveness, preserves finite-prefix `pending`, and names
+  unchecked unbounded properties. Native BMC and a test-only Python oracle
+  cross-check the monitor, and positive/overdue NFR fixtures ship in both Public
+  Kernel release bundles (issue #225).
 - Replay-trace schema `1.1.0` adds explicit `action: null` observation points.
   Equal-state stutters preserve the projected action trace; reported transient
   implementation states are nonconformant while unreported intermediates are

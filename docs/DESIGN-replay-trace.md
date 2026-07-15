@@ -1,6 +1,6 @@
 # Public Replay Trace Contract
 
-Status: accepted and implemented for issues #221 and #224.
+Status: accepted and implemented for issues #221, #224, and #225.
 
 ## Goal and authority
 
@@ -11,15 +11,16 @@ is `schemas/fslc/kernel/replay-trace.v1.schema.json`; the native Rust CLI is the
 authoritative consumer.
 
 Replay is finite runtime evidence. It checks concrete actions, safety
-properties, and complete observed states. It does not prove `leadsTo`, interpret
-wall-clock time, or replace production-log refinement mappings.
+properties, complete observed states, and (since trace schema 1.2) bounded
+`leadsTo` deadlines. It does not prove unbounded liveness, interpret wall-clock
+time, or replace production-log refinement mappings.
 
 ## Versioned v1 envelope
 
 ```json
 {
   "$schema": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "kernel_schema_version": "1.0.0",
   "spec": "ReplayTrace",
   "initial": {"phase": "Idle", "selected": null},
@@ -87,7 +88,33 @@ trace values is additive.
 Trace schema `1.0.0` accepts action events only. `1.1.0` additively permits
 `action: null` with empty params for stutter observations. Replay reports the
 input trace version in `trace_schema_version` and rejects null actions under
-`1.0.0`.
+`1.0.0`. Schema `1.2.0` opts into the bounded-liveness semantics below; earlier
+minor versions retain safety-only replay rather than changing meaning in place.
+
+## Bounded liveness at observation points
+
+For each `leadsTo L { P ~> within K Q }` and each supported static binder
+assignment, replay 1.2 maintains the oldest unsatisfied trigger. At observation
+`p`, `P` starts an obligation unless `Q` already holds. `Q` may satisfy that
+obligation at any observation through the inclusive deadline `p + K`; if it is
+still false there, replay exits 1 with `check:"bounded_liveness"`, `property`,
+`bindings`, `pending_since`, `deadline`, `within`, and `tick`. This is the same
+deadline rule as native BMC. Tick 0 and every action or stutter event are
+observations, so stutters advance the bounded response clock.
+
+Safety is checked before liveness at each observation. A state mismatch or
+safety violation at a deadline is therefore reported as safety evidence rather
+than being hidden by a liveness result. Successful replay reports separate
+`checks.safety` and `checks.bounded_liveness` objects. A finite prefix ending
+before a deadline reports liveness `status:"pending"`; this is not a proof or a
+failure. Unbounded `leadsTo` declarations are listed in
+`unbounded_properties` and remain unchecked.
+
+The runtime monitor is solver-free and consumes the checked Kernel model. It
+enumerates typed and static integer-range binders. Collection binders and
+`where` filters fail closed instead of silently checking a weaker property.
+Requirements `deadline` is already lowered to a safety invariant and stays in
+the safety check; only explicit `leadsTo ... within K` uses this monitor.
 
 ## Validation and verdicts
 
@@ -129,8 +156,9 @@ for external names and schemas.
 
 ## Fixtures and distribution
 
-The action, state-mismatch, malformed-tick, stuttering, and transient-observation
-goldens plus their FSL specs live under `rust/fslc/tests/fixtures/replay_*`.
+The action, state-mismatch, malformed-tick, stuttering, transient-observation,
+and bounded-liveness goldens plus their FSL specs live under
+`rust/fslc/tests/fixtures/replay_*` and `examples/nfr/bounded_response*`.
 Release packaging copies the
 schema and all fixtures into both independently checksummed Public Kernel v1
 and v2 bundles together with this contract, so an external compiler can

@@ -322,6 +322,24 @@ failure is a transition-progress failure.
 - **scenarios**: leadsTo is out of scope (future: leave a comment about the
   possibility of turning a pending→achieved trace into a scenario).
 
+## 5.1 Solver-free bounded runtime monitoring (issue #225)
+
+Public replay trace 1.2 evaluates `leadsTo P ~> within K Q` without Z3. The
+runtime monitor consumes the same checked `LeadsToDef` as the verifier and
+tracks the oldest outstanding trigger per static binder assignment. For a
+trigger at observation `p`, `Q` may become true through observation `p + K`;
+otherwise that deadline is the violating observation. `within 0` therefore
+requires `Q` in the same observation as `P`.
+
+This is deliberately only bounded prefix monitoring. A trace that ends early
+reports pending obligations, and declarations without `within` are reported as
+unchecked rather than inferred from a finite prefix. Action and stutter
+observations both advance the logical clock. Unsupported collection binders or
+`where` filters fail closed. Differential tests feed a native BMC
+counterexample into the monitor and require identical property, binding,
+trigger, and deadline evidence. The external contract and JSON fields are
+specified in `DESIGN-replay-trace.md`.
+
 ## 6. Test Plan (tests/test_temporal.py)
 
 1. **stutter counterexample**: a spec that deadlocks after becoming P so Q never
