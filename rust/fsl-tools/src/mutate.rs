@@ -273,6 +273,17 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
             }
         }
         Expr::Binary { op, left, right } => {
+            if matches!(op.as_str(), "==" | "!=") {
+                output.push(ExprMutation {
+                    expr: Expr::Binary {
+                        op: if op == "==" { "!=" } else { "==" }.to_owned(),
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                    op: "equality_operator_flip",
+                    enum_swap: None,
+                });
+            }
             for mutation in expr_mutations(left, enums) {
                 output.push(ExprMutation {
                     expr: Expr::Binary {

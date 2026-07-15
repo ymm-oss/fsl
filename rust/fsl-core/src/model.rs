@@ -718,6 +718,8 @@ impl ModelBuilder {
                 }
             })?;
         }
+        crate::public_kernel::validate_model_expression_types(&model)
+            .map_err(|error| model_error(format!("invalid model expression: {}", error.message)))?;
         Ok(model)
     }
 

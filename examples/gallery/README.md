@@ -11,6 +11,7 @@ comments, and `tests/test_gallery.py` matches them against the actual `fslc` JSO
 | tiny | `valid/tiny_turnstile.fsl` | Turnstile | Minimal state machine of `coin` and `push` | `fslc verify ... --engine induction` |
 | tiny | `valid/tiny_traffic_light.fsl` | Traffic light | Basics of `enum` and nested `if` | `fslc verify ... --engine induction` |
 | tiny | `valid/tiny_bounded_counter.fsl` | Bounded counter | Keep the bound with bounded types and `requires` | `fslc verify ... --engine induction` |
+| tiny | `valid/tiny_option_structural_equality.fsl` | Option equality | Compare `none`/`some` structurally; use `is some` to bind | `fslc verify --depth 1 --deadlock ignore` |
 | small | `valid/small_vending_machine.fsl` | Vending machine | `Map`, `Option`, stock decrement, `ensures` | `fslc verify --depth 6 --deadlock ignore` |
 | small | `valid/small_elevator.fsl` | Single elevator | Consistency of floor, door, and target floor | `fslc verify ... --engine induction` |
 | small | `valid/small_tcp_handshake.fsl` | TCP-like handshake | Entry point to `fair action` and `leadsTo` | `fslc verify --depth 6 --deadlock ignore` |
@@ -28,7 +29,6 @@ JSON is enough.
 | kind | File | What the output looks like |
 |---|---|---|
 | `parse` | `errors/parse_missing_expression.fsl` | `{"result":"error","kind":"parse","expected":"one of: ..."}` |
-| `type` | `errors/type_option_some_equality.fsl` | `Option == and != are only defined against none` |
 | `type` | `errors/type_undeclared_type.fsl` | `unknown type 'UserId'` |
 | `type` | `errors/type_struct_set_field.fsl` | `struct field ... has non-scalar type` |
 | `semantics` | `errors/semantics_duplicate_assignment.fsl` | `double assignment to 'x' on the same execution path` |

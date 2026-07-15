@@ -523,8 +523,10 @@ variable capture instead of inventing internal binder names. See
 - Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
   `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
   matching binding, while `exactlyOne` means exactly one.
-- Option: `x == none` / `x != none` / `x is some(v)` (v is bound within that expression).
-  **`x == some(e)` is a type error** — extract with `x is some(v)` and compare
+- Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
+  Equality is structural: `none` equals only `none`, while two `some` values are
+  equal exactly when their payloads are equal. `x is some(v)` remains the form
+  that binds `v`; equality never introduces a binding. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`

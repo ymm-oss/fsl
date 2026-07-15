@@ -584,8 +584,10 @@ variable capture instead of inventing internal binder names. See
 <li>Cardinality predicates: <code>unique(x: T where expr)</code> / <code>exactlyOne(x: T where expr)</code>;
   <code>x in set_or_seq [where expr]</code> is also allowed. <code>unique</code> means at most one
   matching binding, while <code>exactlyOne</code> means exactly one.</li>
-<li>Option: <code>x == none</code> / <code>x != none</code> / <code>x is some(v)</code> (v is bound within that expression).
-  <strong><code>x == some(e)</code> is a type error</strong> — extract with <code>x is some(v)</code> and compare</li>
+<li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
+  Equality is structural: <code>none</code> equals only <code>none</code>, while two <code>some</code> values are
+  equal exactly when their payloads are equal. <code>x is some(v)</code> remains the form
+  that binds <code>v</code>; equality never introduces a binding. Ordering is not defined.</li>
 <li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
   <code>==</code> is field-by-field equality</li>
 <li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code></li>

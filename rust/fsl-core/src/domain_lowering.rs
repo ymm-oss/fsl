@@ -702,17 +702,6 @@ impl<'a> Resolver<'a> {
                         (left_value, right_value)
                     }
                 };
-                if matches!(op.canonical.as_str(), "==" | "!=")
-                    && (matches!(left.ty, LogicalType::Option(_))
-                        || matches!(right.ty, LogicalType::Option(_)))
-                    && !matches!(&left.expr, Expr::None)
-                    && !matches!(&right.expr, Expr::None)
-                {
-                    return Err(error_at(
-                        "Option values may only compare with none; use 'is some(binding)'",
-                        op.span,
-                    ));
-                }
                 let result_type = match op.canonical.as_str() {
                     "and" | "or" | "=>" => {
                         if !self.compatible(&left.ty, &LogicalType::Bool)

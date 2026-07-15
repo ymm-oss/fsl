@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use fsl_syntax::{Binder, Expr, LValue, MetaTag, Pattern, Span, SpecItem, Statement};
+use fsl_syntax::{Binder, Expr, LValue, MetaTag, Pattern, SourcePos, Span, SpecItem, Statement};
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -160,17 +160,12 @@ fn binder_type(
     match binder {
         Binder::Typed { type_name, .. } => Ok(TypeRef::Named(qualified_name(type_name)?)),
         Binder::Range { lo, hi, .. } => {
-            let Expr::Num(lo) = lo.as_ref() else {
-                return Err(error(
-                    "public Kernel requires lowered constant binder bounds",
-                ));
-            };
-            let Expr::Num(hi) = hi.as_ref() else {
-                return Err(error(
-                    "public Kernel requires lowered constant binder bounds",
-                ));
-            };
-            Ok(TypeRef::Range(*lo, *hi))
+            ensure_assignable(lo, &TypeRef::Int, env, model)?;
+            ensure_assignable(hi, &TypeRef::Int, env, model)?;
+            match (lo.as_ref(), hi.as_ref()) {
+                (Expr::Num(lo), Expr::Num(hi)) => Ok(TypeRef::Range(*lo, *hi)),
+                _ => Ok(TypeRef::Int),
+            }
         }
         Binder::Collection { collection, .. } => {
             match resolve(model, &infer_type(collection, env, model, None)?)? {
@@ -916,6 +911,109 @@ pub(crate) fn validate_statement_types(
     model: &KernelModel,
 ) -> Result<(), PublicKernelError> {
     validate_statement_assignments(statement, &base_env(model), model)
+}
+
+/// Run the shared expression/type checker over every non-init model expression.
+pub(crate) fn validate_model_expression_types(
+    model: &KernelModel,
+) -> Result<(), PublicKernelError> {
+    let env = base_env(model);
+    for action in &model.actions {
+        let mut local = env.clone();
+        for param in &action.params {
+            match param {
+                ParamDef::Typed { name, ty } => {
+                    local.insert(name.clone(), ty.clone());
+                }
+                ParamDef::Range { name, lo, hi } => {
+                    local.insert(name.clone(), TypeRef::Range(*lo, *hi));
+                }
+            }
+        }
+        for guard in &action.guards {
+            match guard {
+                ActionGuard::Requires(expr) => {
+                    expr_json(expr, &local, model, "", action.span, Some(&TypeRef::Bool))?;
+                    extend_pattern_binding(expr, &mut local, model)?;
+                }
+                ActionGuard::Let(name, expr) => {
+                    expr_json(expr, &local, model, "", action.span, None)?;
+                    local.insert(name.clone(), infer_type(expr, &local, model, None)?);
+                }
+            }
+        }
+        for statement in &action.statements {
+            statement_json(statement, &local, model, "")?;
+        }
+        for expr in &action.ensures {
+            expr_json(expr, &local, model, "", action.span, Some(&TypeRef::Bool))?;
+        }
+    }
+    for property in model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .chain(&model.reachables)
+    {
+        expr_json(
+            &property.expr,
+            &env,
+            model,
+            "",
+            property.span,
+            Some(&TypeRef::Bool),
+        )?;
+    }
+    for leadsto in &model.leadstos {
+        let mut local = env.clone();
+        for binder in &leadsto.binders {
+            binder_json(binder, &local, model, "", leadsto.span)?;
+            let name = match binder {
+                Binder::Typed { name, .. }
+                | Binder::Range { name, .. }
+                | Binder::Collection { name, .. } => name,
+            };
+            local.insert(name.clone(), binder_type(binder, &local, model)?);
+        }
+        expr_json(
+            &leadsto.before,
+            &local,
+            model,
+            "",
+            leadsto.span,
+            Some(&TypeRef::Bool),
+        )?;
+        expr_json(
+            &leadsto.after,
+            &local,
+            model,
+            "",
+            leadsto.span,
+            Some(&TypeRef::Bool),
+        )?;
+        if let Some(expr) = &leadsto.decreases {
+            expr_json(expr, &local, model, "", leadsto.span, Some(&TypeRef::Int))?;
+        }
+    }
+    if let Some(expr) = &model.terminal {
+        let position = SourcePos {
+            offset: 0,
+            line: 1,
+            column: 1,
+        };
+        expr_json(
+            expr,
+            &env,
+            model,
+            "",
+            Span {
+                start: position,
+                end: position,
+            },
+            Some(&TypeRef::Bool),
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_statement_assignments(
@@ -1797,5 +1895,30 @@ mod tests {
         let contract =
             public_kernel_contract(&kernel, &model, "s.fsl", "kernel").expect("contract");
         assert_eq!(contract["schema_version"], "1.0.0");
+    }
+
+    #[test]
+    fn option_equality_uses_existing_binary_and_constructor_nodes() {
+        let source = "spec S { type K = 0..1 state { x: Option<K> } init { x = some(0) } action clear() { requires x == some(0) x = none } invariant I { true } }";
+        let kernel = parse_direct_kernel_spec(source).expect("parse");
+        let model = build_model(kernel.clone()).expect("model");
+        let contract =
+            public_kernel_contract(&kernel, &model, "s.fsl", "kernel").expect("contract");
+        let expression = &contract["actions"][0]["guards"][0]["expression"];
+
+        assert_eq!(expression["kind"], "binary");
+        assert_eq!(expression["operator"], "==");
+        assert_eq!(expression["left"]["type"]["kind"], "option");
+        assert_eq!(expression["right"]["kind"], "some");
+        assert_eq!(expression["right"]["operand"]["kind"], "num");
+    }
+
+    #[test]
+    fn option_equality_rejects_mismatched_inner_types() {
+        let source = "spec S { enum A { A1 } enum B { B1 } state { a: Option<A>, b: Option<B> } init { a = none b = none } action stay() { a = a b = b } invariant Bad { a == b } }";
+        let kernel = parse_direct_kernel_spec(source).expect("parse");
+        let error = build_model(kernel).expect_err("mismatched Option payloads must fail check");
+
+        assert!(error.message.contains("is not assignable"));
     }
 }

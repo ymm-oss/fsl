@@ -733,6 +733,13 @@ pub(crate) fn coerce<S: SmtSolver>(
                 &model.default_value(inner)?,
             )?),
         }),
+        (SymbolicValue::Option { present, value, .. }, TypeRef::Option(inner)) => {
+            Ok(SymbolicValue::Option {
+                ty: target_ty.clone(),
+                present,
+                value: Box::new(coerce(solver, model, *value, inner)?),
+            })
+        }
         (SymbolicValue::SetLiteral(items), TypeRef::Set(element_ty)) => {
             let mut entries = Vec::new();
             for element in model.domain_values(element_ty)? {

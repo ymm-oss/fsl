@@ -525,18 +525,6 @@
       "result": "error"
     }
   },
-  "examples/gallery/errors/type_option_some_equality.fsl": {
-    "check": {
-      "result": "ok",
-      "warnings": [
-        "none"
-      ]
-    },
-    "verify": {
-      "kind": "type",
-      "result": "error"
-    }
-  },
   "examples/gallery/errors/type_struct_set_field.fsl": {
     "check": {
       "kind": "type",
@@ -1001,6 +989,30 @@
       "reachables": {
         "HitCap": 3
       },
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/gallery/valid/tiny_option_structural_equality.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "keep": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_empty",
+        "_bounds_first",
+        "_bounds_same",
+        "_bounds_different",
+        "TruthTable",
+        "PatternStillBinds"
+      ],
+      "reachables": {},
       "result": "verified",
       "transitions_checked": [],
       "warnings": []
