@@ -50,6 +50,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Native domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds now share
+  one versioned input adapter over Public Kernel v1 and the public
+  `domain-scaffold-metadata.v1` compatibility bridge. Target emitters no longer
+  receive `DomainSpec`; incompatible schemas and missing lowered member
+  counterparts are rejected, all five outputs match pre-migration goldens, the
+  valid domain corpus generates for every target, and `domain testgen` reuses
+  the same TypeScript adapter/effect emitter instead of a duplicate
+  implementation (issue #213).
 - Native pytest, Vitest, Swift, Kotlin, Dart, and PHPUnit test generation now
   shares one fail-closed adapter over Public Kernel v1 metadata, scenario JSON,
   and the new versioned `testgen-trace.v1` fixed-seed conformance trace. Target emitters no longer

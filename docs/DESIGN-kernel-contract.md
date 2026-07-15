@@ -299,7 +299,8 @@ truthfully retained.
 
 Native releases attach independently checksummed `fsl-kernel-contract-v1` and
 `fsl-kernel-contract-v2` bundles. The v1 bundle contains only v1 artifacts and
-continues to contain all four v1 schemas, the comprehensive input fixture and
+continues to contain all five v1 schemas (including the domain scaffold
+metadata bridge), the comprehensive input fixture and
 its golden public Kernel JSON, the golden failure vectors, the golden
 conformance coverage matrix
 (JSON and Markdown), and this guide. Target-specific generators remain
@@ -310,8 +311,18 @@ consumes scenario JSON and the versioned fixed-seed testgen trace. Compose retai
 explicit names/order-only producer because both public Kernel majors reject
 incomplete multi-file provenance. All target emitters still consume the same
 normalized adapter, and that producer is retired when truthful compose export
-exists. Domain scaffolds remain tracked by
-[#213](https://github.com/ymm-oss/fsl/issues/213). The native Rust typestate
+exists. Domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds completed
+their Public Kernel v1 input migration in
+[#213](https://github.com/ymm-oss/fsl/issues/213). Because the closed Kernel
+contract intentionally omits unused domain declarations, source expressions,
+and saga/effect source topology, their shared adapter also consumes the
+versioned `domain-scaffold-metadata.v1` public compatibility companion. The
+adapter rejects incompatible versions and missing lowered member counterparts;
+the companion is authoritative for topology that v1 cannot represent. It is supported for at
+least two minor releases and may be removed only in a following major after an
+equivalent external generator or negotiated public topology contract exists.
+No target emitter receives `DomainSpec`, and `domain testgen` reuses the same
+adapter/effect output. The native Rust typestate
 analysis and TypeScript output migration completed in
 [#215](https://github.com/ymm-oss/fsl/issues/215): the CLI now feeds public
 Kernel JSON v1 to the generator, rejects incompatible schema versions, and no

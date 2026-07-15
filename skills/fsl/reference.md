@@ -291,6 +291,13 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
+Native domain generation is grounded in Public Kernel v1. A closed
+`domain-scaffold-metadata.v1` companion retains source grouping/spelling that
+lowering cannot publish. Versions, dialect, duplicate Kernel members, and
+missing lowered type/state/action counterparts fail closed; source expressions
+and effect/saga topology are authoritative in the companion because v1 has no
+equivalent nodes. Emitters never receive `DomainSpec`, never reparse source
+text, and the five targets preserve their pre-migration bytes.
 
 The Rust frontend keeps an internal origin chain across direct domain lowering,
 checked-model construction, verification, counterexamples, and `explain`.
