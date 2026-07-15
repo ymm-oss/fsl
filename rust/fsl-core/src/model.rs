@@ -278,6 +278,35 @@ impl KernelModel {
             .unwrap_or_default()
     }
 
+    /// Return every executable Kernel target carrying a requirement relation.
+    #[must_use]
+    pub fn requirement_targets(&self) -> BTreeMap<String, Vec<RequirementLink>> {
+        let mut targets = BTreeMap::new();
+        let mut insert = |target: String| {
+            let requirements = self.requirements_for(&target);
+            if !requirements.is_empty() {
+                targets.insert(target, requirements);
+            }
+        };
+        insert(INIT_TARGET.to_owned());
+        for action in &self.actions {
+            insert(action_target(&action.name));
+        }
+        for (kind, properties) in [
+            ("invariant", &self.invariants),
+            ("trans", &self.transitions),
+            ("reachable", &self.reachables),
+        ] {
+            for property in properties {
+                insert(property_target(kind, &property.name));
+            }
+        }
+        for property in &self.leadstos {
+            insert(property_target("leadsTo", &property.name));
+        }
+        targets
+    }
+
     #[must_use]
     pub fn annotations_for(&self, target: &str) -> &Annotations {
         self.annotations.annotations_for(target)

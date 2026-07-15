@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/analysis/code-audit.v0.schema.json",
+  "title": "fslc requirement-to-code audit v0",
+  "type": "object",
+  "required": ["fsl", "result", "spec", "analysis", "projection", "schema_version", "formal_status", "code_path", "files_scanned", "requirements", "coverage", "findings"],
+  "properties": {
+    "fsl": {"type": "string"},
+    "result": {"const": "analyzed"},
+    "spec": {"type": "string"},
+    "analysis": {"const": "structure"},
+    "projection": {"const": "code_audit"},
+    "schema_version": {"const": "code-audit.v0"},
+    "formal_status": {"const": "not_a_violation"},
+    "code_path": {"type": "string"},
+    "files_scanned": {"type": "integer", "minimum": 0},
+    "requirements": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/requirement"}
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["requirements", "requirement_targets", "by_origin_assurance"],
+      "properties": {
+        "requirements": {"$ref": "#/$defs/requirementCoverage"},
+        "requirement_targets": {"$ref": "#/$defs/targetCoverage"},
+        "by_origin_assurance": {
+          "type": "object",
+          "required": ["source_backed", "generated_from_source", "generated_only", "unknown"],
+          "properties": {
+            "source_backed": {"$ref": "#/$defs/assuranceCoverage"},
+            "generated_from_source": {"$ref": "#/$defs/assuranceCoverage"},
+            "generated_only": {"$ref": "#/$defs/assuranceCoverage"},
+            "unknown": {"$ref": "#/$defs/assuranceCoverage"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/finding"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "location": {
+      "type": "object",
+      "required": ["file", "line", "column", "origin_assurance"],
+      "properties": {
+        "file": {"type": "string"},
+        "line": {"type": "integer", "minimum": 1},
+        "column": {"type": "integer", "minimum": 1},
+        "origin_assurance": {"enum": ["source_backed", "generated_from_source", "generated_only", "unknown"]}
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["kernel_target", "status", "implementations"],
+      "properties": {
+        "kernel_target": {"type": "string"},
+        "status": {"enum": ["covered", "missing"]},
+        "implementations": {"type": "array", "items": {"$ref": "#/$defs/location"}}
+      },
+      "additionalProperties": false
+    },
+    "requirement": {
+      "type": "object",
+      "required": ["requirement_id", "status", "kernel_targets"],
+      "properties": {
+        "requirement_id": {"type": "string"},
+        "status": {"enum": ["covered", "partial", "missing"]},
+        "kernel_targets": {"type": "array", "items": {"$ref": "#/$defs/target"}}
+      },
+      "additionalProperties": false
+    },
+    "requirementCoverage": {
+      "type": "object",
+      "required": ["total", "covered", "partial", "missing"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "covered": {"type": "integer", "minimum": 0},
+        "partial": {"type": "integer", "minimum": 0},
+        "missing": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "targetCoverage": {
+      "type": "object",
+      "required": ["total", "covered", "missing"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "covered": {"type": "integer", "minimum": 0},
+        "missing": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "assuranceCoverage": {
+      "type": "object",
+      "required": ["annotations", "requirement_targets"],
+      "properties": {
+        "annotations": {"type": "integer", "minimum": 0},
+        "requirement_targets": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "required": ["finding_type", "severity", "formal_status", "requirement_id", "kernel_target"],
+      "properties": {
+        "finding_type": {"enum": ["missing_requirement_implementation", "orphan_code_annotation", "annotation_target_mismatch"]},
+        "severity": {"const": "review_required"},
+        "formal_status": {"const": "not_a_violation"},
+        "requirement_id": {"type": "string"},
+        "kernel_target": {"type": "string"},
+        "expected_kernel_targets": {"type": "array", "items": {"type": "string"}},
+        "location": {"$ref": "#/$defs/location"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

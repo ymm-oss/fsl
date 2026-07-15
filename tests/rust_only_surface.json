@@ -478,6 +478,20 @@
   "rust_only_actions": [
     {
       "path": [
+        "analyze"
+      ],
+      "index": 5,
+      "action": {
+        "dest": "code",
+        "required": false,
+        "flags": [
+          "--code"
+        ],
+        "action": "store"
+      }
+    },
+    {
+      "path": [
         "ledger"
       ],
       "index": 8,
@@ -525,6 +539,51 @@
   "action_overrides": [
     {
       "path": [
+        "analyze"
+      ],
+      "index": 2,
+      "python": {
+        "dest": "projection",
+        "required": false,
+        "flags": [
+          "--projection"
+        ],
+        "choices": [
+          "tsg",
+          "action_dependency_graph",
+          "action_state_graph",
+          "impact_graph",
+          "property_state_graph",
+          "requirement_property_graph",
+          "refinement_graph",
+          "traceability_graph"
+        ],
+        "default": "tsg",
+        "action": "store"
+      },
+      "rust": {
+        "dest": "projection",
+        "required": false,
+        "flags": [
+          "--projection"
+        ],
+        "choices": [
+          "tsg",
+          "action_dependency_graph",
+          "action_state_graph",
+          "code_audit",
+          "impact_graph",
+          "property_state_graph",
+          "requirement_property_graph",
+          "refinement_graph",
+          "traceability_graph"
+        ],
+        "default": "tsg",
+        "action": "store"
+      }
+    },
+    {
+      "path": [
         "verify"
       ],
       "index": 3,
@@ -563,6 +622,13 @@
       "path": [],
       "python_sha256": "731a3fd77cc65de2bd63dbf5fe84d72edd9361089f618aa0998fd294bd6f4392",
       "rust_sha256": "c1adcda68a995fcadc1e061323fceca5aba2b2d0a3d24d652a3fb05d0e103b6b"
+    },
+    {
+      "path": [
+        "analyze"
+      ],
+      "python_sha256": "4df4add86a9528340f815b1d5e3e89f6628f33f0ccf234904eef77ff9ffcd3cc",
+      "rust_sha256": "10589d32833afd41dcbd6cca9a2858b8f2198a7659e82cb987084490d7c513a1"
     },
     {
       "path": [

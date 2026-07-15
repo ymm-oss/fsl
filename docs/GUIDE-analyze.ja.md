@@ -64,6 +64,9 @@ fslc analyze specs/ examples/e2e/ --profile ai-review
 fslc analyze specs/cart_refines.fsl --projection refinement_graph
 fslc analyze fsl-project.toml --projection traceability_graph
 
+# 要件IDと実装位置を監査（単一仕様・JSONのみ）
+fslc analyze specs/cart_v1.fsl --projection code_audit --code src/
+
 # 可視化向けエクスポート
 fslc analyze specs/cart_v1.fsl --projection action_state_graph --format dot
 fslc analyze specs/cart_v1.fsl --projection action_state_graph --format mermaid
@@ -71,7 +74,8 @@ fslc analyze specs/cart_v1.fsl --projection action_state_graph --format mermaid
 
 **引数の要点**
 
-- `--projection`: `tsg`（既定）/ `action_state_graph` / `requirement_property_graph` / `property_state_graph` / `refinement_graph` / `traceability_graph`。
+- `--projection`: `tsg`（既定）/ `action_state_graph` / `requirement_property_graph` / `property_state_graph` / `refinement_graph` / `traceability_graph` / `code_audit`。
+- `--code`: `code_audit` が走査する実装ファイルまたはディレクトリ。
 - `--profile ai-review`: findings モード。projection ではなく「所見の抽出」を行う。
 - `--export tag-review`: タグ付き宣言を `(tag, formal_definition, identifiers)`
   の固定JSONにする単一ファイル専用モード。自然言語と式の意味一致は判定しない。
@@ -309,6 +313,8 @@ refinement 経由の `lower_anchor` エッジで層が接続される。
 - `tsg.v0.schema.json`
 - `analysis-graph.v0.schema.json`
 - `analysis-findings.v0.schema.json`
+- `code-trace.v0.schema.json`（実装側の1行注釈）
+- `code-audit.v0.schema.json`（要件→実装位置の監査結果）
 
 下流の消費者は形状を仮定する前に `schema_version`（`tsg.v0` / `analysis-graph.v0` /
 `analysis-findings.v0`）を確認すること。**追加の任意フィールドは同一バージョン内で

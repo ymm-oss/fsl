@@ -440,7 +440,7 @@
           "analyze"
         ],
         "prog": "fslc analyze",
-        "help": "usage: fslc analyze [-h] [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}] [--profile {ai-review}] [--export {tag-review}] [--focus FOCUS] [--format {dot,json,mermaid}] file [file ...]\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}\n                        structural projection to emit\n  --profile {ai-review}\n                        emit AI-readable structural review findings\n  --export {tag-review}\n                        export declaration-level tag/formula review tuples\n  --focus FOCUS         node id for --projection impact_graph, e.g. state:stock\n                        or action:checkout\n  --format {dot,json,mermaid}\n",
+        "help": "usage: fslc analyze [-h] [--projection {tsg,action_dependency_graph,action_state_graph,code_audit,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}] [--profile {ai-review}] [--export {tag-review}] [--code CODE] [--focus FOCUS] [--format {dot,json,mermaid}] file [file ...]\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --projection {tsg,action_dependency_graph,action_state_graph,code_audit,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}\n                        structural projection to emit\n  --profile {ai-review}\n                        emit AI-readable structural review findings\n  --export {tag-review}\n                        export declaration-level tag/formula review tuples\n  --code CODE           source file or directory for --projection code_audit\n  --focus FOCUS         node id for --projection impact_graph, e.g. state:stock\n                        or action:checkout\n  --format {dot,json,mermaid}\n",
         "actions": [
           {
             "dest": "help",
@@ -469,6 +469,7 @@
               "tsg",
               "action_dependency_graph",
               "action_state_graph",
+              "code_audit",
               "impact_graph",
               "property_state_graph",
               "requirement_property_graph",
@@ -497,6 +498,14 @@
             ],
             "choices": [
               "tag-review"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "code",
+            "required": false,
+            "flags": [
+              "--code"
             ],
             "action": "store"
           },

@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc analyze --projection code_audit --code <path>` now maps checked
+  executable Kernel requirement targets to a closed, language-independent
+  `@fsl.trace` annotation convention. Deterministic JSON reports complete,
+  partial, missing, orphan, and target-mismatch coverage without presenting
+  structural claims as proof; versioned input/output schemas and a compliant
+  fixture define the public contract (issue #222).
 - Replay-trace schema `1.2.0` opts into solver-free bounded `leadsTo`
   monitoring over initial, action, and stutter observations. Inclusive deadline
   failures carry property/binding/timing evidence; successful output separates

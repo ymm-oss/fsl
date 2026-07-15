@@ -380,32 +380,14 @@ pub fn spec_digest(path: &Path) -> Result<String, String> {
 
 #[must_use]
 pub fn requirement_ids(model: &KernelModel) -> Vec<String> {
-    let mut ids = BTreeSet::new();
-    let mut add = |annotations: &fsl_core::Annotations| {
-        ids.extend(
-            annotations
-                .requirements()
-                .expect("checked model annotations are valid")
-                .into_iter()
-                .map(|requirement| requirement.id),
-        );
-    };
-    for action in &model.actions {
-        add(&action.annotations);
-    }
-    for property in &model.invariants {
-        add(&property.annotations);
-    }
-    for property in &model.transitions {
-        add(&property.annotations);
-    }
-    for property in &model.reachables {
-        add(&property.annotations);
-    }
-    for property in &model.leadstos {
-        add(&property.annotations);
-    }
-    ids.into_iter().collect()
+    model
+        .requirement_targets()
+        .into_values()
+        .flatten()
+        .map(|requirement| requirement.id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn git_output(cwd: &Path, arguments: &[&str]) -> Result<String, String> {
