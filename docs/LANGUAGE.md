@@ -251,8 +251,10 @@ Domain declarations use `enum Name { Member, ... }` for finite variants and
 stable `deprecated_domain_enum_union` warning over the complete declaration,
 including a canonical replacement. `fslc check`, `fslc verify`, and
 `fslc domain check` accept `--edition current|next`; `next` rejects the legacy
-union spelling. Empty enums and duplicate members are errors, reported at the
-declaration and duplicate member respectively.
+union spelling. `fslc lint` reports the edition finding without mutation, and
+`fslc migrate --edition next` supplies the checked canonical edit. Empty enums
+and duplicate members are errors, reported at the declaration and duplicate
+member respectively.
 
 The native Rust frontend also retains a private origin chain for domain state,
 actions, guards, statements, and properties. Verification, counterexample, and
@@ -269,7 +271,8 @@ When a domain aggregate state field omits its initializer, the current edition
 preserves the established Bool `false`, enum first-member, range lower-bound, or
 external-placeholder `0` choice and emits `implicit_initial_value`. The warning
 contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion.
+machine-applicable explicit-initializer insertion. The next edition requires the
+initializer to be explicit.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
@@ -663,6 +666,8 @@ variable.
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc lint      <path>... [--edition current|next] # stable edition diagnostics; never mutates
+fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
@@ -719,6 +724,15 @@ fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DD
 fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
 fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
+
+Edition lint findings use the stable taxonomies `deprecated`,
+`non_canonical`, `ambiguous_intent`, and `unsupported_in_edition`. Migration
+handles legacy domain enums/operators, declaration string metadata, colon
+quantifiers, unambiguous local inline action mappings, and implicit defaults.
+It refuses source/comment movement that cannot be proven safe. `&&` remains an
+invalid token and is therefore reported with an `and` suggestion but is never
+machine-applied. See `docs/DESIGN-migration.md` for atomicity and bulk-update
+steps.
 
 The native Rust-only `kernel` command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,

@@ -217,7 +217,9 @@ Use `enum Name { Member, ... }` for finite domain variants and
 `type Name = A | B` spelling is accepted by the current 2.x edition with the
 stable `deprecated_domain_enum_union` warning and a canonical replacement.
 Pass `--edition next` to `check`, `verify`, or `domain check` to reject legacy
-enum unions during migration.
+enum unions. Use `fslc lint <path>... --edition next` for stable non-mutating
+edition diagnostics and `fslc migrate <path>... --edition next` to review
+machine edits; add `--write` only after reviewing the complete validated set.
 
 ```fsl
 domain <Name> {
@@ -781,6 +783,8 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 
 ```
 fslc check <f>                                  # syntax / names / types only
+fslc lint <path>... [--edition current|next]    # stable edition findings; never mutates
+fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
 fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)

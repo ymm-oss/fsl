@@ -25,6 +25,7 @@ from fslc.lsp.server import (  # noqa: E402
     _create_server,
     _definition_target,
     _path_to_uri,
+    _migration_code_actions,
     _result_to_diagnostics,
     _to_completion_item,
     _to_lsp_range,
@@ -376,3 +377,27 @@ def test_analysis_diagnostics_no_findings_file_adds_no_information_diagnostics()
     diagnostics = _result_to_diagnostics(types, source, result, index)
 
     assert not [d for d in diagnostics if d.source == "fslc analyze"]
+
+
+def test_legacy_enum_diagnostic_exposes_a_machine_applicable_code_action():
+    source = """domain Legacy {
+  type Status = Pending | Done
+  aggregate Job { state { status: Status = Pending; } }
+}
+"""
+    result = check_source(source, "legacy.fsl")
+    diagnostics = _result_to_diagnostics(types, source, result, None)
+    diagnostic = next(d for d in diagnostics if d.code == "deprecated_domain_enum_union")
+    assert diagnostic.data["taxonomy"] == "deprecated"
+    assert diagnostic.data["machine_applicable"] is True
+
+    uri = "file:///tmp/legacy.fsl"
+    actions = _migration_code_actions(types, uri, [diagnostic])
+    assert len(actions) == 1
+    edit = actions[0].edit.changes[uri][0]
+    assert edit.new_text == "enum Status { Pending, Done }"
+    lines = source.splitlines()
+    replaced = lines[edit.range.start.line][
+        edit.range.start.character:edit.range.end.character
+    ]
+    assert replaced == "type Status = Pending | Done"

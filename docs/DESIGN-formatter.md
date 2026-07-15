@@ -15,7 +15,8 @@ option; mutation and multi-file migration belong to the edition migrator.
 Both formatting editions select an accepted, meaning-equivalent canonical
 surface. `next` does not authorize migrations, implicit defaults, declaration
 movement, or other changes that require judgment. In particular, `&&` remains
-invalid FSL; accepting or migrating it requires a separate language decision.
+invalid FSL; the migrator can identify it and suggest `and`, but cannot prove a
+pre-migration model and therefore refuses automatic application.
 
 ## Lossless boundary
 
@@ -84,3 +85,6 @@ edition migrator owns diagnostics, dry-run/write workflows, implicit-default
 insertion, inline-mapping movement, and any conversion that is not already an
 accepted semantic equivalence. This keeps one source-edit engine without
 turning formatting into an unsafe migration command.
+
+See [DESIGN-migration.md](DESIGN-migration.md) for the edition, refusal,
+transaction, and idempotence contracts.

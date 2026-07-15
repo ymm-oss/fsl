@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 use std::future::Future;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
@@ -387,6 +387,354 @@ fn read_fmt_source(path: &Path) -> Result<String, String> {
     }
 }
 
+struct MigrationOptions {
+    paths: Vec<PathBuf>,
+    edition: fslc_rust::migration::Edition,
+    write: bool,
+}
+
+fn parse_migration_options(
+    args: impl Iterator<Item = String>,
+    migrate: bool,
+) -> Result<MigrationOptions, String> {
+    let mut args = args.peekable();
+    let mut paths = Vec::new();
+    let mut edition = if migrate {
+        fslc_rust::migration::Edition::Next
+    } else {
+        fslc_rust::migration::Edition::Current
+    };
+    let mut write = false;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--edition" => {
+                edition = fslc_rust::migration::Edition::parse(&required_option_value(
+                    &mut args,
+                    "--edition",
+                )?)?;
+            }
+            "--write" if migrate => write = true,
+            option if option.starts_with('-') => {
+                return Err(format!(
+                    "unknown {} option '{option}'",
+                    if migrate { "migrate" } else { "lint" }
+                ));
+            }
+            path => paths.push(PathBuf::from(path)),
+        }
+    }
+    if paths.is_empty() {
+        return Err(if migrate {
+            "usage: fslc migrate FILE... [--edition current|next] [--write]".to_owned()
+        } else {
+            "usage: fslc lint FILE... [--edition current|next]".to_owned()
+        });
+    }
+    let mut unique = std::collections::BTreeSet::new();
+    if paths.iter().any(|path| !unique.insert(path.clone())) {
+        return Err("the same migration path cannot be supplied twice".to_owned());
+    }
+    Ok(MigrationOptions {
+        paths,
+        edition,
+        write,
+    })
+}
+
+fn run_lint(options: &MigrationOptions) -> (Value, i32) {
+    let mut files = Vec::new();
+    let mut finding_count = 0_usize;
+    for path in &options.paths {
+        let (_, plan) = match load_migration_plan(path, options.edition) {
+            Ok(loaded) => loaded,
+            Err(error) => return (error, 2),
+        };
+        finding_count += plan.diagnostics.len();
+        files.push(json!({
+            "path": path,
+            "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+        }));
+    }
+    (
+        json!({
+            "fsl":"1.0",
+            "result":"lint",
+            "edition":options.edition.as_str(),
+            "finding_count":finding_count,
+            "files":files,
+        }),
+        i32::from(finding_count > 0),
+    )
+}
+
+fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
+    let mut planned = Vec::new();
+    let mut files = Vec::new();
+    let mut refused = false;
+    for path in &options.paths {
+        let (source, plan) = match load_migration_plan(path, options.edition) {
+            Ok(loaded) => loaded,
+            Err(error) => return (error, 2),
+        };
+        refused |= plan.refused();
+        let migrated = plan.migrated_source.as_ref();
+        if let Some(migrated) = migrated
+            && let Err(error) = validate_migration_semantics(&source, migrated, path)
+        {
+            return (semantic_error_output(&error), 2);
+        }
+        files.push(json!({
+            "path":path,
+            "changed":migrated.is_some(),
+            "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+            "edits":migrated.map(|replacement| vec![json!({"start":0,"end":source.len(),"replacement":replacement})]).unwrap_or_default(),
+        }));
+        planned.push((path.clone(), migrated.cloned()));
+    }
+    if refused {
+        return (
+            json!({
+                "fsl":"1.0",
+                "result":"migration_refused",
+                "edition":options.edition.as_str(),
+                "written":false,
+                "files":files,
+            }),
+            2,
+        );
+    }
+    if options.write {
+        let writes = planned
+            .iter()
+            .filter_map(|(path, source)| {
+                source
+                    .as_ref()
+                    .map(|source| (path.as_path(), source.as_str()))
+            })
+            .collect::<Vec<_>>();
+        if let Err(error) = atomic_write_migrations(&writes) {
+            return (error_output("io", &error), 2);
+        }
+    }
+    let changed = planned
+        .iter()
+        .filter(|(_, source)| source.is_some())
+        .count();
+    (
+        json!({
+            "fsl":"1.0",
+            "result":"migrated",
+            "edition":options.edition.as_str(),
+            "changed":changed,
+            "written":options.write,
+            "files":files,
+        }),
+        0,
+    )
+}
+
+fn load_migration_plan(
+    path: &Path,
+    edition: fslc_rust::migration::Edition,
+) -> Result<(String, fslc_rust::migration::MigrationPlan), Value> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+    let plan = fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), edition)
+        .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+    Ok((source, plan))
+}
+
+fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Result<(), String> {
+    let before = migration_kernel_contract(before, path)?;
+    let after = migration_kernel_contract(after, path)?;
+    if before == after {
+        Ok(())
+    } else {
+        Err(format!(
+            "migration changed the checked Public Kernel for '{}'",
+            path.display()
+        ))
+    }
+}
+
+fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String> {
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
+        .map_err(|error| error.to_string())?;
+    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    if matches!(
+        fsl_syntax::parse_surface_document(source),
+        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
+    ) {
+        fsl_core::requirements_implements(source, &resolver, &model)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path.to_string_lossy(),
+        source_dialect(source),
+    )
+    .map_err(|error| error.to_string())?;
+    remove_migration_locations(&mut contract);
+    remove_legacy_metadata_projection(&mut contract);
+    Ok(json!({
+        "kernel": contract,
+        "annotations": migration_annotation_contract(&model),
+    }))
+}
+
+fn remove_migration_locations(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for key in ["span", "source_node_id", "source_node_ids", "reverse_index"] {
+                object.remove(key);
+            }
+            object.values_mut().for_each(remove_migration_locations);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_migration_locations),
+        _ => {}
+    }
+}
+
+fn remove_legacy_metadata_projection(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("requirement");
+            if let Some(Value::Object(origin)) = object.get_mut("origin") {
+                origin.remove("declaration");
+            }
+            object
+                .values_mut()
+                .for_each(remove_legacy_metadata_projection);
+        }
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(remove_legacy_metadata_projection),
+        _ => {}
+    }
+}
+
+fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
+    let mut targets = vec!["spec".to_owned(), "init".to_owned()];
+    targets.extend(
+        model
+            .actions
+            .iter()
+            .map(|action| fsl_core::action_target(&action.name)),
+    );
+    for (kind, properties) in [
+        ("invariant", &model.invariants),
+        ("trans", &model.transitions),
+        ("reachable", &model.reachables),
+    ] {
+        targets.extend(
+            properties
+                .iter()
+                .map(|property| fsl_core::property_target(kind, &property.name)),
+        );
+    }
+    targets.extend(
+        model
+            .leadstos
+            .iter()
+            .map(|property| fsl_core::property_target("leadsTo", &property.name)),
+    );
+    targets.sort();
+    targets.dedup();
+    Value::Object(
+        targets
+            .into_iter()
+            .filter_map(|target| {
+                let mut annotations = model
+                    .annotations_for(&target)
+                    .source_order()
+                    .iter()
+                    .map(fsl_syntax::Annotation::render_source)
+                    .collect::<Vec<_>>();
+                annotations.sort();
+                (!annotations.is_empty()).then(|| (target, json!(annotations)))
+            })
+            .collect(),
+    )
+}
+
+fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
+    let mut output = match fsl_syntax::parse_surface_document(source) {
+        Err(error) => surface_parse_error_output(&error),
+        Ok(_) => semantic_error_output(message),
+    };
+    let object = output.as_object_mut().expect("error envelope");
+    object.insert("file".to_owned(), json!(path));
+    if let Some(Value::Object(location)) = object.get_mut("loc") {
+        location.insert("file".to_owned(), json!(path));
+    }
+    output
+}
+
+fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
+    if writes.is_empty() {
+        return Ok(());
+    }
+    let nonce = format!("{}", std::process::id());
+    let mut prepared = Vec::new();
+    for (index, (path, source)) in writes.iter().enumerate() {
+        let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "migration write target '{}' is not a regular file",
+                path.display()
+            ));
+        }
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let temp = parent.join(format!(".fslc-migrate-{nonce}-{index}.tmp"));
+        let backup = parent.join(format!(".fslc-migrate-{nonce}-{index}.bak"));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = file
+            .write_all(source.as_bytes())
+            .and_then(|()| file.sync_all())
+            .and_then(|()| std::fs::set_permissions(&temp, metadata.permissions()))
+        {
+            let _ = std::fs::remove_file(&temp);
+            for (_, temp, _) in &prepared {
+                let _ = std::fs::remove_file(temp);
+            }
+            return Err(error.to_string());
+        }
+        prepared.push((path.to_path_buf(), temp, backup));
+    }
+    for (path, _, backup) in &prepared {
+        if let Err(error) = std::fs::hard_link(path, backup) {
+            for (_, temp, backup) in &prepared {
+                let _ = std::fs::remove_file(temp);
+                let _ = std::fs::remove_file(backup);
+            }
+            return Err(error.to_string());
+        }
+    }
+    for (committed, (path, temp, _)) in prepared.iter().enumerate() {
+        if let Err(error) = std::fs::rename(temp, path) {
+            for (path, _, backup) in prepared.iter().take(committed) {
+                let _ = std::fs::rename(backup, path);
+            }
+            for (_, temp, backup) in &prepared {
+                let _ = std::fs::remove_file(temp);
+                let _ = std::fs::remove_file(backup);
+            }
+            return Err(error.to_string());
+        }
+    }
+    for (_, _, backup) in &prepared {
+        let _ = std::fs::remove_file(backup);
+    }
+    Ok(())
+}
+
 fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
     let dialect = fsl_syntax::dialect_keyword(source).map_err(|error| error.to_string())?;
     if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
@@ -481,6 +829,14 @@ fn command() -> Result<(Value, i32), String> {
                 requirements.as_deref(),
                 &edition,
             )))
+        }
+        "lint" => {
+            let options = parse_migration_options(args, false)?;
+            Ok(run_lint(&options))
+        }
+        "migrate" => {
+            let options = parse_migration_options(args, true)?;
+            Ok(run_migrate(&options))
         }
         "kernel" => {
             let mut path = None;
@@ -3590,74 +3946,51 @@ fn run_check_with_tags(
     apply_domain_edition((output, status), path, edition)
 }
 
-fn domain_enum_union_warnings(path: &Path) -> Vec<Value> {
-    let Ok(fsl_syntax::SurfaceDocument::Domain(domain)) = parse_surface_document(path) else {
-        return Vec::new();
-    };
-    domain
-        .types
-        .iter()
-        .filter(|ty| ty.source_form == fsl_syntax::DomainTypeSourceForm::LegacyEnumUnion)
-        .map(|ty| {
-            let replacement = format!("enum {} {{ {} }}", ty.name, ty.members.join(", "));
-            json!({
-                "kind": "deprecated_domain_enum_union",
-                "code": "deprecated_domain_enum_union",
-                "severity": "warning",
-                "message": format!("domain enum union syntax for '{}' is deprecated; use `{replacement}`", ty.name),
-                "loc": {
-                    "file": path,
-                    "line": ty.span.start.line,
-                    "column": ty.span.start.column,
-                    "end_line": ty.span.end.line,
-                    "end_column": ty.span.end.column,
-                },
-                "canonical_replacement": replacement,
-                "suggestion": {
-                    "kind": "replace",
-                    "replacement": replacement,
-                    "span": {
-                        "start": ty.span.start.offset,
-                        "end": ty.span.end.offset,
-                    },
-                },
-            })
-        })
-        .collect()
-}
-
-fn implicit_initial_value_warnings(path: &Path) -> Vec<Value> {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    fslc_rust::frontend_output::implicit_initial_value_warnings(&source, &path.to_string_lossy())
-}
-
 fn apply_domain_edition(
     (mut output, status): (Value, i32),
     path: &Path,
     edition: &str,
 ) -> (Value, i32) {
-    let mut legacy_additions = domain_enum_union_warnings(path);
-    if edition == "next" && !legacy_additions.is_empty() {
-        for finding in &mut legacy_additions {
-            finding["severity"] = json!("error");
-            finding["message"] = json!(format!(
-                "{}; legacy domain enum unions are not accepted in the next edition",
-                finding["message"]
-                    .as_str()
-                    .unwrap_or("deprecated domain enum union")
-            ));
-        }
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return (output, status);
+    };
+    let migration_edition = if edition == "next" {
+        fslc_rust::migration::Edition::Next
+    } else {
+        fslc_rust::migration::Edition::Current
+    };
+    let Ok(plan) =
+        fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), migration_edition)
+    else {
+        return (output, status);
+    };
+    let mut additions = plan
+        .diagnostics
+        .iter()
+        .filter(|finding| edition == "next" || finding.code == "deprecated_domain_enum_union")
+        .map(|finding| finding.json(&path.to_string_lossy(), migration_edition))
+        .collect::<Vec<_>>();
+    if edition != "next" {
+        additions.extend(fslc_rust::frontend_output::implicit_initial_value_warnings(
+            &source,
+            &path.to_string_lossy(),
+        ));
+    }
+    if edition == "next" && !additions.is_empty() {
+        let kind = if additions.iter().all(|finding| {
+            finding.get("code").and_then(Value::as_str) == Some("deprecated_domain_enum_union")
+        }) {
+            "deprecated_domain_enum_union"
+        } else {
+            "unsupported_in_edition"
+        };
         let mut error = envelope();
         error.insert("result".to_owned(), json!("error"));
-        error.insert("kind".to_owned(), json!("deprecated_domain_enum_union"));
+        error.insert("kind".to_owned(), json!(kind));
         error.insert("edition".to_owned(), json!(edition));
-        error.insert("findings".to_owned(), Value::Array(legacy_additions));
+        error.insert("findings".to_owned(), Value::Array(additions));
         return (Value::Object(error), 2);
     }
-    let mut additions = legacy_additions;
-    additions.extend(implicit_initial_value_warnings(path));
     if !additions.is_empty()
         && let Value::Object(envelope) = &mut output
     {
