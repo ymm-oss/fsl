@@ -1137,7 +1137,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
-fn visit_expr_children(
+pub(crate) fn visit_expr_children(
     expr: &Expr,
     visitor: &mut impl FnMut(&Expr) -> Result<(), CoreError>,
 ) -> Result<(), CoreError> {
@@ -1145,6 +1145,7 @@ fn visit_expr_children(
         Expr::Some(expr)
         | Expr::Neg(expr)
         | Expr::Not(expr)
+        | Expr::Stage { entity: expr, .. }
         | Expr::UnaryNamed { expr, .. }
         | Expr::Is { expr, .. } => visitor(expr)?,
         Expr::Set(items) | Expr::Seq(items) => {

@@ -1506,10 +1506,14 @@ verify {
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.
 - `terminal { <expr> }` is allowed at the top level (pass-through to the
-  kernel, one block per spec, same as the kernel). In the process+data
-  profile, write the predicate against the synthesized stage map
-  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`) — not
-  `stage(c)`, which is business-only.
+  kernel, one block per spec, same as the kernel). In the process+data profile,
+  write `stage(c)` for a typed entity binder or parameter; it resolves to the
+  process stage enum and lowers to the synthesized stage map. Requirements do
+  not infer terminal states from sink stages.
+- If several qualified processes share an entity type, declare paths such as
+  `process claims.Claim` and use `claims.Claim.stage(c)` to disambiguate.
+  Arbitrary-depth paths use the shared `SymbolPath` parser; generated
+  `*_stage` names are not requirements source vocabulary.
 
 ### Drawing the layer boundary
 

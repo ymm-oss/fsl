@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
+use crate::SymbolPath;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -133,6 +134,12 @@ pub enum Expr {
         body: Box<Expr>,
         condition: Option<Box<Expr>>,
     },
+    Stage {
+        process: Option<Box<SymbolPath>>,
+        entity: Box<Expr>,
+        entity_span: Span,
+        span: Span,
+    },
     UnaryNamed {
         name: String,
         expr: Box<Expr>,
@@ -198,6 +205,7 @@ impl Binder {
 
 impl Expr {
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn python_ast(&self) -> Value {
         match self {
             Self::Num(value) => json!(["num", value]),
@@ -270,8 +278,27 @@ impl Expr {
                 body.python_ast(),
                 condition.as_deref().map(Expr::python_ast)
             ]),
-            Self::UnaryNamed { name, expr, span } => match name.as_str() {
-                "stage" => json!(["stage", expr.python_ast(), span.python_loc()]),
+            Self::Stage {
+                process,
+                entity,
+                span,
+                ..
+            } => process.as_ref().map_or_else(
+                || json!(["stage", entity.python_ast(), span.python_loc()]),
+                |process| {
+                    json!([
+                        "qualified_stage",
+                        process.to_string(),
+                        entity.python_ast(),
+                        span.python_loc()
+                    ])
+                },
+            ),
+            Self::UnaryNamed {
+                name,
+                expr,
+                span: _,
+            } => match name.as_str() {
                 "old" | "abs" => json!([name, expr.python_ast()]),
                 "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range" => {
                     json!([name, expr.python_ast()])

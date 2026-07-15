@@ -10,6 +10,7 @@ use fsl_core::{
 };
 use serde_json::{Value, json};
 
+#[allow(clippy::too_many_lines)]
 fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> {
     fn collect(expr: &KernelExpr, roots: &mut BTreeSet<String>) {
         match expr {
@@ -20,6 +21,7 @@ fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> 
             | KernelExpr::Neg(value)
             | KernelExpr::Not(value)
             | KernelExpr::Field(value, _)
+            | KernelExpr::Stage { entity: value, .. }
             | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
             KernelExpr::Index(left, right)
             | KernelExpr::Binary { left, right, .. }

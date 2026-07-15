@@ -3,7 +3,9 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::{AiComponent, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span};
+use crate::{
+    AiComponent, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span, SymbolPath,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetaTag {
@@ -364,7 +366,7 @@ pub enum BusinessItem {
     Actor(Vec<String>, Span),
     Entity(String, Span),
     Process {
-        name: String,
+        name: SymbolPath,
         fields: Option<ProcessFields>,
         items: Vec<ProcessItem>,
         span: Span,
@@ -1256,7 +1258,7 @@ impl BusinessItem {
                 span,
             } => json!([
                 "biz_process",
-                name,
+                name.to_string(),
                 fields.as_ref().map(ProcessFields::python_ast),
                 items
                     .iter()

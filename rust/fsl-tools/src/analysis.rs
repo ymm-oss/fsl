@@ -134,6 +134,7 @@ fn binder_name(binder: &Binder) -> &str {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn expr_reads_bound(
     expr: &Expr,
     state: &BTreeSet<String>,
@@ -146,7 +147,11 @@ fn expr_reads_bound(
                 reads.insert(name.clone());
             }
         }
-        Expr::Some(value) | Expr::Neg(value) | Expr::Not(value) | Expr::Field(value, _) => {
+        Expr::Some(value)
+        | Expr::Neg(value)
+        | Expr::Not(value)
+        | Expr::Field(value, _)
+        | Expr::Stage { entity: value, .. } => {
             reads.extend(expr_reads_bound(value, state, bound));
         }
         Expr::Index(base, index)

@@ -707,6 +707,7 @@ fn collect_state_references(
         | Expr::Neg(value)
         | Expr::Not(value)
         | Expr::Field(value, _)
+        | Expr::Stage { entity: value, .. }
         | Expr::UnaryNamed { expr: value, .. }
         | Expr::Is { expr: value, .. } => {
             collect_state_references(value, state_names, output);

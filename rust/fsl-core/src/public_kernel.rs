@@ -275,6 +275,7 @@ fn infer_type(
         Expr::Call { name, .. } => Err(error(format!(
             "unlowered predicate call '{name}' in public Kernel"
         ))),
+        Expr::Stage { .. } => Err(error("unlowered stage access in public Kernel")),
         Expr::Index(base, _) => match resolve(model, &infer_type(base, env, model, None)?)? {
             TypeRef::Map(_, value) | TypeRef::Relation(_, value) => Ok(*value),
             TypeRef::Seq(item, _) => Ok(*item),
@@ -599,6 +600,9 @@ fn expr_json(
             return Err(error(format!(
                 "unlowered predicate call '{name}' in public Kernel"
             )));
+        }
+        Expr::Stage { .. } => {
+            return Err(error("unlowered stage access in public Kernel"));
         }
         Expr::Index(collection, index) => {
             let collection_ty = resolve(model, &infer_type(collection, env, model, None)?)?;
@@ -1247,7 +1251,9 @@ fn walk_partial(
             children.push(left);
             children.push(right);
         }
-        Expr::Field(value, _) | Expr::UnaryNamed { expr: value, .. } => children.push(value),
+        Expr::Field(value, _)
+        | Expr::Stage { entity: value, .. }
+        | Expr::UnaryNamed { expr: value, .. } => children.push(value),
         Expr::Method { receiver, args, .. } => {
             children.push(receiver);
             children.extend(args);

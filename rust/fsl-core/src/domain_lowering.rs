@@ -3261,7 +3261,9 @@ fn bind_expression_tree(
             bind_expression_tree(registry, &child("then"), then_expr, origin);
             bind_expression_tree(registry, &child("else"), else_expr, origin);
         }
-        Expr::Is { expr, .. } | Expr::UnaryNamed { expr, .. } => {
+        Expr::Is { expr, .. }
+        | Expr::Stage { entity: expr, .. }
+        | Expr::UnaryNamed { expr, .. } => {
             bind_expression_tree(registry, &child("operand"), expr, origin);
         }
         Expr::Quantified { body, .. }

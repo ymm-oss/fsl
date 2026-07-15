@@ -632,11 +632,11 @@ variable.
   states**, `terminal` lets you select **which stops are intentional**.
   Example: `terminal { status == Done or status == Failed }`.
   - **requirements**: `terminal { }` is a `requirements_item` and passes
-    through unchanged to the kernel spec (§13.2). Inside a spec that uses
-    `process E { ... }`, write the predicate against the synthesized stage
-    map — the lowercased process/entity name + `_stage` (e.g. `process Claim`
-    → `claim_stage`), so `terminal { forall c: Claim { claim_stage[c] ==
-    Approved or claim_stage[c] == Rejected } }`.
+    through to the kernel spec (§13.2). Inside a spec that uses `process E {
+    ... }`, use the source-level accessor, for example `terminal { forall c:
+    Claim { stage(c) == Approved or stage(c) == Rejected } }`. It resolves from
+    `c`'s entity type and lowers to the generated stage map; the generated
+    `claim_stage` name is not part of requirements source syntax.
   - **business**: no `terminal` syntax exists at all — it is derived
     automatically from each process's sink stages (stages with no outgoing
     `transition`); see §13.3.
@@ -1587,11 +1587,18 @@ verify {
   `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
   correspondence to the upper layer.
 - `terminal { <expr> }` is allowed at the top level of a `requirements` spec
-  and passes through to the kernel unchanged (§6) — there is exactly one
-  `terminal` block per spec, same as the kernel. If the spec uses
-  `process E { ... }`, the predicate must reference the synthesized stage map
-  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`), not
-  `stage(c)` (that natural-language form is business-only, §13.3).
+  and lowers to the kernel (§6) — there is exactly one `terminal` block per
+  spec, same as the kernel. `stage(c)` is available in all requirements
+  expression contexts when `c` is a typed entity parameter or binder. The
+  entity type selects its process and stage enum, and the checked expression
+  lowers to the generated stage-map index. No sink stage becomes terminal
+  automatically in requirements.
+- A process may use a qualified path when one entity participates in several
+  processes: `process claims.Claim { ... }`. Unqualified `stage(c)` is an error
+  when several processes correspond to `Claim`; use
+  `claims.Claim.stage(c)` (arbitrary-depth `SymbolPath`) to select one. A
+  missing process, non-entity argument, unknown stage member, or unresolved
+  qualifier is a source-located type error.
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 

@@ -1289,6 +1289,12 @@
       "warnings": []
     }
   },
+  "examples/requirements_stage.fsl": {
+    "check": {
+      "kind": "type",
+      "result": "error"
+    }
+  },
   "examples/self/fslc_monitor.fsl": {
     "check": {
       "result": "ok",

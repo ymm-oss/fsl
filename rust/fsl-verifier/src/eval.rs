@@ -66,6 +66,7 @@ pub(crate) fn eval<S: SmtSolver>(
         Expr::Call { name, .. } => Err(VerifyError::new(format!(
             "unexpanded predicate call '{name}'"
         ))),
+        Expr::Stage { .. } => Err(VerifyError::new("unlowered stage access")),
         Expr::Index(base, index) => {
             let base = eval(solver, model, base, state, bindings, old_state)?;
             let index = eval(solver, model, index, state, bindings, old_state)?;
