@@ -6,6 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc replay --trace` now consumes the closed `replay-trace.v1` external
+  compiler contract: trace/Kernel versions, exact spec action/parameters,
+  canonical ticks, complete typed initial and post-action state, and optional
+  opaque producer timestamps. Typed observation differences return leaf-level
+  nonconformance while malformed/incomplete contracts fail closed. Positive and
+  negative goldens plus the schema ship in both Public Kernel release bundles;
+  legacy action-only arrays/`{events}` remain an explicit unversioned adapter
+  (issue #221).
 - `fslc lint` now reports edition-aware diagnostics with stable taxonomy,
   severity, spans, canonical replacements, and machine applicability. `fslc
   migrate` is dry-run by default and `--write` atomically applies only a fully

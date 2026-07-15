@@ -13,6 +13,7 @@ pub mod coverage;
 pub mod frontend_output;
 pub mod migration;
 pub mod origin_coverage;
+pub mod replay_trace;
 pub mod verification_output;
 
 pub use fsl_core::{
