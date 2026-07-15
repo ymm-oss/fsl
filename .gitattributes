@@ -1,3 +1,4 @@
+*.fsl text eol=lf
 rust/fslc/tests/fixtures/conformance_coverage.v1.md text eol=lf
 rust/fslc/tests/fixtures/typestate_order.v1.json text eol=lf
 rust/fslc/tests/fixtures/typestate_order.v1.ts text eol=lf

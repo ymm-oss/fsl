@@ -44,4 +44,5 @@ Immediately before this change, the separate Python contract job took 67 seconds
 including 44 seconds in pytest, while the Rust/WASM job took about 10 minutes on a cold runner. The
 single gate removes the Python environment and job rather than hiding it behind another wrapper.
 Native solver tests continue on Linux, macOS ARM, macOS Intel, and Windows for every change; generated
-artifact digests normalize path separators so identical text has one cross-platform identity.
+artifact digests normalize path separators, checked-in FSL source uses LF on every runner, and
+testgen templates normalize line endings so identical text has one cross-platform identity.
