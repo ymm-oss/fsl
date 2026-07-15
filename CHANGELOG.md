@@ -99,6 +99,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Native Rust internals now separate top-level CLI routing from command-family parsing and base
+  ledger generation from approval evaluation. Observable CLI, ledger, and approval digest
+  contracts are unchanged.
 - `fslc verify --engine auto` (issue #226) now dispatches through a
   `VerificationEngine::Auto` variant alongside the other engines instead of
   resolving before the shared parser, loads the model once per attempt (the

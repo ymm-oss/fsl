@@ -153,6 +153,25 @@ fn write_signing_keys(root: &Path, seed: u8, prefix: &str) -> (PathBuf, PathBuf)
 }
 
 #[test]
+fn ledger_reports_spec_errors_before_approval_errors() {
+    let root = approval_repo();
+    std::fs::write(root.join("invalid.fsl"), "not an FSL document").expect("write invalid spec");
+
+    let output = failed(
+        &root,
+        &[
+            "ledger",
+            "invalid.fsl",
+            "--approval",
+            "missing-approval.json",
+        ],
+    );
+
+    assert_eq!(output["kind"], "semantics");
+    std::fs::remove_dir_all(root).expect("remove temporary repository");
+}
+
+#[test]
 #[allow(clippy::too_many_lines)]
 fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
     let root = approval_repo();
