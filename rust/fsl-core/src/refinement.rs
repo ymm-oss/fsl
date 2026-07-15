@@ -9,7 +9,7 @@ use fsl_syntax::{
     SurfaceRefinement,
 };
 
-use crate::{FileResolver, KernelModel, TypeRef, build_model, parse_kernel_source};
+use crate::{FileResolver, KernelModel, ParamDef, TypeRef, build_model, parse_kernel_source};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StateMap {
@@ -256,6 +256,7 @@ fn build_refinement(
             &mut action_maps,
         )?;
     }
+    validate_refinement_expressions(implementation, abstraction, &state_maps, &action_maps)?;
     for (name, _) in &abstraction.state {
         if !state_maps.contains_key(name) {
             return Err(refinement_error(
@@ -307,6 +308,169 @@ fn build_refinement(
         action_maps,
         progress,
     })
+}
+
+fn validate_refinement_expressions(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    state_maps: &BTreeMap<String, StateMap>,
+    action_maps: &BTreeMap<String, ActionMap>,
+) -> Result<(), RefinementError> {
+    let context = refinement_type_context(implementation, abstraction);
+    for state_map in state_maps.values() {
+        validate_state_map(state_map, abstraction, &context)?;
+    }
+    for action_map in action_maps.values() {
+        validate_action_map(action_map, implementation, abstraction, &context)?;
+    }
+    Ok(())
+}
+
+fn refinement_type_context(implementation: &KernelModel, abstraction: &KernelModel) -> KernelModel {
+    let mut context = implementation.clone();
+    for (name, value) in &abstraction.consts {
+        context.consts.entry(name.clone()).or_insert(value.clone());
+    }
+    for (name, definition) in &abstraction.types {
+        context
+            .types
+            .entry(name.clone())
+            .or_insert(definition.clone());
+    }
+    for (name, value) in &abstraction.enum_members {
+        context
+            .enum_members
+            .entry(name.clone())
+            .or_insert(value.clone());
+    }
+    context
+}
+
+fn validate_state_map(
+    state_map: &StateMap,
+    abstraction: &KernelModel,
+    context: &KernelModel,
+) -> Result<(), RefinementError> {
+    let mut expected = abstraction
+        .state_type(&state_map.name)
+        .expect("state maps were checked against abstraction state")
+        .clone();
+    let mut bindings = Vec::new();
+    if let Some(binder) = &state_map.binder {
+        let binder_ty = crate::public_kernel::expression_binder_type(binder, context)
+            .map_err(|error| invalid_state_map_at_map(state_map, "binder", &error.message))?;
+        let TypeRef::Map(key, value) = expected else {
+            return Err(refinement_error(
+                format!(
+                    "map '{}' has a binder but its abstract state is not a Map",
+                    state_map.name
+                ),
+                state_map.span,
+            ));
+        };
+        let binder_name = match binder {
+            Binder::Typed { name, .. }
+            | Binder::Range { name, .. }
+            | Binder::Collection { name, .. } => name.clone(),
+        };
+        crate::public_kernel::validate_expression_type(
+            &Expr::Var(binder_name.clone()),
+            &key,
+            &[(binder_name.clone(), binder_ty.clone())],
+            context,
+        )
+        .map_err(|error| invalid_state_map_at_map(state_map, "binder", &error.message))?;
+        bindings.push((binder_name, binder_ty));
+        expected = *value;
+    }
+    crate::public_kernel::validate_expression_type(&state_map.expr, &expected, &bindings, context)
+        .map_err(|error| {
+            invalid_state_map(
+                state_map,
+                "expression",
+                &error.message,
+                error
+                    .span
+                    .expect("mapped expression type errors carry source spans"),
+            )
+        })
+}
+
+fn invalid_state_map_at_map(state_map: &StateMap, part: &str, message: &str) -> RefinementError {
+    refinement_error(
+        format!("invalid map {part} for '{}': {message}", state_map.name),
+        state_map.span,
+    )
+}
+
+fn invalid_state_map(
+    state_map: &StateMap,
+    part: &str,
+    message: &str,
+    span: Span,
+) -> RefinementError {
+    refinement_error(
+        format!("invalid map {part} for '{}': {message}", state_map.name),
+        Some(span),
+    )
+}
+
+fn validate_action_map(
+    action_map: &ActionMap,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    context: &KernelModel,
+) -> Result<(), RefinementError> {
+    let ActionMapTarget::Action { name, args } = &action_map.target else {
+        return Ok(());
+    };
+    let implementation_action = implementation
+        .actions
+        .iter()
+        .find(|action| action.name == action_map.name)
+        .expect("action maps were checked against implementation actions");
+    let abstraction_action = abstraction
+        .actions
+        .iter()
+        .find(|action| action.name == *name)
+        .expect("action maps were checked against abstraction actions");
+    let bindings = implementation_action
+        .params
+        .iter()
+        .map(|param| (param.name().to_owned(), parameter_type(param)))
+        .collect::<Vec<_>>();
+    for (index, (argument, parameter)) in args.iter().zip(&abstraction_action.params).enumerate() {
+        crate::public_kernel::validate_expression_type(
+            argument,
+            &parameter_type(parameter),
+            &bindings,
+            context,
+        )
+        .map_err(|error| {
+            refinement_error(
+                format!(
+                    "invalid argument {} for action '{}' -> '{}': {}",
+                    index + 1,
+                    action_map.name,
+                    name,
+                    error.message
+                ),
+                Some(
+                    error
+                        .span
+                        .expect("mapped argument type errors carry source spans"),
+                ),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn parameter_type(parameter: &ParamDef) -> TypeRef {
+    match parameter {
+        ParamDef::Typed { ty, .. } => ty.clone(),
+        ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+    }
 }
 
 fn apply_auto_maps(

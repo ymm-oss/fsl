@@ -450,10 +450,8 @@ exactly one <code>level[k]</code>, every enabled action strictly decreases the t
 induction returns <code>"proved"</code> with <code>"completeness": "unbounded"</code>. This idiom
 only covers designs where <em>every</em> enabled action decreases the total. For
 per-entity progress under interleaving, prefer the <code>helpful</code> form above.
-(Conditional expressions can't substitute for a per-branch measure either:
-<code>if/then/else</code> is legal only in
-refinement-mapping expressions (§10), not in the general expression grammar
-that <code>decreases</code> draws from.)</p></div></details>
+(A conditional measure can select between integer expressions, but it does not
+by itself prove the per-entity decrease required by the <code>helpful</code> form.)</p></div></details>
 <details id="2-types"><summary>2. Types<span class="tree-blurb"> — 基本型、列挙、構造体、Seq、Option などの型システム。</span></summary><div class="tree-body"><table>
 <thead>
 <tr>
@@ -576,6 +574,14 @@ variable capture instead of inventing internal binder names. See
   as <code>a / b</code> with whitespace)</li>
 <li>Comparison: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>Logical: <code>and or not =&gt;</code></li>
+<li>Conditional: <code>if condition then when_true else when_false</code>. The condition is
+  <code>Bool</code>; both branches are checked and must have the same logical type. It is
+  available anywhere an expression is accepted, including guards, assignments,
+  properties, function arguments, ranking expressions, constants, and
+  refinement mappings. Conditional expressions associate to the right and each
+  branch extends to the enclosing delimiter; use parentheses when a following
+  operator should apply to the whole conditional. Concrete evaluation executes
+  only the selected branch, while name and type checking always visits both.</li>
 <li>Quantification (bounded): <code>forall x: T { expr }</code> / <code>exists x: T { expr }</code> (can be filtered with <code>where expr</code>),
   the v0 form <code>forall i in lo..hi: expr</code> is also allowed. Expression quantifiers
   can also range over a Set or Seq value: <code>forall x in active { ... }</code> /
@@ -1178,12 +1184,9 @@ not depart from the behavior of abs (see <code>DESIGN-refinement.md</code>).</p>
   Formal params may be bare names or <code>name: Type</code> annotations matching the impl action declaration.
   <code>stutter</code> is an internal step in which the abstract state does not change.</li>
 </ul>
-<p>Only in the expressions of a refinement mapping file may you use
-<code>if &lt;expr&gt; then &lt;expr&gt; else &lt;expr&gt;</code>. This is valid only in the right-hand side
-of <code>map</code> and in the argument expressions of <code>action ... -&gt; abs(&lt;expr list&gt;)</code>,
-and is not part of the expression grammar of an ordinary <code>.fsl</code> spec file. The
-two arms of then/else must have the same logical type
-(Bool, Int/domain/enum, Option, struct).</p>
+<p>Refinement maps and action arguments use the same expression grammar and type
+rules as ordinary specs, including <code>if &lt;condition&gt; then &lt;expr&gt; else &lt;expr&gt;</code>.
+Both branches are name- and type-checked even when the condition is constant.</p>
 <pre><code class="language-bash">fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
 </code></pre>
 <p>Success: <code>result: "refines"</code> (exit 0). Violation: <code>refinement_failed</code> (exit 1)

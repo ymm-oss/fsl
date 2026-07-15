@@ -108,6 +108,35 @@ fn domain_expressions_are_typed_spanned_and_preserve_legacy_operators() {
 }
 
 #[test]
+fn conditional_retains_its_own_and_each_child_span() {
+    let source = r"domain ConditionalSpans {
+  enum Status { Pending, Done }
+  aggregate Order {
+    state { status: Status = Pending; ready: Bool = false; }
+    invariant selected { if ready then status == Done else status == Pending }
+  }
+}";
+    let domain = parse_domain(source).expect("parse conditional");
+    let expression = &domain.aggregates[0].invariants[0].expr;
+    let SyntaxExprKind::Conditional {
+        condition,
+        then_expr,
+        else_expr,
+    } = &expression.kind
+    else {
+        panic!("expected conditional: {expression:?}");
+    };
+
+    assert_eq!(
+        text(source, expression),
+        "if ready then status == Done else status == Pending"
+    );
+    assert_eq!(text(source, condition), "ready");
+    assert_eq!(text(source, then_expr), "status == Done");
+    assert_eq!(text(source, else_expr), "status == Pending");
+}
+
+#[test]
 fn malformed_domain_expression_reports_the_original_source_span() {
     let source = r"domain Broken {
   aggregate Order {

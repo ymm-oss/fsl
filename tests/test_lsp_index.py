@@ -141,6 +141,29 @@ def test_raw_tree_index_extracts_spec_definitions_references_and_ranges():
     assert init_i_loc.range == init_i.selection_range
 
 
+def test_raw_tree_index_visits_every_conditional_branch():
+    source = """spec ConditionalIndex {
+  state { condition: Bool, then_value: Bool, else_value: Bool }
+  init { condition = true then_value = true else_value = false }
+  action stay() {
+    condition = condition
+    then_value = then_value
+    else_value = else_value
+  }
+  invariant Choice { if condition then then_value else else_value }
+}
+"""
+    index = build_index(source, "conditional.fsl")
+
+    for name in ("condition", "then_value", "else_value"):
+        references = [
+            reference
+            for reference in index.references
+            if reference.name == name and reference.role == "value"
+        ]
+        assert len(references) >= 2, f"conditional reference not indexed: {name}"
+
+
 def test_domain_canonical_enum_is_indexed_with_members():
     source = """domain Orders {
   enum Status { Pending, Approved }

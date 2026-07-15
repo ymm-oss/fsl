@@ -2391,10 +2391,11 @@ fn mapping_json_expr(
                 .as_i64()
                 .ok_or_else(|| "mapping negation requires integer".to_owned())?
         )),
-        KernelExpr::IfThenElse {
+        KernelExpr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             if mapping_json_expr(condition, raw, bindings, model)?
                 .as_bool()
@@ -5317,10 +5318,11 @@ fn expression_state_roots(
                 collect(base, roots);
                 collect(index, roots);
             }
-            KernelExpr::IfThenElse {
+            KernelExpr::Conditional {
                 condition,
                 then_expr,
                 else_expr,
+                ..
             }
             | KernelExpr::TernaryNamed {
                 first: condition,
@@ -6051,10 +6053,11 @@ fn expression_mutant_count(
             .iter()
             .map(|(_, value)| expression_mutant_count(value, enum_siblings))
             .sum(),
-        KernelExpr::IfThenElse {
+        KernelExpr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => [condition.as_ref(), then_expr, else_expr]
             .into_iter()
             .map(|value| expression_mutant_count(value, enum_siblings))

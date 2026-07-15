@@ -168,10 +168,11 @@ fn expr_reads_bound(
             reads.extend(expr_reads_bound(left, state, bound));
             reads.extend(expr_reads_bound(right, state, bound));
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             reads.extend(expr_reads_bound(condition, state, bound));
             reads.extend(expr_reads_bound(then_expr, state, bound));

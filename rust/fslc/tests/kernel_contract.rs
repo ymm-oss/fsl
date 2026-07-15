@@ -120,6 +120,25 @@ fn typestate_consumes_the_versioned_public_kernel_contract() {
 }
 
 #[test]
+fn typestate_rejects_conditional_nodes_instead_of_omitting_them() {
+    let source = "spec S { type N = 0..1 state { x: N, gate: Bool } init { x = 0 gate = true } action choose() { x = if gate then 1 else 0 gate = gate } invariant I { true } }";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel.clone()).expect("build model");
+    let mut contract = fsl_core::public_kernel_contract(&kernel, &model, "s.fsl", "kernel")
+        .expect("export public Kernel");
+
+    let error = fsl_tools::analyze_typestate(&contract)
+        .expect_err("unsupported conditional must not be silently ignored");
+    assert!(error.contains("conditional expressions"));
+
+    contract["actions"][0]["updates"][0]["value"]["kind"] =
+        Value::String("unknown_node".to_owned());
+    let error = fsl_tools::analyze_typestate(&contract)
+        .expect_err("unknown public Kernel nodes must be rejected");
+    assert!(error.contains("unknown expression kind 'unknown_node'"));
+}
+
+#[test]
 fn typestate_rejects_an_incompatible_public_kernel_version() {
     let path = fixture("kernel_contract.fsl");
     let (kernel, model) = load(&path);
@@ -559,5 +578,6 @@ fn published_schema_ids_match_the_rust_api_constants() {
     let kinds = kernel["$defs"]["expression"]["properties"]["kind"]["enum"]
         .as_array()
         .expect("expression kind enum");
+    assert!(kinds.contains(&Value::String("ite".to_owned())));
     assert!(!kinds.contains(&Value::String("totally_unknown".to_owned())));
 }

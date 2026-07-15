@@ -164,7 +164,7 @@
     </div>
 
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0"><b>Two mapping mechanisms hide internal detail.</b> <code>action ... -&gt; stutter</code> hides an internal-only operation, and a <code>map</code> expression absorbs internal fields (for example <code>map stock[i] = impl_stock[i] - reserved[i]</code> hides a <code>reserved</code> field). <code>maps auto</code> synthesizes identity entries for same-named state and actions; explicit entries override it. <code>if … then … else …</code> is allowed <i>only</i> inside mapping expressions, never in an ordinary <code>spec</code>.</p>
+      <p style="margin:0"><b>Two mapping mechanisms hide internal detail.</b> <code>action ... -&gt; stutter</code> hides an internal-only operation, and a <code>map</code> expression absorbs internal fields (for example <code>map stock[i] = impl_stock[i] - reserved[i]</code> hides a <code>reserved</code> field). <code>maps auto</code> synthesizes identity entries for same-named state and actions; explicit entries override it. Mapping expressions use the same <code>if … then … else …</code> syntax and type rules as ordinary specs.</p>
     </div>
   </div>
 </section>

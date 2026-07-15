@@ -105,10 +105,11 @@ pub(crate) fn eval<S: SmtSolver>(
             let value = eval(solver, model, inner, state, bindings, old_state)?;
             Ok(bool_value(solver, solver.not(bool_term(&value)?)?))
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             let condition = eval(solver, model, condition, state, bindings, old_state)?;
             let then_value = eval(solver, model, then_expr, state, bindings, old_state)?;

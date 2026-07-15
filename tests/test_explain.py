@@ -333,6 +333,8 @@ def test_expr_to_text_parenthesizes_where_semantics_require_it():
         _expr_to_text(_bin("-", _bin("-", _var("a"), _var("b")), _var("c")))
         == "a - b - c"
     )
+    conditional = ("ite", _var("c"), _var("a"), _var("b"))
+    assert _expr_to_text(_bin("+", conditional, ("num", 1))) == "(if c then a else b) + 1"
 
 
 def test_expr_to_text_omits_parens_not_required_by_precedence():

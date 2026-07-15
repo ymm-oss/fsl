@@ -149,10 +149,11 @@ pub fn eval(
         Expr::Not(expr) => Ok(Value::Bool(!as_bool(eval(
             expr, state, bindings, model, old_state,
         )?)?)),
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            ..
         } => {
             if as_bool(eval(condition, state, bindings, model, old_state)?)? {
                 eval(then_expr, state, bindings, model, old_state)

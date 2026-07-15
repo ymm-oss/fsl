@@ -321,14 +321,16 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
-        Expr::IfThenElse {
+        Expr::Conditional {
             condition,
             then_expr,
             else_expr,
+            spans,
         } => {
             for mutation in expr_mutations(condition, enums) {
                 output.push(ExprMutation {
-                    expr: Expr::IfThenElse {
+                    expr: Expr::Conditional {
+                        spans: spans.clone(),
                         condition: Box::new(mutation.expr.clone()),
                         then_expr: then_expr.clone(),
                         else_expr: else_expr.clone(),
@@ -338,7 +340,8 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
             }
             for mutation in expr_mutations(then_expr, enums) {
                 output.push(ExprMutation {
-                    expr: Expr::IfThenElse {
+                    expr: Expr::Conditional {
+                        spans: spans.clone(),
                         condition: condition.clone(),
                         then_expr: Box::new(mutation.expr.clone()),
                         else_expr: else_expr.clone(),
@@ -348,7 +351,8 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
             }
             for mutation in expr_mutations(else_expr, enums) {
                 output.push(ExprMutation {
-                    expr: Expr::IfThenElse {
+                    expr: Expr::Conditional {
+                        spans: spans.clone(),
                         condition: condition.clone(),
                         then_expr: then_expr.clone(),
                         else_expr: Box::new(mutation.expr.clone()),

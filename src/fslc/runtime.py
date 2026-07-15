@@ -677,6 +677,9 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         _err(f"unknown operator '{op}'")
     if tag in ("forall", "exists"):
         return _eval_quant(e, state, binds, spec, old_state, in_ensures)
+    if tag == "ite":
+        branch = e[2] if eval_concrete(e[1], state, binds, spec, old_state, in_ensures) else e[3]
+        return eval_concrete(branch, state, binds, spec, old_state, in_ensures)
     if tag in ("unique", "exactly_one"):
         return _eval_one(e, state, binds, spec, old_state, in_ensures)
     if tag == "count":

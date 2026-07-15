@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ConditionalTypeError {
+  state { x: Int }
+  init { x = 0 }
+  action stay() {
+    x = if true then 1 else Missing
+  }
+  invariant Safe { true }
+}

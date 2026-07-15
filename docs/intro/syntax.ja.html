@@ -360,10 +360,11 @@ requires stock[i] &gt; 0
         <p>Option値全体の比較には <code>x == some(e)</code>、後続式で中身へ名前をつける場合は <code>x is some(v)</code> を使います。</p>
       </div>
       <div class="syntax-card">
-        <h3>詳細化の対応表だけで使える if式</h3>
-        <pre><code>map holder[s: SeatId] =
-  if slots[s].st == Sold then slots[s].buyer else none</code></pre>
-        <p><code>if c then a else b</code> は詳細化の <code>map</code> や <code>action</code> 引数の中だけで使えます。通常の <code>spec</code> の式では使いません。</p>
+        <h3>条件式</h3>
+        <pre><code>invariant EffectiveLimit {
+  limit == if premium then PREMIUM_LIMIT else STANDARD_LIMIT
+}</code></pre>
+        <p><code>if c then a else b</code> は式を書けるすべての場所で使えます。両 branch は同じ型を持ち、実行時には選択された branch だけを評価します。</p>
       </div>
     </div>
   </div>
