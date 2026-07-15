@@ -3732,7 +3732,7 @@ fn validate_specialized_document(path: &Path) -> Result<(), String> {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<std::collections::BTreeSet<_>>();
-            for tool in component
+            for rule in component
                 .authority
                 .may_suggest
                 .iter()
@@ -3740,8 +3740,8 @@ fn validate_specialized_document(path: &Path) -> Result<(), String> {
                 .chain(&component.authority.requires_human_approval)
                 .chain(&component.authority.forbidden)
             {
-                if !tools.contains(tool.as_str()) {
-                    return Err(format!("unknown tool '{tool}' in authority block"));
+                if !tools.contains(rule.name.as_str()) {
+                    return Err(format!("unknown tool '{}' in authority block", rule.name));
                 }
             }
             Ok(())

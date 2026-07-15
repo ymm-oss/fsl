@@ -1484,11 +1484,29 @@ arguments, namespaces, or syntax report <code>FSL-ANNOTATION-ARGUMENTS</code> /
 string/<code>covers</code> forms both desugar into the same typed relation and simply
 union when both are present on one declaration (identical <code>(id, text)</code> pairs
 deduplicate; conflicting text for one requirement ID is a checked-model error).
-Declaration-level annotations on <code>domain</code>/<code>dbsystem</code>/<code>ai_component</code> nested
-declarations (their top-level document annotation already works) are tracked
-by a follow-up issue (#281) and are not yet supported. <code>@...</code> on a nested declaration
-is a native-only surface addition — the frozen Python reference does not parse
-it, so specs that use it are outside the Python-parity corpus by construction.</p>
+As of issue #281, the same <code>@...</code> grammar also attaches to nested
+declarations in the three specialized frontends that do not share this
+parser: <code>domain</code> (aggregate <code>command</code>, <code>decide</code>, <code>evolve</code>, <code>invariant</code>,
+<code>projection</code>, <code>effect</code>, saga <code>step</code>), <code>ai_component</code> (<code>tool</code>, the <code>tools
+[a, b];</code> shorthand, the <code>authority</code> block and each of its rule lines,
+<code>fallback</code> and each <code>when</code> item, <code>check</code>), and <code>dbsystem</code> (<code>migration</code>, and
+each <code>rule</code> line inside <code>check compatibility { ... }</code>). A <code>command</code>/<code>decide</code>
+pair (plus any <code>evolve</code> block the decide's emitted events reach) union onto
+the one action they together generate; an <code>effect</code>'s or saga <code>step</code>'s
+annotations broadcast to every action it generates (a step's own action and
+its <code>_timeout</code> variant; an effect's per-outcome <code>_complete_*</code> actions, its
+<code>_retry</code> action, and its success-sticky progress property). Everywhere else
+in these three dialects — a migration operation line, a <code>dbsystem</code>/
+<code>ai_component</code> scalar declaration, a domain declaration outside the accepted
+list — a stray annotation still reports the coded <code>FSL-ANNOTATION-TARGET</code>
+diagnostic. See <code>DESIGN-annotations.md</code>'s "domain/db/ai nested declaration
+syntax" section for the full attachment table, the <code>AiAuthority</code> rule
+restructuring, and how a <code>dbsystem</code> migration/compatibility-rule annotation
+reaches the checked model without going through the lossy legacy
+<code>quote_meta</code> string convention. <code>@...</code> on a nested declaration remains a
+native-only surface addition — the frozen Python reference does not parse
+it, so specs that use it are outside the Python-parity corpus by
+construction.</p>
 <h3 id="132-requirements-layer-requirements-the-fsl-req-dialect">13.2 Requirements layer: <code>requirements</code> (the fsl-req dialect)</h3>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }

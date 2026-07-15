@@ -4,11 +4,12 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::annotation_parse;
 use crate::syntax_expr::{
     ExpressionMode, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxTypeExpr,
     parse_tokens_expression, parse_tokens_lvalue,
 };
-use crate::{ParseError, Span, Token, TokenKind, lex};
+use crate::{Annotations, ParseError, Span, Token, TokenKind, lex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct DomainLoc {
@@ -72,6 +73,7 @@ pub struct DomainType {
 pub struct DomainCommand {
     pub name: String,
     pub inputs: Vec<DomainField>,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -101,6 +103,7 @@ pub struct DomainDecide {
     pub requires: Vec<SyntaxExpr>,
     pub rejects: Vec<DomainReject>,
     pub emits: Vec<String>,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -117,6 +120,7 @@ pub struct DomainEvolve {
     pub event: String,
     pub requires: Vec<SyntaxExpr>,
     pub assignments: Vec<DomainAssignment>,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -125,6 +129,7 @@ pub struct DomainInvariant {
     pub name: SyntaxIdent,
     pub expr: SyntaxExpr,
     pub span: Span,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -133,6 +138,7 @@ pub struct DomainProjection {
     pub name: String,
     pub source: String,
     pub fields: Vec<String>,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -185,6 +191,7 @@ pub struct DomainEffect {
     pub compensation_events: Vec<String>,
     pub outbox: Option<String>,
     pub inbox: Option<String>,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -207,6 +214,7 @@ pub struct DomainSagaStep {
     pub awaits: Vec<String>,
     pub timeout_after: Option<String>,
     pub timeout_event: Option<String>,
+    pub annotations: Annotations,
     pub loc: DomainLoc,
 }
 
@@ -389,6 +397,7 @@ impl DomainEffect {
             compensation_events: Vec::new(),
             outbox: None,
             inbox: None,
+            annotations: Annotations::default(),
             loc,
         }
     }
@@ -462,7 +471,11 @@ pub(crate) fn parse_domain_tokens(
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<DomainSpec, ParseError> {
-    let mut parser = DomainParser { tokens, cursor };
+    let mut parser = DomainParser {
+        tokens,
+        cursor,
+        pending_annotations: Annotations::default(),
+    };
     let domain = parser.domain()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after domain"));
@@ -473,9 +486,72 @@ pub(crate) fn parse_domain_tokens(
 struct DomainParser {
     tokens: Vec<Token>,
     cursor: usize,
+    pending_annotations: Annotations,
 }
 
 impl DomainParser {
+    /// Parse zero or more leading `@name(args...)` annotations into
+    /// `self.pending_annotations`, ready to be drained by whichever
+    /// declaration constructor runs next.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] for malformed annotation syntax, a failed
+    /// validation, or one or more annotations with no following declaration
+    /// in the same block.
+    fn take_leading_annotations(&mut self) -> Result<(), ParseError> {
+        while self.peek_symbol("@") {
+            let annotation = annotation_parse::annotation(&self.tokens, &mut self.cursor)?;
+            self.pending_annotations.push(annotation);
+        }
+        if let Some(first) = self.pending_annotations.source_order().first()
+            && (self.peek_symbol("}") || matches!(self.peek().kind, TokenKind::Eof))
+        {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation must be followed by a declaration in the same block",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Drain and validate the annotations collected for the declaration
+    /// currently under construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] when the drained group fails validation.
+    fn take_annotations(&mut self) -> Result<Annotations, ParseError> {
+        let annotations = std::mem::take(&mut self.pending_annotations);
+        annotations.validate().map_err(|error| {
+            ParseError::coded("FSL-ANNOTATION-INVALID", error.message, error.span)
+        })?;
+        Ok(annotations)
+    }
+
+    /// Reject any annotation left over after parsing a declaration that does
+    /// not accept annotations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] coded `FSL-ANNOTATION-TARGET` when annotations
+    /// remain pending.
+    fn expect_no_pending_annotations(&mut self) -> Result<(), ParseError> {
+        if let Some(first) = self.pending_annotations.source_order().first() {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation cannot attach to this declaration",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn domain(&mut self) -> Result<DomainSpec, ParseError> {
         let loc = self.loc();
         self.expect_ident_value("domain")?;
@@ -489,7 +565,9 @@ impl DomainParser {
         let mut sagas = Vec::new();
         let mut projections = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             if self.eat_ident("implementation_profile") {
+                self.expect_no_pending_annotations()?;
                 implementation_profile = Some(self.expect_ident()?);
                 if self.eat_symbol("{") {
                     while !self.eat_symbol("}") {
@@ -500,20 +578,26 @@ impl DomainParser {
                 }
                 self.eat_symbol(";");
             } else if self.peek_ident("type") {
+                self.expect_no_pending_annotations()?;
                 types.push(self.domain_type()?);
             } else if self.peek_ident("enum") {
+                self.expect_no_pending_annotations()?;
                 types.push(self.domain_enum()?);
             } else if self.peek_ident("value_object") {
+                self.expect_no_pending_annotations()?;
                 types.push(self.value_object()?);
             } else if self.peek_ident("aggregate") {
+                self.expect_no_pending_annotations()?;
                 let (aggregate, nested_projections) = self.aggregate()?;
                 aggregates.push(aggregate);
                 projections.extend(nested_projections);
             } else if self.peek_ident("effect") {
                 effects.push(self.effect()?);
             } else if self.peek_ident("await") {
+                self.expect_no_pending_annotations()?;
                 awaits.push(self.await_block()?);
             } else if self.peek_ident("saga") {
+                self.expect_no_pending_annotations()?;
                 sagas.push(self.saga()?);
             } else if self.peek_ident("projection") {
                 projections.push(self.projection()?);
@@ -628,9 +712,11 @@ impl DomainParser {
         let mut fields = Vec::new();
         let mut invariants = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             if self.peek_ident("invariant") {
                 invariants.push(self.invariant()?);
             } else {
+                self.expect_no_pending_annotations()?;
                 fields.push(self.field(false, true)?);
             }
         }
@@ -666,10 +752,13 @@ impl DomainParser {
         let mut projections = Vec::new();
         let mut stale_policies = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             if self.eat_ident("id") {
+                self.expect_no_pending_annotations()?;
                 id_type = Some(self.expect_ident()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("state") {
+                self.expect_no_pending_annotations()?;
                 self.expect_symbol("{")?;
                 while !self.eat_symbol("}") {
                     state.push(self.field(false, true)?);
@@ -677,8 +766,10 @@ impl DomainParser {
             } else if self.peek_ident("command") {
                 commands.push(self.command()?);
             } else if self.peek_ident("event") {
+                self.expect_no_pending_annotations()?;
                 events.push(self.event()?);
             } else if self.peek_ident("error") {
+                self.expect_no_pending_annotations()?;
                 let error_loc = self.loc();
                 self.bump();
                 errors.push(DomainError {
@@ -695,6 +786,7 @@ impl DomainParser {
             } else if self.peek_ident("projection") {
                 projections.push(self.projection()?);
             } else if self.peek_ident("on_stale") {
+                self.expect_no_pending_annotations()?;
                 stale_policies.push(self.stale_policy()?);
             } else {
                 return Err(self.error("expected aggregate declaration"));
@@ -719,6 +811,7 @@ impl DomainParser {
     }
 
     fn command(&mut self) -> Result<DomainCommand, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let name = self.expect_ident()?;
@@ -727,7 +820,12 @@ impl DomainParser {
         while !self.eat_symbol("}") {
             inputs.push(self.field(true, false)?);
         }
-        Ok(DomainCommand { name, inputs, loc })
+        Ok(DomainCommand {
+            name,
+            inputs,
+            annotations,
+            loc,
+        })
     }
 
     fn event(&mut self) -> Result<DomainEvent, ParseError> {
@@ -786,6 +884,7 @@ impl DomainParser {
     }
 
     fn decide(&mut self) -> Result<DomainDecide, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let command = self.expect_ident()?;
@@ -818,11 +917,13 @@ impl DomainParser {
             requires,
             rejects,
             emits,
+            annotations,
             loc,
         })
     }
 
     fn evolve(&mut self) -> Result<DomainEvolve, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let event = self.expect_ident()?;
@@ -840,6 +941,7 @@ impl DomainParser {
             event,
             requires,
             assignments,
+            annotations,
             loc,
         })
     }
@@ -860,6 +962,7 @@ impl DomainParser {
     }
 
     fn invariant(&mut self) -> Result<DomainInvariant, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         let start = self.peek().span;
         self.bump();
@@ -871,11 +974,13 @@ impl DomainParser {
             name,
             expr,
             span: join(start, self.previous_span()),
+            annotations,
             loc,
         })
     }
 
     fn projection(&mut self) -> Result<DomainProjection, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let name = self.expect_ident()?;
@@ -897,6 +1002,7 @@ impl DomainParser {
             name,
             source,
             fields,
+            annotations,
             loc,
         })
     }
@@ -921,11 +1027,13 @@ impl DomainParser {
     }
 
     fn effect(&mut self) -> Result<DomainEffect, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let name = self.expect_ident()?;
         self.expect_symbol("{")?;
         let mut effect = DomainEffect::new(name, loc);
+        effect.annotations = annotations;
         while !self.eat_symbol("}") {
             if self.eat_ident("async") {
                 effect.async_effect = true;
@@ -1075,22 +1183,29 @@ impl DomainParser {
         let mut outboxes = Vec::new();
         let mut inboxes = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             if self.eat_ident("starts_on") {
+                self.expect_no_pending_annotations()?;
                 starts_on = Some(self.expect_ident()?);
                 self.eat_symbol(";");
             } else if self.peek_ident("step") {
                 steps.push(self.saga_step()?);
             } else if self.eat_ident("compensation") {
+                self.expect_no_pending_annotations()?;
                 self.expect_symbol("{")?;
                 while !self.eat_symbol("}") {
+                    self.take_leading_annotations()?;
+                    self.expect_no_pending_annotations()?;
                     compensations.push(self.saga_compensation()?);
                 }
             } else if self.peek_ident("invariant") {
                 invariants.push(self.invariant()?);
             } else if self.eat_ident("outbox") {
+                self.expect_no_pending_annotations()?;
                 outboxes.push(self.expect_ident()?);
                 self.eat_symbol(";");
             } else if self.eat_ident("inbox") {
+                self.expect_no_pending_annotations()?;
                 inboxes.push(self.expect_ident()?);
                 self.eat_symbol(";");
             } else {
@@ -1110,6 +1225,7 @@ impl DomainParser {
     }
 
     fn saga_step(&mut self) -> Result<DomainSagaStep, ParseError> {
+        let annotations = self.take_annotations()?;
         let loc = self.loc();
         self.bump();
         let name = self.expect_ident()?;
@@ -1123,6 +1239,7 @@ impl DomainParser {
             awaits: Vec::new(),
             timeout_after: None,
             timeout_event: None,
+            annotations,
             loc,
         };
         while !self.eat_symbol("}") {

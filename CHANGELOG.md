@@ -115,9 +115,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   to every action/property it contains. A malformed or stray annotation
   (nothing to attach to) reports a precise coded diagnostic
   (`FSL-ANNOTATION-TARGET`/`-ARGUMENTS`/`-PATH`/`-SYNTAX`). Public Kernel v1/v2
-  JSON and `python_ast` projections remain unchanged; `domain`/`dbsystem`/
-  `ai_component` nested declarations are not yet covered and are tracked by a
-  follow-up issue (issue #241; follow-up #281).
+  JSON and `python_ast` projections remain unchanged (issue #241).
+- Native Rust now also accepts the same declaration-level `@...` syntax on
+  `domain` (aggregate `command`/`decide`/`evolve`/`invariant`, `projection`,
+  `effect`, saga `step`), `ai_component` (`tool`, `authority` and its
+  individual rule lines, `fallback` and its `when` items, `check`), and
+  `dbsystem` (`migration`, `check compatibility` rule lines) nested
+  declarations. A `command`/`decide`/matching-`evolve` group unions onto the
+  one action they generate together; an `effect` or saga `step` broadcasts to
+  every action it generates. `AiAuthority`'s `may_suggest`/`may_execute`/
+  `requires_human_approval`/`forbidden` rule lists are now span/annotation-
+  carrying `AiAuthorityRule` nodes while `python_ast()` still projects the
+  original plain string-array JSON shape. A `dbsystem` migration or
+  compatibility-rule annotation reaches the checked model and TSG/ledger by
+  rendering back to `@...` source rather than through the lossy legacy
+  `quote_meta` string convention. Public Kernel v1/v2 JSON and `python_ast`
+  projections remain unchanged (issue #281).
 - Approval records can now opt into detached Ed25519 signatures with
   `approval create --signing-key`. The strict v2 schema binds the complete
   canonical record, while `approval check`, `approval diff`, and `ledger`

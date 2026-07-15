@@ -1,0 +1,70 @@
+// ════════════════════════════════════════════════════════════════
+// Declaration-level @annotation syntax on ai_component nested
+// declarations (issue #281) — sample corpus
+//
+// Demonstrates `@requirement(id, text?)` attached directly to a tool,
+// an authority block and its individual rule lines, a fallback block
+// and one of its `when` items, and a hard check block and one of its
+// individual rule lines. See docs/DESIGN-annotations.md's "domain/db/ai
+// nested declaration syntax" section for the `AiAuthority`/`AiHardCheck`
+// restructuring into `AiAuthorityRule`/`AiCheckRule { name, annotations,
+// loc }` and the unchanged `python_ast()` JSON shape.
+//
+// Native-only: the frozen Python reference does not parse `@...`
+// before an ai_component nested declaration, so this file is excluded
+// from the Python Monitor conformance sweep (tests/dialect_registry.py
+// MONITOR_EXCLUSIONS); native coverage lives in rust/fsl-syntax tests.
+//
+//   fslc check examples/annotations/annotated_ai_component.fsl
+// ════════════════════════════════════════════════════════════════
+ai_component AnnotatedRefundAgent {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+    effect read_order;
+  }
+
+  @requirement("REQ-REFUND-TOOL", "refund execution is a declared, schema-checked tool")
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+    effect payment_refunded;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+    effect customer_data_deleted;
+  }
+
+  @kind("safety", "authority boundary for this component")
+  authority {
+    may_suggest SearchOrder;
+    may_execute SearchOrder;
+    @requirement("REQ-APPROVAL", "refunds require a human in the loop")
+    requires_human_approval RefundPayment;
+    @requirement("REQ-FORBIDDEN", "customer data deletion is never agent-initiated")
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    @requirement("REQ-FALLBACK", "low-confidence decisions escalate to a human")
+    when low_confidence require human_review;
+    when missing_order_evidence require refuse_with_reason;
+  }
+
+  @requirement("REQ-HARD-CHECK", "the hard contract enforces schema and approval rules")
+  check hard {
+    rule tool_authority;
+    @requirement("REQ-APPROVAL-CHECK", "human approval is verified before execution")
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
+  }
+}

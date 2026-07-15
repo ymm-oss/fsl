@@ -21,7 +21,8 @@ mod surface;
 mod syntax_expr;
 
 pub use ai::{
-    AiAuthority, AiComponent, AiFallback, AiHardCheck, AiLoc, AiTool, parse_ai_component,
+    AiAuthority, AiAuthorityRule, AiCheckRule, AiComponent, AiFallback, AiHardCheck, AiLoc, AiTool,
+    parse_ai_component,
 };
 pub use annotation::{
     Annotation, AnnotationError, AnnotationRegistry, AnnotationValue, Annotations, RequirementLink,
@@ -29,8 +30,9 @@ pub use annotation::{
 };
 pub use ast::{Binder, Expr, Pattern, QualifiedName, SourcePos, Span};
 pub use db::{
-    DbArtifact, DbCheck, DbColumn, DbColumnRef, DbDatabase, DbEnvironment, DbEnvironmentArtifact,
-    DbFlag, DbFlagCondition, DbMigration, DbMigrationOp, DbSystem, DbTable, parse_db_system,
+    DbArtifact, DbCheck, DbCheckRule, DbColumn, DbColumnRef, DbDatabase, DbEnvironment,
+    DbEnvironmentArtifact, DbFlag, DbFlagCondition, DbMigration, DbMigrationOp, DbSystem, DbTable,
+    parse_db_system,
 };
 pub use dispatch::{
     DIALECT_KEYWORDS, ParsedDocument, SourceFile, declaration_keyword, dialect_keyword,

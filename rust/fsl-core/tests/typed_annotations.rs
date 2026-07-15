@@ -783,3 +783,213 @@ requirements ReservedTraceId {{
         assert_eq!(error.line, 6);
     }
 }
+
+#[test]
+fn domain_command_decide_and_evolve_annotations_union_into_one_action() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    state { ready: Bool }
+    @requirement("REQ-COMMAND")
+    command Place {}
+    event Placed {}
+    @requirement("REQ-DECIDE")
+    decide Place { emits Placed }
+    @requirement("REQ-EVOLVE")
+    evolve Placed { ready = true }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated domain");
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "order_place")
+        .expect("order_place action");
+    let mut ids = action
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["REQ-COMMAND", "REQ-DECIDE", "REQ-EVOLVE"]);
+}
+
+#[test]
+fn domain_effect_annotations_broadcast_to_complete_and_retry_actions() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    id OrderId
+    state { ready: Bool = false; }
+    command Place {
+      input order_id: OrderId
+    }
+    event Placed { order_id: OrderId }
+    event Shipped { order_id: OrderId }
+    decide Place { emits Placed }
+    evolve Placed { ready = true }
+    evolve Shipped { ready = true }
+  }
+  @requirement("REQ-EFFECT")
+  effect Ship {
+    correlation_id Placed.order_id
+    handles Placed
+    emits one_of [Shipped]
+    retry { max_attempts 3 }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated domain effect");
+    let model = build_model(kernel).expect("build checked model");
+    for name in ["ship_complete_shipped", "ship_retry"] {
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == name)
+            .unwrap_or_else(|| panic!("{name} action"));
+        assert_eq!(
+            action.annotations.requirements().unwrap()[0].id,
+            "REQ-EFFECT",
+            "action {name}"
+        );
+    }
+}
+
+#[test]
+fn domain_saga_step_annotations_broadcast_to_step_and_timeout_actions() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    state { ready: Bool }
+    command Place {}
+    event Placed {}
+    event Shipped {}
+    decide Place { emits Placed }
+    evolve Placed { ready = true }
+    evolve Shipped { ready = true }
+  }
+  saga Fulfillment {
+    starts_on Placed
+    @requirement("REQ-STEP")
+    step Notify {
+      awaits one_of [Shipped]
+      timeout after 5m emits Shipped
+    }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated saga step");
+    let model = build_model(kernel).expect("build checked model");
+    for name in ["saga_fulfillment_notify", "saga_fulfillment_notify_timeout"] {
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == name)
+            .unwrap_or_else(|| panic!("{name} action"));
+        assert_eq!(
+            action.annotations.requirements().unwrap()[0].id,
+            "REQ-STEP",
+            "action {name}"
+        );
+    }
+}
+
+#[test]
+fn domain_invariant_annotations_reach_the_checked_property() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    state { ready: Bool }
+    @requirement("REQ-INVARIANT")
+    invariant Stable { ready == ready }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated domain invariant");
+    let model = build_model(kernel).expect("build checked model");
+    let invariant = model
+        .invariants
+        .iter()
+        .find(|invariant| invariant.name == "Order_Stable")
+        .expect("Order_Stable invariant");
+    let mut ids = invariant
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["DOMAIN-INVARIANT", "REQ-INVARIANT"]);
+}
+
+#[test]
+fn db_migration_and_check_rule_annotations_reach_the_checked_model() {
+    let kernel = parse_kernel_source(
+        r#"
+dbsystem Orders {
+  database Db {
+    schema 0
+    table orders {
+      column status: Value present backfilled not_null;
+    }
+  }
+  @requirement("REQ-MIGRATION")
+  migration AddStatus from 0 to 1 {
+    add orders.status not_null;
+  }
+  check compatibility {
+    @requirement("REQ-RULE")
+    rule not_null_after_backfill;
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated dbsystem");
+    let model = build_model(kernel).expect("build checked model");
+    let migrate = model
+        .actions
+        .iter()
+        .find(|action| action.name == "migrate_AddStatus")
+        .expect("migrate_AddStatus action");
+    let mut migrate_ids = migrate
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    migrate_ids.sort();
+    assert_eq!(migrate_ids, ["DB-MIGRATION", "REQ-MIGRATION"]);
+    let not_null_invariant = model
+        .invariants
+        .iter()
+        .find(|invariant| invariant.name.starts_with("db_not_null_after_backfill"))
+        .expect("not_null_after_backfill invariant");
+    let mut invariant_ids = not_null_invariant
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    invariant_ids.sort();
+    assert_eq!(invariant_ids, ["DB-NOT-NULL", "REQ-RULE"]);
+}

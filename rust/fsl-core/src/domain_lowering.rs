@@ -1997,7 +1997,13 @@ fn metadata(id: impl Into<String>, text: impl Into<String>) -> MetaTag {
     }
 }
 
-fn action(name: String, params: Vec<Param>, items: Vec<ActionItem>, span: Span) -> SpecItem {
+fn action(
+    name: String,
+    params: Vec<Param>,
+    items: Vec<ActionItem>,
+    span: Span,
+    annotations: Annotations,
+) -> SpecItem {
     SpecItem::Action {
         name,
         params,
@@ -2006,8 +2012,17 @@ fn action(name: String, params: Vec<Param>, items: Vec<ActionItem>, span: Span) 
         fair: false,
         meta: None,
         sync: false,
-        annotations: Annotations::default(),
+        annotations,
     }
+}
+
+fn evolve_annotations(aggregate: &DomainAggregate, event: &str) -> Annotations {
+    aggregate
+        .evolves
+        .iter()
+        .find(|evolve| evolve.event == event)
+        .map(|evolve| evolve.annotations.clone())
+        .unwrap_or_default()
 }
 
 fn field_params(resolver: &Resolver<'_>, fields: &[DomainField]) -> Result<Vec<Param>, CoreError> {
@@ -2392,6 +2407,16 @@ fn lower_aggregate_actions(
                     }));
                 }
             }
+            let mut annotations = command.annotations.clone();
+            annotations.extend(decide.annotations.source_order().iter().cloned());
+            for event in &decide.emits {
+                annotations.extend(
+                    evolve_annotations(aggregate, event)
+                        .source_order()
+                        .iter()
+                        .cloned(),
+                );
+            }
             items.push(action(
                 format!(
                     "{}_{}",
@@ -2401,6 +2426,7 @@ fn lower_aggregate_actions(
                 field_params(resolver, &command.inputs)?,
                 action_items,
                 span,
+                annotations,
             ));
         }
     }
@@ -2481,6 +2507,13 @@ fn lower_effect_actions(
                 span,
             }));
             action_items.extend(resolver.evolve_items(aggregate, event_name, &scope)?);
+            let mut annotations = effect.annotations.clone();
+            annotations.extend(
+                evolve_annotations(aggregate, event_name)
+                    .source_order()
+                    .iter()
+                    .cloned(),
+            );
             items.push(action(
                 format!(
                     "{}_complete_{}",
@@ -2490,6 +2523,7 @@ fn lower_effect_actions(
                 field_params(resolver, &params)?,
                 action_items,
                 span,
+                annotations,
             ));
         }
         if let Some(maximum) = effect.retry.max_attempts {
@@ -2551,6 +2585,7 @@ fn lower_effect_actions(
                 )],
                 action_items,
                 span,
+                effect.annotations.clone(),
             ));
         }
     }
@@ -2611,6 +2646,7 @@ fn saga_guards(
     Ok(guards)
 }
 
+#[allow(clippy::too_many_lines)]
 fn lower_saga_actions(
     resolver: &Resolver<'_>,
     domain: &DomainSpec,
@@ -2636,6 +2672,7 @@ fn lower_saga_actions(
                 .map(ActionItem::Statement)
                 .collect::<Vec<_>>();
             action_items.extend(resolver.evolve_items(aggregate, &event_name, &scope)?);
+            let annotations = evolve_annotations(aggregate, &event_name);
             items.push(action(
                 format!(
                     "saga_{}_observe_{}",
@@ -2645,6 +2682,7 @@ fn lower_saga_actions(
                 field_params(resolver, &event.fields)?,
                 action_items,
                 span,
+                annotations,
             ));
         }
         for (index, step) in saga.steps.iter().enumerate() {
@@ -2662,7 +2700,13 @@ fn lower_saga_actions(
                     .map(ActionItem::Statement),
             );
             let action_name = format!("saga_{}_{}", lower_name(&saga.name), lower_name(&step.name));
-            items.push(action(action_name.clone(), Vec::new(), action_items, span));
+            items.push(action(
+                action_name.clone(),
+                Vec::new(),
+                action_items,
+                span,
+                step.annotations.clone(),
+            ));
             if let Some(timeout) = &step.timeout_event {
                 let mut timeout_items = guards
                     .into_iter()
@@ -2679,6 +2723,7 @@ fn lower_saga_actions(
                     Vec::new(),
                     timeout_items,
                     span,
+                    step.annotations.clone(),
                 ));
             }
         }
@@ -2706,6 +2751,7 @@ fn lower_saga_actions(
                 Vec::new(),
                 action_items,
                 span,
+                Annotations::default(),
             ));
         }
     }
@@ -2728,7 +2774,7 @@ fn lower_properties(
                     "DOMAIN-INVARIANT",
                     format!("{}.{}", aggregate.name, invariant.name),
                 )),
-                annotations: Annotations::default(),
+                annotations: invariant.annotations.clone(),
             });
         }
     }
@@ -2743,7 +2789,7 @@ fn lower_properties(
                     "DOMAIN-SAGA",
                     format!("{}.{}", saga.name, invariant.name),
                 )),
-                annotations: Annotations::default(),
+                annotations: invariant.annotations.clone(),
             });
         }
     }
@@ -2787,7 +2833,7 @@ fn lower_properties(
                 "DOMAIN-EFFECT",
                 format!("{} success is sticky", effect.name),
             )),
-            annotations: Annotations::default(),
+            annotations: effect.annotations.clone(),
         });
     }
     Ok(())

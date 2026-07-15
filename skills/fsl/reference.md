@@ -38,9 +38,15 @@ attachment. They coexist with (and desugar to the same relation as) the legacy
 `"ID: text"` string slot and `covers`/`requirement` block relations — see §13.1.
 An annotation with nothing supported to attach to reports
 `FSL-ANNOTATION-TARGET`. `domain`/`dbsystem`/`ai_component` nested
-declarations don't yet accept `@...` (only their one top-level document
-annotation does; tracked by follow-up issue #281); this is native-only syntax
-the frozen Python reference does not parse.
+declarations also accept `@...` (issue #281): `domain` aggregate `command`,
+`decide`, `evolve`, `invariant`, `projection`, `effect`, and saga `step`;
+`ai_component` `tool`, the `tools [a, b];` shorthand, `authority` (and each
+rule line), `fallback` (and each `when` item), `check`; `dbsystem`
+`migration` and each `check compatibility { rule ...; }` line. A
+`command`/`decide` pair and any matching `evolve` union onto the one action
+they generate together; an `effect` or saga `step` broadcasts to every
+action it generates. This is native-only syntax the frozen Python reference
+does not parse.
 
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified

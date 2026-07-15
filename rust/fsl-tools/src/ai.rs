@@ -47,11 +47,16 @@ pub fn check_ai(component: &AiComponent, kernel: Value) -> Value {
         .authority
         .requires_human_approval
         .iter()
+        .map(|rule| rule.name.as_str())
         .collect::<BTreeSet<_>>();
     for tool in &component.tools {
         if tool.irreversible
-            && component.authority.may_execute.contains(&tool.name)
-            && !approvals.contains(&tool.name)
+            && component
+                .authority
+                .may_execute
+                .iter()
+                .any(|rule| rule.name == tool.name)
+            && !approvals.contains(tool.name.as_str())
         {
             findings.push(finding(
                 component,
@@ -129,7 +134,7 @@ pub fn replay_ai(component: &AiComponent, events: &[Value]) -> Value {
                     .authority
                     .forbidden
                     .iter()
-                    .any(|item| item == tool_name)
+                    .any(|rule| rule.name == tool_name)
             {
                 findings.push(finding(component,Some(tool_name),"forbidden_tool_call","forbidden_tool_blocked","ai_hard_contract_violation","syntactic_hard",&json!({"event_index":index,"reason":"forbidden tool was observed in execute mode","event":"tool_call","component":component.name,"tool":tool_name,"mode":mode,"tool_schema":call.get("tool_schema"),"schema_valid":call.get("schema_valid"),"arg_keys":call.get("args").and_then(Value::as_object).map(|args|args.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()}),&assumptions));
             }
@@ -138,7 +143,7 @@ pub fn replay_ai(component: &AiComponent, events: &[Value]) -> Value {
                     .authority
                     .requires_human_approval
                     .iter()
-                    .any(|item| item == tool_name)
+                    .any(|rule| rule.name == tool_name)
                 && !approvals.remove(tool_name)
             {
                 findings.push(finding(component,Some(tool_name),"human_approval_required_before_irreversible_tool","human_approval_required","ai_hard_contract_violation","syntactic_hard",&json!({"event_index":index,"reason":"tool execution was observed before human approval"}),&assumptions));

@@ -1,0 +1,76 @@
+// ════════════════════════════════════════════════════════════════
+// Declaration-level @annotation syntax on domain nested declarations
+// (issue #281) — sample corpus
+//
+// Demonstrates `@requirement(id, text?)` attached directly to an
+// aggregate command/decide/evolve/invariant, a projection, and an
+// effect. Saga `step` attachment (also part of issue #281) is covered
+// by rust/fsl-syntax/tests/dialect_declaration_annotations.rs and
+// rust/fsl-core/tests/typed_annotations.rs instead of this file, to
+// keep this example's saga-free reachability easy to verify by
+// inspection. See docs/DESIGN-annotations.md's "domain/db/ai nested
+// declaration syntax" section and docs/LANGUAGE.md §13.1.
+//
+// Native-only: the frozen Python reference does not parse `@...` before
+// a domain nested declaration, so this file is excluded from the
+// Python Monitor conformance sweep (tests/dialect_registry.py
+// MONITOR_EXCLUSIONS); native coverage lives in rust/fsl-syntax and
+// rust/fsl-core tests.
+//
+//   fslc check examples/annotations/annotated_domain.fsl
+//   fslc verify examples/annotations/annotated_domain.fsl --depth 6
+// ════════════════════════════════════════════════════════════════
+domain AnnotatedOrders {
+  implementation_profile functional_ddd
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      placed: Bool = false;
+      shipped: Bool = false;
+    }
+
+    @requirement("REQ-COMMAND", "placing an order is traceable")
+    command Place {
+      input order_id: OrderId
+    }
+
+    event Placed { order_id: OrderId }
+    event Shipped { order_id: OrderId }
+
+    @requirement("REQ-DECIDE", "an order can only be placed once")
+    decide Place {
+      requires not shipped
+      emits Placed
+    }
+
+    @requirement("REQ-EVOLVE", "placement and shipment update tracked state")
+    evolve Placed {
+      placed = true
+    }
+
+    evolve Shipped {
+      shipped = true
+    }
+
+    @requirement("REQ-INVARIANT", "an order is placed before it ships")
+    invariant NoShippingUnplaced {
+      shipped -> placed
+    }
+  }
+
+  @requirement("REQ-EFFECT", "shipment is an idempotent side effect of placement")
+  effect Ship {
+    idempotency_key Placed.order_id
+    correlation_id Placed.order_id
+    handles Placed
+    emits one_of [Shipped]
+  }
+
+  @requirement("REQ-PROJECTION", "external readers observe shipment status")
+  projection OrderObservedState {
+    from Order
+    fields [shipped]
+  }
+}

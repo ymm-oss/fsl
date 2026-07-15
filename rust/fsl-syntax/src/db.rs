@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use crate::{ParseError, Span, Token, TokenKind, lex};
+use crate::annotation_parse;
+use crate::{Annotations, ParseError, Span, Token, TokenKind, lex};
 
 pub type DbColumnRef = (String, String);
 
@@ -52,6 +53,7 @@ pub struct DbMigration {
     pub to_schema: i64,
     pub ops: Vec<DbMigrationOp>,
     pub annotations: Vec<String>,
+    pub decl_annotations: Annotations,
     pub span: Span,
 }
 
@@ -97,8 +99,15 @@ pub struct DbEnvironment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DbCheckRule {
+    pub name: String,
+    pub annotations: Annotations,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DbCheck {
-    pub rules: Vec<String>,
+    pub rules: Vec<DbCheckRule>,
     pub span: Option<Span>,
 }
 
@@ -243,7 +252,8 @@ impl DbEnvironment {
 impl DbCheck {
     fn python_ast(&self) -> Value {
         json!({
-            "$type": "DbCheck", "rules": self.rules,
+            "$type": "DbCheck",
+            "rules": self.rules.iter().map(|rule| rule.name.as_str()).collect::<Vec<_>>(),
             "loc": self.span.map(Span::python_loc),
         })
     }
@@ -271,7 +281,11 @@ pub(crate) fn parse_db_system_tokens(
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<DbSystem, ParseError> {
-    let mut parser = DbParser { tokens, cursor };
+    let mut parser = DbParser {
+        tokens,
+        cursor,
+        pending_annotations: Annotations::default(),
+    };
     let system = parser.system()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after dbsystem"));
@@ -282,9 +296,72 @@ pub(crate) fn parse_db_system_tokens(
 struct DbParser {
     tokens: Vec<Token>,
     cursor: usize,
+    pending_annotations: Annotations,
 }
 
 impl DbParser {
+    /// Parse zero or more leading `@name(args...)` annotations into
+    /// `self.pending_annotations`, ready to be drained by whichever
+    /// declaration constructor runs next.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] for malformed annotation syntax, a failed
+    /// validation, or one or more annotations with no following declaration
+    /// in the same block.
+    fn take_leading_annotations(&mut self) -> Result<(), ParseError> {
+        while self.peek_symbol("@") {
+            let annotation = annotation_parse::annotation(&self.tokens, &mut self.cursor)?;
+            self.pending_annotations.push(annotation);
+        }
+        if let Some(first) = self.pending_annotations.source_order().first()
+            && (self.peek_symbol("}") || matches!(self.peek().kind, TokenKind::Eof))
+        {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation must be followed by a declaration in the same block",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Drain and validate the annotations collected for the declaration
+    /// currently under construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] when the drained group fails validation.
+    fn take_annotations(&mut self) -> Result<Annotations, ParseError> {
+        let annotations = std::mem::take(&mut self.pending_annotations);
+        annotations.validate().map_err(|error| {
+            ParseError::coded("FSL-ANNOTATION-INVALID", error.message, error.span)
+        })?;
+        Ok(annotations)
+    }
+
+    /// Reject any annotation left over after parsing a declaration that does
+    /// not accept annotations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseError`] coded `FSL-ANNOTATION-TARGET` when annotations
+    /// remain pending.
+    fn expect_no_pending_annotations(&mut self) -> Result<(), ParseError> {
+        if let Some(first) = self.pending_annotations.source_order().first() {
+            let span = first.span();
+            self.pending_annotations = Annotations::default();
+            return Err(ParseError::coded(
+                "FSL-ANNOTATION-TARGET",
+                "annotation cannot attach to this declaration",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn system(&mut self) -> Result<DbSystem, ParseError> {
         let span = self.peek().span;
         self.expect_ident_value("dbsystem")?;
@@ -299,6 +376,7 @@ impl DbParser {
             span: None,
         };
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
             match self.item()? {
                 DbItem::Database(value) => {
                     if database.replace(value).is_some() {
@@ -324,14 +402,18 @@ impl DbParser {
 
     fn item(&mut self) -> Result<DbItem, ParseError> {
         if self.peek_ident("database") {
+            self.expect_no_pending_annotations()?;
             Ok(DbItem::Database(self.database()?))
         } else if self.peek_ident("migration") {
             Ok(DbItem::Migration(self.migration()?))
         } else if self.peek_ident("artifact") {
+            self.expect_no_pending_annotations()?;
             Ok(DbItem::Artifact(self.artifact()?))
         } else if self.peek_ident("environment") {
+            self.expect_no_pending_annotations()?;
             Ok(DbItem::Environment(self.environment()?))
         } else if self.peek_ident("check") {
+            self.expect_no_pending_annotations()?;
             Ok(DbItem::Check(self.check()?))
         } else {
             Err(self.error("expected dbsystem declaration"))
@@ -419,6 +501,7 @@ impl DbParser {
     }
 
     fn migration(&mut self) -> Result<DbMigration, ParseError> {
+        let decl_annotations = self.take_annotations()?;
         let span = self.bump().span;
         let name = self.expect_ident()?;
         self.expect_ident_value("from")?;
@@ -429,6 +512,8 @@ impl DbParser {
         self.expect_symbol("{")?;
         let mut ops = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
+            self.expect_no_pending_annotations()?;
             ops.push(self.migration_op()?);
         }
         Ok(DbMigration {
@@ -437,6 +522,7 @@ impl DbParser {
             to_schema,
             ops,
             annotations,
+            decl_annotations,
             span,
         })
     }
@@ -618,8 +704,15 @@ impl DbParser {
         self.expect_symbol("{")?;
         let mut rules = Vec::new();
         while !self.eat_symbol("}") {
+            self.take_leading_annotations()?;
+            let rule_span = self.peek().span;
+            let annotations = self.take_annotations()?;
             self.expect_ident_value("rule")?;
-            rules.push(self.expect_ident()?);
+            rules.push(DbCheckRule {
+                name: self.expect_ident()?,
+                annotations,
+                span: rule_span,
+            });
             self.eat_symbol(";");
         }
         Ok(DbCheck {

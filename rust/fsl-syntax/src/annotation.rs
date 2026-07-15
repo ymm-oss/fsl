@@ -138,6 +138,29 @@ pub enum AnnotationValue {
     Symbol(SymbolPath),
 }
 
+/// The lexer has no string escape syntax, so a rendered string literal
+/// replaces the characters that would otherwise break tokenization.
+fn sanitize_string_literal(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\\' | '"' | '\n' | '\r' => '_',
+            other => other,
+        })
+        .collect()
+}
+
+impl AnnotationValue {
+    fn render_source(&self) -> String {
+        match self {
+            Self::String(value) => format!("\"{}\"", sanitize_string_literal(value)),
+            Self::Integer(value) => value.to_string(),
+            Self::Boolean(value) => value.to_string(),
+            Self::Symbol(path) => path.to_string(),
+        }
+    }
+}
+
 /// Typed metadata attached to a declaration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Annotation {
@@ -195,6 +218,52 @@ impl Annotation {
             span,
         }
     }
+
+    /// Render this annotation back to `@name(args...)` declaration syntax.
+    ///
+    /// String arguments are sanitized (backslash/quote/newline become `_`)
+    /// because the lexer has no string escape syntax; this is used to
+    /// re-embed typed annotations into synthesized FSL source (for example
+    /// the dbsystem kernel) without going through the lossy legacy
+    /// `"ID: text"` meta-string convention.
+    #[must_use]
+    pub fn render_source(&self) -> String {
+        match self {
+            Self::Requirement { id, text, .. } => render_call(
+                "requirement",
+                &std::iter::once(id.clone())
+                    .chain(text.clone())
+                    .map(AnnotationValue::String)
+                    .collect::<Vec<_>>(),
+            ),
+            Self::Undecided { reason, .. } => {
+                render_call("undecided", &[AnnotationValue::String(reason.clone())])
+            }
+            Self::Kind { id, text, .. } => render_call(
+                "kind",
+                &std::iter::once(id.clone())
+                    .chain(text.clone())
+                    .map(AnnotationValue::String)
+                    .collect::<Vec<_>>(),
+            ),
+            Self::Custom {
+                namespace,
+                arguments,
+                ..
+            } => render_call(&namespace.to_string(), arguments),
+        }
+    }
+}
+
+fn render_call(name: &str, arguments: &[AnnotationValue]) -> String {
+    format!(
+        "@{name}({})",
+        arguments
+            .iter()
+            .map(AnnotationValue::render_source)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 /// A normalized requirement relation derived from one or more annotations.

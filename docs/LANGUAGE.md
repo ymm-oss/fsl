@@ -1456,11 +1456,29 @@ arguments, namespaces, or syntax report `FSL-ANNOTATION-ARGUMENTS` /
 string/`covers` forms both desugar into the same typed relation and simply
 union when both are present on one declaration (identical `(id, text)` pairs
 deduplicate; conflicting text for one requirement ID is a checked-model error).
-Declaration-level annotations on `domain`/`dbsystem`/`ai_component` nested
-declarations (their top-level document annotation already works) are tracked
-by a follow-up issue (#281) and are not yet supported. `@...` on a nested declaration
-is a native-only surface addition — the frozen Python reference does not parse
-it, so specs that use it are outside the Python-parity corpus by construction.
+As of issue #281, the same `@...` grammar also attaches to nested
+declarations in the three specialized frontends that do not share this
+parser: `domain` (aggregate `command`, `decide`, `evolve`, `invariant`,
+`projection`, `effect`, saga `step`), `ai_component` (`tool`, the `tools
+[a, b];` shorthand, the `authority` block and each of its rule lines,
+`fallback` and each `when` item, `check`), and `dbsystem` (`migration`, and
+each `rule` line inside `check compatibility { ... }`). A `command`/`decide`
+pair (plus any `evolve` block the decide's emitted events reach) union onto
+the one action they together generate; an `effect`'s or saga `step`'s
+annotations broadcast to every action it generates (a step's own action and
+its `_timeout` variant; an effect's per-outcome `_complete_*` actions, its
+`_retry` action, and its success-sticky progress property). Everywhere else
+in these three dialects — a migration operation line, a `dbsystem`/
+`ai_component` scalar declaration, a domain declaration outside the accepted
+list — a stray annotation still reports the coded `FSL-ANNOTATION-TARGET`
+diagnostic. See `DESIGN-annotations.md`'s "domain/db/ai nested declaration
+syntax" section for the full attachment table, the `AiAuthority` rule
+restructuring, and how a `dbsystem` migration/compatibility-rule annotation
+reaches the checked model without going through the lossy legacy
+`quote_meta` string convention. `@...` on a nested declaration remains a
+native-only surface addition — the frozen Python reference does not parse
+it, so specs that use it are outside the Python-parity corpus by
+construction.
 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
