@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- Python compatibility envelopes now scope faithfulness routing to actual
+  diagnostics, so user state fields named `kind`, `classification`, or other
+  diagnostic discriminators neither crash nor receive routing metadata (issue
+  #278).
+
 ### Changed
 - Native/WASM parity now runs every Worker-supported surface document from the
   shared `specs/` and `examples/` corpus and structurally compares complete

@@ -150,9 +150,9 @@ spec)` helper (display label + `__`→`.`). explain.py re-imports under the old 
 
 No existing field changes meaning or disappears; exit codes untouched. Display discipline: all
 names pass through `display_label`/`_public_model_bindings`/`render.public_var` (no `__`
-leakage). Nested blame entries avoid the reserved discriminators `result`/`violation_kind`/
-`covered` and use `kind` only in the already-established `blocking` entry sense, so
-`with_faithfulness`'s recursive walk stays inert on them.
+leakage). Faithfulness routing is provenance-scoped to the result root and its
+immediate `warnings`, `unreached`, and `action_coverage` diagnostic slots, so nested
+blame and user-authored state are copied without interpreting their keys as diagnostics.
 
 ## 7. Ripple / tests
 

@@ -375,8 +375,7 @@ def _skeleton(spec, source_lines):
     properties.extend(_property_skeleton("reachable", reach, spec)
                       for reach in spec.get("reachables", []))
     return {
-        # `spec_kind`, not `kind`: the enveloped result tree reserves `kind` for the
-        # string diagnostic discriminator that with_faithfulness/trace_type_for scan.
+        # `spec_kind` distinguishes spec metadata from the diagnostic `kind` field.
         "spec_kind": spec.get("kind"),
         "state": {
             _public_name(name, spec): _public_type(ty)
