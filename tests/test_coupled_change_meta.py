@@ -51,7 +51,7 @@ def test_retained_python_dialect_registry_matches_native_authority():
 
 
 def test_native_ai_project_block_gate_matches_retained_parser():
-    source = (ROOT / "rust" / "fslc" / "src" / "main.rs").read_text()
+    source = (ROOT / "rust" / "fslc" / "src" / "frontend_output.rs").read_text()
     block = re.search(
         r"const PROJECT_BLOCKS: &\[&str\] = &\[(?P<body>.*?)\n\s*\];",
         source,
