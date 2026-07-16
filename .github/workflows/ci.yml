@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  rust-workspace-wasm:
-    name: rust workspace and WASM
+  rust-workspace:
+    name: rust workspace
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -28,6 +28,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
+
+      - name: Check Rust workspace
+        run: ./tools/check-native-integration.sh rust
+
+  wasm:
+    name: WASM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      Z3_SYS_Z3_VERSION: "4.16.0"
+      READ_ONLY_GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
           targets: wasm32-unknown-unknown
 
       - uses: actions/setup-node@v4
@@ -38,11 +54,22 @@ jobs:
             rust/spikes/z3js-worker/package-lock.json
             rust/fsl-wasm/package-lock.json
 
+      - name: Cache pinned wasm-bindgen CLI
+        id: wasm-bindgen-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/bin/wasm-bindgen-test-runner
+            ~/.cargo/bin/wasm2es6js
+          key: ${{ runner.os }}-wasm-bindgen-cli-0.2.126
+
       - name: Install pinned wasm-bindgen CLI
+        if: steps.wasm-bindgen-cache.outputs.cache-hit != 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
 
-      - name: Check native integration suite
-        run: ./tools/check-native-integration.sh
+      - name: Check WASM integration
+        run: ./tools/check-native-integration.sh wasm
 
   rust-native-z3:
     name: native Z3 4.16 (${{ matrix.os }})
