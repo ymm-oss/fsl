@@ -135,6 +135,10 @@ const duplicateWriteCase = "examples/gallery/errors/semantics_duplicate_assignme
 if (!parityCases.some((testCase) => testCase.path === duplicateWriteCase)) {
   throw new Error(`${duplicateWriteCase} must remain in the parity corpus`);
 }
+const governanceErrorCase = "examples/gallery/errors/governance_missing_before.fsl";
+if (!parityCases.some((testCase) => testCase.path === governanceErrorCase)) {
+  throw new Error(`${governanceErrorCase} must remain in the parity corpus`);
+}
 await writeFile(join(dist, "parity-cases.json"), `${JSON.stringify(parityCases)}\n`, "utf8");
 const mime = {
   ".html": "text/html; charset=utf-8",

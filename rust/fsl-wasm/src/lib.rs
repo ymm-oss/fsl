@@ -156,59 +156,71 @@ fn check(request: &Request, solver_version: &str) -> Value {
                 .insert("governance".to_owned(), governance);
         }
         Ok(None) => {}
-        Err(failure) => return error(solver_version, "type", failure),
+        Err(failure) => {
+            return fslc_rust::verification_output::render_governance_error(
+                envelope(solver_version),
+                &failure,
+            );
+        }
     }
     output
 }
 
-fn governance_output(request: &Request) -> Result<Option<Value>, String> {
+fn governance_output(
+    request: &Request,
+) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
     fslc_rust::verification_output::governance_output(&request.source, |preservation| {
         let implementation_source = resolver
             .read(&preservation.after_path)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| governance_error(failure.to_string()))?;
         let abstraction_source = resolver
             .read(&preservation.before_path)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| governance_error(failure.to_string()))?;
         let mapping_source = resolver
             .read(&preservation.refinement_path)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| governance_error(failure.to_string()))?;
         let implementation = fsl_core::build_model(
             fsl_core::parse_kernel_source_with_file(
                 &implementation_source,
                 &resolver,
                 &preservation.after_path,
             )
-            .map_err(|failure| failure.to_string())?,
+            .map_err(|failure| governance_error(failure.to_string()))?,
         )
-        .map_err(|failure| failure.to_string())?;
+        .map_err(|failure| governance_error(failure.to_string()))?;
         let abstraction = fsl_core::build_model(
             fsl_core::parse_kernel_source_with_file(
                 &abstraction_source,
                 &resolver,
                 &preservation.before_path,
             )
-            .map_err(|failure| failure.to_string())?,
+            .map_err(|failure| governance_error(failure.to_string()))?,
         )
-        .map_err(|failure| failure.to_string())?;
+        .map_err(|failure| governance_error(failure.to_string()))?;
         let mapping = fsl_core::parse_refinement(&mapping_source, &implementation, &abstraction)
-            .map_err(|failure| failure.message)?;
+            .map_err(|failure| governance_error(failure.message))?;
         if !mapping.progress.is_empty() {
-            return Err(
-                "governance preservation with progress requires browser refinement progress verification"
-                    .to_owned(),
-            );
+            return Err(governance_error(
+                "governance preservation with progress requires browser refinement progress verification",
+            ));
         }
         let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 8)
-            .map_err(|failure| failure.to_string())?;
+            .map_err(|failure| governance_error(failure.to_string()))?;
         Ok(json!(if checked.failure.is_some() {
             "refinement_failed"
         } else {
             "refines"
         }))
     })
+}
+
+fn governance_error(
+    message: impl Into<String>,
+) -> fslc_rust::verification_output::GovernanceOutputError {
+    fslc_rust::verification_output::GovernanceOutputError::new(message, 1, 1)
 }
 
 fn remove_generic_invariant_warning(output: &mut Value) {
@@ -456,6 +468,29 @@ mod tests {
             error["message"]
                 .as_str()
                 .is_some_and(|message| message.contains("same state location"))
+        );
+    }
+
+    #[test]
+    fn check_rejects_an_incomplete_governance_contract() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!("../../../examples/gallery/errors/governance_missing_before.fsl")
+                .to_owned(),
+            source_file: "governance_missing_before.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+
+        let error = check(&request, TEST_SOLVER_VERSION);
+
+        assert_eq!(error["result"], json!("error"));
+        assert_eq!(error["kind"], json!("type"));
+        assert_eq!(error["loc"], json!({"line": 4, "column": 3}));
+        assert!(
+            error["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("governance preservation missing before"))
         );
     }
 

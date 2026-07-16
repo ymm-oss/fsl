@@ -71,6 +71,48 @@ pub fn render_semantic_error(mut output: Map<String, Value>, message: &str) -> V
     Value::Object(output)
 }
 
+/// A governance diagnostic with its source location preserved across delivery
+/// surfaces.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GovernanceOutputError {
+    pub message: String,
+    pub line: u32,
+    pub column: u32,
+}
+
+impl GovernanceOutputError {
+    #[must_use]
+    pub fn new(message: impl Into<String>, line: u32, column: u32) -> Self {
+        Self {
+            message: message.into(),
+            line,
+            column,
+        }
+    }
+}
+
+impl From<fsl_core::CoreError> for GovernanceOutputError {
+    fn from(error: fsl_core::CoreError) -> Self {
+        Self::new(error.to_string(), error.line, error.column)
+    }
+}
+
+/// Render a governance type diagnostic using the public JSON contract.
+#[must_use]
+pub fn render_governance_error(
+    mut output: Map<String, Value>,
+    error: &GovernanceOutputError,
+) -> Value {
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!("type"));
+    output.insert("message".to_owned(), json!(error.message));
+    output.insert(
+        "loc".to_owned(),
+        json!({"line": error.line, "column": error.column}),
+    );
+    Value::Object(output)
+}
+
 /// Evaluate a requirements-layer `implements` declaration for verify metadata.
 ///
 /// # Errors
@@ -110,10 +152,12 @@ pub fn requirements_implements_output(
 /// Returns a diagnostic when the governance document is malformed.
 pub fn governance_output(
     source: &str,
-    mut preservation_result: impl FnMut(&fsl_core::GovernancePreservation) -> Result<Value, String>,
-) -> Result<Option<Value>, String> {
+    mut preservation_result: impl FnMut(
+        &fsl_core::GovernancePreservation,
+    ) -> Result<Value, GovernanceOutputError>,
+) -> Result<Option<Value>, GovernanceOutputError> {
     let Some(contract) =
-        fsl_core::governance_contract(source).map_err(|error| error.to_string())?
+        fsl_core::governance_contract(source).map_err(GovernanceOutputError::from)?
     else {
         return Ok(None);
     };
@@ -155,7 +199,7 @@ pub fn governance_output(
                 "result": preservation_result(preservation)?,
             }))
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect::<Result<Vec<_>, GovernanceOutputError>>()?;
     Ok(Some(json!({
         "name": contract.name,
         "controls": contract.controls,

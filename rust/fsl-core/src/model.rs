@@ -990,10 +990,27 @@ impl ModelBuilder {
                     if qualified.namespace.is_some() {
                         return Err(model_error("qualified type remained after kernel lowering"));
                     }
-                    let ty = TypeExpr::Name(qualified.name.clone());
+                    let ty = match qualified.name.as_str() {
+                        "Bool" => TypeExpr::Bool,
+                        "Int" => TypeExpr::Int,
+                        _ => TypeExpr::Name(qualified.name.clone()),
+                    };
+                    let ty = self.resolve_type(&ty)?;
+                    let finite_scalar = matches!(ty, TypeRef::Bool | TypeRef::Range(_, _))
+                        || matches!(
+                            &ty,
+                            TypeRef::Named(name)
+                                if matches!(
+                                    self.types.get(name),
+                                    Some(TypeDef::Domain { .. } | TypeDef::Enum { .. })
+                                )
+                        );
+                    if !finite_scalar {
+                        return Err(model_error("action parameter type is not a finite scalar"));
+                    }
                     Ok(ParamDef::Typed {
                         name: name.clone(),
-                        ty: self.resolve_type(&ty)?,
+                        ty,
                     })
                 }
                 Param::Range(name, lo, hi) => Ok(ParamDef::Range {
