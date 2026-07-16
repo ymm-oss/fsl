@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `docs/intro/language.ja.html` now renders from a new, section-aligned Japanese
+  translation, `docs/LANGUAGE.ja.md`, instead of reusing the English `docs/LANGUAGE.md`
+  body verbatim. FSL keywords, `fslc` commands/flags, diagnostic/result identifiers,
+  JSON, and fenced code blocks stay untranslated and byte-identical to the English
+  source; only headings and prose are Japanese. `tools/build_site_reference.py` fails
+  loudly if the two files' `## ` section counts drift out of 1:1 alignment, and page
+  anchors/`SECTION_BLURBS` lookups stay keyed off the English heading so cross-page
+  links are unaffected. This supersedes the earlier "no translation" stance (see
+  `docs/DESIGN-docs-site.md` D7); `docs/LANGUAGE.ja.md` now moves alongside
+  `docs/LANGUAGE.md` under the "a language feature moves all of its files together"
+  rule (`AGENTS.md`).
 - Literate Markdown FSL: `fslc check`, `fslc verify`, and `fslc scenarios` now
   accept `.md` files containing ` ```fsl ` fenced code blocks directly. Lines
   outside fsl blocks are blanked in place so that diagnostic positions (line
@@ -107,6 +118,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   remains the distinct binding form (issue #246).
 
 ### Fixed
+- Native `check` now propagates malformed governance-preservation diagnostics
+  as a located type error with exit 2 instead of silently returning `ok`. A
+  resolver-backed core contract also rejects missing dependencies, unknown or
+  unsatisfied controls, duplicate declarations, unknown artifacts, empty
+  preservations, and referenced-name mismatches without last-write-wins data
+  loss. Native CLI and browser Worker now share these checks and progress-
+  preservation verification, including process-exit and browser parity cases.
+- Model construction now rejects duplicate action names, duplicate action
+  parameters, and empty inline parameter ranges before name-based runtime
+  dispatch or finite-domain enumeration can become ambiguous.
+- The native concrete `Monitor` now revalidates a previously enumerated action
+  against the current state, rejects parameters outside their declared
+  Bool/enum/range/domain, and shares one guard-evaluation path across
+  enumeration, direct attempts, and selected steps. Builtin Bool action
+  parameters are accepted as documented while unbounded/non-scalar parameters
+  fail during model construction. A two-stage FSL requirements model captures
+  fresh selection, stale reuse, and raw-input rejection; native
+  symbolic/concrete differential tests and mutation evidence supply its
+  implementation anchors and negative controls.
 - Python compatibility envelopes now scope faithfulness routing to actual
   diagnostics, so user state fields named `kind`, `classification`, or other
   diagnostic discriminators neither crash nor receive routing metadata (issue

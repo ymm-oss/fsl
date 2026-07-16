@@ -3996,8 +3996,17 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             if let Some(implements) = implements {
                 output.insert("implements".to_owned(), implements);
             }
-            if let Ok(Some(governance)) = governance_result(path, 8) {
-                output.insert("governance".to_owned(), governance);
+            match governance_result(path, 8) {
+                Ok(Some(governance)) => {
+                    output.insert("governance".to_owned(), governance);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return (
+                        fslc_rust::verification_output::render_governance_error(envelope(), &error),
+                        2,
+                    );
+                }
             }
             (Value::Object(output), 0)
         }
@@ -11662,16 +11671,32 @@ fn validate_requirement_trace_source(
     fslc_rust::verification_output::validate_requirement_trace_source(&envelope(), source, model)
 }
 
-fn governance_result(path: &Path, depth: usize) -> Result<Option<Value>, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+fn governance_result(
+    path: &Path,
+    depth: usize,
+) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
+    let source = std::fs::read_to_string(path).map_err(|error| {
+        fslc_rust::verification_output::GovernanceOutputError::new(error.to_string(), 1, 1)
+    })?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    fslc_rust::verification_output::governance_output(&source, |preservation| {
-        let (result, _) = run_refine(
+    let resolver = fsl_core::FsResolver::new(base);
+    fslc_rust::verification_output::governance_output(&source, &resolver, |preservation| {
+        let (result, status) = run_refine(
             &base.join(&preservation.after_path),
             &base.join(&preservation.before_path),
             &base.join(&preservation.refinement_path),
             depth,
         );
+        if status > 1 {
+            return Err(fslc_rust::verification_output::GovernanceOutputError::new(
+                result
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("governance preservation refinement failed"),
+                preservation.span.start.line,
+                preservation.span.start.column,
+            ));
+        }
         Ok(result
             .get("result")
             .cloned()

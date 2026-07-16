@@ -14,8 +14,8 @@ use fsl_syntax::{
 };
 
 use crate::{
-    CoreError, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
-    ProjectionDef, TERMINAL_TARGET, action_target, lower_direct_spec, state_target,
+    CoreError, FileResolver, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry,
+    OriginSite, ProjectionDef, TERMINAL_TARGET, action_target, lower_direct_spec, state_target,
     substitute_expr,
 };
 
@@ -94,6 +94,7 @@ pub struct GovernancePreservation {
     pub after_path: String,
     pub preserve: Vec<String>,
     pub refinement_path: String,
+    pub span: fsl_syntax::Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2394,91 +2395,72 @@ fn trace_case_annotations(
 ///
 /// Returns [`CoreError`] for malformed governance source or incomplete
 /// preservation declarations.
-pub fn governance_contract(source: &str) -> Result<Option<GovernanceContract>, CoreError> {
+pub fn governance_contract(
+    source: &str,
+    resolver: &dyn FileResolver,
+) -> Result<Option<GovernanceContract>, CoreError> {
     let document = fsl_syntax::parse_surface_document(source)?;
     let SurfaceDocument::Governance(governance) = document else {
         return Ok(None);
     };
     let mut controls = Vec::new();
+    let mut control_ids = BTreeSet::new();
+    for item in &governance.items {
+        if let GovernanceItem::Control { id, span, .. } = item {
+            if !control_ids.insert(id.clone()) {
+                return Err(core_error(
+                    format!("duplicate governance control '{id}'"),
+                    *span,
+                ));
+            }
+            controls.push(id.clone());
+        }
+    }
     let mut delegates = Vec::new();
     let mut preservations = Vec::new();
+    let mut preservation_names = BTreeSet::new();
     for item in governance.items {
         match item {
-            GovernanceItem::Control { id, .. } => controls.push(id),
-            GovernanceItem::Delegates {
-                business_name,
-                items,
+            GovernanceItem::Control { .. } => {}
+            GovernanceItem::Authority {
+                control_ids: owned,
+                span,
                 ..
             } => {
-                let mut required = Vec::new();
-                let mut satisfied = BTreeMap::<String, Vec<(String, String)>>::new();
-                for item in items {
-                    match item {
-                        GovernanceDelegateItem::Require(id, _) => required.push(id),
-                        GovernanceDelegateItem::Satisfaction {
-                            control_id,
-                            artifacts,
-                            ..
-                        } => {
-                            let projected = artifacts
-                                .into_iter()
-                                .map(|artifact| match artifact {
-                                    GovernanceArtifactRef::Policy(id, _) => {
-                                        ("policy".to_owned(), id)
-                                    }
-                                    GovernanceArtifactRef::Goal(id, _) => ("goal".to_owned(), id),
-                                })
-                                .collect();
-                            satisfied.insert(control_id, projected);
-                        }
-                    }
+                for id in owned {
+                    require_governance_control(&control_ids, &id, span)?;
                 }
-                delegates.push(GovernanceDelegate {
-                    business: business_name,
-                    required,
-                    satisfied,
-                });
+            }
+            GovernanceItem::Delegates {
+                business_name,
+                path,
+                items,
+                span,
+            } => {
+                delegates.push(validate_governance_delegate(
+                    business_name,
+                    &path,
+                    items,
+                    span,
+                    &control_ids,
+                    resolver,
+                )?);
             }
             GovernanceItem::Preservation { name, items, span } => {
-                let mut before = None;
-                let mut after = None;
-                let mut preserve = Vec::new();
-                let mut refinement = None;
-                for item in items {
-                    match item {
-                        PreservationItem::Before {
-                            spec_name, path, ..
-                        } => before = Some((spec_name, path)),
-                        PreservationItem::After {
-                            spec_name, path, ..
-                        } => after = Some((spec_name, path)),
-                        PreservationItem::Preserve(id, _) => preserve.push(id),
-                        PreservationItem::Refinement(path, _) => refinement = Some(path),
-                    }
-                }
-                let (before_name, before_path) = before.ok_or_else(|| {
-                    core_error("governance preservation missing before".to_owned(), span)
-                })?;
-                let (after_name, after_path) = after.ok_or_else(|| {
-                    core_error("governance preservation missing after".to_owned(), span)
-                })?;
-                let refinement_path = refinement.ok_or_else(|| {
-                    core_error(
-                        "governance preservation missing refinement".to_owned(),
+                if !preservation_names.insert(name.clone()) {
+                    return Err(core_error(
+                        format!("duplicate governance preservation '{name}'"),
                         span,
-                    )
-                })?;
-                preservations.push(GovernancePreservation {
+                    ));
+                }
+                preservations.push(validate_governance_preservation(
                     name,
-                    before_name,
-                    before_path,
-                    after_name,
-                    after_path,
-                    preserve,
-                    refinement_path,
-                });
+                    items,
+                    span,
+                    &control_ids,
+                    resolver,
+                )?);
             }
-            GovernanceItem::Authority { .. } => {}
         }
     }
     Ok(Some(GovernanceContract {
@@ -2487,6 +2469,281 @@ pub fn governance_contract(source: &str) -> Result<Option<GovernanceContract>, C
         delegates,
         preservations,
     }))
+}
+
+type GovernanceSatisfaction = BTreeMap<String, Vec<(String, String)>>;
+
+fn governance_business_catalog(
+    business_name: &str,
+    path: &str,
+    span: fsl_syntax::Span,
+    resolver: &dyn FileResolver,
+) -> Result<(BTreeSet<String>, BTreeSet<String>, GovernanceSatisfaction), CoreError> {
+    let dependency = resolver
+        .read(path)
+        .map_err(|_| core_error(format!("governance dependency not found: '{path}'"), span))?;
+    let parsed = fsl_syntax::parse_surface_document(&dependency).map_err(|error| {
+        core_error(
+            format!("invalid governance dependency '{path}': {error}"),
+            span,
+        )
+    })?;
+    let SurfaceDocument::Business(business) = parsed else {
+        return Err(core_error(
+            format!("governance delegate '{path}' is not a business document"),
+            span,
+        ));
+    };
+    if business.name != business_name {
+        return Err(core_error(
+            format!(
+                "governance delegate expects business '{business_name}', found '{}'",
+                business.name
+            ),
+            span,
+        ));
+    }
+    let mut policies = BTreeSet::new();
+    let mut goals = BTreeSet::new();
+    let mut satisfied = GovernanceSatisfaction::new();
+    for item in business.items {
+        let (kind, id, controls) = match item {
+            BusinessItem::Policy { id, satisfies, .. } => ("policy", id, satisfies),
+            BusinessItem::Goal { id, satisfies, .. } => ("goal", id, satisfies),
+            _ => continue,
+        };
+        if kind == "policy" {
+            policies.insert(id.clone());
+        } else {
+            goals.insert(id.clone());
+        }
+        for control in controls {
+            satisfied
+                .entry(control)
+                .or_default()
+                .push((kind.to_owned(), id.clone()));
+        }
+    }
+    Ok((policies, goals, satisfied))
+}
+
+fn validate_governance_delegate(
+    business_name: String,
+    path: &str,
+    items: Vec<GovernanceDelegateItem>,
+    span: fsl_syntax::Span,
+    controls: &BTreeSet<String>,
+    resolver: &dyn FileResolver,
+) -> Result<GovernanceDelegate, CoreError> {
+    let (policies, goals, implicit_satisfaction) =
+        governance_business_catalog(&business_name, path, span, resolver)?;
+    let mut required = Vec::new();
+    let mut required_ids = BTreeSet::new();
+    let mut explicit = GovernanceSatisfaction::new();
+    for item in items {
+        match item {
+            GovernanceDelegateItem::Require(id, item_span) => {
+                require_governance_control(controls, &id, item_span)?;
+                if required_ids.insert(id.clone()) {
+                    required.push(id);
+                }
+            }
+            GovernanceDelegateItem::Satisfaction {
+                control_id,
+                artifacts,
+                span: item_span,
+            } => {
+                require_governance_control(controls, &control_id, item_span)?;
+                let projected = explicit.entry(control_id).or_default();
+                for artifact in artifacts {
+                    let (kind, id, artifact_span, exists) = match artifact {
+                        GovernanceArtifactRef::Policy(id, artifact_span) => {
+                            ("policy", id.clone(), artifact_span, policies.contains(&id))
+                        }
+                        GovernanceArtifactRef::Goal(id, artifact_span) => {
+                            ("goal", id.clone(), artifact_span, goals.contains(&id))
+                        }
+                    };
+                    if !exists {
+                        return Err(core_error(
+                            format!("governance delegate references unknown {kind} '{id}'"),
+                            artifact_span,
+                        ));
+                    }
+                    let artifact = (kind.to_owned(), id);
+                    if !projected.contains(&artifact) {
+                        projected.push(artifact);
+                    }
+                }
+            }
+        }
+    }
+    let mut satisfied = GovernanceSatisfaction::new();
+    for id in &required {
+        let projected = satisfied.entry(id.clone()).or_default();
+        for artifact in implicit_satisfaction
+            .get(id)
+            .into_iter()
+            .flatten()
+            .chain(explicit.get(id).into_iter().flatten())
+        {
+            if !projected.contains(artifact) {
+                projected.push(artifact.clone());
+            }
+        }
+        if projected.is_empty() {
+            return Err(core_error(
+                format!("governance control '{id}' is not satisfied"),
+                span,
+            ));
+        }
+    }
+    Ok(GovernanceDelegate {
+        business: business_name,
+        required,
+        satisfied,
+    })
+}
+
+fn validate_governance_preservation(
+    name: String,
+    items: Vec<PreservationItem>,
+    span: fsl_syntax::Span,
+    controls: &BTreeSet<String>,
+    resolver: &dyn FileResolver,
+) -> Result<GovernancePreservation, CoreError> {
+    let mut before = None;
+    let mut after = None;
+    let mut preserve = Vec::new();
+    let mut preserved = BTreeSet::new();
+    let mut refinement = None;
+    for item in items {
+        match item {
+            PreservationItem::Before {
+                spec_name,
+                path,
+                span: item_span,
+            } => {
+                if before.replace((spec_name, path, item_span)).is_some() {
+                    return Err(core_error(
+                        "duplicate governance preservation before".to_owned(),
+                        item_span,
+                    ));
+                }
+            }
+            PreservationItem::After {
+                spec_name,
+                path,
+                span: item_span,
+            } => {
+                if after.replace((spec_name, path, item_span)).is_some() {
+                    return Err(core_error(
+                        "duplicate governance preservation after".to_owned(),
+                        item_span,
+                    ));
+                }
+            }
+            PreservationItem::Preserve(id, item_span) => {
+                require_governance_control(controls, &id, item_span)?;
+                if preserved.insert(id.clone()) {
+                    preserve.push(id);
+                }
+            }
+            PreservationItem::Refinement(path, item_span) => {
+                if refinement.replace((path, item_span)).is_some() {
+                    return Err(core_error(
+                        "duplicate governance preservation refinement".to_owned(),
+                        item_span,
+                    ));
+                }
+            }
+        }
+    }
+    let (before_name, before_path, before_span) = before
+        .ok_or_else(|| core_error("governance preservation missing before".to_owned(), span))?;
+    let (after_name, after_path, after_span) = after
+        .ok_or_else(|| core_error("governance preservation missing after".to_owned(), span))?;
+    let (refinement_path, refinement_span) = refinement.ok_or_else(|| {
+        core_error(
+            "governance preservation missing refinement".to_owned(),
+            span,
+        )
+    })?;
+    if preserve.is_empty() {
+        return Err(core_error(
+            "governance preservation must preserve at least one control".to_owned(),
+            span,
+        ));
+    }
+    validate_governance_document(resolver, &before_path, &before_name, before_span)?;
+    validate_governance_document(resolver, &after_path, &after_name, after_span)?;
+    resolver.read(&refinement_path).map_err(|_| {
+        core_error(
+            format!("governance dependency not found: '{refinement_path}'"),
+            refinement_span,
+        )
+    })?;
+    Ok(GovernancePreservation {
+        name,
+        before_name,
+        before_path,
+        after_name,
+        after_path,
+        preserve,
+        refinement_path,
+        span,
+    })
+}
+
+fn require_governance_control(
+    controls: &BTreeSet<String>,
+    id: &str,
+    span: fsl_syntax::Span,
+) -> Result<(), CoreError> {
+    if controls.contains(id) {
+        Ok(())
+    } else {
+        Err(core_error(
+            format!("unknown governance control '{id}'"),
+            span,
+        ))
+    }
+}
+
+fn validate_governance_document(
+    resolver: &dyn FileResolver,
+    path: &str,
+    expected_name: &str,
+    span: fsl_syntax::Span,
+) -> Result<(), CoreError> {
+    let source = resolver
+        .read(path)
+        .map_err(|_| core_error(format!("governance dependency not found: '{path}'"), span))?;
+    let document = fsl_syntax::parse_surface_document(&source).map_err(|error| {
+        core_error(
+            format!("invalid governance dependency '{path}': {error}"),
+            span,
+        )
+    })?;
+    let actual_name = match document {
+        SurfaceDocument::Spec(document) => document.name,
+        SurfaceDocument::Business(document) => document.name,
+        SurfaceDocument::Requirements(document) => document.name,
+        SurfaceDocument::Compose(document) => document.name,
+        _ => {
+            return Err(core_error(
+                format!("governance dependency '{path}' is not a verifiable document"),
+                span,
+            ));
+        }
+    };
+    if actual_name != expected_name {
+        return Err(core_error(
+            format!("governance dependency expects '{expected_name}', found '{actual_name}'"),
+            span,
+        ));
+    }
+    Ok(())
 }
 
 fn zero_span() -> fsl_syntax::Span {

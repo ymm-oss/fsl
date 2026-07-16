@@ -70,6 +70,7 @@ const unsupportedDocuments = new Map(Object.entries({
   "examples/consulting/tobe_refines_asis.fsl": "refinement",
   "examples/e2e/3_refines_2.fsl": "refinement",
   "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": "refinement",
+  "examples/gallery/adversarial/governance_semantic_mapping.fsl": "refinement",
   "examples/gallery/errors/refinement_failed_map.fsl": "refinement",
   "examples/layers/return_impl_refines.fsl": "refinement",
   "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": "refinement",
@@ -135,6 +136,22 @@ const duplicateWriteCase = "examples/gallery/errors/semantics_duplicate_assignme
 if (!parityCases.some((testCase) => testCase.path === duplicateWriteCase)) {
   throw new Error(`${duplicateWriteCase} must remain in the parity corpus`);
 }
+const governanceErrorCase = "examples/gallery/errors/governance_missing_before.fsl";
+if (!parityCases.some((testCase) => testCase.path === governanceErrorCase)) {
+  throw new Error(`${governanceErrorCase} must remain in the parity corpus`);
+}
+const missingGovernanceDependency = "rust/fslc/tests/fixtures/governance_missing_dependency.fsl";
+const missingGovernanceSource = await readFile(join(repository, missingGovernanceDependency), "utf8");
+parityCases.push({
+  id: `parity-${parityCases.length}`,
+  cmd: "check",
+  path: missingGovernanceDependency,
+  source: missingGovernanceSource,
+  source_file: missingGovernanceDependency,
+  files: {},
+  options: {},
+  expected_status: 2,
+});
 await writeFile(join(dist, "parity-cases.json"), `${JSON.stringify(parityCases)}\n`, "utf8");
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -265,9 +282,15 @@ async function nativeEnvelope(testCase) {
     childProcess.stdout.on("data", (chunk) => { stdout += chunk; });
     childProcess.stderr.on("data", (chunk) => { stderr += chunk; });
     childProcess.on("error", reject);
-    childProcess.on("close", () => {
+    childProcess.on("close", (status) => {
       try {
         const envelope = JSON.parse(stdout);
+        if (testCase.expected_status !== undefined && status !== testCase.expected_status) {
+          reject(new Error(
+            `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${status}`,
+          ));
+          return;
+        }
         resolve(envelope);
       } catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
     });

@@ -69,7 +69,10 @@ the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
 - Native CLI and Worker output must preserve the JSON envelope, exit codes, locations, and replayable
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
-  regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, a design note, and `CHANGELOG.md`.
+  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
+  note, and `CHANGELOG.md`. `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
+  1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
+  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7.
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
 - Do not hand-edit generated compatibility snapshots. Regenerate them only when the corresponding
   contract change is intentional and review the resulting diff.

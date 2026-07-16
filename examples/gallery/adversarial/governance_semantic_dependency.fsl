@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+governance SemanticDependency {
+  control CTRL-1 "Dependencies remain semantically valid"
+
+  preservation SemanticValidation {
+    before Before from "governance_semantic_before.fsl"
+    after After from "governance_semantic_after.fsl"
+    preserve CTRL-1
+    checked_by refinement "governance_semantic_mapping.fsl"
+  }
+}

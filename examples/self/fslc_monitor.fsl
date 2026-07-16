@@ -1,6 +1,6 @@
 // Self-spec: replay Monitor runtime.
 //
-// Models src/fslc/cli.py run_replay(): events are sent to Monitor.step in
+// Models the native run_replay path: events are sent to Monitor::attempt in
 // order; the first ok=false response returns nonconformant immediately, while
 // a log whose events all pass returns conformant. leadsTo is intentionally not
 // checked by replay.

@@ -2083,7 +2083,7 @@ declares bare tools with no schema/precondition/effect. A `tool` block's
 one `effect <name>;`. None of these fields — nor `authority`, `fallback`, or
 the `check hard { }` block below — accept a `"description text"` tag; every
 field here is a bare identifier or number, unlike the declaration-tag
-convention in §10.
+convention in §13.1.
 
 An `ai_component` may also declare which hard rules get an explicit,
 separately-reported invariant:

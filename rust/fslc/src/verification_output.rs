@@ -3,6 +3,7 @@
 //! Backend-neutral JSON rendering for bounded verification results.
 
 use std::collections::BTreeSet;
+use std::future::Future;
 
 use fsl_core::{
     FslValue, KernelExpr, KernelModel, TypeDef, TypeRef, display_name, fsl_value_json,
@@ -62,6 +63,48 @@ pub fn render_semantic_error(mut output: Map<String, Value>, message: &str) -> V
     Value::Object(output)
 }
 
+/// A governance diagnostic with its source location preserved across delivery
+/// surfaces.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GovernanceOutputError {
+    pub message: String,
+    pub line: u32,
+    pub column: u32,
+}
+
+impl GovernanceOutputError {
+    #[must_use]
+    pub fn new(message: impl Into<String>, line: u32, column: u32) -> Self {
+        Self {
+            message: message.into(),
+            line,
+            column,
+        }
+    }
+}
+
+impl From<fsl_core::CoreError> for GovernanceOutputError {
+    fn from(error: fsl_core::CoreError) -> Self {
+        Self::new(error.to_string(), error.line, error.column)
+    }
+}
+
+/// Render a governance type diagnostic using the public JSON contract.
+#[must_use]
+pub fn render_governance_error(
+    mut output: Map<String, Value>,
+    error: &GovernanceOutputError,
+) -> Value {
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!("type"));
+    output.insert("message".to_owned(), json!(error.message));
+    output.insert(
+        "loc".to_owned(),
+        json!({"line": error.line, "column": error.column}),
+    );
+    Value::Object(output)
+}
+
 /// Classify a typed-model diagnostic identically on every Rust delivery surface.
 #[must_use]
 pub fn semantic_error_kind(message: &str) -> &'static str {
@@ -116,13 +159,60 @@ pub fn requirements_implements_output(
 /// Returns a diagnostic when the governance document is malformed.
 pub fn governance_output(
     source: &str,
-    mut preservation_result: impl FnMut(&fsl_core::GovernancePreservation) -> Result<Value, String>,
-) -> Result<Option<Value>, String> {
+    resolver: &dyn fsl_core::FileResolver,
+    mut preservation_result: impl FnMut(
+        &fsl_core::GovernancePreservation,
+    ) -> Result<Value, GovernanceOutputError>,
+) -> Result<Option<Value>, GovernanceOutputError> {
     let Some(contract) =
-        fsl_core::governance_contract(source).map_err(|error| error.to_string())?
+        fsl_core::governance_contract(source, resolver).map_err(GovernanceOutputError::from)?
     else {
         return Ok(None);
     };
+    let preservation_results = contract
+        .preservations
+        .iter()
+        .map(&mut preservation_result)
+        .collect::<Result<Vec<_>, GovernanceOutputError>>()?;
+    Ok(Some(render_governance_contract(
+        &contract,
+        preservation_results,
+    )))
+}
+
+/// Async counterpart of [`governance_output`] for browser solver backends.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the governance document or a preservation is invalid.
+pub async fn governance_output_async<F, Fut>(
+    source: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    mut preservation_result: F,
+) -> Result<Option<Value>, GovernanceOutputError>
+where
+    F: FnMut(&fsl_core::GovernancePreservation) -> Fut,
+    Fut: Future<Output = Result<Value, GovernanceOutputError>>,
+{
+    let Some(contract) =
+        fsl_core::governance_contract(source, resolver).map_err(GovernanceOutputError::from)?
+    else {
+        return Ok(None);
+    };
+    let mut preservation_results = Vec::with_capacity(contract.preservations.len());
+    for preservation in &contract.preservations {
+        preservation_results.push(preservation_result(preservation).await?);
+    }
+    Ok(Some(render_governance_contract(
+        &contract,
+        preservation_results,
+    )))
+}
+
+fn render_governance_contract(
+    contract: &fsl_core::GovernanceContract,
+    preservation_results: Vec<Value>,
+) -> Value {
     let delegates = contract
         .delegates
         .iter()
@@ -152,22 +242,23 @@ pub fn governance_output(
     let preservations = contract
         .preservations
         .iter()
-        .map(|preservation| {
-            Ok(json!({
+        .zip(preservation_results)
+        .map(|(preservation, result)| {
+            json!({
                 "name": preservation.name,
                 "before": preservation.before_name,
                 "after": preservation.after_name,
                 "preserve": preservation.preserve,
-                "result": preservation_result(preservation)?,
-            }))
+                "result": result,
+            })
         })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(Some(json!({
+        .collect::<Vec<_>>();
+    json!({
         "name": contract.name,
         "controls": contract.controls,
         "delegates": delegates,
         "preservations": preservations,
-    })))
+    })
 }
 
 /// Resolve one requirements trace step against the Monitor's enabled actions.

@@ -70,6 +70,138 @@ fn native_check_and_verify_share_the_core_duplicate_write_gate() {
 }
 
 #[test]
+fn native_check_rejects_an_incomplete_governance_contract() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/gallery/errors/governance_missing_before.fsl",
+    ]);
+
+    assert_eq!(status, 2);
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 4, "column": 3}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("governance preservation missing before")),
+        "{value}"
+    );
+}
+
+#[test]
+fn native_check_rejects_a_missing_governance_dependency() {
+    let (value, status) = run_cli(&[
+        "check",
+        "rust/fslc/tests/fixtures/governance_missing_dependency.fsl",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 6, "column": 5}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("missing-before.fsl")),
+        "{value}"
+    );
+}
+
+#[test]
+fn native_check_reports_a_governance_counterexample_without_misclassifying_it() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/refinement_liveness/governance_detects_safety_loss.fsl",
+    ]);
+
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["result"], "ok");
+    assert_eq!(
+        value["governance"]["preservations"][0]["result"],
+        "refinement_failed"
+    );
+}
+
+#[test]
+fn native_check_locates_a_malformed_dependency_at_the_governance_reference() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/gallery/errors/governance_malformed_dependency.fsl",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 5, "column": 3}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("governance_malformed_business.fsl")),
+        "{value}"
+    );
+}
+
+#[test]
+fn native_check_locates_a_semantic_dependency_error_at_the_preservation() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/gallery/adversarial/governance_semantic_dependency.fsl",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 6, "column": 3}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown type 'Missing'")),
+        "{value}"
+    );
+}
+
+#[test]
+fn monitor_boundary_self_spec_is_proved_and_mutation_sensitive() {
+    let fixture = "examples/self/monitor_action_boundary.fsl";
+    let (checked, check_status) = run_cli(&["check", fixture, "--strict-tags"]);
+    assert_eq!(check_status, 0, "{checked}");
+    assert_eq!(checked["result"], "ok");
+
+    let (verified, verify_status) = run_cli(&["verify", fixture, "--depth", "8", "--no-cache"]);
+    assert_eq!(verify_status, 0, "{verified}");
+    assert_eq!(verified["result"], "verified");
+
+    let (proved, induction_status) = run_cli(&[
+        "verify",
+        fixture,
+        "--engine",
+        "induction",
+        "--depth",
+        "8",
+        "--no-cache",
+    ]);
+    assert_eq!(induction_status, 0, "{proved}");
+    assert_eq!(proved["result"], "proved");
+
+    let (mutated, mutation_status) =
+        run_cli(&["mutate", fixture, "--depth", "8", "--by-requirement"]);
+    assert_eq!(mutation_status, 0, "{mutated}");
+    assert_eq!(mutated["result"], "mutated");
+    assert!(
+        mutated["summary"]["kill_rate"]
+            .as_f64()
+            .is_some_and(|rate| rate >= 0.70),
+        "{mutated}"
+    );
+    assert!(
+        mutated["by_requirement"]["MONITOR-ACTION-BOUNDARY"]["kills"]
+            .as_u64()
+            .is_some_and(|kills| kills > 0),
+        "{mutated}"
+    );
+}
+
+#[test]
 fn native_check_and_verify_reject_duplicate_correspondence_origins() {
     let fixture = "rust/fslc/tests/fixtures/action_correspondence_duplicate.fsl";
 

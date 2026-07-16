@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+governance ProgressControls {
+  control CTRL-PROGRESS "Submitted claims remain decidable"
+
+  preservation DesignPreservesProgress {
+    before ClaimPolicy from "policy.fsl"
+    after DesignKeepsLiveness from "design_keeps_liveness.fsl"
+    preserve CTRL-PROGRESS
+    checked_by refinement "design_keeps_liveness_progress_refines.fsl"
+  }
+}

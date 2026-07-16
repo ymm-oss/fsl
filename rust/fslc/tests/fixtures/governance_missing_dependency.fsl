@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+governance MissingDependency {
+  control CTRL-1 "Preserved control"
+  preservation MissingFiles {
+    before Before from "missing-before.fsl"
+    after After from "missing-after.fsl"
+    preserve CTRL-1
+    checked_by refinement "missing-refinement.fsl"
+  }
+}

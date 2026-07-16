@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
+refinement SemanticDependencyMapping {
+  impl After
+  abs Before
+  maps auto
+}

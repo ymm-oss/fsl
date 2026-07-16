@@ -111,3 +111,124 @@ fn failed_steps_leave_the_monitor_state_unchanged() {
         assert_eq!(monitor.state, before);
     }
 }
+
+#[test]
+fn stale_enabled_action_is_rejected_after_state_change() {
+    let model = model(
+        "spec Once { state { done: Bool } init { done = false } ".to_owned()
+            + "action finish() { requires not done done = true } }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    let action = monitor.enabled().expect("enabled actions")[0].clone();
+
+    monitor.step(&action).expect("first step");
+    let state_after_first_step = monitor.state.clone();
+    let error = monitor.step(&action).expect_err("stale action must fail");
+
+    assert!(error.message.contains("stale"), "{error:?}");
+    assert_eq!(monitor.state, state_after_first_step);
+    let failed = monitor
+        .attempt("finish", &BTreeMap::new())
+        .expect("disabled attempt is observable");
+    assert_eq!(failed.violation.expect("requires violation").step, 2);
+}
+
+#[test]
+fn action_parameters_must_belong_to_their_declared_domains() {
+    let model = model(
+        "spec Parameters { type Small = 0..1 enum Choice { A, B } state { done: Bool } ".to_owned()
+            + "init { done = false } action inline(v in 0..1) { } "
+            + "action domain(v: Small) { } action choice(v: Choice) { } "
+            + "action flag(v: Bool) { } }",
+    );
+    let valid = [
+        ("inline", FslValue::Int(0)),
+        ("inline", FslValue::Int(1)),
+        ("domain", FslValue::Int(0)),
+        ("domain", FslValue::Int(1)),
+        (
+            "choice",
+            FslValue::Enum {
+                type_name: "Choice".to_owned(),
+                member: "A".to_owned(),
+            },
+        ),
+        ("flag", FslValue::Bool(false)),
+        ("flag", FslValue::Bool(true)),
+    ];
+    for (action, value) in valid {
+        let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize monitor");
+        let result = monitor
+            .attempt(action, &BTreeMap::from([("v".to_owned(), value)]))
+            .unwrap_or_else(|error| panic!("valid {action} parameter failed: {error:?}"));
+        assert!(result.violation.is_none(), "{action}: {result:?}");
+    }
+
+    let invalid = [
+        ("inline", FslValue::Int(-1)),
+        ("inline", FslValue::Int(2)),
+        ("domain", FslValue::Int(-1)),
+        ("domain", FslValue::Int(2)),
+        ("choice", FslValue::Bool(false)),
+        (
+            "choice",
+            FslValue::Enum {
+                type_name: "Other".to_owned(),
+                member: "A".to_owned(),
+            },
+        ),
+        (
+            "choice",
+            FslValue::Enum {
+                type_name: "Choice".to_owned(),
+                member: "Missing".to_owned(),
+            },
+        ),
+        ("flag", FslValue::Int(0)),
+    ];
+    for (action, value) in invalid {
+        let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize monitor");
+        let state_before_attempt = monitor.state.clone();
+        let error = monitor
+            .attempt(action, &BTreeMap::from([("v".to_owned(), value)]))
+            .expect_err("out-of-domain parameter must fail");
+        assert!(error.message.contains("parameter"), "{error:?}");
+        assert_eq!(monitor.state, state_before_attempt);
+    }
+}
+
+#[test]
+fn wide_named_domain_parameter_validation_does_not_enumerate_for_direct_attempts() {
+    let model = model(
+        "spec Wide { type Value = 0..1000000000 state { done: Bool } init { done = false } action accept(v: Value) { done = true } }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+
+    monitor
+        .attempt(
+            "accept",
+            &BTreeMap::from([("v".to_owned(), FslValue::Int(1_000_000_000))]),
+        )
+        .expect("upper bound validates without domain enumeration");
+}
+
+#[test]
+fn invalid_parameters_do_not_consume_a_logical_step() {
+    let model = model(
+        "spec Steps { type Small = 0..1 state { done: Bool } init { done = false } action blocked(v: Small) { requires false } }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    monitor
+        .attempt(
+            "blocked",
+            &BTreeMap::from([("v".to_owned(), FslValue::Int(2))]),
+        )
+        .expect_err("invalid parameter must fail before attempting a step");
+    let failed = monitor
+        .attempt(
+            "blocked",
+            &BTreeMap::from([("v".to_owned(), FslValue::Int(1))]),
+        )
+        .expect("valid disabled attempt is observable");
+    assert_eq!(failed.violation.expect("requires violation").step, 1);
+}

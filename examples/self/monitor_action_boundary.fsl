@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Requirements model for the Monitor's two-stage select/execute boundary.
+// RawInput is deliberately wider than Count so rejected API inputs remain in
+// the formal state space instead of disappearing through typed enumeration.
+requirements MonitorActionBoundary {
+  type Count = 0..1
+  type RawInput = -1..2
+  enum Phase { Ready, Done }
+  enum Selection { Empty, Chosen }
+
+  state {
+    x: Count,
+    phase: Phase,
+    selection: Selection,
+    selected: Count
+  }
+
+  init {
+    x = 0
+    phase = Ready
+    selection = Empty
+    selected = 0
+  }
+
+  requirement MONITOR-ACTION-BOUNDARY "Only a fresh selection with an in-domain raw value may execute" {
+    action select(v: Count) {
+      requires phase == Ready
+      selection = Chosen
+      selected = v
+    }
+
+    action execute(raw: RawInput) {
+      requires selection == Chosen
+      requires phase == Ready
+      requires raw >= 0 and raw <= 1
+      requires raw == selected
+      x = raw
+      phase = Done
+      selection = Empty
+      ensures x == selected
+    }
+
+    invariant ConsumedSelectionIsCleared {
+      phase == Ready or selection == Empty
+    }
+  }
+
+  acceptance MONITOR-LOWER-BOUND "The lower parameter bound executes" {
+    select(0)
+    execute(0)
+    expect phase == Done and x == 0
+  }
+
+  acceptance MONITOR-UPPER-BOUND "The upper parameter bound executes" {
+    select(1)
+    execute(1)
+    expect phase == Done and x == 1
+  }
+
+  forbidden MONITOR-STALE-REJECTED "A consumed selection cannot execute again" {
+    select(0)
+    execute(0)
+    execute(0)
+    expect rejected
+  }
+
+  forbidden MONITOR-RAW-OUT-OF-DOMAIN "A raw value outside Count is rejected" {
+    select(0)
+    execute(2)
+    expect rejected
+  }
+
+  terminal { phase == Done }
+}
