@@ -115,7 +115,6 @@ and it runs.
 | OS / arch | File to download |
 | --- | --- |
 | macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
-| macOS (Intel) | `fslc-macos-x64` |
 | Linux (x86_64) | `fslc-linux-x64` |
 | Linux (ARM64) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |
@@ -180,6 +179,8 @@ Kernel bundles attached to GitHub Releases. The retained Python compatibility
 reference is installed from this repository and is not published to PyPI; the
 Rust workspace crates are not published to crates.io. Publishing either surface
 requires an explicit manifest, workflow, and documentation change.
+Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
+procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
 
 ## Developer setup
 
