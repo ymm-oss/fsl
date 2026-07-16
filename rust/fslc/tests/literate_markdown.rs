@@ -211,3 +211,187 @@ fn literate_scenarios_produces_output() {
         "scenarios should produce structured output: {output:#}"
     );
 }
+
+/// Isolates the verify cache in a fresh, per-test directory (same pattern as
+/// `issue_226_auto_engine.rs`'s `CacheDir`).
+struct LiterateCacheDir {
+    path: PathBuf,
+}
+
+impl LiterateCacheDir {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "fslc-literate-cachedir-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        Self { path }
+    }
+
+    fn run(&self, arguments: &[&str]) -> (Value, i32) {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(arguments)
+            .current_dir(repository_root())
+            .env("FSLC_CACHE_DIR", &self.path)
+            .output()
+            .expect("run native fslc");
+        let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "invalid JSON: {error}; args={arguments:?}; stderr={}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+        (value, output.status.code().expect("native exit status"))
+    }
+}
+
+impl Drop for LiterateCacheDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+#[test]
+fn literate_verify_cache_hits_on_the_second_run() {
+    // Root cause this guards: the materialized sibling used to embed
+    // `std::process::id()` in its filename, so the canonicalized "path" baked
+    // into the cache key (and the sibling's own entry in the cache-key
+    // directory walk) changed on every single run — the cache could never
+    // hit for a `.md` spec. The fsl content below embeds a fresh nonce so
+    // this test's cache entry cannot collide with any other test's.
+    let cache = LiterateCacheDir::new("hit");
+    let dir = std::env::temp_dir().join(format!("fslc-literate-cache-doc-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let doc = dir.join("cache_toggle.md");
+    std::fs::write(
+        &doc,
+        format!(
+            "\
+# Cache toggle
+
+```fsl
+// nonce: {nonce}
+spec CacheToggle {{
+  state {{ active: Bool }}
+  init {{ active = false }}
+  action toggle() {{ active = not active }}
+  invariant AlwaysBool {{ active or not active }}
+}}
+```
+"
+        ),
+    )
+    .expect("write cache-key test doc");
+    let doc_str = doc.to_str().expect("UTF-8 path");
+
+    let (first, status) = cache.run(&["verify", doc_str, "--depth", "4"]);
+    assert_eq!(status, 0, "first run failed: {first:#}");
+    assert!(
+        first.get("cache").is_none(),
+        "first run should not report a cache hit: {first:#}"
+    );
+
+    let (second, status) = cache.run(&["verify", doc_str, "--depth", "4"]);
+    assert_eq!(status, 0, "second run failed: {second:#}");
+    assert_eq!(
+        second["cache"]["hit"], true,
+        "second run should hit the verify cache: {second:#}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn literate_check_edition_finding_names_the_markdown_file_not_the_materialization() {
+    // Wraps `tests/fixtures/domain_legacy_enum_union.fsl` (which produces a
+    // `deprecated_domain_enum_union` warning under the default "current"
+    // edition — see `issue_244_domain_enum.rs`) in a literate `.md` fence and
+    // asserts the finding's `loc.file` names the `.md` path, never the
+    // transient `.literate.fsl` materialization `apply_domain_edition` reads
+    // from.
+    let dir = std::env::temp_dir().join(format!("fslc-literate-edition-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let inner = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/domain_legacy_enum_union.fsl"),
+    )
+    .expect("read domain enum-union fixture");
+    let doc = dir.join("legacy_enum.md");
+    std::fs::write(&doc, format!("# Legacy enum\n\n```fsl\n{inner}```\n")).expect("write doc");
+    let doc_str = doc.to_str().expect("UTF-8 path");
+
+    let (output, status) = run_cli(&["check", doc_str]);
+    assert_eq!(status, 0, "check failed: {output:#}");
+    let warning = output["warnings"]
+        .as_array()
+        .and_then(|warnings| {
+            warnings
+                .iter()
+                .find(|warning| warning["code"] == "deprecated_domain_enum_union")
+        })
+        .unwrap_or_else(|| panic!("missing deprecation warning: {output:#}"));
+    assert_eq!(
+        warning["loc"]["file"], doc_str,
+        "finding file field should name the .md document: {output:#}"
+    );
+    let file_field = warning["loc"]["file"].as_str().expect("file field");
+    assert!(
+        !file_field.contains("literate.fsl"),
+        "finding file field must not leak the materialized sibling: {output:#}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn four_backtick_fence_around_a_triple_backtick_fsl_example_verifies_correctly() {
+    // Regression for the CommonMark fence-length bug: a four-backtick "other"
+    // fence containing a literal ```fsl example used to be mis-tracked (the
+    // old code only ever recognized exactly-3-backtick closers), corrupting
+    // extraction and producing a confusing parse error instead of the real
+    // verdict. Per CommonMark, the final fsl block below is real spec code:
+    // `n` can reach 2 via repeated `inc()`, violating `Low`.
+    let dir = std::env::temp_dir().join(format!("fslc-literate-fourtick-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let doc = dir.join("four_backtick.md");
+    std::fs::write(
+        &doc,
+        "\
+# Spec
+
+```fsl
+spec Counter {
+  state { n: 0..3 }
+  init { n = 0 }
+  action inc() { n = n + 1 }
+```
+
+Example (four-backtick fence, inner three backticks are literal):
+
+````text
+```fsl
+example only
+```
+````
+
+```fsl
+  invariant Low { n < 2 }
+}
+```
+",
+    )
+    .expect("write four-backtick repro doc");
+    let doc_str = doc.to_str().expect("UTF-8 path");
+
+    let (output, status) = run_cli(&["verify", doc_str, "--depth", "6", "--no-cache"]);
+    assert_eq!(
+        output["result"], "violated",
+        "expected violated: {output:#}"
+    );
+    assert_eq!(status, 1, "{output:#}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

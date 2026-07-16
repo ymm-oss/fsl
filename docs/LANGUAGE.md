@@ -986,12 +986,12 @@ or, when the target predicate is unsatisfiable under type bounds/invariants:
 ### Literate Markdown FSL
 
 Markdown files (`.md`) containing ` ```fsl ` fenced code blocks are accepted
-directly by `fslc check` and `fslc verify` — no flags or extraction step
-needed. Lines outside fsl blocks are blanked (replaced with empty lines) so
-that all diagnostic positions (line numbers, columns in error messages and
-counterexamples) point to the original Markdown document. Multiple fsl blocks
-in one document are treated as one compilation unit, so definitions can be
-split across sections:
+directly by `fslc check`, `fslc verify`, and `fslc scenarios` — no flags or
+extraction step needed. Lines outside fsl blocks are blanked (replaced with
+empty lines) so that all diagnostic positions (line numbers, columns in error
+messages and counterexamples) point to the original Markdown document.
+Multiple fsl blocks in one document are treated as one compilation unit, so
+definitions can be split across sections:
 
     # Cart invariant
 
@@ -1011,7 +1011,9 @@ split across sections:
 
 A `.md` file with no ` ```fsl ` fences is rejected with a clear diagnostic.
 Non-fsl fenced blocks (` ```python `, etc.) are ignored. `use`/compose paths
-resolve relative to the Markdown file's directory (same as for `.fsl` files).
+resolve relative to the Markdown file's directory (same as for `.fsl` files);
+a literate `.md` may `use`/compose `.fsl` files this way, but using another
+`.md` file as a compose target is not supported.
 
 ## 8. Recommended workflow: make proved the standard
 

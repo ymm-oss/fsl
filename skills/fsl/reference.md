@@ -925,12 +925,15 @@ runs of the same spec (the cache key is always the engine that actually
 decided, never `auto` itself), does not change the default engine, and is
 Rust-only.
 
-**Literate Markdown FSL.** `fslc check` and `fslc verify` accept `.md` files
-containing ` ```fsl ` fenced code blocks directly — no extraction step or
-flag needed. Non-fsl lines are blanked in place so all diagnostic positions
-point to the Markdown document's own line numbers. Multiple fsl blocks form
-one compilation unit (split definitions across sections). Files without fsl
-fences are rejected; non-fsl fences (` ```python ` etc.) are ignored.
+**Literate Markdown FSL.** `fslc check`, `fslc verify`, and `fslc scenarios`
+accept `.md` files containing ` ```fsl ` fenced code blocks directly — no
+extraction step or flag needed. Non-fsl lines are blanked in place so all
+diagnostic positions point to the Markdown document's own line numbers.
+Multiple fsl blocks form one compilation unit (split definitions across
+sections). Files without fsl fences are rejected; non-fsl fences
+(` ```python ` etc.) are ignored. A literate `.md` may `use`/compose `.fsl`
+files relative to its own directory; using another `.md` as a compose target
+is not supported.
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`

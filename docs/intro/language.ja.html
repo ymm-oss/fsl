@@ -1068,12 +1068,12 @@ internal split-action <code>name</code> and adds <code>display_name</code>.</p>
 </code></pre>
 <h3 id="literate-markdown-fsl">Literate Markdown FSL</h3>
 <p>Markdown files (<code>.md</code>) containing <code>```fsl</code> fenced code blocks are accepted
-directly by <code>fslc check</code> and <code>fslc verify</code> — no flags or extraction step
-needed. Lines outside fsl blocks are blanked (replaced with empty lines) so
-that all diagnostic positions (line numbers, columns in error messages and
-counterexamples) point to the original Markdown document. Multiple fsl blocks
-in one document are treated as one compilation unit, so definitions can be
-split across sections:</p>
+directly by <code>fslc check</code>, <code>fslc verify</code>, and <code>fslc scenarios</code> — no flags or
+extraction step needed. Lines outside fsl blocks are blanked (replaced with
+empty lines) so that all diagnostic positions (line numbers, columns in error
+messages and counterexamples) point to the original Markdown document.
+Multiple fsl blocks in one document are treated as one compilation unit, so
+definitions can be split across sections:</p>
 <pre><code># Cart invariant
 
 ```fsl
@@ -1092,7 +1092,9 @@ spec Cart {
 </code></pre>
 <p>A <code>.md</code> file with no <code>```fsl</code> fences is rejected with a clear diagnostic.
 Non-fsl fenced blocks (<code>```python</code>, etc.) are ignored. <code>use</code>/compose paths
-resolve relative to the Markdown file's directory (same as for <code>.fsl</code> files).</p></div></details>
+resolve relative to the Markdown file's directory (same as for <code>.fsl</code> files);
+a literate <code>.md</code> may <code>use</code>/compose <code>.fsl</code> files this way, but using another
+<code>.md</code> file as a compose target is not supported.</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. Recommended workflow: make proved the standard<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>Write the spec → <code>fslc check</code> (the fast syntax/type loop)</li>
 <li><code>fslc verify --depth 8</code> → if violated, fix using the trace.
