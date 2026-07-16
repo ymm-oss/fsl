@@ -318,12 +318,12 @@ Phase 0 produces a concrete counterexample.
 
 ## 9. Migration policy
 
-Phases 0-3 are complete. The native Rust implementation is now authoritative;
-Python is a frozen compatibility/reference and optional LSP surface, as enforced
-by the Rust-native gate in [`DESIGN-rust-integration.md`](DESIGN-rust-integration.md).
-New CLI and semantic work is not backported to Python. Cross-implementation
-fixtures remain useful historical evidence but no longer define the evolving
-compiler boundary.
+Phases 0-3 are complete. The native Rust implementation, including `fslc-lsp`,
+is now authoritative; Python is a frozen compatibility/reference surface, as
+enforced by the Rust-native gate in
+[`DESIGN-rust-integration.md`](DESIGN-rust-integration.md). New CLI and semantic
+work is not backported to Python. Cross-implementation fixtures remain useful
+historical evidence but no longer define the evolving compiler boundary.
 
 External tools must depend on the versioned normalized Kernel JSON described in
 [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md), not either

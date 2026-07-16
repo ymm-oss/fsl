@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Token-aware dialect selection shared by the retained Python/LSP surfaces."""
+"""Token-aware dialect selection for the retained Python compatibility surface."""
 
 from dataclasses import dataclass
 from typing import Optional
@@ -34,8 +34,8 @@ def inspect_source(source: str) -> DialectDispatch:
     """Return the first declaration keyword and a position-preserving parser view.
 
     The native Rust lexer is authoritative. This retained adapter mirrors its
-    BOM/comment/top-level-annotation significance rules so the Python LSP picks
-    the same frontend without copying raw ``lstrip().startswith`` branches.
+    BOM/comment/top-level-annotation significance rules so the frozen Python CLI
+    picks the same frontend without copying raw ``lstrip().startswith`` branches.
     """
 
     chars = list(source)

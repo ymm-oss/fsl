@@ -6,7 +6,6 @@
 from pathlib import Path
 
 from fslc.cli import run_ai_check, run_check
-from fslc.lsp.index import build_index
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -239,12 +238,3 @@ agent Parent {
 
     assert out["result"] == "violated"
     assert _violations(out) == {"policy_review_bypass_in_orchestration"}
-
-
-def test_lsp_index_handles_recursive_agent_dialect_without_crashing():
-    source = (EXAMPLES / "recursive_support_agent.fsl").read_text(encoding="utf-8")
-
-    index = build_index(source)
-
-    assert any(sym.name == "SupportOrchestrator" and sym.role == "agent" for sym in index.symbols)
-    assert any(sym.name == "RetrievalAgent" and sym.role == "agent" for sym in index.symbols)

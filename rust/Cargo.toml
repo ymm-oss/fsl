@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "fsl-core",
+    "fsl-lsp",
     "fsl-runtime",
     "fsl-solver",
     "fsl-solver-z3",
@@ -25,6 +26,9 @@ base64 = "0.22"
 ed25519-dalek = { version = "=2.2.0", features = ["pkcs8", "pem"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
+lsp-server = "0.7"
+lsp-types = "0.95"
+crossbeam-channel = "0.5"
 sha2 = "0.10"
 z3 = { version = "=0.20.2", default-features = false, features = ["gh-release", "z3_4_16"] }
 js-sys = "0.3.82"
