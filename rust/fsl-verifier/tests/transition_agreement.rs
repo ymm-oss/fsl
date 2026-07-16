@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::path::Path;
 use std::pin::pin;
@@ -16,6 +16,18 @@ fn block_on<F: Future>(future: F) -> F::Output {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("native solver unexpectedly yielded Pending"),
     }
+}
+
+fn monitor_boundary_model() -> fsl_core::KernelModel {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/self/monitor_action_boundary.fsl");
+    let source = std::fs::read_to_string(&fixture).expect("read monitor boundary self-spec");
+    let kernel = parse_kernel_source(
+        &source,
+        &FsResolver::new(fixture.parent().expect("fixture directory")),
+    )
+    .expect("parse model");
+    build_model(kernel).expect("build model")
 }
 
 #[test]
@@ -188,5 +200,144 @@ fn disabled_and_failed_monitor_outcomes_agree_and_rollback() {
                 action.name
             );
         }
+    }
+}
+
+#[test]
+fn stale_and_out_of_domain_calls_are_absent_from_the_symbolic_relation() {
+    let model = monitor_boundary_model();
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let selected = monitor
+        .enabled()
+        .expect("enumerate selections")
+        .into_iter()
+        .find(|action| {
+            action.action == "select" && action.params.get("v") == Some(&FslValue::Int(0))
+        })
+        .expect("select lower bound");
+    monitor.step(&selected).expect("select value");
+    let selected_state = monitor.state.clone();
+    let enabled = monitor
+        .enabled()
+        .expect("enumerate executions")
+        .into_iter()
+        .find(|action| {
+            action.action == "execute" && action.params.get("raw") == Some(&FslValue::Int(0))
+        })
+        .expect("execute selected value");
+    let executed = monitor.step(&enabled).expect("execute value");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    assert!(
+        block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &selected_state,
+            &enabled.action,
+            &enabled.params,
+            &executed.state,
+        ))
+        .expect("accept legal transition")
+    );
+    let current = monitor.state.clone();
+
+    assert!(
+        monitor
+            .step(&enabled)
+            .expect_err("stale action must fail")
+            .message
+            .contains("stale")
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    assert!(
+        !block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            &enabled.action,
+            &enabled.params,
+            &current,
+        ))
+        .expect("reject stale transition")
+    );
+
+    let rejected = BTreeMap::from([("raw".to_owned(), FslValue::Int(2))]);
+    let mut attempted = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    attempted.step(&selected).expect("select value");
+    let result = attempted
+        .attempt("execute", &rejected)
+        .expect("raw input belongs to its API domain");
+    assert_eq!(
+        result
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("requires_failed")
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    assert!(
+        !block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &selected_state,
+            "execute",
+            &rejected,
+            &selected_state,
+        ))
+        .expect("reject raw Count violation")
+    );
+
+    let invalid = BTreeMap::from([("raw".to_owned(), FslValue::Int(3))]);
+    let state_before_attempt = attempted.state.clone();
+    assert!(
+        attempted
+            .attempt("execute", &invalid)
+            .expect_err("out-of-domain parameter must fail")
+            .message
+            .contains("parameter")
+    );
+    assert_eq!(attempted.state, state_before_attempt);
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    assert!(
+        !block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &selected_state,
+            "execute",
+            &invalid,
+            &selected_state,
+        ))
+        .expect("reject out-of-domain transition")
+    );
+}
+
+#[test]
+fn bool_action_parameters_agree_between_symbolic_and_concrete_execution() {
+    let model = build_model(
+        parse_kernel_source(
+            "spec BoolParameter { state { value: Bool } init { value = false } action set(v: Bool) { value = v } }",
+            &FsResolver::new("."),
+        )
+        .expect("parse Bool action model"),
+    )
+    .expect("build Bool action model");
+    let monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    for value in [false, true] {
+        let params = BTreeMap::from([("v".to_owned(), FslValue::Bool(value))]);
+        let mut concrete = monitor.clone();
+        let result = concrete
+            .attempt("set", &params)
+            .expect("execute Bool action");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+        assert!(
+            block_on(fsl_verifier::transition_matches_step(
+                &model,
+                &mut solver,
+                &monitor.state,
+                "set",
+                &params,
+                &result.state,
+            ))
+            .expect("check Bool transition")
+        );
     }
 }

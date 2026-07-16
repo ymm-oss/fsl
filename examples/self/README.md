@@ -10,6 +10,7 @@ a subject of the verifier itself.
 |---|---|
 | `fslc_session.fsl` | CLI result classification and the ordering of exit-code severity. Only advance to a success result after a successful check; `proved` includes `verified`; an internal error is unrecoverable. |
 | `fslc_monitor.fsl` | The reject-stickiness of the replay runtime. Once a log becomes nonconformant it does not revert, and it is conformant only when every step is ok. |
+| `monitor_action_boundary.fsl` | A two-stage API model makes fresh selection, stale reuse, legal bounds, and raw out-of-domain input explicit requirements. |
 | `refinement_algebra.fsl` | Through refinement layers, safety propagates and liveness does not. A change that breaks safety is not a valid refinement link. |
 
 ## Run
@@ -18,19 +19,25 @@ a subject of the verifier itself.
 E=examples/self
 
 # fslc_session: declare intended terminal states such as ToolFault and each success result with terminal { }
-./.venv/bin/python -m fslc check  $E/fslc_session.fsl
-./.venv/bin/python -m fslc verify $E/fslc_session.fsl
-./.venv/bin/python -m fslc verify $E/fslc_session.fsl --engine induction
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/fslc_session.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_session.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_session.fsl --engine induction
 
 # fslc_monitor: declare Conformant / Nonconformant with terminal { }
-./.venv/bin/python -m fslc check  $E/fslc_monitor.fsl
-./.venv/bin/python -m fslc verify $E/fslc_monitor.fsl
-./.venv/bin/python -m fslc verify $E/fslc_monitor.fsl --engine induction
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/fslc_monitor.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_monitor.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_monitor.fsl --engine induction
+
+# monitor_action_boundary: the Rust agreement test reads this source directly
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/monitor_action_boundary.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/monitor_action_boundary.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/monitor_action_boundary.fsl --engine induction
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- mutate $E/monitor_action_boundary.fsl --depth 8 --by-requirement
 
 # refinement_algebra: there is no terminal state because reflexive_refine is always enabled
-./.venv/bin/python -m fslc check  $E/refinement_algebra.fsl
-./.venv/bin/python -m fslc verify $E/refinement_algebra.fsl
-./.venv/bin/python -m fslc verify $E/refinement_algebra.fsl --engine induction
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/refinement_algebra.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/refinement_algebra.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/refinement_algebra.fsl --engine induction
 ```
 
 In every case, `check` is `ok`, ordinary `verify` is `verified`, and induction is
@@ -48,9 +55,10 @@ to check whether an invariant leans on a dead ghost.
 `fslc_session.fsl` is a self-spec that models fslc's CLI result classification and
 exit-code severity in FSL, but proving the model's internal consistency alone via
 `verify` / induction does not guarantee **whether the implementation
-(`src/fslc/cli.py`) actually honors that contract**.
+actually honors that contract**.
 
-`tests/test_self_conformance.py` fills that gap. For a set of specs that produce
+`tests/test_self_conformance.py` retains the frozen Python compatibility anchor.
+For a set of specs that produce
 diverse outcomes, it runs `check` → (if ok) `verify` → (if verified) `verify
 --engine induction` against the real CLI and checks:
 
@@ -64,15 +72,23 @@ diverse outcomes, it runs `check` → (if ok) `verify` → (if verified) `verify
 4. that a hand-written trace violating a contract becomes `nonconformant` (a
    negative control).
 
-With this, meta-circular dogfooding is lifted from "model verification" to
-"implementation-conformance verification."
+The required product gate is Rust-native. `monitor_action_boundary.fsl` models
+selection and execution as distinct actions and deliberately gives the raw API
+input a wider domain than the stored value. Its acceptance and forbidden traces
+therefore keep legal bounds, stale reuse, and raw out-of-domain rejection inside
+the formal state space. `rust/fsl-verifier/tests/transition_agreement.rs` consumes
+that source directly, checks a legal transition against both symbolic and
+concrete execution, and supplies negative symbolic controls. Runtime regression
+tests separately pin the concrete `EnabledAction` token and typed-parameter
+validation semantics that the FSL API abstraction represents.
 
 ### fslc_monitor anchor (replay runtime)
 
-`fslc_monitor.fsl` models the contract that `Monitor` / `run_replay` in
-`src/fslc/runtime.py` must honor (stop at the first reject, conformant only when
+`fslc_monitor.fsl` models the replay contract (stop at the first reject,
+conformant only when
 all are ok, no processing proceeds after a reject). The monitor section of
-`tests/test_self_conformance.py` maps the observed result of a real `fslc replay`
+`tests/test_self_conformance.py` is the frozen Python compatibility anchor: it
+maps the observed result of its compatibility `fslc replay`
 against a guarded spec (`specs/cart_v1.fsl`) onto a `step_ok` / `step_reject` /
 `finish` sequence, and checks that the replay against `fslc_monitor` becomes
 `conformant`. It also includes a negative control where a contract-violating trace

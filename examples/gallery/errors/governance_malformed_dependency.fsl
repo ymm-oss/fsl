@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+governance MalformedDependency {
+  control CTRL-1 "Referenced business remains parseable"
+  delegates Broken from "governance_malformed_business.fsl" {
+    require CTRL-1
+  }
+}

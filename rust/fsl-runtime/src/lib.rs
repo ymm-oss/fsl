@@ -792,24 +792,9 @@ impl Monitor {
         let mut enabled = Vec::new();
         for action in &self.model.actions {
             for params in action_parameter_bindings(action, &self.model)? {
-                let mut bindings = params.clone();
-                let mut holds = true;
-                for guard in &action.guards {
-                    match guard {
-                        ActionGuard::Let(name, expr) => {
-                            let value = eval(expr, &self.state, &mut bindings, &self.model, None)?;
-                            bindings.insert(name.clone(), value);
-                        }
-                        ActionGuard::Requires(expr) => {
-                            if !as_bool(eval(expr, &self.state, &mut bindings, &self.model, None)?)?
-                            {
-                                holds = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if holds {
+                if let Some(bindings) =
+                    evaluate_action_guards(action, &params, &self.state, &self.model)?
+                {
                     enabled.push(EnabledAction {
                         action: action.name.clone(),
                         params,
@@ -840,55 +825,24 @@ impl Monitor {
             .find(|action| action.name == action_name)
             .cloned()
             .ok_or_else(|| runtime_error(format!("unknown action '{action_name}'")))?;
-        if action.params.len() != params.len()
-            || action
-                .params
-                .iter()
-                .any(|parameter| !params.contains_key(parameter.name()))
-        {
-            return Err(runtime_error(format!(
-                "parameters do not match action '{action_name}'"
-            )));
-        }
-        let mut bindings = params.clone();
-        for guard in &action.guards {
-            match guard {
-                ActionGuard::Let(name, expression) => {
-                    match eval(expression, &self.state, &mut bindings, &self.model, None) {
-                        Ok(value) => {
-                            bindings.insert(name.clone(), value);
-                        }
-                        Err(error) if is_partial_operation_error(&error.message) => {
-                            return Ok(self.failed_step(action_name, params, "partial_op", None));
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                ActionGuard::Requires(expression) => {
-                    let value =
-                        match eval(expression, &self.state, &mut bindings, &self.model, None) {
-                            Ok(value) => value,
-                            Err(error) if is_partial_operation_error(&error.message) => {
-                                return Ok(self.failed_step(
-                                    action_name,
-                                    params,
-                                    "partial_op",
-                                    None,
-                                ));
-                            }
-                            Err(error) => return Err(error),
-                        };
-                    if !as_bool(value)? {
-                        return Ok(self.failed_step(action_name, params, "requires_failed", None));
-                    }
-                }
+        let bindings = match evaluate_action_guards(&action, params, &self.state, &self.model) {
+            Ok(Some(bindings)) => bindings,
+            Ok(None) => {
+                return Ok(self.failed_step(action_name, params, "requires_failed", None));
             }
-        }
-        self.step(&EnabledAction {
-            action: action_name.to_owned(),
-            params: params.clone(),
-            bindings,
-        })
+            Err(error) if is_partial_operation_error(&error.message) => {
+                return Ok(self.failed_step(action_name, params, "partial_op", None));
+            }
+            Err(error) => return Err(error),
+        };
+        self.execute_selected(
+            &EnabledAction {
+                action: action_name.to_owned(),
+                params: params.clone(),
+                bindings,
+            },
+            None,
+        )
     }
 
     /// Execute one previously enumerated enabled instance.
@@ -911,8 +865,32 @@ impl Monitor {
     ///
     /// Returns [`RuntimeError`] for stale/unknown instances, update errors, or
     /// expression/type failures.
-    #[allow(clippy::too_many_lines)]
     pub fn step_selected(
+        &mut self,
+        enabled: &EnabledAction,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<StepResult, RuntimeError> {
+        let action = self
+            .model
+            .actions
+            .iter()
+            .find(|action| action.name == enabled.action)
+            .cloned()
+            .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
+        let bindings = evaluate_action_guards(&action, &enabled.params, &self.state, &self.model)?
+            .ok_or_else(|| runtime_error(format!("stale enabled action '{}'", enabled.action)))?;
+        self.execute_selected(
+            &EnabledAction {
+                action: enabled.action.clone(),
+                params: enabled.params.clone(),
+                bindings,
+            },
+            checked_bounds,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn execute_selected(
         &mut self,
         enabled: &EnabledAction,
         checked_bounds: Option<&BTreeSet<String>>,
@@ -2361,6 +2339,62 @@ fn action_parameter_bindings(
         bindings = next;
     }
     Ok(bindings)
+}
+
+fn validate_action_parameters(
+    action: &ActionDef,
+    params: &Bindings,
+    model: &KernelModel,
+) -> Result<(), RuntimeError> {
+    if action.params.len() != params.len() {
+        return Err(runtime_error(format!(
+            "parameters do not match action '{}'",
+            action.name
+        )));
+    }
+    for parameter in &action.params {
+        let value = params.get(parameter.name()).ok_or_else(|| {
+            runtime_error(format!("parameters do not match action '{}'", action.name))
+        })?;
+        let belongs = match parameter {
+            ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
+            ParamDef::Range { lo, hi, .. } => {
+                matches!(value, Value::Int(value) if lo <= value && value <= hi)
+            }
+        };
+        if !belongs {
+            return Err(runtime_error(format!(
+                "parameter '{}' does not belong to its declared domain for action '{}'",
+                parameter.name(),
+                action.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn evaluate_action_guards(
+    action: &ActionDef,
+    params: &Bindings,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Option<Bindings>, RuntimeError> {
+    validate_action_parameters(action, params, model)?;
+    let mut bindings = params.clone();
+    for guard in &action.guards {
+        match guard {
+            ActionGuard::Let(name, expression) => {
+                let value = eval(expression, state, &mut bindings, model, None)?;
+                bindings.insert(name.clone(), value);
+            }
+            ActionGuard::Requires(expression) => {
+                if !as_bool(eval(expression, state, &mut bindings, model, None)?)? {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+    Ok(Some(bindings))
 }
 
 fn execute_init_statement(

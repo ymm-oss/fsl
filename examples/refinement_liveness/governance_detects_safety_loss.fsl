@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+governance SafetyControls {
+  control CTRL-SAFETY "Payment remains approval-gated"
+
+  preservation DesignMustPreserveSafety {
+    before ClaimPolicy from "policy.fsl"
+    after DesignBypassesControl from "design_bypasses_control.fsl"
+    preserve CTRL-SAFETY
+    checked_by refinement "design_bypasses_control_refines.fsl"
+  }
+}
