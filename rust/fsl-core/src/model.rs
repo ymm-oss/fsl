@@ -530,6 +530,7 @@ impl ModelBuilder {
         let mut inline_initializers = Vec::new();
         let mut init_meta = None;
         let mut actions = Vec::new();
+        let mut action_names = BTreeSet::new();
         let mut invariants = Vec::new();
         let mut transitions = Vec::new();
         let mut reachables = Vec::new();
@@ -640,6 +641,11 @@ impl ModelBuilder {
                     ..
                 } => {
                     let origin = self.origins.diagnostic_origin(&action_target(name));
+                    if !action_names.insert(name) {
+                        return Err(
+                            model_error(format!("duplicate action '{name}'")).with_origin(origin)
+                        );
+                    }
                     actions.push(
                         self.action(name, params, items, *span, *fair, meta.clone())
                             .map_err(|error| error.with_origin(origin))?,
@@ -983,41 +989,19 @@ impl ModelBuilder {
         fair: bool,
         meta: Option<MetaTag>,
     ) -> Result<ActionDef, ModelError> {
+        let mut parameter_names = BTreeSet::new();
         let params = params
             .iter()
-            .map(|param| match param {
-                Param::Typed(name, qualified) => {
-                    if qualified.namespace.is_some() {
-                        return Err(model_error("qualified type remained after kernel lowering"));
-                    }
-                    let ty = match qualified.name.as_str() {
-                        "Bool" => TypeExpr::Bool,
-                        "Int" => TypeExpr::Int,
-                        _ => TypeExpr::Name(qualified.name.clone()),
-                    };
-                    let ty = self.resolve_type(&ty)?;
-                    let finite_scalar = matches!(ty, TypeRef::Bool | TypeRef::Range(_, _))
-                        || matches!(
-                            &ty,
-                            TypeRef::Named(name)
-                                if matches!(
-                                    self.types.get(name),
-                                    Some(TypeDef::Domain { .. } | TypeDef::Enum { .. })
-                                )
-                        );
-                    if !finite_scalar {
-                        return Err(model_error("action parameter type is not a finite scalar"));
-                    }
-                    Ok(ParamDef::Typed {
-                        name: name.clone(),
-                        ty,
-                    })
+            .map(|param| {
+                let parameter_name = match param {
+                    Param::Typed(name, _) | Param::Range(name, _, _) => name,
+                };
+                if !parameter_names.insert(parameter_name) {
+                    return Err(model_error(format!(
+                        "duplicate action parameter '{parameter_name}'"
+                    )));
                 }
-                Param::Range(name, lo, hi) => Ok(ParamDef::Range {
-                    name: name.clone(),
-                    lo: self.const_int(lo)?,
-                    hi: self.const_int(hi)?,
-                }),
+                self.action_param(param)
             })
             .collect::<Result<_, ModelError>>()?;
         let mut requires = Vec::new();
@@ -1071,6 +1055,50 @@ impl ModelBuilder {
                 .annotations_for(&action_target(name))
                 .clone(),
         })
+    }
+
+    fn action_param(&self, param: &Param) -> Result<ParamDef, ModelError> {
+        match param {
+            Param::Typed(name, qualified) => {
+                if qualified.namespace.is_some() {
+                    return Err(model_error("qualified type remained after kernel lowering"));
+                }
+                let ty = match qualified.name.as_str() {
+                    "Bool" => TypeExpr::Bool,
+                    "Int" => TypeExpr::Int,
+                    _ => TypeExpr::Name(qualified.name.clone()),
+                };
+                let ty = self.resolve_type(&ty)?;
+                let finite_scalar = matches!(ty, TypeRef::Bool | TypeRef::Range(_, _))
+                    || matches!(
+                        &ty,
+                        TypeRef::Named(name)
+                            if matches!(
+                                self.types.get(name),
+                                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. })
+                            )
+                    );
+                if !finite_scalar {
+                    return Err(model_error("action parameter type is not a finite scalar"));
+                }
+                Ok(ParamDef::Typed {
+                    name: name.clone(),
+                    ty,
+                })
+            }
+            Param::Range(name, lo, hi) => {
+                let lo = self.const_int(lo)?;
+                let hi = self.const_int(hi)?;
+                if lo > hi {
+                    return Err(model_error("action parameter range is empty"));
+                }
+                Ok(ParamDef::Range {
+                    name: name.clone(),
+                    lo,
+                    hi,
+                })
+            }
+        }
     }
 
     #[allow(clippy::too_many_lines)]
