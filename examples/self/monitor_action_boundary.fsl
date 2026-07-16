@@ -23,7 +23,7 @@ requirements MonitorActionBoundary {
     selected = 0
   }
 
-  requirement MONITOR-ACTION-BOUNDARY "Only a fresh selection with an in-domain raw value may execute" {
+  requirement REQ-MONITOR-001 "Only a fresh selection with an in-domain raw value may execute" {
     action select(v: Count) {
       requires phase == Ready
       selection = Chosen
@@ -46,26 +46,26 @@ requirements MonitorActionBoundary {
     }
   }
 
-  acceptance MONITOR-LOWER-BOUND "The lower parameter bound executes" {
+  acceptance AC-MONITOR-001 "The lower parameter bound executes" {
     select(0)
     execute(0)
     expect phase == Done and x == 0
   }
 
-  acceptance MONITOR-UPPER-BOUND "The upper parameter bound executes" {
+  acceptance AC-MONITOR-002 "The upper parameter bound executes" {
     select(1)
     execute(1)
     expect phase == Done and x == 1
   }
 
-  forbidden MONITOR-STALE-REJECTED "A consumed selection cannot execute again" {
+  forbidden FB-MONITOR-001 "A consumed selection cannot execute again" {
     select(0)
     execute(0)
     execute(0)
     expect rejected
   }
 
-  forbidden MONITOR-RAW-OUT-OF-DOMAIN "A raw value outside Count is rejected" {
+  forbidden FB-MONITOR-002 "A raw value outside Count is rejected" {
     select(0)
     execute(2)
     expect rejected

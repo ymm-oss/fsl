@@ -657,7 +657,7 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types only (fast)
-fslc lint      <path>... [--edition current|next] # stable edition diagnostics; never mutates
+fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
@@ -1457,13 +1457,23 @@ requirements ⊒ design ⊒ implementation (testgen/replay)**。
 
 ### 13.1 宣言タグ(全レイヤー共通のトレーサビリティ)
 
-invariant / reachable / leadsTo / action の `{` の直前に `"ID: original text"` を
-書くと、違反、CTI、カバレッジ診断、シナリオが `requirement: {id, text}` を運びます:
+正準な関係構文は、リンクされる宣言の直前に置く型付きアノテーションです。違反、
+CTI、カバレッジ診断、シナリオは `requirement: {id, text}` を運びます:
 
 ```fsl
-invariant PaidLedger "REQ-3: the ledger matches the number of payments" { ... }
-action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are auto-approved" { ... }
+@requirement("REQ-LEDGER-003", "the ledger matches the number of payments")
+invariant PaidLedger { ... }
+
+@requirement("REQ-EXPENSE-001", "amounts at or below the threshold are auto-approved")
+action submit(c: Case, a: Amount) { ... }
 ```
+
+`requirement`、`acceptance`、`forbidden`、`policy`、`goal`、`control` の各宣言は、
+キーワード直後の ID を所有します。`@requirement(...)` は別の宣言をその ID へリンクし、
+process の `covers ID "text"` は同じ型付き関係に対する正準なダイアレクト糖衣です。
+宣言本体直前の旧形式 `"ID: original text"` は移行入力として引き続き受理されますが、
+`fslc lint` は `legacy_string_metadata` を報告し、`fslc migrate --edition next` は
+安全に変換できる場合に `@requirement(...)` へ変換します。
 
 予約された `"undecided: reason"` タグは、レビュー済みで意図的に先送りされた決定を
 マークします。これはメタデータであり、プロパティとして検証されることはありません。
@@ -1495,12 +1505,12 @@ Rust CLI が実装しており、凍結された Python 参照実装にはバッ
 どちらでもかまいません:
 
 ```fsl
-@requirement("REQ-DOC", "this document owns the checkout contract")
+@requirement("REQ-CHECKOUT-001", "this document owns the checkout contract")
 @acme.review(owner.platform, 2, true)
 spec Checkout {
   state { paid: Bool }
 
-  @requirement("REQ-3", "the ledger matches payments")
+  @requirement("REQ-CHECKOUT-003", "the ledger matches payments")
   @undecided("late gateway completion policy is pending")
   @kind("safety")
   invariant PaidLedger { paid == paid }
@@ -1518,6 +1528,45 @@ BOM、空白、`//` コメントをスキップします。積み重ねたアノ
 しません。空のドキュメントと未知のドキュメントは、正確な位置と決定的なサポート
 済みキーワードのリストとともに `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` を報告
 します(`DESIGN-dialect-dispatch.md` を参照)。
+
+#### 13.1.1 正準 ID ポリシー
+
+既存の分類体系を表現できるよう、文法自体は幅広い ID を受理します。`fslc lint` は
+構文解析や検証とは独立して、次の種別別組み込みポリシーを適用します:
+
+| 種別 | 組み込みテンプレート |
+|---|---|
+| requirement | `REQ-{scope}-{number:3}`, `NFR-{scope}-{number:3}`, `INV-{scope}-{number:3}` |
+| acceptance | `AC-{scope}-{number:3}` |
+| forbidden | `FB-{scope}-{number:3}` |
+| policy | `POL-{scope}-{number:3}` |
+| goal | `GOAL-{scope}-{number:3}` |
+| control | `CTRL-{scope}-{number:3}` |
+| model | `MODEL-{scope}-{number:3}` |
+| assumption | `ASSUME-{scope}-{number:3}` |
+
+`scope` は大文字 ASCII 英数字で、ハイフン区切りの複数セグメントを持てます。
+`number:3` はちょうど 3 桁の十進数です。不一致は機械適用不可の
+`non_canonical_id` finding になります。参照はソース、テスト、コード、telemetry、
+外部証跡を横断しうるため、ID の rename は自動実行されません。
+
+`--project fsl-project.toml` を渡すと、指定した種別だけを置き換え、省略した種別には
+組み込み既定値を残せます:
+
+```toml
+[id_policy.patterns]
+requirement = ["PAY-{number}", "NFR-{scope}-{number:3}"]
+acceptance = "TEST-{number}"
+```
+
+値は文字列または空でない文字列配列です。テンプレートは `{scope}`、`{number}`、
+正の幅を持つ `{number:N}` をサポートします。不正なポリシー設定は exit 2 で失敗します。
+値には manifest reader の閉じた部分集合を使います。すなわち、double quote の
+JSON-compatible な文字列/配列を trailing comma と inline comment なしで記述し、
+single quote の TOML 文字列は拒否されます。model と assumption のテンプレートは、
+互いにも requirement template にも重ならない別々の literal prefix で始める必要があります。lint は親ディレクトリを
+探索しません。manifest は明示的に渡し、JSON 出力はその source と解決済み pattern
+全体を記録します。`DESIGN-id-policy.md` を参照してください。
 
 宣言レベルのアノテーションは、`init`、`action`(sync とマップされた/requirement
 の action を含む)、`invariant`、`trans`、`reachable`、`until`、
@@ -1565,20 +1614,20 @@ requirements ExpenseRequirements {
   process Claim with amount: Amount {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
-    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
-    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
-    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
-    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
-    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-EXPENSE-002 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-EXPENSE-004 "Only approved claims are paid"
   }
 
   kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+  acceptance AC-EXPENSE-001 "Approval flow: a low-amount claim is auto-approved and paid" {
     submit(0, 1) auto_approve(0) pay(0)
     expect Claim 0 in Paid
   }
-  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+  acceptance AC-EXPENSE-002 "Rejection flow: a high-amount claim ends in manager rejection" {
     submit(1, 2) reject(1)
     expect Claim 1 in Rejected
   }

@@ -79,7 +79,7 @@ impl std::error::Error for ParseError {}
 /// not accepted by the FSL expression grammar.
 pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
     let tokens = lex(source).map_err(ParseError::from)?;
-    let mut parser = Parser::new(tokens, 0);
+    let mut parser = Parser::new(source, tokens, 0);
     let expr = parser.expression(0)?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after expression"));
@@ -95,7 +95,7 @@ pub fn parse_expr(source: &str) -> Result<Expr, ParseError> {
 /// spec. Other top-level dialects are rejected by this phase-0 entrypoint.
 pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
     let tokens = lex(source).map_err(ParseError::from)?;
-    let mut parser = Parser::new(tokens, 0);
+    let mut parser = Parser::new(source, tokens, 0);
     let spec = parser.surface_spec()?;
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after spec"));
@@ -114,10 +114,11 @@ pub fn parse_surface_document(source: &str) -> Result<SurfaceDocument, ParseErro
 }
 
 pub(crate) fn parse_shared_tokens(
+    source: &str,
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<SurfaceDocument, ParseError> {
-    let mut parser = Parser::new(tokens, cursor);
+    let mut parser = Parser::new(source, tokens, cursor);
     let document = if parser.peek_ident("spec") {
         SurfaceDocument::Spec(parser.surface_spec()?)
     } else if parser.peek_ident("refinement") {
@@ -139,15 +140,17 @@ pub(crate) fn parse_shared_tokens(
     Ok(document)
 }
 
-struct Parser {
+struct Parser<'a> {
+    source: &'a str,
     tokens: Vec<Token>,
     cursor: usize,
     pending_annotations: Annotations,
 }
 
-impl Parser {
-    fn new(tokens: Vec<Token>, cursor: usize) -> Self {
+impl<'a> Parser<'a> {
+    fn new(source: &'a str, tokens: Vec<Token>, cursor: usize) -> Self {
         Self {
+            source,
             tokens,
             cursor,
             pending_annotations: Annotations::default(),
@@ -2135,7 +2138,9 @@ impl Parser {
         let token = self.bump().clone();
         let mut value = match token.kind {
             TokenKind::Ident(value) => value,
-            TokenKind::Int(value) => value.to_string(),
+            TokenKind::Int(_) => {
+                self.source[token.span.start.offset..token.span.end.offset].to_owned()
+            }
             _ => {
                 return Err(ParseError::new(
                     "expected requirement identifier",
@@ -2146,7 +2151,9 @@ impl Parser {
         while self.peek_symbol("-") {
             let component = match &self.peek_n(1).kind {
                 TokenKind::Ident(component) => component.clone(),
-                TokenKind::Int(component) => component.to_string(),
+                TokenKind::Int(_) => self.source
+                    [self.peek_n(1).span.start.offset..self.peek_n(1).span.end.offset]
+                    .to_owned(),
                 _ => break,
             };
             self.bump();
@@ -2293,5 +2300,34 @@ verify { values Id = 0..2 }
         assert_eq!(ast[2][4][0], "action");
         assert_eq!(ast[2][4][5], true);
         assert_eq!(ast[2][7][0], "verify_bounds");
+    }
+
+    #[test]
+    fn requirement_ids_preserve_zero_padded_source_spelling() {
+        let source = r#"requirements Checkout {
+  requirement REQ-CHECKOUT-001 "owned requirement" { }
+  acceptance AC-CHECKOUT-002 "accepted path" { expect true }
+  action reject() { }
+  forbidden FB-CHECKOUT-003 "rejected path" { reject() expect rejected }
+}"#;
+        let SurfaceDocument::Requirements(requirements) =
+            parse_surface_document(source).expect("requirements should parse")
+        else {
+            panic!("expected requirements document");
+        };
+        let ids = requirements
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                RequirementsItem::Requirement { id, .. }
+                | RequirementsItem::Acceptance { id, .. }
+                | RequirementsItem::Forbidden { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            ["REQ-CHECKOUT-001", "AC-CHECKOUT-002", "FB-CHECKOUT-003"]
+        );
     }
 }
