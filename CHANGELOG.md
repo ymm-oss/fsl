@@ -12,6 +12,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Documented a rationale convention for annotating a declaration so tooling and
+  AI agents can see the "why" that used to live only in `//` comments (lexer
+  trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the
+  existing `@kind(id, text?)` to classify and explain a declaration in one
+  line, and the recommended custom namespace `@doc.rationale("...")` for a
+  short rationale that isn't a classification. No grammar, IR, or schema
+  change; multi-sentence narrative keeps living in comments. See
+  `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`),
+  `docs/DESIGN-annotations.md`, and `skills/fsl/reference.md`.
 - `fslc lint` now enforces a built-in, kind-aware canonical ID policy and accepts
   an explicit `--project fsl-project.toml` override. Requirement, acceptance,
   forbidden, policy, goal, control, model, and assumption IDs have distinct
