@@ -6,3 +6,6 @@
   workspace gates.
 - Do not add Intel Mac to the regular CI matrix unless it is explicitly required;
   Apple Silicon macOS coverage is sufficient for this repository.
+- Treat `skills/` as the distribution surface only. Put repository-internal
+  workflow Skills under `.claude/skills` and `.codex/skills`, without adding
+  them to `skills/`.

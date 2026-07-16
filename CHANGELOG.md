@@ -143,6 +143,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- The internal `release` Skill now operates a GitLab Flow-inspired
+  `short-lived branch -> main -> production -> vX.Y.Z` lifecycle. It separates
+  integration evidence from release readiness, omits permanent `develop` and
+  `pre-production` branches, defines promotion, stabilization, and hotfix
+  procedures, and keeps component behavior independent of branch names. Codex
+  and Claude share the same internal Skill definition.
 - Native Rust internals now separate top-level CLI routing from command-family parsing and base
   ledger generation from approval evaluation. Observable CLI, ledger, and approval digest
   contracts are unchanged.
