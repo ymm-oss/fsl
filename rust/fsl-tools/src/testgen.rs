@@ -671,12 +671,14 @@ def _assert_rejected(result, expected_kind):
         .iter()
         .map(|name| display_name(name))
         .collect::<Vec<_>>();
+    let mut seen = BTreeMap::new();
     for (scenario_index, scenario) in input.scenarios.iter().enumerate() {
         let name = scenario["name"].as_str().unwrap_or("scenario");
+        let function = unique_ident(name, &mut seen, "test_scenario_");
         let separator = if scenario_index == 0 { "\n\n" } else { "\n" };
         let _ = write!(
             text,
-            "{separator}def test_scenario_{name}(adapter):\n    {}\n    if not _adapter_ready(adapter):\n        pytest.skip('Adapter not implemented')\n    adapter.reset()\n",
+            "{separator}def {function}(adapter):\n    {}\n    if not _adapter_ready(adapter):\n        pytest.skip('Adapter not implemented')\n    adapter.reset()\n",
             python_string(&format!("Scenario: {name}"))
         );
         let steps = scenario["steps"].as_array().cloned().unwrap_or_default();
@@ -1538,5 +1540,34 @@ mod tests {
             public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
                 .expect("adapt valid input");
         assert!(generate_testgen(&input, "unknown").is_err());
+    }
+
+    #[test]
+    fn pytest_sanitizes_scenario_names_without_losing_display_names() {
+        let (kernel, mut scenarios, walk) = contracts();
+        scenarios["scenarios"] = json!([
+            {
+                "name":"reach_bank.Settled",
+                "initial_state":{"zeta":0,"alpha":0},
+                "steps":[],
+                "expected_states":[]
+            },
+            {
+                "name":"reach_bank-Settled",
+                "initial_state":{"zeta":0,"alpha":0},
+                "steps":[],
+                "expected_states":[]
+            }
+        ]);
+        let input =
+            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
+                .expect("adapt valid scenarios");
+
+        let output = generate_testgen(&input, "pytest").expect("emit pytest");
+
+        assert!(output.contains("def test_scenario_reach_bank_Settled(adapter):"));
+        assert!(output.contains("def test_scenario_reach_bank_Settled_2(adapter):"));
+        assert!(output.contains("'Scenario: reach_bank.Settled'"));
+        assert!(output.contains("'Scenario: reach_bank-Settled'"));
     }
 }

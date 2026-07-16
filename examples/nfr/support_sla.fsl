@@ -1,5 +1,4 @@
-// Canonical example of the deadline-urgency pattern (discovered by a subject in
-// the second blind test; see DOGFOOD-8).
+// Canonical example of the deadline-urgency pattern from docs/DESIGN-nfr.md.
 // It avoids the trap where making "the response itself" urgent freezes time and
 // makes the deadline vacuous; only the handling of cases that reach the deadline
 // (respond_due) is marked urgent.

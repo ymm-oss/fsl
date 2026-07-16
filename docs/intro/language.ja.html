@@ -355,7 +355,9 @@ impl 側だけの carried number(例: business の抽象には存在しない <c
 元の <code>verify { instances Case = N }</code> 境界向けに書かれていても、<code>--instances Case=1
 --property &lt;Liveness&gt;</code> が使えます。</p>
 <p><code>fair</code> は弱い公平性(weak fairness)のアノテーションです: その action インスタンス
-が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。</p>
+が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。
+公平性は action インスタンス全体に適用されます。条件付きでのみ公平にしたい場合は、
+その条件を個別に guard した <code>fair action</code> へ分割してください。</p>
 <p><strong>action パラメータの型</strong>(<code>&lt;p&gt;: &lt;type name&gt;</code>): ドメイン型、enum、または組み込みの
 <code>Bool</code> — BMC が列挙できるものすべてです。<code>Bool</code> は <code>Bool</code> の状態変数とまったく同じ
 ように振る舞います: 真偽値のガードとして裸で使う(<code>requires b</code>、
@@ -368,6 +370,9 @@ impl 側だけの carried number(例: business の抽象には存在しない <c
 なければ、<code>leadsTo</code> は有界に検査されます。<code>--engine induction</code> と
 <code>decreases &lt;int expr&gt;</code> があれば、<code>leadsTo</code> は well-founded なランキング論法によって
 非有界に証明できます。</p>
+<p>FSL が検証するのは有限遷移系であり、refinement 関係そのものに対する高階の公理は
+宣言しません。refinement の反射律や推移律のような法則は、代数公理として量化する
+のではなく、具体的な refinement chain または有限状態機械のモデルを通して検査します。</p>
 <p><code>leadsTo</code> ブロック内の応答プロパティ:</p>
 <pre><code class="language-fsl">leadsTo &lt;Name&gt; {
   &lt;expr&gt; ~&gt; &lt;expr&gt;                      // once P holds (including the same instant), Q eventually holds
@@ -597,7 +602,10 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 <li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>。
   等値は構造的です: <code>none</code> は <code>none</code> とだけ等しく、2 つの <code>some</code> 値はペイロードが
   等しいときにちょうど等しくなります。<code>v</code> を束縛する形は引き続き <code>x is some(v)</code>
-  であり、等値が束縛を導入することはありません。順序は定義されません。</li>
+  であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
+  論理的な後続部分だけです。例えば <code>(x is some(v)) =&gt; ...</code> や
+  <code>(x is some(v)) and ...</code> の右辺では使えますが、グローバルな束縛にはなりません。
+  順序は定義されません。</li>
 <li>struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
   <code>==</code> はフィールドごとの等値</li>
 <li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>、<code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code></li>
@@ -1055,9 +1063,8 @@ witness のコントラクトを使わなければなりません。</p>
    それを排除する<strong>補助 invariant</strong>(それ自体がドメインの真実であるもの)を追加して
    ステップ 3 に戻る</li>
 </ol>
-<p>実際には、補助 invariant は 1 ラウンドで収束することが多いです
-(<code>DOGFOOD-1.md</code> / <code>DOGFOOD-2.md</code> の実例: 「attempts == 3 なら locked」
-「refund を持つのは Captured だけ」「キューに重複はない」)。</p></div></details>
+<p>有用な補助 invariant は、証明専用の人工物ではなく「attempts == 3 なら locked」
+「refund を持つのは Captured だけ」「キューに重複はない」のようなドメインの真実です。</p></div></details>
 <details id="9-idiom-collection"><summary>9. イディオム集<span class="tree-blurb"> — よく使うイディオム集 — Option、Seq集約、ghost変数など。</span></summary><div class="tree-body"><h3 id="option">番兵値の代わりに Option</h3>
 <pre><code class="language-fsl">cart: Map&lt;UserId, Option&lt;ItemId&gt;&gt;      // do not use a sentinel like -1
 struct Reservation { item: Option&lt;ItemId&gt;, qty: Qty }  // optional fields can be written directly too
@@ -2263,8 +2270,8 @@ DESIGN-*.md があります)。</p>
 </ul>
 <p>書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
 <code>skills/</code> の下の AI エージェントスキルにあり、共有の言語リファレンスは
-<code>skills/fsl/SKILL.md</code>、実走の記録は
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-9.md"><code>DOGFOOD-9.md</code></a> にあります。</p></div></details>
+<code>skills/fsl/SKILL.md</code> にあります。保守される実例は
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/validation"><code>examples/validation/</code></a> にあります。</p></div></details>
 <details id="16-promotion-judgment-to-ghost-types-typestate"><summary>16. ghost 型への昇格判定(typestate)<span class="tree-blurb"> — 状態機械を ghost 型 / typestate へ昇格させる判断。</span></summary><div class="tree-body"><p><code>fslc typestate &lt;file.fsl&gt; [--ts]</code> は、設計 spec の状態機械(enum 値の struct
 フィールド / 状態変数 / <code>Option&lt;_&gt;</code> スロット)を、ホスト言語の typestate
 (ghost 型)へどれだけ健全にマップできるかを判定します。各

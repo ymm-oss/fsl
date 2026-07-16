@@ -1,6 +1,6 @@
 // Inventory hold/confirm/release with a conservation invariant.
-// v2.1: Res.item is Option<ItemId> — the natural modeling DOGFOOD-1 F3
-// asked for (previously worked around with a meaningless item: 0 when Free).
+// Res.item uses Option<ItemId> so a free reservation has no meaningless sentinel
+// item (previously worked around with item 0 when Free).
 spec InventoryReservation {
   type ItemId = 0..1
   type ResId  = 0..2

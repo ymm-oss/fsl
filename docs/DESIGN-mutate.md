@@ -4,7 +4,7 @@ Motivation: issue #6 (category 4/7 of roadmap #1). A spec whose invariants are t
 missing stays silently verified (under-constraint). There was no mechanism to measure "how much
 the set of properties constrains the model's behavior." Even when tags are present, "whether
 that formalization actually constrains anything" (semantic traceability) is invisible to #5's
-existence check. This productizes the mutation proof done by hand on fslc itself in DOGFOOD-7.
+existence check. This productizes mutation as a repeatable non-triviality check.
 
 ## 1. CLI
 

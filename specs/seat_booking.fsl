@@ -1,6 +1,6 @@
 // Abstract seat booking: a seat is either free (none) or owned by a user.
 // The two-phase implementation (seat_booking_impl.fsl) refines this via a
-// state-dependent conditional mapping — the DOGFOOD-3 F9 motivating case.
+// State-dependent conditional mapping exercises refinement expression lowering.
 spec SeatBooking {
   type SeatId = 0..2
   type UserId = 0..1

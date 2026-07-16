@@ -95,14 +95,14 @@ refinement M { impl ImplR  abs AbsR
 
 
 def test_trace_type_acceptance_channel():
-    # boundary-flip lands in the acceptance lane (DOGFOOD-10 F19)
+    # A boundary flip requires the independent acceptance lane.
     r = run_check(str(INJECTED / "return_system__boundary_flip.fsl"))
     assert r["result"] == "error"
     assert r["trace_type"] == "acceptance"
 
 
 def test_trace_type_forbidden_channel():
-    # guard-weakening lands in the forbidden lane (DOGFOOD-10 F19)
+    # Guard weakening requires the independent forbidden lane.
     r = run_check(str(INJECTED / "return_system__guard_weakening.fsl"))
     assert r["result"] == "error"
     assert r["trace_type"] == "forbidden"

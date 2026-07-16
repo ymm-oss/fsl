@@ -323,7 +323,7 @@ failure and continues through the rest of the manifest.
 | 1 | **Metadata plumbing**: pass req_id/text through from AST → all JSON output (delivers value ahead of dialects: usable even in current fsl via `// @req REQ-1` annotations) | small |
 | 2 | **fsl-req dialect**: process+data, requirement/acceptance/branches/implements. The expander is isomorphic to compose. Process+data covers the common lifecycle; `branches` remains for hard kernel-wrapper cases; automatic synthesis of refinement is the core | medium (about one compose round) |
 | 3 | **fsl-biz dialect**: process/policy/kpi. The expander + display in business vocabulary | medium |
-| 4 | Three-layer dogfooding (run all three layers + implementation, starting from a consulting document) | medium |
+| 4 | Three-layer validation (run all three layers + implementation, starting from a consulting document) | medium |
 
 Risks and fallback: the concern that a dialect becomes a leaky abstraction
 (kernel concepts are exposed on verification failure) is addressed by a
