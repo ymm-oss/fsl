@@ -28,32 +28,27 @@ misidentified.
 
 ### Materialization
 
-The native CLI (`fslc`) materializes the blanked text to a sibling
-`.{stem}.literate.fsl` file next to the original `.md` (e.g. `toggle.md`
-materializes to `.toggle.literate.fsl`), passes that path to the existing
-check/verify pipeline, and removes the sibling on completion (via a `Drop`
-guard).  This design avoids modifying every independent `read_to_string`
-call site in the CLI — the blanked file is read from disk by all existing
-code paths, and positions are correct because blanking preserves line
-structure.  The materialized path is used only to read source content;
+The native CLI (`fslc`) materializes the blanked text to a process-owned
+`.{stem}.{pid}.literate.fsl` sibling next to the original `.md`, passes that
+path to the existing check/verify pipeline, and removes its own sibling on
+completion (via a `Drop` guard). This design avoids modifying every independent
+`read_to_string` call site in the CLI — the blanked file is read from disk by
+all existing code paths, and positions are correct because blanking preserves
+line structure. The materialized path is used only to read source content;
 every user-visible label in the CLI's JSON output (`file` fields, migration
 and implicit-initial-value finding locations) is stamped with the original
 `.md` path instead, so machine-readable output never names the transient
 sibling.
 
-The sibling filename is deterministic (no process ID component) so that the
-verify cache key — which is keyed in part on the canonicalized path passed
-to the check/verify pipeline — stays stable across repeated runs of the same
-document (see "Cache key" below). The sibling file requires write access to
-the source directory and is visible to concurrent processes during the CLI
-run: two concurrent runs on the same `.md` document write identical bytes
-(both blank from the same source), so a race is at worst a redundant write,
-never a wrong verdict; the only failure mode is one run's read losing to
-another process's deletion of the sibling mid-read, which errors loudly
-rather than silently misreading. This is acceptable for a local developer
-tool; a future design could use an in-memory buffer instead of a sibling
-file, but that would require a shared-source-loader refactoring across the
-~8 independent `read_to_string` call sites in the CLI.
+Process ownership is required: concurrent commands for one `.md` document must
+not write or delete another command's physical source. The original Markdown
+path is passed separately as the logical verify-cache identity, so PID-based
+physical isolation preserves cache hits across commands (see "Cache key"
+below). Cache dependency discovery still uses the physical sibling's directory,
+which is also the resolver base; this distinction keeps symlink aliases tied to
+the dependencies they actually resolve. The sibling still requires write
+access to the source directory. An in-memory buffer remains a possible future
+shared-source-loader refactoring, but is not required for concurrency safety.
 
 ### Multiple blocks
 
@@ -96,17 +91,18 @@ is not supported.
 
 `collect_fsl_sources` (verify cache-key computation) includes `.md` files
 in directory walks so that edits to literate Markdown specs invalidate the
-verification cache. The transient `.{stem}.literate.fsl` materialization
-(see "Materialization" above) is excluded from that walk by filename suffix
-— its content is already represented by the `.md` file itself through this
+verification cache. Transient `.{stem}.{pid}.literate.fsl` materializations
+(see "Materialization" above) are excluded from that walk by filename suffix
+— their content is already represented by the `.md` file itself through this
 same function's Markdown branch, so including it too would double-count it
-and, before the sibling's filename was made deterministic, made every run's
-cache key unique (the walk picked up the run-local sibling as if it were an
-independent dependency). The cache key's `path` field is the canonicalized
-path passed to the check/verify pipeline (the materialized sibling for a
-literate `.md`), which is why the sibling's filename must be deterministic
-rather than PID-suffixed — otherwise the key would never repeat across runs
-of the same document.
+and make a run-local sibling appear as an independent dependency. For literate
+input, the cache key's `path` field uses the canonicalized original `.md` path,
+not the process-owned physical read path, and the original Markdown bytes are
+hashed directly. Dependency collection starts at the physical read path's
+parent so it exactly matches the resolver base, including when the Markdown
+input is a symlink. Repeated and concurrent invocations therefore share one
+logical cache identity without sharing a mutable file or losing dependency
+invalidation.
 
 ## 3. Scope boundaries
 
@@ -153,9 +149,13 @@ without a separate code path).
   isolation, mixed fences, four-backtick fence containing a literal
   ` ```fsl ` example, tilde-fenced non-fsl block, `~~~fsl` fence, backtick
   run with trailing text staying content inside an fsl block).
-- `rust/fslc/tests/literate_markdown.rs`: 11 CLI integration tests (check,
+- `rust/fslc/tests/literate_markdown.rs`: 12 CLI integration tests (check,
   verify, scenarios, parse-error loc mapping, no-fsl rejection, non-fsl
   rejection, multi-block = single-block verdict, materialized-file cleanup,
   verify-cache hit on a second run, edition-finding `file` field naming the
-  `.md` document, four-backtick fence repro verifying as `violated`).
+  `.md` document, four-backtick fence repro verifying as `violated`, and
+  concurrent check/verify/scenarios isolation on one Markdown source).
+- `rust/fslc/src/main.rs` and `rust/fslc/src/verification.rs` unit tests:
+  process IDs produce distinct materialization paths, and symlink-alias cache
+  keys invalidate when a dependency beside the alias changes.
 - `examples/literate/toggle.md`: canonical literate example.

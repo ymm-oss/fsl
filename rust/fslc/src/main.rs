@@ -53,15 +53,16 @@ fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("literate");
-    // Deterministic (no PID): the same `.md` must materialize to the same sibling
-    // path across runs so the verify cache key is stable. Concurrent runs on the
-    // same document write identical bytes (both blank from the same source), so a
-    // race only ever produces a harmless duplicate write, never a wrong verdict;
-    // worst case a run's mid-read sees the file mid-write-or-delete by a sibling
-    // process and errors loudly rather than silently misreading.
-    let materialized = path.with_file_name(format!(".{stem}.literate.fsl"));
+    // Each CLI process owns its materialization. The original Markdown path is
+    // passed separately as the stable verify-cache identity, so physical
+    // isolation does not trade away cache hits across invocations.
+    let materialized = literate_materialization_path(path, stem, std::process::id());
     std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
     Ok(Some(LiterateState { path: materialized }))
+}
+
+fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> PathBuf {
+    path.with_file_name(format!(".{stem}.{process_id}.literate.fsl"))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1493,7 +1494,7 @@ fn command() -> Result<(Value, i32), String> {
                 .map_or(&display_path, |state| &state.path);
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                let result = run_verify_cli(path, &options);
+                let result = run_verify_cli(path, &display_path, &options);
                 with_version_metadata(apply_domain_edition(
                     result,
                     path,
@@ -2181,7 +2182,7 @@ fn run_sweep(
                     from_state: None,
                     edition: "current".to_owned(),
                 };
-                let (mut verification, _) = run_verify_cli(path, &options);
+                let (mut verification, _) = run_verify_cli(path, path, &options);
                 if let Value::Object(envelope) = &mut verification {
                     let trace_type = envelope.remove("trace_type");
                     envelope.insert(
@@ -13027,6 +13028,15 @@ mod exit_status_tests {
         assert_eq!(
             normalized_exit_status(&error_output("semantics", "bad spec"), 2),
             2
+        );
+    }
+
+    #[test]
+    fn literate_materialization_paths_are_process_owned() {
+        let source = Path::new("spec.md");
+        assert_ne!(
+            literate_materialization_path(source, "spec", 41),
+            literate_materialization_path(source, "spec", 42)
         );
     }
 
