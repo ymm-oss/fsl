@@ -1655,7 +1655,7 @@ fn cache_root() -> Option<PathBuf> {
 
 fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
     if path.is_file() {
-        if path.extension().and_then(std::ffi::OsStr::to_str) == Some("fsl") {
+        if is_fsl_source(path) && !is_literate_materialization(path) {
             output.push(path.to_path_buf());
         }
         return Ok(());
@@ -1671,6 +1671,28 @@ fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Resul
         }
     }
     Ok(())
+}
+
+fn is_fsl_source(path: &Path) -> bool {
+    match path.extension().and_then(std::ffi::OsStr::to_str) {
+        Some("fsl") => true,
+        Some("md") => std::fs::read_to_string(path)
+            .ok()
+            .and_then(|source| fsl_syntax::extract_literate_fsl(&source))
+            .is_some(),
+        _ => false,
+    }
+}
+
+/// True for the transient sibling `fslc` materializes next to a literate `.md`
+/// file (see `materialize_literate` in `main.rs`). This file's content is
+/// already represented by the `.md` file itself via `is_fsl_source`'s Markdown
+/// branch above, so it must be excluded from the cache-key directory walk —
+/// otherwise a run-local artifact would spuriously appear as a dependency.
+fn is_literate_materialization(path: &Path) -> bool {
+    path.file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|name| name.ends_with(".literate.fsl"))
 }
 
 fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String, String), String> {

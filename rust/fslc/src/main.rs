@@ -27,6 +27,43 @@ use verification::{
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 
+struct LiterateState {
+    path: PathBuf,
+}
+
+impl Drop for LiterateState {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
+        return Ok(None);
+    }
+    let raw =
+        std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let blanked = fsl_syntax::extract_literate_fsl(&raw).ok_or_else(|| {
+        format!(
+            "{}: Markdown file does not contain any ```fsl fenced code blocks",
+            path.display()
+        )
+    })?;
+    let stem = path
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("literate");
+    // Deterministic (no PID): the same `.md` must materialize to the same sibling
+    // path across runs so the verify cache key is stable. Concurrent runs on the
+    // same document write identical bytes (both blank from the same source), so a
+    // race only ever produces a harmless duplicate write, never a wrong verdict;
+    // worst case a run's mid-read sees the file mid-write-or-delete by a sibling
+    // process and errors loudly rather than silently misreading.
+    let materialized = path.with_file_name(format!(".{stem}.literate.fsl"));
+    std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
+    Ok(Some(LiterateState { path: materialized }))
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ScopeBounds {
     instances: std::collections::BTreeMap<String, i64>,
@@ -804,10 +841,14 @@ fn command() -> Result<(Value, i32), String> {
             std::process::exit(0);
         }
         "check" => {
-            let path = PathBuf::from(
+            let display_path = PathBuf::from(
                 args.next()
                     .ok_or_else(|| "usage: fslc check SPEC [options]".to_owned())?,
             );
+            let literate_guard = materialize_literate(&display_path)?;
+            let path = literate_guard
+                .as_ref()
+                .map_or(&display_path, |state| &state.path);
             let mut strict_tags = false;
             let mut requirements = None;
             let mut edition = "current".to_owned();
@@ -825,7 +866,8 @@ fn command() -> Result<(Value, i32), String> {
                 }
             }
             Ok(with_version_metadata(run_check_with_tags(
-                &path,
+                path,
+                &display_path,
                 strict_tags,
                 requirements.as_deref(),
                 &edition,
@@ -1441,14 +1483,23 @@ fn command() -> Result<(Value, i32), String> {
             ))
         }
         "verify" | "scenarios" => {
-            let path = PathBuf::from(
+            let display_path = PathBuf::from(
                 args.next()
                     .ok_or_else(|| format!("usage: fslc {command} SPEC [options]"))?,
             );
+            let literate_guard = materialize_literate(&display_path)?;
+            let path = literate_guard
+                .as_ref()
+                .map_or(&display_path, |state| &state.path);
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                let result = run_verify_cli(&path, &options);
-                with_version_metadata(apply_domain_edition(result, &path, &options.edition))
+                let result = run_verify_cli(path, &options);
+                with_version_metadata(apply_domain_edition(
+                    result,
+                    path,
+                    &display_path,
+                    &options.edition,
+                ))
             } else {
                 if options.engine != "bmc"
                     || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
@@ -1467,7 +1518,7 @@ fn command() -> Result<(Value, i32), String> {
                 {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
-                run_scenarios(&path, options.depth, &options.deadlock)
+                run_scenarios(path, options.depth, &options.deadlock)
             })
         }
         _ => Err(format!("unknown command '{command}'")),
@@ -2392,7 +2443,7 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
                         );
                         (detail, status, "verify", Some(depth))
                     } else {
-                        let (detail, status) = run_check(&file_path);
+                        let (detail, status) = run_check(&file_path, &file_path);
                         (detail, status, "check", None)
                     };
                 let passed = chain_layer_passes(&detail, status);
@@ -3869,11 +3920,17 @@ fn display_binding(value: &fsl_core::FslValue) -> String {
     }
 }
 
-fn run_check(path: &Path) -> (Value, i32) {
+/// `path` is read for source content (for a literate `.md` input, this is the
+/// materialized, blanked `.literate.fsl` sibling — its line positions match
+/// the original document). `display_path` is stamped into every user-visible
+/// label (`file` fields, embedded `at file:line:col` text) so the machine-
+/// readable output always names the document the caller actually passed in,
+/// never the transient materialization.
+fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     if let Ok(source) = std::fs::read_to_string(path) {
         if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
             &source,
-            &path.to_string_lossy(),
+            &display_path.to_string_lossy(),
             envelope(),
         ) {
             return (output, 0);
@@ -3896,10 +3953,13 @@ fn run_check(path: &Path) -> (Value, i32) {
             Err(error) => return (surface_parse_error_output(&error), 2),
         }
         let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-        if let Some(diagnostic) =
-            fslc_rust::source_diagnostic::diagnostics(&source, &path.to_string_lossy(), &resolver)
-                .into_iter()
-                .find(|diagnostic| diagnostic.kind != "migration")
+        if let Some(diagnostic) = fslc_rust::source_diagnostic::diagnostics(
+            &source,
+            &display_path.to_string_lossy(),
+            &resolver,
+        )
+        .into_iter()
+        .find(|diagnostic| diagnostic.kind != "migration")
         {
             return (semantic_error_output(&diagnostic.message), 2);
         }
@@ -4186,13 +4246,17 @@ fn add_strict_tag_warnings(
     Ok(())
 }
 
+/// `path` is read for source content (the materialized `.literate.fsl` sibling
+/// for a literate `.md` input); `display_path` is stamped into user-visible
+/// labels. See `run_check` for the same split.
 fn run_check_with_tags(
     path: &Path,
+    display_path: &Path,
     strict_tags: bool,
     requirements: Option<&Path>,
     edition: &str,
 ) -> (Value, i32) {
-    let (mut output, status) = run_check(path);
+    let (mut output, status) = run_check(path, display_path);
     if status == 0 && strict_tags {
         let model = match load_model(path) {
             Ok(model) => model,
@@ -4202,12 +4266,20 @@ fn run_check_with_tags(
             return (error_output("io", &error), 2);
         }
     }
-    apply_domain_edition((output, status), path, edition)
+    apply_domain_edition((output, status), path, display_path, edition)
 }
 
+/// `path` is read for source content (the materialized `.literate.fsl`
+/// sibling for a literate `.md` input, so parsing sees the correctly blanked,
+/// position-preserving text); `display_path` is stamped into every
+/// user-visible label (migration/edition finding `file` fields, implicit-
+/// initial-value warning `file` fields) so machine-readable output always
+/// names the document the caller passed on the command line, never the
+/// transient materialization.
 fn apply_domain_edition(
     (mut output, status): (Value, i32),
     path: &Path,
+    display_path: &Path,
     edition: &str,
 ) -> (Value, i32) {
     let Ok(source) = std::fs::read_to_string(path) else {
@@ -4218,21 +4290,23 @@ fn apply_domain_edition(
     } else {
         fslc_rust::migration::Edition::Current
     };
-    let Ok(plan) =
-        fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), migration_edition)
-    else {
+    let Ok(plan) = fslc_rust::migration::plan_migration(
+        &source,
+        &display_path.to_string_lossy(),
+        migration_edition,
+    ) else {
         return (output, status);
     };
     let mut additions = plan
         .diagnostics
         .iter()
         .filter(|finding| edition == "next" || finding.code == "deprecated_domain_enum_union")
-        .map(|finding| finding.json(&path.to_string_lossy(), migration_edition))
+        .map(|finding| finding.json(&display_path.to_string_lossy(), migration_edition))
         .collect::<Vec<_>>();
     if edition != "next" {
         additions.extend(fslc_rust::frontend_output::implicit_initial_value_warnings(
             &source,
-            &path.to_string_lossy(),
+            &display_path.to_string_lossy(),
         ));
     }
     if edition == "next" && !additions.is_empty() {
@@ -5009,18 +5083,19 @@ fn run_domain_check(
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
         Err(error) => {
-            return apply_domain_edition((semantic_error_output(&error), 2), path, edition);
+            return apply_domain_edition((semantic_error_output(&error), 2), path, path, edition);
         }
     };
     let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
     if status == 2 {
-        return apply_domain_edition((kernel, status), path, edition);
+        return apply_domain_edition((kernel, status), path, path, edition);
     }
     apply_domain_edition(
         wrap_specialized(fsl_tools::check_domain(
             &domain,
             &stable_kernel_projection(kernel),
         )),
+        path,
         path,
         edition,
     )

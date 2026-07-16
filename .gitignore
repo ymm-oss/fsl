@@ -36,6 +36,9 @@ tasks/active.md
 # Generated docs search index (bleve) — regenerable, not tracked
 docs/index.bleve/
 
+# fslc literate-Markdown materialization sibling (transient; leaked only on a crash)
+*.literate.fsl
+
 # Relational Design plugin local trace/session state — working scratch for the
 # design process, not a repo deliverable (the decisions land in docs/DESIGN-*.md)
 .relational-design/
