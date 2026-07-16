@@ -20,6 +20,10 @@ Keep `main` as the default branch. Do not create `develop` or `pre-production`.
 Use a temporary `release/vX.Y` branch only when `main` must advance while an
 exact candidate is stabilized.
 
+Read `docs/RELEASE.md` completely before `promote` or `cut`; it is the
+authoritative command-level procedure. Keep it and this lifecycle contract
+aligned in the same pull request.
+
 ## Non-negotiable rules
 
 - Merge product and quality changes into `main` through pull requests.
@@ -27,6 +31,11 @@ exact candidate is stabilized.
 - Never tag `main`; tag the exact `production` commit approved for release.
 - Never selectively promote commits from `main`. Promote its complete tree.
 - Never force-move or reuse a published tag.
+- Publish only the tag-driven GitHub Release. Do not publish the frozen Python
+  compatibility reference to PyPI or the Rust crates to crates.io.
+- Release native binaries for macOS arm64, Linux x64, Linux arm64, and Windows
+  x64 only. Intel macOS (`macos-x64`) is not supported.
+- Populate the GitHub Release body from the matching non-empty changelog section.
 - Fix defects upstream in `main` first, then promote downstream. Use the hotfix
   exception only when unreleased `main` cannot safely ship.
 - Stop before a push, production merge, tag, release publication, or branch
@@ -86,15 +95,21 @@ a feature-flag system solely to accommodate this flow.
 2. Freeze the candidate by recording the exact `main` SHA in the promotion pull
    request. If unrelated changes land, rerun the gate or replace the candidate.
 3. Confirm the release commit preparation is already on `main`:
-   - synchronize versions required by repository contracts;
+   - bump `rust/Cargo.toml`'s workspace version and regenerate `rust/Cargo.lock`
+     with Cargo; do not bump the frozen `pyproject.toml` package for a native
+     GitHub Release;
    - move `[Unreleased]` entries under `## [X.Y.Z] - YYYY-MM-DD` while retaining
      an empty `[Unreleased]` section;
-   - update comparison links and release notes.
+   - update comparison links and confirm the matching changelog section is a
+     non-empty Release body.
 4. Run `./tools/check-native-integration.sh` and dispatch the release workflow's
    manual artifact build. Verify the completed run's `head_sha` equals the
    recorded candidate SHA; discard and rerun evidence produced from a moving
-   branch after it advances. Add focused formal, mutation, platform, or
-   compatibility evidence when the changed contract requires it.
+   branch after it advances. Confirm all four native targets, the VS Code
+   extension, and both Kernel bundle jobs pass. `workflow_dispatch` is
+   non-publishing and must never attach Release assets, even for a tag ref. Add
+   focused formal, mutation, platform, or compatibility evidence when the
+   changed contract requires it.
 5. Open `main -> production`. State the candidate SHA, version, included changes,
    known residual risk, exact gates, and artifact evidence.
 6. Merge without squashing away the promoted history. Verify the resulting
@@ -111,19 +126,32 @@ After the promotion is approved and merged:
 
 1. Verify the requested version is valid SemVer and absent from local and remote
    tags and releases.
-2. Verify `production` HEAD has the prepared version and changelog.
+2. Verify `production` HEAD has the prepared Rust workspace version, lockfile,
+   changelog, and non-empty version section.
 3. Rerun `./tools/check-native-integration.sh` on exact `production` HEAD. Dispatch
    the manual release artifact workflow from `production`, verify its `head_sha`
    equals that HEAD, and require every job to pass. Never reuse evidence from the
    pre-merge candidate for a distinct production merge commit.
-4. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
-5. Before pushing, state the tag, commit SHA, and that the push publishes native
+4. Regenerate a temporary notes file from the exact production HEAD's matching
+   changelog section. Stop if it is empty; never reuse notes derived from the
+   pre-promotion candidate.
+5. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
+6. Before pushing, state the tag, commit SHA, and that the push publishes native
    binaries, the VS Code extension, and Kernel contract bundles.
-6. Push the tag only after explicit confirmation for that version.
-7. Observe every release job. Report the release URL, tag SHA, artifact matrix,
-   checksums, and any failed job without retagging.
-8. If publication has begun and a defect is found, fix it and cut a new patch
-   version. Never rewrite the published release.
+7. Push the tag only after explicit confirmation for that version.
+8. Observe every release job. If a job fails transiently, inspect it and rerun
+   only the failed jobs; do not retag.
+9. Show the production-derived notes file and obtain explicit confirmation
+   before setting the GitHub Release body with
+   `gh release edit vX.Y.Z --notes-file ...`.
+10. Verify the Release body is non-empty and matches the changelog section.
+11. Verify exactly the four supported native `fslc`/`fslc-lsp` asset pairs and
+    checksums, the VS Code extension, and both Kernel bundles. Reject any
+    `macos-x64` asset. Download one supported binary, verify its checksum, and
+    require `fslc --version` to equal the tag; the workflow performs the same
+    tag/version assertion on every native runner.
+12. If publication has begun and a defect is found, fix it upstream, promote it,
+    and cut a new patch version. Never rewrite the published release.
 
 ## Stabilize while main advances
 
@@ -187,5 +215,7 @@ At completion, report:
 - integration and release gates actually observed;
 - promotion pull request and release URLs;
 - released tag and whether it equals `production` HEAD;
+- non-empty release notes, supported asset inventory, checksum, and version
+  smoke-test evidence;
 - temporary release/hotfix branches still requiring cleanup;
 - any component-contract risk deferred from the release.

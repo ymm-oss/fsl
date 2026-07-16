@@ -165,6 +165,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `pre-production` branches, defines promotion, stabilization, and hotfix
   procedures, and keeps component behavior independent of branch names. Codex
   and Claude share the same internal Skill definition.
+- Releases now follow one documented, agent-operable procedure that gates the
+  Rust version/changelog PR, exact-SHA `main` to `production` promotion,
+  four-target workflow dry runs, confirmed annotated tag push,
+  changelog-derived GitHub Release notes, and post-release asset/version checks.
+  Intel macOS binaries are no longer built or advertised (issue #335).
 - Chronological field-trial reports were distilled into authoritative design
   contracts, language/skill rules, maintained examples, and executable regression
   tests, then removed as a parallel documentation source. The native pytest

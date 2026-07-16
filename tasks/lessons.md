@@ -1,5 +1,8 @@
 # Workflow lessons
 
+- Before scoping an issue, fetch `origin` and inspect recently merged pull
+  requests that touch the same contract surface; a locally cached
+  `origin/main` is not evidence that the issue's prerequisites are current.
 - When the user makes the native Rust implementation the completion authority,
   do not block delivery on a stalled full Python suite. Stop that suite when
   directed, retain only focused compatibility evidence, and finish the Rust
