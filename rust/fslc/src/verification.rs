@@ -28,6 +28,7 @@ pub(super) use fslc_rust::verification_output::DeadlockMode;
 #[derive(Clone, Copy)]
 pub(super) struct ModelSelection<'a> {
     pub(super) path: &'a Path,
+    pub(super) model: Option<&'a KernelModel>,
     pub(super) scope: Option<&'a ScopeBounds>,
     pub(super) property: Option<&'a str>,
     pub(super) excluded: &'a [String],
@@ -149,16 +150,15 @@ fn finish_verification(
 }
 
 fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, String> {
-    selection
-        .scope
-        .map_or_else(
+    let mut model = match selection.model {
+        Some(model) => model.clone(),
+        None => selection.scope.map_or_else(
             || load_model(selection.path),
             |scope| load_model_scoped(selection.path, scope),
-        )
-        .and_then(|mut model| {
-            select_properties(&mut model, selection.property, selection.excluded)?;
-            Ok(model)
-        })
+        )?,
+    };
+    select_properties(&mut model, selection.property, selection.excluded)?;
+    Ok(model)
 }
 
 pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i32) {
@@ -1520,6 +1520,7 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
     };
     let selection = ModelSelection {
         path,
+        model: None,
         scope: None,
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
@@ -1744,13 +1745,29 @@ fn verify_cache_keys_with_solver_version(
     engine: &str,
     solver_version: &str,
 ) -> Result<(String, String), String> {
+    verify_cache_keys_with_fingerprints(
+        path,
+        options,
+        engine,
+        solver_version,
+        env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
+    )
+}
+
+fn verify_cache_keys_with_fingerprints(
+    path: &Path,
+    options: &CliVerifyOptions,
+    engine: &str,
+    solver_version: &str,
+    implementation_fingerprint: &str,
+) -> Result<(String, String), String> {
     let canonical = cache_identity(path)?;
     let base = canonical.parent().unwrap_or_else(|| Path::new("."));
     let mut sources = Vec::new();
     collect_fsl_sources(base, &mut sources).map_err(|error| error.to_string())?;
     sources.sort();
     let mut digest = Sha256::new();
-    digest.update(b"fslc-rust-verify-cache-v1\0");
+    digest.update(b"fslc-rust-verify-cache-v2\0");
     digest.update(env!("CARGO_PKG_VERSION").as_bytes());
     if engine == "explicit" {
         digest.update(b"\0backend=native-explicit\0");
@@ -1759,9 +1776,8 @@ fn verify_cache_keys_with_solver_version(
         digest.update(solver_version.as_bytes());
         digest.update(b"\0");
     }
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    digest.update(b"executable\0");
-    digest.update(std::fs::read(executable).map_err(|error| error.to_string())?);
+    digest.update(b"implementation\0");
+    digest.update(implementation_fingerprint.as_bytes());
     digest.update(b"\0");
     for source in sources {
         digest.update(
@@ -1804,7 +1820,7 @@ fn verify_cache_keys_with_solver_version(
 fn verify_cache_path(key: &str) -> Option<PathBuf> {
     Some(
         cache_root()?
-            .join("verify/v1")
+            .join("verify/v2")
             .join(&key[..2])
             .join(format!("{key}.json")),
     )
@@ -1822,7 +1838,7 @@ fn verify_cache_lookup_with_fallback(
     let path = verify_cache_path(key)?;
     if let Ok(bytes) = std::fs::read(path)
         && let Ok(entry) = serde_json::from_slice::<Value>(&bytes)
-        && entry.get("schema").and_then(Value::as_str) == Some("fslc-rust-cache.v1")
+        && entry.get("schema").and_then(Value::as_str) == Some("fslc-rust-cache.v2")
         && entry.get("key").and_then(Value::as_str) == Some(key)
     {
         let mut output = entry.get("output")?.clone();
@@ -1833,7 +1849,7 @@ fn verify_cache_lookup_with_fallback(
         return Some((output, entry.get("engine_fallback").cloned()));
     }
     let pointer_path = cache_root()?
-        .join("verify/v1/xdepth")
+        .join("verify/v2/xdepth")
         .join(format!("{xdepth}.json"));
     let pointer: Value = serde_json::from_slice(&std::fs::read(pointer_path).ok()?).ok()?;
     let violation_step = usize::try_from(pointer.get("violated_at_step")?.as_u64()?).ok()?;
@@ -1877,7 +1893,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value, engine_fallback: 
     let temporary = parent.join(format!(".{}.{}.tmp", key, std::process::id()));
     let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
     let mut entry = json!({
-        "schema": "fslc-rust-cache.v1",
+        "schema": "fslc-rust-cache.v2",
         "key": key,
         "backend": if explicit { "native-explicit" } else { "native-z3" },
         "solver_version": if explicit {
@@ -1903,7 +1919,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value, engine_fallback: 
         && let Some(step) = output.get("violated_at_step").and_then(Value::as_u64)
         && let Some(root) = cache_root()
     {
-        let directory = root.join("verify/v1/xdepth");
+        let directory = root.join("verify/v2/xdepth");
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
             let temporary = directory.join(format!(".{xdepth}.{}.tmp", std::process::id()));
@@ -1920,7 +1936,10 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value, engine_fallback: 
 
 struct PreparedCliVerification {
     has_scope: bool,
+    is_agent_document: bool,
+    model: Result<KernelModel, String>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
+    has_trace_contract: bool,
 }
 
 pub(super) fn run_verify_cli(path: &Path, options: &CliVerifyOptions) -> CommandResult {
@@ -1983,11 +2002,15 @@ fn prepare_cli_verification(
     path: &Path,
     options: &CliVerifyOptions,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    if let Ok(source) = std::fs::read_to_string(path)
-        && let Err(error) = fsl_syntax::parse_surface_document(&source)
-    {
-        return Err((error_output("parse", &error.to_string()), 2));
-    }
+    let is_agent_document = if let Ok(source) = std::fs::read_to_string(path) {
+        match fsl_syntax::parse_surface_document(&source) {
+            Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
+            Ok(_) => false,
+            Err(error) => return Err((error_output("parse", &error.to_string()), 2)),
+        }
+    } else {
+        false
+    };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document(path) {
         return Err((semantic_error_output(&error), 2));
@@ -2008,17 +2031,21 @@ fn prepare_cli_verification(
     } else {
         None
     };
+    let mut has_trace_contract = false;
     if !has_scope && let Ok(model) = &snapshot_model {
         match validate_requirement_traces(path, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
-            Ok((None, _)) => {}
+            Ok((None, has_contract)) => has_trace_contract = has_contract,
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
-    validate_cli_property_selection(path, options, has_scope)?;
+    validate_cli_property_selection(path, options, has_scope, snapshot_model.as_ref().ok())?;
     Ok(PreparedCliVerification {
         has_scope,
+        is_agent_document,
+        model: snapshot_model,
         initial_state,
+        has_trace_contract,
     })
 }
 
@@ -2026,14 +2053,15 @@ fn validate_cli_property_selection(
     path: &Path,
     options: &CliVerifyOptions,
     has_scope: bool,
+    prepared_model: Option<&KernelModel>,
 ) -> Result<(), CommandResult> {
     if options.property.is_none() && options.exclude_properties.is_empty() {
         return Ok(());
     }
-    let mut model = if has_scope {
-        load_model_scoped(path, &options.scope)
-    } else {
-        load_model(path)
+    let mut model = match prepared_model {
+        Some(model) => Ok(model.clone()),
+        None if has_scope => load_model_scoped(path, &options.scope),
+        None => load_model(path),
     }
     .map_err(|error| (semantic_error_output(&error), 2))?;
     if options.engine == "induction"
@@ -2154,58 +2182,97 @@ fn execute_cli_verification(
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> CommandResult {
-    if prepared.has_scope
+    let filtered = prepared.has_scope
         || options.property.is_some()
         || !options.exclude_properties.is_empty()
-        || prepared.initial_state.is_some()
-    {
-        let deadlock = match DeadlockMode::parse(&options.deadlock) {
-            Ok(mode) => mode,
-            Err(error) => return (error_output("usage", &error), 2),
-        };
-        let selection = ModelSelection {
-            path,
-            scope: prepared.has_scope.then_some(&options.scope),
-            property: options.property.as_deref(),
-            excluded: &options.exclude_properties,
-        };
-        return match VerificationEngine::parse(&options.engine) {
-            Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
-                selection,
-                depth: options.depth,
-                deadlock,
-                initial_state: prepared.initial_state.as_ref(),
-            }),
-            Ok(VerificationEngine::Induction) => run_induction_filtered(InductionRequest {
-                selection,
-                depth: options.depth,
-                deadlock,
-                k: options.k_ind,
-                auxiliary: &[],
-            }),
-            Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
-                selection,
-                depth: options.depth,
-                deadlock,
-                budget: options.explicit_budget,
-            }),
-            Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
-                selection,
-                depth: options.depth,
-                deadlock,
-                budget: options.explicit_budget,
-            }),
-            Err(error) => (error_output("usage", &error), 2),
-        };
+        || prepared.initial_state.is_some();
+    if !filtered && prepared.is_agent_document {
+        return (
+            error_output(
+                "parse",
+                "agent documents cannot be verified as Kernel specs",
+            ),
+            2,
+        );
     }
-    run_verify(
+    let deadlock = match DeadlockMode::parse(&options.deadlock) {
+        Ok(mode) => mode,
+        Err(error) => return (error_output("usage", &error), 2),
+    };
+    let model = match &prepared.model {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(error), 2),
+    };
+    let implements = if filtered {
+        None
+    } else {
+        match implements_result(path, model, options.depth) {
+            Ok(implements) => implements,
+            Err(error) => return (error_output("type", &error), 2),
+        }
+    };
+    let selection = ModelSelection {
         path,
-        options.depth,
-        &options.deadlock,
-        &options.engine,
-        options.explicit_budget,
-        options.k_ind,
-    )
+        model: Some(model),
+        scope: None,
+        property: options.property.as_deref(),
+        excluded: &options.exclude_properties,
+    };
+    let (mut output, status) = match VerificationEngine::parse(&options.engine) {
+        Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
+            selection,
+            depth: options.depth,
+            deadlock,
+            initial_state: prepared.initial_state.as_ref(),
+        }),
+        Ok(VerificationEngine::Induction) => run_induction_filtered(InductionRequest {
+            selection,
+            depth: options.depth,
+            deadlock,
+            k: options.k_ind,
+            auxiliary: &[],
+        }),
+        Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
+            selection,
+            depth: options.depth,
+            deadlock,
+            budget: options.explicit_budget,
+        }),
+        Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
+            selection,
+            depth: options.depth,
+            deadlock,
+            budget: options.explicit_budget,
+        }),
+        Err(error) => return (error_output("usage", &error), 2),
+    };
+    if !filtered {
+        decorate_default_cli_verification(&mut output, implements, prepared.has_trace_contract);
+    }
+    (output, status)
+}
+
+fn decorate_default_cli_verification(
+    output: &mut Value,
+    implements: Option<Value>,
+    has_trace_contract: bool,
+) {
+    let Value::Object(envelope) = output else {
+        return;
+    };
+    if envelope.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(implements) = implements
+    {
+        envelope.insert("implements".to_owned(), implements);
+    }
+    if (envelope.contains_key("implements") || has_trace_contract)
+        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
+    {
+        warnings.retain(|warning| {
+            warning.get("message").and_then(Value::as_str)
+                != Some("spec declares no user invariants (only implicit type bounds are checked)")
+        });
+    }
 }
 
 fn finalize_cli_verification(
@@ -2326,6 +2393,7 @@ mod tests {
         let (output, status) = run_bmc_filtered(BmcRequest {
             selection: ModelSelection {
                 path: &path,
+                model: None,
                 scope: None,
                 property: None,
                 excluded: &excluded,
@@ -2346,6 +2414,7 @@ mod tests {
         let (output, status) = run_induction_filtered(InductionRequest {
             selection: ModelSelection {
                 path: &path,
+                model: None,
                 scope: None,
                 property: None,
                 excluded: &excluded,
@@ -2411,6 +2480,31 @@ mod tests {
             .expect("current solver cache keys");
         let updated = verify_cache_keys_with_solver_version(&path, &options, "bmc", "Z3 4.17.0.0")
             .expect("updated solver cache keys");
+
+        assert_ne!(current, updated);
+    }
+
+    #[test]
+    fn cache_keys_include_the_compiled_implementation_fingerprint() {
+        let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
+        let options = CliVerifyOptions::default();
+
+        let current = verify_cache_keys_with_fingerprints(
+            &path,
+            &options,
+            "bmc",
+            "Z3 4.16.0.0",
+            "implementation-a",
+        )
+        .expect("current implementation cache keys");
+        let updated = verify_cache_keys_with_fingerprints(
+            &path,
+            &options,
+            "bmc",
+            "Z3 4.16.0.0",
+            "implementation-b",
+        )
+        .expect("updated implementation cache keys");
 
         assert_ne!(current, updated);
     }
