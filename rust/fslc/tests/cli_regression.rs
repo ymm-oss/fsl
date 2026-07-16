@@ -126,7 +126,7 @@ fn native_check_reports_a_governance_counterexample_without_misclassifying_it() 
 fn native_check_locates_a_malformed_dependency_at_the_governance_reference() {
     let (value, status) = run_cli(&[
         "check",
-        "examples/gallery/adversarial/governance_malformed_dependency.fsl",
+        "examples/gallery/errors/governance_malformed_dependency.fsl",
     ]);
 
     assert_eq!(status, 2, "{value}");
