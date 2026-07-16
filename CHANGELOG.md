@@ -153,6 +153,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Required product CI now runs the Rust workspace and WASM integration phases in parallel while
+  preserving `tools/check-native-integration.sh` as the complete local gate. The pinned
+  `wasm-bindgen-cli` binaries are cached by runner OS and version instead of being rebuilt on every
+  run.
 - The internal `release` Skill now operates a GitLab Flow-inspired
   `short-lived branch -> main -> production -> vX.Y.Z` lifecycle. It separates
   integration evidence from release readiness, omits permanent `develop` and
