@@ -5,14 +5,17 @@
     docs/intro/language.{ja,en}.html  <-  docs/LANGUAGE.md
     docs/intro/cli.{ja,en}.html       <-  src/fslc/cli.py (argparse introspection)
 
-Design contract (see docs/DESIGN-docs-site.md D3/D4/D5 and the fable decision on the
-"canonical language problem"): the English body of LANGUAGE.md is reused verbatim for
-both the ja and en pages — no translation, no second source to keep in sync. The ja page
-only adds a Japanese lead paragraph and a Japanese one-line description per top-level
-section, sourced from SECTION_BLURBS below. If LANGUAGE.md grows a top-level ("## ")
-section that isn't in SECTION_BLURBS, this script fails loudly instead of silently
-shipping an incomplete reference — the dictionary is where the "language feature moves
-all of its files together" rule (CLAUDE.md) reaches this site.
+Design contract (see docs/DESIGN-docs-site.md D3/D4/D5/D7): the ja page body is rendered
+from docs/LANGUAGE.ja.md, a second canonical source kept section-aligned 1:1 with
+docs/LANGUAGE.md (same count and order of "## " sections; see D7 for why this replaced
+the earlier "no translation" stance). Section anchors (`id=`) and blurb lookups always key
+off the English heading text so cross-page links and SECTION_BLURBS stay stable regardless
+of language. The ja page also adds a Japanese lead paragraph and a Japanese one-line
+description per top-level section, sourced from SECTION_BLURBS below. If LANGUAGE.md grows
+a top-level ("## ") section that isn't in SECTION_BLURBS, or LANGUAGE.md/LANGUAGE.ja.md fall
+out of section-count sync, this script fails loudly instead of silently shipping an
+incomplete or misaligned reference — this is where the "language feature moves all of its
+files together" rule (CLAUDE.md) reaches this site.
 
 Output is deterministic (no timestamps/commit hashes) so regeneration produces a clean,
 reviewable diff only when the sources actually changed. Run after any change to
@@ -34,6 +37,7 @@ import markdown
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LANGUAGE_MD = REPO_ROOT / "docs" / "LANGUAGE.md"
+LANGUAGE_MD_JA = REPO_ROOT / "docs" / "LANGUAGE.ja.md"
 OUT_DIR = REPO_ROOT / "docs" / "intro"
 
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -165,9 +169,9 @@ def _rewrite_relative_md_links(html_text: str) -> str:
 
 
 def render_language_tree(lang: str) -> str:
-    text = LANGUAGE_MD.read_text(encoding="utf-8")
-    sections = split_language_md(text)
-    unknown = [h for h, _ in sections if h not in SECTION_BLURBS]
+    en_text = LANGUAGE_MD.read_text(encoding="utf-8")
+    en_sections = split_language_md(en_text)
+    unknown = [h for h, _ in en_sections if h not in SECTION_BLURBS]
     if unknown:
         raise SystemExit(
             "build_site_reference: docs/LANGUAGE.md has section(s) with no entry in "
@@ -176,13 +180,30 @@ def render_language_tree(lang: str) -> str:
             "(this is the connective-tissue check for the 'a language feature moves "
             "all of its files together' rule reaching the site)."
         )
+
+    if lang == "ja":
+        ja_text = LANGUAGE_MD_JA.read_text(encoding="utf-8")
+        render_sections = split_language_md(ja_text)
+        if len(render_sections) != len(en_sections):
+            raise SystemExit(
+                "build_site_reference: docs/LANGUAGE.ja.md has "
+                f"{len(render_sections)} '## ' section(s) but docs/LANGUAGE.md has "
+                f"{len(en_sections)}. The two files must stay section-aligned 1:1 "
+                "(same count, same order) — reconcile docs/LANGUAGE.ja.md with the "
+                "current docs/LANGUAGE.md before regenerating (see docs/DESIGN-docs-site.md D7)."
+            )
+    else:
+        render_sections = en_sections
+
     md = markdown.Markdown(extensions=["tables", "fenced_code", "toc"])
     nodes = []
-    for heading, body in sections:
+    for (en_heading, _), (heading, body) in zip(en_sections, render_sections):
         md.reset()
         body_html = _rewrite_relative_md_links(md.convert(body))
-        slug = slugify(heading)
-        blurb = SECTION_BLURBS[heading][lang]
+        # Anchors and blurb lookups always key off the English heading so cross-page
+        # links and SECTION_BLURBS stay stable regardless of which language renders.
+        slug = slugify(en_heading)
+        blurb = SECTION_BLURBS[en_heading][lang]
         nodes.append(
             f'<details id="{slug}"><summary>{html.escape(heading)}'
             f'<span class="tree-blurb"> — {html.escape(blurb)}</span></summary>'
@@ -259,17 +280,17 @@ def render_cli_tree() -> str:
 PAGE_STRINGS = {
     "language": {
         "ja": {
-            "title": "FSL 言語リファレンス — LANGUAGE.md から生成",
-            "description": "docs/LANGUAGE.md から生成される、FSLの網羅的な言語リファレンス。",
+            "title": "FSL 言語リファレンス — LANGUAGE.ja.md から生成",
+            "description": "docs/LANGUAGE.ja.md から生成される、FSLの網羅的な言語リファレンス(日本語版)。",
             "kicker": "Generated Reference",
             "h1": "言語リファレンス",
             "lead": (
-                "これは <code>docs/LANGUAGE.md</code> からの生成物です。正典は英語の本文で、"
-                "翻訳は行いません — FSLの予約語・エラーメッセージ・JSON出力はすべて英語であり、"
-                "訳を作ると <code>LANGUAGE.md</code> / このページ / <code>skills/fsl/reference.md</code> "
-                "の三重管理に戻ってしまうためです。各節の日本語1行説明は目次として付けています。"
+                "これは <code>docs/LANGUAGE.ja.md</code> からの生成物です。"
+                "<code>docs/LANGUAGE.md</code>(英語)と節単位で1対1対応する第二の正典として"
+                "保守されています。FSLの予約語・コマンド名・診断コード・JSON出力などは"
+                "そのまま英語で表記しています。"
             ),
-            "badge": "Generated from LANGUAGE.md",
+            "badge": "Generated from LANGUAGE.ja.md",
             "expand": "すべて展開",
             "collapse": "すべて折りたたむ",
             "top": "↑ 先頭へ",
@@ -379,8 +400,9 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for lang in ("ja", "en"):
         tree = render_language_tree(lang)
+        source_note = "docs/LANGUAGE.ja.md" if lang == "ja" else "docs/LANGUAGE.md"
         (OUT_DIR / f"language.{lang}.html").write_text(
-            page_shell("language", lang, tree, "docs/LANGUAGE.md"), encoding="utf-8"
+            page_shell("language", lang, tree, source_note), encoding="utf-8"
         )
     cli_tree = render_cli_tree()
     for lang in ("ja", "en"):

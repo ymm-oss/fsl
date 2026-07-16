@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `docs/intro/language.ja.html` now renders from a new, section-aligned Japanese
+  translation, `docs/LANGUAGE.ja.md`, instead of reusing the English `docs/LANGUAGE.md`
+  body verbatim. FSL keywords, `fslc` commands/flags, diagnostic/result identifiers,
+  JSON, and fenced code blocks stay untranslated and byte-identical to the English
+  source; only headings and prose are Japanese. `tools/build_site_reference.py` fails
+  loudly if the two files' `## ` section counts drift out of 1:1 alignment, and page
+  anchors/`SECTION_BLURBS` lookups stay keyed off the English heading so cross-page
+  links are unaffected. This supersedes the earlier "no translation" stance (see
+  `docs/DESIGN-docs-site.md` D7); `docs/LANGUAGE.ja.md` now moves alongside
+  `docs/LANGUAGE.md` under the "a language feature moves all of its files together"
+  rule (`AGENTS.md`).
 - `fslc-lsp` is now a native Rust language server backed directly by the authoritative
   syntax, core, and analysis implementation. Existing diagnostics, navigation, symbols,
   rename, semantic tokens, completion, hover, and code actions no longer require Python;
