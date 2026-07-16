@@ -13,9 +13,10 @@ and code changes should preserve FSL's observable language and evidence contract
 
 ## Implementation boundary
 
-The native Rust workspace under `rust/` is authoritative. The Python package under `src/fslc/` is a
-frozen compatibility reference and retained LSP surface. New product and language behavior belongs in
-Rust. Change Python only when an accepted compatibility or LSP requirement explicitly calls for it.
+The native Rust workspace under `rust/` is authoritative, including the `fslc-lsp` language server.
+The Python package under `src/fslc/` is a frozen compatibility reference. New product and language
+behavior belongs in Rust. Change Python only when an accepted compatibility requirement explicitly
+calls for it.
 
 The most important structural boundary is that `fsl-runtime` remains independent of `fsl-solver`, Z3,
 and JavaScript solver bridges. Symbolic BMC, the concrete Monitor, solver-free BFS, compatibility
@@ -26,7 +27,7 @@ that share one solver is insufficient.
 
 Install a stable Rust toolchain with `rustfmt` and `clippy`, Node.js 22, and the pinned
 `wasm-bindgen-cli` used by CI. Python 3.9+ is optional unless changing the frozen compatibility
-reference, LSP, or Python-based repository hooks:
+reference or Python-based repository hooks:
 
 ```bash
 python3 -m venv .venv
@@ -66,7 +67,7 @@ inventory and explicitly optional Python surfaces.
 - **Specs and examples:** run native `check`, bounded verification, induction where relevant, mutation,
   and vacuity checks. Do not weaken an invariant to erase a real counterexample.
 - **Frozen Python reference:** do not mirror every Rust feature into Python. A Python change needs an
-  explicit compatibility/LSP reason and focused regression evidence.
+  explicit compatibility reason and focused regression evidence.
 - **Generated artifacts:** never hand-edit compatibility snapshots or generated site output. Use the
   owning generator and review the diff.
 

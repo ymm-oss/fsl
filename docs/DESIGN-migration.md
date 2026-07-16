@@ -53,9 +53,10 @@ remain in the typed annotation registry and are not collapsed into that field.
 Refused findings prevent every write in the invocation; safe edits are still
 returned for review but are not partially applied.
 
-The retained Python implementation is not a second migrator. Its LSP adapter
-preserves migration data on diagnostics and exposes machine-applicable edits as
-quick-fix Code Actions; the authoritative planner remains native Rust.
+The retained Python implementation is not a second migrator. The native
+`fslc-lsp` preserves migration data on diagnostics and exposes
+machine-applicable edits as quick-fix Code Actions through the authoritative
+Rust planner.
 
 ## Bulk update procedure
 

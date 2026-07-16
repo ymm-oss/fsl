@@ -1,25 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Coupled-change metatests (issue #168).
+"""Python compatibility and DESIGN-doc coupled-change metatests (issue #168).
 
-CLAUDE.md/CONTRIBUTING.md state "a language feature moves grammar/model/bmc
-(+runtime) + docs/LANGUAGE.md + skills/fsl/reference.md + a
-docs/DESIGN-<feature>.md + tests together" -- until now that was a human
-checklist. `d1770c4` showed the failure mode: `src/fslc/lsp/index.py` was
-outside the list, so the `ai_component`/`dbsystem` dialects shipped with the
-LSP entirely dark. Prototyping this metatest re-found the same class twice
-more (fsl-domain, fsl-ai project files) -- fixed in the same PR that adds
-this file (see docs/DESIGN-coupled-change-metatest.md).
-
-Two independent checks, no Z3 dependency (lark + file scans only):
-1. LSP index coverage -- every grammar production with a NAME/REQ_ID token
-   either has a `_visit_<rule>` handler, or its tokens are proven to reach
-   `symbols`/`references` through a parent handler, or it is an explicit,
-   reviewed allowlist entry.
-2. DESIGN-doc coverage -- docs/README.md's DESIGN-*.md map is bidirectional,
-   every kernel dialect (`top_def` alternative) maps to a doc, and every CLI
-   command maps to a doc (or an explicit waiver reason).
+The authoritative LSP corpus/index gate moved to `rust/fsl-lsp/tests/corpus.rs`.
+This module retains only the frozen Python compatibility checks and the
+DESIGN-doc map checks that still inspect Python-owned surfaces.
 """
 from __future__ import annotations
 
@@ -27,16 +13,10 @@ import argparse
 import re
 from pathlib import Path
 
-from lark import Token, Tree
-
-from fslc.ai_parser import is_ai_agent_source, is_ai_source
-from fslc.ai_project import PROJECT_BLOCKS, is_ai_project_source
+from fslc.ai_project import PROJECT_BLOCKS
 from fslc.cli import _build_arg_parser
-from fslc.db_parser import is_dbsystem_source
 from fslc.dialect_registry import DIALECT_KEYWORDS
-from fslc.domain_parser import is_domain_source
 from fslc.grammar import GRAMMAR
-from fslc.lsp.index import DOMAIN_PARSER, _IndexBuilder, _parser_for_source, build_index
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -61,158 +41,7 @@ def test_native_ai_project_block_gate_matches_retained_parser():
     native = set(re.findall(r'"([a-z_]+)"', block.group("body")))
     assert native == PROJECT_BLOCKS
 
-# ---------------------------------------------------------------------------
-# 1. LSP index coverage
-# ---------------------------------------------------------------------------
-
-# (parser_id, node.data) -> reason. A grammar production whose NAME/REQ_ID
-# token is genuinely a free label / external artifact id / engine keyword,
-# not an in-file symbol or reference -- reviewed design decisions, not a
-# parking lot. Staleness is enforced by test_lsp_allowlist_not_stale below:
-# every entry must still occur in the corpus for its parser.
-INTENTIONALLY_UNINDEXED = {
-    ("kernel", "control_severity"): "`severity high` -- free severity word, not an in-file symbol",
-    ("db", "column_type"): "`column x: int` -- engine scalar-type words, dbsystem has no in-file type decls",
-    ("db", "check_item"): "`rule <name>` names a built-in compatibility rule, not an in-file declaration",
-    ("ai", "check_item"): "`check hard { rule ... }` names a built-in hard-check rule",
-    ("ai", "tool_precondition"): "free-form semantic label (`precondition order_paid`)",
-    ("ai", "tool_effect"): "free-form effect label",
-    ("ai", "trust_def"): "`trust medium` -- free trust-level word",
-    ("ai", "atom_name"): "`model gpt_5_5` / `prompt ..._v8` -- external artifact ids",
-    ("ai", "failure_target"): "`-> HumanReviewPending` -- policy-outcome label, not an in-file symbol",
-}
-
-_CORPUS_ROOTS = ("specs", "examples")
-_EXCLUDED_DIRS = (
-    ROOT / "examples" / "gallery" / "errors",
-    # native-only declaration-level @annotation syntax (issues #241 and
-    # #281, the latter extending it to domain/dbsystem/ai_component nested
-    # declarations); the frozen LSP grammar (src/fslc/lsp/index.py) is not
-    # extended for it, same boundary as tests/dialect_registry.py's
-    # MONITOR_EXCLUSIONS entries for these files.
-    ROOT / "examples" / "annotations",
-)
-
-
-def _corpus_files() -> list[Path]:
-    paths: set[Path] = set()
-    for root in _CORPUS_ROOTS:
-        paths.update((ROOT / root).rglob("*.fsl"))
-    excluded = {p for p in paths if any(str(p).startswith(str(d)) for d in _EXCLUDED_DIRS)}
-    return sorted(paths - excluded)
-
-
-def _parser_id(src: str) -> "str | None":
-    """None means the source is not Lark-parsed at all by the LSP (fsl-ai
-    project files: indexed by ai_project._top_blocks scanning instead, see
-    lsp/index.py's build_index)."""
-    if is_ai_project_source(src):
-        return None
-    if is_dbsystem_source(src):
-        return "db"
-    if is_domain_source(src):
-        return "domain"
-    if is_ai_source(src):
-        return "ai"
-    return "kernel"
-
-
-def _walk(node) -> "list":
-    out = [node]
-    if isinstance(node, Tree):
-        for child in node.children:
-            out.extend(_walk(child))
-    return out
-
-
-def _direct_name_tokens(node: Tree) -> list:
-    return [c for c in node.children if isinstance(c, Token) and c.type in ("NAME", "REQ_ID")]
-
-
-def test_lsp_index_covers_corpus_grammar():
-    assert _EXCLUDED_DIRS[0].is_dir() and any(_EXCLUDED_DIRS[0].glob("*.fsl")), (
-        "examples/gallery/errors must stay non-empty, or this exclusion is silently vacuous"
-    )
-
-    candidates: dict = {}  # (parser_id, node.data) -> list[(file, line)]
-    for path in _corpus_files():
-        src = path.read_text(encoding="utf-8")
-        parser_id = _parser_id(src)
-        if parser_id is None:
-            continue
-        try:
-            tree = _parser_for_source(src).parse(src)
-        except Exception as exc:  # noqa: BLE001 -- a corpus file the LSP cannot even parse is itself the finding
-            raise AssertionError(f"{path}: LSP parser ({parser_id}) could not parse this corpus file: {exc}") from exc
-
-        try:
-            idx = build_index(src, str(path))
-        except Exception as exc:  # noqa: BLE001
-            raise AssertionError(f"{path}: build_index raised: {exc}") from exc
-        indexed_positions = {s.selection_range.start_tuple for s in idx.symbols} | {
-            r.range.start_tuple for r in idx.references
-        }
-
-        for node in _walk(tree):
-            if not isinstance(node, Tree):
-                continue
-            names = _direct_name_tokens(node)
-            if not names:
-                continue
-            key = (parser_id, node.data)
-            handled = hasattr(_IndexBuilder, f"_visit_{node.data}")
-            missing = [tok for tok in names if (tok.line - 1, tok.column - 1) not in indexed_positions]
-            if missing:
-                candidates.setdefault(key, []).append(
-                    (path.relative_to(ROOT).as_posix(), missing[0].line, handled)
-                )
-
-    unallowed = {k: v for k, v in candidates.items() if k not in INTENTIONALLY_UNINDEXED}
-    assert not unallowed, {
-        f"{parser_id}:{node_data}": f"{len(hits)} miss(es), e.g. {hits[0][0]}:{hits[0][1]} (handler exists: {hits[0][2]})"
-        for (parser_id, node_data), hits in unallowed.items()
-    }
-
-
-def test_lsp_allowlist_not_stale():
-    seen: set = set()
-    for path in _corpus_files():
-        src = path.read_text(encoding="utf-8")
-        parser_id = _parser_id(src)
-        if parser_id is None:
-            continue
-        tree = _parser_for_source(src).parse(src)
-        for node in _walk(tree):
-            if isinstance(node, Tree) and _direct_name_tokens(node):
-                seen.add((parser_id, node.data))
-    stale = set(INTENTIONALLY_UNINDEXED) - seen
-    assert not stale, f"allowlist entries no longer occur in the corpus, remove them: {stale}"
-
-
-def test_domain_parser_exported_for_lsp_dispatch():
-    # Guards the specific bug this issue closed: a dedicated Lark instance
-    # for fsl-domain must exist and be reachable from lsp/index.py, or every
-    # examples/domain/*.fsl silently fails to parse there again.
-    assert DOMAIN_PARSER is not None
-
-
-def test_ai_agent_dialect_still_dispatches_through_ai_parser():
-    # A distinct guard from the metatest above: `agent` recursive-composition
-    # files (unlike `ai_component` hard-contract files) must keep resolving
-    # through the same AI_PARSER path, not regress into the ai-project branch.
-    sample = next(
-        p for p in _corpus_files()
-        if is_ai_source(p.read_text(encoding="utf-8")) and is_ai_agent_source(p.read_text(encoding="utf-8"))
-    )
-    src = sample.read_text(encoding="utf-8")
-    assert not is_ai_project_source(src)
-    idx = build_index(src, str(sample))
-    assert idx.symbols, f"{sample}: expected at least one indexed symbol"
-
-
-# ---------------------------------------------------------------------------
-# 2. DESIGN-doc coverage
-# ---------------------------------------------------------------------------
+# DESIGN-doc coverage
 
 TOP_DEF_DESIGN_DOCS = {
     "spec_def": ("DESIGN-v1.md",),

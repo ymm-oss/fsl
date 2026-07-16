@@ -20,9 +20,9 @@ specialized DB, domain, and AI adapters may still be called directly, but the
 canonical path does not ask them to lex again. `parse_surface_document(&str)` is
 the surface-only adapter over this entrypoint.
 
-The native CLI, Kernel lowering, and WASM path use this dispatch through
-`fsl-syntax`/`fsl-core`. The retained Python parser and LSP cannot consume Rust
-tokens in-process, so their single `dialect_registry` adapter mirrors the same
+The native CLI, Kernel lowering, WASM path, and `fslc-lsp` use this dispatch
+through `fsl-syntax`/`fsl-core`. The retained Python parser cannot consume Rust
+tokens in-process, so its `dialect_registry` adapter mirrors the same
 significant-token and registry-key contract and masks dispatch-only prefixes
 without changing source coordinates. The Rust registry remains authoritative.
 

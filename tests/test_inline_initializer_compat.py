@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""Frozen Python/LSP compatibility for native Kernel inline initializers."""
+"""Frozen Python compatibility for native Kernel inline initializers."""
 
 from fslc.model import build_spec
 from fslc.parser import parse_src

@@ -325,7 +325,7 @@ refinement 経由の `lower_anchor` エッジで層が接続される。
 ## 11. LSP 連携
 
 `fslc-lsp` は `FSLC_LSP_ANALYSIS_DIAGNOSTICS=1` を付けて起動すると、
-`--profile ai-review` の findings を**情報レベルの診断**としてエディタに出せる。
+TSG の構造レビュー findings を**情報レベルの診断**としてエディタに出せる。
 診断は可能なら TSG ノードのソース位置を使い、なければ最良のインデックス済み宣言範囲に
 フォールバックする。**verifier のエラーではなく、`fslc analyze` の構造レビュー信号**である
 ことは明示される。

@@ -10,9 +10,10 @@ The required product integration gate is `./tools/check-native-integration.sh`. 
 authoritative Rust workspace, dependency boundaries, the JavaScript solver Worker probe, and the
 production WASM browser contract. It does not install or execute Python.
 
-The frozen Python package remains an optional compatibility reference and the retained LSP surface.
-Its tests are manual, focused evidence for changes explicitly scoped to compatibility or LSP; they
-are not an evolving product specification and are not part of required CI.
+The frozen Python package remains an optional compatibility reference. Its tests are manual,
+focused evidence for changes explicitly scoped to compatibility; they are not an evolving product
+specification and are not part of required CI. The native `fsl-lsp` crate and `fslc-lsp` binary are
+part of the Rust product gate.
 
 ## Contract inventory
 
@@ -24,6 +25,7 @@ are not an evolving product specification and are not part of required CI.
 | Registered FSL corpus formatting and semantics | `formatter_cli.rs` |
 | Symbolic, Monitor, and explicit-state agreement | `fsl-verifier/tests/*agreement.rs`, `explicit_engine.rs`, `issue_226_auto_engine.rs` |
 | Replayable evidence | `replay_trace_contract.rs` and native/WASM corpus replay tests |
+| LSP features and corpus/index coverage | `fsl-lsp` unit, stdio, and corpus tests |
 | Native and browser envelope parity | `fsl-wasm/test-browser.mjs` |
 | Runtime and WASM dependency boundaries | `check-native-integration.sh` |
 | Claude/Codex repository hook environment | Manual `tests/test_claude_environment.py` and `tests/test_codex_environment.py` when those hooks change; non-product exception |

@@ -252,7 +252,7 @@ changing required field semantics should use a new version.
 
 ## 6. LSP diagnostics
 
-`fslc-lsp` can surface `--profile ai-review` findings as informational
+`fslc-lsp` can surface deterministic TSG structural-review findings as informational
 diagnostics when started with `FSLC_LSP_ANALYSIS_DIAGNOSTICS=1`. These
 diagnostics use source locations from TSG nodes when available, fall back to the
 best indexed declaration range, and remain clearly marked as structural review

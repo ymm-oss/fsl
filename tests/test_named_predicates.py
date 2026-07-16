@@ -8,7 +8,6 @@ import textwrap
 
 from fslc.bmc import prove, scenarios, verify
 from fslc.cli import run_check
-from fslc.lsp.index import build_index
 from fslc.model import build_spec
 from fslc.parser import parse
 
@@ -153,17 +152,3 @@ def test_capture_risk_is_rejected_without_synthetic_name_leak(tmp_path):
     assert out["result"] == "error"
     assert "would capture variable 'x'" in out["message"]
     assert "__def" not in out["message"]
-
-
-def test_lsp_indexes_predicate_definition_parameters_and_calls():
-    source = textwrap.dedent(WITH_DEF)
-    index = build_index(source, "predicates.fsl")
-    predicate = next(sym for sym in index.symbols if sym.role == "predicate")
-    parameter = next(sym for sym in index.symbols if sym.role == "parameter")
-    call = next(ref for ref in index.references if ref.role == "predicate")
-
-    assert predicate.name == "eligible"
-    assert parameter.name == "value"
-    target = index.definition_at(call.range.start.line, call.range.start.character)
-    assert target is not None
-    assert target.range == predicate.selection_range
