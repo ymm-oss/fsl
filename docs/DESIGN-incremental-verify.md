@@ -49,6 +49,13 @@ kept in one place (`verify_cache.compute_key`); adding a semantics-affecting par
    (relative-path, bytes) of every `*.py` in the installed `fslc` package. The file-content
    fingerprint is what protects editable installs and dev worktrees, where the version string
    does not move when `bmc.py` does. Computed once per process (~1 MB of source; milliseconds).
+   The native Rust CLI embeds the equivalent fingerprint at compile time: SHA-256 over the
+   participating workspace crates, manifests/lockfile, enabled features, target/profile/Rust
+   flags, and `rustc -vV`. Runtime cache-key construction hashes that fixed digest rather than
+   rereading and hashing the complete executable. This preserves fail-closed invalidation for
+   rebuilt editable worktrees while avoiding an engine-independent cost proportional to a
+   debug binary's size; native entries using this layout are schema `fslc-rust-cache.v2` under
+   `verify/v2` (issue #349).
 3. **Kernel AST**: the `(ast, display_names)` pair returned by `parse_src` — i.e.
    *post*-desugaring (compose/requirements/business/governance/db/ai/domain) and *post*
    `--instances`/`--values` override application. Because `expand_compose` /
@@ -82,7 +89,8 @@ than hashing an under-specified representation).
 ## 3. Storage
 
 - Location: `$FSLC_CACHE_DIR`, else `$XDG_CACHE_HOME/fslc`, else `~/.cache/fslc`. Layout:
-  `<root>/verify/v1/<key[:2]>/<key>.json`. Content-addressed keys make a machine-global cache
+  Python uses `<root>/verify/v1/<key[:2]>/<key>.json`; native Rust schema v2 uses the same
+  layout under `<root>/verify/v2/`. Content-addressed keys make a machine-global cache
   safe across projects/worktrees; entries embed no absolute paths (results carry spec names,
   not file paths).
 - Entry: `{"schema": 1, "created": iso8601, "fslc": version, "key_inputs": {component
@@ -133,8 +141,9 @@ failed at depth k last time is answered from depth k first" without a heuristic 
 No other cross-depth reuse in v1: a `verified`-at-depth-10 entry is *not* served for a
 depth-8 request, because verified payloads embed the depth in `depth`/`checked_to_depth`/
 warning text; rewriting cached payloads is exactly the kind of cleverness this design bans.
-(Index: a small `<root>/verify/v1/xdepth/<depth-agnostic-key>.json` pointer to the violated
-entry; same atomicity rules.)
+(Index: a small `<root>/verify/v1/xdepth/<depth-agnostic-key>.json` pointer for Python, or
+`<root>/verify/v2/xdepth/<depth-agnostic-key>.json` for native Rust, to the violated entry;
+same atomicity rules.)
 
 ## 6. Property-level differential re-verification (staged; BMC only)
 

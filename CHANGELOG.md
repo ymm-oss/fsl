@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
+  hashing the full executable on every invocation, and CLI preparation reuses its validated
+  `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
+  entries fail-closed while removing the engine-independent fixed cost found in issue #349.
+
 ### Added
 - `docs/intro/language.ja.html` now renders from a new, section-aligned Japanese
   translation, `docs/LANGUAGE.ja.md`, instead of reusing the English `docs/LANGUAGE.md`
