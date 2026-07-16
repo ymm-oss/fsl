@@ -12323,6 +12323,7 @@ fn run_verify(
     };
     let selection = ModelSelection {
         path,
+        model: None,
         scope: None,
         property: None,
         excluded: &[],

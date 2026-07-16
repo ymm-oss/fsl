@@ -48,6 +48,23 @@ fn native_cli_checks_a_repository_spec_without_python() {
 }
 
 #[test]
+fn native_verify_preserves_the_agent_document_boundary_error() {
+    let (value, status) = run_cli(&[
+        "verify",
+        "examples/ai/recursive_support_agent.fsl",
+        "--no-cache",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "parse");
+    assert_eq!(
+        value["message"],
+        "agent documents cannot be verified as Kernel specs"
+    );
+}
+
+#[test]
 fn native_check_and_verify_share_the_core_duplicate_write_gate() {
     let fixture = "rust/fslc/tests/fixtures/duplicate_write.fsl";
 
