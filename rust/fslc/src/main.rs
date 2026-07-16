@@ -11929,13 +11929,24 @@ fn governance_result(
         fslc_rust::verification_output::GovernanceOutputError::new(error.to_string(), 1, 1)
     })?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    fslc_rust::verification_output::governance_output(&source, |preservation| {
-        let (result, _) = run_refine(
+    let resolver = fsl_core::FsResolver::new(base);
+    fslc_rust::verification_output::governance_output(&source, &resolver, |preservation| {
+        let (result, status) = run_refine(
             &base.join(&preservation.after_path),
             &base.join(&preservation.before_path),
             &base.join(&preservation.refinement_path),
             depth,
         );
+        if status > 1 {
+            return Err(fslc_rust::verification_output::GovernanceOutputError::new(
+                result
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("governance preservation refinement failed"),
+                preservation.span.start.line,
+                preservation.span.start.column,
+            ));
+        }
         Ok(result
             .get("result")
             .cloned()

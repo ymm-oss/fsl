@@ -89,6 +89,78 @@ fn native_check_rejects_an_incomplete_governance_contract() {
 }
 
 #[test]
+fn native_check_rejects_a_missing_governance_dependency() {
+    let (value, status) = run_cli(&[
+        "check",
+        "rust/fslc/tests/fixtures/governance_missing_dependency.fsl",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 6, "column": 5}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("missing-before.fsl")),
+        "{value}"
+    );
+}
+
+#[test]
+fn native_check_reports_a_governance_counterexample_without_misclassifying_it() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/refinement_liveness/governance_detects_safety_loss.fsl",
+    ]);
+
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["result"], "ok");
+    assert_eq!(
+        value["governance"]["preservations"][0]["result"],
+        "refinement_failed"
+    );
+}
+
+#[test]
+fn native_check_locates_a_malformed_dependency_at_the_governance_reference() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/gallery/adversarial/governance_malformed_dependency.fsl",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 5, "column": 3}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("governance_malformed_business.fsl")),
+        "{value}"
+    );
+}
+
+#[test]
+fn native_check_locates_a_semantic_dependency_error_at_the_preservation() {
+    let (value, status) = run_cli(&[
+        "check",
+        "examples/gallery/adversarial/governance_semantic_dependency.fsl",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 6, "column": 3}));
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown type 'Missing'")),
+        "{value}"
+    );
+}
+
+#[test]
 fn monitor_boundary_self_spec_is_proved_and_mutation_sensitive() {
     let fixture = "examples/self/monitor_action_boundary.fsl";
     let (checked, check_status) = run_cli(&["check", fixture, "--strict-tags"]);

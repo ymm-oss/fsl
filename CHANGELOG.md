@@ -95,7 +95,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ### Fixed
 - Native `check` now propagates malformed governance-preservation diagnostics
   as a located type error with exit 2 instead of silently returning `ok`. A
-  shared gallery fixture keeps native CLI and browser Worker behavior aligned.
+  resolver-backed core contract also rejects missing dependencies, unknown or
+  unsatisfied controls, duplicate declarations, unknown artifacts, empty
+  preservations, and referenced-name mismatches without last-write-wins data
+  loss. Native CLI and browser Worker now share these checks and progress-
+  preservation verification, including process-exit and browser parity cases.
+- Model construction now rejects duplicate action names, duplicate action
+  parameters, and empty inline parameter ranges before name-based runtime
+  dispatch or finite-domain enumeration can become ambiguous.
 - The native concrete `Monitor` now revalidates a previously enumerated action
   against the current state, rejects parameters outside their declared
   Bool/enum/range/domain, and shares one guard-evaluation path across

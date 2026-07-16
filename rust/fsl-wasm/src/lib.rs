@@ -109,7 +109,7 @@ fn build(request: &Request, solver_version: &str) -> Result<KernelModel, Value> 
     })
 }
 
-fn check(request: &Request, solver_version: &str) -> Value {
+async fn check(request: &Request, solver_version: &str) -> Value {
     if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
         &request.source,
         &request.source_file,
@@ -148,7 +148,7 @@ fn check(request: &Request, solver_version: &str) -> Value {
         8,
         Value::Object(output),
     );
-    match governance_output(request) {
+    match governance_output(request).await {
         Ok(Some(governance)) => {
             output
                 .as_object_mut()
@@ -166,61 +166,93 @@ fn check(request: &Request, solver_version: &str) -> Value {
     output
 }
 
-fn governance_output(
+async fn governance_output(
     request: &Request,
 ) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
-    fslc_rust::verification_output::governance_output(&request.source, |preservation| {
-        let implementation_source = resolver
-            .read(&preservation.after_path)
-            .map_err(|failure| governance_error(failure.to_string()))?;
-        let abstraction_source = resolver
-            .read(&preservation.before_path)
-            .map_err(|failure| governance_error(failure.to_string()))?;
-        let mapping_source = resolver
-            .read(&preservation.refinement_path)
-            .map_err(|failure| governance_error(failure.to_string()))?;
-        let implementation = fsl_core::build_model(
-            fsl_core::parse_kernel_source_with_file(
-                &implementation_source,
-                &resolver,
-                &preservation.after_path,
-            )
-            .map_err(|failure| governance_error(failure.to_string()))?,
-        )
-        .map_err(|failure| governance_error(failure.to_string()))?;
-        let abstraction = fsl_core::build_model(
-            fsl_core::parse_kernel_source_with_file(
-                &abstraction_source,
-                &resolver,
-                &preservation.before_path,
-            )
-            .map_err(|failure| governance_error(failure.to_string()))?,
-        )
-        .map_err(|failure| governance_error(failure.to_string()))?;
-        let mapping = fsl_core::parse_refinement(&mapping_source, &implementation, &abstraction)
-            .map_err(|failure| governance_error(failure.message))?;
-        if !mapping.progress.is_empty() {
-            return Err(governance_error(
-                "governance preservation with progress requires browser refinement progress verification",
-            ));
-        }
-        let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 8)
-            .map_err(|failure| governance_error(failure.to_string()))?;
-        Ok(json!(if checked.failure.is_some() {
-            "refinement_failed"
-        } else {
-            "refines"
-        }))
-    })
+    let resolver_ref = &resolver;
+    fslc_rust::verification_output::governance_output_async(
+        &request.source,
+        resolver_ref,
+        |preservation| {
+            let preservation = preservation.clone();
+            let resolver = resolver_ref;
+            async move {
+                let implementation_source = resolver
+                    .read(&preservation.after_path)
+                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                let abstraction_source = resolver
+                    .read(&preservation.before_path)
+                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                let mapping_source = resolver
+                    .read(&preservation.refinement_path)
+                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                let implementation = fsl_core::build_model(
+                    fsl_core::parse_kernel_source_with_file(
+                        &implementation_source,
+                        resolver,
+                        &preservation.after_path,
+                    )
+                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
+                )
+                .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                let abstraction = fsl_core::build_model(
+                    fsl_core::parse_kernel_source_with_file(
+                        &abstraction_source,
+                        resolver,
+                        &preservation.before_path,
+                    )
+                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
+                )
+                .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                let mapping =
+                    fsl_core::parse_refinement(&mapping_source, &implementation, &abstraction)
+                        .map_err(|failure| governance_error(failure.message, preservation.span))?;
+                let checked =
+                    fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 8)
+                        .map_err(|failure| {
+                            governance_error(failure.to_string(), preservation.span)
+                        })?;
+                if checked.failure.is_some() {
+                    return Ok(json!("refinement_failed"));
+                }
+                if !mapping.progress.is_empty() {
+                    let mut solver = fsl_solver_z3js::Z3JsSolver::new();
+                    let progress = fsl_verifier::check_refinement_progress(
+                        &implementation,
+                        &abstraction,
+                        &mapping,
+                        &mut solver,
+                        8,
+                    )
+                    .await
+                    .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                    if progress.violation.is_some() {
+                        return Ok(json!("refinement_failed"));
+                    }
+                }
+                Ok(json!(if checked.failure.is_some() {
+                    "refinement_failed"
+                } else {
+                    "refines"
+                }))
+            }
+        },
+    )
+    .await
 }
 
 fn governance_error(
     message: impl Into<String>,
+    span: fsl_syntax::Span,
 ) -> fslc_rust::verification_output::GovernanceOutputError {
-    fslc_rust::verification_output::GovernanceOutputError::new(message, 1, 1)
+    fslc_rust::verification_output::GovernanceOutputError::new(
+        message,
+        span.start.line,
+        span.start.column,
+    )
 }
 
 fn remove_generic_invariant_warning(output: &mut Value) {
@@ -387,7 +419,7 @@ pub async fn run(request_json: String) -> String {
         }
     };
     let output = match request.cmd.as_str() {
-        "check" => check(&request, &solver_version),
+        "check" => check(&request, &solver_version).await,
         "verify" => verify(&request, &solver_version).await,
         command => error(
             &solver_version,
@@ -412,11 +444,33 @@ pub fn internal_error(message: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
     use super::*;
     use fsl_core::{FslValue, TraceAction, TraceStep, trace_json};
     use fsl_verifier::{BmcResult, BmcViolation, LeadsToViolation};
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        loop {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+            std::thread::yield_now();
+        }
+    }
 
     fn model_from(source: &str) -> KernelModel {
         let resolver = MemoryResolver {
@@ -482,7 +536,7 @@ mod tests {
             options: Options::default(),
         };
 
-        let error = check(&request, TEST_SOLVER_VERSION);
+        let error = block_on(check(&request, TEST_SOLVER_VERSION));
 
         assert_eq!(error["result"], json!("error"));
         assert_eq!(error["kind"], json!("type"));
@@ -491,6 +545,29 @@ mod tests {
             error["message"]
                 .as_str()
                 .is_some_and(|message| message.contains("governance preservation missing before"))
+        );
+    }
+
+    #[test]
+    fn check_rejects_a_missing_governance_dependency_at_its_reference() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!("../../fslc/tests/fixtures/governance_missing_dependency.fsl")
+                .to_owned(),
+            source_file: "governance_missing_dependency.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+
+        let error = block_on(check(&request, TEST_SOLVER_VERSION));
+
+        assert_eq!(error["result"], json!("error"));
+        assert_eq!(error["kind"], json!("type"));
+        assert_eq!(error["loc"], json!({"line": 6, "column": 5}));
+        assert!(
+            error["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("missing-before.fsl"))
         );
     }
 
