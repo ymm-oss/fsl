@@ -1,7 +1,7 @@
 # FSL — Integer division `/` and modulo `%` implementation design
 
-Motivation: DOGFOOD-8 F-B. In the standard technique for flattening two-dimensional
-data into a single key (F-A), recovering the axes from a cell (`c / SLOTS`, `c % SLOTS`)
+Motivation: in the standard technique for flattening two-dimensional
+data into a single key, recovering the axes from a cell (`c / SLOTS`, `c % SLOTS`)
 could not be written, forcing boundaries to be hard-coded. This completes arithmetic
 with `+ - * / %`.
 
@@ -67,7 +67,7 @@ with `+ - * / %`.
 
 1. Basics: a spec using quotient and remainder is verified/proved (e.g., a meeting-room
    spec writing "room r is full" as `c / SLOTS == r` from a flattened cell — a fixture
-   based on an improved version of the DOGFOOD-8 blind-test spec).
+   based on a meeting-room booking spec that uses a flattened cell domain).
 2. **Agreement of the two evaluators (most important)**: for every pair in
    a ∈ [-7..7] × b ∈ [-3..3] (including b=0), the evaluated value of the Z3 encoding
    and the runtime's `_euc_div`/`_euc_mod` agree (either via a small spec or by

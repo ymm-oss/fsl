@@ -381,10 +381,10 @@ return_policy.fsl in this dialect, can **be refined from the requirements layer*
 by the existing return_refines.fsl (with adjusted abs names) (= demonstration
 that the kernel spec after dialect expansion is equivalent to a hand-written one).
 
-## Stage 4: three-layer dogfooding
+## Stage 4: three-layer validation
 
 The return domain across all three layers: fsl-biz (business) ← fsl-req
 (requirements; implements) ← fsl (design; adding implementation details such as
 persistence and retry, then refine) ← the Adapter implementation in examples.
-Findings in DOGFOOD-4.md. Additions of the dialects to LANGUAGE.md and skills/fsl
-are also done here.
+The executable chain is under `examples/layers/`. Additions of the dialects to
+LANGUAGE.md and skills/fsl are also done here.

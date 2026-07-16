@@ -62,7 +62,7 @@ fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
 }
 
 fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> PathBuf {
-    path.with_file_name(format!(".{stem}.{process_id}.literate.fsl"))
+    path.with_file_name(format!(".{stem}.literate-{process_id}.fsl"))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

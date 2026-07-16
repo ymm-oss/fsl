@@ -396,7 +396,7 @@
     { id: "db",                 categoryId: "examples-background", en: ["fsl-db", "DB / Multi-env Compatibility", "Schema, artifacts, environments"], ja: ["fsl-db", "DB/複数環境互換性", "スキーマ・成果物・環境"] },
     { id: "ai",                 categoryId: "examples-background", en: ["fsl-ai", "AI Contracts & Agents", "Tool authority, agents, replay"], ja: ["fsl-ai", "AI contract / agent", "tool権限・agent構造・replay"] },
     { id: "examples",           categoryId: "examples-background", en: ["Examples", "Example Gallery", "A guided map of examples/ and specs/"], ja: ["実例", "実例ギャラリー", "examples/・specs/ の案内"] },
-    { id: "design-notes",       categoryId: "examples-background", en: ["Design Notes", "Design Notes & Dogfooding", "Why it's built this way — DESIGN-*.md, DOGFOOD-*.md"], ja: ["設計ノート", "設計ノート・実戦記録", "なぜこの設計か — DESIGN-*.md・DOGFOOD-*.md"] },
+    { id: "design-notes",       categoryId: "examples-background", en: ["Design Notes", "Design Notes", "Why it's built this way — authoritative DESIGN-*.md contracts"], ja: ["設計ノート", "設計ノート", "なぜこの設計か — 正本のDESIGN-*.md契約"] },
   ];
   const NAV_T = {
     en: { brand: "Manual", index: "English Manual", kicker: "FSL Manual", other: "日本語", otherRead: "日本語で読む",

@@ -148,6 +148,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Chronological field-trial reports were distilled into authoritative design
+  contracts, language/skill rules, maintained examples, and executable regression
+  tests, then removed as a parallel documentation source. The native pytest
+  generator now also sanitizes composed scenario display names with deterministic
+  collision suffixes while preserving the original name in the docstring. Literate
+  Markdown commands now use process-isolated materializations while normalizing
+  cache identity to the source document, preventing concurrent checks from deleting
+  one another's input.
 - Native Rust internals now separate top-level CLI routing from command-family parsing and base
   ledger generation from approval evaluation. Observable CLI, ledger, and approval digest
   contracts are unchanged.
@@ -694,7 +702,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   7 new chapters: `quickstart` (a 5-minute install-to-proof walkthrough),
   `examples` (a guide to `examples/`/`specs/`), `errors` (the JSON envelope,
   exit-code contract, and a failure-mode index), `glossary`, and `design-notes`
-  (an index of `DESIGN-*.md`/`DOGFOOD-*.md`). Added `tools/build_site_reference.py`,
+  (an index of authoritative `DESIGN-*.md` documents). Added `tools/build_site_reference.py`,
   which generates `intro/language.*.html` and `intro/cli.*.html` — exhaustive,
   disclosure-tree references reproduced verbatim from `docs/LANGUAGE.md` and
   introspected from `src/fslc/cli.py` — plus `tests/test_site_reference_snapshot.py`
@@ -1191,7 +1199,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   hollowing warning — after fixing a `forbidden`/`violated` by tightening a guard,
   re-run `verify` and confirm the action's `action_coverage` is still `true` (and
   affected `reachable`s still witnessed), since an over-tight guard surfaces as a
-  *new* `reachable_failed`/`covered:false`. (Surfaced by the #22 repair DOGFOOD,
+  *new* `reachable_failed`/`covered:false`. (Surfaced by the #22 repair validation run,
   where fslc-arm agents did exactly this self-check.)
 - Documented the cross-layer discrete-time SLA rule: a `deadline` is a safety
   property of the clock that declares it, so a refinement carries it only across a
@@ -1627,22 +1635,22 @@ Also unifies the two FSL expression evaluators behind a shared, domain-parameter
   State mappings are composed at the Z3 level, and indexed maps, Option, and structs are handled by the existing eval.
 - Examples `examples/refinement_liveness` (safety propagates, liveness does not, resolved with fair) and
   `examples/refinement_chain` (chain checking), each with its own checking test.
-- **A set of self-specs for meta-circular dogfooding** in `examples/self/`: three specs that model fslc's own design contracts
+- **A set of self-specs** in `examples/self/`: three specs that model fslc's own design contracts
   in FSL (`fslc_session` = CLI result classification and exit-code severity,
   `fslc_monitor` = stickiness of replay-runtime rejection, `refinement_algebra` = safety
   propagates, liveness does not). All are proved. Pinned-result test `tests/test_self_examples.py`.
-- **`terminal { <predicate> }` block (addressing DOGFOOD-11 F23)**: declares a halting state satisfying the predicate
+- **`terminal { <predicate> }` block**: declares a halting state satisfying the predicate
   as an "intended terminal" and excludes it from deadlock checking. Whereas `--deadlock ignore`
   uniformly ignores all halting states, this lets you single out only the intended halts, while unexpected deadlocks are
   still detected. Used by `examples/self/fslc_session` and `fslc_monitor` (LANGUAGE §1/§6).
-- **`fslc verify --property <Name>` (addressing DOGFOOD-11 F27)**: checks just a single invariant.
+- **`fslc verify --property <Name>`**: checks just a single invariant.
   This makes it easier to confirm a violation of a targeted invariant with a non-vacuous probe (a nonexistent name is a usage error = exit 2).
-- **Vacuity detection of dead-ghost tautologies (addressing DOGFOOD-11 F22, top priority)**: `--vacuity`
+- **Vacuity detection of dead-ghost tautologies**: `--vacuity`
   now statically detects with Z3 an "invariant that, when a frozen state variable assigned by no action is pinned to its init value, becomes
   always true regardless of the values of dynamic variables" (kind `tautology_over_frozen`). It warns at verification time about
   hollow (always-true) invariants that previously both verify and vacuity missed, surfacing only via mutate's survival rate.
   Invariants that do not reference a frozen variable / do not reference state are out of scope. Confirmed zero false positives across the existing corpus.
-- **Transition invariant `trans { }` (addressing DOGFOOD-11 F24)**: `trans Name { old(x) => ... }`
+- **Transition invariant `trans { }`**: `trans Name { old(x) => ... }`
   lets you directly declare cross-action two-state safety. BMC checks each reachable transition, induction checks it in the step case,
   successful output includes `transitions_checked`, and a violation returns `violation_kind:"trans"`.
 
@@ -1650,25 +1658,23 @@ Also unifies the two FSL expression evaluators behind a shared, domain-parameter
 - **Test suite runs without a `.venv` (CI portability)**: the subprocess-based tests invoked the
   CLI through a hardcoded `ROOT/.venv/bin/python` and a macOS-only `/private/tmp` scratch path,
   which failed on the CI runners. Now use `sys.executable` and `tempfile.gettempdir()`.
-- **Include the state in the deadlock warning (addressing DOGFOOD-11 F26)**: the `--deadlock warn` warning
+- **Include the state in the deadlock warning**: the `--deadlock warn` warning
   message now shows which state it halted in (e.g. `deadlock reachable at step 1
   (state: status=ToolFault, ...)`). The state was previously only in the JSON `deadlock.trace`.
 - **Soundness bug in `fslc refine`**: when an impl's violating transition reached a terminal (deadlock) state within the bound,
   forcing a full-length trace excluded the violation from all models, so it was missed
   (a non-monotonic behavior where raising the depth reduced detection). Resolved by switching to a dedicated solver that
   checks each prefix with only the constraints up to step t. Added a regression test (a residual case of the
-  "vacuous refines" bug class in `docs/DOGFOOD-6.md`).
+  "vacuous refines" regression class in `examples/gallery/`).
 
 ### Documentation
 - **Rescoped the layer-chain propagation claim to safety**: in `DESIGN-layers` §1/§6 and `LANGUAGE` §10,
   made explicit that refinement propagates safety (invariants, control guards, behavioral inclusion) but not liveness
   (`leadsTo`/`responds`), because of stuttering, and that liveness must be re-verified at each layer
   with `fair` required on progress actions.
-- **`docs/DOGFOOD-11.md`** (meta-circular dogfooding findings): records the blind spots where `--vacuity`/single verify
-  miss "an always-true invariant over a variable that is never assigned (a dead ghost)" and it surfaces only via mutate kill-rate
-  (F22), the absence of syntax for declaring intended terminal states (F23), the inability to directly
-  assert a forbidden transition (F24), the expressiveness limits for relational/algebraic properties (F25), the deadlock-warn
-  message lacking the state name (F26), and the absence of a single-invariant selector (F27).
+- Documented the self-spec findings in their authoritative surfaces: dead-ghost
+  vacuity, intended terminal states, transition invariants, finite-state
+  expressiveness limits, deadlock diagnostics, and single-property selection.
 
 ### License / distribution (preparing for OSS release)
 - **Finalized the license as Apache License 2.0** (rights holder: Copyright 2026 Ryoichi Izumita).
@@ -1963,10 +1969,10 @@ The discipline before writing (formalization memo, recommended practices) goes i
   comments/tags), a **natural-language→syntax reverse-lookup table**, the discipline of appending to the assumption ledger during repair,
   and **recommended practices** (positive-example pairs, one requirement = one declaration, domain sizing,
   cross-verification of high-risk specs — all optional; heavy procedures are not mandated).
-- Added a real-run record of the above workflow, `docs/DOGFOOD-9.md`, and the example
-  `examples/validation/order_refund.fsl` (proved). Demonstrated how the positive-example pair
+- Added `examples/validation/order_refund.fsl` (proved) as the maintained example
+  of the workflow. Demonstrated how the positive-example pair
   `reachable FullyRefunded` catches with `reachable_failed` a first version where "the safety invariant passes but the refund path is dead."
-- Filled out the DOGFOOD index in `docs/README.md` to 1-9 (also resolving the unlisted 6/7/8).
+- Expanded the documentation index for the validation artifacts available at that release.
 
 ## [1.1.0] - 2026-06-12
 
@@ -1983,8 +1989,8 @@ The discipline before writing (formalization memo, recommended practices) goes i
   deadline hold vacuously**, and the correct **deadline-urgency pattern**
   (make urgent only a guarded action that is enabled only when the deadline is reached).
   Added the official example `examples/nfr/support_sla.fsl` (proved).
-- A blind expressibility test (`docs/DOGFOOD-8.md`, n=3): external validation that another agent, using the skill alone, can get a
-  new domain to proved. The above documentation improvements address the gaps this test surfaced.
+- External authoring trials motivated the above documentation improvements for
+  independently producing a proved spec from the skill alone.
 
 ## [1.0.3] - 2026-06-12
 

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Design Notes &amp; Dogfooding — why it's built this way</title>
-<meta name="description" content="A guide to DESIGN-*.md (implementation design) and DOGFOOD-*.md (real-use findings) — the primary sources for why fslc is designed the way it is." />
+<title>Design Notes — why it's built this way</title>
+<meta name="description" content="A guide to the authoritative DESIGN-*.md contracts that explain why fslc is built this way." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="design-notes">
@@ -20,8 +20,8 @@
   <div class="wrap narrow center">
     <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">Examples &amp; Background</p>
-    <h1 class="reveal">Design Notes &amp; <span class="hl">Dogfooding</span></h1>
-    <p class="lead reveal">This manual explains how to use FSL. The primary source for why it's designed this way is <code>docs/DESIGN-*.md</code> (per-feature implementation design) and <code>docs/DOGFOOD-*.md</code> (findings, bugs, and design decisions from real use). This page is the map — links go to the .md files on GitHub.</p>
+    <h1 class="reveal"><span class="hl">Design Notes</span></h1>
+    <p class="lead reveal">This manual explains how to use FSL. The authoritative source for why it is designed this way is <code>docs/DESIGN-*.md</code>, where field findings are distilled into maintained contracts. This page is the map — links go to the .md files on GitHub.</p>
   </div>
 </section>
 
@@ -78,27 +78,6 @@
       <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></td><td>fsl-ai — tool authority, human approval, forbidden tools, recursive agent structure analysis</td></tr>
       <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></td><td>fsl-stochastic — precomputed eval JSONL, Wilson intervals, the boundary between statistical support and formal proof</td></tr>
       <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ui.md">DESIGN-ui.md</a></td><td>fsl-ui (the screen-transition dialect spike, go/no-go for #9)</td></tr>
-    </table>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <p class="kicker reveal">Dogfooding</p>
-    <h2 class="reveal">DOGFOOD-1 through 11 — what real use turned up</h2>
-    <table class="matrix reveal">
-      <tr><th>Document</th><th>What's in it</th></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-1.md">DOGFOOD-1</a></td><td>v1.0 field evaluation (found BUG11-14, PERF1)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-2.md">DOGFOOD-2</a></td><td>Making proved standard practice; Seq (discovery of the aggregation idiom)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-3.md">DOGFOOD-3</a></td><td>The full workflow (abstract → refine → compose → implementation)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-4.md">DOGFOOD-4</a></td><td>Penetration of the three-layer dialects (cross-layer diagnostics by requirement ID)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-5.md">DOGFOOD-5</a></td><td>NFR / discrete-time SLA</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-6.md">DOGFOOD-6</a></td><td>A bug hunt in the example gallery (two refine misses)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-7.md">DOGFOOD-7</a></td><td>The golden-oracle test suite (Monitor BFS, trace soundness, BUG-020)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-8.md">DOGFOOD-8</a></td><td>A blind expressibility test (external validation of G1)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-9.md">DOGFOOD-9</a></td><td>A real run of the validation workflow (memo → positive-example pair → repair)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-10.md">DOGFOOD-10</a></td><td>A fault-injection benchmark (detector capture rate by category × mechanism)</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-11.md">DOGFOOD-11</a></td><td>Meta-circular dogfooding (modeling fslc's own design contract in FSL; detector blind spots F22-F24)</td></tr>
     </table>
   </div>
 </section>

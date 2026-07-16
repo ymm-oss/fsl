@@ -1690,9 +1690,16 @@ fn is_fsl_source(path: &Path) -> bool {
 /// branch above, so it must be excluded from the cache-key directory walk —
 /// otherwise a run-local artifact would spuriously appear as a dependency.
 fn is_literate_materialization(path: &Path) -> bool {
-    path.file_name()
+    let Some(pid) = path
+        .file_name()
         .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|name| name.ends_with(".literate.fsl"))
+        .and_then(|name| name.strip_prefix('.'))
+        .and_then(|name| name.strip_suffix(".fsl"))
+        .and_then(|name| name.rsplit_once(".literate-").map(|(_, pid)| pid))
+    else {
+        return false;
+    };
+    !pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn verify_cache_keys(
@@ -2447,7 +2454,7 @@ mod tests {
             .expect("write real document");
         let alias_document = alias.join("spec.md");
         symlink(&real_document, &alias_document).expect("create document alias");
-        let materialized = alias.join(".spec.1.literate.fsl");
+        let materialized = alias.join(".spec.literate-1.fsl");
         std::fs::write(&materialized, "spec Example {}\n").expect("write materialization");
         let dependency = alias.join("dependency.fsl");
         std::fs::write(&dependency, "spec DependencyA {}\n").expect("write dependency");
@@ -2461,5 +2468,40 @@ mod tests {
 
         assert_ne!(before, after);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn literate_materialization_requires_a_numeric_process_suffix() {
+        assert!(is_literate_materialization(Path::new(
+            ".model.literate-123.fsl"
+        )));
+        assert!(!is_literate_materialization(Path::new(
+            ".shared.literate-model.fsl"
+        )));
+        assert!(!is_literate_materialization(Path::new(
+            ".model.literate-.fsl"
+        )));
+    }
+
+    #[test]
+    fn cache_keys_include_hidden_sources_with_literate_in_their_name() {
+        let directory =
+            std::env::temp_dir().join(format!("fslc-hidden-literate-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create cache-key fixture directory");
+        let root = directory.join("root.fsl");
+        let hidden = directory.join(".shared.literate-model.fsl");
+        std::fs::write(&root, "spec Root { state { x: Int } init { x = 0 } }")
+            .expect("write root source");
+        std::fs::write(&hidden, "first").expect("write hidden source");
+        let options = CliVerifyOptions::default();
+
+        let before = verify_cache_keys_with_solver_version(&root, &root, &options, "bmc", "test")
+            .expect("initial cache keys");
+        std::fs::write(&hidden, "second").expect("update hidden source");
+        let after = verify_cache_keys_with_solver_version(&root, &root, &options, "bmc", "test")
+            .expect("updated cache keys");
+        std::fs::remove_dir_all(&directory).expect("remove cache-key fixture directory");
+
+        assert_ne!(before, after);
     }
 }

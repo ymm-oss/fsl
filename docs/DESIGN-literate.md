@@ -29,7 +29,7 @@ misidentified.
 ### Materialization
 
 The native CLI (`fslc`) materializes the blanked text to a process-owned
-`.{stem}.{pid}.literate.fsl` sibling next to the original `.md`, passes that
+`.{stem}.literate-{pid}.fsl` sibling next to the original `.md`, passes that
 path to the existing check/verify pipeline, and removes its own sibling on
 completion (via a `Drop` guard). This design avoids modifying every independent
 `read_to_string` call site in the CLI — the blanked file is read from disk by
@@ -91,7 +91,7 @@ is not supported.
 
 `collect_fsl_sources` (verify cache-key computation) includes `.md` files
 in directory walks so that edits to literate Markdown specs invalidate the
-verification cache. Transient `.{stem}.{pid}.literate.fsl` materializations
+verification cache. Transient `.{stem}.literate-{pid}.fsl` materializations
 (see "Materialization" above) are excluded from that walk by filename suffix
 — their content is already represented by the `.md` file itself through this
 same function's Markdown branch, so including it too would double-count it

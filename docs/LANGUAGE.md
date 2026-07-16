@@ -336,6 +336,8 @@ written against the original `verify { instances Case = N }` bound.
 
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
+Fairness applies to a whole action instance. To model fairness only under a
+condition, split that condition into a separately guarded `fair action`.
 
 **Action parameter types** (`<p>: <type name>`): a domain type, enum, or the
 builtin `Bool` — anything BMC can enumerate. `Bool` behaves exactly like a
@@ -351,6 +353,11 @@ two-state safety (the pre-transition state can be referenced with `old()`), and
 `leadsTo` is response liveness. Without a ranking function, `leadsTo` is checked
 boundedly. With `--engine induction` and `decreases <int expr>`, a `leadsTo` can
 be proved unbounded by a well-founded ranking argument.
+
+FSL verifies finite transition systems; it does not declare higher-order axioms
+over the refinement relation itself. Laws such as refinement reflexivity or
+transitivity are checked through concrete refinement chains or finite state-machine
+models, not quantified as algebraic axioms.
 
 Response properties inside a `leadsTo` block:
 
@@ -549,7 +556,10 @@ variable capture instead of inventing internal binder names. See
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
   Equality is structural: `none` equals only `none`, while two `some` values are
   equal exactly when their payloads are equal. `x is some(v)` remains the form
-  that binds `v`; equality never introduces a binding. Ordering is not defined.
+  that binds `v`; equality never introduces a binding. The binding is available
+  only in the logical continuation where the match is true, such as the
+  right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
+  not a global binding. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
@@ -1026,9 +1036,9 @@ a literate `.md` may `use`/compose `.fsl` files this way, but using another
    unreachable." Add an **auxiliary invariant** that excludes it (one that is
    itself a truth of the domain) and return to step 3
 
-In practice, auxiliary invariants often converge in a single round
-(real examples in `DOGFOOD-1.md` / `DOGFOOD-2.md`: "if attempts == 3, locked,"
-"only Captured has a refund," "no duplicates in the queue").
+Useful auxiliary invariants are domain truths such as "if attempts == 3, locked,"
+"only Captured has a refund," and "no duplicates in the queue," rather than
+proof-only artifacts.
 
 ## 9. Idiom collection
 
@@ -2345,8 +2355,8 @@ DESIGN-*.md).
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under `skills/`, with
-the shared language reference in `skills/fsl/SKILL.md`; the real-run record is in
-[`DOGFOOD-9.md`](DOGFOOD-9.md).
+the shared language reference in `skills/fsl/SKILL.md`. A maintained worked example
+is under [`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examples/validation).
 
 ## 16. Promotion judgment to ghost types (typestate)
 

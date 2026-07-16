@@ -233,10 +233,14 @@ fn has_literate_sibling(directory: &Path) -> bool {
         .flatten()
         .any(|entry| {
             entry.is_ok_and(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.contains("literate.fsl"))
+                let path = entry.path();
+                path.extension()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("fsl"))
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.contains(".literate-"))
             })
         })
 }

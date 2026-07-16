@@ -57,6 +57,6 @@ verified) and incorrect example (`forbidden_op_accepted.fsl` → error/forbidden
 
 ## 5. Related
 
-The dual of `acceptance` (DESIGN-bridge / DESIGN-dialects). Detecting under-constraint is
-complementary to #4 vacuity (`always_true_requires`) and #6 mutate. Origin: live run
-DOGFOOD-9, roadmap #1.
+The dual of `acceptance` (DESIGN-bridge / DESIGN-dialects). Detecting
+under-constraint is complementary to #4 vacuity (`always_true_requires`) and #6
+mutate. It is the validation workflow's independent negative-example channel.

@@ -105,7 +105,7 @@ fundamental principle of not expanding into the kernel).
   transcribing a Figma flow diagram into fsl-ui and checking it** (the AI-Native
   position). Designers writing it directly is unrealistic.
 - **Decision**: go if there is demand for UI-flow checking (`expand_ui` + tests +
-  dogfooding). If demand is thin, the operation of "write screen flows in plain fsl" (the
+  field validation). If demand is thin, the operation of "write screen flows in plain fsl" (the
   spike's ReturnUI as a template) delivers enough value for now. **The F-UI-1 fix is
   useful independently of the dialect, so it has already been merged ahead.**
 
