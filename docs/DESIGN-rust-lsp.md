@@ -11,8 +11,9 @@ fallback.
 
 The server owns only editor concerns: open-buffer state, workspace discovery, source-positioned
 document indexes, and LSP protocol translation. It does not own an FSL grammar or semantic rules.
-Every document is accepted or rejected first by `fsl-syntax`, and semantic diagnostics come from a
-shared Rust frontend diagnostic API used by the CLI and LSP.
+Every standard FSL document is accepted or rejected first by `fsl-syntax`; the existing Rust-native
+AI-project compatibility recognizer remains its explicit frontend gate. Semantic diagnostics come
+from a shared Rust frontend diagnostic API used by the CLI and LSP.
 
 ## 2. Issue contract
 
@@ -36,8 +37,9 @@ shared Rust frontend diagnostic API used by the CLI and LSP.
 - A process test performs initialize, open/change diagnostics, one request, shutdown, and exit.
 - Corpus tests parse and index every valid file under `specs/` and `examples/` through the
   authoritative dialect registry and reject missing identifier coverage unless explicitly waived.
-- CLI and LSP tests compare diagnostic kind, message, and source range for parse, type, and semantic
-  failures.
+- CLI and LSP tests compare diagnostic kind and message for parse, type, and semantic failures;
+  shared-frontend tests preserve the compiler range independently where the stable CLI envelope
+  intentionally omits it.
 - release CI builds and starts both native executables on macOS, Linux, and Windows targets.
 - `tools/check-native-integration.sh` covers the LSP without executing Python.
 
@@ -131,8 +133,9 @@ Related law: `LAW-lsp-diagnostic-parity`.
 
 ### LAW-lsp-authoritative-analysis (Invariant, S1)
 
-For every indexed or diagnosed document `d`, success implies
-`fsl_syntax::parse_document(d).is_ok()`. Semantic success additionally implies the applicable
+For every indexed or diagnosed standard FSL document `d`, success implies
+`fsl_syntax::parse_document(d).is_ok()`. A legacy AI-project document must instead pass the shared
+Rust-native compatibility recognizer. Semantic success additionally implies the applicable
 `fsl_core` lowering/model gate succeeds. No LSP-local grammar can override either result.
 
 Grounding: parser-rejection unit tests and the valid-corpus index gate.
@@ -140,9 +143,10 @@ Grounding: parser-rejection unit tests and the valid-corpus index gate.
 ### LAW-lsp-diagnostic-parity (Invariant, S1)
 
 For every source rejected by the shared frontend diagnostic API, CLI and LSP projections preserve
-the same kind, message, source file, and span.
+the same kind and message. The LSP preserves the shared compiler source span; the CLI preserves its
+existing envelope and exposes a location only where that established transport already did so.
 
-Grounding: shared diagnostic unit tests plus CLI/LSP projection integration tests.
+Grounding: shared diagnostic unit tests plus CLI/LSP identity integration tests.
 
 ### LAW-lsp-latest-buffer (Postcondition, S1)
 
