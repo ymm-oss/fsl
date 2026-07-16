@@ -171,6 +171,44 @@ Recorded here rather than fixed by adding a new ordering field, since no reassig
 happened yet — add a per-chapter `order`-within-category field only if/when the maintainer
 review in §2 actually reorders something.
 
+### D7 — `docs/LANGUAGE.ja.md`: a second canonical source, section-aligned to `docs/LANGUAGE.md`
+
+Supersedes the "no translation, no second source to keep in sync" framing in D4/the earlier
+`tools/build_site_reference.py` docstring (itself attributed there to "the fable decision on the
+canonical language problem"). Under that policy `docs/intro/language.ja.html`'s body reused the
+English `docs/LANGUAGE.md` verbatim — only the lead paragraph and each section's one-line
+`SECTION_BLURBS` description were Japanese. A user explicitly asked for the Japanese page to be
+readable in Japanese, accepting the resulting maintenance cost.
+
+- **What changed:** `docs/LANGUAGE.ja.md` is a new, hand(-and-agent)-maintained Japanese
+  translation of `docs/LANGUAGE.md`, kept **section-aligned 1:1**: the same count and order of
+  `## ` headings as the English file. FSL keywords, type names, `fslc` subcommands/flags, result/
+  diagnostic identifiers (`verified`, `unknown_cti`, `FSL-ANNOTATION-TARGET`, ...), JSON
+  keys/values, and every fenced code block are left untranslated/byte-identical to the English
+  source — only heading text and prose are translated.
+- **How the site stays honest about drift:** `render_language_tree("ja")` in
+  `tools/build_site_reference.py` reads `docs/LANGUAGE.ja.md` and compares its section count
+  against `docs/LANGUAGE.md`'s. A mismatch raises `SystemExit` at generation time rather than
+  silently shipping a page with a missing or misplaced section — the same "fail loudly on drift"
+  discipline D4/the original docstring already used for `SECTION_BLURBS` coverage, now also
+  covering section-count parity between the two language files.
+- **Anchors and blurbs stay keyed off English.** Both the `<details id="...">` slug and the
+  `SECTION_BLURBS` lookup are computed from the **English** heading (via `zip(en_sections,
+  render_sections)`), never the Japanese one. This keeps `#7-the-verifier-fslc`-style cross-page
+  links stable regardless of which language rendered the page, and means `SECTION_BLURBS` did not
+  need a second, Japanese-heading-keyed dictionary.
+- **Accepted cost, not hidden:** every future `docs/LANGUAGE.md` change needs a corresponding
+  `docs/LANGUAGE.ja.md` edit (human- or agent-reviewed) to stay section-aligned; this is exactly
+  the "second source to keep in sync" cost D4 originally chose to avoid. It is now accepted in
+  exchange for a Japanese reference readers can actually read in Japanese. `AGENTS.md`'s
+  "a language feature moves all of its files together" rule lists `docs/LANGUAGE.ja.md` alongside
+  `docs/LANGUAGE.md` for this reason.
+- **Out of scope for this document:** any machine-translation or CI-enforced
+  translation-freshness pipeline (e.g. auto-flagging which English section changed since the last
+  Japanese sync) is a separate future task, not implemented here. Today the only enforcement is
+  the section-count parity check above — it catches an added/removed/reordered section, not a
+  paragraph that changed English wording without a matching Japanese edit.
+
 ## 2. Chapter → category mapping
 
 | Category (`categoryId`) | ja label | en label | Chapters |
