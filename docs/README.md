@@ -90,21 +90,13 @@
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
 | [`DESIGN-docs-site.md`](DESIGN-docs-site.md) | This manual site's information architecture, navigation chrome, and the generated-reference-page template (`intro/language.*.html`, `intro/cli.*.html`) — produced with the Relational Design plugin |
 
-## Dogfooding records (DOGFOOD-*)
+## Evidence policy
 
-Findings, bugs, and discoveries from putting each feature into real use. These form the basis of the design decisions.
-
-1. [`DOGFOOD-1.md`](DOGFOOD-1.md) — v1.0 field evaluation (found BUG11-14, PERF1)
-2. [`DOGFOOD-2.md`](DOGFOOD-2.md) — proved as standard practice, Seq (discovery of the aggregation idiom)
-3. [`DOGFOOD-3.md`](DOGFOOD-3.md) — full workflow (abstract → refine → compose → implementation)
-4. [`DOGFOOD-4.md`](DOGFOOD-4.md) — penetration of the three-layer dialects (cross-layer diagnostics by requirement ID)
-5. [`DOGFOOD-5.md`](DOGFOOD-5.md) — NFR / discrete-time SLA
-6. [`DOGFOOD-6.md`](DOGFOOD-6.md) — bug hunt in the example gallery (two refine misses)
-7. [`DOGFOOD-7.md`](DOGFOOD-7.md) — golden-oracle test suite (Monitor BFS, trace soundness, BUG-020)
-8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — blind expressibility test (external validation of G1)
-9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — real run of the validation workflow (memo → positive-example pair → repair)
-10. [`DOGFOOD-10.md`](DOGFOOD-10.md) — fault-injection benchmark (measuring detector capture rate by category × mechanism)
-11. [`DOGFOOD-11.md`](DOGFOOD-11.md) — meta-circular dogfooding (modeling fslc's own design contract in FSL; detector blind spots F22-F24)
+Field trials, spikes, and audits are temporary evidence. Reusable findings are
+distilled into the `DESIGN-*` contracts above, the language reference, agent
+skills, executable examples, and regression tests. Git and pull-request history
+retain the chronology without making investigation logs a parallel source of
+truth.
 
 Worked examples are in [`../specs/`](../specs/) (standalone specs) and [`../examples/`](../examples/)
 (bank: implementation conformance / layers: three-layer chain / nfr: SLA).

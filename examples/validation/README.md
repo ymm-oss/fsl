@@ -2,8 +2,8 @@
 
 A worked deliverable showing how to catch "a spec that passes internal consistency
 (verify) but drifts from the original intent" through discipline both before and
-after writing. The background and findings are in
-[`../../docs/DOGFOOD-9.md`](../../docs/DOGFOOD-9.md).
+after writing. The reusable workflow is defined in
+[`../../skills/fsl/SKILL.md`](../../skills/fsl/SKILL.md).
 
 | File | Contents |
 |---|---|

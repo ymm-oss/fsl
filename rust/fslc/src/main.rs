@@ -53,13 +53,9 @@ fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("literate");
-    // Deterministic (no PID): the same `.md` must materialize to the same sibling
-    // path across runs so the verify cache key is stable. Concurrent runs on the
-    // same document write identical bytes (both blank from the same source), so a
-    // race only ever produces a harmless duplicate write, never a wrong verdict;
-    // worst case a run's mid-read sees the file mid-write-or-delete by a sibling
-    // process and errors loudly rather than silently misreading.
-    let materialized = path.with_file_name(format!(".{stem}.literate.fsl"));
+    // Keep concurrent CLI processes isolated. Verification normalizes this
+    // process-local path back to the source Markdown when computing cache keys.
+    let materialized = path.with_file_name(format!(".{stem}.literate-{}.fsl", std::process::id()));
     std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
     Ok(Some(LiterateState { path: materialized }))
 }

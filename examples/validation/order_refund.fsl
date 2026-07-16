@@ -2,7 +2,7 @@
 // Order payment / cancel / refund flow (with stock) — design-layer spec.
 //
 // A worked deliverable of the validation workflow (formalization note -> spec ->
-// positive-example pair -> repair). Background is in docs/DOGFOOD-9.md.
+// positive-example pair -> repair). See examples/validation/README.md.
 // Assumptions are folded into the ASSUME tags below.
 //
 //   fslc verify examples/validation/order_refund.fsl --engine induction
@@ -16,7 +16,7 @@ spec OrderRefund {
   //           Not handled at the design layer; refundability is simply "possible if cancelled".
   //           The window check is delegated to time+deadline at the requirements layer
   //           (an initial version that brought a window flag into the design layer made
-  //           refund unreachable, which reachable FullyRefunded detected. See DOGFOOD-9).
+  //           refund unreachable, which reachable FullyRefunded detected).
   const CAP = 2
   type OrderId = 0..2
   type Cnt = 0..3

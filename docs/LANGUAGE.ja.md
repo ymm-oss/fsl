@@ -328,6 +328,8 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 
 `fair` は弱い公平性(weak fairness)のアノテーションです: その action インスタンス
 が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。
+公平性は action インスタンス全体に適用されます。条件付きでのみ公平にしたい場合は、
+その条件を個別に guard した `fair action` へ分割してください。
 
 **action パラメータの型**(`<p>: <type name>`): ドメイン型、enum、または組み込みの
 `Bool` — BMC が列挙できるものすべてです。`Bool` は `Bool` の状態変数とまったく同じ
@@ -342,6 +344,10 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 なければ、`leadsTo` は有界に検査されます。`--engine induction` と
 `decreases <int expr>` があれば、`leadsTo` は well-founded なランキング論法によって
 非有界に証明できます。
+
+FSL が検証するのは有限遷移系であり、refinement 関係そのものに対する高階の公理は
+宣言しません。refinement の反射律や推移律のような法則は、代数公理として量化する
+のではなく、具体的な refinement chain または有限状態機械のモデルを通して検査します。
 
 `leadsTo` ブロック内の応答プロパティ:
 
@@ -534,7 +540,10 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`。
   等値は構造的です: `none` は `none` とだけ等しく、2 つの `some` 値はペイロードが
   等しいときにちょうど等しくなります。`v` を束縛する形は引き続き `x is some(v)`
-  であり、等値が束縛を導入することはありません。順序は定義されません。
+  であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
+  論理的な後続部分だけです。例えば `(x is some(v)) => ...` や
+  `(x is some(v)) and ...` の右辺では使えますが、グローバルな束縛にはなりません。
+  順序は定義されません。
 - struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
   `==` はフィールドごとの等値
 - Set: `Set {}` / `Set { 1, 2 }`、`.add(e)` `.remove(e)` `.contains(e)` `.size()`
@@ -971,9 +980,8 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
    それを排除する**補助 invariant**(それ自体がドメインの真実であるもの)を追加して
    ステップ 3 に戻る
 
-実際には、補助 invariant は 1 ラウンドで収束することが多いです
-(`DOGFOOD-1.md` / `DOGFOOD-2.md` の実例: 「attempts == 3 なら locked」
-「refund を持つのは Captured だけ」「キューに重複はない」)。
+有用な補助 invariant は、証明専用の人工物ではなく「attempts == 3 なら locked」
+「refund を持つのは Captured だけ」「キューに重複はない」のようなドメインの真実です。
 
 ## 9. イディオム集
 
@@ -2335,8 +2343,8 @@ DESIGN-*.md があります)。
 
 書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
 `skills/` の下の AI エージェントスキルにあり、共有の言語リファレンスは
-`skills/fsl/SKILL.md`、実走の記録は
-[`DOGFOOD-9.md`](DOGFOOD-9.md) にあります。
+`skills/fsl/SKILL.md` にあります。保守される実例は
+[`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examples/validation) にあります。
 
 ## 16. ghost 型への昇格判定(typestate)
 

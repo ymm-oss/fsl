@@ -661,7 +661,9 @@ cannot be assigned both inline and in `init`.
 - Option: `x == none` `x != none` `x == some(e)` `x != some(e)` use structural
   equality (presence first, then payload when present). `x is some(v)` is still
   required when `v` must be bound for the rest of the formula; equality creates
-  no binding. Arithmetic and ordering on Option are type errors.
+  no binding. The binding is scoped to the logical continuation where the match
+  is true, such as the guarded RHS of `=>` or `and`, and is not global.
+  Arithmetic and ordering on Option are type errors.
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`
@@ -715,7 +717,10 @@ cannot be assigned both inline and in `init`.
    invariant/reachable is an undefined value — always guard with `i < q.size() =>`.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
-   counterexamples.
+   counterexamples. Fairness applies to whole action instances; model conditional
+   fairness by splitting the condition into a separately guarded `fair action`.
+   Removing `fair` is not a useful negative probe in a structurally terminating
+   machine; the probe must admit a lasso, deadlock, or pending stall.
 7. `leadsTo ... decreases M` under `verify --engine induction` proves an
    unbounded response when, under the proved invariants and while P holds and Q is
    false, M is non-negative and the ranked progress discipline holds. Without

@@ -74,8 +74,20 @@ the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
   1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
   fails loudly on drift; see `docs/DESIGN-docs-site.md` D7.
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
+- Every formal-to-implementation conformance anchor must include a negative control that rejects a
+  known contract-violating trace, transition, or mutation. A green positive path alone does not
+  establish that the anchor can detect drift.
 - Do not hand-edit generated compatibility snapshots. Regenerate them only when the corresponding
   contract change is intentional and review the resulting diff.
+
+## Knowledge distillation
+
+Treat field-trial logs, spike notes, task packets, and audit transcripts as temporary evidence, not
+repository authority. Before closing the work, promote every durable result to the smallest relevant
+authoritative surface: a language/design contract, an agent or contributor rule, an executable test,
+or a maintained example. Then remove the temporary report and its backlinks. Keep a standalone
+experiment record only when its method or raw data is itself a maintained product artifact; Git and
+pull-request history preserve chronology.
 
 ## Coding and change conventions
 

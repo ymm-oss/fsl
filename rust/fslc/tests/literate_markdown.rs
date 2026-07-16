@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Barrier};
 
 use serde_json::Value;
 
@@ -45,6 +46,28 @@ fn literate_check_succeeds_on_valid_spec() {
     assert_eq!(status, 0, "check failed: {output:#}");
     assert_eq!(output["result"], "ok");
     assert_eq!(output["spec"], "Toggle");
+}
+
+#[test]
+fn concurrent_literate_checks_use_isolated_materializations() {
+    let path = fixture_path("literate_toggle.md");
+    let barrier = Arc::new(Barrier::new(4));
+    let handles = (0..4)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                run_cli(&["check", &path])
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for handle in handles {
+        let (output, status) = handle.join().expect("join concurrent check");
+        assert_eq!(status, 0, "check failed: {output:#}");
+        assert_eq!(output["result"], "ok");
+    }
 }
 
 #[test]
@@ -193,10 +216,14 @@ fn has_literate_sibling(directory: &Path) -> bool {
         .flatten()
         .any(|entry| {
             entry.is_ok_and(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.contains("literate.fsl"))
+                let path = entry.path();
+                path.extension()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("fsl"))
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.contains(".literate-"))
             })
         })
 }

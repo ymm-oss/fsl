@@ -361,7 +361,9 @@ overrides — or for any other failure (a false <code>expect</code>, an unmet <c
 --property &lt;Liveness&gt;</code> usable even when the spec's acceptance scenarios were
 written against the original <code>verify { instances Case = N }</code> bound.</p>
 <p><code>fair</code> is a weak-fairness annotation: if that action instance remains
-continuously enabled, the assumption is that it will eventually be executed.</p>
+continuously enabled, the assumption is that it will eventually be executed.
+Fairness applies to a whole action instance. To model fairness only under a
+condition, split that condition into a separately guarded <code>fair action</code>.</p>
 <p><strong>Action parameter types</strong> (<code>&lt;p&gt;: &lt;type name&gt;</code>): a domain type, enum, or the
 builtin <code>Bool</code> — anything BMC can enumerate. <code>Bool</code> behaves exactly like a
 <code>Bool</code> state variable: use it bare as a boolean guard (<code>requires b</code>,
@@ -375,6 +377,10 @@ two-state safety (the pre-transition state can be referenced with <code>old()</c
 <code>leadsTo</code> is response liveness. Without a ranking function, <code>leadsTo</code> is checked
 boundedly. With <code>--engine induction</code> and <code>decreases &lt;int expr&gt;</code>, a <code>leadsTo</code> can
 be proved unbounded by a well-founded ranking argument.</p>
+<p>FSL verifies finite transition systems; it does not declare higher-order axioms
+over the refinement relation itself. Laws such as refinement reflexivity or
+transitivity are checked through concrete refinement chains or finite state-machine
+models, not quantified as algebraic axioms.</p>
 <p>Response properties inside a <code>leadsTo</code> block:</p>
 <pre><code class="language-fsl">leadsTo &lt;Name&gt; {
   &lt;expr&gt; ~&gt; &lt;expr&gt;                      // once P holds (including the same instant), Q eventually holds
@@ -610,7 +616,10 @@ variable capture instead of inventing internal binder names. See
 <li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
   Equality is structural: <code>none</code> equals only <code>none</code>, while two <code>some</code> values are
   equal exactly when their payloads are equal. <code>x is some(v)</code> remains the form
-  that binds <code>v</code>; equality never introduces a binding. Ordering is not defined.</li>
+  that binds <code>v</code>; equality never introduces a binding. The binding is available
+  only in the logical continuation where the match is true, such as the
+  right-hand side of <code>(x is some(v)) =&gt; ...</code> or <code>(x is some(v)) and ...</code>; it is
+  not a global binding. Ordering is not defined.</li>
 <li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
   <code>==</code> is field-by-field equality</li>
 <li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code></li>
@@ -1105,9 +1114,9 @@ a literate <code>.md</code> may <code>use</code>/compose <code>.fsl</code> files
    unreachable." Add an <strong>auxiliary invariant</strong> that excludes it (one that is
    itself a truth of the domain) and return to step 3</li>
 </ol>
-<p>In practice, auxiliary invariants often converge in a single round
-(real examples in <code>DOGFOOD-1.md</code> / <code>DOGFOOD-2.md</code>: "if attempts == 3, locked,"
-"only Captured has a refund," "no duplicates in the queue").</p></div></details>
+<p>Useful auxiliary invariants are domain truths such as "if attempts == 3, locked,"
+"only Captured has a refund," and "no duplicates in the queue," rather than
+proof-only artifacts.</p></div></details>
 <details id="9-idiom-collection"><summary>9. Idiom collection<span class="tree-blurb"> — Common idioms — Option, Seq aggregation, ghost variables.</span></summary><div class="tree-body"><h3 id="option-instead-of-a-sentinel-value">Option instead of a sentinel value</h3>
 <pre><code class="language-fsl">cart: Map&lt;UserId, Option&lt;ItemId&gt;&gt;      // do not use a sentinel like -1
 struct Reservation { item: Option&lt;ItemId&gt;, qty: Qty }  // optional fields can be written directly too
@@ -2393,8 +2402,8 @@ DESIGN-*.md).</p>
 </ul>
 <p>The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under <code>skills/</code>, with
-the shared language reference in <code>skills/fsl/SKILL.md</code>; the real-run record is in
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-9.md"><code>DOGFOOD-9.md</code></a>.</p></div></details>
+the shared language reference in <code>skills/fsl/SKILL.md</code>. A maintained worked example
+is under <a href="https://github.com/ymm-oss/fsl/tree/main/examples/validation"><code>examples/validation/</code></a>.</p></div></details>
 <details id="16-promotion-judgment-to-ghost-types-typestate"><summary>16. Promotion judgment to ghost types (typestate)<span class="tree-blurb"> — Deciding when a state machine promotes to a ghost type / typestate.</span></summary><div class="tree-body"><p><code>fslc typestate &lt;file.fsl&gt; [--ts]</code> decides how soundly the state machine of a
 design spec (enum-valued struct fields / state variables / <code>Option&lt;_&gt;</code> slots)
 can be mapped to the host language's typestate (ghost types). It classifies each
