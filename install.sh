@@ -121,17 +121,18 @@ fi
 
 NATIVE_DIR="$REPO_DIR/.native/bin"
 FSL_BIN="$NATIVE_DIR/fslc"
+FSL_LSP_BIN="$NATIVE_DIR/fslc-lsp"
 mkdir -p "$NATIVE_DIR"
 
-native_asset() {
+native_target() {
   os=$(uname -s)
   arch=$(uname -m)
   case "$os:$arch" in
-    Darwin:arm64|Darwin:aarch64) echo "fslc-macos-arm64" ;;
-    Darwin:x86_64|Darwin:amd64) echo "fslc-macos-x64" ;;
-    Linux:x86_64|Linux:amd64) echo "fslc-linux-x64" ;;
-    Linux:aarch64|Linux:arm64) echo "fslc-linux-arm64" ;;
-    *) fail "No native fslc release is available for $os/$arch." ;;
+    Darwin:arm64|Darwin:aarch64) echo "macos-arm64" ;;
+    Darwin:x86_64|Darwin:amd64) echo "macos-x64" ;;
+    Linux:x86_64|Linux:amd64) echo "linux-x64" ;;
+    Linux:aarch64|Linux:arm64) echo "linux-arm64" ;;
+    *) fail "No native FSL release is available for $os/$arch." ;;
   esac
 }
 
@@ -143,45 +144,34 @@ download_file() {
   elif command -v wget >/dev/null 2>&1; then
     wget -q "$url" -O "$destination"
   else
-    fail "curl or wget is required to download the native fslc binary."
+    fail "curl or wget is required to download the native FSL binaries."
   fi
 }
 
-ASSET=$(native_asset)
 RELEASE_URL="https://github.com/ymm-oss/fsl/releases/latest/download"
-echo "Installing the native Rust fslc binary: $ASSET"
-download_file "$RELEASE_URL/$ASSET" "$FSL_BIN.download" || fail "Failed to download $ASSET from the latest GitHub Release."
-download_file "$RELEASE_URL/$ASSET.sha256" "$FSL_BIN.sha256.download" || fail "Failed to download the checksum for $ASSET."
-EXPECTED_HASH=$(awk '{print $1}' "$FSL_BIN.sha256.download")
-if command -v shasum >/dev/null 2>&1; then
-  ACTUAL_HASH=$(shasum -a 256 "$FSL_BIN.download" | awk '{print $1}')
-elif command -v sha256sum >/dev/null 2>&1; then
-  ACTUAL_HASH=$(sha256sum "$FSL_BIN.download" | awk '{print $1}')
-else
-  fail "shasum or sha256sum is required to verify the native binary."
-fi
-[ "$EXPECTED_HASH" = "$ACTUAL_HASH" ] || fail "Checksum verification failed for $ASSET."
-mv "$FSL_BIN.download" "$FSL_BIN"
-rm -f "$FSL_BIN.sha256.download"
-chmod +x "$FSL_BIN"
-
-# Python remains the reference implementation and provides the optional LSP.
-# It is deliberately not placed on the public `fslc` command path.
-FSL_LSP_BIN=""
-if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
-  PYTHON_BIN=$(command -v python3)
-  VENV_DIR="$REPO_DIR/.venv"
-  VENV_PYTHON="$VENV_DIR/bin/python"
-  echo "Python 3.9+ found; installing the optional fslc-lsp server."
-  if PYTHONPATH='' "$PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1 \
-    && ( cd "$REPO_DIR" && PYTHONPATH='' "$VENV_PYTHON" -m pip install ".[lsp]" >/dev/null 2>&1 ); then
-    FSL_LSP_BIN="$VENV_DIR/bin/fslc-lsp"
+install_release_asset() {
+  asset="$1"
+  destination="$2"
+  echo "Installing native Rust binary: $asset"
+  download_file "$RELEASE_URL/$asset" "$destination.download" || fail "Failed to download $asset from the latest GitHub Release."
+  download_file "$RELEASE_URL/$asset.sha256" "$destination.sha256.download" || fail "Failed to download the checksum for $asset."
+  expected_hash=$(awk '{print $1}' "$destination.sha256.download")
+  if command -v shasum >/dev/null 2>&1; then
+    actual_hash=$(shasum -a 256 "$destination.download" | awk '{print $1}')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual_hash=$(sha256sum "$destination.download" | awk '{print $1}')
   else
-    echo "Warning: optional fslc-lsp installation failed; the native fslc CLI is installed and usable."
+    fail "shasum or sha256sum is required to verify the native binaries."
   fi
-else
-  echo "Python 3.9+ not found; skipping the optional fslc-lsp server."
-fi
+  [ "$expected_hash" = "$actual_hash" ] || fail "Checksum verification failed for $asset."
+  mv "$destination.download" "$destination"
+  rm -f "$destination.sha256.download"
+  chmod +x "$destination"
+}
+
+TARGET=$(native_target)
+install_release_asset "fslc-$TARGET" "$FSL_BIN"
+install_release_asset "fslc-lsp-$TARGET" "$FSL_LSP_BIN"
 
 LOCAL_BIN="$HOME/.local/bin"
 mkdir -p "$LOCAL_BIN"
@@ -194,9 +184,9 @@ link_command() {
     link_target=$(readlink "$link_path" || true)
     if [ "$link_target" = "$target" ]; then
       echo "The $cmd_name command link is already set up: $link_path"
-    elif [ "$cmd_name" = "fslc" ] && [ "$link_target" = "$REPO_DIR/.venv/bin/fslc" ]; then
+    elif [ "$link_target" = "$REPO_DIR/.venv/bin/$cmd_name" ]; then
       ln -sfn "$target" "$link_path"
-      echo "Migrated the fslc command link from the Python reference to the native binary: $link_path"
+      echo "Migrated the $cmd_name command link from Python to the native binary: $link_path"
     else
       echo "Warning: $link_path points to a different location (${link_target}). Not overwriting."
     fi
@@ -209,11 +199,8 @@ link_command() {
 }
 
 link_command fslc "$FSL_BIN"
-# The VSCode extension launches `fslc-lsp` from PATH; link it when present
-# (the offline fallback above installs fslc only, without the LSP server).
-if [ -n "$FSL_LSP_BIN" ] && [ -x "$FSL_LSP_BIN" ]; then
-  link_command fslc-lsp "$FSL_LSP_BIN"
-fi
+# The VS Code extension launches `fslc-lsp` from PATH.
+link_command fslc-lsp "$FSL_LSP_BIN"
 
 case ":$PATH:" in
   *":$LOCAL_BIN:"*)

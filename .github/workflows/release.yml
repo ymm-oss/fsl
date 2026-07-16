@@ -31,18 +31,23 @@ jobs:
           - os: macos-14        # Apple Silicon
             target: macos-arm64
             asset: fslc-macos-arm64
+            lsp_asset: fslc-lsp-macos-arm64
           - os: macos-15-intel  # Intel
             target: macos-x64
             asset: fslc-macos-x64
+            lsp_asset: fslc-lsp-macos-x64
           - os: ubuntu-latest
             target: linux-x64
             asset: fslc-linux-x64
+            lsp_asset: fslc-lsp-linux-x64
           - os: ubuntu-24.04-arm
             target: linux-arm64
             asset: fslc-linux-arm64
+            lsp_asset: fslc-lsp-linux-arm64
           - os: windows-latest
             target: windows-x64
             asset: fslc-windows-x64.exe
+            lsp_asset: fslc-lsp-windows-x64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +58,7 @@ jobs:
         working-directory: rust
         env:
           Z3_SYS_Z3_VERSION: "4.16.0"
-        run: cargo build --release --locked -p fslc-rust
+        run: cargo build --release --locked -p fslc-rust -p fsl-lsp
 
       # Use a fixed, known spec that is verified and has no counterexample.
       # Picking an arbitrary .fsl via find|head can grab a demo spec that contains a
@@ -66,6 +71,19 @@ jobs:
           ./rust/target/release/fslc verify examples/pm/cancel_flow.fsl > /dev/null
           echo "ok"
 
+      - name: Smoke test LSP startup handshake (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          frame() { printf 'Content-Length: %s\r\n\r\n%s' "${#1}" "$1"; }
+          response=$({
+            frame '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}'
+            frame '{"jsonrpc":"2.0","method":"initialized","params":{}}'
+            frame '{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}'
+            frame '{"jsonrpc":"2.0","method":"exit","params":null}'
+          } | ./rust/target/release/fslc-lsp)
+          grep -q '"capabilities"' <<<"$response"
+
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -74,12 +92,29 @@ jobs:
           ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl > $null
           echo "ok"
 
+      - name: Smoke test LSP startup handshake (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          function Frame([string] $body) {
+            "Content-Length: $([Text.Encoding]::UTF8.GetByteCount($body))`r`n`r`n$body"
+          }
+          $messages = (Frame '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}') +
+            (Frame '{"jsonrpc":"2.0","method":"initialized","params":{}}') +
+            (Frame '{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}') +
+            (Frame '{"jsonrpc":"2.0","method":"exit","params":null}')
+          $response = $messages | ./rust/target/release/fslc-lsp.exe
+          $responseText = $response -join "`n"
+          if ($responseText -notmatch '"capabilities"') { throw "fslc-lsp did not complete the initialize handshake" }
+
       - name: Rename + checksum (unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           mv rust/target/release/fslc "dist/${{ matrix.asset }}"
+          mv rust/target/release/fslc-lsp "dist/${{ matrix.lsp_asset }}"
           ( cd dist && shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256" )
+          ( cd dist && shasum -a 256 "${{ matrix.lsp_asset }}" > "${{ matrix.lsp_asset }}.sha256" )
 
       - name: Rename + checksum (Windows)
         if: runner.os == 'Windows'
@@ -87,8 +122,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Move-Item rust/target/release/fslc.exe "dist/${{ matrix.asset }}"
+          Move-Item rust/target/release/fslc-lsp.exe "dist/${{ matrix.lsp_asset }}"
           $hash = (Get-FileHash "dist/${{ matrix.asset }}" -Algorithm SHA256).Hash.ToLower()
           "$hash  ${{ matrix.asset }}" | Out-File -Encoding ascii "dist/${{ matrix.asset }}.sha256"
+          $lspHash = (Get-FileHash "dist/${{ matrix.lsp_asset }}" -Algorithm SHA256).Hash.ToLower()
+          "$lspHash  ${{ matrix.lsp_asset }}" | Out-File -Encoding ascii "dist/${{ matrix.lsp_asset }}.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -97,6 +135,8 @@ jobs:
           path: |
             dist/${{ matrix.asset }}
             dist/${{ matrix.asset }}.sha256
+            dist/${{ matrix.lsp_asset }}
+            dist/${{ matrix.lsp_asset }}.sha256
 
       - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -105,6 +145,8 @@ jobs:
           files: |
             dist/${{ matrix.asset }}
             dist/${{ matrix.asset }}.sha256
+            dist/${{ matrix.lsp_asset }}
+            dist/${{ matrix.lsp_asset }}.sha256
 
   vsix:
     name: build vscode extension (.vsix)

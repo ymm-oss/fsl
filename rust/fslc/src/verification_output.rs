@@ -50,16 +50,7 @@ pub struct BmcOutputOptions<'a> {
 /// Render a model-construction error using the public semantic classification.
 #[must_use]
 pub fn render_semantic_error(mut output: Map<String, Value>, message: &str) -> Value {
-    let kind = if message == "init constraints are unsatisfiable" {
-        "vacuous"
-    } else if message.starts_with("unknown type '")
-        || message.starts_with("cannot coerce symbolic value")
-        || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
-    {
-        "type"
-    } else {
-        "semantics"
-    };
+    let kind = semantic_error_kind(message);
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
@@ -112,6 +103,21 @@ pub fn render_governance_error(
         json!({"line": error.line, "column": error.column}),
     );
     Value::Object(output)
+}
+
+/// Classify a typed-model diagnostic identically on every Rust delivery surface.
+#[must_use]
+pub fn semantic_error_kind(message: &str) -> &'static str {
+    if message == "init constraints are unsatisfiable" {
+        "vacuous"
+    } else if message.starts_with("unknown type '")
+        || message.starts_with("cannot coerce symbolic value")
+        || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
+    {
+        "type"
+    } else {
+        "semantics"
+    }
 }
 
 /// Evaluate a requirements-layer `implements` declaration for verify metadata.

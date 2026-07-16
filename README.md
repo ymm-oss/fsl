@@ -163,9 +163,8 @@ the Claude Code skills in `~/.claude/skills/`
 
 What gets installed:
 
-- the native Rust `fslc` command (used from `~/.local/bin/fslc`; Python is not required)
-- the optional Python `fslc-lsp` language server when Python 3.9+ is available
-  (`~/.local/bin/fslc-lsp`) — the VSCode extension in `editors/vscode/` launches it from `PATH`
+- the native Rust `fslc` and `fslc-lsp` commands (used from `~/.local/bin`; Python is not required)
+  — the VSCode extension in `editors/vscode/` launches `fslc-lsp` from `PATH`
 - the Claude Code skills (`~/.claude/skills/fsl*`)
 - samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
 
@@ -178,9 +177,9 @@ rm -rf ~/.fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.cl
 ```
 
 Official releases are the checksummed native binaries, VSCode extension, and
-Kernel bundles attached to GitHub Releases. The retained Python reference/LSP
-is installed from this repository and is not published to PyPI; the Rust
-workspace crates are not published to crates.io. Publishing either surface
+Kernel bundles attached to GitHub Releases. The retained Python compatibility
+reference is installed from this repository and is not published to PyPI; the
+Rust workspace crates are not published to crates.io. Publishing either surface
 requires an explicit manifest, workflow, and documentation change.
 
 ## Developer setup
@@ -192,7 +191,7 @@ git clone https://github.com/ymm-oss/fsl && cd fsl
 ```
 
 The commands below install the retained Python reference implementation for differential
-testing and LSP development. There are only two runtime dependencies: `lark` (pure Python) and `z3-solver`
+testing. There are only two runtime dependencies: `lark` (pure Python) and `z3-solver`
 (a prebuilt wheel that bundles the native libz3). **No C++ compiler or separate Z3 install is needed**,
 and on Mac / Windows / Linux it is all done with just `pip install` (requires Python 3.9+).
 

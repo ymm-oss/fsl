@@ -132,8 +132,8 @@ declared corpora. Phase 2 is complete without changing these Phase-1 contracts.
 Phase 4's production Worker and cancellation/native-verdict gates are also
 complete. Phase 3 is complete: its large raw-output/report bodies and stable
 projections pass command-by-command parity without a Python command fallback.
-The native release binary is the primary `fslc` distribution; the Python package
-remains available as the parity oracle and optional LSP implementation.
+The native release binaries provide `fslc` and `fslc-lsp`; the Python package
+remains available only as the frozen compatibility/parity oracle.
 
 The batching decision is evidence-driven: retain per-term calls unless profiling
 representative Phase-1 corpus verification shows that JS term construction is at

@@ -3,9 +3,9 @@
 ## Project and authority
 
 `fslc` is the verifier for FSL, an AI-native formal specification language. The native Rust
-workspace under `rust/` is the authoritative implementation and distribution surface. The Python
-package under `src/fslc/` is a frozen compatibility reference and the retained LSP surface; do not
-add product behavior there unless a compatibility or LSP change explicitly requires it.
+workspace under `rust/` is the authoritative implementation and distribution surface, including
+the `fslc-lsp` language server. The Python package under `src/fslc/` is a frozen compatibility
+reference; do not add product behavior there unless a compatibility change explicitly requires it.
 
 Interpret evidence in this order:
 
@@ -26,7 +26,8 @@ When sources disagree, stop and resolve the contract conflict instead of silentl
 - `rust/fsl-tools`: analysis, mutation, report, typestate, and test generation tools.
 - `rust/fslc`: native CLI and JSON/process contract.
 - `rust/fsl-wasm`: browser Worker surface.
-- `src/fslc`: frozen Python compatibility reference and LSP.
+- `rust/fsl-lsp`: native language server and document index.
+- `src/fslc`: frozen Python compatibility reference.
 - `tests`: Python-driven Rust contract, parity, and compatibility tests.
 - `specs` and `examples`: FSL corpus and reproducing cases.
 - `skills`: canonical agent skills; `.claude/skills/fsl*` and `.agents/skills/fsl*` symlink here.
@@ -57,7 +58,7 @@ The complete required product gate has one Rust-native entrypoint and does not e
 ```
 
 Python is optional and is used only for changes explicitly scoped to the frozen compatibility
-reference, retained LSP, or Python-based repository hooks. Native solver changes should also run
+reference or Python-based repository hooks. Native solver changes should also run
 the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
 
 ## Correctness invariants

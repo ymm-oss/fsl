@@ -20,7 +20,7 @@ mod typestate;
 mod undecided;
 
 pub use ai::{check_ai, replay_ai};
-pub use analysis::{analyze_model, build_tsg};
+pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_findings};
 pub use analysis_export::export_analysis_graph;
 pub use db::{DbToolError, check_db, observe_db, validate_db};
 pub use db_import::{DbImport, import_db};

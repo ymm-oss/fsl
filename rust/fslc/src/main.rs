@@ -3870,16 +3870,14 @@ fn display_binding(value: &fsl_core::FslValue) -> String {
 }
 
 fn run_check(path: &Path) -> (Value, i32) {
-    if let Ok(source) = std::fs::read_to_string(path)
-        && let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+    if let Ok(source) = std::fs::read_to_string(path) {
+        if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
             &source,
             &path.to_string_lossy(),
             envelope(),
-        )
-    {
-        return (output, 0);
-    }
-    if let Ok(source) = std::fs::read_to_string(path) {
+        ) {
+            return (output, 0);
+        }
         match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
             Ok(fsl_syntax::ParsedDocument {
                 surface: fsl_syntax::SurfaceDocument::Agent(agent),
@@ -3896,6 +3894,14 @@ fn run_check(path: &Path) -> (Value, i32) {
             }
             Ok(_) => {}
             Err(error) => return (surface_parse_error_output(&error), 2),
+        }
+        let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+        if let Some(diagnostic) =
+            fslc_rust::source_diagnostic::diagnostics(&source, &path.to_string_lossy(), &resolver)
+                .into_iter()
+                .find(|diagnostic| diagnostic.kind != "migration")
+        {
+            return (semantic_error_output(&diagnostic.message), 2);
         }
     }
     if let Err(error) = validate_specialized_document(path) {
@@ -8932,36 +8938,6 @@ fn tag_tokens(
     (bare, explicit)
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
-fn analysis_finding(
-    finding_type: &str,
-    confidence: f64,
-    involved_nodes: Value,
-    witness: Value,
-    why: &str,
-    repairs: Value,
-    caveats: Value,
-    loc: Option<Value>,
-) -> Value {
-    let mut finding = json!({
-        "finding_id":"",
-        "analysis":"structure",
-        "finding_type":finding_type,
-        "severity":"review_required",
-        "confidence":confidence,
-        "formal_status":"not_a_violation",
-        "involved_nodes":involved_nodes,
-        "witness":witness,
-        "why_it_matters":why,
-        "candidate_repairs":repairs,
-        "do_not_assume":caveats,
-    });
-    if let (Some(loc), Value::Object(object)) = (loc, &mut finding) {
-        object.insert("loc".to_owned(), loc);
-    }
-    finding
-}
-
 fn ai_tag_findings(model: &KernelModel) -> Vec<Value> {
     let export = tag_review_output(model);
     let declarations = export["declarations"]
@@ -9036,7 +9012,7 @@ fn ai_tag_findings(model: &KernelModel) -> Vec<Value> {
                 continue;
             }
             let stale = finding_type == "tag_stale_reference";
-            findings.push(analysis_finding(
+            findings.push(fsl_tools::review_finding(
                 finding_type,
                 if stale { 0.82 } else { 0.74 },
                 json!([declaration["node_id"]]),
@@ -9056,307 +9032,6 @@ fn ai_tag_findings(model: &KernelModel) -> Vec<Value> {
                 declaration.get("loc").cloned(),
             ));
         }
-    }
-    findings
-}
-
-fn tsg_nodes(tsg: &Value) -> std::collections::BTreeMap<String, Value> {
-    tsg["nodes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|node| Some((node.get("id")?.as_str()?.to_owned(), node.clone())))
-        .collect()
-}
-
-#[allow(clippy::too_many_lines)]
-fn ai_structural_findings(tsg: &Value) -> Vec<Value> {
-    let nodes = tsg_nodes(tsg);
-    let edges = tsg["edges"].as_array().cloned().unwrap_or_default();
-    let property_kinds = ["invariant", "trans", "leadsTo", "reachable"]
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
-    let scenario_kinds = ["acceptance", "forbidden"]
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut findings = Vec::new();
-
-    for requirement in nodes.values().filter(|node| node["kind"] == "requirement") {
-        let id = requirement["id"].as_str().unwrap_or_default();
-        let useful = edges.iter().any(|edge| {
-            edge["kind"] == "covers"
-                && edge["from"] == id
-                && nodes
-                    .get(edge["to"].as_str().unwrap_or_default())
-                    .is_some_and(|node| {
-                        let kind = node["kind"].as_str().unwrap_or_default();
-                        property_kinds.contains(kind)
-                            || scenario_kinds.contains(kind)
-                            || matches!(kind, "action" | "kpi" | "control")
-                    })
-        });
-        if !useful {
-            findings.push(analysis_finding(
-                "disconnected_requirement",
-                0.8,
-                json!([id]),
-                json!({"kind":"isolated_node","node":id}),
-                "The requirement is declared but is not connected to an action, property, acceptance scenario, forbidden scenario, governance control, or refinement mapping in the structural graph.",
-                json!([{"kind":"add_traceability_anchor","template":"Attach the requirement id to a relevant action/property or add an acceptance/forbidden scenario."}]),
-                json!(["The requirement is invalid.","The implementation is missing behavior."]),
-                None,
-            ));
-        }
-    }
-
-    let action_states = edges
-        .iter()
-        .filter(|edge| matches!(edge["kind"].as_str(), Some("reads" | "writes")))
-        .filter(|edge| {
-            nodes
-                .get(edge["from"].as_str().unwrap_or_default())
-                .is_some_and(|node| node["kind"] == "action")
-                && nodes
-                    .get(edge["to"].as_str().unwrap_or_default())
-                    .is_some_and(|node| node["kind"] == "state")
-        })
-        .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
-        .collect::<std::collections::BTreeSet<_>>();
-    let scenario_ids = nodes
-        .values()
-        .filter(|node| scenario_kinds.contains(node["kind"].as_str().unwrap_or_default()))
-        .filter_map(|node| node["id"].as_str().map(str::to_owned))
-        .collect::<std::collections::BTreeSet<_>>();
-    let scenario_actions = edges.iter().any(|edge| {
-        scenario_ids.contains(edge["from"].as_str().unwrap_or_default())
-            && nodes
-                .get(edge["to"].as_str().unwrap_or_default())
-                .is_some_and(|node| node["kind"] == "action")
-    });
-    let scenario_states = edges
-        .iter()
-        .filter(|edge| scenario_ids.contains(edge["from"].as_str().unwrap_or_default()))
-        .filter(|edge| {
-            nodes
-                .get(edge["to"].as_str().unwrap_or_default())
-                .is_some_and(|node| node["kind"] == "state")
-        })
-        .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
-        .collect::<std::collections::BTreeSet<_>>();
-    let related = action_states
-        .union(&scenario_states)
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    for property in nodes
-        .values()
-        .filter(|node| property_kinds.contains(node["kind"].as_str().unwrap_or_default()))
-    {
-        if property.get("meta").is_some() {
-            continue;
-        }
-        let id = property["id"].as_str().unwrap_or_default();
-        let reads = edges
-            .iter()
-            .filter(|edge| {
-                edge["from"] == id && matches!(edge["kind"].as_str(), Some("reads" | "checks"))
-            })
-            .filter(|edge| {
-                nodes
-                    .get(edge["to"].as_str().unwrap_or_default())
-                    .is_some_and(|node| node["kind"] == "state")
-            })
-            .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
-            .collect::<std::collections::BTreeSet<_>>();
-        if (!reads.is_empty() && !reads.is_disjoint(&related))
-            || (scenario_actions && property["kind"] == "reachable")
-        {
-            continue;
-        }
-        findings.push(analysis_finding(
-            "unanchored_property",
-            0.7,
-            json!([id]),
-            json!({"kind":"unanchored_node","node":id,"reads":reads}),
-            "The user property is not connected to requirement metadata, scenarios, governance metadata, or an action-state anchor in the structural graph.",
-            json!([{"kind":"add_traceability_anchor","template":"Attach a requirement tag or add a scenario/action-state anchor that explains why this property exists."}]),
-            json!(["The property is wrong.","The property should be deleted."]),
-            None,
-        ));
-    }
-
-    let mut written = std::collections::BTreeSet::new();
-    let mut read = std::collections::BTreeSet::new();
-    for edge in &edges {
-        if !nodes
-            .get(edge["to"].as_str().unwrap_or_default())
-            .is_some_and(|node| node["kind"] == "state")
-        {
-            continue;
-        }
-        match edge["kind"].as_str() {
-            Some("writes") => {
-                written.insert(edge["to"].as_str().unwrap_or_default().to_owned());
-            }
-            Some("reads" | "checks") => {
-                read.insert(edge["to"].as_str().unwrap_or_default().to_owned());
-            }
-            _ => {}
-        }
-    }
-    for state in nodes.values().filter(|node| node["kind"] == "state") {
-        let id = state["id"].as_str().unwrap_or_default();
-        if written.contains(id) {
-            continue;
-        }
-        let readers = edges
-            .iter()
-            .filter(|edge| {
-                edge["to"] == id && matches!(edge["kind"].as_str(), Some("reads" | "checks"))
-            })
-            .filter_map(|edge| edge["from"].as_str().map(str::to_owned))
-            .collect::<Vec<_>>();
-        findings.push(analysis_finding(
-            "unwritten_state",
-            if read.contains(id) { 0.76 } else { 0.68 },
-            json!([id]),
-            json!({"kind":"state_has_no_action_writes","node":id,"read_by":readers}),
-            "The state variable is initialized but no action writes it in the structural graph.",
-            json!([{"kind":"review_state_role","template":"Make the value a const/model parameter if it is intentionally fixed, or add the missing action/effect that changes it."}]),
-            json!(["The state variable is useless.","A verifier property is violated.","The variable is safe to delete without checking generated dialect state."]),
-            state.get("loc").cloned(),
-        ));
-    }
-
-    let relevance_seeds = [
-        "invariant",
-        "trans",
-        "leadsTo",
-        "reachable",
-        "acceptance",
-        "forbidden",
-        "guard",
-        "ensures",
-    ]
-    .into_iter()
-    .collect::<std::collections::BTreeSet<_>>();
-    let mut relevant = std::collections::BTreeSet::new();
-    let mut effect_targets = std::collections::BTreeMap::new();
-    let mut effect_reads =
-        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
-    for node in nodes.values().filter(|node| node["kind"] == "effect") {
-        if let (Some(id), Some(target)) = (node["id"].as_str(), node["target"].as_str()) {
-            effect_targets.insert(id.to_owned(), format!("state:{target}"));
-        }
-    }
-    for edge in &edges {
-        let Some(target) = edge["to"].as_str() else {
-            continue;
-        };
-        if !nodes
-            .get(target)
-            .is_some_and(|node| node["kind"] == "state")
-        {
-            continue;
-        }
-        let Some(source) = edge["from"].as_str() else {
-            continue;
-        };
-        let source_kind = nodes
-            .get(source)
-            .and_then(|node| node["kind"].as_str())
-            .unwrap_or_default();
-        if matches!(edge["kind"].as_str(), Some("reads" | "checks"))
-            && relevance_seeds.contains(source_kind)
-        {
-            relevant.insert(target.to_owned());
-        }
-        if edge["kind"] == "reads" && source_kind == "effect" {
-            effect_reads
-                .entry(source.to_owned())
-                .or_default()
-                .insert(target.to_owned());
-        }
-    }
-    loop {
-        let mut changed = false;
-        for (effect, target) in &effect_targets {
-            if !relevant.contains(target) {
-                continue;
-            }
-            for read in effect_reads.get(effect).into_iter().flatten() {
-                changed |= relevant.insert(read.clone());
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    let mut writers =
-        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
-    for edge in &edges {
-        if edge["kind"] != "writes" {
-            continue;
-        }
-        let (Some(source), Some(target)) = (edge["from"].as_str(), edge["to"].as_str()) else {
-            continue;
-        };
-        if !nodes
-            .get(target)
-            .is_some_and(|node| node["kind"] == "state")
-        {
-            continue;
-        }
-        let writer = nodes.get(source).and_then(|node| {
-            if node["kind"] == "action" {
-                Some(source)
-            } else {
-                node["action"].as_str()
-            }
-        });
-        if let Some(writer) = writer {
-            writers
-                .entry(target.to_owned())
-                .or_default()
-                .insert(writer.to_owned());
-        }
-    }
-    let relevance_seed_kinds = relevance_seeds.into_iter().collect::<Vec<_>>();
-    for state in nodes.values().filter(|node| node["kind"] == "state") {
-        let id = state["id"].as_str().unwrap_or_default();
-        let state_writers = writers.get(id).cloned().unwrap_or_default();
-        if state_writers.is_empty()
-            || relevant.contains(id)
-            || state_writers.iter().any(|writer| {
-                nodes
-                    .get(writer)
-                    .is_some_and(|node| node.get("meta").is_some())
-            })
-        {
-            continue;
-        }
-        findings.push(analysis_finding(
-            "unread_state",
-            0.64,
-            json!([id]),
-            json!({
-                "kind":"state_influences_no_check",
-                "node":id,
-                "writers":state_writers,
-                "relevance_seed_kinds":relevance_seed_kinds,
-                "message":"No transitive relevance chain reaches a guard, property, ensures clause, or scenario.",
-            }),
-            "The state variable is written, but its value does not transitively influence a guard, property, ensures clause, or acceptance/forbidden scenario in the structural graph.",
-            json!([
-                {"kind":"add_property_or_guard","template":"Add the missing invariant/trans/leadsTo/reachable, scenario expectation, ensures clause, or guard that consumes this state if it is part of the contract."},
-                {"kind":"review_state_role","template":"If this is intentional audit/history/ghost state, tag or document the writing action so reviewers know why the state is externally consumed."}
-            ]),
-            json!([
-                "The state variable is safe to delete.",
-                "The value is semantically irrelevant to external tooling, runtime logs, audit requirements, or generated dialect behavior.",
-                "A verifier property is violated."
-            ]),
-            state.get("loc").cloned(),
-        ));
     }
     findings
 }
@@ -9459,7 +9134,7 @@ fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
             .iter()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
-        findings.push(analysis_finding(
+        findings.push(fsl_tools::review_finding(
             "progressless_cycle",
             0.68,
             json!(involved),
@@ -9680,7 +9355,7 @@ fn ai_conservation_findings(model: &KernelModel) -> Vec<Value> {
                         .filter_map(|item| item["action"].as_str().map(str::to_owned)),
                 )
                 .collect::<std::collections::BTreeSet<_>>();
-            findings.push(analysis_finding(
+            findings.push(fsl_tools::review_finding(
                 "conservation_candidate",
                 0.6,
                 json!(involved),
@@ -9951,7 +9626,7 @@ fn semantic_review_findings(review: &SemanticReview) -> Vec<Value> {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect::<std::collections::BTreeSet<_>>();
-        let mut finding = analysis_finding(
+        let mut finding = fsl_tools::review_finding(
             "divergent_choice",
             0.86,
             json!(involved),
@@ -9989,7 +9664,7 @@ fn semantic_review_findings(review: &SemanticReview) -> Vec<Value> {
         let involved = std::iter::once(format!("state:{state}"))
             .chain(actions)
             .collect::<Vec<_>>();
-        let mut finding = analysis_finding(
+        let mut finding = fsl_tools::review_finding(
             "unconstrained_effect",
             0.82,
             json!(involved),
@@ -10053,7 +9728,7 @@ fn acknowledge_undecided_findings(model: &KernelModel, findings: &mut [Value]) {
 
 fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) -> Value {
     let tsg = fsl_tools::build_tsg(model);
-    let mut findings = ai_structural_findings(&tsg);
+    let mut findings = fsl_tools::structural_review_findings(&tsg);
     let unconstrained_states = findings
         .iter()
         .filter(|finding| finding["finding_type"] == "unread_state")
@@ -10088,7 +9763,7 @@ fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) ->
             .filter(|edge| edge["from"] == action_id && edge["kind"] == "writes")
             .filter_map(|edge| edge["to"].as_str().map(str::to_owned))
             .collect::<Vec<_>>();
-        findings.push(analysis_finding(
+        findings.push(fsl_tools::review_finding(
             "unguarded_action",
             0.72,
             json!([action_id]),

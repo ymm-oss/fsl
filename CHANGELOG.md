@@ -6,10 +6,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc-lsp` is now a native Rust language server backed directly by the authoritative
+  syntax, core, and analysis implementation. Existing diagnostics, navigation, symbols,
+  rename, semantic tokens, completion, hover, and code actions no longer require Python;
+  corpus/index coverage and stdio lifecycle tests run in the Rust workspace (issue #310).
 - Required product CI now has one Rust-native integration entrypoint covering the workspace,
   dependency boundaries, CLI/schema contracts, native/browser agreement, and WASM. The redundant
-  Python CLI parity job and its frozen-surface exception snapshot are removed; compatibility and LSP
-  Python tests remain explicit manual evidence. FSL source locations, testgen templates, and generated
+  Python CLI parity job and its frozen-surface exception snapshot are removed; compatibility Python
+  tests remain explicit manual evidence. FSL source locations, testgen templates, and generated
   artifact digests are portable across the supported native runner matrix (issue #307).
 - `fslc analyze --projection code_audit --code <path>` now maps checked
   executable Kernel requirement targets to a closed, language-independent
@@ -45,7 +49,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   formatter edits cover legacy enums/operators and quantifiers; typed metadata,
   unambiguous local action correspondences, and implicit defaults use semantic
   planners. Unsafe comment movement, branch/duplicate mappings, and invalid
-  `&&` are explicit refusals. The retained LSP exposes applicable diagnostics
+  `&&` are explicit refusals. The native LSP exposes applicable diagnostics
   as quick-fix Code Actions (issue #249).
 - `fslc fmt` now formats one registered FSL document or stdin to canonical
   stdout without mutating it; `--check` accepts multiple paths and reports a

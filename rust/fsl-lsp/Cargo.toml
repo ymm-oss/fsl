@@ -1,0 +1,26 @@
+[package]
+name = "fsl-lsp"
+description = "Native FSL language server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fslc-lsp"
+path = "src/main.rs"
+
+[dependencies]
+fsl-core = { path = "../fsl-core" }
+fsl-syntax = { path = "../fsl-syntax" }
+fsl-tools = { path = "../fsl-tools" }
+fslc-rust = { path = "../fslc", default-features = false }
+crossbeam-channel.workspace = true
+lsp-server.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

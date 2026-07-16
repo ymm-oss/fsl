@@ -139,7 +139,8 @@ This skill only supplies language knowledge; verification is done by the `fslc`
 CLI. If it is not installed, run `bash install.sh` from the FSL repository (or
 `bash ~/.fsl/install.sh` after cloning there). The installer places the
 checksummed native Rust binary on the public `fslc` path; Python is optional and
-used only for the frozen reference/LSP development surface.
+used only for the frozen compatibility-reference development surface. The
+`fslc-lsp` language server is also native Rust and does not require Python.
 
 ## How to run
 
@@ -147,10 +148,10 @@ used only for the frozen reference/LSP development surface.
 fslc <subcommand> ...            # authoritative native Rust CLI
 ```
 
-The Python implementation is a frozen compatibility reference and optional LSP
-support surface. New language/CLI features are not backported to it. In
-particular, use the native `fslc` binary for `undecided:` syntax and its
-ledger/HTML/analyze output; do not route new work through `python -m fslc`.
+The Python implementation is a frozen compatibility reference. New language/CLI
+features are not backported to it. Use the native `fslc` binary for
+`undecided:` syntax and its ledger/HTML/analyze output; do not route new work
+through `python -m fslc`.
 
 External compilers and generators must use `fslc kernel <spec>` rather than the
 Python AST or source re-parsing. Validate independent implementations with

@@ -8,7 +8,10 @@ cd "$root"
 
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
-cargo test --manifest-path rust/Cargo.toml --workspace --locked
+cargo test --manifest-path rust/Cargo.toml -p fsl-lsp --lib --locked
+cargo test --manifest-path rust/Cargo.toml -p fsl-lsp --test stdio --locked
+cargo test --manifest-path rust/Cargo.toml -p fsl-lsp --test corpus --locked
+cargo test --manifest-path rust/Cargo.toml --workspace --exclude fsl-lsp --locked
 cargo build --manifest-path rust/Cargo.toml --workspace --locked
 
 assert_dependency_absent() {
