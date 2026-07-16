@@ -429,6 +429,7 @@ struct MigrationOptions {
     paths: Vec<PathBuf>,
     edition: fslc_rust::migration::Edition,
     write: bool,
+    project: Option<PathBuf>,
 }
 
 fn parse_migration_options(
@@ -443,6 +444,7 @@ fn parse_migration_options(
         fslc_rust::migration::Edition::Current
     };
     let mut write = false;
+    let mut project = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--edition" => {
@@ -452,6 +454,12 @@ fn parse_migration_options(
                 )?)?;
             }
             "--write" if migrate => write = true,
+            "--project" if !migrate => {
+                project = Some(PathBuf::from(required_option_value(
+                    &mut args,
+                    "--project",
+                )?));
+            }
             option if option.starts_with('-') => {
                 return Err(format!(
                     "unknown {} option '{option}'",
@@ -465,7 +473,8 @@ fn parse_migration_options(
         return Err(if migrate {
             "usage: fslc migrate FILE... [--edition current|next] [--write]".to_owned()
         } else {
-            "usage: fslc lint FILE... [--edition current|next]".to_owned()
+            "usage: fslc lint FILE... [--edition current|next] [--project fsl-project.toml]"
+                .to_owned()
         });
     }
     let mut unique = std::collections::BTreeSet::new();
@@ -476,17 +485,28 @@ fn parse_migration_options(
         paths,
         edition,
         write,
+        project,
     })
 }
 
 fn run_lint(options: &MigrationOptions) -> (Value, i32) {
+    let (id_policy, policy_source) = match load_id_policy(options.project.as_deref()) {
+        Ok(policy) => policy,
+        Err(error) => return (error_output("config", &error), 2),
+    };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
     for path in &options.paths {
-        let (_, plan) = match load_migration_plan(path, options.edition) {
+        let (source, mut plan) = match load_migration_plan(path, options.edition) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
+        plan.diagnostics
+            .extend(fslc_rust::migration::id_policy_diagnostics(
+                &source, &id_policy,
+            ));
+        plan.diagnostics
+            .sort_by_key(|diagnostic| diagnostic.span.start.offset);
         finding_count += plan.diagnostics.len();
         files.push(json!({
             "path": path,
@@ -499,10 +519,52 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
             "result":"lint",
             "edition":options.edition.as_str(),
             "finding_count":finding_count,
+            "id_policy":{
+                "source":policy_source,
+                "patterns":id_policy.json(),
+            },
             "files":files,
         }),
         i32::from(finding_count > 0),
     )
+}
+
+fn load_id_policy(
+    project: Option<&Path>,
+) -> Result<(fslc_rust::migration::IdPolicy, String), String> {
+    let mut policy = fslc_rust::migration::IdPolicy::default();
+    let Some(project) = project else {
+        return Ok((policy, "builtin".to_owned()));
+    };
+    let source = std::fs::read_to_string(project)
+        .map_err(|error| format!("{}: {error}", project.display()))?;
+    let sections = parse_project_manifest(&source)?;
+    if let Some(patterns) = sections.get("id_policy.patterns") {
+        for (kind, raw_patterns) in &patterns.values {
+            let kind = fslc_rust::migration::IdKind::parse(kind)?;
+            if raw_patterns.starts_with('\'') || raw_patterns.ends_with('\'') {
+                return Err(format!(
+                    "invalid [id_policy.patterns].{} in {}: use double-quoted JSON-compatible strings",
+                    kind.as_str(),
+                    project.display()
+                ));
+            }
+            let values = if raw_patterns.trim_start().starts_with('[') {
+                serde_json::from_str::<Vec<String>>(raw_patterns).map_err(|error| {
+                    format!(
+                        "invalid [id_policy.patterns].{} in {}: {error}",
+                        kind.as_str(),
+                        project.display()
+                    )
+                })?
+            } else {
+                vec![raw_patterns.clone()]
+            };
+            policy.set_patterns(kind, values)?;
+        }
+    }
+    policy.validate()?;
+    Ok((policy, project.display().to_string()))
 }
 
 fn run_migrate(options: &MigrationOptions) -> (Value, i32) {

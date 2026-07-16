@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `fslc lint` now enforces a built-in, kind-aware canonical ID policy and accepts
+  an explicit `--project fsl-project.toml` override. Requirement, acceptance,
+  forbidden, policy, goal, control, model, and assumption IDs have distinct
+  default templates; project tables can replace individual kinds while retaining
+  all other defaults. Results record the resolved policy, invalid configuration
+  fails closed, zero-padded numeric ID components retain their exact source
+  spelling through parsing/lowering, and ID findings are deliberately non-machine-applicable so
+  `migrate` never guesses cross-artifact renames. Typed `@requirement` annotations
+  are the canonical declaration-link syntax; legacy `"ID: text"` metadata remains
+  migration input.
 - `docs/intro/language.ja.html` now renders from a new, section-aligned Japanese
   translation, `docs/LANGUAGE.ja.md`, instead of reusing the English `docs/LANGUAGE.md`
   body verbatim. FSL keywords, `fslc` commands/flags, diagnostic/result identifiers,

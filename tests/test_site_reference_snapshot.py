@@ -60,7 +60,9 @@ def test_generated_reference_pages_are_fresh(page_id):
         committed = (OUT_DIR / f"{page_id}.{lang}.html").read_text(encoding="utf-8")
         if page_id == "language":
             tree = mod.render_language_tree(lang)
-            source_note = "docs/LANGUAGE.md"
+            source_note = (
+                "docs/LANGUAGE.ja.md" if lang == "ja" else "docs/LANGUAGE.md"
+            )
         else:
             tree = mod.render_cli_tree()
             source_note = "src/fslc/cli.py"

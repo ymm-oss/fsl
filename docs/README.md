@@ -28,6 +28,7 @@
 | [`DESIGN-dialect-dispatch.md`](DESIGN-dialect-dispatch.md) | Shared-lexer dialect registry, significant-token rules, document annotations, diagnostics, and frontend contract |
 | [`DESIGN-formatter.md`](DESIGN-formatter.md) | Lossless token/trivia boundary, canonical formatting policy, non-mutating CLI contract, and safe refusal range |
 | [`DESIGN-migration.md`](DESIGN-migration.md) | Edition lint taxonomy, checked rewrite rules, explicit refusal boundaries, atomic write contract, and bulk-update procedure |
+| [`DESIGN-id-policy.md`](DESIGN-id-policy.md) | Canonical ID ownership/link syntax, built-in templates, project overrides, lint diagnostics, and the no-auto-rename boundary |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
 | [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |

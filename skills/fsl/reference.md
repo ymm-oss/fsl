@@ -11,7 +11,7 @@ may precede the dialect keyword and attach to the document rather than affecting
 dispatch:
 
 ```fsl
-@requirement("REQ-DOC", "document contract")
+@requirement("REQ-CHECKOUT-001", "document contract")
 @acme.review(owner.platform, 2, true)
 spec <Name> { ... }
 ```
@@ -27,7 +27,7 @@ process `transition`, or a `requirement`/`acceptance`/`forbidden` block — in
 the spec/business/requirements/compose dialects:
 
 ```fsl
-@requirement("REQ-3", "the ledger matches payments")
+@requirement("REQ-CHECKOUT-003", "the ledger matches payments")
 @undecided("late gateway completion policy is pending")
 invariant PaidLedger { ... }
 ```
@@ -783,7 +783,7 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 
 ```
 fslc check <f>                                  # syntax / names / types only; f = .fsl or .md (literate)
-fslc lint <path>... [--edition current|next]    # stable edition findings; never mutates
+fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
 fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
@@ -1356,11 +1356,15 @@ in §7 work as-is.
 
 ### Declaration tags (common to all layers)
 
-`"ID: source"` immediately before the `{` of an invariant / trans / reachable /
+Use a typed annotation immediately before an invariant / trans / reachable /
 leadsTo / action:
-`invariant PaidLedger "REQ-3: ledger consistency" { ... }` →
-`requirement: {id, text}` in violated / unknown_cti / coverage diagnostic /
-scenarios / `refinement_failed` (root).
+`@requirement("REQ-LEDGER-003", "ledger consistency")` followed by
+`invariant PaidLedger { ... }` → `requirement: {id, text}` in violated /
+unknown_cti / coverage diagnostic / scenarios / `refinement_failed` (root).
+Semantic declarations own the ID after their keyword; `@requirement` links a
+declaration to an owned ID, and process `covers` is canonical dialect sugar for
+the same relation. The older `"ID: source"` slot is migration input and linted
+as `legacy_string_metadata`.
 
 Reserved intentional-undecided metadata uses the same single tag slot:
 `init "undecided: initial mode pending" { ... }` or
@@ -1387,12 +1391,19 @@ not extended.
 The spec source IS the documentation: a rule you can read is also the rule that is
 verified, so it never drifts. In the requirements and design (kernel) layers:
 
-1. **Tag every invariant/action/property** with `"ID: one-sentence intent"` — the only
-   in-source prose that flows into all output (explain / html / counterexamples). It is
+1. **Tag every invariant/action/property** with
+   `@requirement("REQ-SCOPE-001", "one-sentence intent")` — the in-source prose
+   that flows into all output (explain / html / counterexamples). It is
    NOT verified, so keep it a faithful paraphrase of the expression, not a rival truth.
-2. **Quarantine verification scaffolding by ID prefix.** Domain rules: `REQ-…` / `INV-…`.
-   Verification-only artifacts (k-induction CTI auxiliary invariants, ghost-counter
-   relations): `MODEL-…` / `ASSUME-…`, so a reader can skip them.
+2. **Use the active ID policy.** The built-in forms are
+   `REQ|NFR|INV-{SCOPE}-{NNN}` for requirement relations,
+   `AC|FB|POL|GOAL|CTRL-{SCOPE}-{NNN}` for their respective declarations, and
+   `MODEL|ASSUME-{SCOPE}-{NNN}` for verification-only artifacts. Projects may
+   partially override these templates in `[id_policy.patterns]` and pass the
+   manifest explicitly with `fslc lint --project fsl-project.toml`. Pattern
+   values use double-quoted JSON-compatible strings/arrays; model and assumption
+   templates begin with literal prefixes that overlap neither each other nor
+   requirement templates.
 3. **Prefer member-quantification** `forall x in coll { P(x) }` over the index idiom
    `forall i in 0..N { i < coll.size() => P(coll.at(i)) }` — but ONLY (a) in expression
    position (invariant/property bodies; NOT action/init `forall` *statements*, which
@@ -1497,20 +1508,20 @@ requirements ExpenseRequirements {
   process Claim with amount: Amount {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
-    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
-    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
-    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
-    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
-    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-EXPENSE-002 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-EXPENSE-004 "Only approved claims are paid"
   }
 
   kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+  acceptance AC-EXPENSE-001 "Approval flow: a low-amount claim is auto-approved and paid" {
     submit(0, 1) auto_approve(0) pay(0)
     expect Claim 0 in Paid
   }
-  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+  acceptance AC-EXPENSE-002 "Rejection flow: a high-amount claim ends in manager rejection" {
     submit(1, 2) reject(1)
     expect Claim 1 in Rejected
   }
@@ -1556,7 +1567,7 @@ verify {
   scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments accept
   enum member names and const names, not just numeric literals (`answer(0, Triggered)`
   == `answer(0, 1)`); an undefined name is a check-time error.
-- `forbidden FB-1 "source" { <steps> expect rejected }` is must-forbid (the dual of
+- `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected** (not-enabled, or an
   invariant/type_bound/partial_op/ensures violation). If accepted,
@@ -1645,7 +1656,7 @@ time {
   urgent respond_due                       // <- make only the deadline-reached handler urgent
   age resp_age[c: CaseId] while cases[c] == Accepted
 }
-requirement REQ-3 "first response within 3 ticks of acceptance" {
+requirement REQ-RESPONSE-003 "first response within 3 ticks of acceptance" {
   fair action respond_due(c: CaseId) {
     requires cases[c] == Accepted
     requires resp_age[c] >= SLA_TICKS      // enabled only at the deadline = time flows until then
