@@ -445,8 +445,7 @@ pub fn internal_error(message: String) -> String {
 #[cfg(test)]
 mod tests {
     use std::future::Future;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::{Context, Poll, Waker};
 
     use super::*;
     use fsl_core::{FslValue, TraceAction, TraceStep, trace_json};
@@ -454,15 +453,8 @@ mod tests {
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
 
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-
     fn block_on<F: Future>(future: F) -> F::Output {
-        let waker = Waker::from(Arc::new(NoopWake));
-        let mut context = Context::from_waker(&waker);
+        let mut context = Context::from_waker(Waker::noop());
         let mut future = Box::pin(future);
         loop {
             if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
