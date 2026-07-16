@@ -119,7 +119,7 @@
         <pre><code>requirements Name {
   number Amount
   process Claim with amount: Amount { ... }
-  acceptance AC-1 "..." { ... }
+  acceptance AC-CHECKOUT-001 "..." { ... }
 }
 verify { instances Claim = 3 }</code></pre>
         <p>要件層。工程、要件ID、受け入れ手順、禁止手順、非機能要件を扱います。</p>
@@ -422,20 +422,20 @@ requires stock[i] &gt; 0
     initial Draft
     transition submit Draft -&gt; Submitted by Employee
       with a: Amount when a &gt; 0 set amount = a
-      covers REQ-1 "申請者が金額を入力して経費を申請する"
+      covers REQ-EXPENSE-001 "申請者が金額を入力して経費を申請する"
     transition auto_approve Submitted -&gt; Approved by System
       when amount &lt;= AUTO_LIMIT
-      covers REQ-2 "少額申請は自動承認される"
+      covers REQ-EXPENSE-002 "少額申請は自動承認される"
     transition pay Approved -&gt; Paid by Finance
-      covers REQ-4 "承認済み申請だけが支払われる"
+      covers REQ-EXPENSE-004 "承認済み申請だけが支払われる"
   }
 
-  acceptance AC-1 "少額申請は支払いまで進める" {
+  acceptance AC-EXPENSE-001 "少額申請は支払いまで進める" {
     submit(0, 1) auto_approve(0) pay(0)
     expect Claim 0 in Paid
   }
 
-  forbidden FB-1 "下書き申請は支払えない" {
+  forbidden FB-EXPENSE-001 "下書き申請は支払えない" {
     pay(0)
     expect rejected
   }

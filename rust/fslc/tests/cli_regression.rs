@@ -194,7 +194,7 @@ fn monitor_boundary_self_spec_is_proved_and_mutation_sensitive() {
         "{mutated}"
     );
     assert!(
-        mutated["by_requirement"]["MONITOR-ACTION-BOUNDARY"]["kills"]
+        mutated["by_requirement"]["REQ-MONITOR-001"]["kills"]
             .as_u64()
             .is_some_and(|kills| kills > 0),
         "{mutated}"
