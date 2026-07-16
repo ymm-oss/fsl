@@ -782,7 +782,7 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 ## 7. CLI and JSON essentials
 
 ```
-fslc check <f>                                  # syntax / names / types only
+fslc check <f>                                  # syntax / names / types only; f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next]    # stable edition findings; never mutates
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
 fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
@@ -924,6 +924,13 @@ clear. `auto` shares its cache entries with plain `--engine explicit`/`bmc`
 runs of the same spec (the cache key is always the engine that actually
 decided, never `auto` itself), does not change the default engine, and is
 Rust-only.
+
+**Literate Markdown FSL.** `fslc check` and `fslc verify` accept `.md` files
+containing ` ```fsl ` fenced code blocks directly — no extraction step or
+flag needed. Non-fsl lines are blanked in place so all diagnostic positions
+point to the Markdown document's own line numbers. Multiple fsl blocks form
+one compilation unit (split definitions across sections). Files without fsl
+fences are rejected; non-fsl fences (` ```python ` etc.) are ignored.
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`

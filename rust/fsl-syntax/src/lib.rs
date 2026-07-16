@@ -16,6 +16,7 @@ mod db;
 mod dispatch;
 mod domain;
 mod lexer;
+mod literate;
 mod lossless;
 mod parser;
 mod surface;
@@ -48,6 +49,7 @@ pub use domain::{
     DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
 pub use lexer::{LexError, Token, TokenKind, lex};
+pub use literate::extract_literate_fsl;
 pub use lossless::{
     CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,
     LosslessKind, LosslessNode, SourceEdit, apply_source_edits, canonical_rewrites, format_source,

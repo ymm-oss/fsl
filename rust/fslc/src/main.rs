@@ -27,6 +27,36 @@ use verification::{
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 
+struct LiterateState {
+    path: PathBuf,
+}
+
+impl Drop for LiterateState {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let blanked = fsl_syntax::extract_literate_fsl(&raw).ok_or_else(|| {
+        format!(
+            "{}: Markdown file does not contain any ```fsl fenced code blocks",
+            path.display()
+        )
+    })?;
+    let stem = path
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("literate");
+    let materialized = path.with_file_name(format!(".{stem}.{}.literate.fsl", std::process::id()));
+    std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
+    Ok(Some(LiterateState { path: materialized }))
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ScopeBounds {
     instances: std::collections::BTreeMap<String, i64>,
@@ -808,6 +838,8 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| "usage: fslc check SPEC [options]".to_owned())?,
             );
+            let literate_guard = materialize_literate(&path)?;
+            let path = literate_guard.as_ref().map_or(&path, |state| &state.path);
             let mut strict_tags = false;
             let mut requirements = None;
             let mut edition = "current".to_owned();
@@ -825,7 +857,7 @@ fn command() -> Result<(Value, i32), String> {
                 }
             }
             Ok(with_version_metadata(run_check_with_tags(
-                &path,
+                path,
                 strict_tags,
                 requirements.as_deref(),
                 &edition,
@@ -1445,10 +1477,12 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| format!("usage: fslc {command} SPEC [options]"))?,
             );
+            let literate_guard = materialize_literate(&path)?;
+            let path = literate_guard.as_ref().map_or(&path, |state| &state.path);
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                let result = run_verify_cli(&path, &options);
-                with_version_metadata(apply_domain_edition(result, &path, &options.edition))
+                let result = run_verify_cli(path, &options);
+                with_version_metadata(apply_domain_edition(result, path, &options.edition))
             } else {
                 if options.engine != "bmc"
                     || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
@@ -1467,7 +1501,7 @@ fn command() -> Result<(Value, i32), String> {
                 {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
-                run_scenarios(&path, options.depth, &options.deadlock)
+                run_scenarios(path, options.depth, &options.deadlock)
             })
         }
         _ => Err(format!("unknown command '{command}'")),

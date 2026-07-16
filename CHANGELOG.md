@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Literate Markdown FSL: `fslc check` and `fslc verify` now accept `.md` files
+  containing ` ```fsl ` fenced code blocks directly. Lines outside fsl blocks
+  are blanked in place so that diagnostic positions (line numbers, columns,
+  counterexample locs) point to the original Markdown document. Multiple fsl
+  blocks form one compilation unit; files without fsl fences are rejected with
+  a clear diagnostic (issue #193).
 - `fslc-lsp` is now a native Rust language server backed directly by the authoritative
   syntax, core, and analysis implementation. Existing diagnostics, navigation, symbols,
   rename, semantic tokens, completion, hover, and code actions no longer require Python;

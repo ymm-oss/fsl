@@ -665,14 +665,14 @@ variable.
 ## 7. The verifier `fslc`
 
 ```
-fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc check     <file.fsl|file.md>                  # syntax / names / types only (fast; .md = literate FSL)
 fslc lint      <path>... [--edition current|next] # stable edition diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -690,7 +690,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
-fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
+fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
@@ -982,6 +982,36 @@ or, when the target predicate is unsatisfiable under type bounds/invariants:
   "hint": "target predicate is unsatisfiable under type bounds/invariants (_bounds_x); ..."
 }
 ```
+
+### Literate Markdown FSL
+
+Markdown files (`.md`) containing ` ```fsl ` fenced code blocks are accepted
+directly by `fslc check` and `fslc verify` — no flags or extraction step
+needed. Lines outside fsl blocks are blanked (replaced with empty lines) so
+that all diagnostic positions (line numbers, columns in error messages and
+counterexamples) point to the original Markdown document. Multiple fsl blocks
+in one document are treated as one compilation unit, so definitions can be
+split across sections:
+
+    # Cart invariant
+
+    ```fsl
+    spec Cart {
+      state { count: 0..3 }
+      init  { count = 0 }
+    ```
+
+    ## Actions (continued in a second fsl block)
+
+    ```fsl
+      action inc() { requires count < 3  count = count + 1 }
+      invariant Bounded { count >= 0 and count <= 3 }
+    }
+    ```
+
+A `.md` file with no ` ```fsl ` fences is rejected with a clear diagnostic.
+Non-fsl fenced blocks (` ```python `, etc.) are ignored. `use`/compose paths
+resolve relative to the Markdown file's directory (same as for `.fsl` files).
 
 ## 8. Recommended workflow: make proved the standard
 

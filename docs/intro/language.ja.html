@@ -745,14 +745,14 @@ variable.</p></div></details>
 <li>A full <code>push</code> into a Seq is also detected automatically as <code>type_bound</code>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
-<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types only (fast; .md = literate FSL)
 fslc lint      &lt;path&gt;... [--edition current|next] # stable edition diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc verify    &lt;file.fsl|file.md&gt; [--depth K]     # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -770,7 +770,7 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
-fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
+fslc scenarios &lt;file.fsl|file.md&gt; [--depth K]     # generate integration-test scaffold JSON
 fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace conformance (§12)
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
@@ -1065,7 +1065,34 @@ internal split-action <code>name</code> and adds <code>display_name</code>.</p>
   &quot;blocking_requires&quot;: [{&quot;kind&quot;: &quot;type_bound&quot;, &quot;name&quot;: &quot;_bounds_x&quot;}],
   &quot;hint&quot;: &quot;target predicate is unsatisfiable under type bounds/invariants (_bounds_x); ...&quot;
 }
-</code></pre></div></details>
+</code></pre>
+<h3 id="literate-markdown-fsl">Literate Markdown FSL</h3>
+<p>Markdown files (<code>.md</code>) containing <code>```fsl</code> fenced code blocks are accepted
+directly by <code>fslc check</code> and <code>fslc verify</code> — no flags or extraction step
+needed. Lines outside fsl blocks are blanked (replaced with empty lines) so
+that all diagnostic positions (line numbers, columns in error messages and
+counterexamples) point to the original Markdown document. Multiple fsl blocks
+in one document are treated as one compilation unit, so definitions can be
+split across sections:</p>
+<pre><code># Cart invariant
+
+```fsl
+spec Cart {
+  state { count: 0..3 }
+  init  { count = 0 }
+```
+
+## Actions (continued in a second fsl block)
+
+```fsl
+  action inc() { requires count &lt; 3  count = count + 1 }
+  invariant Bounded { count &gt;= 0 and count &lt;= 3 }
+}
+```
+</code></pre>
+<p>A <code>.md</code> file with no <code>```fsl</code> fences is rejected with a clear diagnostic.
+Non-fsl fenced blocks (<code>```python</code>, etc.) are ignored. <code>use</code>/compose paths
+resolve relative to the Markdown file's directory (same as for <code>.fsl</code> files).</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. Recommended workflow: make proved the standard<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>Write the spec → <code>fslc check</code> (the fast syntax/type loop)</li>
 <li><code>fslc verify --depth 8</code> → if violated, fix using the trace.

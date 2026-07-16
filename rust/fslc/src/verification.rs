@@ -1655,7 +1655,7 @@ fn cache_root() -> Option<PathBuf> {
 
 fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
     if path.is_file() {
-        if path.extension().and_then(std::ffi::OsStr::to_str) == Some("fsl") {
+        if is_fsl_source(path) {
             output.push(path.to_path_buf());
         }
         return Ok(());
@@ -1671,6 +1671,17 @@ fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Resul
         }
     }
     Ok(())
+}
+
+fn is_fsl_source(path: &Path) -> bool {
+    match path.extension().and_then(std::ffi::OsStr::to_str) {
+        Some("fsl") => true,
+        Some("md") => std::fs::read_to_string(path)
+            .ok()
+            .and_then(|source| fsl_syntax::extract_literate_fsl(&source))
+            .is_some(),
+        _ => false,
+    }
 }
 
 fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String, String), String> {
