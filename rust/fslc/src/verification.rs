@@ -1690,9 +1690,36 @@ fn is_fsl_source(path: &Path) -> bool {
 /// branch above, so it must be excluded from the cache-key directory walk —
 /// otherwise a run-local artifact would spuriously appear as a dependency.
 fn is_literate_materialization(path: &Path) -> bool {
-    path.file_name()
+    let Some(pid) = path
+        .file_name()
         .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|name| name.ends_with(".literate.fsl"))
+        .and_then(|name| name.strip_prefix('.'))
+        .and_then(|name| name.strip_suffix(".fsl"))
+        .and_then(|name| name.rsplit_once(".literate-").map(|(_, pid)| pid))
+    else {
+        return false;
+    };
+    !pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn cache_identity(path: &Path) -> Result<PathBuf, String> {
+    let canonical = path.canonicalize().map_err(|error| error.to_string())?;
+    if !is_literate_materialization(&canonical) {
+        return Ok(canonical);
+    }
+    let name = canonical
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| "literate materialization path is not UTF-8".to_owned())?;
+    let stem = name
+        .strip_prefix('.')
+        .and_then(|name| name.strip_suffix(".fsl"))
+        .and_then(|name| name.rsplit_once(".literate-").map(|(stem, _)| stem))
+        .ok_or_else(|| "invalid literate materialization path".to_owned())?;
+    canonical
+        .with_file_name(format!("{stem}.md"))
+        .canonicalize()
+        .map_err(|error| error.to_string())
 }
 
 fn verify_cache_keys(path: &Path, options: &CliVerifyOptions) -> Result<(String, String), String> {
@@ -1717,7 +1744,7 @@ fn verify_cache_keys_with_solver_version(
     engine: &str,
     solver_version: &str,
 ) -> Result<(String, String), String> {
-    let canonical = path.canonicalize().map_err(|error| error.to_string())?;
+    let canonical = cache_identity(path)?;
     let base = canonical.parent().unwrap_or_else(|| Path::new("."));
     let mut sources = Vec::new();
     collect_fsl_sources(base, &mut sources).map_err(|error| error.to_string())?;
@@ -2386,5 +2413,40 @@ mod tests {
             .expect("updated solver cache keys");
 
         assert_ne!(current, updated);
+    }
+
+    #[test]
+    fn literate_materialization_requires_a_numeric_process_suffix() {
+        assert!(is_literate_materialization(Path::new(
+            ".model.literate-123.fsl"
+        )));
+        assert!(!is_literate_materialization(Path::new(
+            ".shared.literate-model.fsl"
+        )));
+        assert!(!is_literate_materialization(Path::new(
+            ".model.literate-.fsl"
+        )));
+    }
+
+    #[test]
+    fn cache_keys_include_hidden_sources_with_literate_in_their_name() {
+        let directory =
+            std::env::temp_dir().join(format!("fslc-hidden-literate-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create cache-key fixture directory");
+        let root = directory.join("root.fsl");
+        let hidden = directory.join(".shared.literate-model.fsl");
+        std::fs::write(&root, "spec Root { state { x: Int } init { x = 0 } }")
+            .expect("write root source");
+        std::fs::write(&hidden, "first").expect("write hidden source");
+        let options = CliVerifyOptions::default();
+
+        let before = verify_cache_keys_with_solver_version(&root, &options, "bmc", "test")
+            .expect("initial cache keys");
+        std::fs::write(&hidden, "second").expect("update hidden source");
+        let after = verify_cache_keys_with_solver_version(&root, &options, "bmc", "test")
+            .expect("updated cache keys");
+        std::fs::remove_dir_all(&directory).expect("remove cache-key fixture directory");
+
+        assert_ne!(before, after);
     }
 }

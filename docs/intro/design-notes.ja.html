@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>設計ノート・実戦記録 — なぜこの設計か</title>
-<meta name="description" content="DESIGN-*.md（実装設計）とDOGFOOD-*.md（実戦記録）への案内。fslcがなぜこう設計されているかの一次資料。" />
+<title>設計ノート — なぜこの設計か</title>
+<meta name="description" content="fslcがなぜこう設計されているかを説明する、正本のDESIGN-*.mdへの案内。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="design-notes">
@@ -20,8 +20,8 @@
   <div class="wrap narrow center">
     <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">実例と背景</p>
-    <h1 class="reveal">設計ノート・<span class="hl">実戦記録</span></h1>
-    <p class="lead reveal">このマニュアルは「どう使うか」を説明します。「なぜこう設計されているか」の一次資料は<code>docs/DESIGN-*.md</code>（機能ごとの実装設計）と<code>docs/DOGFOOD-*.md</code>（実際に使って得た知見・バグ・設計判断）です。ここはその案内図で、リンク先はGitHub上の.mdファイルです。</p>
+    <h1 class="reveal"><span class="hl">設計ノート</span></h1>
+    <p class="lead reveal">このマニュアルは「どう使うか」を説明します。「なぜこう設計されているか」の正本は、実地で得た知見を保守される契約へ抽象化した<code>docs/DESIGN-*.md</code>です。ここはその案内図で、リンク先はGitHub上の.mdファイルです。</p>
   </div>
 </section>
 
@@ -78,27 +78,6 @@
       <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></td><td>fsl-ai — tool authority、人間承認、forbidden tool、recursive agent構造分析</td></tr>
       <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></td><td>fsl-stochastic — 事前計算evalJSONL、Wilson区間、統計的支持と形式証明の境界</td></tr>
       <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ui.md">DESIGN-ui.md</a></td><td>fsl-ui（画面遷移ダイアレクトのスパイク検討、#9のgo/no-go）</td></tr>
-    </table>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <p class="kicker reveal">実戦記録</p>
-    <h2 class="reveal">DOGFOOD-1〜11 — 実際に使って見つけたこと</h2>
-    <table class="matrix reveal">
-      <tr><th>文書</th><th>内容</th></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-1.md">DOGFOOD-1</a></td><td>v1.0の実地評価（BUG11-14、PERF1を発見）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-2.md">DOGFOOD-2</a></td><td>provedを標準運用に、Seq（集約イディオムの発見）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-3.md">DOGFOOD-3</a></td><td>フルワークフロー（抽象→詳細化→合成→実装）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-4.md">DOGFOOD-4</a></td><td>3層ダイアレクトの貫通（要件IDによる層横断診断）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-5.md">DOGFOOD-5</a></td><td>NFR／離散時間SLA</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-6.md">DOGFOOD-6</a></td><td>実例ギャラリーでのバグハント（詳細化の見落とし2件）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-7.md">DOGFOOD-7</a></td><td>golden-oracleテストスイート（Monitor BFS、トレース健全性、BUG-020）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-8.md">DOGFOOD-8</a></td><td>盲検の表現力テスト（G1の外部検証）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-9.md">DOGFOOD-9</a></td><td>検証ワークフローの実走（メモ→正例ペア→修復）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-10.md">DOGFOOD-10</a></td><td>フォールトインジェクションのベンチマーク（種別×機構ごとの検出率測定）</td></tr>
-      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DOGFOOD-11.md">DOGFOOD-11</a></td><td>メタ循環的ドッグフーディング（fslcの設計契約自体をFSLでモデル化、検出器の死角F22-F24）</td></tr>
     </table>
   </div>
 </section>

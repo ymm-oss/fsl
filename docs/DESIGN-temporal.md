@@ -1,8 +1,7 @@
 # FSL v2.0-lite — `leadsTo`, Fairness, and Ranked Induction Implementation Design
 
-The first two items of DESIGN-v1.md §10 v2.0. The motivation is DOGFOOD-1 F1 /
-DOGFOOD-2 F7: "eventually Y after X" (a response property) cannot be written with
-state alone.
+The first two items of DESIGN-v1.md §10 v2.0. The motivation is that "eventually
+Y after X" is a response property and cannot be written with state alone.
 
 ## 1. Syntax
 
@@ -412,5 +411,4 @@ binding), generate the **shortest trace from when P holds until Q holds**:
   leadsTo to the §6 table, and "history ghost variable vs leadsTo: when to use
   which" to the §9 idiom collection (a fact of state → ghost, a response
   property → leadsTo).
-- Add `fair` + `WaiterGetsLock` to mutex_queue.fsl as a worked example (resolving
-  DOGFOOD-2 F7).
+- Add `fair` + `WaiterGetsLock` to mutex_queue.fsl as a worked example.

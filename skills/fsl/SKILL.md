@@ -341,7 +341,9 @@ the formalization memo.**
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a
    spec whose baseline is not verified, it emits no mutation report and returns the
-   baseline result), `fslc scenarios` (integration-test skeleton JSON),
+   baseline result. Track survivors and kill-rate against an accepted baseline: a
+   regression in that delta is the signal; one absolute survivor count is not),
+   `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
    (normalized spec-action log conformance), or `fslc replay --from-log
@@ -624,6 +626,10 @@ important constraints and high-risk specs.
   independently write the dynamics + properties, then `replay` each other's
   `scenarios` against the other's spec to expose discrepancies. Costly, so use it
   selectively.
+- **Liveness negative controls must be able to stall**: removing `fair` is not a
+  useful probe when every maximal execution terminates structurally. A negative
+  control for `leadsTo` must admit a lasso, deadlock, or other pending stall that
+  the checked progress rule is expected to reject.
 
 ## Role-specific authoring entry points
 

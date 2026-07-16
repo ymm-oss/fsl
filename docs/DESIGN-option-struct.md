@@ -1,8 +1,9 @@
 # FSL v2.1 — implementation design for `Option<scalar>` struct fields
 
-A feature whose real-world need was confirmed in DOGFOOD-1 F3. It legalizes
-`struct Res { item: Option<ItemId> }`. The design approach is a **composition** of
-existing lowerings; no new semantics are introduced.
+This feature legalizes the natural reservation model
+`struct Res { item: Option<ItemId> }` without a meaningless sentinel value. The
+design approach is a **composition** of existing lowerings; no new semantics are
+introduced.
 
 ## 1. Language specification changes
 
@@ -91,7 +92,7 @@ It also automatically enters the induction step premise (via invariants).
 
 ## 7. Documentation
 
-- Update LANGUAGE.md §2's table and whitelist, and the description of the F3 workaround
+- Update LANGUAGE.md §2's table and whitelist, and the former sentinel workaround
   in the §9 idiom collection, to "writable directly from v2.1".
-- A note on lifting the Option-field restriction in the "no struct nesting" paragraph of
-  DESIGN-v1.md §3.4. A "resolved" note on DOGFOOD-1 F3.
+- Add a note on lifting the Option-field restriction in the "no struct nesting"
+  paragraph of DESIGN-v1.md §3.4.

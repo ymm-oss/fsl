@@ -1,5 +1,5 @@
 // Design variant: with a refund-period window (a design-layer implementation
-// proposal for R5, which DOGFOOD-9 ASSUME-5 deferred).
+// proposal for R5, which the abstract contract's ASSUME-5 deferred).
 // Without editing the abstract contract examples/validation/order_refund.fsl at all,
 // it adds at the detail layer the restriction that refund is possible only within
 // WINDOW ticks after cancel.

@@ -59,6 +59,13 @@ exhaustively; the registry says what may exist there.
    `DIALECTS` construct. **An unknown construct fails the run** with
    "register the new dialect in tests/dialect_registry.py".
 
+The injected corpus is also the executable calibration of detector boundaries:
+reachability/coverage catches over-constraint, vacuity catches ineffective rules,
+strict tags need an external requirement registry to detect pure omission,
+mutation is meaningful as a delta from an accepted baseline, and
+acceptance/forbidden traces provide the independent channel for boundary or guard
+drift. No single green detector establishes intent fidelity.
+
 ## Pipeline stages and failure semantics — `tests/test_dialect_conformance.py`
 
 One parametrized test per class; every obligation is an `assert`, never a skip.
