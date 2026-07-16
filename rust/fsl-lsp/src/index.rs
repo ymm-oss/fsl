@@ -195,10 +195,11 @@ impl DocumentIndex {
                     awaiting_block = None;
                     expected = None;
                 }
-                TokenKind::Symbol(symbol) if symbol == ";" => {
-                    if !matches!(awaiting_block, Some((Context::Action | Context::Top, _))) {
-                        awaiting_block = None;
-                    }
+                TokenKind::Symbol(symbol)
+                    if symbol == ";"
+                        && !matches!(awaiting_block, Some((Context::Action | Context::Top, _))) =>
+                {
+                    awaiting_block = None;
                 }
                 _ => {}
             }
