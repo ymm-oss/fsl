@@ -1,4 +1,4 @@
-"""FSL dogfooding itself: specs/repair_loop.fsl models fslc's own
+"""FSL self-specification: specs/repair_loop.fsl models fslc's own
 write -> verify -> repair workflow. These tests pin the demonstration —
 including the CTI -> auxiliary-invariant lesson the spec is about."""
 from pathlib import Path
@@ -13,7 +13,7 @@ def test_repair_loop_verifies_and_reaches_proved():
     r = verify(spec, 10, deadlock_mode="ignore")
     assert r["result"] == "verified"
     assert r["reachables"]["ReachProved"]["witnessed_at_step"] == 3
-    # the CTI -> repair -> proved cycle is reachable (matches DOGFOOD experience)
+    # The CTI -> repair -> proved cycle is reachable.
     assert r["reachables"]["RepairedThenProved"]["witnessed_at_step"] >= 1
 
 

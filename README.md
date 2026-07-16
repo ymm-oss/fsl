@@ -66,8 +66,7 @@ fsl/
 ├── docs/
 │   ├── README.md           # map of docs (start here)
 │   ├── LANGUAGE.md         # language reference — read this if you are writing specs
-│   ├── DESIGN-*.md         # design documents (language / three-layer dialects / NFR / each feature — 12 in total)
-│   └── DOGFOOD-1..7.md     # dogfooding findings (record of bugs and discoveries)
+│   └── DESIGN-*.md         # authoritative design contracts and distilled findings
 ├── specs/                  # sample specs (*.fsl) — all the correct ones are proved at k=1
 │   ├── cart_v1.fsl         #   basic form of Option / ensures / reachable
 │   ├── cart_v1_buggy.fsl   #   missing guard — returns the shortest type_bound violation counterexample

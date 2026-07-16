@@ -60,12 +60,12 @@ of JSON output actually confirmed with `fslc`.
 
 ```json
 // refinement_failed_map.fsl
-{"result":"refines","checked_to_depth":3,"impl":"GalleryRefinementImpl","abs":"GalleryRefinementAbs","action_map":{"approve_i":"approve","quick_pay_i":"pay"}}
+{"result":"refinement_failed","kind":"abs_requires_failed","impl_action":"quick_pay_i","abs_action":"pay"}
 ```
 
 `refinement_failed_map.fsl` is correctly expected to give
-`refinement_failed/abs_requires_failed`. The diff from the actual output is
-`BUG-001` in `docs/DOGFOOD-6.md`.
+`refinement_failed/abs_requires_failed`; it is the regression for an
+implementation action bypassing an abstract guard.
 
 ```json
 // error_acceptance_false_expect.fsl

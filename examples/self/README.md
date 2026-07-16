@@ -1,8 +1,7 @@
-# self specs — dogfooding fslc itself in FSL
+# self specs — fslc contracts written in FSL
 
-This directory holds self-specs (meta-circular dogfooding). That is, the design
-contracts of `fslc` itself are written as FSL state machines, making the verifier
-a subject of the verifier itself.
+This directory holds self-specs: the design contracts of `fslc` itself are written
+as FSL state machines, making the verifier a subject of the verifier itself.
 
 ## Cast
 
@@ -44,13 +43,19 @@ In every case, `check` is `ok`, ordinary `verify` is `verified`, and induction i
 `proved`. Because `fslc_session` / `fslc_monitor` **declare their intended terminal
 states with `terminal { }` blocks**, no deadlock warning is raised even with
 `--deadlock warn` (the default). If there is a stop state **not included** in
-terminal (an unexpected deadlock), it is warned as before. This addresses F23 of
-DOGFOOD-11 (the lack of a means to declare intended stops).
+terminal (an unexpected deadlock), it is warned as before. This keeps intended
+stops distinct from unexpected deadlocks.
 
 The kill-rate of `fslc mutate` was used as a non-triviality (anti-ghost) indicator
 to check whether an invariant leans on a dead ghost.
+`refinement_algebra.fsl` is a finite transition-system model; FSL does not quantify
+higher-order axioms over an arbitrary refinement relation.
 
 ## Implementation-conformance anchors
+
+Every anchor below includes a negative control that deliberately violates the
+modeled contract. A positive trace alone would not show that the anchor can detect
+implementation drift.
 
 `fslc_session.fsl` is a self-spec that models fslc's CLI result classification and
 exit-code severity in FSL, but proving the model's internal consistency alone via

@@ -12,7 +12,7 @@ refinement.
 - `sla_worker_design.fsl` + `sla_worker_refines.fsl`: a design layer that
   **refines** `sla_worker.fsl`, plus the mapping.
 - `support_sla.fsl`: a second requirements-dialect SLA fixture (the non-vacuous
-  deadline-urgency pattern from DOGFOOD-8).
+  deadline-urgency pattern specified in `docs/DESIGN-nfr.md`).
 - `bounded_response.fsl`: a solver-free replay fixture with one bounded and one
   unbounded `leadsTo`; `bounded_response.within.v1.json` responds at the
   inclusive deadline and `bounded_response.overdue.v1.json` misses it through

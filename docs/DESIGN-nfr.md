@@ -127,7 +127,7 @@ Add an "how to write NFRs" section to LANGUAGE.md / skills:
 3. examples/nfr/: a hand-written kernel version (proved, with auxiliary invariants) and
    the dialect version side by side + README.
 4. LANGUAGE.md (time/deadline in §13, a new "how to write NFRs" section), skills/fsl
-   (SKILL.md rules + reference.md), DOGFOOD-5.md (record of this spike).
+   (SKILL.md rules + reference.md), with executable cases under `examples/nfr/`.
 
 ## 6. Discrete-time SLA across layers (issue #56)
 
