@@ -2380,11 +2380,13 @@ DESIGN-*.md があります)。
   `unanchored_property`、`progressless_cycle`、`unwritten_state`、
   `unread_state`、`unguarded_action`、`conservation_candidate`、
   `divergent_choice`、`unconstrained_effect` のようなレビュー findings を出力
-  します。最後の 2 つは固定の深さ 4 の BMC プローブを使います:
-  `evidence_basis:"bounded_bmc"`、reachable な分岐の witness、どの成果が意図されて
+  します。最後の 2 つは固定の深さ 4 の有界プローブ(ランタイム Monitor による
+  solver 非依存の明示的状態探索)を使います:
+  `evidence_basis:"bounded_bmc"`(「有界の到達可能性 witness に裏付けられている」
+  ことを意味する凍結された v0 語彙)、reachable な分岐の witness、どの成果が意図されて
   いるかを問う疑問形の `spec_question` を含みます。`undecided:` の宣言との完全一致
   は `acknowledged:true` と `acknowledged_by` つきで可視のままです。一致しない
-  意味的な findings は acknowledgement のフィールドを運びません。BMC に裏付け
+  意味的な findings は acknowledgement のフィールドを運びません。有界 witness に裏付け
   られた `unconstrained_effect` は、同じ状態の
   構造的な `unread_state` を抑制します。意味的な action の witness は、同様に重複
   する `unguarded_action` を抑制します。不在は、境界を超えた決定性の証明では
