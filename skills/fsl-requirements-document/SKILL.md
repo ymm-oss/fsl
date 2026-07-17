@@ -42,6 +42,10 @@ sections itself.
   disappear.** Surfacing the gap is the value; resolving it is a human decision.
 - Flag a missing requirement tag, a missing `acceptance`/`forbidden` case, or an
   `undecided` item that looks resolvable, as a review note.
+- Point a stakeholder at a requirement whose assurance class is `not_run` in
+  every dimension (issue #332) as a review note — never supply evidence
+  yourself or assert a stronger class than the document already shows; the
+  `--evidence` files come from real verification runs, not from the agent.
 
 ## Forbidden operations
 
@@ -71,6 +75,13 @@ fslc document generate spec.fsl --lang ja -o requirements.md
 # agent edits only the non-normative `background` slot in requirements.md
 fslc document check spec.fsl requirements.md
 fslc ledger spec.fsl --depth 8 -o requirements-ledger.md
+
+# optional: overlay saved verification evidence as a per-requirement
+# assurance class (issue #332) — the same envelope shape --evidence
+# already accepts for fslc ledger; check must be given the identical
+# --evidence set or it reports evidence_changed, not a hard error
+fslc document generate spec.fsl --lang ja --evidence verify-run.json -o requirements.md
+fslc document check spec.fsl requirements.md --evidence verify-run.json
 ```
 
 1. Confirm the spec is checked (`fslc check`, or the existing verification flow

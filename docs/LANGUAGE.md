@@ -719,11 +719,13 @@ fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_depe
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
-               [--glossary glossary.json] [-o requirements.md]
-                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13)
+               [--glossary glossary.json] [--evidence evidence.json]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`)
 fslc document claims <file.fsl> [--view requirements] [-o requirements.claims.json]
                                                   # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
-fslc document check <file.fsl> <document.md> [--glossary glossary.json]
+fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evidence evidence.json]...
                                                   # structural drift check: generated claim blocks vs a
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]

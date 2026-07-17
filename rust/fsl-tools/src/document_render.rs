@@ -22,8 +22,10 @@ use fsl_core::{
     ActionGuard, KernelModel, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target, display_name,
 };
+use serde_json::Value;
 
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
+use crate::document_evidence::{AppliedEvidence, requirement_assurance};
 use crate::document_glossary::AppliedGlossary;
 use crate::document_render_expr;
 
@@ -66,6 +68,7 @@ struct Ctx<'a> {
     fallback_count: u64,
     rendered_claims: BTreeSet<String>,
     glossary: Option<&'a crate::document_glossary::Glossary>,
+    evidence: &'a [(String, Value)],
 }
 
 /// Compile RCIR claims into a controlled-language Markdown document.
@@ -79,6 +82,14 @@ struct Ctx<'a> {
 /// heading, and a standalone "Glossary" reference section listing every
 /// accepted label) — never modality, negation, or conditional structure,
 /// since no other rendering decision ever consults it.
+///
+/// `evidence` (issue #332) overlays saved external verification results onto
+/// each requirement, reusing `fslc ledger`'s own assurance classifier and
+/// vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/
+/// `not_run`) rather than inventing a new judgment. It is rendered
+/// exclusively as residue *outside* every claim's `<!-- fsl:claim -->`
+/// markers, never inside them, so a claim block's own digest never depends
+/// on whether evidence was supplied.
 #[must_use]
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
@@ -86,6 +97,7 @@ pub fn render_requirements_document(
     trace_contract: Option<&RequirementsTraceContract>,
     locale: Locale,
     glossary: Option<&AppliedGlossary<'_>>,
+    evidence: Option<&AppliedEvidence<'_>>,
 ) -> RenderedDocument {
     let mut ctx = Ctx {
         model,
@@ -94,6 +106,7 @@ pub fn render_requirements_document(
         fallback_count: 0,
         rendered_claims: BTreeSet::new(),
         glossary: glossary.map(|applied| applied.glossary),
+        evidence: evidence.map_or(&[], |applied| applied.files),
     };
 
     let mut out = String::new();
@@ -105,17 +118,22 @@ pub fn render_requirements_document(
             &claims.spec.spec_digest,
             &claims.spec.claim_set_digest,
             glossary.map(|applied| applied.digest),
+            evidence.map(|applied| applied.digest),
         ),
     );
     push_section(&mut out, &title(&claims.spec.name, locale));
     push_section(&mut out, &background_slot(locale));
     push_section(&mut out, &position_section(locale));
     push_section(&mut out, &semantics_section(locale));
+    push_section(&mut out, &verification_status_section(locale));
     push_section(&mut out, &requirements_section(claims, &mut ctx));
     push_section(&mut out, &unattributed_section(claims, &mut ctx));
     push_section(&mut out, &undecided_section(claims, locale));
     push_section(&mut out, &analysis_scope_section(claims, locale));
     if let Some(section) = glossary_section(ctx.glossary, locale) {
+        push_section(&mut out, &section);
+    }
+    if let Some(section) = evidence_sources_section(claims, ctx.evidence, locale) {
         push_section(&mut out, &section);
     }
     push_section(
@@ -220,6 +238,75 @@ fn semantics_section(locale: Locale) -> String {
     format!("{head}\n\n{intro}\n\n{list}")
 }
 
+/// Fixed boilerplate the "principles" section of issue #332 requires
+/// appearing regardless of whether any `--evidence` was supplied: the
+/// shared assurance vocabulary (`fslc ledger`'s own, issue #171,
+/// `docs/DESIGN-assurance-classes.md`), the class/verdict orthogonality
+/// rule, the liveness disclaimers, and the explicit-`not_run`-by-default
+/// rule. Kept as its own section (not folded into "Global semantic
+/// conventions", which defines *execution* semantics — `updates`/`reads`/
+/// `failed_step`/`fairness` — a different kind of fixed convention from
+/// verification epistemology).
+fn verification_status_section(locale: Locale) -> String {
+    let head = heading(
+        locale,
+        "##",
+        "検証結果の読み方",
+        "How to read verification results",
+    );
+    let vocabulary = match locale {
+        Locale::Ja => [
+            "`proved(induction)`: k帰納法により全深さで証明済み。",
+            "`bounded(BMC depth k)`: 深さ k までのすべての実行を検査した。それ以遠の実行については何も保証しない。これは証明ではない。",
+            "`replay-observed`: 具体的な実行ログ／トレースを仕様と照合した結果のみ。すべての実行に対する保証ではない。",
+            "`statistical`: 統計的裏付け（Wilson 区間）。個別の実行に対する保証ではない。",
+            "`not_run`: 対応するエビデンスは供給されていない。",
+        ],
+        Locale::En => [
+            "`proved(induction)`: proved by k-induction over all depths.",
+            "`bounded(BMC depth k)`: every execution up to depth k was examined; nothing is guaranteed beyond that depth. This is not a proof.",
+            "`replay-observed`: a concrete log/trace was checked against the specification; this is not a guarantee over all executions.",
+            "`statistical`: statistical support (Wilson interval); this is not a guarantee for any individual execution.",
+            "`not_run`: no corresponding evidence was supplied.",
+        ],
+    };
+    let vocabulary_list = vocabulary
+        .iter()
+        .map(|item| format!("- {item}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let principles = match locale {
+        Locale::Ja => [
+            "保証クラスは検証手法の網羅範囲を表し、合否を表さない。反例が存在する場合もクラスは `bounded` のままである。合否は各エビデンスの結果欄に別掲する。",
+            "`fair` は公平性という検証上のスケジューリング仮定であり、即時実行の保証ではない。",
+            "`leadsTo`（進行条件）は将来のある時点での成立を要求する demand であり、それ自体は検証結果ではない。",
+            "refinement は safety の保存を検査するものであり、liveness を自動的には保存しない。",
+            "エビデンスが供給されていない側面は、省略されず `not_run` と明示される。",
+        ],
+        Locale::En => [
+            "An assurance class describes a verification method's coverage, not its pass/fail verdict. A class stays `bounded` even when a counterexample exists; the verdict is shown separately in each evidence entry's result.",
+            "`fair` is a verification-level scheduling assumption, not a guarantee of immediate execution.",
+            "`leadsTo` (a progress rule) is a demand that something eventually holds; it is not itself a verification result.",
+            "Refinement checks that safety is preserved; it does not automatically preserve liveness.",
+            "An aspect with no supplied evidence is never omitted — it is shown explicitly as `not_run`.",
+        ],
+    };
+    let principles_list = principles
+        .iter()
+        .map(|item| format!("- {item}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let link = match locale {
+        Locale::Ja => {
+            "本書は要求内容（what）を定義する。検証がどこまで実施されたか（how far）は `fslc ledger` が生成する監査台帳が示す。両者は同じ保証クラス語彙を用いる。"
+        }
+        Locale::En => {
+            "This document defines what is required. How far verification has actually gone is shown by the audit ledger `fslc ledger` generates. Both use the same assurance-class vocabulary."
+        }
+    };
+    format!("{head}\n\n{vocabulary_list}\n\n{principles_list}\n\n{link}")
+}
+
 fn requirements_section(claims: &RequirementClaimSet, ctx: &mut Ctx<'_>) -> String {
     let head = heading(ctx.locale, "##", "要件", "Requirements");
     if claims.requirements.is_empty() {
@@ -294,8 +381,112 @@ fn requirement_block(
         .map(|claim| render_claim(claim, ctx))
         .collect::<Vec<_>>()
         .join("\n\n");
+    let assurance = assurance_block(requirement, claims, ctx);
 
-    format!("{head}\n\n{original_head}\n\n{statements}\n\n{formal_head}\n\n{claim_blocks}")
+    format!(
+        "{head}\n\n{original_head}\n\n{statements}\n\n{formal_head}\n\n{claim_blocks}\n\n{assurance}"
+    )
+}
+
+/// The per-requirement evidence/assurance overlay (issue #332), rendered as
+/// residue *after* `claim_blocks` — never passed into `wrap_claim_block` —
+/// so a claim block's own digest never depends on whether evidence exists
+/// (acceptance criterion 2). Every dimension always renders, defaulting to
+/// `not_run` (acceptance criterion 1); the label/verdict shown for each
+/// entry comes only from `ledger::assurance_token`/`assurance_label`, never
+/// re-derived here (acceptance criterion 3).
+fn assurance_block(
+    requirement: &crate::document::Requirement,
+    claims: &RequirementClaimSet,
+    ctx: &Ctx<'_>,
+) -> String {
+    let assurance = requirement_assurance(&requirement.id, ctx.evidence);
+    let head = heading(ctx.locale, "**", "保証クラス**", "Assurance class**");
+    let head = format!("**{}", head.trim_start_matches("** "));
+    let mut lines = vec![
+        assurance_dimension_line(
+            match ctx.locale {
+                Locale::Ja => "形式検証",
+                Locale::En => "Formal verification",
+            },
+            &assurance.formal,
+            ctx.locale,
+        ),
+        assurance_dimension_line(
+            match ctx.locale {
+                Locale::Ja => "実装適合",
+                Locale::En => "Implementation conformance",
+            },
+            &assurance.conformance,
+            ctx.locale,
+        ),
+        assurance_dimension_line(
+            match ctx.locale {
+                Locale::Ja => "統計的裏付け",
+                Locale::En => "Statistical support",
+            },
+            &assurance.statistical,
+            ctx.locale,
+        ),
+    ];
+    let is_liveness = requirement
+        .claim_ids
+        .iter()
+        .filter_map(|id| claims.claims.iter().find(|claim| &claim.id == id))
+        .any(|claim| {
+            matches!(
+                claim.kind,
+                ClaimKind::ProgressRule | ClaimKind::ReachabilityGoal
+            )
+        });
+    let has_bounded_formal = assurance
+        .formal
+        .iter()
+        .any(|entry| entry.label.starts_with("bounded"));
+    if is_liveness && has_bounded_formal {
+        lines.push(match ctx.locale {
+            Locale::Ja => {
+                "- 注記: この要件には進行条件（liveness）が含まれる。`bounded` は反例が見つからなかったことのみを意味し、liveness の証明ではない。".to_owned()
+            }
+            Locale::En => {
+                "- Note: this requirement includes a progress rule (liveness). `bounded` means only that no counterexample was found; it is not a proof of liveness.".to_owned()
+            }
+        });
+    }
+    format!("{head}\n\n{}", lines.join("\n"))
+}
+
+fn assurance_dimension_line(
+    label: &str,
+    entries: &[crate::document_evidence::EvidenceEntry],
+    locale: Locale,
+) -> String {
+    if entries.is_empty() {
+        return match locale {
+            Locale::Ja => format!("- {label}: `not_run` — 対応するエビデンスは供給されていない。"),
+            Locale::En => format!("- {label}: `not_run` — no corresponding evidence was supplied."),
+        };
+    }
+    let joined = entries
+        .iter()
+        .map(|entry| {
+            let result = entry.result.as_deref().unwrap_or("");
+            match locale {
+                Locale::Ja if entry.result.is_some() => format!(
+                    "`{}`（結果: `{result}`、出典: `{}`）",
+                    entry.label, entry.source
+                ),
+                Locale::Ja => format!("`{}`（出典: `{}`）", entry.label, entry.source),
+                Locale::En if entry.result.is_some() => format!(
+                    "`{}` (result: `{result}`, source: `{}`)",
+                    entry.label, entry.source
+                ),
+                Locale::En => format!("`{}` (source: `{}`)", entry.label, entry.source),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("- {label}: {joined}")
 }
 
 fn unattributed_section(claims: &RequirementClaimSet, ctx: &mut Ctx<'_>) -> String {
@@ -330,7 +521,18 @@ fn unattributed_section(claims: &RequirementClaimSet, ctx: &mut Ctx<'_>) -> Stri
         .map(|claim| render_claim(claim, ctx))
         .collect::<Vec<_>>()
         .join("\n\n");
-    format!("{head}\n\n{intro}\n\n{blocks}")
+    // These elements carry no requirement ID, so evidence (matched by
+    // requirement ID, issue #332) can never attach to them — a fixed,
+    // evidence-independent fact, not a per-render classification.
+    let no_evidence = match ctx.locale {
+        Locale::Ja => {
+            "これらの要素は要件 ID を持たないため、外部エビデンスを対応付けられない。保証クラスは一律 `not_run` である。"
+        }
+        Locale::En => {
+            "These elements carry no requirement ID, so no external evidence can be attached to them. Their assurance class is uniformly `not_run`."
+        }
+    };
+    format!("{head}\n\n{intro}\n\n{blocks}\n\n{no_evidence}")
 }
 
 fn undecided_section(claims: &RequirementClaimSet, locale: Locale) -> String {
@@ -481,6 +683,68 @@ fn glossary_section(
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!("{head}\n\n{intro}\n\n{rows}"))
+}
+
+/// A reference section listing every `--evidence` file the assurance-class
+/// fields (issue #332) drew on, sorted by path so the same file set in a
+/// different CLI order still renders byte-identically. `None` (section
+/// omitted) when no evidence was supplied at all.
+fn evidence_sources_section(
+    claims: &RequirementClaimSet,
+    evidence: &[(String, Value)],
+    locale: Locale,
+) -> Option<String> {
+    if evidence.is_empty() {
+        return None;
+    }
+    let head = heading(
+        locale,
+        "##",
+        "検証エビデンス出典",
+        "Verification evidence sources",
+    );
+    let intro = match locale {
+        Locale::Ja => "本書の保証クラス欄が参照する外部エビデンスの一覧。",
+        Locale::En => {
+            "The external evidence files referenced by this document's assurance-class fields."
+        }
+    };
+    let known_ids: BTreeSet<&str> = claims
+        .requirements
+        .iter()
+        .map(|requirement| requirement.id.as_str())
+        .collect();
+    let mut rows: Vec<String> = evidence
+        .iter()
+        .map(|(path, item)| {
+            let result = item.get("result").and_then(Value::as_str).unwrap_or("");
+            let mut ids: Vec<&str> = crate::ledger::evidence_requirement_ids(item)
+                .into_iter()
+                .filter(|id| known_ids.contains(id))
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            let matched = if ids.is_empty() {
+                match locale {
+                    Locale::Ja => "（本仕様のどの要件 ID にも対応しない）".to_owned(),
+                    Locale::En => {
+                        "(does not correspond to any requirement ID in this specification)"
+                            .to_owned()
+                    }
+                }
+            } else {
+                ids.join(", ")
+            };
+            match locale {
+                Locale::Ja => format!("- `{path}`（結果: `{result}`、対象要件 ID: {matched}）"),
+                Locale::En => {
+                    format!("- `{path}` (result: `{result}`, matched requirement IDs: {matched})")
+                }
+            }
+        })
+        .collect();
+    rows.sort();
+    Some(format!("{head}\n\n{intro}\n\n{}", rows.join("\n")))
 }
 
 fn generation_section(claims: &RequirementClaimSet, fallback_count: u64, locale: Locale) -> String {
@@ -1119,10 +1383,10 @@ fn render_reachability_goal(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
     let block = condition_block(&property.expr, ctx);
     let tail = match ctx.locale {
         Locale::Ja => {
-            "これは「少なくとも一つの実行が存在する」ことを求める到達目標であり、すべての状態での成立を求める不変条件ではない。\n\n- 検証状態: 本書は検証結果を含まない。到達が確認済みであることを意味しない。"
+            "これは「少なくとも一つの実行が存在する」ことを求める到達目標であり、すべての状態での成立を求める不変条件ではない。\n\n- 検証状態: この規範文自体は検証結果を含まない。検証エビデンスが供給されている場合はこの要件の「保証クラス」欄に別掲され、供給されていない場合は `not_run` と明示される。到達が確認済みであることを意味しない。"
         }
         Locale::En => {
-            "This is a reachability goal \u{2014} it demands that at least one such execution exists. It is not an invariant that must hold in every state.\n\n- Verification status: this document contains no verification results. It does not mean that reachability has been confirmed."
+            "This is a reachability goal \u{2014} it demands that at least one such execution exists. It is not an invariant that must hold in every state.\n\n- Verification status: this normative text itself contains no verification results. When verification evidence is supplied, it appears separately in this requirement's Assurance class field; when it is not, that field explicitly shows `not_run`. It does not mean that reachability has been confirmed."
         }
     };
     format!("{head}\n\n{lead}\n\n{block}\n\n{tail}")
@@ -1302,8 +1566,8 @@ fn render_leadsto(claim: &Claim, property: &LeadsToDef, ctx: &mut Ctx<'_>) -> St
         });
     }
     lines.push(match ctx.locale {
-        Locale::Ja => "- 検証状態: 本書は検証結果を含まない。この条件は FSL が要求として宣言しているものであり、成立が確認済みであることを意味しない。".to_owned(),
-        Locale::En => "- Verification status: this document contains no verification results. This rule is what the FSL declares as a demand; it does not mean the rule has been established.".to_owned(),
+        Locale::Ja => "- 検証状態: この規範文自体は検証結果を含まない。検証エビデンスが供給されている場合はこの要件の「保証クラス」欄に別掲され、供給されていない場合は `not_run` と明示される。この条件は FSL が要求として宣言しているものであり、成立が確認済みであることを意味しない。".to_owned(),
+        Locale::En => "- Verification status: this normative text itself contains no verification results. When verification evidence is supplied, it appears separately in this requirement's Assurance class field; when it is not, that field explicitly shows `not_run`. This rule is what the FSL declares as a demand; it does not mean the rule has been established.".to_owned(),
     });
     format!("{head}\n\n{lead}\n\n{}", lines.join("\n"))
 }

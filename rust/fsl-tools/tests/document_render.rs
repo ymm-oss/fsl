@@ -57,8 +57,14 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
     let kernel = fsl_core::parse_kernel_source(&fixture.source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
-    let doc =
-        fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale, None);
+    let doc = fsl_tools::render_requirements_document(
+        &claims,
+        &model,
+        trace.as_ref(),
+        locale,
+        None,
+        None,
+    );
     (claims, doc)
 }
 
@@ -103,7 +109,13 @@ fn req2_ja_golden_matches_exactly() {
 1. `scr[c]` を `SubView { offered: true, st: OfferDialog }` に置き換える。すなわち、`scr[c].offered` を `true` に、`scr[c].st` を `OfferDialog` にする。\n\
 \n\
 この操作には弱い公平性（weak fairness）を仮定する。これはスケジューリング上の仮定であり、この操作が実行可能（enabled）であり続けるならば、いつかは実行される、という意味である。直ちに実行されることを意味しない。\n\
-<!-- fsl:claim end -->";
+<!-- fsl:claim end -->\n\
+\n\
+**保証クラス**\n\
+\n\
+- 形式検証: `not_run` — 対応するエビデンスは供給されていない。\n\
+- 実装適合: `not_run` — 対応するエビデンスは供給されていない。\n\
+- 統計的裏付け: `not_run` — 対応するエビデンスは供給されていない。";
     assert_eq!(req2_block(&doc.markdown), expected);
 }
 
@@ -138,7 +150,13 @@ When the action succeeds, the following updates are applied simultaneously withi
 1. Replace `scr[c]` with `SubView { offered: true, st: OfferDialog }`; that is, set `scr[c].offered` to `true` and `scr[c].st` to `OfferDialog`.\n\
 \n\
 Weak fairness is assumed for this action. This is a scheduling assumption: if the action remains continuously enabled, it is eventually executed. It does not mean that the action is executed immediately.\n\
-<!-- fsl:claim end -->";
+<!-- fsl:claim end -->\n\
+\n\
+**Assurance class**\n\
+\n\
+- Formal verification: `not_run` — no corresponding evidence was supplied.\n\
+- Implementation conformance: `not_run` — no corresponding evidence was supplied.\n\
+- Statistical support: `not_run` — no corresponding evidence was supplied.";
     assert_eq!(req2_block(&doc.markdown), expected);
 }
 
@@ -334,9 +352,13 @@ fn progress_rule_never_claims_established_evidence() {
     let (_, ja) = render(&fixture, Locale::Ja);
     assert!(ja.markdown.contains("#### 進行条件"));
     assert!(ja.markdown.contains("成立が確認済みであることを意味しない"));
+    let progress_start = ja.markdown.find("#### 進行条件").unwrap();
+    let claim_end = ja.markdown[progress_start..]
+        .find("<!-- fsl:claim end -->")
+        .map(|offset| progress_start + offset)
+        .expect("a claim end marker follows the progress rule heading");
+    let progress_section = &ja.markdown[progress_start..claim_end];
     for banned in ["proved", "証明済み", "bounded"] {
-        let progress_start = ja.markdown.find("#### 進行条件").unwrap();
-        let progress_section = &ja.markdown[progress_start..progress_start + 800];
         assert!(
             !progress_section.contains(banned),
             "banned phrase present: {banned}"

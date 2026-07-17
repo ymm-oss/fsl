@@ -230,7 +230,7 @@ fn an_old_renderer_version_is_reported_as_renderer_changed() {
     let artifact = generate(&["--lang", "ja"]);
     let edited = edit(
         &artifact,
-        "renderer_version: 1.0.0",
+        "renderer_version: 1.1.0",
         "renderer_version: 0.9.0",
     );
     let output = check(CANCEL_SYSTEM, &edited);

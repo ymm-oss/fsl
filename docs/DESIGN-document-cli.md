@@ -107,8 +107,10 @@ exist yet — a caller has no way to tell "ignored" from "applied." Each of thos
 issues adds its own flag when the feature behind it exists.
 
 `--glossary` landed in issue #330 (`docs/DESIGN-document-glossary.md`), on both
-`generate` and `check`. `--evidence` (#332) and `--approval` (#333) remain
-deferred for the same reason stated above.
+`generate` and `check`. `--evidence` landed in issue #332
+(`docs/DESIGN-document-evidence-overlay.md`), also on both `generate` and
+`check`. `--approval` (#333) remains deferred for the same reason stated
+above.
 
 ## Verification evidence
 
