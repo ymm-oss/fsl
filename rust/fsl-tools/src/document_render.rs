@@ -20,10 +20,11 @@ use std::fmt::Write as _;
 
 use fsl_core::{
     ActionGuard, KernelModel, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, display_name,
+    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target, display_name,
 };
 
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
+use crate::document_glossary::AppliedGlossary;
 use crate::document_render_expr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,6 +65,7 @@ struct Ctx<'a> {
     locale: Locale,
     fallback_count: u64,
     rendered_claims: BTreeSet<String>,
+    glossary: Option<&'a crate::document_glossary::Glossary>,
 }
 
 /// Compile RCIR claims into a controlled-language Markdown document.
@@ -71,12 +73,19 @@ struct Ctx<'a> {
 /// `trace_contract` should be `requirements_trace_contract(source)`'s result
 /// for the same source the RCIR claim set was projected from (`None` for a
 /// direct `spec` dialect, which has no acceptance/forbidden cases).
+///
+/// `glossary` (issue #330) is presentation-only: it can only change how an
+/// `action:`/`state:`/`enum:` identifier *displays* (an action's own claim
+/// heading, and a standalone "Glossary" reference section listing every
+/// accepted label) — never modality, negation, or conditional structure,
+/// since no other rendering decision ever consults it.
 #[must_use]
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
     model: &KernelModel,
     trace_contract: Option<&RequirementsTraceContract>,
     locale: Locale,
+    glossary: Option<&AppliedGlossary<'_>>,
 ) -> RenderedDocument {
     let mut ctx = Ctx {
         model,
@@ -84,6 +93,7 @@ pub fn render_requirements_document(
         locale,
         fallback_count: 0,
         rendered_claims: BTreeSet::new(),
+        glossary: glossary.map(|applied| applied.glossary),
     };
 
     let mut out = String::new();
@@ -94,6 +104,7 @@ pub fn render_requirements_document(
             locale,
             &claims.spec.spec_digest,
             &claims.spec.claim_set_digest,
+            glossary.map(|applied| applied.digest),
         ),
     );
     push_section(&mut out, &title(&claims.spec.name, locale));
@@ -104,6 +115,9 @@ pub fn render_requirements_document(
     push_section(&mut out, &unattributed_section(claims, &mut ctx));
     push_section(&mut out, &undecided_section(claims, locale));
     push_section(&mut out, &analysis_scope_section(claims, locale));
+    if let Some(section) = glossary_section(ctx.glossary, locale) {
+        push_section(&mut out, &section);
+    }
     push_section(
         &mut out,
         &generation_section(claims, ctx.fallback_count, locale),
@@ -437,6 +451,38 @@ fn analysis_scope_section(claims: &RequirementClaimSet, locale: Locale) -> Strin
     format!("{head}\n\n{intro}\n\n{list}")
 }
 
+/// A reference section listing every accepted glossary label (issue #330),
+/// sorted by target. This is the only place a `state:`/`enum:` label is
+/// ever shown — v1 does not substitute a label inside rendered expression
+/// text (see `docs/DESIGN-document-glossary.md`); an `action:` label is
+/// additionally shown at the action's own claim heading
+/// (`render_operation`/`metadata_header`). Returns `None` when no glossary
+/// was applied, so a glossary-less document renders byte-identically to
+/// before this issue.
+fn glossary_section(
+    glossary: Option<&crate::document_glossary::Glossary>,
+    locale: Locale,
+) -> Option<String> {
+    let glossary = glossary?;
+    let head = heading(locale, "##", "用語集", "Glossary");
+    let intro = match locale {
+        Locale::Ja => {
+            "本文中の識別子表示は次の用語集ラベルに基づく。ラベルは表示のみを変更し、検証条件を変更しない。"
+        }
+        Locale::En => {
+            "Identifier display throughout this document follows the glossary labels below. \
+             A label changes only display, never a verification condition."
+        }
+    };
+    let rows = glossary
+        .labels
+        .iter()
+        .map(|(target, label)| format!("- `{target}`: {label}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!("{head}\n\n{intro}\n\n{rows}"))
+}
+
 fn generation_section(claims: &RequirementClaimSet, fallback_count: u64, locale: Locale) -> String {
     let head = heading(locale, "##", "生成情報", "Generation info");
     let source_line = match &claims.spec.source {
@@ -600,9 +646,25 @@ fn back_reference(claim: &Claim, locale: Locale) -> String {
     }
 }
 
-fn metadata_header(claim: &Claim, display: &str, locale: Locale) -> String {
-    let label = kind_label(claim.kind, locale);
-    let mut lines = vec![format!("#### {label}: `{display}`"), String::new()];
+/// `glossary_label`, when present, is an accepted glossary label for this
+/// claim's own subject (issue #330) — shown alongside, never instead of, the
+/// canonical identifier, so the heading stays a valid cross-reference back
+/// to the FSL source no matter what a sidecar file says.
+fn metadata_header(
+    claim: &Claim,
+    display: &str,
+    glossary_label: Option<&str>,
+    locale: Locale,
+) -> String {
+    let kind = kind_label(claim.kind, locale);
+    let heading = match glossary_label {
+        Some(label) => match locale {
+            Locale::Ja => format!("#### {kind}: {label}（`{display}`）"),
+            Locale::En => format!("#### {kind}: {label} (`{display}`)"),
+        },
+        None => format!("#### {kind}: `{display}`"),
+    };
+    let mut lines = vec![heading, String::new()];
     let (id_label, source_label) = match locale {
         Locale::Ja => ("識別子", "出典"),
         Locale::En => ("Identifier", "Source"),
@@ -689,10 +751,14 @@ fn render_operation(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .as_str()
         .unwrap_or_default()
         .to_owned();
+    let label = ctx
+        .glossary
+        .and_then(|glossary| glossary.labels.get(&action_target(&name)))
+        .map(String::as_str);
     let Some(action) = ctx.model.actions.iter().find(|action| action.name == name) else {
-        return metadata_header(claim, &display_name(&name), ctx.locale);
+        return metadata_header(claim, &display_name(&name), label, ctx.locale);
     };
-    let mut out = metadata_header(claim, &display_name(&name), ctx.locale);
+    let mut out = metadata_header(claim, &display_name(&name), label, ctx.locale);
 
     let params_label = match ctx.locale {
         Locale::Ja => "パラメータ",
@@ -985,9 +1051,9 @@ fn render_state_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.invariants, &name) else {
-        return metadata_header(claim, &display_name(&name), ctx.locale);
+        return metadata_header(claim, &display_name(&name), None, ctx.locale);
     };
-    let head = metadata_header(claim, &display_name(&name), ctx.locale);
+    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
     let lead = match ctx.locale {
         Locale::Ja => {
             "初期化後、および成功した各操作のコミット後に、次の条件が成立しなければならない。"
@@ -1014,9 +1080,9 @@ fn render_transition_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.transitions, &name) else {
-        return metadata_header(claim, &display_name(&name), ctx.locale);
+        return metadata_header(claim, &display_name(&name), None, ctx.locale);
     };
-    let head = metadata_header(claim, &display_name(&name), ctx.locale);
+    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
     let lead = match ctx.locale {
         Locale::Ja => {
             "成功する各遷移について、遷移前の状態と遷移後の状態は次の関係を満たさなければならない。以下で「遷移前の `x`」は遷移前の値を指し、それ以外の読み取りは遷移後の値を指す。"
@@ -1041,9 +1107,9 @@ fn render_reachability_goal(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.reachables, &name) else {
-        return metadata_header(claim, &display_name(&name), ctx.locale);
+        return metadata_header(claim, &display_name(&name), None, ctx.locale);
     };
-    let head = metadata_header(claim, &display_name(&name), ctx.locale);
+    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
     let lead = match ctx.locale {
         Locale::Ja => "次の状態に到達する実行例が存在しなければならない（到達目標）。",
         Locale::En => {
@@ -1068,9 +1134,9 @@ fn render_deadline_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.invariants, &name) else {
-        return metadata_header(claim, &display_name(&name), ctx.locale);
+        return metadata_header(claim, &display_name(&name), None, ctx.locale);
     };
-    let head = metadata_header(claim, &display_name(&name), ctx.locale);
+    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
     let lead = match ctx.locale {
         Locale::Ja => {
             "次の条件は期限条件（deadline）である。初期化後、および成功した各操作のコミット後に成立しなければならない。"
@@ -1093,7 +1159,7 @@ fn render_deadline_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
 
 fn render_terminal_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
     let Some(expr) = ctx.model.terminal.clone() else {
-        return metadata_header(claim, "", ctx.locale);
+        return metadata_header(claim, "", None, ctx.locale);
     };
     let head = format!(
         "#### {}",
@@ -1131,14 +1197,14 @@ fn render_progress_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = ctx.model.leadstos.iter().find(|p| p.name == name).cloned() else {
-        return metadata_header(claim, &display_name(&name), ctx.locale);
+        return metadata_header(claim, &display_name(&name), None, ctx.locale);
     };
     render_leadsto(claim, &property, ctx)
 }
 
 #[allow(clippy::too_many_lines)]
 fn render_leadsto(claim: &Claim, property: &LeadsToDef, ctx: &mut Ctx<'_>) -> String {
-    let head = metadata_header(claim, &display_name(&property.name), ctx.locale);
+    let head = metadata_header(claim, &display_name(&property.name), None, ctx.locale);
     let lead = match ctx.locale {
         Locale::Ja => "次の進行条件（liveness）が、FSL 上の要求として宣言されている。",
         Locale::En => "The following progress rule (liveness) is declared as a demand in the FSL.",
@@ -1252,7 +1318,7 @@ fn render_trace(claim: &Claim, ctx: &mut Ctx<'_>, is_acceptance: bool) -> String
         .unwrap_or_default()
         .to_owned();
     let Some(case) = find_case(ctx.trace, &case_id, is_acceptance) else {
-        return metadata_header(claim, &case_id, ctx.locale);
+        return metadata_header(claim, &case_id, None, ctx.locale);
     };
     let case = case.clone();
     if is_acceptance {
@@ -1286,7 +1352,7 @@ fn step_text(model: &KernelModel, name: &str, args: &[fsl_core::KernelExpr]) -> 
 }
 
 fn render_acceptance(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<'_>) -> String {
-    let head = metadata_header(claim, &case.id, ctx.locale);
+    let head = metadata_header(claim, &case.id, None, ctx.locale);
     let title_label = match ctx.locale {
         Locale::Ja => "表題",
         Locale::En => "Title",
@@ -1336,7 +1402,7 @@ fn render_acceptance(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<
 }
 
 fn render_forbidden(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<'_>) -> String {
-    let head = metadata_header(claim, &case.id, ctx.locale);
+    let head = metadata_header(claim, &case.id, None, ctx.locale);
     let title_label = match ctx.locale {
         Locale::Ja => "表題",
         Locale::En => "Title",

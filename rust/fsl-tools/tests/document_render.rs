@@ -57,7 +57,8 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
     let kernel = fsl_core::parse_kernel_source(&fixture.source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
-    let doc = fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale);
+    let doc =
+        fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale, None);
     (claims, doc)
 }
 

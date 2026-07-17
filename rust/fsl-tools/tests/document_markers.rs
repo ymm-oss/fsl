@@ -34,7 +34,7 @@ fn cancel_system_markdown(locale: Locale) -> String {
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
-    fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale).markdown
+    fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale, None).markdown
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn back_references_carry_no_markers() {
     let model = fsl_core::build_model(kernel).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
     let markdown =
-        fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), Locale::Ja)
+        fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), Locale::Ja, None)
             .markdown;
     assert!(
         claims
