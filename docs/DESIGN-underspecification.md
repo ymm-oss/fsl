@@ -25,9 +25,15 @@ A finding requires all of the following:
    one user invariant or acceptance `expect` predicate has a different truth
    value.
 
-The solver constructs two successor states from the same symbolic current
-state, pins a different action instance into each transition, and asks for an
-XOR over contract predicates. The witness includes the reachable prefix, both
+The authoritative native probe explores concretely: it enumerates reachable
+states by explicit-state BFS over the solver-independent `fsl_runtime::Monitor`
+(`new`/`enabled`/`step`), executes each action of the pair from the same
+concrete current state, and compares the truth value of every contract
+predicate on the two successors. No solver is involved. (The frozen Python
+reference realizes the same bounded probe symbolically — a Z3 XOR query over
+two pinned transitions — which is where this section's original "the solver
+constructs two successor states" phrasing came from; the finding contract is
+identical.) The witness includes the reachable prefix, both
 actions/parameters, both logical successors, divergent state names, and the
 predicates whose outcomes differ.
 
@@ -50,11 +56,15 @@ witness was found.
 
 ## Bounded exploration and cost controls
 
-The probe reuses the verifier's `init_constraints`, transition relation,
-logical equality, action-instance enumeration, and trace rendering. Path states
-are constrained by all invariants. Branch successors are not constrained by
-the invariants so `divergent_choice` can expose a choice whose property truth
-values split.
+The native probe reuses the runtime Monitor's initialization, enabled-instance
+enumeration, and step semantics, plus the CLI's trace rendering — the same
+concrete semantics the replay/monitor surface uses, so the probe introduces no
+transition relation of its own that could drift from the runtime's (the
+verifier's symbolic relation is a separate, cross-checked implementation of the
+same semantics). Path states are constrained by all invariants.
+Branch successors are not constrained by the invariants (the probe compares
+each successor's `attempted_state`) so `divergent_choice` can expose a choice
+whose property truth values split.
 
 Exploration is deterministic:
 
@@ -65,7 +75,7 @@ Exploration is deterministic:
 - action names and unconstrained state names are sorted;
 - at most 256 action-instance pair queries per spec.
 
-If expression evaluation or the semantic solver cannot build a probe, semantic
+If the Monitor cannot be constructed or expression evaluation fails, semantic
 findings degrade to an empty set and ordinary structural analysis continues.
 The AI-review command must not become an internal error because optional
 semantic evidence was unavailable.
@@ -93,7 +103,12 @@ Both finding types add:
 
 `analysis-findings.v0.schema.json` adds optional `spec_question` (must end in
 `?`) and `evidence_basis` (`structural` or `bounded_bmc`). They remain optional
-so existing v0 findings are backward compatible.
+so existing v0 findings are backward compatible. `"bounded_bmc"` is frozen v0
+schema vocabulary meaning "backed by a bounded machine-checked reachability
+witness" — in the native implementation that witness comes from the depth-4
+explicit-state BFS above, not from symbolic BMC. The enum value is retained
+as-is because renaming it is a v0 contract change with no behavioral benefit
+(issue #318).
 
 The question asks the specification owner to decide or explicitly declare that
 both outcomes are intended. It never tells an agent to delete an action,

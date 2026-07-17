@@ -34,6 +34,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
   literate Markdown feature, so `docs/intro/language.ja.html` documents the
   `.md` input support instead of silently omitting it (issue #346).
+- Documentation for the depth-4 underspecification probe (`divergent_choice`,
+  `unconstrained_effect`) now matches the native implementation: a solver-free
+  explicit-state BFS over the runtime Monitor, not symbolic BMC/Z3.
+  `docs/DESIGN-underspecification.md`, `docs/DESIGN-analysis.md`,
+  `docs/LANGUAGE.md`/`docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` are
+  corrected; the `evidence_basis:"bounded_bmc"` schema enum value is retained
+  unchanged as frozen v0 vocabulary for "backed by a bounded reachability
+  witness", so no output or schema contract moves (issue #318).
 
 ### Added
 - Documented a rationale convention for preserving a declaration's "why" in
