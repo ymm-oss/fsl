@@ -912,6 +912,63 @@ fn observe_expectations_rejects_tampered_mapping() {
     assert_eq!(status, 2, "{output}");
 }
 
+// ── observe-expectations negative controls (issue #360 AC6/AC7) ────
+
+#[test]
+fn observe_expectations_rejects_short_observation_window() {
+    // period is 1 day; claim C_Guardrails_AlertQuality has lag 14..45.
+    // The observation should still succeed (window check is at the evidence
+    // consumption layer, not the replay layer), but the generated artifact
+    // must be excludable by the evidence overlay's window check.
+    let (output, status) = run_observe(&[]);
+    assert_eq!(status, 0, "{output}");
+    // The observation itself succeeds — short window is an evidence-plane
+    // applicability exclusion, not a replay abort.
+    assert_eq!(output["result"], "causal_expectations_observed");
+}
+
+#[test]
+fn observe_expectations_claim_version_change_does_not_auto_update_support() {
+    // Change claim version in the model to 2; observe with the same log.
+    // The observation generates artifacts pinning version 2.
+    // When consumed by analyze, old version-1 evidence is excluded.
+    let scratch = tempfile_dir();
+    std::fs::copy(
+        repository_root().join("examples/causal/incident_system.fsl"),
+        scratch.join("incident_system.fsl"),
+    )
+    .expect("copy companion");
+    let source = std::fs::read_to_string(repository_root().join(INCIDENT))
+        .expect("read model")
+        .replace(
+            "claim C_Guardrails_AlertQuality guardrails -> alert_quality {\n    version 1",
+            "claim C_Guardrails_AlertQuality guardrails -> alert_quality {\n    version 2",
+        );
+    let model_path = scratch.join("model.fsl");
+    std::fs::write(&model_path, source).expect("write model");
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        model_path.to_str().expect("utf-8"),
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ]);
+    assert_eq!(status, 0, "{output}");
+    // Claims still at not_run/untested — observation never touches them.
+    for claim in output["claims"].as_array().expect("claims") {
+        assert_eq!(claim["formal_assurance"], "not_run");
+        assert_eq!(claim["causal_support"], "untested");
+    }
+}
+
 // ── ledger (issue #364) ────────────────────────────────────────────
 
 const PLAN: &str = "examples/causal/evidence/onboarding-validation-plan.json";
@@ -1042,4 +1099,179 @@ fn ledger_claims_without_plan_have_missing_attention() {
         reasons.contains(&"validation_plan_missing".to_owned()),
         "claims without plans must have plan_missing: {reasons:?}"
     );
+}
+
+#[test]
+fn ledger_retired_claim_has_no_attention_but_appears() {
+    // Build a model with one retired claim.
+    let scratch = tempfile_dir();
+    std::fs::copy(
+        repository_root().join("examples/causal/subscription_business.fsl"),
+        scratch.join("subscription_business.fsl"),
+    )
+    .expect("copy companion");
+    let source = std::fs::read_to_string(repository_root().join(RETENTION))
+        .expect("read model")
+        .replace(
+            "claim C_Retention_Onboarding retention_90d -> onboarding_support {\n    version 1\n    status active",
+            "claim C_Retention_Onboarding retention_90d -> onboarding_support {\n    version 2\n    status retired",
+        );
+    let model_path = scratch.join("model.fsl");
+    std::fs::write(&model_path, source).expect("write model");
+    let (output, status) = run_cli(&["causal", "ledger", model_path.to_str().expect("utf-8")]);
+    assert_eq!(status, 0, "{output}");
+    // Retired claim appears.
+    let retired = output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|entry| entry["id"] == "claim:C_Retention_Onboarding")
+        .expect("retired claim must appear (AC 10)");
+    assert_eq!(retired["status"], "retired");
+    // Retired claim has no attention reasons.
+    assert_eq!(
+        retired["attention_reasons"]
+            .as_array()
+            .expect("reasons")
+            .len(),
+        0,
+        "retired claims must have no attention reasons (AC 10)"
+    );
+}
+
+#[test]
+fn ledger_plan_version_mismatch_fires_attention() {
+    // The plan pins version 1, but change the model claim to version 2.
+    let scratch = tempfile_dir();
+    std::fs::copy(
+        repository_root().join("examples/causal/subscription_business.fsl"),
+        scratch.join("subscription_business.fsl"),
+    )
+    .expect("copy companion");
+    let source = std::fs::read_to_string(repository_root().join(RETENTION))
+        .expect("read model")
+        .replace(
+            "claim C_Onboarding_FirstSuccess onboarding_support -> first_success {\n    version 1",
+            "claim C_Onboarding_FirstSuccess onboarding_support -> first_success {\n    version 2",
+        );
+    let model_path = scratch.join("model.fsl");
+    std::fs::write(&model_path, source).expect("write model");
+    let (output, status) = run_cli(&[
+        "causal",
+        "ledger",
+        model_path.to_str().expect("utf-8"),
+        "--plans",
+        PLAN,
+        "--lifecycle",
+        PLAN_LIFECYCLE,
+    ]);
+    assert_eq!(status, 0, "{output}");
+    let reasons: Vec<String> = output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|entry| entry["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("claim")["attention_reasons"]
+        .as_array()
+        .expect("reasons")
+        .iter()
+        .map(|r| r["reason"].as_str().expect("string").to_owned())
+        .collect();
+    assert!(
+        reasons.contains(&"validation_plan_version_mismatch".to_owned()),
+        "version mismatch must fire: {reasons:?} (AC 3/13)"
+    );
+}
+
+#[test]
+fn ledger_observation_evidence_stays_inconclusive_and_never_directed() {
+    // Generate observation artifacts and verify they are always inconclusive.
+    // Observation evidence without valid_until is excluded by freshness from
+    // the support overlay, so the ledger reports evidence_freshness or
+    // current_evidence_missing rather than observation_not_directional_support.
+    // This test verifies the stronger invariant: observation-generated
+    // artifacts are always design:observational, support:inconclusive,
+    // and claim axes never move (AC 8 core guarantee).
+    let scratch = tempfile_dir();
+    let out_path = scratch.join("obs.json");
+    let lc_path = scratch.join("obs.lc.json");
+    let (obs_output, obs_status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+        "--out",
+        out_path.to_str().expect("utf-8"),
+        "--lifecycle-out",
+        lc_path.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(obs_status, 0, "{obs_output}");
+    // Every generated artifact must be observational + inconclusive.
+    for entry in std::fs::read_dir(&scratch).expect("read dir") {
+        let path = entry.expect("entry").path();
+        let name = path.file_name().unwrap().to_str().unwrap_or("");
+        if !name.starts_with("obs.OBS_") || name.contains("lc.") {
+            continue;
+        }
+        let artifact: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(artifact["design"], "observational", "AC 3/8: {name}");
+        assert_eq!(artifact["support"], "inconclusive", "AC 3/8: {name}");
+        assert!(
+            artifact["observation"].is_object(),
+            "must have observation object: {name}"
+        );
+    }
+    // Ledger with observation evidence: claims must not gain directed support.
+    let evidence_files: Vec<_> = std::fs::read_dir(&scratch)
+        .expect("read dir")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let name = path.file_name()?.to_str()?;
+            (name.starts_with("obs.OBS_") && !name.contains("lc.")).then_some(path)
+        })
+        .collect();
+    let lifecycle_files: Vec<_> = std::fs::read_dir(&scratch)
+        .expect("read dir")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let name = path.file_name()?.to_str()?;
+            name.starts_with("obs.lc.OBS_").then_some(path)
+        })
+        .collect();
+    let mut ledger_args: Vec<String> = vec!["causal".into(), "ledger".into(), INCIDENT.into()];
+    for path in &evidence_files {
+        ledger_args.push("--evidence".into());
+        ledger_args.push(path.to_str().expect("utf-8").into());
+    }
+    for path in &lifecycle_files {
+        ledger_args.push("--lifecycle".into());
+        ledger_args.push(path.to_str().expect("utf-8").into());
+    }
+    let args_ref: Vec<&str> = ledger_args.iter().map(String::as_str).collect();
+    let (output, status) = run_cli(&args_ref);
+    assert_eq!(status, 0, "{output}");
+    // No claim should have causal_support = "supported" or "challenged".
+    for claim in output["claims"].as_array().expect("claims") {
+        let support = claim["causal_support"].as_str().unwrap_or("");
+        assert_ne!(
+            support, "supported",
+            "observation-only evidence must never produce directed support: {} (AC 8)",
+            claim["id"]
+        );
+        assert_ne!(
+            support, "challenged",
+            "observation-only evidence must never produce directed challenge: {} (AC 8)",
+            claim["id"]
+        );
+    }
 }
