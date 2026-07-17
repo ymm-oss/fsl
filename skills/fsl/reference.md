@@ -1000,7 +1000,11 @@ earliest step does not depend on the requested search bound. Comment/
 whitespace-only edits still miss (diagnostics quote source by line number,
 so entry-file text is hashed verbatim) — that is a deliberate hit-rate/
 staleness trade-off, never a soundness one. `--no-cache` (or `FSLC_CACHE=off`)
-opts a run out entirely. See `docs/DESIGN-incremental-verify.md`.
+opts a run out entirely. Cache writes are atomic, so running `fslc verify` on
+many files as concurrent processes (e.g. `xargs -P`, a CI job matrix) is safe —
+concurrent runs at worst duplicate solving, never corrupt the cache. When
+verifying a whole project's specs, prefer process-level parallelism over a
+sequential per-file loop. See `docs/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
