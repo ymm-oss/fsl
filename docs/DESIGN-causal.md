@@ -37,6 +37,21 @@ verification cost for no assurance gain.
 Every JSON output in the profile separates `formal_assurance` from
 `causal_support` as two orthogonal axes and carries a `do_not_assume` array.
 
+**Authority scope.** Sections 1–11 are normative for Phase 1 (model
+syntax, typed IR, check/analyze/diff). Sections 12–17 (implementation
+notes per phase) are normative for their respective phases: §13 for #322
+evidence schemas, lifecycle, and support aggregation; §14 for #323
+expectation lowering; §16 for #360 observation replay; §17 for #364
+portfolio ledger. Each phase's implementation notes refine the sections
+above; they never contradict them. The observation bridge (§16) generates
+`design: "observational"`, `support: "inconclusive"` evidence — it does
+**not** convert temporal co-occurrence into directed causal support (the
+§11 non-goal). A `pass` verdict on a generated `leadsTo` expectation
+(§14) carries `assurance: "bounded"` or `"replay-observed"` but the
+derived claim's `formal_assurance` stays `"not_run"` and its
+`causal_support` is untouched — the label is on the generated kernel
+property, not on the causal claim.
+
 ## 2. Adopted and rejected decisions
 
 Adopted:
@@ -275,8 +290,16 @@ comparable scopes:
   in at least one required dimension.
 
 Multi-dimension composition: any dimension `disjoint` ⇒ whole `disjoint`; all
-dimensions `subsumes` ⇒ whole `subsumes`; otherwise `partial_overlap`. When
-declared tokens still cannot be related from `subset_of` / `overlaps` /
+dimensions `subsumes` ⇒ whole `subsumes`; otherwise `partial_overlap`.
+
+**Missing-dimension handling.** When a dimension is present in the claim
+scope but absent from the evidence/plan scope (or vice versa), the
+per-dimension result for that dimension is `unassessable`. When either side
+has an entirely empty scope (no dimensions at all), the whole comparison is
+`unassessable`. A claim with no explicit scope and no model `default_scope`
+has an empty scope; a missing scope is never silently treated as universal.
+
+When declared tokens still cannot be related from `subset_of` / `overlaps` /
 `disjoint_with`, that is not a model check error; at evidence-comparison time
 it becomes an `evidence_scope_unassessable` warning and the evidence is
 excluded from current support. A missing scope with no model default gets the
@@ -292,16 +315,30 @@ separated from content. The content version covers causal meaning — source /
 target, polarity, lag, persists, basis, scope, future moderation — and
 excludes evidence references, derived support, and lifecycle metadata
 (`status`, `superseded_by`). Adding evidence or retiring a claim does not
-self-referentially bump the content version. Evidence artifacts pin the claim
-`version`, not just the ID; an artifact pinned to a non-current version is
-#322's `evidence_claim_version_mismatch` warning — retained as historical
-evidence for the old version, excluded from current support aggregation.
+self-referentially bump the content version. A content change without a
+version bump is a model error detectable by `causal diff` (the old and new
+versions hash-compare as different content under the same version number,
+producing a `content_changed_without_version_bump` diff finding). Evidence
+artifacts pin the claim `version`, not just the ID; an artifact pinned to a
+non-current version is #322's `evidence_claim_version_mismatch` warning —
+retained as historical evidence for the old version, excluded from current
+support aggregation.
+
+`basis` is version-relevant content: changing a claim's basis from
+`hypothesis` to `assumption` (or vice versa) changes the claim's epistemic
+meaning and must bump the content version. `basis supported` cannot be
+written in source (§4.3); support is derived from evidence only.
 
 Refuted or abandoned claims are not deleted: they become `status retired`.
-Retired claims are excluded from current reachability, timeline, and support
-aggregation, but remain in causal diff, the evidence graph, and history
-projections, so re-proposing an already-refuted hypothesis is detectable.
-Retirement itself is not a formal proof of falsity.
+**`retired` is terminal**: a retired claim cannot return to `active`. To
+re-propose a hypothesis after retirement, create a new claim ID (which may
+reference the retired predecessor via `superseded_by` on the old claim).
+Retired claims are excluded from current reachability, timeline, support
+aggregation, and portfolio attention, but remain in causal diff, the
+evidence graph, and history projections. Re-proposal detection: `causal
+diff` reports when a new claim shares source/target/polarity with a retired
+claim under a different ID, producing a `retired_hypothesis_reproposed`
+finding. Retirement itself is not a formal proof of falsity.
 
 ## 5. Time semantics
 
@@ -334,7 +371,10 @@ A directed cycle is not automatically an error (network effects, referral,
 capability accumulation, and negative control loops are ordinary).
 
 - **Instantaneous loop** (minimum lag sum over the cycle = 0): check error —
-  its semantics degenerate.
+  its semantics degenerate. An edge with `lag: unknown` is treated as
+  `lag.min == 0` for this check because unknown lag cannot prove a positive
+  delay. A cycle composed entirely of `lag: unknown` edges is therefore
+  rejected as instantaneous.
 - **Delayed feedback** (minimum lag sum > 0): allowed but requires an explicit
   `feedback` declaration (an undeclared delayed cycle is the
   `causal_unacknowledged_feedback` warning, §11.5).
@@ -447,7 +487,11 @@ check (`causal-check.v0`):
 }
 ```
 
-analyze finding (every finding carries `formal_status: "not_a_violation"`):
+analyze finding (every finding carries `formal_status: "not_a_violation"`).
+`confidence` is a deterministic structural score (e.g. the fraction of
+reachable outcomes that depend on the flagged claim, computed from the
+graph alone) — it is not a probability of causality, a Bayesian posterior,
+or a statistical p-value:
 
 ```json
 {
