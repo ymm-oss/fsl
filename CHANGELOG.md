@@ -12,6 +12,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Accepted `docs/DESIGN-causal.md`: the design contract for the review-only
+  `causal` profile (typed causal hypothesis graphs). It fixes the three-plane
+  architecture (causal specification / formal expectation / external
+  evidence), surface syntax and field contracts, scope-token declaration and
+  three-valued containment, claim content-versioning and retired lifecycle,
+  discrete time semantics (lag/persists Minkowski sums, fail-closed clock
+  mappings), delayed-feedback polarity classification, the typed CausalModel
+  IR boundary, and versioned JSON contracts under `schemas/fslc/causal/`.
+  Causal claims never receive `proved`/`verified`; Public Kernel v1, runtime,
+  solver, and verifier are unchanged by design (issue #320).
 - Documented a rationale convention for annotating a declaration so tooling and
   AI agents can see the "why" that used to live only in `//` comments (lexer
   trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the
