@@ -2,7 +2,7 @@
   "name": "fsl-vscode",
   "displayName": "FSL",
   "description": "Language support for FSL specifications.",
-  "version": "0.1.0",
+  "version": "3.0.0",
   "publisher": "fslc",
   "license": "Apache-2.0",
   "repository": {
@@ -51,6 +51,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.84.0",
+    "@vscode/vsce": "3.9.2",
     "typescript": "^5.3.3"
   }
 }

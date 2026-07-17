@@ -21,7 +21,6 @@ venv/
 # VSCode extension build artifacts
 node_modules/
 editors/vscode/out/
-editors/vscode/package-lock.json
 *.vsix
 
 # Claude Code local config (not part of the project)

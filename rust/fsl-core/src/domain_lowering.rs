@@ -1888,7 +1888,7 @@ impl<'a> Resolver<'a> {
         for event in emitted {
             self.event(event, DomainLoc::from(span))?;
         }
-        let emitted = emitted.iter().collect::<BTreeSet<_>>();
+        let emitted = emitted.iter().map(String::as_str).collect::<BTreeSet<_>>();
         let mut names = self
             .domain
             .aggregates
@@ -1900,7 +1900,7 @@ impl<'a> Resolver<'a> {
             .into_iter()
             .map(|name| Statement::Assign {
                 target: LValue::Var(event_flag(name)),
-                value: Expr::Bool(emitted.contains(&name.to_owned())),
+                value: Expr::Bool(emitted.contains(name)),
                 span,
             })
             .collect())

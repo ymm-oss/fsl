@@ -341,19 +341,19 @@ impl<'a> Context<'a> {
             }
         }
         for (variable, ty) in type_env {
-            if self.ty(ty).is_some_and(|ty| ty.kind == "enum") {
-                if let Some(definition) = self.ty(ty) {
-                    for member in &definition.members {
-                        let value = self.enum_value(ty, member);
-                        output = output.replace(
-                            &format!("{variable} == {member}"),
-                            &format!("{variable} == {value}"),
-                        );
-                        output = output.replace(
-                            &format!("{variable} != {member}"),
-                            &format!("{variable} != {value}"),
-                        );
-                    }
+            if self.ty(ty).is_some_and(|ty| ty.kind == "enum")
+                && let Some(definition) = self.ty(ty)
+            {
+                for member in &definition.members {
+                    let value = self.enum_value(ty, member);
+                    output = output.replace(
+                        &format!("{variable} == {member}"),
+                        &format!("{variable} == {value}"),
+                    );
+                    output = output.replace(
+                        &format!("{variable} != {member}"),
+                        &format!("{variable} != {value}"),
+                    );
                 }
             }
             let marker = format!("{variable} in [");
