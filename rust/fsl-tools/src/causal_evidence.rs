@@ -650,7 +650,7 @@ fn window_in_timebase(model: &CausalModel, artifact: &EvidenceArtifact) -> Optio
     match model.timebase.as_str() {
         "day" => Some(days),
         "hour" => Some(days * 24),
-        "week" => (days % 7 == 0).then_some(days / 7),
+        "week" => days.is_multiple_of(7).then_some(days / 7),
         _ => None,
     }
 }
