@@ -1688,14 +1688,15 @@ only in prose:
 - Use the built-in `@kind(id, text?)` to classify and explain a declaration in
   one line, e.g. `@kind("aux_invariant", "closes the k-induction CTI for
   attempts_bounded")`. `Kind` never alters guards, actions, property kinds,
-  verification, or lowering; every consumer reading
-  `KernelModel::annotations_for` — including the JSON envelope and the LSP —
-  sees it.
+  verification, or lowering. It survives in the checked `KernelModel` for
+  in-process consumers that explicitly call `annotations_for`; the current
+  JSON envelope, LSP index, and audit ledger do not project generic annotations.
 - For a short rationale that does not naturally fit a classification, the
   recommended custom namespace is `@doc.rationale("...")` (an ordinary
-  `Custom` annotation; see 13.1). It carries the same verification-inert,
-  queryable guarantee as any other custom namespace and needs no grammar
-  change.
+  `Custom` annotation; see 13.1). It carries the same verification-inert
+  checked-model representation as any other custom namespace and needs no
+  grammar change. A public JSON, LSP, or audit consumer still needs an explicit
+  projection contract before it can query that rationale.
 - Multi-sentence narrative — what a spec demonstrates, a walkthrough of why a
   design works, a pedagogical bug marker in an intentionally-broken example —
   stays an ordinary `//` comment. Annotation argument strings have no escape

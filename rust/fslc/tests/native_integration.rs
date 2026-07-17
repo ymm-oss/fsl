@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
@@ -299,4 +299,164 @@ fn workspace_packages_are_not_publishable() {
             .all(|package| package["publish"].as_array().is_some_and(Vec::is_empty))
     );
     assert!(!root.join(".github/workflows/publish.yml").exists());
+}
+
+#[test]
+fn native_release_unit_is_atomic_pinned_and_platform_closed() {
+    let root = root();
+    let workflow = std::fs::read_to_string(root.join(".github/workflows/release.yml"))
+        .expect("release workflow")
+        .replace("\r\n", "\n");
+    assert_eq!(workflow.matches("softprops/action-gh-release@").count(), 1);
+    assert!(workflow.contains("name: assemble complete release unit"));
+    assert!(workflow.contains("needs: [build, vsix, kernel-contract]"));
+    assert!(workflow.contains("name: release-unit"));
+    assert!(workflow.contains("name: publish atomic release unit"));
+    assert!(workflow.contains("needs: [assemble]"));
+    assert!(workflow.contains("merge-multiple: true"));
+    assert!(workflow.contains("draft: true"));
+    assert!(workflow.contains("body_path: release-notes.md"));
+    assert!(workflow.contains("Verify the remote draft release unit"));
+    assert!(workflow.contains("diff -u expected-assets.txt remote-assets.txt"));
+    assert!(workflow.contains("gh release edit \"$GITHUB_REF_NAME\" --draft=false --latest"));
+    assert!(workflow.contains("npm ci"));
+    assert!(workflow.contains("cp ../../LICENSE LICENSE"));
+    assert!(workflow.contains("npm exec -- vsce package"));
+    assert!(!workflow.contains("npx --yes @vscode/vsce"));
+    assert_eq!(workflow.matches("            target: ").count(), 4);
+    for target in ["macos-arm64", "linux-x64", "linux-arm64", "windows-x64"] {
+        assert!(workflow.contains(&format!("target: {target}")));
+    }
+    assert!(workflow.contains("os: ubuntu-24.04\n            target: linux-x64"));
+    assert!(workflow.contains("GLIBC_2.39"));
+    assert!(!workflow.contains("target: macos-x64"));
+    assert!(workflow.contains("\"fslc ${GITHUB_REF_NAME#v}\""));
+    assert!(workflow.contains("$env:GITHUB_REF_NAME.Substring(1)"));
+    assert!(workflow.contains("binary version does not match tag"));
+    for mutable in [
+        "uses: actions/checkout@v4",
+        "uses: actions/setup-node@v4",
+        "uses: actions/upload-artifact@v4",
+        "uses: actions/download-artifact@v4",
+        "uses: dtolnay/rust-toolchain@stable",
+        "uses: softprops/action-gh-release@v2",
+    ] {
+        assert!(
+            !workflow.contains(mutable),
+            "mutable release action: {mutable}"
+        );
+    }
+    assert!(workflow.contains("toolchain: 1.85.0"));
+
+    let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
+    assert!(!installer.contains("echo \"macos-x64\""));
+    assert!(installer.contains("RELEASE_TAG=$(latest_release_tag)"));
+    assert!(installer.contains("git clone --branch \"$RELEASE_TAG\" --depth 1"));
+    assert!(installer.contains("releases/download/$RELEASE_TAG"));
+    assert!(!installer.contains("releases/latest/download"));
+    assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
+    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
+    let stage_cli = installer
+        .find("stage_release_asset \"fslc-$TARGET\"")
+        .unwrap();
+    let stage_lsp = installer
+        .find("stage_release_asset \"fslc-lsp-$TARGET\"")
+        .unwrap();
+    let install_cli = installer
+        .find("mv \"$STAGING_DIR/fslc.download\" \"$FSL_BIN\"")
+        .unwrap();
+    assert!(stage_cli < stage_lsp && stage_lsp < install_cli);
+
+    let package: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("editors/vscode/package.json"))
+            .expect("VS Code package"),
+    )
+    .expect("VS Code package JSON");
+    assert_eq!(package["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(package["devDependencies"]["@vscode/vsce"], "3.9.2");
+    let package_lock: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("editors/vscode/package-lock.json"))
+            .expect("VS Code package lock"),
+    )
+    .expect("VS Code package lock JSON");
+    assert_eq!(package_lock["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        package_lock["packages"][""]["devDependencies"]["@vscode/vsce"],
+        "3.9.2"
+    );
+
+    let runbook = std::fs::read_to_string(root.join("docs/RELEASE.md")).expect("release runbook");
+    let skill = std::fs::read_to_string(root.join(".claude/skills/release/SKILL.md"))
+        .expect("release skill");
+    for contract in [
+        "short-lived branch -> main -> production -> vX.Y.Z",
+        "Never tag `main`",
+        "workflow_dispatch",
+        "explicit confirmation",
+    ] {
+        assert!(runbook.contains(contract), "runbook lost {contract}");
+        assert!(skill.contains(contract), "skill lost {contract}");
+    }
+    assert!(runbook.contains("git tag -a vX.Y.Z PRODUCTION_SHA"));
+    assert!(skill.contains("tag `vX.Y.Z` at the gated `production` HEAD"));
+    assert!(runbook.contains("cannot validate its own first installation"));
+    assert!(skill.contains("cannot validate its own first installation"));
+    assert_eq!(
+        std::fs::canonicalize(root.join(".codex/skills/release")).expect("Codex release link"),
+        std::fs::canonicalize(root.join(".claude/skills/release"))
+            .expect("canonical release skill")
+    );
+}
+
+#[test]
+fn production_accepts_only_governed_source_branches() {
+    let root = root();
+    let policy = std::fs::read_to_string(root.join(".github/workflows/production-policy.yml"))
+        .expect("production policy")
+        .replace("\r\n", "\n");
+    assert!(policy.contains("branches: [production]"));
+    assert!(policy.contains("  pull_request_target:"));
+    assert!(!policy.contains("\n  pull_request:\n"));
+    assert!(!policy.contains("actions/checkout@"));
+    assert!(policy.contains("HEAD_REF: ${{ github.event.pull_request.head.ref }}"));
+    assert!(policy.contains("HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}"));
+    assert!(policy.contains("REPOSITORY: ${{ github.repository }}"));
+    #[cfg(not(windows))]
+    {
+        let policy_script = policy
+            .split_once("        run: |\n")
+            .expect("inline production policy")
+            .1
+            .lines()
+            .map(|line| line.strip_prefix("          ").unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let run_policy = |head_ref: &str, head_repo: &str| {
+            Command::new("bash")
+                .arg("-c")
+                .arg(&policy_script)
+                .env("HEAD_REF", head_ref)
+                .env("HEAD_REPO", head_repo)
+                .env("REPOSITORY", "expected-repository")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        };
+
+        for accepted in ["main", "release/v3.0", "hotfix/v3.0.1"] {
+            assert!(run_policy(accepted, "expected-repository"));
+            assert!(!run_policy(accepted, "foreign-repository"));
+        }
+        for rejected in [
+            "feature/release",
+            "release/v3",
+            "release/v3.0.0",
+            "hotfix/v3.0",
+            "main-extra",
+        ] {
+            assert!(!run_policy(rejected, "expected-repository"));
+        }
+    }
 }
