@@ -1,5 +1,5 @@
 // Self-spec: fslc's own write -> verify -> repair loop, written in FSL.
-// FSL dogfooding itself at the protocol level — the toolchain's intended
+// Self-spec of the toolchain's intended
 // workflow (check -> verify -> induction, repair on failure) modeled as a
 // state machine. ProvedWasVerified is not 1-inductive on its own; the CTI
 // exposes the phantom state {Verified, ever_verified=false}, and the aux

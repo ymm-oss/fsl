@@ -66,8 +66,7 @@ fsl/
 ├── docs/
 │   ├── README.md           # map of docs (start here)
 │   ├── LANGUAGE.md         # language reference — read this if you are writing specs
-│   ├── DESIGN-*.md         # design documents (language / three-layer dialects / NFR / each feature — 12 in total)
-│   └── DOGFOOD-1..7.md     # dogfooding findings (record of bugs and discoveries)
+│   └── DESIGN-*.md         # authoritative design contracts and distilled findings
 ├── specs/                  # sample specs (*.fsl) — all the correct ones are proved at k=1
 │   ├── cart_v1.fsl         #   basic form of Option / ensures / reachable
 │   ├── cart_v1_buggy.fsl   #   missing guard — returns the shortest type_bound violation counterexample
@@ -116,7 +115,6 @@ and it runs.
 | OS / arch | File to download |
 | --- | --- |
 | macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
-| macOS (Intel) | `fslc-macos-x64` |
 | Linux (x86_64) | `fslc-linux-x64` |
 | Linux (ARM64) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |
@@ -181,6 +179,8 @@ Kernel bundles attached to GitHub Releases. The retained Python compatibility
 reference is installed from this repository and is not published to PyPI; the
 Rust workspace crates are not published to crates.io. Publishing either surface
 requires an explicit manifest, workflow, and documentation change.
+Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
+procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
 
 ## Developer setup
 

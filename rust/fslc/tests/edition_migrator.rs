@@ -196,6 +196,116 @@ fn string_metadata_uses_typed_annotations_without_changing_public_kernel() {
 }
 
 #[test]
+fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
+    let directory = FixtureDir::new();
+    let path = directory.write(
+        "ids.fsl",
+        r#"requirements Checkout {
+  requirement REQ-1 "requirement" { }
+  action reject() { }
+  acceptance AC-1 "acceptance" { expect true }
+  forbidden NEG-1 "forbidden" { reject() expect rejected }
+}
+"#,
+    );
+    let path_text = path.to_str().expect("UTF-8 path");
+    let output = run(&["lint", path_text]);
+    assert_eq!(output.status.code(), Some(1));
+    let output = json(&output);
+    assert_eq!(output["id_policy"]["source"], "builtin");
+    let findings = output["files"][0]["findings"].as_array().expect("findings");
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding["code"] == "non_canonical_id")
+            .count(),
+        3
+    );
+    assert!(findings.iter().all(|finding| {
+        finding["code"] != "non_canonical_id"
+            || (finding["taxonomy"] == "non_canonical"
+                && finding["severity"] == "warning"
+                && finding["machine_applicable"] == false
+                && finding["edits"].as_array().is_some_and(Vec::is_empty))
+    }));
+
+    let migrate = run(&["migrate", path_text, "--edition", "next"]);
+    assert!(migrate.status.success());
+    assert_eq!(json(&migrate)["changed"], 0);
+}
+
+#[test]
+fn project_id_policy_partially_overrides_builtin_templates() {
+    let directory = FixtureDir::new();
+    let project = directory.write(
+        "fsl-project.toml",
+        r#"[id_policy.patterns]
+requirement = ["PAY-{number}", "NFR-{scope}-{number:3}"]
+acceptance = "TEST-{number}"
+"#,
+    );
+    let source = directory.write(
+        "custom.fsl",
+        r#"requirements Checkout {
+  requirement PAY-42 "requirement" { }
+  acceptance TEST-7 "acceptance" { expect true }
+  action reject() { }
+  forbidden FB-CHECKOUT-001 "forbidden" { reject() expect rejected }
+}
+"#,
+    );
+    let output = run(&[
+        "lint",
+        source.to_str().expect("UTF-8 path"),
+        "--project",
+        project.to_str().expect("UTF-8 path"),
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let output = json(&output);
+    assert_eq!(output["finding_count"], 0);
+    assert_eq!(
+        output["id_policy"]["source"],
+        project.to_str().expect("UTF-8 path")
+    );
+    assert_eq!(
+        output["id_policy"]["patterns"]["forbidden"][0],
+        "FB-{scope}-{number:3}"
+    );
+}
+
+#[test]
+fn invalid_project_id_policy_fails_closed() {
+    let directory = FixtureDir::new();
+    let source = directory.write(
+        "source.fsl",
+        "requirements Checkout { requirement REQ-CHECKOUT-001 \"ok\" { } }\n",
+    );
+    for project_source in [
+        "[id_policy.patterns]\nunknown = \"X-{number}\"\n",
+        "[id_policy.patterns]\nrequirement = \"REQ-{unknown}\"\n",
+        "[id_policy.patterns]\nrequirement = []\n",
+        "[id_policy.patterns]\nrequirement = 'REQ-{number}'\n",
+        "[id_policy.patterns]\nmodel = \"{scope}-MODEL-{number}\"\n",
+        "[id_policy.patterns]\nmodel = \"TRACE-{number}\"\nassumption = \"TRACE-A-{number}\"\n",
+        "[id_policy.patterns]\nmodel = \"REQ-{scope}-{number:3}\"\n",
+    ] {
+        let project = directory.write("fsl-project.toml", project_source);
+        let output = run(&[
+            "lint",
+            source.to_str().expect("UTF-8 path"),
+            "--project",
+            project.to_str().expect("UTF-8 path"),
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(json(&output)["kind"], "config");
+    }
+}
+
+#[test]
 fn invalid_double_ampersand_and_ambiguous_maps_are_explicit_refusals() {
     let directory = FixtureDir::new();
     let invalid = directory.write(

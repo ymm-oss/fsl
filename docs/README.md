@@ -10,6 +10,7 @@
 | 同じ19章の `.en.html` 版 | **English HTML manual (19 chapters)**. Same generated-reference note applies to `intro/language.en.html` / `intro/cli.en.html` |
 | [`INTRO-formal-methods-and-fsl.md`](INTRO-formal-methods-and-fsl.md) | **Introduction to formal methods and FSL**. Background for non-specialists, the role of FSL in AI-driven development, and considerations for an introductory PoC |
 | [`LANGUAGE.md`](LANGUAGE.md) | **Language reference** (full syntax, semantics, CLI, idioms, the three-layer dialects, and NFRs). Read this if you are writing specifications |
+| [`RELEASE.md`](RELEASE.md) | **Authoritative release procedure**: version PR, changelog rollover, exact-SHA `main` to `production` promotion, non-publishing workflow dry runs, confirmed annotated tag push, changelog-derived GitHub Release notes, and four-target artifact verification |
 | [`intro/analysis.ja.html`](intro/analysis.ja.html) / [`intro/analysis.en.html`](intro/analysis.en.html) / [`GUIDE-analyze.ja.md`](GUIDE-analyze.ja.md) / [`DESIGN-analysis.md`](DESIGN-analysis.md) / [`DESIGN-code-audit.md`](DESIGN-code-audit.md) | **`fslc analyze` structural observation layer**. Site pages, a team-facing Japanese practical guide, and implementation design for TSG, graph projections, focused impact slices, action dependency/conflict graphs, structural metrics, batch analysis, refinement/project/code traceability, graph exports, schemas, and AI-review findings/candidates |
 | [`intro/domain.ja.html`](intro/domain.ja.html) / [`intro/domain.en.html`](intro/domain.en.html) / [`DESIGN-domain.md`](DESIGN-domain.md) / [`DESIGN-effect.md`](DESIGN-effect.md) | **fsl-domain Functional DDD / async effect dialect**. Site pages and implementation design for `domain`, aggregate command/event ownership, pure decide/evolve lowering, saga/process-manager coordination, async effect lifecycle checks, multi-target scaffolds, runtime replay, and domain-specific findings |
 | [`intro/db.ja.html`](intro/db.ja.html) / [`intro/db.en.html`](intro/db.en.html) / [`DESIGN-db.md`](DESIGN-db.md) | **fsl-db DB / multi-environment compatibility dialect**. Site pages and implementation design for `dbsystem`, schema/artifact/environment compatibility, rollout windows, and DB-specific findings |
@@ -28,6 +29,7 @@
 | [`DESIGN-dialect-dispatch.md`](DESIGN-dialect-dispatch.md) | Shared-lexer dialect registry, significant-token rules, document annotations, diagnostics, and frontend contract |
 | [`DESIGN-formatter.md`](DESIGN-formatter.md) | Lossless token/trivia boundary, canonical formatting policy, non-mutating CLI contract, and safe refusal range |
 | [`DESIGN-migration.md`](DESIGN-migration.md) | Edition lint taxonomy, checked rewrite rules, explicit refusal boundaries, atomic write contract, and bulk-update procedure |
+| [`DESIGN-id-policy.md`](DESIGN-id-policy.md) | Canonical ID ownership/link syntax, built-in templates, project overrides, lint diagnostics, and the no-auto-rename boundary |
 | [`DESIGN-nfr.md`](DESIGN-nfr.md) | Non-functional requirements (mapping table, discrete-time SLA: time/urgent/age/deadline) |
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
 | [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
@@ -89,21 +91,13 @@
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
 | [`DESIGN-docs-site.md`](DESIGN-docs-site.md) | This manual site's information architecture, navigation chrome, and the generated-reference-page template (`intro/language.*.html`, `intro/cli.*.html`) — produced with the Relational Design plugin |
 
-## Dogfooding records (DOGFOOD-*)
+## Evidence policy
 
-Findings, bugs, and discoveries from putting each feature into real use. These form the basis of the design decisions.
-
-1. [`DOGFOOD-1.md`](DOGFOOD-1.md) — v1.0 field evaluation (found BUG11-14, PERF1)
-2. [`DOGFOOD-2.md`](DOGFOOD-2.md) — proved as standard practice, Seq (discovery of the aggregation idiom)
-3. [`DOGFOOD-3.md`](DOGFOOD-3.md) — full workflow (abstract → refine → compose → implementation)
-4. [`DOGFOOD-4.md`](DOGFOOD-4.md) — penetration of the three-layer dialects (cross-layer diagnostics by requirement ID)
-5. [`DOGFOOD-5.md`](DOGFOOD-5.md) — NFR / discrete-time SLA
-6. [`DOGFOOD-6.md`](DOGFOOD-6.md) — bug hunt in the example gallery (two refine misses)
-7. [`DOGFOOD-7.md`](DOGFOOD-7.md) — golden-oracle test suite (Monitor BFS, trace soundness, BUG-020)
-8. [`DOGFOOD-8.md`](DOGFOOD-8.md) — blind expressibility test (external validation of G1)
-9. [`DOGFOOD-9.md`](DOGFOOD-9.md) — real run of the validation workflow (memo → positive-example pair → repair)
-10. [`DOGFOOD-10.md`](DOGFOOD-10.md) — fault-injection benchmark (measuring detector capture rate by category × mechanism)
-11. [`DOGFOOD-11.md`](DOGFOOD-11.md) — meta-circular dogfooding (modeling fslc's own design contract in FSL; detector blind spots F22-F24)
+Field trials, spikes, and audits are temporary evidence. Reusable findings are
+distilled into the `DESIGN-*` contracts above, the language reference, agent
+skills, executable examples, and regression tests. Git and pull-request history
+retain the chronology without making investigation logs a parallel source of
+truth.
 
 Worked examples are in [`../specs/`](../specs/) (standalone specs) and [`../examples/`](../examples/)
 (bank: implementation conformance / layers: three-layer chain / nfr: SLA).

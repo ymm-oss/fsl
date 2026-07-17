@@ -32,10 +32,6 @@ jobs:
             target: macos-arm64
             asset: fslc-macos-arm64
             lsp_asset: fslc-lsp-macos-arm64
-          - os: macos-15-intel  # Intel
-            target: macos-x64
-            asset: fslc-macos-x64
-            lsp_asset: fslc-lsp-macos-x64
           - os: ubuntu-latest
             target: linux-x64
             asset: fslc-linux-x64
@@ -68,6 +64,9 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           ./rust/target/release/fslc --version
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "$(./rust/target/release/fslc --version)" = "fslc ${GITHUB_REF_NAME#v}"
+          fi
           ./rust/target/release/fslc verify examples/pm/cancel_flow.fsl > /dev/null
           echo "ok"
 
@@ -89,6 +88,10 @@ jobs:
         shell: pwsh
         run: |
           ./rust/target/release/fslc.exe --version
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $expected = "fslc $($env:GITHUB_REF_NAME.Substring(1))"
+            if ((./rust/target/release/fslc.exe --version) -ne $expected) { throw "binary version does not match tag" }
+          }
           ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl > $null
           echo "ok"
 
@@ -139,7 +142,7 @@ jobs:
             dist/${{ matrix.lsp_asset }}.sha256
 
       - name: Attach to Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -172,7 +175,7 @@ jobs:
           path: editors/vscode/fsl-vscode.vsix
 
       - name: Attach to Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: editors/vscode/fsl-vscode.vsix
@@ -260,7 +263,7 @@ jobs:
             dist/fsl-kernel-contract-v2.tar.gz.sha256
 
       - name: Attach to Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |

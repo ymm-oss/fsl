@@ -124,8 +124,8 @@ verify { instances Return = 3 }</code></pre>
         <pre><code>requirements Name {
   number Amount
   process Claim with amount: Amount { ... }
-  acceptance AC-1 "..." { ... }
-  forbidden FB-1 "..." { ... }
+  acceptance AC-CHECKOUT-001 "..." { ... }
+  forbidden FB-CHECKOUT-001 "..." { ... }
 }
 verify { instances Claim = 3 values Amount = 0..3 }</code></pre>
         <p>Requirement IDs, inputs, acceptance flows, forbidden flows, and NFRs.</p>

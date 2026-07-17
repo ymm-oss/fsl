@@ -190,11 +190,11 @@ fn unknown_dialect(token: &Token) -> ParseError {
 }
 
 fn parse_shared(
-    _source: SourceFile<'_>,
+    source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<SurfaceDocument, ParseError> {
-    crate::parser::parse_shared_tokens(tokens, cursor)
+    crate::parser::parse_shared_tokens(source.source(), tokens, cursor)
 }
 
 fn parse_db(

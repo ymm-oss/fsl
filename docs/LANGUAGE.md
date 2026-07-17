@@ -336,6 +336,8 @@ written against the original `verify { instances Case = N }` bound.
 
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
+Fairness applies to a whole action instance. To model fairness only under a
+condition, split that condition into a separately guarded `fair action`.
 
 **Action parameter types** (`<p>: <type name>`): a domain type, enum, or the
 builtin `Bool` — anything BMC can enumerate. `Bool` behaves exactly like a
@@ -351,6 +353,11 @@ two-state safety (the pre-transition state can be referenced with `old()`), and
 `leadsTo` is response liveness. Without a ranking function, `leadsTo` is checked
 boundedly. With `--engine induction` and `decreases <int expr>`, a `leadsTo` can
 be proved unbounded by a well-founded ranking argument.
+
+FSL verifies finite transition systems; it does not declare higher-order axioms
+over the refinement relation itself. Laws such as refinement reflexivity or
+transitivity are checked through concrete refinement chains or finite state-machine
+models, not quantified as algebraic axioms.
 
 Response properties inside a `leadsTo` block:
 
@@ -549,7 +556,10 @@ variable capture instead of inventing internal binder names. See
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
   Equality is structural: `none` equals only `none`, while two `some` values are
   equal exactly when their payloads are equal. `x is some(v)` remains the form
-  that binds `v`; equality never introduces a binding. Ordering is not defined.
+  that binds `v`; equality never introduces a binding. The binding is available
+  only in the logical continuation where the match is true, such as the
+  right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
+  not a global binding. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
@@ -666,7 +676,7 @@ variable.
 
 ```
 fslc check     <file.fsl|file.md>                  # syntax / names / types only (fast; .md = literate FSL)
-fslc lint      <path>... [--edition current|next] # stable edition diagnostics; never mutates
+fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
@@ -1026,9 +1036,9 @@ a literate `.md` may `use`/compose `.fsl` files this way, but using another
    unreachable." Add an **auxiliary invariant** that excludes it (one that is
    itself a truth of the domain) and return to step 3
 
-In practice, auxiliary invariants often converge in a single round
-(real examples in `DOGFOOD-1.md` / `DOGFOOD-2.md`: "if attempts == 3, locked,"
-"only Captured has a refund," "no duplicates in the queue").
+Useful auxiliary invariants are domain truths such as "if attempts == 3, locked,"
+"only Captured has a refund," and "no duplicates in the queue," rather than
+proof-only artifacts.
 
 ## 9. Idiom collection
 
@@ -1510,14 +1520,25 @@ are connected by refinement: **business ⊒ requirements ⊒ design ⊒ implemen
 
 ### 13.1 Declaration tags (traceability common to all layers)
 
-If you write `"ID: original text"` just before the `{` of an invariant /
-reachable / leadsTo / action, then violations, CTIs, coverage diagnoses, and
-scenarios carry `requirement: {id, text}`:
+The canonical relationship syntax is a typed annotation immediately before the
+linked declaration. Violations, CTIs, coverage diagnoses, and scenarios then
+carry `requirement: {id, text}`:
 
 ```fsl
-invariant PaidLedger "REQ-3: the ledger matches the number of payments" { ... }
-action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are auto-approved" { ... }
+@requirement("REQ-LEDGER-003", "the ledger matches the number of payments")
+invariant PaidLedger { ... }
+
+@requirement("REQ-EXPENSE-001", "amounts at or below the threshold are auto-approved")
+action submit(c: Case, a: Amount) { ... }
 ```
+
+A `requirement`, `acceptance`, `forbidden`, `policy`, `goal`, or `control`
+declaration owns the ID after its keyword. `@requirement(...)` links another
+declaration to such an ID; process `covers ID "text"` is canonical dialect sugar
+for the same typed relationship. The older `"ID: original text"` slot before a
+declaration body remains accepted migration input, but `fslc lint` reports it as
+`legacy_string_metadata` and `fslc migrate --edition next` converts safe cases
+to `@requirement(...)`.
 
 The reserved `"undecided: reason"` tag marks a reviewed, intentionally deferred
 decision. It is metadata and is never verified as a property. It may be attached
@@ -1551,12 +1572,12 @@ annotations immediately before it, in either order relative to legacy
 metadata that also targets the same declaration:
 
 ```fsl
-@requirement("REQ-DOC", "this document owns the checkout contract")
+@requirement("REQ-CHECKOUT-001", "this document owns the checkout contract")
 @acme.review(owner.platform, 2, true)
 spec Checkout {
   state { paid: Bool }
 
-  @requirement("REQ-3", "the ledger matches payments")
+  @requirement("REQ-CHECKOUT-003", "the ledger matches payments")
   @undecided("late gateway completion policy is pending")
   @kind("safety")
   invariant PaidLedger { paid == paid }
@@ -1574,6 +1595,48 @@ changing the checked result. At top level, keywords inside annotation
 arguments do not participate in dialect dispatch; empty and unknown documents
 report `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` with exact locations and the
 deterministic supported-keyword list (see `DESIGN-dialect-dispatch.md`).
+
+#### 13.1.1 Canonical ID policy
+
+The grammar accepts broad IDs so existing taxonomies remain representable.
+`fslc lint`, independently of parsing and verification, applies a built-in
+kind-aware policy:
+
+| Kind | Built-in template(s) |
+|---|---|
+| requirement | `REQ-{scope}-{number:3}`, `NFR-{scope}-{number:3}`, `INV-{scope}-{number:3}` |
+| acceptance | `AC-{scope}-{number:3}` |
+| forbidden | `FB-{scope}-{number:3}` |
+| policy | `POL-{scope}-{number:3}` |
+| goal | `GOAL-{scope}-{number:3}` |
+| control | `CTRL-{scope}-{number:3}` |
+| model | `MODEL-{scope}-{number:3}` |
+| assumption | `ASSUME-{scope}-{number:3}` |
+
+`scope` is uppercase ASCII alphanumeric and may contain hyphen-separated
+segments; `number:3` is exactly three decimal digits. A mismatch is reported as
+the non-machine-applicable `non_canonical_id` finding: ID renaming is never
+performed automatically because references can cross source, tests, code,
+telemetry, and external evidence.
+
+Pass `--project fsl-project.toml` to replace selected kinds while retaining the
+built-in defaults for omitted kinds:
+
+```toml
+[id_policy.patterns]
+requirement = ["PAY-{number}", "NFR-{scope}-{number:3}"]
+acceptance = "TEST-{number}"
+```
+
+Values are a string or non-empty string array. Templates support `{scope}`,
+`{number}`, and positive-width `{number:N}`. Invalid policy configuration fails
+with exit 2. Values use the manifest reader's closed subset: double-quoted
+JSON-compatible strings and arrays without trailing commas or inline comments;
+single-quoted TOML strings are rejected. Model and assumption templates must
+start with distinct literal prefixes that overlap neither each other nor
+requirement templates. Lint does not search parent directories: the manifest
+is explicit, and JSON output records its
+source and the fully resolved patterns. See `DESIGN-id-policy.md`.
 
 Declaration-level annotations attach to `init`, `action` (including sync and
 mapped/requirement actions), `invariant`, `trans`, `reachable`, `until`,
@@ -1612,6 +1675,34 @@ native-only surface addition — the frozen Python reference does not parse
 it, so specs that use it are outside the Python-parity corpus by
 construction.
 
+#### 13.1.2 Rationale for tooling and AI consumption
+
+A `//` comment is lexer trivia (`rust/fsl-syntax/src/lexer.rs`): it never
+reaches the AST, `KernelModel`, `python_ast()`, the JSON result envelope, the
+LSP index, or the audit ledger. A fact a downstream tool or an AI agent must
+not lose — that an auxiliary invariant exists to close a k-induction CTI, or
+that an implementation guard is deliberately stronger than its abstract
+counterpart — should therefore ride the annotation carrier instead of living
+only in prose:
+
+- Use the built-in `@kind(id, text?)` to classify and explain a declaration in
+  one line, e.g. `@kind("aux_invariant", "closes the k-induction CTI for
+  attempts_bounded")`. `Kind` never alters guards, actions, property kinds,
+  verification, or lowering; every consumer reading
+  `KernelModel::annotations_for` — including the JSON envelope and the LSP —
+  sees it.
+- For a short rationale that does not naturally fit a classification, the
+  recommended custom namespace is `@doc.rationale("...")` (an ordinary
+  `Custom` annotation; see 13.1). It carries the same verification-inert,
+  queryable guarantee as any other custom namespace and needs no grammar
+  change.
+- Multi-sentence narrative — what a spec demonstrates, a walkthrough of why a
+  design works, a pedagogical bug marker in an intentionally-broken example —
+  stays an ordinary `//` comment. Annotation argument strings have no escape
+  syntax and stop at the first `"` or newline (`lex_string`), so they cannot
+  hold prose; forcing narrative into an annotation argument makes a spec
+  harder to read, not easier.
+
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
 ```fsl
@@ -1624,20 +1715,20 @@ requirements ExpenseRequirements {
   process Claim with amount: Amount {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
-    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
-    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
-    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
-    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
-    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-EXPENSE-002 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-EXPENSE-004 "Only approved claims are paid"
   }
 
   kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+  acceptance AC-EXPENSE-001 "Approval flow: a low-amount claim is auto-approved and paid" {
     submit(0, 1) auto_approve(0) pay(0)
     expect Claim 0 in Paid
   }
-  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+  acceptance AC-EXPENSE-002 "Rejection flow: a high-amount claim ends in manager rejection" {
     submit(1, 2) reject(1)
     expect Claim 1 in Rejected
   }
@@ -2345,8 +2436,8 @@ DESIGN-*.md).
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under `skills/`, with
-the shared language reference in `skills/fsl/SKILL.md`; the real-run record is in
-[`DOGFOOD-9.md`](DOGFOOD-9.md).
+the shared language reference in `skills/fsl/SKILL.md`. A maintained worked example
+is under [`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examples/validation).
 
 ## 16. Promotion judgment to ghost types (typestate)
 

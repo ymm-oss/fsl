@@ -449,7 +449,7 @@ fn collect_json_files(directory: &Path, files: &mut Vec<PathBuf>) {
 }
 
 /// Cache-entry purity at rest, checked directly against the files on disk:
-/// after an `auto` fallback, no persisted `verify/v1` entry may carry
+/// after an `auto` fallback, no persisted `verify/v2` entry may carry
 /// `engine`/`engine_fallback` at its top level or inside its `output` — those
 /// fields belong only to the value `auto` returns for a given invocation,
 /// never to what is written to the cache (the §6a design contract).
@@ -470,7 +470,7 @@ fn auto_never_persists_engine_annotations_into_the_cache_entry_itself() {
     assert!(auto["engine_fallback"].is_object());
 
     let mut files = Vec::new();
-    collect_json_files(&cache.path.join("verify/v1"), &mut files);
+    collect_json_files(&cache.path.join("verify/v2"), &mut files);
     let mut checked = 0_usize;
     for file in files {
         let contents = std::fs::read_to_string(&file).expect("read cache entry");
@@ -478,7 +478,7 @@ fn auto_never_persists_engine_annotations_into_the_cache_entry_itself() {
         let Some(object) = parsed.as_object() else {
             continue;
         };
-        if object.get("schema").and_then(serde_json::Value::as_str) != Some("fslc-rust-cache.v1") {
+        if object.get("schema").and_then(serde_json::Value::as_str) != Some("fslc-rust-cache.v2") {
             continue; // the xdepth pointer file, not a verify cache entry
         }
         assert!(

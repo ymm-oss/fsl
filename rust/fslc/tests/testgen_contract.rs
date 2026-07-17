@@ -77,7 +77,7 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
     for (target, digest) in [
         (
             "pytest",
-            "e9736918e4ee14c3ea863d1bab11e4ffa5b892364407a0aa46e5e79e831007cd",
+            "870aa7f2aea4e759990e9d52acd9e55e4b133957a8b2fa3e730900d49704547c",
         ),
         (
             "vitest",
