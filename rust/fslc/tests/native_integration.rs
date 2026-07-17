@@ -353,6 +353,8 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(installer.contains("git clone --branch \"$RELEASE_TAG\" --depth 1"));
     assert!(installer.contains("releases/download/$RELEASE_TAG"));
     assert!(!installer.contains("releases/latest/download"));
+    assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
+    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
     let stage_cli = installer
         .find("stage_release_asset \"fslc-$TARGET\"")
         .unwrap();
@@ -396,6 +398,8 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     }
     assert!(runbook.contains("git tag -a vX.Y.Z PRODUCTION_SHA"));
     assert!(skill.contains("tag `vX.Y.Z` at the gated `production` HEAD"));
+    assert!(runbook.contains("cannot validate its own first installation"));
+    assert!(skill.contains("cannot validate its own first installation"));
     assert_eq!(
         std::fs::canonicalize(root.join(".codex/skills/release")).expect("Codex release link"),
         std::fs::canonicalize(root.join(".claude/skills/release"))
@@ -411,16 +415,23 @@ fn production_accepts_only_governed_source_branches() {
     assert!(policy.contains("branches: [production]"));
     assert!(policy.contains("  pull_request_target:"));
     assert!(!policy.contains("\n  pull_request:\n"));
-    assert!(policy.contains("ref: ${{ github.event.pull_request.base.sha }}"));
-    assert!(policy.contains("persist-credentials: false"));
+    assert!(!policy.contains("actions/checkout@"));
     assert!(policy.contains("HEAD_REF: ${{ github.event.pull_request.head.ref }}"));
-    assert!(policy.contains("./tools/check-production-source-policy.sh \"$HEAD_REF\""));
+    let policy_script = policy
+        .split_once("        run: |\n")
+        .expect("inline production policy")
+        .1
+        .lines()
+        .map(|line| line.strip_prefix("          ").unwrap_or(line))
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    let policy_script = root.join("tools/check-production-source-policy.sh");
     for accepted in ["main", "release/v3.0", "hotfix/v3.0.1"] {
         assert!(
-            Command::new(&policy_script)
-                .arg(accepted)
+            Command::new("bash")
+                .arg("-c")
+                .arg(&policy_script)
+                .env("HEAD_REF", accepted)
                 .status()
                 .unwrap()
                 .success()
@@ -434,8 +445,10 @@ fn production_accepts_only_governed_source_branches() {
         "main-extra",
     ] {
         assert!(
-            !Command::new(&policy_script)
-                .arg(rejected)
+            !Command::new("bash")
+                .arg("-c")
+                .arg(&policy_script)
+                .env("HEAD_REF", rejected)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()

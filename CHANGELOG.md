@@ -10,7 +10,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ### Changed
 - Native v3 releases now assemble and validate all four CLI/LSP pairs, checksums,
   VSIX, and Kernel bundles before one tag-only publication step. Release actions,
-  the Rust toolchain, and the VSIX packager are pinned; manual dry runs validate
+  the Rust toolchain, and the VSIX packager are pinned; publication verifies a
+  remote draft inventory before making it public, and manual dry runs validate
   the same assembled unit without publishing it.
 - The installer rejects unsupported Intel macOS, pins repository content and
   binaries to the same latest Release tag, and stages both checksummed native

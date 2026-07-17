@@ -60,15 +60,22 @@ cannot be derived safely.
 1. Fetch remote branches and tags. Require a clean worktree.
 2. Identify the latest published `vX.Y.Z` tag and verify its release exists.
 3. Create `production` at that tag, not at a newer unreleased `main` commit.
-4. Protect `main` and `production` from direct pushes and force pushes.
-5. Require normal CI and review on `main` pull requests.
-6. Add a required policy status check for pull requests whose base is
+4. If that released baseline predates `.github/workflows/production-policy.yml`,
+   bootstrap it before requiring the check: create `release/vX.Y` from
+   `production`, add the exact workflow already reviewed on `main`, open a pull
+   request to `production`, and manually verify both the allowed source ref and
+   byte-for-byte workflow match. Merge that one bootstrap pull request only
+   after explicit approval. A `pull_request_target` workflow absent from the
+   base branch cannot validate its own first installation.
+5. Protect `main` and `production` from direct pushes and force pushes.
+6. Require normal CI and review on `main` pull requests.
+7. Add a required policy status check for pull requests whose base is
    `production`. Make it reject every head except `main`, `release/vX.Y`, or
    `hotfix/vX.Y.Z`; branch protection alone cannot restrict the source branch.
-7. Require the release gate and explicit approval on `production` promotion
+8. Require the release gate and explicit approval on `production` promotion
    pull requests. Treat adoption as incomplete until the source-policy check is
    required by the `production` ruleset.
-8. Keep tag creation as the publication trigger in `.github/workflows/release.yml`.
+9. Keep tag creation as the publication trigger in `.github/workflows/release.yml`.
 
 If no release has ever been published, require the user to identify the initial
 production baseline. Do not guess it from branch age.
@@ -133,24 +140,23 @@ After the promotion is approved and merged:
    equals that HEAD, and require every job to pass. Never reuse evidence from the
    pre-merge candidate for a distinct production merge commit.
 4. Regenerate a temporary notes file from the exact production HEAD's matching
-   changelog section. Stop if it is empty; never reuse notes derived from the
-   pre-promotion candidate.
+   changelog section, show it to the user, and stop if it is empty; never reuse
+   notes derived from the pre-promotion candidate.
 5. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
-6. Before pushing, state the tag, commit SHA, and that the push publishes native
-   binaries, the VS Code extension, and Kernel contract bundles.
-7. Push the tag only after explicit confirmation for that version.
+6. Before pushing, state the tag, commit SHA, exact notes, and that the push
+   uploads a draft, verifies its remote inventory, then makes the notes, native
+   binaries, VS Code extension, and Kernel contract bundles public.
+7. Push the tag only after one explicit confirmation for that complete
+   publication and version.
 8. Observe every release job. If a job fails transiently, inspect it and rerun
    only the failed jobs; do not retag.
-9. Show the production-derived notes file and obtain explicit confirmation
-   before setting the GitHub Release body with
-   `gh release edit vX.Y.Z --notes-file ...`.
-10. Verify the Release body is non-empty and matches the changelog section.
-11. Verify exactly the four supported native `fslc`/`fslc-lsp` asset pairs and
+9. Verify the Release body is non-empty and matches the changelog section.
+10. Verify exactly the four supported native `fslc`/`fslc-lsp` asset pairs and
     checksums, the VS Code extension, and both Kernel bundles. Reject any
     `macos-x64` asset. Download one supported binary, verify its checksum, and
     require `fslc --version` to equal the tag; the workflow performs the same
     tag/version assertion on every native runner.
-12. If publication has begun and a defect is found, fix it upstream, promote it,
+11. If publication has begun and a defect is found, fix it upstream, promote it,
     and cut a new patch version. Never rewrite the published release.
 
 ## Stabilize while main advances

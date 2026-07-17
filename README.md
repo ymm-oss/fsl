@@ -21,12 +21,7 @@ reading the verification results as it repairs it.
 1. **Install FSL and the skill**
 
    ```bash
-   # If you downloaded and unzipped the ZIP from GitHub
-   cd ~/Downloads/fsl-main
-   bash install.sh
-
-   # If you use the GitHub CLI
-   gh repo clone ymm-oss/fsl ~/.fsl
+   git clone https://github.com/ymm-oss/fsl.git ~/.fsl
    bash ~/.fsl/install.sh
    ```
 
@@ -141,27 +136,26 @@ The Linux binaries target the Ubuntu 24.04 ABI baseline (glibc 2.39 or newer).
 
 ## Easy setup (for PMs, consultants, and non-engineers)
 
-No programming knowledge is required. Just these three steps:
+No programming knowledge is required. Git is used to keep every installed file
+on one published Release tag.
 
-1. **Download** — open ymm-oss/fsl on GitHub in your browser and click the green
-   **"Code" ▾ → "Download ZIP"** (no login needed, since it is a public repository).
-   Double-click the downloaded zip to unzip it.
+1. **Install Git** from [git-scm.com](https://git-scm.com/) if `git --version`
+   does not work in your terminal.
 2. **Open a terminal** (on Mac, "Terminal.app"; search your apps for "terminal").
-3. In the folder you unzipped, **run the install command**:
+3. **Run the install commands**:
 
    ```bash
-   cd ~/Downloads/fsl-main      # adjust to the name of the folder you unzipped
-   bash install.sh
+   git clone https://github.com/ymm-oss/fsl.git ~/.fsl
+   bash ~/.fsl/install.sh
    ```
 
 This places FSL itself in `~/.fsl`, the `fslc` command in `~/.local/bin/fslc`, and
-the Claude Code skills in `~/.claude/skills/`
-(once placed, you can delete the folder you downloaded).
+the Claude Code skills in `~/.claude/skills/`.
 The installer checks out the latest published Release tag in `~/.fsl`, so the
 skills, examples, `fslc`, and `fslc-lsp` always come from the same release.
 
-> For those who use the GitHub CLI, or engineers: if you have run `gh auth login`, this one line also works:
-> `gh repo clone ymm-oss/fsl ~/.fsl && bash ~/.fsl/install.sh`
+> If you use the GitHub CLI, `gh repo clone ymm-oss/fsl ~/.fsl` can replace the
+> `git clone` command above.
 
 What gets installed:
 

@@ -31,6 +31,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 latest_release_tag() {
+  local api metadata tag
   api="https://api.github.com/repos/ymm-oss/fsl/releases/latest"
   if command -v curl >/dev/null 2>&1; then
     metadata=$(curl -fsSL "$api")
@@ -66,6 +67,7 @@ FSL_LSP_BIN="$NATIVE_DIR/fslc-lsp"
 mkdir -p "$NATIVE_DIR"
 
 native_target() {
+  local os arch
   os=$(uname -s)
   arch=$(uname -m)
   case "$os:$arch" in
@@ -77,8 +79,8 @@ native_target() {
 }
 
 download_file() {
-  url="$1"
-  destination="$2"
+  local url="$1"
+  local destination="$2"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$url" -o "$destination"
   elif command -v wget >/dev/null 2>&1; then
@@ -90,8 +92,9 @@ download_file() {
 
 RELEASE_URL="https://github.com/ymm-oss/fsl/releases/download/$RELEASE_TAG"
 stage_release_asset() {
-  asset="$1"
-  destination="$2"
+  local asset="$1"
+  local destination="$2"
+  local expected_hash actual_hash
   echo "Installing native Rust binary: $asset"
   download_file "$RELEASE_URL/$asset" "$destination.download" || fail "Failed to download $asset from $RELEASE_TAG."
   download_file "$RELEASE_URL/$asset.sha256" "$destination.sha256.download" || fail "Failed to download the checksum for $asset."
@@ -123,9 +126,10 @@ LOCAL_BIN="$HOME/.local/bin"
 mkdir -p "$LOCAL_BIN"
 
 link_command() {
-  cmd_name="$1"
-  target="$2"
-  link_path="$LOCAL_BIN/$cmd_name"
+  local cmd_name="$1"
+  local target="$2"
+  local link_path="$LOCAL_BIN/$cmd_name"
+  local link_target
   if [ -L "$link_path" ]; then
     link_target=$(readlink "$link_path" || true)
     if [ "$link_target" = "$target" ]; then
@@ -170,15 +174,21 @@ if [ "$INSTALL_SKILL" -eq 1 ]; then
     SKILL_SRC="$REPO_DIR/skills/$SKILL_NAME"
     SKILL_DST="$HOME/.claude/skills/$SKILL_NAME"
     [ -d "$SKILL_SRC" ] || fail "$SKILL_SRC not found. Check that the repository was fetched correctly and re-run."
-    if [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
-      echo "The Claude Code skill already exists: $SKILL_DST — to update this skill, run rm -rf \"$SKILL_DST\" and re-run."
+    if [ -L "$SKILL_DST" ] && [ "$(readlink "$SKILL_DST")" = "$SKILL_SRC" ]; then
+      echo "The Claude Code skill link is current: $SKILL_DST"
+    elif [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
+      SKILL_BACKUP="$SKILL_DST.pre-native-v3"
+      [ ! -e "$SKILL_BACKUP" ] && [ ! -L "$SKILL_BACKUP" ] || fail "$SKILL_BACKUP already exists. Move it and re-run."
+      mv "$SKILL_DST" "$SKILL_BACKUP"
+      ln -s "$SKILL_SRC" "$SKILL_DST"
+      echo "Linked Claude Code skill: $SKILL_DST (previous copy preserved at $SKILL_BACKUP)"
     else
-      cp -R "$SKILL_SRC" "$SKILL_DST"
-      echo "Copied Claude Code skill: $SKILL_DST"
+      ln -s "$SKILL_SRC" "$SKILL_DST"
+      echo "Linked Claude Code skill: $SKILL_DST"
     fi
   done
 else
-  echo "Skipped copying the Claude Code skills."
+  echo "Skipped linking the Claude Code skills."
 fi
 
 echo "Running a smoke test."
