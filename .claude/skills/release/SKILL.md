@@ -112,9 +112,9 @@ a feature-flag system solely to accommodate this flow.
 4. Run `./tools/check-native-integration.sh` and dispatch the release workflow's
    manual artifact build. Verify the completed run's `head_sha` equals the
    recorded candidate SHA; discard and rerun evidence produced from a moving
-   branch after it advances. Confirm all four native targets, the VS Code
-   extension, and both Kernel bundles pass. `workflow_dispatch` is
-   non-publishing and must never attach Release assets, even for a tag ref. Add
+   branch after it advances. Confirm all four native targets, the Agent Skill
+   bundle, the VS Code extension, and both Kernel bundles pass.
+   `workflow_dispatch` is non-publishing and must never attach Release assets, even for a tag ref. Add
    focused formal, mutation, platform, or compatibility evidence when the
    changed contract requires it.
 5. Open `main -> production`. State the candidate SHA, version, included changes,
@@ -152,7 +152,8 @@ After the promotion is approved and merged:
    only the failed jobs; do not retag.
 9. Verify the Release body is non-empty and matches the changelog section.
 10. Verify exactly the four supported native `fslc`/`fslc-lsp` asset pairs and
-    checksums, the VS Code extension, and both Kernel bundles. Reject any
+    checksums, the Agent Skill bundle and checksum, the VS Code extension, and
+    both Kernel bundles. Reject any
     `macos-x64` asset. Download one supported binary, verify its checksum, and
     require `fslc --version` to equal the tag; the workflow performs the same
     tag/version assertion on every native runner.
@@ -199,7 +200,8 @@ path. Apply these design constraints when a change affects architecture:
 - Keep branch names out of product configuration, binaries, schemas, and runtime
   behavior. Git controls promotion; components implement one tested contract.
 - Treat all artifacts built from one tag as one atomic release unit. For FSL this
-  includes `fslc`, `fslc-lsp`, the VS Code extension, and published Kernel bundles.
+  includes `fslc`, `fslc-lsp`, the Agent Skills, the VS Code extension, and
+  published Kernel bundles.
   Build jobs upload private workflow artifacts; one final job uploads the complete
   unit to a draft, verifies the remote inventory, and only then makes it public.
 - Verify cross-component contracts at the promotion SHA. A component cannot be

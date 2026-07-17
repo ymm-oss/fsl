@@ -5,6 +5,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- The native installer no longer clones the repository into `~/.fsl`. It now
+  installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
+  atomically activates the complete payload, safely migrates recognized Python
+  2.7 links, and rejects binaries whose reported version differs from the
+  Release tag. Agent Skills are packaged as a checksummed Release asset; the
+  v3.0.0 compatibility path verifies a pinned tag-archive checksum and extracts
+  only the six installed skills.
+
 ## [3.0.0] - 2026-07-17
 
 ### Changed
