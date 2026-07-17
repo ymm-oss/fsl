@@ -107,9 +107,30 @@ explicit in `notes` (no silent cap). Survivors of coverage-false actions are ann
 "dead at baseline," and equivalent mutants go to a review queue (not a hard failure).
 The combined and per-source kill rates use `killed / (killed + survived)`;
 `invalid` records are excluded from the denominator and retained as external
-generation-quality evidence. Built-in entries have `source:"builtin"`;
+generation-quality evidence (an `invalid` record says nothing about the spec's
+constraint strength — it failed before reaching the kill oracle, so counting it
+either way would distort the score). Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
 **The verification engine is unmodified.**
+
+### What the score means (and does not)
+
+`kill_rate` is **bounded mutant-set sensitivity**: the fraction of a selected
+finite mutant set that the existing net of checks rejects, at the selected
+`--depth`, under the BMC + acceptance + forbidden + refinement oracle. The
+number moves with every one of those choices — operator mix, `--max-mutants`
+truncation, depth, and oracle composition — so it is comparable only across
+runs that hold them fixed. It is not a production defect-detection rate, not a
+probability that the specification is correct, and not a completeness measure.
+
+Survivors are a review queue, not failures and not automatic missing-invariant
+findings. A survivor may be an equivalent mutant (same behavior, no property
+can distinguish it), behavior dead at baseline (annotated via coverage), an
+effect only observable beyond the depth bound, or genuine under-constraint —
+only the last calls for a spec change. Symmetrically, `empty_formalization`
+and the per-requirement kill counts are **observed lower bounds** within the
+chosen mutant set and depth: "killed nothing here" never proves a requirement
+is vacuous, and a high kill count never proves it is fully formalized.
 
 ## 6. Tests / related
 

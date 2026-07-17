@@ -51,6 +51,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   corrected; the `evidence_basis:"bounded_bmc"` schema enum value is retained
   unchanged as frozen v0 vocabulary for "backed by a bounded reachability
   witness", so no output or schema contract moves (issue #318).
+- Mutation documentation no longer overstates the score: `kill_rate =
+  killed / (killed + survived)` is now defined everywhere as bounded
+  mutant-set sensitivity — dependent on the operator mix, `--max-mutants`
+  cap, `--depth`, and the verify/acceptance/forbidden/refinement oracle — not
+  a production defect-detection rate, spec-correctness probability, or
+  completeness measure. Survivors are documented as a review queue
+  (equivalent mutants, dead-at-baseline behavior, beyond-depth effects, or
+  genuine under-constraint) instead of "a place where an invariant is
+  missing", and `empty_formalization`/per-requirement kills as observed lower
+  bounds within the chosen mutant set and depth. Aligned across
+  `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `docs/DESIGN-mutate.md`,
+  `README.md`, `skills/fsl/reference.md`, and the generated site reference; a
+  new `rust/fslc/tests/mutation_docs_contract.rs` regression keeps the
+  stronger survivor claim from returning (issue #338).
 
 ### Added
 - Documented that the persistent verify cache is safe under concurrent

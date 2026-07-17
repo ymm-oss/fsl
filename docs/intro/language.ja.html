@@ -2321,20 +2321,29 @@ DESIGN-*.md があります)。</p>
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
 <li><strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
-  よって殺されるかを測定します。生き残ったミュータント = どのプロパティにも制約
-  されない振る舞い = invariant が欠けている場所です。
+  よって殺されるかを測定します。スコアは<strong>有界ミュータント集合への感度
+  (bounded mutant-set sensitivity)</strong>です: 選択された有限のミュータント集合・
+  選択された <code>--depth</code>・verify/acceptance/forbidden/refinement オラクルの下での
+  <code>kill_rate = killed / (killed + survived)</code>。値はオペレーターの構成、
+  <code>--max-mutants</code> の上限、深さ、オラクルに依存して動きます — 本番の欠陥検出率
+  でも、spec が正しい確率でも、完全性の尺度でもありません。生存者は自動的に
+  「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
+  等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
+  初めて見える効果、あるいは本物の制約不足かもしれません。
   <code>--from mutants.jsonl</code> はさらに、完全な <code>mutated_spec</code>、または正確な
   <code>replace:{target,replacement,occurrence?}</code> 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは <code>invalid</code> で、決して killed にはならず、
-  combined/per-source のキル率の分母から除外されます。
+  combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
+  なく、外部ジェネレーターの品質を測ります)。
   すべてのエントリは <code>source:"builtin"|"external"</code> を運びます。<code>--max-mutants</code> は
   組み込みのカタログだけを上限にするので、<code>--max-mutants 0 --from ...</code> は外部のみ
   を実行します。
   <code>--by-requirement</code> は「どの振る舞いミュータントも殺さない要件」を
   <code>empty_formalization</code> 警告としてフラグします(<code>--strict-tags</code> の意味レベルの
-  拡張)。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
+  拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
+  観測された下界です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
 <li><strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で

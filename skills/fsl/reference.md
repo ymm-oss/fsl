@@ -1104,8 +1104,13 @@ first failed layer and later layers are marked `skipped`.
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
   whether it is killed by BMC/acceptance/forbidden/refinement. exit is always 0.
-  A survivor is not a failure but an equivalent mutant or a review candidate for
-  under-constraint. If the baseline is not clean at depth K, no mutation is done and
+  `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
+  sensitivity: it depends on the operator mix, `--max-mutants` cap, depth, and
+  oracle, and a high value is not a real-bug detection probability, spec
+  correctness, or completeness. A survivor is not a failure and not
+  automatically a missing invariant: it may be an equivalent mutant, behavior
+  dead at baseline, a beyond-depth effect, or genuine under-constraint —
+  triage it as a review queue. If the baseline is not clean at depth K, no mutation is done and
   the baseline result is returned. `--by-requirement` aggregates by the requirement
   tag of the "killed property" and warns on zero kills as `empty_formalization`
   (a lower bound observed for this mutant set and depth).
