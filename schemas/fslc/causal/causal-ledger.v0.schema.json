@@ -51,10 +51,6 @@
         "causal_support": { "type": "string" },
         "plans": { "$ref": "#/$defs/plan_summary" },
         "evidence": { "$ref": "#/$defs/evidence_summary" },
-        "expectations": {
-          "type": "array",
-          "items": { "type": "object" }
-        },
         "external_refs": {
           "type": "array",
           "items": { "type": "object" }

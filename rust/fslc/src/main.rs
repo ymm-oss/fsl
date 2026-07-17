@@ -3389,6 +3389,21 @@ fn run_causal_ledger(
         if let Some(plan_id) = value.get("evidence_id").and_then(Value::as_str)
             && let Some(plan) = plans.get_mut(plan_id)
         {
+            // Cross-check lifecycle chain's artifact_digest against the plan's.
+            if let Some(chain_digest) = value.get("artifact_digest").and_then(Value::as_str)
+                && chain_digest != plan.declared_digest
+            {
+                return (
+                    error_output(
+                        "causal_plan_digest_mismatch",
+                        &format!(
+                            "lifecycle chain for plan '{plan_id}' declares artifact_digest {chain_digest} but plan has {}",
+                            plan.declared_digest
+                        ),
+                    ),
+                    2,
+                );
+            }
             let empty_artifacts = std::collections::BTreeMap::new();
             let Ok((_, status)) = fsl_tools::validate_lifecycle_chain(&value, &empty_artifacts)
             else {
