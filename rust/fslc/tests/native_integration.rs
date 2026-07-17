@@ -305,7 +305,8 @@ fn workspace_packages_are_not_publishable() {
 fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     let root = root();
     let workflow = std::fs::read_to_string(root.join(".github/workflows/release.yml"))
-        .expect("release workflow");
+        .expect("release workflow")
+        .replace("\r\n", "\n");
     assert_eq!(workflow.matches("softprops/action-gh-release@").count(), 1);
     assert!(workflow.contains("name: assemble complete release unit"));
     assert!(workflow.contains("needs: [build, vsix, kernel-contract]"));
@@ -411,7 +412,8 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
 fn production_accepts_only_governed_source_branches() {
     let root = root();
     let policy = std::fs::read_to_string(root.join(".github/workflows/production-policy.yml"))
-        .expect("production policy");
+        .expect("production policy")
+        .replace("\r\n", "\n");
     assert!(policy.contains("branches: [production]"));
     assert!(policy.contains("  pull_request_target:"));
     assert!(!policy.contains("\n  pull_request:\n"));
