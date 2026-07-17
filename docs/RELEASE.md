@@ -22,13 +22,17 @@ binary.
 | Target | Runner | Binary suffix |
 |---|---|---|
 | macOS arm64 (Apple Silicon) | `macos-14` | `macos-arm64` |
-| Linux x64 | `ubuntu-latest` | `linux-x64` |
+| Linux x64 | `ubuntu-24.04` | `linux-x64` |
 | Linux arm64 | `ubuntu-24.04-arm` | `linux-arm64` |
 | Windows x64 | `windows-latest` | `windows-x64.exe` |
 
 Intel macOS (`macos-x64`) is not supported. Releases also contain the VS Code
 extension and the Public Kernel contract bundles produced by
 `.github/workflows/release.yml`.
+
+Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
+runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
+It also rejects a dynamic dependency on `libz3`.
 
 ## 1. Prepare the release commit on main
 
@@ -73,7 +77,7 @@ extension and the Public Kernel contract bundles produced by
    `workflow_dispatch` run builds and smoke-tests every artifact but cannot
    attach files to a GitHub Release, even when the selected ref is a tag.
 2. Verify the completed run's `head_sha` equals the recorded candidate SHA and
-   all four native targets, the VS Code extension, and both Kernel bundle jobs
+   all four native targets, the VS Code extension, and both Kernel bundles
    pass. Do not reuse evidence from a moving branch after its SHA changes.
 3. Open the release-promotion pull request from `main` to `production`, stating
    the candidate SHA, version, changes, residual risk, gate results, and dry-run

@@ -106,7 +106,7 @@ a feature-flag system solely to accommodate this flow.
    manual artifact build. Verify the completed run's `head_sha` equals the
    recorded candidate SHA; discard and rerun evidence produced from a moving
    branch after it advances. Confirm all four native targets, the VS Code
-   extension, and both Kernel bundle jobs pass. `workflow_dispatch` is
+   extension, and both Kernel bundles pass. `workflow_dispatch` is
    non-publishing and must never attach Release assets, even for a tag ref. Add
    focused formal, mutation, platform, or compatibility evidence when the
    changed contract requires it.
@@ -194,6 +194,8 @@ path. Apply these design constraints when a change affects architecture:
   behavior. Git controls promotion; components implement one tested contract.
 - Treat all artifacts built from one tag as one atomic release unit. For FSL this
   includes `fslc`, `fslc-lsp`, the VS Code extension, and published Kernel bundles.
+  Build jobs upload private workflow artifacts; one final job publishes only after
+  every artifact job succeeds.
 - Verify cross-component contracts at the promotion SHA. A component cannot be
   declared ready while another artifact from the same tag still depends on an
   incompatible contract.

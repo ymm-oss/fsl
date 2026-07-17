@@ -5,20 +5,31 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-07-17
+
 ### Changed
+- Native v3 releases now assemble and validate all four CLI/LSP pairs, checksums,
+  VSIX, and Kernel bundles before one tag-only publication step. Release actions,
+  the Rust toolchain, and the VSIX packager are pinned; manual dry runs validate
+  the same assembled unit without publishing it.
+- The installer rejects unsupported Intel macOS and stages both checksummed native
+  binaries before replacing either installed command. Linux artifacts now have an
+  explicit Ubuntu 24.04 / glibc 2.39 baseline and reject dynamic `libz3` linkage.
+- Release distribution checks now run in the authoritative native Rust gate;
+  the redundant Python-only release workflow test was removed.
 - Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
   hashing the full executable on every invocation, and CLI preparation reuses its validated
   `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
-- Documented a rationale convention for annotating a declaration so tooling and
-  AI agents can see the "why" that used to live only in `//` comments (lexer
-  trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the
+- Documented a rationale convention for preserving a declaration's "why" in
+  the checked model instead of only in `//` comments (lexer trivia): use the
   existing `@kind(id, text?)` to classify and explain a declaration in one
   line, and the recommended custom namespace `@doc.rationale("...")` for a
   short rationale that isn't a classification. No grammar, IR, or schema
-  change; multi-sentence narrative keeps living in comments. See
+  change; multi-sentence narrative keeps living in comments, and generic
+  annotations are not currently projected through JSON, LSP, or the audit ledger. See
   `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`),
   `docs/DESIGN-annotations.md`, and `skills/fsl/reference.md`.
 - `fslc lint` now enforces a built-in, kind-aware canonical ID policy and accepts
@@ -2097,7 +2108,21 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
+[2.7.0]: https://github.com/ymm-oss/fsl/compare/v2.6.3...v2.7.0
+[2.6.3]: https://github.com/ymm-oss/fsl/compare/v2.6.2...v2.6.3
+[2.6.2]: https://github.com/ymm-oss/fsl/compare/v2.6.1...v2.6.2
+[2.6.1]: https://github.com/ymm-oss/fsl/compare/v2.6.0...v2.6.1
+[2.6.0]: https://github.com/ymm-oss/fsl/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/ymm-oss/fsl/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/ymm-oss/fsl/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/ymm-oss/fsl/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/ymm-oss/fsl/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/ymm-oss/fsl/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/ymm-oss/fsl/compare/v1.5.0...v2.0.0
+[1.5.0]: https://github.com/ymm-oss/fsl/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/ymm-oss/fsl/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ymm-oss/fsl/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ymm-oss/fsl/compare/v1.2.10...v1.3.0
 [1.2.10]: https://github.com/ymm-oss/fsl/compare/v1.2.9...v1.2.10

@@ -129,7 +129,6 @@ native_target() {
   arch=$(uname -m)
   case "$os:$arch" in
     Darwin:arm64|Darwin:aarch64) echo "macos-arm64" ;;
-    Darwin:x86_64|Darwin:amd64) echo "macos-x64" ;;
     Linux:x86_64|Linux:amd64) echo "linux-x64" ;;
     Linux:aarch64|Linux:arm64) echo "linux-arm64" ;;
     *) fail "No native FSL release is available for $os/$arch." ;;
@@ -149,7 +148,7 @@ download_file() {
 }
 
 RELEASE_URL="https://github.com/ymm-oss/fsl/releases/latest/download"
-install_release_asset() {
+stage_release_asset() {
   asset="$1"
   destination="$2"
   echo "Installing native Rust binary: $asset"
@@ -164,14 +163,20 @@ install_release_asset() {
     fail "shasum or sha256sum is required to verify the native binaries."
   fi
   [ "$expected_hash" = "$actual_hash" ] || fail "Checksum verification failed for $asset."
-  mv "$destination.download" "$destination"
   rm -f "$destination.sha256.download"
-  chmod +x "$destination"
+  chmod +x "$destination.download"
 }
 
 TARGET=$(native_target)
-install_release_asset "fslc-$TARGET" "$FSL_BIN"
-install_release_asset "fslc-lsp-$TARGET" "$FSL_LSP_BIN"
+STAGING_DIR=$(mktemp -d "$NATIVE_DIR/.install.XXXXXX")
+trap 'rm -rf "$STAGING_DIR"' EXIT
+stage_release_asset "fslc-$TARGET" "$STAGING_DIR/fslc"
+stage_release_asset "fslc-lsp-$TARGET" "$STAGING_DIR/fslc-lsp"
+
+mv "$STAGING_DIR/fslc.download" "$FSL_BIN"
+mv "$STAGING_DIR/fslc-lsp.download" "$FSL_LSP_BIN"
+rm -rf "$STAGING_DIR"
+trap - EXIT
 
 LOCAL_BIN="$HOME/.local/bin"
 mkdir -p "$LOCAL_BIN"

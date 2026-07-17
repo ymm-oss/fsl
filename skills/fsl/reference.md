@@ -57,6 +57,12 @@ a short rationale that isn't a classification. Keep multi-sentence narrative
 in `//` comments — annotation strings have no escape syntax and stop at the
 first `"` or newline.
 
+`@kind` and custom annotations survive in the checked model for in-process
+consumers that explicitly query `KernelModel::annotations_for`. The current
+JSON envelope, LSP index, and audit ledger do not project generic annotations;
+do not assume those public consumers can query a rationale without a separate
+projection contract.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)

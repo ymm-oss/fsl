@@ -108,15 +108,15 @@ fsl/
 
 ## Easiest of all: just download the executable (no Python needed)
 
-`fslc` is distributed as a **standalone single binary**. You need neither a Python install,
-`pip`, nor `git`. Just grab the one file for your OS from GitHub **Releases**
+`fslc` is distributed as a **single native executable**. You need neither a Python install,
+`pip`, nor a separately installed Z3. Just grab the one file for your OS from GitHub **Releases**
 and it runs.
 
 | OS / arch | File to download |
 | --- | --- |
 | macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
-| Linux (x86_64) | `fslc-linux-x64` |
-| Linux (ARM64) | `fslc-linux-arm64` |
+| Linux (x86_64, glibc 2.39+) | `fslc-linux-x64` |
+| Linux (ARM64, glibc 2.39+) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |
 
 ```bash
@@ -133,8 +133,10 @@ chmod +x fslc-macos-arm64
 Each file ships with a companion `*.sha256`. You can verify it with
 `shasum -a 256 -c fslc-macos-arm64.sha256`.
 
-> This binary bundles even z3's native library, so all features including `verify`
-> work with no external dependencies. If you need skill integration or editable development,
+The Linux binaries target the Ubuntu 24.04 ABI baseline (glibc 2.39 or newer).
+
+> This binary bundles Z3, so all features including `verify` work without a separately
+> installed solver. Normal operating-system runtime libraries still apply. If you need skill integration or editable development,
 > use the setup instructions below.
 
 ## Easy setup (for PMs, consultants, and non-engineers)
