@@ -27,70 +27,86 @@ pub fn source_expr_text(model: &KernelModel, expr: &Expr) -> String {
     expr_text_with_origins(Some(model), expr)
 }
 
+/// Render a binder (`c: Sub`, `i in 0..3`, `x in collection`, each with an
+/// optional ` where ...` filter) the same way [`expr_text`] renders the
+/// binder inside a `Quantified`/`Aggregate` expression. Exposed for the
+/// controlled-language renderer (issue #326), which needs the identical
+/// canonical binder text outside of a full quantifier expression.
+#[must_use]
+pub fn binder_text(binder: &Binder) -> String {
+    binder_text_with_origins(None, binder)
+}
+
+/// [`binder_text`] with source-level names recovered from lowering origins.
+#[must_use]
+pub fn source_binder_text(model: &KernelModel, binder: &Binder) -> String {
+    binder_text_with_origins(Some(model), binder)
+}
+
+fn precedence(expr: &Expr) -> u8 {
+    match expr {
+        Expr::Conditional { .. } | Expr::Quantified { .. } => 0,
+        Expr::Binary { op, .. } => match op.as_str() {
+            "=>" => 1,
+            "or" => 2,
+            "and" => 3,
+            "==" | "!=" | "<" | "<=" | ">" | ">=" => 6,
+            "+" | "-" => 7,
+            "*" | "/" | "%" => 8,
+            _ => 10,
+        },
+        Expr::Not(_) => 4,
+        Expr::Is { .. } => 5,
+        Expr::Neg(_) => 9,
+        _ => 10,
+    }
+}
+
+fn operand(model: Option<&KernelModel>, expr: &Expr, minimum: u8) -> String {
+    let rendered = expr_text_with_origins(model, expr);
+    if precedence(expr) < minimum {
+        format!("({rendered})")
+    } else {
+        rendered
+    }
+}
+
+fn binder_text_with_origins(model: Option<&KernelModel>, binder: &Binder) -> String {
+    let mut text = binder_base_text(model, binder);
+    if let Some(condition) = binder_filter(binder) {
+        let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
+    }
+    text
+}
+
+fn binder_base_text(model: Option<&KernelModel>, binder: &Binder) -> String {
+    match binder {
+        Binder::Typed {
+            name, type_name, ..
+        } => format!("{name}: {}", display_name(&type_name.name)),
+        Binder::Range { name, lo, hi, .. } => {
+            format!(
+                "{name} in {}..{}",
+                expr_text_with_origins(model, lo),
+                expr_text_with_origins(model, hi)
+            )
+        }
+        Binder::Collection {
+            name, collection, ..
+        } => format!("{name} in {}", expr_text_with_origins(model, collection)),
+    }
+}
+
+fn binder_filter(binder: &Binder) -> Option<&Expr> {
+    match binder {
+        Binder::Typed { where_expr, .. }
+        | Binder::Range { where_expr, .. }
+        | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
-    fn precedence(expr: &Expr) -> u8 {
-        match expr {
-            Expr::Conditional { .. } | Expr::Quantified { .. } => 0,
-            Expr::Binary { op, .. } => match op.as_str() {
-                "=>" => 1,
-                "or" => 2,
-                "and" => 3,
-                "==" | "!=" | "<" | "<=" | ">" | ">=" => 6,
-                "+" | "-" => 7,
-                "*" | "/" | "%" => 8,
-                _ => 10,
-            },
-            Expr::Not(_) => 4,
-            Expr::Is { .. } => 5,
-            Expr::Neg(_) => 9,
-            _ => 10,
-        }
-    }
-
-    fn operand(model: Option<&KernelModel>, expr: &Expr, minimum: u8) -> String {
-        let rendered = expr_text_with_origins(model, expr);
-        if precedence(expr) < minimum {
-            format!("({rendered})")
-        } else {
-            rendered
-        }
-    }
-
-    fn binder_text(model: Option<&KernelModel>, binder: &Binder) -> String {
-        let mut text = binder_base_text(model, binder);
-        if let Some(condition) = binder_filter(binder) {
-            let _ = write!(text, " where {}", expr_text_with_origins(model, condition));
-        }
-        text
-    }
-
-    fn binder_base_text(model: Option<&KernelModel>, binder: &Binder) -> String {
-        match binder {
-            Binder::Typed {
-                name, type_name, ..
-            } => format!("{name}: {}", display_name(&type_name.name)),
-            Binder::Range { name, lo, hi, .. } => {
-                format!(
-                    "{name} in {}..{}",
-                    expr_text_with_origins(model, lo),
-                    expr_text_with_origins(model, hi)
-                )
-            }
-            Binder::Collection {
-                name, collection, ..
-            } => format!("{name} in {}", expr_text_with_origins(model, collection)),
-        }
-    }
-
-    fn binder_filter(binder: &Binder) -> Option<&Expr> {
-        match binder {
-            Binder::Typed { where_expr, .. }
-            | Binder::Range { where_expr, .. }
-            | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
-        }
-    }
-
     match expr {
         Expr::Num(value) => value.to_string(),
         Expr::Bool(value) => value.to_string(),
@@ -219,7 +235,7 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
             body,
         } => format!(
             "{quantifier} {} {{ {} }}",
-            binder_text(model, binder),
+            binder_text_with_origins(model, binder),
             expr_text_with_origins(model, body)
         ),
         Expr::Aggregate {
@@ -227,7 +243,7 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
             binder,
             value,
         } => match kind {
-            AggregateKind::Count => format!("count({})", binder_text(model, binder)),
+            AggregateKind::Count => format!("count({})", binder_text_with_origins(model, binder)),
             AggregateKind::Sum => format!(
                 "sum({} of {}{})",
                 binder_base_text(model, binder),
@@ -236,8 +252,10 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
                     format!(" where {}", expr_text_with_origins(model, filter))
                 })
             ),
-            AggregateKind::Unique => format!("unique({})", binder_text(model, binder)),
-            AggregateKind::ExactlyOne => format!("exactlyOne({})", binder_text(model, binder)),
+            AggregateKind::Unique => format!("unique({})", binder_text_with_origins(model, binder)),
+            AggregateKind::ExactlyOne => {
+                format!("exactlyOne({})", binder_text_with_origins(model, binder))
+            }
         },
         Expr::Stage {
             process, entity, ..
