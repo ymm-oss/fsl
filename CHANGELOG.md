@@ -30,6 +30,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Fixed
+- `docs/LANGUAGE.ja.md` now carries the Japanese translation of the
+  "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
+  literate Markdown feature, so `docs/intro/language.ja.html` documents the
+  `.md` input support instead of silently omitting it (issue #346).
 - Mutation documentation no longer overstates the score: `kill_rate =
   killed / (killed + survived)` is now defined everywhere as bounded
   mutant-set sensitivity — dependent on the operator mix, `--max-mutants`
