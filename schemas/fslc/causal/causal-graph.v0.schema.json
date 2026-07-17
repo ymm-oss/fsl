@@ -4,6 +4,7 @@
   "title": "fslc causal analyze graph projections v0",
   "type": "object",
   "required": [
+    "fsl",
     "result",
     "schema_version",
     "formal_result",
@@ -14,10 +15,21 @@
     "do_not_assume"
   ],
   "properties": {
-    "result": { "const": "causal_analyzed" },
-    "schema_version": { "const": "causal-graph.v0" },
-    "formal_result": { "const": "not_run" },
-    "model": { "type": "string" },
+    "fsl": {
+      "type": "string"
+    },
+    "result": {
+      "const": "causal_analyzed"
+    },
+    "schema_version": {
+      "const": "causal-graph.v0"
+    },
+    "formal_result": {
+      "const": "not_run"
+    },
+    "model": {
+      "type": "string"
+    },
     "projection": {
       "enum": [
         "causal_graph",
@@ -25,32 +37,51 @@
         "causal_traceability_graph"
       ]
     },
-    "timebase": { "type": "string" },
-    "horizon": { "type": "integer", "minimum": 0 },
+    "timebase": {
+      "type": "string"
+    },
+    "horizon": {
+      "type": "integer",
+      "minimum": 0
+    },
     "nodes": {
       "type": "array",
-      "items": { "$ref": "#/$defs/node" }
+      "items": {
+        "$ref": "#/$defs/node"
+      }
     },
     "edges": {
       "type": "array",
-      "items": { "$ref": "#/$defs/edge" }
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
     },
     "paths": {
       "type": "array",
-      "items": { "$ref": "#/$defs/path" }
+      "items": {
+        "$ref": "#/$defs/path"
+      }
     },
     "feedbacks": {
       "type": "array",
-      "items": { "$ref": "#/$defs/feedback" }
+      "items": {
+        "$ref": "#/$defs/feedback"
+      }
     },
     "timelines": {
       "type": "array",
-      "items": { "$ref": "#/$defs/timeline" }
+      "items": {
+        "$ref": "#/$defs/timeline"
+      }
     },
-    "truncation": { "$ref": "#/$defs/truncation" },
+    "truncation": {
+      "$ref": "#/$defs/truncation"
+    },
     "do_not_assume": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "minItems": 1
     }
   },
@@ -58,25 +89,49 @@
   "$defs": {
     "interval": {
       "type": "object",
-      "required": ["min", "max"],
+      "required": [
+        "min",
+        "max"
+      ],
       "properties": {
-        "min": { "type": "integer", "minimum": 0 },
-        "max": { "type": "integer", "minimum": 0 }
+        "min": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "time_reach": {
       "oneOf": [
-        { "$ref": "#/$defs/interval" },
-        { "const": "unknown" }
+        {
+          "$ref": "#/$defs/interval"
+        },
+        {
+          "const": "unknown"
+        }
       ]
     },
-    "polarity": { "enum": ["positive", "negative", "unknown"] },
+    "polarity": {
+      "enum": [
+        "positive",
+        "negative",
+        "unknown"
+      ]
+    },
     "node": {
       "type": "object",
-      "required": ["id", "kind"],
+      "required": [
+        "id",
+        "kind"
+      ],
       "properties": {
-        "id": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
         "kind": {
           "enum": [
             "variable",
@@ -86,25 +141,49 @@
             "requirement",
             "action",
             "kpi",
+            "state",
             "property"
           ]
         },
         "role": {
-          "enum": ["intervention", "mediator", "outcome", "context"]
+          "enum": [
+            "intervention",
+            "mediator",
+            "outcome",
+            "context"
+          ]
         },
-        "latent": { "type": "boolean" },
-        "status": { "enum": ["active", "retired"] },
+        "latent": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        },
         "indicator_class": {
-          "enum": ["leading", "intermediate", "lagging"]
+          "enum": [
+            "leading",
+            "intermediate",
+            "lagging"
+          ]
         }
       },
       "additionalProperties": true
     },
     "edge": {
       "type": "object",
-      "required": ["id", "kind", "source", "target"],
+      "required": [
+        "id",
+        "kind",
+        "source",
+        "target"
+      ],
       "properties": {
-        "id": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
         "kind": {
           "enum": [
             "claim",
@@ -116,77 +195,164 @@
             "member"
           ]
         },
-        "source": { "type": "string" },
-        "target": { "type": "string" },
-        "polarity": { "$ref": "#/$defs/polarity" },
-        "lag": { "$ref": "#/$defs/time_reach" },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "polarity": {
+          "$ref": "#/$defs/polarity"
+        },
+        "lag": {
+          "$ref": "#/$defs/time_reach"
+        },
         "persists": {
           "oneOf": [
-            { "$ref": "#/$defs/interval" },
-            { "enum": ["unknown", "unbounded"] }
+            {
+              "$ref": "#/$defs/interval"
+            },
+            {
+              "enum": [
+                "unknown",
+                "unbounded"
+              ]
+            }
           ]
         },
-        "version": { "type": "integer", "minimum": 1 },
-        "status": { "enum": ["active", "retired"] },
-        "basis": { "enum": ["hypothesis", "assumption"] }
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "hypothesis",
+            "assumption"
+          ]
+        }
       },
       "additionalProperties": true
     },
     "path": {
       "type": "object",
-      "required": ["source", "target", "claims", "polarity"],
+      "required": [
+        "source",
+        "target",
+        "claims",
+        "polarity"
+      ],
       "properties": {
-        "source": { "type": "string" },
-        "target": { "type": "string" },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
         "claims": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         },
-        "polarity": { "$ref": "#/$defs/polarity" },
-        "first_response": { "$ref": "#/$defs/time_reach" }
+        "polarity": {
+          "$ref": "#/$defs/polarity"
+        },
+        "first_response": {
+          "$ref": "#/$defs/time_reach"
+        }
       },
       "additionalProperties": true
     },
     "feedback": {
       "type": "object",
-      "required": ["id", "loop_class", "claims"],
+      "required": [
+        "id",
+        "loop_class",
+        "claims"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "loop_class": { "enum": ["reinforcing", "balancing", "unknown"] },
-        "claims": {
-          "type": "array",
-          "items": { "type": "string" },
-          "minItems": 1
+        "id": {
+          "type": "string"
         },
-        "cycle_lag": { "$ref": "#/$defs/time_reach" },
-        "max_repetitions_within_horizon": {
-          "oneOf": [
-            { "type": "integer", "minimum": 0 },
-            { "const": "unknown" }
+        "loop_class": {
+          "enum": [
+            "reinforcing",
+            "balancing",
+            "unknown"
           ]
         },
-        "recurrent": { "const": true }
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "cycle_lag": {
+          "$ref": "#/$defs/time_reach"
+        },
+        "max_repetitions_within_horizon": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "const": "unknown"
+            }
+          ]
+        },
+        "recurrent": {
+          "const": true
+        }
       },
       "additionalProperties": true
     },
     "timeline": {
       "type": "object",
-      "required": ["intervention", "outcome", "first_pass"],
+      "required": [
+        "intervention",
+        "outcome",
+        "first_pass"
+      ],
       "properties": {
-        "intervention": { "type": "string" },
-        "outcome": { "type": "string" },
-        "first_pass": { "$ref": "#/$defs/time_reach" },
-        "via_feedback": { "type": "boolean" }
+        "intervention": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "first_pass": {
+          "$ref": "#/$defs/time_reach"
+        },
+        "via_feedback": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": true
     },
     "truncation": {
       "type": "object",
-      "required": ["paths_cap", "paths_truncated"],
+      "required": [
+        "paths_cap",
+        "paths_truncated"
+      ],
       "properties": {
-        "paths_cap": { "type": "integer", "minimum": 0 },
-        "paths_truncated": { "type": "integer", "minimum": 0 }
+        "paths_cap": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "paths_truncated": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": true
     }

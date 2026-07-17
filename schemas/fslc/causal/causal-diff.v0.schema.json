@@ -4,6 +4,7 @@
   "title": "fslc causal diff v0",
   "type": "object",
   "required": [
+    "fsl",
     "result",
     "schema_version",
     "formal_result",
@@ -13,18 +14,35 @@
     "do_not_assume"
   ],
   "properties": {
-    "result": { "const": "causal_diffed" },
-    "schema_version": { "const": "causal-diff.v0" },
-    "formal_result": { "const": "not_run" },
-    "before": { "type": "string" },
-    "after": { "type": "string" },
+    "fsl": {
+      "type": "string"
+    },
+    "result": {
+      "const": "causal_diffed"
+    },
+    "schema_version": {
+      "const": "causal-diff.v0"
+    },
+    "formal_result": {
+      "const": "not_run"
+    },
+    "before": {
+      "type": "string"
+    },
+    "after": {
+      "type": "string"
+    },
     "changes": {
       "type": "array",
-      "items": { "$ref": "#/$defs/change" }
+      "items": {
+        "$ref": "#/$defs/change"
+      }
     },
     "do_not_assume": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "minItems": 1
     }
   },
@@ -32,7 +50,11 @@
   "$defs": {
     "change": {
       "type": "object",
-      "required": ["kind", "id", "support_transition"],
+      "required": [
+        "kind",
+        "id",
+        "support_transition"
+      ],
       "properties": {
         "kind": {
           "enum": [
@@ -54,16 +76,38 @@
             "evidence_ref_removed"
           ]
         },
-        "id": { "type": "string" },
-        "before_version": { "type": "integer", "minimum": 1 },
-        "after_version": { "type": "integer", "minimum": 1 },
+        "id": {
+          "type": "string"
+        },
+        "before_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "after_version": {
+          "type": "integer",
+          "minimum": 1
+        },
         "fields": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "before_status": { "enum": ["active", "retired"] },
-        "after_status": { "enum": ["active", "retired"] },
-        "support_transition": { "const": "not_available" }
+        "before_status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        },
+        "after_status": {
+          "enum": [
+            "active",
+            "retired"
+          ]
+        },
+        "support_transition": {
+          "const": "not_available"
+        }
       },
       "additionalProperties": true
     }
