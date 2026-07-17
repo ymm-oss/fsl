@@ -3140,7 +3140,8 @@ fn run_causal_observe_expectations(
                 "scope": scope,
                 "period": {
                     "start": period_start,
-                    "end": period_end
+                    "end": period_end,
+                    "valid_until": period_end
                 },
                 "observation": {
                     "kind": "expectation_replay",
