@@ -2522,7 +2522,23 @@ least the claim's minimum lag count; one source lineage collapses to one vote
 (contradictions inside a lineage are `inconclusive`). Staleness is judged only
 against an explicit `--as-of` date — never the wall clock. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes
-`formal_assurance: "not_run"`, and no support value is a verdict. Versioned
+`formal_assurance: "not_run"`, and no support value is a verdict.
+
+A human can carve an observable contract out of a claim as an `expectation`
+and check it with the existing verifier — **the claim itself is never
+lowered**: `expectation E { trigger action alias.name` (or `trigger
+predicate alias { <kernel expr> }`) `response predicate alias { <kernel
+expr> } within N clock <name> derived_from_claim <Id> }`.
+`fslc causal verify-expectations model.fsl [--depth K]` compiles each
+expectation, fail-closed, into an ordinary `leadsTo ... within ticks`
+property on the imported kernel spec (an action trigger becomes a one-step
+pulse ghost; `within` must convert to an exact integer number of kernel
+ticks under the named clock — nothing is rounded, and a clock is never
+applied to a different spec) and reports `pass`/`violated` with
+`assurance: "bounded"`. Whatever the verdict, the derived claim's
+`formal_assurance` stays `"not_run"` and its `causal_support` is untouched:
+`derived_from_claim` is traceability in both directions, never evidence.
+The legacy field name `supports` is rejected. Versioned
 schemas live under `schemas/fslc/causal/`; the browser Worker does not expose
 causal commands. Working models live in
 [`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal).

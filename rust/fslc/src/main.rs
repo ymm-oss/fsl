@@ -1983,9 +1983,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
 
 #[allow(clippy::too_many_lines)]
 fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
-    let subcommand = args
-        .next()
-        .ok_or_else(|| "usage: fslc causal <check|analyze|diff> ...".to_owned())?;
+    let subcommand = args.next().ok_or_else(|| {
+        "usage: fslc causal <check|analyze|verify-expectations|diff> ...".to_owned()
+    })?;
     match subcommand.as_str() {
         "check" => {
             let path = PathBuf::from(
@@ -2039,6 +2039,28 @@ fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                 as_of.as_deref(),
             ))
         }
+        "verify-expectations" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal verify-expectations requires a file".to_owned())?,
+            );
+            let mut depth = 8_usize;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = required_option_value(&mut args, "--depth")?
+                            .parse()
+                            .map_err(|_| "--depth requires a positive integer".to_owned())?;
+                    }
+                    _ => {
+                        return Err(format!(
+                            "unknown causal verify-expectations option '{option}'"
+                        ));
+                    }
+                }
+            }
+            Ok(run_causal_verify_expectations(&path, depth))
+        }
         "diff" => {
             let before = PathBuf::from(
                 args.next()
@@ -2061,7 +2083,7 @@ fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             Ok(run_causal_diff(&before, &after))
         }
         other => Err(format!(
-            "unknown causal subcommand '{other}' (expected check | analyze | diff; there is deliberately no 'causal verify')"
+            "unknown causal subcommand '{other}' (expected check | analyze | verify-expectations | diff; there is deliberately no 'causal verify')"
         )),
     }
 }
@@ -2293,6 +2315,130 @@ fn run_causal_analyze(
     );
     output.insert("format".to_owned(), json!(format));
     output.insert("content".to_owned(), json!(content));
+    (Value::Object(output), 0)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return (
+                error_output("io", &format!("cannot read {}: {error}", path.display())),
+                2,
+            );
+        }
+    };
+    let surface = match fsl_syntax::parse_causal(&source) {
+        Ok(surface) => surface,
+        Err(error) => {
+            let mut output = error_output("parse", &error.to_string());
+            if let Some(object) = output.as_object_mut() {
+                object.insert("loc".to_owned(), error.span.python_loc());
+            }
+            return (output, 2);
+        }
+    };
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let resolver = fsl_core::FsResolver::new(base);
+    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+        Ok(compiled) => compiled,
+        Err(error) => return causal_error_output(&error),
+    };
+    let mut expectations = Vec::new();
+    for expectation in &compiled {
+        let mut solver = match fsl_solver_z3::Z3Solver::new() {
+            Ok(solver) => solver,
+            Err(error) => return (error_output("internal", &error.to_string()), 3),
+        };
+        let result = match block_on_native(fsl_verifier::verify_bounded(
+            &expectation.model,
+            &mut solver,
+            depth,
+        )) {
+            Ok(result) => result,
+            Err(error) => {
+                return (
+                    error_output(
+                        "semantics",
+                        &format!("expectation '{}': {error}", expectation.id),
+                    ),
+                    2,
+                );
+            }
+        };
+        let violated_here = result
+            .leadsto_violation
+            .as_ref()
+            .is_some_and(|violation| violation.name == expectation.property);
+        let base_violation = result.violation.is_some()
+            || result
+                .leadsto_violation
+                .as_ref()
+                .is_some_and(|violation| violation.name != expectation.property);
+        if base_violation {
+            return (
+                error_output(
+                    "semantics",
+                    &format!(
+                        "expectation '{}': the target spec itself is not clean at depth {depth}; fix the spec before checking expectations",
+                        expectation.id
+                    ),
+                ),
+                2,
+            );
+        }
+        expectations.push(json!({
+            "id": format!("expectation:{}", expectation.id),
+            "verdict": if violated_here { "violated" } else { "pass" },
+            "assurance": "bounded",
+            "checked_to_depth": depth,
+            "within_ticks": expectation.within_ticks,
+            "clock": expectation.clock,
+            "trigger_kind": expectation.trigger_kind,
+            "derived_from_claim": expectation
+                .derived_from_claim
+                .as_ref()
+                .map(|claim| format!("claim:{claim}")),
+            "do_not_assume": [
+                "The causal claim is proved",
+                "No unmodeled common cause exists",
+                "Expectation violation refutes the causal claim"
+            ],
+        }));
+    }
+    let claims: Vec<Value> = model
+        .claims
+        .values()
+        .map(|claim| {
+            json!({
+                "id": format!("claim:{}", claim.id),
+                "formal_assurance": "not_run",
+                "causal_support": "untested",
+            })
+        })
+        .collect();
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("causal_expectations_checked"));
+    output.insert("schema_version".to_owned(), json!("causal-expectations.v0"));
+    output.insert("formal_result".to_owned(), json!("not_run"));
+    output.insert("model".to_owned(), json!(model.name));
+    output.insert("claims".to_owned(), json!(claims));
+    output.insert("expectations".to_owned(), json!(expectations));
+    output.insert(
+        "do_not_assume".to_owned(),
+        json!([
+            "The causal claims are true",
+            "A passing expectation proves the causal claim",
+            "Expectation violation refutes the causal claim"
+        ]),
+    );
     (Value::Object(output), 0)
 }
 

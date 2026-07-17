@@ -12,6 +12,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Causal expectation lowering (Phase 3, issue #323): explicit `expectation`
+  declarations (trigger action or inline predicate, response predicate,
+  `within N clock <name>`, `derived_from_claim`) compile — fail-closed on
+  missing/foreign clocks, fractional tick conversion, unresolved references,
+  or non-kernel targets — into ordinary `leadsTo ... within ticks` properties
+  on the imported spec; action triggers become one-step pulse ghosts that
+  never change guards. `fslc causal verify-expectations model.fsl [--depth
+  K]` (`causal-expectations.v0`) reports `pass`/`violated` with
+  `assurance: "bounded"`; pass and violated goldens both hold the central
+  invariant that the derived claim's `formal_assurance` stays `"not_run"`
+  and its `causal_support` is untouched — `derived_from_claim` is
+  traceability only, and the legacy `supports` field is a parse error. A
+  generated property is semantically identical to the hand-written pulse
+  encoding (asserted by test), and there is deliberately still no
+  `causal verify` alias.
 - Causal evidence plane (Phase 2, issue #322): `fslc causal analyze --evidence
   artifact.json [--lifecycle chain.json] [--as-of YYYY-MM-DD]` validates
   `fsl-causal-evidence.v0` artifacts (closed design/support vocabularies,

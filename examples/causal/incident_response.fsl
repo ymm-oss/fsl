@@ -9,6 +9,11 @@ causal IncidentResponse {
   timebase day
   horizon 365
 
+  clock ops_clock {
+    kernel ops
+    1 tick = 1 day
+  }
+
   variable guardrails {
     role intervention
     binds action ops.deploy_guardrails
@@ -44,5 +49,26 @@ causal IncidentResponse {
     lag 31..60
     persists 30..180
     basis hypothesis
+  }
+
+  // Observable expectation carved out of C_Guardrails_AlertQuality: after
+  // guardrails deploy, the guardrail counter itself must read 1 within a
+  // day (pass golden). derived_from_claim is traceability only.
+  expectation E_GuardrailsVisible {
+    trigger action ops.deploy_guardrails
+    response predicate ops { guardrails >= 1 }
+    within 1
+    clock ops_clock
+    derived_from_claim C_Guardrails_AlertQuality
+  }
+
+  // Violated golden: nothing forces alert tuning to happen, so precision
+  // is not guaranteed to improve within 5 days of deploying guardrails.
+  expectation E_AlertQualityImproves {
+    trigger action ops.deploy_guardrails
+    response predicate ops { alert_precision >= 4 }
+    within 5
+    clock ops_clock
+    derived_from_claim C_Guardrails_AlertQuality
   }
 }

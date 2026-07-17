@@ -167,6 +167,29 @@ pub struct CausalEvidenceDecl {
     pub span: Span,
 }
 
+/// `trigger` of an expectation: a kernel action or an inline predicate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExpectationTrigger {
+    Action(CausalRef),
+    Predicate {
+        alias: String,
+        source: String,
+        span: Span,
+    },
+}
+
+/// An `expectation <Id> { ... }` declaration (issue #323).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CausalExpectationDecl {
+    pub id: String,
+    pub id_span: Span,
+    pub trigger: Option<ExpectationTrigger>,
+    pub response: Option<(String, String, Span)>,
+    pub within: Option<(u64, Span)>,
+    pub clock: Option<(String, Span)>,
+    pub derived_from_claim: Option<(String, Span)>,
+}
+
 /// Parsed surface form of one `causal` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CausalSource {
@@ -182,6 +205,7 @@ pub struct CausalSource {
     pub claims: Vec<CausalClaimDecl>,
     pub feedbacks: Vec<CausalFeedbackDecl>,
     pub evidence: Vec<CausalEvidenceDecl>,
+    pub expectations: Vec<CausalExpectationDecl>,
 }
 
 /// Pre-dispatch sniff: is this document a standalone `causal` model?
@@ -200,10 +224,16 @@ pub fn is_causal_source(source: &str) -> bool {
 /// parser's.
 pub fn parse_causal(source: &str) -> Result<CausalSource, ParseError> {
     let tokens = lex(source).map_err(ParseError::from)?;
-    CausalParser { tokens, cursor: 0 }.document()
+    CausalParser {
+        source: source.to_owned(),
+        tokens,
+        cursor: 0,
+    }
+    .document()
 }
 
 struct CausalParser {
+    source: String,
     tokens: Vec<Token>,
     cursor: usize,
 }
@@ -373,6 +403,7 @@ impl CausalParser {
             claims: Vec::new(),
             feedbacks: Vec::new(),
             evidence: Vec::new(),
+            expectations: Vec::new(),
         };
         loop {
             match self.peek().kind.clone() {
@@ -410,6 +441,7 @@ impl CausalParser {
                     "claim" => self.claim_item(&mut model)?,
                     "feedback" => self.feedback_item(&mut model)?,
                     "evidence" => self.evidence_item(&mut model)?,
+                    "expectation" => self.expectation_item(&mut model)?,
                     other => {
                         return Err(
                             self.error(format!("unknown causal declaration keyword '{other}'"))
@@ -769,6 +801,129 @@ impl CausalParser {
             id_span,
             claims,
         });
+        Ok(())
+    }
+
+    /// Consume a brace-delimited block and return the raw source between the
+    /// braces (used for inline kernel predicate expressions, which are parsed
+    /// and type-checked against the target spec by the expectation compiler).
+    fn brace_source(&mut self) -> Result<(String, Span), ParseError> {
+        let open = self.symbol("{")?;
+        let mut depth = 1_usize;
+        let start = self.peek().span.start;
+        let mut end = start;
+        loop {
+            match &self.peek().kind {
+                TokenKind::Symbol(text) if text == "{" => depth += 1,
+                TokenKind::Symbol(text) if text == "}" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TokenKind::Eof => return Err(self.error("unterminated predicate block")),
+                _ => {}
+            }
+            end = self.peek().span.end;
+            self.advance();
+        }
+        let close = self.symbol("}")?;
+        let text = self
+            .source
+            .get(start.offset..end.offset.max(start.offset))
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if text.is_empty() {
+            return Err(ParseError::coded(
+                "FSL-CAUSAL-PARSE",
+                "empty predicate block",
+                Span {
+                    start: open.start,
+                    end: close.end,
+                },
+            ));
+        }
+        Ok((text, Span { start, end }))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn expectation_item(&mut self, model: &mut CausalSource) -> Result<(), ParseError> {
+        self.advance();
+        let (id, id_span) = self.ident("expectation id")?;
+        self.symbol("{")?;
+        let mut decl = CausalExpectationDecl {
+            id,
+            id_span,
+            trigger: None,
+            response: None,
+            within: None,
+            clock: None,
+            derived_from_claim: None,
+        };
+        while !matches!(&self.peek().kind, TokenKind::Symbol(text) if text == "}") {
+            let (field, _) = self.ident("expectation field")?;
+            match field.as_str() {
+                "trigger" => {
+                    if decl.trigger.is_some() {
+                        return Err(self.error("duplicate trigger field"));
+                    }
+                    let (kind, _) = self.ident("trigger kind (action | predicate)")?;
+                    decl.trigger = Some(match kind.as_str() {
+                        "action" => ExpectationTrigger::Action(self.causal_ref("action")?),
+                        "predicate" => {
+                            let (alias, _) = self.ident("trigger predicate alias")?;
+                            let (text, span) = self.brace_source()?;
+                            ExpectationTrigger::Predicate {
+                                alias,
+                                source: text,
+                                span,
+                            }
+                        }
+                        other => {
+                            return Err(self.error(format!(
+                                "unsupported trigger kind '{other}' (expected action | predicate)"
+                            )));
+                        }
+                    });
+                }
+                "response" => {
+                    if decl.response.is_some() {
+                        return Err(self.error("duplicate response field"));
+                    }
+                    self.keyword("predicate")?;
+                    let (alias, _) = self.ident("response predicate alias")?;
+                    let (text, span) = self.brace_source()?;
+                    decl.response = Some((alias, text, span));
+                }
+                "within" => {
+                    let value = self.int("within")?;
+                    if decl.within.replace(value).is_some() {
+                        return Err(self.error("duplicate within field"));
+                    }
+                }
+                "clock" => {
+                    let value = self.ident("clock name")?;
+                    if decl.clock.replace(value).is_some() {
+                        return Err(self.error("duplicate clock field"));
+                    }
+                }
+                "derived_from_claim" => {
+                    let value = self.ident("claim id")?;
+                    if decl.derived_from_claim.replace(value).is_some() {
+                        return Err(self.error("duplicate derived_from_claim field"));
+                    }
+                }
+                "supports" | "supports_claim" => {
+                    return Err(self.error(
+                        "'supports' is not an expectation field; use derived_from_claim (traceability only, never evidence support)",
+                    ));
+                }
+                other => return Err(self.error(format!("unknown expectation field '{other}'"))),
+            }
+        }
+        self.symbol("}")?;
+        model.expectations.push(decl);
         Ok(())
     }
 

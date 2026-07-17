@@ -487,3 +487,174 @@ fn review_profile_with_evidence_appends_support_map() {
     // The review profile still never claims formal verdicts.
     assert_review_only(&output);
 }
+
+#[test]
+fn verify_expectations_checks_bounded_and_never_touches_claim_axes() {
+    let (output, status) = run_cli(&["causal", "verify-expectations", INCIDENT, "--depth", "8"]);
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "causal_expectations_checked");
+    assert_eq!(output["schema_version"], "causal-expectations.v0");
+    assert_review_only(&output);
+    let expectations = output["expectations"].as_array().expect("expectations");
+    let verdict = |id: &str| {
+        expectations
+            .iter()
+            .find(|entry| entry["id"] == format!("expectation:{id}"))
+            .unwrap_or_else(|| panic!("missing {id}"))["verdict"]
+            .clone()
+    };
+    // Pass and violated goldens: in BOTH cases every claim stays not_run /
+    // untested (issue #323's central invariant).
+    assert_eq!(verdict("E_GuardrailsVisible"), "pass");
+    assert_eq!(verdict("E_AlertQualityImproves"), "violated");
+    for claim in output["claims"].as_array().expect("claims") {
+        assert_eq!(claim["formal_assurance"], "not_run");
+        assert_eq!(claim["causal_support"], "untested");
+    }
+    for entry in expectations {
+        assert!(
+            entry["do_not_assume"]
+                .as_array()
+                .expect("list")
+                .iter()
+                .any(|line| line == "Expectation violation refutes the causal claim")
+        );
+        assert_eq!(entry["assurance"], "bounded");
+        assert_eq!(
+            entry["derived_from_claim"],
+            "claim:C_Guardrails_AlertQuality"
+        );
+    }
+}
+
+fn incident_with(replacement: &str, target: &str) -> PathBuf {
+    let scratch = tempfile_dir();
+    std::fs::copy(
+        repository_root().join("examples/causal/incident_system.fsl"),
+        scratch.join("incident_system.fsl"),
+    )
+    .expect("copy companion");
+    let source = std::fs::read_to_string(repository_root().join(INCIDENT))
+        .expect("read model")
+        .replace(target, replacement);
+    let path = scratch.join("model.fsl");
+    std::fs::write(&path, source).expect("write model");
+    path
+}
+
+#[test]
+fn expectation_clock_gates_fail_closed() {
+    // Missing clock reference (only the expectation reference is renamed;
+    // the clock declaration itself keeps its name).
+    let model = incident_with(
+        "clock missing_clock\n    derived_from_claim",
+        "clock ops_clock\n    derived_from_claim",
+    );
+    let (output, status) = run_cli(&[
+        "causal",
+        "verify-expectations",
+        model.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(status, 2);
+    assert_eq!(output["diagnostic"], "causal_expectation_invalid");
+    assert!(
+        output["message"]
+            .as_str()
+            .expect("message")
+            .contains("unknown clock")
+    );
+    // Fractional tick conversion: 3 ticks = 2 days makes within 5 fractional.
+    let model = incident_with("3 tick = 2 day", "1 tick = 1 day");
+    let (output, status) = run_cli(&[
+        "causal",
+        "verify-expectations",
+        model.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(status, 2);
+    assert!(
+        output["message"]
+            .as_str()
+            .expect("message")
+            .contains("exact integer number of kernel ticks")
+    );
+}
+
+#[test]
+fn expectation_rejects_legacy_supports_field_and_unresolved_targets() {
+    let model = incident_with(
+        "supports C_Guardrails_AlertQuality",
+        "derived_from_claim C_Guardrails_AlertQuality",
+    );
+    let (output, status) = run_cli(&[
+        "causal",
+        "verify-expectations",
+        model.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(status, 2);
+    assert!(
+        output["message"]
+            .as_str()
+            .expect("message")
+            .contains("derived_from_claim")
+    );
+    // A response referencing a non-state name (e.g. a KPI-style metric that
+    // does not exist in the target state space) fails closed at build time.
+    let model = incident_with(
+        "response predicate ops { average_mttr_delta >= 1 }",
+        "response predicate ops { alert_precision >= 4 }",
+    );
+    let (output, status) = run_cli(&[
+        "causal",
+        "verify-expectations",
+        model.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(status, 2);
+    assert!(
+        output["message"]
+            .as_str()
+            .expect("message")
+            .contains("state space")
+    );
+}
+
+#[test]
+fn generated_leadsto_matches_a_hand_written_property() {
+    // Hand-write the same pulse encoding + leadsTo in a kernel spec and
+    // confirm the ordinary verifier agrees with verify-expectations.
+    let scratch = tempfile_dir();
+    let source = std::fs::read_to_string(
+        repository_root().join("examples/causal/incident_system.fsl"),
+    )
+    .expect("read spec")
+    .replace(
+        "    mttr_hours: 0..100\n  }",
+        "    mttr_hours: 0..100,\n    fired: Bool\n  }",
+    )
+    .replace(
+        "    mttr_hours = 24\n  }",
+        "    mttr_hours = 24\n    fired = false\n  }",
+    )
+    .replace(
+        "    guardrails = guardrails + 1\n  }",
+        "    guardrails = guardrails + 1\n    fired = true\n  }",
+    )
+    .replace(
+        "    alert_precision = alert_precision + 1\n  }",
+        "    alert_precision = alert_precision + 1\n    fired = false\n  }",
+    )
+    .replace(
+        "    mttr_hours = mttr_hours - 1\n  }",
+        "    mttr_hours = mttr_hours - 1\n    fired = false\n  }",
+    )
+    .replace(
+        "  invariant PrecisionBounded",
+        "  leadsTo Manual { fired ~> within 5 alert_precision >= 4 }\n  invariant PrecisionBounded",
+    );
+    let path = scratch.join("manual.fsl");
+    std::fs::write(&path, source).expect("write spec");
+    let (output, status) = run_cli(&["verify", path.to_str().expect("utf-8"), "--depth", "8"]);
+    // The hand-written property is violated exactly like the generated one.
+    assert_eq!(status, 1, "{output}");
+    assert_eq!(output["result"], "violated");
+    assert_eq!(output["invariant"], "Manual");
+}

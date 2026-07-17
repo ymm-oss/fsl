@@ -2441,7 +2441,21 @@ collapse されます(lineage 内の矛盾は <code>inconclusive</code>)。stale
 <code>--as-of</code> 日付に対してだけ判定され、実行環境の時計は決して使いません。
 <strong><code>causal_support</code> と <code>formal_assurance</code> は直交する 2 軸</strong>です: evidence は
 <code>formal_assurance: "not_run"</code> を決して変えず、どの support 値も verdict では
-ありません。バージョン付き schema は <code>schemas/fslc/causal/</code> に
+ありません。</p>
+<p>人間は claim から観測可能な契約を <code>expectation</code> として切り出し、既存の
+verifier で検査できます — <strong>claim そのものは決して lowering されません</strong>:
+<code>expectation E { trigger action alias.name</code>(または <code>trigger predicate
+alias { &lt;kernel 式&gt; }</code>)<code>response predicate alias { &lt;kernel 式&gt; } within N
+clock &lt;name&gt; derived_from_claim &lt;Id&gt; }</code>。
+<code>fslc causal verify-expectations model.fsl [--depth K]</code> は各 expectation を
+fail-closed にコンパイルし、インポートした kernel spec 上の通常の
+<code>leadsTo ... within ticks</code> プロパティにします(action trigger は 1 ステップの
+pulse ghost になります。<code>within</code> は名前付き clock の下で正確な整数 kernel tick
+に変換できなければならず、丸めは行わず、clock を別の spec に流用することも
+ありません)。結果は <code>pass</code>/<code>violated</code> と <code>assurance: "bounded"</code> で報告されます。
+どちらの verdict でも、由来 claim の <code>formal_assurance</code> は <code>"not_run"</code> のまま、
+<code>causal_support</code> も不変です: <code>derived_from_claim</code> は双方向とも traceability
+専用で、evidence にはなりません。旧フィールド名 <code>supports</code> は拒否されます。バージョン付き schema は <code>schemas/fslc/causal/</code> に
 あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
 <a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>
 にあります。

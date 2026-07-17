@@ -644,7 +644,38 @@ never contradict, the sections above.
   `unsupported_assumption_chain`) are model-structural and fire without
   evidence inputs.
 
-## 14. Test obligations for Phase 1
+## 14. Phase 3 implementation notes (fixed by #323)
+
+- **Syntax.** `expectation <Id> { trigger action alias.name | trigger
+  predicate alias { <expr> }  response predicate alias { <expr> }  within N
+  clock <name>  derived_from_claim <Id> }`. Inline predicate blocks capture
+  raw kernel-expression source; they parse with the ordinary expression
+  grammar and type-check against the target spec's state space when the
+  augmented model builds — anything else (KPI deltas, averages, effect
+  sizes) fails closed there. The legacy field names `supports` /
+  `supports_claim` are parse errors.
+- **Action triggers** lower to a one-step pulse ghost
+  (`_expectation_fired_<id>: Bool`, init false, set true by the trigger
+  action and false by every other action), so the generated
+  `leadsTo pulse ~> within ticks response` reads "within N ticks of the
+  action firing". Guards are untouched — enabledness and deadlock behavior
+  do not change; the ghost only widens the state space by one Bool.
+- **Fail-closed gates** (all `causal_expectation_invalid`): missing
+  trigger/response/within/clock, unknown clock, trigger or response alias ≠
+  the clock's kernel spec, unresolved `derived_from_claim`, a target that is
+  not a plain kernel spec (dialect-lowered state spaces are not stable
+  expectation surfaces in v0), a trigger action absent from the spec, and a
+  `within` that does not convert to an exact integer tick count
+  (`within × ticks ÷ units` must divide evenly; nothing is rounded).
+- **Verdict boundary.** `fslc causal verify-expectations` runs the ordinary
+  bounded verifier per expectation. A violation of the *generated* property
+  is `verdict: "violated"`; a violation of any pre-existing property is an
+  error ("fix the spec first") so expectation verdicts never absorb baseline
+  bugs. Both verdicts leave every claim at `formal_assurance: "not_run"`
+  with untouched `causal_support` (`causal-expectations.v0`, held by pass
+  and violated goldens). There is still no `causal verify` alias.
+
+## 15. Test obligations for Phase 1
 
 The scope three-valued comparison (§4.4), polarity sign product with unknown
 absorption (§6), and `reinforcing / balancing / unknown` loop classification

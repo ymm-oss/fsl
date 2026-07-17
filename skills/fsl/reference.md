@@ -1737,5 +1737,15 @@ lifecycle, and an observation window ≥ the claim's minimum lag; one source
 lineage is one vote. Staleness needs an explicit `--as-of` — never the wall
 clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
 `supported` never means proved, `challenged` never means refuted, and
-evidence never changes `formal_assurance: "not_run"`.** See
+evidence never changes `formal_assurance: "not_run"`.**
+
+Expectations: `fslc causal verify-expectations model.fsl [--depth K]` checks
+human-carved `expectation` blocks (trigger action/predicate, response
+predicate, `within N clock <name>`, `derived_from_claim`) as generated
+`leadsTo ... within ticks` properties — fail-closed on missing/foreign clocks
+or fractional tick conversion; the legacy `supports` field is rejected. **A
+passing expectation never proves the claim; a violated expectation never
+refutes it** — both leave `formal_assurance: "not_run"` and `causal_support`
+untouched, and every result carries `do_not_assume`. Never summarize an
+expectation verdict as the causal claim's status. See
 `docs/DESIGN-causal.md`.

@@ -9,6 +9,7 @@ mod analysis_graph;
 mod causal;
 mod causal_analysis;
 mod causal_evidence;
+mod causal_expectation;
 mod causal_projection;
 mod db;
 mod db_import;
@@ -41,6 +42,7 @@ pub use causal_evidence::{
     SupportOverlay, aggregate_support, artifact_digest, canonical_json, causal_evidence_graph,
     lifecycle_record_digest, parse_artifact, validate_lifecycle_chain,
 };
+pub use causal_expectation::{CompiledExpectation, compile_expectations};
 pub use causal_projection::{
     causal_diff_json, causal_dot, causal_graph_projection, causal_mermaid, causal_review_json,
     causal_timeline_projection, causal_traceability_projection,
