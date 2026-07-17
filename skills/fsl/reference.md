@@ -836,6 +836,10 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
+fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering] [-o requirements.md]
+                                                        # deterministic ja/en requirements document from RCIR (Requirement Claim IR)
+fslc document claims <f> [--view requirements] [-o requirements.claims.json]
+                                                        # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
 fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]
                                                         # bind the reviewed artifact to normalized spec + Git baseline
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
