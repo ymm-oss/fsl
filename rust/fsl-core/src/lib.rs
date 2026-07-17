@@ -26,6 +26,7 @@ mod diagnostics;
 mod dialect;
 mod domain;
 mod domain_lowering;
+mod expr_text;
 mod model;
 mod origin;
 mod public_kernel;
@@ -47,6 +48,7 @@ pub use dialect::{
     lower_governance, lower_requirements, requirements_trace_contract,
 };
 pub use domain::domain_kernel_source;
+pub use expr_text::{expr_text, source_expr_text};
 pub use model::{
     ActionDef, ActionGuard, KernelModel, LeadsToDef, ModelError, ParamDef, PropertyDef, TypeDef,
     TypeRef, Value as FslValue, build_model, static_leadsto_bindings,
