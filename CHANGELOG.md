@@ -12,7 +12,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   VSIX, and Kernel bundles before one tag-only publication step. Release actions,
   the Rust toolchain, and the VSIX packager are pinned; publication verifies a
   remote draft inventory before making it public, and manual dry runs validate
-  the same assembled unit without publishing it.
+  the same assembled unit without publishing it. Native crates and release
+  builds require Rust 1.88 or newer.
 - The installer rejects unsupported Intel macOS, pins repository content and
   binaries to the same latest Release tag, and stages both checksummed native
   binaries before replacing either installed command. Linux artifacts now have
