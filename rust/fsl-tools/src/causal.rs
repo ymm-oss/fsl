@@ -1204,7 +1204,7 @@ fn validate_loops(model: &CausalModel, surface: &CausalSource) -> Result<(), Cau
     for claim in model.active_claims() {
         let zero_min = match claim.lag {
             Lag::Known(interval) => interval.min == 0,
-            Lag::Unknown => false,
+            Lag::Unknown => true,
         };
         if zero_min {
             zero_edges
@@ -1715,6 +1715,15 @@ FEEDBACK}
         let error = build(&source).expect_err("must fail");
         assert_eq!(error.kind, "causal_instantaneous_loop");
         assert!(error.message.contains("minimum lag sum 0"));
+    }
+
+    #[test]
+    fn unknown_lag_cycle_is_rejected_as_instantaneous() {
+        let source = looped("unknown", "")
+            .replace("lag 7..30", "lag unknown")
+            .replace("lag 30..90", "lag unknown");
+        let error = build(&source).expect_err("must fail");
+        assert_eq!(error.kind, "causal_instantaneous_loop");
     }
 
     #[test]
