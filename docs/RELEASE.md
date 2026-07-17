@@ -32,11 +32,14 @@ binary.
 | Linux arm64 | `ubuntu-24.04-arm` | `linux-arm64` |
 | Windows x64 | `windows-latest` | `windows-x64.exe` |
 
-Intel macOS (`macos-x64`) is not supported. Releases also contain the VS Code
-extension and the Public Kernel contract bundles produced by
-`.github/workflows/release.yml`.
+Intel macOS (`macos-x64`) is not supported. Releases also contain the
+checksummed Agent Skill bundle, VS Code extension, and Public Kernel contract
+bundles produced by `.github/workflows/release.yml`.
 `install.sh` resolves the latest published tag once and uses that same tag for
-the repository content and both native binaries.
+the skill bundle and both native binaries. It installs only those payloads into
+the user's data directory; it does not clone the repository. The v3.0.0
+compatibility path extracts only the skills from that exact tag's source archive
+because the first native release predates the checksummed skill bundle.
 
 Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
 runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
@@ -85,8 +88,9 @@ It also rejects a dynamic dependency on `libz3`.
    `workflow_dispatch` run builds and smoke-tests every artifact but cannot
    attach files to a GitHub Release, even when the selected ref is a tag.
 2. Verify the completed run's `head_sha` equals the recorded candidate SHA and
-   all four native targets, the VS Code extension, and both Kernel bundles
-   pass. Do not reuse evidence from a moving branch after its SHA changes.
+   all four native targets, the Agent Skill bundle, VS Code extension, and both
+   Kernel bundles pass. Do not reuse evidence from a moving branch after its SHA
+   changes.
 3. Open the release-promotion pull request from `main` to `production`, stating
    the candidate SHA, version, changes, residual risk, gate results, and dry-run
    URL.
@@ -125,7 +129,8 @@ It also rejects a dynamic dependency on `libz3`.
    section.
 2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
    four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
-   the VS Code extension and both Kernel bundle/checksum pairs are present.
+   the Agent Skill bundle/checksum pair, VS Code extension, and both Kernel
+   bundle/checksum pairs are present.
 3. Download the current machine's supported binary and checksum, verify the
    checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
 4. Report the promotion pull request, production SHA, tag SHA, release URL,
