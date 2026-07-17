@@ -143,6 +143,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   remains the distinct binding form (issue #246).
 
 ### Fixed
+- Concurrent `fslc check`, `verify`, and `scenarios` commands on the same
+  literate Markdown source now use process-owned materializations, so one
+  command cannot delete another command's source mid-read. Verification cache
+  identity remains the original Markdown path, preserving cross-process hits,
+  while dependency invalidation follows the resolver base for symlink aliases.
 - Native `check` now propagates malformed governance-preservation diagnostics
   as a located type error with exit 2 instead of silently returning `ok`. A
   resolver-backed core contract also rejects missing dependencies, unknown or
