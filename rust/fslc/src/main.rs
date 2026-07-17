@@ -54,11 +54,16 @@ fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("literate");
-    // Keep concurrent CLI processes isolated. Verification normalizes this
-    // process-local path back to the source Markdown when computing cache keys.
-    let materialized = path.with_file_name(format!(".{stem}.literate-{}.fsl", std::process::id()));
+    // Each CLI process owns its materialization. The original Markdown path is
+    // passed separately as the stable verify-cache identity, so physical
+    // isolation does not trade away cache hits across invocations.
+    let materialized = literate_materialization_path(path, stem, std::process::id());
     std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
     Ok(Some(LiterateState { path: materialized }))
+}
+
+fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> PathBuf {
+    path.with_file_name(format!(".{stem}.literate-{process_id}.fsl"))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1566,7 +1571,7 @@ fn command() -> Result<(Value, i32), String> {
                 .map_or(&display_path, |state| &state.path);
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                let result = run_verify_cli(path, &options);
+                let result = run_verify_cli(path, &display_path, &options);
                 with_version_metadata(apply_domain_edition(
                     result,
                     path,
@@ -3573,7 +3578,7 @@ fn run_sweep(
                     from_state: None,
                     edition: "current".to_owned(),
                 };
-                let (mut verification, _) = run_verify_cli(path, &options);
+                let (mut verification, _) = run_verify_cli(path, path, &options);
                 if let Value::Object(envelope) = &mut verification {
                     let trace_type = envelope.remove("trace_type");
                     envelope.insert(
@@ -5124,13 +5129,13 @@ fn run_scenarios_mode(
         insert_requirement_metadata(&mut scenario, &action.annotations, action.meta.as_ref());
         scenarios.push(Value::Object(scenario));
     }
-    if let Some(trace) = &result.deadlock_trace {
-        if deadlock_mode != "ignore" {
-            let mut scenario = scenario_from_trace(trace);
-            scenario.insert("name".to_owned(), json!("deadlock_terminal"));
-            scenario.insert("kind".to_owned(), json!("deadlock"));
-            scenarios.push(Value::Object(scenario));
-        }
+    if let Some(trace) = &result.deadlock_trace
+        && deadlock_mode != "ignore"
+    {
+        let mut scenario = scenario_from_trace(trace);
+        scenario.insert("name".to_owned(), json!("deadlock_terminal"));
+        scenario.insert("kind".to_owned(), json!("deadlock"));
+        scenarios.push(Value::Object(scenario));
     }
     match requirement_trace_scenarios(path, &model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
@@ -14420,6 +14425,15 @@ mod exit_status_tests {
         assert_eq!(
             normalized_exit_status(&error_output("semantics", "bad spec"), 2),
             2
+        );
+    }
+
+    #[test]
+    fn literate_materialization_paths_are_process_owned() {
+        let source = Path::new("spec.md");
+        assert_ne!(
+            literate_materialization_path(source, "spec", 41),
+            literate_materialization_path(source, "spec", 42)
         );
     }
 
