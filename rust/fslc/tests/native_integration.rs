@@ -14,6 +14,24 @@ fn root() -> PathBuf {
         .to_owned()
 }
 
+fn assert_vendored_z3(root: &Path, workflow: &str) {
+    assert!(!workflow.contains("Z3_SYS_Z3_VERSION"));
+    assert!(workflow.contains("MACOSX_DEPLOYMENT_TARGET: \"14.0\""));
+    assert!(workflow.contains("os: macos-15"));
+    assert!(!workflow.contains("os: macos-14"));
+    let workspace = std::fs::read_to_string(root.join("rust/Cargo.toml")).expect("workspace");
+    assert!(workspace.contains("features = [\"vendored\", \"z3_4_16\"]"));
+    assert!(!workspace.contains("\"gh-release\""));
+}
+
+fn assert_windows_release_smoke(workflow: &str) {
+    assert!(workflow.contains("$env:GITHUB_REF_NAME.Substring(1)"));
+    assert!(workflow.contains("binary version does not match tag"));
+    assert!(workflow.contains("$verifyExit = $LASTEXITCODE"));
+    assert!(workflow.contains("$verifyResult = $verifyOutput | ConvertFrom-Json"));
+    assert!(workflow.contains("$verifyResult.result -ne \"verified\""));
+}
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
@@ -331,8 +349,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("GLIBC_2.39"));
     assert!(!workflow.contains("target: macos-x64"));
     assert!(workflow.contains("\"fslc ${GITHUB_REF_NAME#v}\""));
-    assert!(workflow.contains("$env:GITHUB_REF_NAME.Substring(1)"));
-    assert!(workflow.contains("binary version does not match tag"));
+    assert_windows_release_smoke(&workflow);
     for mutable in [
         "uses: actions/checkout@v4",
         "uses: actions/setup-node@v4",
@@ -347,6 +364,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
         );
     }
     assert!(workflow.contains("toolchain: 1.88.0"));
+    assert_vendored_z3(&root, &workflow);
 
     let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
     assert!(!installer.contains("echo \"macos-x64\""));
