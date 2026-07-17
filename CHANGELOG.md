@@ -154,6 +154,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   remains the distinct binding form (issue #246).
 
 ### Fixed
+- Concurrent `fslc check`, `verify`, and `scenarios` commands on the same
+  literate Markdown source now use process-owned materializations, so one
+  command cannot delete another command's source mid-read. Verification cache
+  identity remains the original Markdown path, preserving cross-process hits,
+  while dependency invalidation follows the resolver base for symlink aliases.
 - Native `check` now propagates malformed governance-preservation diagnostics
   as a located type error with exit 2 instead of silently returning `ok`. A
   resolver-backed core contract also rejects missing dependencies, unknown or
@@ -177,6 +182,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics, so user state fields named `kind`, `classification`, or other
   diagnostic discriminators neither crash nor receive routing metadata (issue
   #278).
+- `fslc verify --engine auto` no longer silently drops its `engine_fallback`
+  annotation, or returns a stale/completeness-downgraded BMC verdict, when a
+  warm cache entry was written by an unrelated plain `--engine bmc` run: the
+  fallback gate is recomputed for the current invocation instead of being
+  read back off the cache entry, so a warm hit always matches what a fresh
+  `auto` run would report, and the persisted cache entry itself carries the
+  same fields as a plain engine run's, with the `engine_fallback` sibling no
+  longer written at all (issue #226 follow-up).
 
 ### Changed
 - Required product CI now runs the Rust workspace and WASM integration phases in parallel while
@@ -207,14 +220,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   contracts are unchanged.
 - `fslc verify --engine auto` (issue #226) now dispatches through a
   `VerificationEngine::Auto` variant alongside the other engines instead of
-  resolving before the shared parser, loads the model once per attempt (the
-  static fail-closed gate and the real explicit-state run share it, removing
-  a redundant load/gate re-check on the common decide-by-explicit path), and
-  persists the fallback trace on the BMC cache entry itself so a repeat
-  `auto` cache hit restores the exact original `engine_fallback` rather than
-  recomputing a generic one. Output contract, cache-sharing with plain
-  `--engine explicit`/`bmc` runs, and the `engine_fallback: {from, reason,
-  kind}` shape are unchanged.
+  resolving before the shared parser, and loads the model once per fresh
+  attempt (the static fail-closed gate and the real explicit-state run share
+  it, removing a redundant load/gate re-check on the common decide-by-explicit
+  path). A cache hit recomputes that same fail-closed gate for the current
+  invocation rather than persisting a fallback trace on the BMC cache entry
+  (see the Fixed entry above), so a warm `auto` hit always reproduces the
+  exact `engine_fallback` a fresh run would. Output contract, cache-sharing
+  with plain `--engine explicit`/`bmc` runs, and the `engine_fallback: {from,
+  reason, kind}` shape are unchanged.
 - Native domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds now share
   one versioned input adapter over Public Kernel v1 and the public
   `domain-scaffold-metadata.v1` compatibility bridge. Target emitters no longer
