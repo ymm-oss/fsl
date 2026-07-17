@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Barrier};
 
 use serde_json::Value;
 
@@ -46,28 +45,6 @@ fn literate_check_succeeds_on_valid_spec() {
     assert_eq!(status, 0, "check failed: {output:#}");
     assert_eq!(output["result"], "ok");
     assert_eq!(output["spec"], "Toggle");
-}
-
-#[test]
-fn concurrent_literate_checks_use_isolated_materializations() {
-    let path = fixture_path("literate_toggle.md");
-    let barrier = Arc::new(Barrier::new(4));
-    let handles = (0..4)
-        .map(|_| {
-            let path = path.clone();
-            let barrier = Arc::clone(&barrier);
-            std::thread::spawn(move || {
-                barrier.wait();
-                run_cli(&["check", &path])
-            })
-        })
-        .collect::<Vec<_>>();
-
-    for handle in handles {
-        let (output, status) = handle.join().expect("join concurrent check");
-        assert_eq!(status, 0, "check failed: {output:#}");
-        assert_eq!(output["result"], "ok");
-    }
 }
 
 #[test]
@@ -184,6 +161,46 @@ spec Toggle {
 }
 
 #[test]
+fn concurrent_literate_commands_keep_their_materializations_isolated() {
+    let dir = std::env::temp_dir().join(format!("fslc-literate-concurrent-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let document = dir.join("literate_toggle.md");
+    std::fs::copy(fixture_path("literate_toggle.md"), &document).expect("copy literate fixture");
+    let path = document.to_str().expect("UTF-8 path").to_owned();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+    let results = std::thread::scope(|scope| {
+        let handles = (0..6)
+            .map(|index| {
+                let path = path.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    match index % 3 {
+                        0 => run_cli(&["check", &path]),
+                        1 => run_cli(&["verify", &path, "--depth", "4", "--no-cache"]),
+                        _ => run_cli(&["scenarios", &path, "--depth", "4"]),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("literate command thread"))
+            .collect::<Vec<_>>()
+    });
+
+    for (output, status) in results {
+        assert_eq!(status, 0, "concurrent literate command failed: {output:#}");
+        assert_ne!(output["result"], "error", "unexpected error: {output:#}");
+    }
+    assert!(
+        !has_literate_sibling(&dir),
+        "concurrent commands leaked a materialized source"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn materialized_file_is_cleaned_up_after_check_and_verify() {
     let dir = std::env::temp_dir().join(format!("fslc-literate-cleanup-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
@@ -280,12 +297,10 @@ impl Drop for LiterateCacheDir {
 
 #[test]
 fn literate_verify_cache_hits_on_the_second_run() {
-    // Root cause this guards: the materialized sibling used to embed
-    // `std::process::id()` in its filename, so the canonicalized "path" baked
-    // into the cache key (and the sibling's own entry in the cache-key
-    // directory walk) changed on every single run — the cache could never
-    // hit for a `.md` spec. The fsl content below embeds a fresh nonce so
-    // this test's cache entry cannot collide with any other test's.
+    // The physical materialization is process-owned, but the cache identity is
+    // the original Markdown path and transient siblings are excluded from the
+    // dependency walk. The fsl content below embeds a fresh nonce so this test's
+    // cache entry cannot collide with any other test's.
     let cache = LiterateCacheDir::new("hit");
     let dir = std::env::temp_dir().join(format!("fslc-literate-cache-doc-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
