@@ -12,9 +12,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   VSIX, and Kernel bundles before one tag-only publication step. Release actions,
   the Rust toolchain, and the VSIX packager are pinned; manual dry runs validate
   the same assembled unit without publishing it.
-- The installer rejects unsupported Intel macOS and stages both checksummed native
-  binaries before replacing either installed command. Linux artifacts now have an
-  explicit Ubuntu 24.04 / glibc 2.39 baseline and reject dynamic `libz3` linkage.
+- The installer rejects unsupported Intel macOS, pins repository content and
+  binaries to the same latest Release tag, and stages both checksummed native
+  binaries before replacing either installed command. Linux artifacts now have
+  an explicit Ubuntu 24.04 / glibc 2.39 baseline and reject dynamic `libz3` linkage.
 - Release distribution checks now run in the authoritative native Rust gate;
   the redundant Python-only release workflow test was removed.
 - Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of

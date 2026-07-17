@@ -305,13 +305,42 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
       - name: Download the verified release unit
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-unit
           path: release-assets
 
-      - name: Publish the complete release unit
+      - name: Extract release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v heading="## [$version]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+
+      - name: Upload the complete release unit to a draft
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          draft: true
+          body_path: release-notes.md
           files: release-assets/*
+
+      - name: Verify the remote draft release unit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true
+          test -n "$(gh release view "$GITHUB_REF_NAME" --json body --jq .body)"
+          find release-assets -maxdepth 1 -type f -exec basename {} \; | sort > expected-assets.txt
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort > remote-assets.txt
+          diff -u expected-assets.txt remote-assets.txt
+
+      - name: Make the verified release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest

@@ -29,6 +29,8 @@ binary.
 Intel macOS (`macos-x64`) is not supported. Releases also contain the VS Code
 extension and the Public Kernel contract bundles produced by
 `.github/workflows/release.yml`.
+`install.sh` resolves the latest published tag once and uses that same tag for
+the repository content and both native binaries.
 
 Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
 runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
@@ -139,7 +141,9 @@ It also rejects a dynamic dependency on `libz3`.
 - Never force-move, delete, or reuse a pushed release tag. If the tagged commit
   or artifacts are wrong, fix the defect upstream, promote it, and cut a new
   patch version.
-- If release-note publication or asset verification fails, leave the release
-  visibly unresolved until repaired. Do not report completion.
+- The tag workflow uploads notes and all assets to a non-public draft, verifies
+  the remote inventory, and only then makes the Release public. If any publish
+  step fails, leave the draft non-public until the defect is fixed upstream.
+  Do not report completion.
 - Follow the internal release skill's `release/vX.Y` stabilization and hotfix
   procedures when `main` cannot be promoted as a whole.

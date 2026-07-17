@@ -1,7 +1,7 @@
 name: production-policy
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [production]
 
 permissions:
@@ -13,8 +13,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
 
       - name: Accept only reviewed promotion branches
         env:
-          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: ./tools/check-production-source-policy.sh "$HEAD_REF"

@@ -194,8 +194,8 @@ path. Apply these design constraints when a change affects architecture:
   behavior. Git controls promotion; components implement one tested contract.
 - Treat all artifacts built from one tag as one atomic release unit. For FSL this
   includes `fslc`, `fslc-lsp`, the VS Code extension, and published Kernel bundles.
-  Build jobs upload private workflow artifacts; one final job publishes only after
-  every artifact job succeeds.
+  Build jobs upload private workflow artifacts; one final job uploads the complete
+  unit to a draft, verifies the remote inventory, and only then makes it public.
 - Verify cross-component contracts at the promotion SHA. A component cannot be
   declared ready while another artifact from the same tag still depends on an
   incompatible contract.

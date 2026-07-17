@@ -157,6 +157,8 @@ No programming knowledge is required. Just these three steps:
 This places FSL itself in `~/.fsl`, the `fslc` command in `~/.local/bin/fslc`, and
 the Claude Code skills in `~/.claude/skills/`
 (once placed, you can delete the folder you downloaded).
+The installer checks out the latest published Release tag in `~/.fsl`, so the
+skills, examples, `fslc`, and `fslc-lsp` always come from the same release.
 
 > For those who use the GitHub CLI, or engineers: if you have run `gh auth login`, this one line also works:
 > `gh repo clone ymm-oss/fsl ~/.fsl && bash ~/.fsl/install.sh`

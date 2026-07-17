@@ -313,6 +313,11 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("name: publish atomic release unit"));
     assert!(workflow.contains("needs: [assemble]"));
     assert!(workflow.contains("merge-multiple: true"));
+    assert!(workflow.contains("draft: true"));
+    assert!(workflow.contains("body_path: release-notes.md"));
+    assert!(workflow.contains("Verify the remote draft release unit"));
+    assert!(workflow.contains("diff -u expected-assets.txt remote-assets.txt"));
+    assert!(workflow.contains("gh release edit \"$GITHUB_REF_NAME\" --draft=false --latest"));
     assert!(workflow.contains("npm ci"));
     assert!(workflow.contains("cp ../../LICENSE LICENSE"));
     assert!(workflow.contains("npm exec -- vsce package"));
@@ -344,6 +349,10 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
 
     let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
     assert!(!installer.contains("echo \"macos-x64\""));
+    assert!(installer.contains("RELEASE_TAG=$(latest_release_tag)"));
+    assert!(installer.contains("git clone --branch \"$RELEASE_TAG\" --depth 1"));
+    assert!(installer.contains("releases/download/$RELEASE_TAG"));
+    assert!(!installer.contains("releases/latest/download"));
     let stage_cli = installer
         .find("stage_release_asset \"fslc-$TARGET\"")
         .unwrap();
@@ -362,6 +371,16 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     .expect("VS Code package JSON");
     assert_eq!(package["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(package["devDependencies"]["@vscode/vsce"], "3.9.2");
+    let package_lock: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("editors/vscode/package-lock.json"))
+            .expect("VS Code package lock"),
+    )
+    .expect("VS Code package lock JSON");
+    assert_eq!(package_lock["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        package_lock["packages"][""]["devDependencies"]["@vscode/vsce"],
+        "3.9.2"
+    );
 
     let runbook = std::fs::read_to_string(root.join("docs/RELEASE.md")).expect("release runbook");
     let skill = std::fs::read_to_string(root.join(".claude/skills/release/SKILL.md"))
@@ -390,6 +409,11 @@ fn production_accepts_only_governed_source_branches() {
     let policy = std::fs::read_to_string(root.join(".github/workflows/production-policy.yml"))
         .expect("production policy");
     assert!(policy.contains("branches: [production]"));
+    assert!(policy.contains("  pull_request_target:"));
+    assert!(!policy.contains("\n  pull_request:\n"));
+    assert!(policy.contains("ref: ${{ github.event.pull_request.base.sha }}"));
+    assert!(policy.contains("persist-credentials: false"));
+    assert!(policy.contains("HEAD_REF: ${{ github.event.pull_request.head.ref }}"));
     assert!(policy.contains("./tools/check-production-source-policy.sh \"$HEAD_REF\""));
 
     let policy_script = root.join("tools/check-production-source-policy.sh");
