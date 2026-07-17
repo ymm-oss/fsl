@@ -30,7 +30,7 @@ lsp-server = "0.7"
 lsp-types = "0.95"
 crossbeam-channel = "0.5"
 sha2 = "0.10"
-z3 = { version = "=0.20.2", default-features = false, features = ["gh-release", "z3_4_16"] }
+z3 = { version = "=0.20.2", default-features = false, features = ["vendored", "z3_4_16"] }
 js-sys = "0.3.82"
 wasm-bindgen = "0.2.105"
 wasm-bindgen-futures = "0.4.55"

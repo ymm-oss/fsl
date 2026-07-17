@@ -54,8 +54,6 @@ jobs:
 
       - name: Build native Rust binary
         working-directory: rust
-        env:
-          Z3_SYS_Z3_VERSION: "4.16.0"
         run: cargo build --release --locked -p fslc-rust -p fsl-lsp
 
       # Use a fixed, known spec that is verified and has no counterexample.
