@@ -1,0 +1,995 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+use fsl_core::{
+    Annotation, AnnotationValue, FileResolver, FsResolver, SPEC_TARGET, SymbolPath, action_target,
+    build_model, parse_kernel_source, parse_kernel_source_with_bounds, requirements_trace_contract,
+};
+use fsl_syntax::{SourcePos, Span};
+
+fn span(line: u32) -> Span {
+    Span {
+        start: SourcePos {
+            offset: line as usize,
+            line,
+            column: 1,
+        },
+        end: SourcePos {
+            offset: line as usize + 1,
+            line,
+            column: 2,
+        },
+    }
+}
+
+fn direct_spec() -> fsl_core::KernelSpec {
+    parse_kernel_source(
+        r#"
+spec TypedAnnotations "design: annotation carrier" {
+  state { ready: Bool }
+  init "undecided: initial rollout state is pending" { ready = false }
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+  invariant Stable "REQ-2: readiness is Boolean" { ready == ready }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse direct spec")
+}
+
+#[test]
+fn keeps_multiple_typed_annotations_and_legacy_projection_on_one_declaration() {
+    let mut kernel = direct_spec();
+    let target = action_target("publish");
+    kernel.bind_annotation(
+        target.clone(),
+        Annotation::Requirement {
+            id: "REQ-3".to_owned(),
+            text: Some("publication is auditable".to_owned()),
+            span: span(20),
+        },
+    );
+    let custom = SymbolPath::new(["acme".to_owned(), "review".to_owned()], span(24))
+        .expect("valid namespace");
+    assert_eq!(custom.segments(), ["acme", "review"]);
+    assert_eq!(custom.span(), span(24));
+    kernel.bind_annotation(
+        target.clone(),
+        Annotation::Undecided {
+            reason: "review owner is pending".to_owned(),
+            span: span(21),
+        },
+    );
+    kernel.bind_annotation(
+        target.clone(),
+        Annotation::Kind {
+            id: "safety".to_owned(),
+            text: None,
+            span: span(22),
+        },
+    );
+    kernel.bind_annotation(
+        target.clone(),
+        Annotation::Custom {
+            namespace: SymbolPath::new(["acme".to_owned(), "review".to_owned()], span(23))
+                .expect("valid namespace"),
+            arguments: vec![
+                AnnotationValue::String("team-a".to_owned()),
+                AnnotationValue::Integer(2),
+                AnnotationValue::Boolean(true),
+            ],
+            span: span(23),
+        },
+    );
+
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(action.annotations.source_order().len(), 5);
+    assert_eq!(
+        model
+            .requirements_for(&target)
+            .into_iter()
+            .map(|requirement| requirement.id)
+            .collect::<Vec<_>>(),
+        ["REQ-1", "REQ-3"]
+    );
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "review owner is pending"
+    );
+    assert_eq!(action.meta.as_ref().expect("legacy projection").id, "REQ-1");
+}
+
+#[test]
+fn top_level_annotations_flow_from_dispatch_into_the_checked_spec() {
+    let kernel = parse_kernel_source(
+        r#"
+@requirement("REQ-TOP", "the document owns this contract")
+@acme.review(owner.team, 2, true)
+spec TopLevelAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated document");
+
+    let annotations = kernel.annotations().annotations_for(SPEC_TARGET);
+    assert_eq!(annotations.source_order().len(), 2);
+    assert_eq!(annotations.requirements().unwrap()[0].id, "REQ-TOP");
+    let Annotation::Custom { namespace, .. } = &annotations.source_order()[1] else {
+        panic!("expected custom annotation")
+    };
+    assert_eq!(namespace.to_string(), "acme.review");
+    assert_eq!(namespace.span().start.line, 3);
+}
+
+#[test]
+fn scoped_parse_preserves_top_level_annotations() {
+    let kernel = parse_kernel_source_with_bounds(
+        "@requirement(\"REQ-TOP\")\nspec Annotated { state { ready: Bool } init { ready = false } }",
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
+    )
+    .expect("parse annotated scoped document");
+
+    assert_eq!(
+        kernel
+            .annotations()
+            .annotations_for(SPEC_TARGET)
+            .requirements()
+            .unwrap()[0]
+            .id,
+        "REQ-TOP"
+    );
+}
+
+#[test]
+fn compose_preserves_component_document_annotations() {
+    struct Resolver;
+    impl FileResolver for Resolver {
+        fn read(&self, _path: &str) -> Result<String, fsl_core::CoreError> {
+            Ok("@requirement(\"REQ-COMPONENT\")\nspec Child { state { ready: Bool } init { ready = false } }".to_owned())
+        }
+    }
+
+    let kernel = parse_kernel_source(
+        "compose Parent { use Child as child from \"child.fsl\" }",
+        &Resolver,
+    )
+    .expect("parse annotated component");
+
+    assert_eq!(
+        kernel
+            .annotations()
+            .annotations_for(SPEC_TARGET)
+            .requirements()
+            .unwrap()[0]
+            .id,
+        "REQ-COMPONENT"
+    );
+}
+
+#[test]
+fn semantic_requirement_order_is_stable_and_identical_relations_are_deduplicated() {
+    let target = action_target("publish");
+    let annotations = [
+        Annotation::Requirement {
+            id: "REQ-9".to_owned(),
+            text: Some("later".to_owned()),
+            span: span(30),
+        },
+        Annotation::Requirement {
+            id: "REQ-0".to_owned(),
+            text: Some("earlier".to_owned()),
+            span: span(31),
+        },
+        Annotation::Requirement {
+            id: "REQ-9".to_owned(),
+            text: Some("later".to_owned()),
+            span: span(32),
+        },
+    ];
+    let mut forward = direct_spec();
+    let mut reverse = direct_spec();
+    for annotation in annotations.clone() {
+        forward.bind_annotation(target.clone(), annotation);
+    }
+    for annotation in annotations.into_iter().rev() {
+        reverse.bind_annotation(target.clone(), annotation);
+    }
+
+    let forward = build_model(forward).expect("forward model");
+    let reverse = build_model(reverse).expect("reverse model");
+    let ids = |model: &fsl_core::KernelModel| {
+        model
+            .requirements_for(&target)
+            .into_iter()
+            .map(|requirement| requirement.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&forward), ["REQ-0", "REQ-1", "REQ-9"]);
+    assert_eq!(ids(&forward), ids(&reverse));
+}
+
+#[test]
+fn conflicting_text_for_one_requirement_id_is_a_checked_model_error() {
+    let mut kernel = direct_spec();
+    kernel.bind_annotation(
+        action_target("publish"),
+        Annotation::Requirement {
+            id: "REQ-1".to_owned(),
+            text: Some("conflicting text".to_owned()),
+            span: span(40),
+        },
+    );
+    let error = build_model(kernel).expect_err("conflicting relation must fail");
+    assert!(error.message.contains("REQ-1"));
+    assert!(error.message.contains("conflicting text"));
+}
+
+#[test]
+fn requirements_covers_lowers_through_the_typed_requirement_adapter() {
+    let source = r#"
+requirements CoversAdapter {
+  process Claim {
+    stages Draft, Done
+    initial Draft
+    transition finish Draft -> Done by User covers REQ-C "finish is traceable"
+  }
+}
+verify { instances Claim = 1 }
+"#;
+    let kernel =
+        parse_kernel_source(source, &FsResolver::new(".")).expect("parse requirements process");
+    let model = build_model(kernel).expect("build requirements model");
+    let links = model.requirements_for(&action_target("finish"));
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].id, "REQ-C");
+    assert_eq!(links[0].text.as_deref(), Some("finish is traceable"));
+    assert_eq!(links[0].span.start.line, 6);
+    let annotation = "covers REQ-C \"finish is traceable\"";
+    let offset = source.find(annotation).expect("covers annotation");
+    assert_eq!(links[0].span.start.offset, offset);
+    assert_eq!(links[0].span.start.column, 45);
+    assert_eq!(links[0].span.end.offset, offset + annotation.len());
+}
+
+#[test]
+fn requirement_blocks_merge_outer_requirement_with_inner_legacy_annotations() {
+    let source = r#"
+requirements BlockAdapter {
+  state { ready: Bool }
+  init { ready = false }
+  requirement REQ-B "publishing is controlled" {
+    action publish() "undecided: review owner is pending" { ready = true }
+  }
+}
+"#;
+    let kernel =
+        parse_kernel_source(source, &FsResolver::new(".")).expect("parse requirement block");
+    let model = build_model(kernel).expect("build requirement block model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    let requirement = &model.requirements_for(&action_target("publish"))[0];
+    assert_eq!(requirement.id, "REQ-B");
+    let annotation = "requirement REQ-B \"publishing is controlled\"";
+    let offset = source.find(annotation).expect("requirement annotation");
+    assert_eq!(requirement.span.start.offset, offset);
+    assert_eq!(requirement.span.end.offset, offset + annotation.len());
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "review owner is pending"
+    );
+}
+
+#[test]
+fn explicit_requirement_syntax_rejects_the_reserved_undecided_id() {
+    let kernel = parse_kernel_source(
+        r#"
+requirements ReservedRequirementId {
+  process Claim {
+    stages Draft, Done
+    initial Draft
+    transition finish Draft -> Done by User covers undecided "not a requirement"
+  }
+}
+verify { instances Claim = 1 }
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse reserved ID for checked validation");
+    let error = build_model(kernel).expect_err("reserved requirement ID must fail");
+    assert!(error.message.contains("reserved"));
+    assert!(error.message.contains("requirement ID"));
+}
+
+#[test]
+fn acceptance_and_forbidden_cases_expose_the_same_typed_requirement_relation() {
+    let contract = requirements_trace_contract(
+        r#"
+requirements TraceCases {
+  state { ready: Bool }
+  init { ready = false }
+  action publish() { ready = true }
+  acceptance AC-1 "publication succeeds" {
+    publish()
+    expect ready == true
+  }
+  forbidden NEG-1 "publication cannot repeat" {
+    publish() publish()
+    expect rejected
+  }
+}
+
+"#,
+    )
+    .expect("parse trace contract")
+    .expect("requirements trace contract");
+    assert_eq!(
+        contract.acceptance[0].annotations.requirements().unwrap()[0].id,
+        "AC-1"
+    );
+    assert_eq!(
+        contract.forbidden[0].annotations.requirements().unwrap()[0].id,
+        "NEG-1"
+    );
+}
+
+#[test]
+fn nested_annotation_syntax_reaches_the_checked_model() {
+    let source = r#"
+spec NestedAnnotations {
+  state { ready: Bool }
+  @requirement("REQ-INIT", "startup is traceable")
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  @undecided("rollback policy is pending")
+  @kind("safety")
+  @acme.review(owner.team, 2, true)
+  action publish() { ready = true }
+  @requirement("REQ-2", "readiness is Boolean")
+  invariant Stable { ready == ready }
+  @requirement("REQ-3", "readiness never regresses")
+  trans Forward { ready == true => ready == true }
+  @requirement("REQ-4", "readiness is reachable")
+  reachable Ready { ready == true }
+  @requirement("REQ-5", "eventually ready")
+  leadsTo Progress { ready == false ~> ready == true }
+}
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse annotated spec");
+    let model = build_model(kernel).expect("build checked model");
+
+    assert_eq!(
+        model
+            .init_annotations
+            .requirements()
+            .unwrap()
+            .into_iter()
+            .map(|requirement| requirement.id)
+            .collect::<Vec<_>>(),
+        ["REQ-INIT"]
+    );
+
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(action.annotations.source_order().len(), 4);
+    assert_eq!(action.annotations.requirements().unwrap()[0].id, "REQ-1");
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "rollback policy is pending"
+    );
+
+    let invariant = model
+        .invariants
+        .iter()
+        .find(|item| item.name == "Stable")
+        .expect("Stable invariant");
+    assert_eq!(invariant.annotations.requirements().unwrap()[0].id, "REQ-2");
+
+    let trans = model
+        .transitions
+        .iter()
+        .find(|item| item.name == "Forward")
+        .expect("Forward trans");
+    assert_eq!(trans.annotations.requirements().unwrap()[0].id, "REQ-3");
+
+    let reachable = model
+        .reachables
+        .iter()
+        .find(|item| item.name == "Ready")
+        .expect("Ready reachable");
+    assert_eq!(reachable.annotations.requirements().unwrap()[0].id, "REQ-4");
+
+    let leadsto = model
+        .leadstos
+        .iter()
+        .find(|item| item.name == "Progress")
+        .expect("Progress leadsTo");
+    assert_eq!(leadsto.annotations.requirements().unwrap()[0].id, "REQ-5");
+}
+
+#[test]
+fn legacy_string_and_annotation_syntax_desugar_to_the_same_relation() {
+    let legacy = parse_kernel_source(
+        r#"
+spec LegacyMeta {
+  state { ready: Bool }
+  init { ready = false }
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse legacy spec");
+    let annotated = parse_kernel_source(
+        r#"
+spec AnnotationSyntax {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated spec");
+
+    let legacy_model = build_model(legacy).expect("build legacy model");
+    let annotated_model = build_model(annotated).expect("build annotated model");
+    let ids = |model: &fsl_core::KernelModel| {
+        model
+            .requirements_for(&action_target("publish"))
+            .into_iter()
+            .map(|requirement| (requirement.id, requirement.text))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&legacy_model), ids(&annotated_model));
+}
+
+#[test]
+fn legacy_and_annotation_syntax_on_one_declaration_deduplicate_an_identical_relation() {
+    let kernel = parse_kernel_source(
+        r#"
+spec CoexistingAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "publishing changes readiness")
+  @undecided("rollback policy is pending")
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse spec with both channels");
+    let model = build_model(kernel).expect("build checked model");
+    let links = model.requirements_for(&action_target("publish"));
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].id, "REQ-1");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "rollback policy is pending"
+    );
+}
+
+#[test]
+fn legacy_and_annotation_syntax_with_conflicting_text_is_a_checked_error() {
+    let kernel = parse_kernel_source(
+        r#"
+spec ConflictingAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "a different description")
+  action publish() "REQ-1: publishing changes readiness" { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse spec with conflicting channels");
+    let error = build_model(kernel).expect_err("conflicting relation must fail");
+    assert!(error.message.contains("REQ-1"));
+}
+
+#[test]
+fn annotation_order_does_not_change_the_checked_result() {
+    let forward = parse_kernel_source(
+        r#"
+spec OrderForward {
+  state { ready: Bool }
+  init { ready = false }
+  @requirement("REQ-1", "first")
+  @undecided("second")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse forward order");
+    let reverse = parse_kernel_source(
+        r#"
+spec OrderReverse {
+  state { ready: Bool }
+  init { ready = false }
+  @undecided("second")
+  @requirement("REQ-1", "first")
+  action publish() { ready = true }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse reverse order");
+
+    let forward_model = build_model(forward).expect("build forward model");
+    let reverse_model = build_model(reverse).expect("build reverse model");
+    let summarize = |model: &fsl_core::KernelModel| {
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == "publish")
+            .expect("publish action");
+        (
+            action
+                .annotations
+                .requirements()
+                .unwrap()
+                .into_iter()
+                .map(|requirement| requirement.id)
+                .collect::<Vec<_>>(),
+            action.annotations.undecided()[0].0.to_owned(),
+        )
+    };
+    assert_eq!(summarize(&forward_model), summarize(&reverse_model));
+}
+
+#[test]
+fn until_annotations_bind_to_both_generated_targets() {
+    let source = r#"
+spec UntilAnnotations {
+  state { ready: Bool, done: Bool }
+  init { ready = false done = false }
+  @requirement("REQ-U", "ready holds until done")
+  until Sequence { ready until done }
+}
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse until spec");
+    let model = build_model(kernel).expect("build checked model");
+    let trans = model
+        .transitions
+        .iter()
+        .find(|item| item.name == "Sequence_until_safety")
+        .expect("generated until safety trans");
+    assert_eq!(trans.annotations.requirements().unwrap()[0].id, "REQ-U");
+    let leadsto = model
+        .leadstos
+        .iter()
+        .find(|item| item.name == "Sequence")
+        .expect("generated until leadsTo");
+    assert_eq!(leadsto.annotations.requirements().unwrap()[0].id, "REQ-U");
+}
+
+#[test]
+fn process_transition_accepts_leading_annotations_beside_covers() {
+    let source = r#"
+requirements TransitionAnnotations {
+  process Claim {
+    stages Draft, Done
+    initial Draft
+    @requirement("REQ-A", "annotation syntax")
+    transition finish Draft -> Done by User covers REQ-C "covers clause"
+  }
+}
+verify { instances Claim = 1 }
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse transition");
+    let model = build_model(kernel).expect("build checked model");
+    let mut ids = model
+        .requirements_for(&action_target("finish"))
+        .into_iter()
+        .map(|requirement| requirement.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["REQ-A", "REQ-C"]);
+}
+
+#[test]
+fn requirement_block_annotations_fan_out_to_the_inner_action_target() {
+    let source = r#"
+requirements BlockAnnotationFanOut {
+  state { ready: Bool }
+  init { ready = false }
+  @undecided("owning team is pending")
+  requirement REQ-B "publishing is controlled" {
+    action publish() { ready = true }
+  }
+}
+"#;
+    let kernel =
+        parse_kernel_source(source, &FsResolver::new(".")).expect("parse requirement block");
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "publish")
+        .expect("publish action");
+    assert_eq!(
+        action.annotations.undecided()[0].0,
+        "owning team is pending"
+    );
+    assert_eq!(
+        model.requirements_for(&action_target("publish"))[0].id,
+        "REQ-B"
+    );
+}
+
+#[test]
+fn acceptance_and_forbidden_blocks_accept_leading_annotations() {
+    let source = r#"
+requirements TraceAnnotations {
+  state { ready: Bool }
+  init { ready = false }
+  action publish() { ready = true }
+  @undecided("acceptance owner is pending")
+  acceptance AC-1 "publication succeeds" {
+    publish()
+    expect ready == true
+  }
+  @undecided("forbidden owner is pending")
+  forbidden NEG-1 "publication cannot repeat" {
+    publish() publish()
+    expect rejected
+  }
+}
+"#;
+    let contract = requirements_trace_contract(source)
+        .expect("parse trace contract")
+        .expect("requirements trace contract");
+    assert_eq!(
+        contract.acceptance[0].annotations.undecided()[0].0,
+        "acceptance owner is pending"
+    );
+    assert_eq!(
+        contract.acceptance[0].annotations.requirements().unwrap()[0].id,
+        "AC-1"
+    );
+    assert_eq!(
+        contract.forbidden[0].annotations.undecided()[0].0,
+        "forbidden owner is pending"
+    );
+}
+
+#[test]
+fn business_policy_and_goal_accept_leading_annotations() {
+    let source = r#"
+business AnnotatedBusiness {
+  actor Reviewer
+  entity Case
+  process Case {
+    stages Open, Closed
+    initial Open
+    transition close Open -> Closed by Reviewer
+  }
+  @requirement("REQ-POLICY", "closed cases stay closed")
+  policy POL-1 "closed cases stay closed" invariant {
+    case_stage[0] == Open or case_stage[0] == Closed
+  }
+  @undecided("the target closure rate is still under discussion")
+  goal GOAL-1 "cases eventually close" some Case can reach Closed
+}
+verify { instances Case = 1 }
+"#;
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse business spec");
+    let model = build_model(kernel).expect("build checked model");
+
+    let policy = model
+        .invariants
+        .iter()
+        .find(|item| item.name == "POL-1")
+        .expect("POL-1 invariant");
+    let mut policy_ids = policy
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|requirement| requirement.id)
+        .collect::<Vec<_>>();
+    policy_ids.sort();
+    assert_eq!(policy_ids, ["POL-1", "REQ-POLICY"]);
+
+    let goal = model
+        .reachables
+        .iter()
+        .find(|item| item.name == "GOAL-1")
+        .expect("GOAL-1 reachable");
+    assert_eq!(
+        goal.annotations.undecided()[0].0,
+        "the target closure rate is still under discussion"
+    );
+}
+
+#[test]
+fn compose_sync_action_accepts_leading_annotations() {
+    struct Resolver;
+    impl FileResolver for Resolver {
+        fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+            let name = path.trim_end_matches(".fsl");
+            Ok(format!(
+                "spec {name} {{ state {{ ready: Bool }} init {{ ready = false }} action step() {{ ready = true }} }}"
+            ))
+        }
+    }
+
+    let kernel = parse_kernel_source(
+        r#"
+compose Combined {
+  use Left as left from "Left.fsl"
+  use Right as right from "Right.fsl"
+  @requirement("REQ-SYNC", "synchronized step is traceable")
+  action both() = left.step() || right.step() {}
+}
+"#,
+        &Resolver,
+    )
+    .expect("parse compose with annotated sync action");
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "both")
+        .expect("both action");
+    assert_eq!(action.annotations.requirements().unwrap()[0].id, "REQ-SYNC");
+}
+
+#[test]
+fn trace_cases_reject_the_reserved_undecided_requirement_id() {
+    for keyword in ["acceptance", "forbidden"] {
+        let expectation = if keyword == "acceptance" {
+            "expect ready == true"
+        } else {
+            "expect rejected"
+        };
+        let source = format!(
+            r#"
+requirements ReservedTraceId {{
+  state {{ ready: Bool }}
+  init {{ ready = false }}
+  action publish() {{ ready = true }}
+  {keyword} undecided "not a requirement" {{
+    publish()
+    {expectation}
+  }}
+}}
+"#
+        );
+        let error = requirements_trace_contract(&source)
+            .expect_err("reserved trace requirement ID must fail");
+        assert!(error.message.contains("reserved"));
+        assert_eq!(error.line, 6);
+    }
+}
+
+#[test]
+fn domain_command_decide_and_evolve_annotations_union_into_one_action() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    state { ready: Bool }
+    @requirement("REQ-COMMAND")
+    command Place {}
+    event Placed {}
+    @requirement("REQ-DECIDE")
+    decide Place { emits Placed }
+    @requirement("REQ-EVOLVE")
+    evolve Placed { ready = true }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated domain");
+    let model = build_model(kernel).expect("build checked model");
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.name == "order_place")
+        .expect("order_place action");
+    let mut ids = action
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["REQ-COMMAND", "REQ-DECIDE", "REQ-EVOLVE"]);
+}
+
+#[test]
+fn domain_effect_annotations_broadcast_to_complete_and_retry_actions() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    id OrderId
+    state { ready: Bool = false; }
+    command Place {
+      input order_id: OrderId
+    }
+    event Placed { order_id: OrderId }
+    event Shipped { order_id: OrderId }
+    decide Place { emits Placed }
+    evolve Placed { ready = true }
+    evolve Shipped { ready = true }
+  }
+  @requirement("REQ-EFFECT")
+  effect Ship {
+    correlation_id Placed.order_id
+    handles Placed
+    emits one_of [Shipped]
+    retry { max_attempts 3 }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated domain effect");
+    let model = build_model(kernel).expect("build checked model");
+    for name in ["ship_complete_shipped", "ship_retry"] {
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == name)
+            .unwrap_or_else(|| panic!("{name} action"));
+        assert_eq!(
+            action.annotations.requirements().unwrap()[0].id,
+            "REQ-EFFECT",
+            "action {name}"
+        );
+    }
+}
+
+#[test]
+fn domain_saga_step_annotations_broadcast_to_step_and_timeout_actions() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    state { ready: Bool }
+    command Place {}
+    event Placed {}
+    event Shipped {}
+    decide Place { emits Placed }
+    evolve Placed { ready = true }
+    evolve Shipped { ready = true }
+  }
+  saga Fulfillment {
+    starts_on Placed
+    @requirement("REQ-STEP")
+    step Notify {
+      awaits one_of [Shipped]
+      timeout after 5m emits Shipped
+    }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated saga step");
+    let model = build_model(kernel).expect("build checked model");
+    for name in ["saga_fulfillment_notify", "saga_fulfillment_notify_timeout"] {
+        let action = model
+            .actions
+            .iter()
+            .find(|action| action.name == name)
+            .unwrap_or_else(|| panic!("{name} action"));
+        assert_eq!(
+            action.annotations.requirements().unwrap()[0].id,
+            "REQ-STEP",
+            "action {name}"
+        );
+    }
+}
+
+#[test]
+fn domain_invariant_annotations_reach_the_checked_property() {
+    let kernel = parse_kernel_source(
+        r#"
+domain Orders {
+  aggregate Order {
+    state { ready: Bool }
+    @requirement("REQ-INVARIANT")
+    invariant Stable { ready == ready }
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated domain invariant");
+    let model = build_model(kernel).expect("build checked model");
+    let invariant = model
+        .invariants
+        .iter()
+        .find(|invariant| invariant.name == "Order_Stable")
+        .expect("Order_Stable invariant");
+    let mut ids = invariant
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["DOMAIN-INVARIANT", "REQ-INVARIANT"]);
+}
+
+#[test]
+fn db_migration_and_check_rule_annotations_reach_the_checked_model() {
+    let kernel = parse_kernel_source(
+        r#"
+dbsystem Orders {
+  database Db {
+    schema 0
+    table orders {
+      column status: Value present backfilled not_null;
+    }
+  }
+  @requirement("REQ-MIGRATION")
+  migration AddStatus from 0 to 1 {
+    add orders.status not_null;
+  }
+  check compatibility {
+    @requirement("REQ-RULE")
+    rule not_null_after_backfill;
+  }
+}
+"#,
+        &FsResolver::new("."),
+    )
+    .expect("parse annotated dbsystem");
+    let model = build_model(kernel).expect("build checked model");
+    let migrate = model
+        .actions
+        .iter()
+        .find(|action| action.name == "migrate_AddStatus")
+        .expect("migrate_AddStatus action");
+    let mut migrate_ids = migrate
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    migrate_ids.sort();
+    assert_eq!(migrate_ids, ["DB-MIGRATION", "REQ-MIGRATION"]);
+    let not_null_invariant = model
+        .invariants
+        .iter()
+        .find(|invariant| invariant.name.starts_with("db_not_null_after_backfill"))
+        .expect("not_null_after_backfill invariant");
+    let mut invariant_ids = not_null_invariant
+        .annotations
+        .requirements()
+        .unwrap()
+        .into_iter()
+        .map(|link| link.id)
+        .collect::<Vec<_>>();
+    invariant_ids.sort();
+    assert_eq!(invariant_ids, ["DB-NOT-NULL", "REQ-RULE"]);
+}

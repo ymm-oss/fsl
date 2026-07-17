@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: Apache-2.0
+spec ConformanceFailures {
+  type Bit = 0..1
+  state {
+    x: Bit,
+    queue: Seq<Bit, 1>,
+    counter: Int,
+    signed: Int,
+    flag: Bool
+  }
+  init {
+    x = 0
+    queue = Seq {}
+    counter = 0
+    signed = 0
+    flag = false
+  }
+
+  action bad_ensure() {
+    x = x
+    ensures x == 1
+  }
+  action break_invariant() { x = 1 }
+  action divide_zero() { x = x / 0 }
+  action index_out_of_range() { x = queue[0] }
+  action partial() { queue = queue.pop() }
+  action remainder_zero() { x = x % 0 }
+  action at_out_of_range() { x = queue.at(0) }
+  action rejected() { requires false  x = x }
+  action type_bound() { queue = queue.push(0).push(0) }
+  action regress() { counter = counter - 1 }
+  action euclid_divide() { signed = (0 - 7) / 2 }
+  action flip() { flag = not flag }
+
+  invariant Safe { x == 0 }
+  invariant BitRange { forall b: Bit { b >= 0 and b <= 1 } }
+  trans Monotone { counter >= old(counter) }
+}

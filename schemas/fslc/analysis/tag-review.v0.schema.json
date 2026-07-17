@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/analysis/tag-review.v0.schema.json",
+  "title": "fslc declaration-level tag review export v0",
+  "type": "object",
+  "required": ["fsl", "result", "analysis", "export", "schema_version", "review_contract", "declarations"],
+  "properties": {
+    "fsl": {"type": "string"},
+    "result": {"const": "analyzed"},
+    "analysis": {"const": "tag_review"},
+    "export": {"const": "tag-review"},
+    "schema_version": {"const": "tag-review.v0"},
+    "spec": {"type": "string"},
+    "review_contract": {
+      "type": "object",
+      "required": ["unit", "decision", "formal_status", "meaning_judgment"]
+    },
+    "declarations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/declaration"}
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "declaration": {
+      "type": "object",
+      "required": ["kind", "name", "node_id", "tag", "formal_definition", "formal_identifiers"],
+      "properties": {
+        "kind": {"enum": ["action", "invariant", "trans", "reachable", "leadsTo"]},
+        "name": {"type": "string"},
+        "node_id": {"type": "string"},
+        "tag": {
+          "type": "object",
+          "required": ["id", "text"]
+        },
+        "formal_definition": {"type": "object"},
+        "formal_identifiers": {"type": "array", "items": {"type": "string"}},
+        "loc": {"type": "object"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

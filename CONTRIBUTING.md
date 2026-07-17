@@ -1,85 +1,93 @@
 # Contribution Guide
 
-Contributions to FSL (`fslc`) are welcome. Bug reports, feature proposals,
-documentation improvements, and code changes are all appreciated.
+Contributions to FSL (`fslc`) are welcome. Bug reports, feature proposals, documentation improvements,
+and code changes should preserve FSL's observable language and evidence contracts.
 
-## Read These First
+## Read these first
 
-- [`README.md`](README.md) — Overview and setup
-- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) — Language reference (complete)
-- [`docs/README.md`](docs/README.md) — Map of the documentation
-- [`docs/DESIGN-*.md`](docs/) — Design decisions for each feature
-- [`docs/DOGFOOD-*.md`](docs/) — Dogfooding notes (record of bugs and findings)
+- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) — complete language contract.
+- [`docs/README.md`](docs/README.md) — documentation map.
+- [`docs/DESIGN-rust-port.md`](docs/DESIGN-rust-port.md) — authoritative implementation boundary.
+- [`docs/RUST-PORTING.md`](docs/RUST-PORTING.md) — differential and replay evidence gates.
+- Relevant `docs/DESIGN-*.md` for the surface being changed.
 
-## Development Environment
+## Implementation boundary
 
-The only dependencies are `lark` (pure Python) and `z3-solver` (prebuilt wheel).
-No C++ compiler or separate Z3 installation is required (Python 3.9+).
+The native Rust workspace under `rust/` is authoritative, including the `fslc-lsp` language server.
+The Python package under `src/fslc/` is a frozen compatibility reference. New product and language
+behavior belongs in Rust. Change Python only when an accepted compatibility requirement explicitly
+calls for it.
+
+The most important structural boundary is that `fsl-runtime` remains independent of `fsl-solver`, Z3,
+and JavaScript solver bridges. Symbolic BMC, the concrete Monitor, solver-free BFS, compatibility
+fixtures, and cross-implementation replay provide independent evidence; agreement between two paths
+that share one solver is insufficient.
+
+## Development environment
+
+Install a stable Rust toolchain with `rustfmt` and `clippy`, Node.js 22, and the pinned
+`wasm-bindgen-cli` used by CI. Python 3.9+ is optional unless changing the frozen compatibility
+reference or Python-based repository hooks:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"     # Installs lark, z3-solver, pytest and editable-installs fslc
+.venv/bin/python -m pip install -e ".[dev]"
+```
+
+Run the working-tree native CLI without relying on a globally installed `fslc`:
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check specs/cart_v1.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify specs/cart_v1.fsl --depth 8
 ```
 
 ## Testing
 
-Changes must pass the tests.
+Start with the smallest relevant package or integration test. Before submitting a product change,
+run the single required CI-equivalent gate:
 
 ```bash
-pytest -q                   # Full test suite (about 8 minutes)
-pytest tests/test_v1.py -q  # A single file
+./tools/check-native-integration.sh
 ```
 
-CI is tiered to keep pull-request feedback usable:
+Native solver changes also require focused tests for `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust`.
+Public Kernel or CLI changes require the relevant Rust envelope, schema, corpus, and bidirectional
+replay cases. See [`docs/DESIGN-rust-integration.md`](docs/DESIGN-rust-integration.md) for the contract
+inventory and explicitly optional Python surfaces.
 
-- Pull requests run the full suite once on Python 3.12.
-- Pull requests also run a compatibility smoke suite on Python 3.9-3.12:
-  `tests/test_version.py`, `tests/test_v1.py`, `tests/test_temporal.py`, and
-  `tests/test_logic_temporal_sugar.py`.
-- Pushes to `main`, scheduled runs, and manual workflow runs execute the full
-  Python 3.9-3.12 matrix.
+## Guidelines for changes
 
-The test suite cross-checks the Z3 and concrete Monitor evaluators against each
-other using witness diffs, and additionally validates against a Z3-independent
-brute-force oracle (`tests/oracle.py`) to catch misses (false negatives where
-something that is truly violated/refinement_failed is reported as
-verified/proved/refines). **Add a regression test for any change that alters
-behavior.**
+- **Language or semantics:** update Rust syntax/lowering, typed model, symbolic and concrete evaluation,
+  regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, an accepted design note, and
+  `CHANGELOG.md` together.
+- **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
+  agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and changelog.
+- **CLI/JSON contract:** preserve field meanings, ordering requirements, raw-output modes, exit codes,
+  locations, and replayable evidence. Any parity allowlist entry needs a nondeterminism rationale.
+- **Specs and examples:** run native `check`, bounded verification, induction where relevant, mutation,
+  and vacuity checks. Do not weaken an invariant to erase a real counterexample.
+- **Frozen Python reference:** do not mirror every Rust feature into Python. A Python change needs an
+  explicit compatibility reason and focused regression evidence.
+- **Generated artifacts:** never hand-edit compatibility snapshots or generated site output. Use the
+  owning generator and review the diff.
 
-## Guidelines for Changes
+Use repository-relative paths in committed text and examples. New source files require the Apache-2.0
+SPDX header used by neighboring files. Rust must remain formatted, Clippy-clean, and free of unsafe code.
 
-- **Changes to the verifier (`src/fslc/`)**: Do not break existing tests, and add
-  tests under tests/ for new behavior. If you change detectors or semantics,
-  update the corresponding `docs/DESIGN-*.md` as well.
-- **Adding a language feature**: Update grammar/model/bmc (and runtime if needed)
-  consistently, reflect the change in `docs/LANGUAGE.md` and
-  `skills/fsl/reference.md`, and leave a `docs/DESIGN-<feature>.md`.
-- **Adding or changing specs (`.fsl`)**: Run `fslc check` → `verify` →
-  `--engine induction`, and also confirm the spec is non-vacuous (`fslc mutate`
-  kill-rate, `--vacuity`). Avoid hollowing out specs (weakening invariants to
-  make them go green).
-- **Commit granularity**: One topic per commit. Add the key points to the
-  `[Unreleased]` section of `CHANGELOG.md`.
+## Commits and pull requests
 
-## License and Copyright Notice
+Use a dedicated branch/worktree for non-trivial work and preserve unrelated local changes. Keep one
+topic per commit, use a Conventional Commit-style subject, and add notable changes under
+`CHANGELOG.md` `[Unreleased]`.
 
-- This project is licensed under the **Apache License 2.0**. By submitting a pull
-  request, you agree that your contribution is provided under the same license.
-- Add an SPDX header at the top of new Python source files:
+A pull request should describe the problem, the accepted contract, implementation scope, verification
+evidence, linked issue, and any documentation or agent-skill changes. Bug reports and proposals should
+include a minimal reproducing `.fsl`, the exact command, and observed versus expected behavior.
 
-  ```python
-  # SPDX-License-Identifier: Apache-2.0
-  # Copyright <year> <your name>
-  ```
+Report security issues privately through [`SECURITY.md`](SECURITY.md), not a public issue. All
+participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
-- When making large changes to existing files, adding a copyright line is optional.
+## License
 
-## Reporting and Proposals
-
-- File bugs and proposals as GitHub Issues. Attach a minimal reproducing `.fsl`,
-  the command you ran, and observed vs. expected behavior.
-- Report security issues privately following the procedure in
-  [`SECURITY.md`](SECURITY.md) rather than as an Issue.
-
-We follow the [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+Contributions are provided under Apache-2.0. Add the repository SPDX header to new source files. When
+the file type's neighboring files carry a copyright line, follow that convention as well.

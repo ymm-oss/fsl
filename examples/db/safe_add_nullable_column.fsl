@@ -1,0 +1,38 @@
+dbsystem SafeAddNullableColumn {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column nickname: Text absent;
+    }
+  }
+
+  migration add_nickname from 0 to 1 {
+    add users.nickname nullable;
+  }
+
+  artifact server_v1 {
+    reads users.id;
+    writes users.id;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.nickname;
+    writes users.nickname;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v1 when schema 0..0;
+    supported server_v1 when schema 0..0;
+    active server_v2 when schema 1..1;
+    supported server_v2 when schema 1..1;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>エラー・終了コード — result / kind / 終了コードの読み方</title>
+<meta name="description" content="fslcのJSONエンベロープ、終了コード0-3の対応表、violation_kind・CTI・空虚性・デッドロックの読み方索引。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="errors">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">リファレンス</p>
+    <h1 class="reveal">エラー・<span class="hl">終了コード</span></h1>
+    <p class="lead reveal">「反例を読んで直す」がFSLの中核ループです。ここは<code>result</code>/<code>kind</code>/<code>violation_kind</code>の種類と、終了コードの対応表、そして各種の読み方索引です。</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">契約</p>
+    <h2 class="reveal">JSONエンベロープと終了コード</h2>
+    <p class="lead narrow reveal">すべてのコマンドは stdout に1つのJSONを出し、<code>result</code>フィールドが終了コードに対応します。この対応（<code>exit_code()</code>）は<a href="cli.ja.html">CLIリファレンス</a>にソースそのものが載っています——ここでは要点だけを表にします。</p>
+    <table class="matrix reveal">
+      <tr><th>終了コード</th><th>意味</th><th>代表的な<code>result</code></th></tr>
+      <tr><td><code>0</code></td><td>成功</td><td><code>verified</code> / <code>proved</code> / <code>refines</code> / <code>conformant</code> / <code>generated</code> / <code>typestate</code> / <code>mutated</code> / <code>explained</code> / <code>ok</code> など</td></tr>
+      <tr><td><code>1</code></td><td>検査は完走したが不成立</td><td><code>violated</code> / <code>reachable_failed</code> / <code>unknown_cti</code> / <code>nonconformant</code> / <code>refinement_failed</code> など</td></tr>
+      <tr><td><code>2</code></td><td>仕様エラー</td><td><code>result: "error"</code> かつ <code>kind</code> が <code>parse</code>/<code>name</code>/<code>type</code>/<code>semantics</code>/<code>io</code>（<code>--vacuity error</code>時の空虚性エラーもここ）</td></tr>
+      <tr><td><code>3</code></td><td>内部エラー</td><td><code>result: "error"</code> かつ <code>kind: "internal"</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">壊れた仕様で学ぶ</p>
+    <h2 class="reveal">典型的な失敗の読み方索引</h2>
+    <p class="lead narrow reveal"><code>examples/gallery/errors/</code>の壊れた仕様は、診断メッセージを読むための教材です。最初は<code>message</code>・<code>hint</code>・<code>trace</code>・<code>invariant</code>だけ読めば十分です。</p>
+    <table class="matrix reveal">
+      <tr><th>kind</th><th>ファイル</th><th>出力の見え方</th></tr>
+      <tr><td><code>parse</code></td><td><code>errors/parse_missing_expression.fsl</code></td><td><code>{"result":"error","kind":"parse","expected":"one of: ..."}</code></td></tr>
+      <tr><td><code>type</code></td><td><code>errors/type_undeclared_type.fsl</code></td><td><code>unknown type 'UserId'</code></td></tr>
+      <tr><td><code>semantics</code></td><td><code>errors/semantics_duplicate_assignment.fsl</code></td><td><code>double assignment to 'x' on the same execution path</code></td></tr>
+      <tr><td><code>vacuous</code></td><td><code>errors/vacuous_contradictory_init.fsl</code></td><td><code>init constraints are unsatisfiable</code></td></tr>
+      <tr><td><code>invariant</code></td><td><code>errors/violated_invariant_counter.fsl</code></td><td><code>{"result":"violated","violation_kind":"invariant"}</code></td></tr>
+      <tr><td><code>type_bound</code></td><td><code>errors/violated_type_bound_missing_guard.fsl</code></td><td><code>_bounds_stock</code>が破れる</td></tr>
+      <tr><td><code>ensures</code></td><td><code>errors/violated_ensures_wrong_postcondition.fsl</code></td><td>アクション名が<code>invariant</code>フィールドに現れる</td></tr>
+      <tr><td><code>partial_op</code></td><td><code>errors/violated_partial_op_unchecked_pop.fsl</code></td><td><code>guard the action with requires q.size() &gt; 0</code></td></tr>
+      <tr><td><code>leadsTo</code></td><td><code>errors/violated_leads_to_starvation.fsl</code></td><td>ループ状の反例とフェアネスのヒントが出る</td></tr>
+      <tr><td><code>deadlock</code></td><td><code>errors/violated_deadlock_terminal.fsl</code></td><td><code>--deadlock error</code>時に<code>violation_kind: "deadlock"</code></td></tr>
+      <tr><td><code>refinement_failed</code></td><td><code>errors/refinement_failed_map.fsl</code></td><td><code>abs_requires_failed</code>などの詳細化ミス種別</td></tr>
+      <tr><td><code>acceptance</code></td><td><code>errors/error_acceptance_false_expect.fsl</code></td><td>false な <code>expect</code> の失敗状態を返す</td></tr>
+    </table>
+    <p class="reveal" style="margin-top:14px">より詳しい実際のJSON抜粋は <code>examples/gallery/errors/README.md</code> にあります。ファイル自体は<a href="examples.ja.html">実例ギャラリー</a>から辿れます。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">verifiedでも読むもの</p>
+    <h2 class="reveal"><code>result</code>が成功でも見るべき場所</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>warnings</h3>
+        <p><code>verified</code>/<code>proved</code>でも<code>warnings</code>は空とは限りません。デッドロック到達可能性など、バグではないが確認すべき情報が入ります。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>completeness</h3>
+        <p><code>"bounded"</code>は「その深さまでは反例が無い」、<code>"unbounded"</code>は帰納法による無限深さの証明です。<a href="guide.ja.html">仕組みと使い方</a>で違いを詳しく説明しています。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>unknown_cti</h3>
+        <p>k帰納法が反例候補（CTI）を返す場合。到達可能かどうか未確定なので、補助不変条件を足すのが定石です——<a href="mechanism.ja.html">仕組み詳細</a>を参照。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>action_coverage</h3>
+        <p>一度も有効化されなかったアクションが無いかの診断。書いたつもりのアクションが実は到達不能、というミスを見つけられます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

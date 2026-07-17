@@ -1,16 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
-"""Stop hook: nudge if src/fslc changed without a CHANGELOG entry.
+"""Stop hook: remind when product source changed without the changelog."""
 
-Non-blocking. When a turn ends, if the working tree has changes under ``src/fslc/`` but
-``CHANGELOG.md`` is untouched, it prints a reminder — the repo convention is one bullet
-per change under ``## [Unreleased]``. Always exits 0: this nudges, it never blocks the
-stop (so it cannot loop).
-"""
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
+
+
+def needs_reminder(files: list[str]) -> bool:
+    product_changed = any(
+        path.startswith("rust/") or path.startswith("src/fslc/") for path in files
+    )
+    changelog_changed = any(path == "CHANGELOG.md" for path in files)
+    return product_changed and not changelog_changed
 
 
 def main() -> int:
@@ -18,26 +22,27 @@ def main() -> int:
         data = json.load(sys.stdin)
     except Exception:
         data = {}
-    # Avoid re-entrancy if a prior stop hook already kept the turn alive.
     if data.get("stop_hook_active"):
         return 0
-    root = data.get("cwd") or os.getcwd()
+    root = Path(
+        os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd()
+    ).resolve()
     try:
-        out = subprocess.run(
+        proc = subprocess.run(
             ["git", "status", "--porcelain"],
+            cwd=root,
             capture_output=True,
             text=True,
-            cwd=root,
-        ).stdout
-    except Exception:
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
         return 0
-    files = [line[3:].strip() for line in out.splitlines() if line.strip()]
-    touched_src = any(f.startswith("src/fslc/") for f in files)
-    touched_changelog = any(f.endswith("CHANGELOG.md") for f in files)
-    if touched_src and not touched_changelog:
+    files = [line[3:].strip() for line in proc.stdout.splitlines() if line.strip()]
+    if needs_reminder(files):
         sys.stderr.write(
-            "Reminder: src/fslc changed but CHANGELOG.md was not. "
-            "Add a bullet under ## [Unreleased] (one topic per change).\n"
+            "Reminder: product source changed but CHANGELOG.md did not. "
+            "Add a focused entry under ## [Unreleased].\n"
         )
     return 0
 

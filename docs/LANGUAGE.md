@@ -21,7 +21,7 @@ the implementation design of each feature can be reached from
 ## 1. Structure of a specification
 
 ```fsl
-spec <Name> {
+spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
   type  <Name> = <lo>..<hi>            // domain type (bounded integer)
   symmetric type <Name> = <lo>..<hi>   // domain whose values are interchangeable identities
@@ -29,8 +29,10 @@ spec <Name> {
   symmetric enum <Name> { <Member>, ... }
   struct <Name> { <field>: <scalar type | Option<scalar type>>, ... }
 
-  state { <var>: <type>, ... }
-  init  { <stmt>... }
+  def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
+
+  state { <var>: <type> [= <deterministic expr>], ... }
+  init  ["undecided: reason"] { <stmt>... }
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                     // guard. multiple allowed (conjunction)
@@ -46,6 +48,16 @@ spec <Name> {
   terminal { <expr> }                   // intended terminal states (excluded from deadlock checking)
 }
 ```
+
+The optional string after the spec name is a **spec-level tag**
+(`"<kind>: <intent>"`, e.g. `spec ReturnUI "ui: screen flow" { … }`). Like the
+per-declaration tags, it is **metadata only** — never verified — and is surfaced by
+`fslc explain` / `fslc html` as a classification badge next to the spec name (JSON:
+`skeleton.spec_kind = {id, text}`). Use it to record what kind of thing the whole
+spec is (e.g. `ui` for a screen-flow spec that models only the behavioral slice);
+it carries no kernel semantics and desugars to nothing. See `docs/DESIGN-ui.md`.
+Internally this legacy badge is adapted to the shared typed `Kind` annotation;
+the source grammar remains unchanged. See `DESIGN-annotations.md`.
 
 Any layer — including a kernel `spec` — may declare identity/number sorts whose
 finite sizes come from a sibling top-level `verify` block instead of an inline
@@ -77,6 +89,212 @@ verify {
 are exactly equivalent to writing the bounded type directly — the difference is
 only readability (a design spec reads as documentation instead of asserting a
 domain size that is really a model bound). See `docs/DESIGN-spec-domains.md`.
+
+The database compatibility dialect is another frontend over the same kernel:
+
+```fsl
+dbsystem <Name> {
+  database <db> {
+    schema <initial_version>
+    table <table> {
+      column <column>: <db_type> present backfilled not_null;
+      column <future_column>: <db_type> absent;
+    }
+  }
+
+  migration <name> from <v0> to <v1> [rollbackable] {
+    add <table>.<column> nullable;
+    backfill <table>.<column>;
+    set_not_null <table>.<column>;
+    rename <table>.<old> to <table>.<new>;
+    split <table>.<source> into <table>.<a>, <table>.<b> lossless|lossy|irreversible;
+    merge <table>.<a>, <table>.<b> into <table>.<target> lossless|lossy|irreversible;
+    drop <table>.<column> destructive|irreversible;
+  }
+
+  artifact <version> {
+    reads <table>.<column>, ...;
+    writes <table>.<column>, ...;
+    requires <capability_namespace>.<capability>, ...;
+    provides <capability_namespace>.<capability>, ...;
+    calls api.<operation>, ...;
+    accepts api.<operation>, ...;
+    expects response.<field>, ...;
+    responds response.<field>, ...;
+    emits_offline api.<operation> ttl <finite_ticks>;
+  }
+
+  environment <env> {
+    schema <lo>..<hi>;
+    flag <flag_name> { <variant>, ... } default <variant>;
+    active <version> when schema <lo>..<hi> when flag <flag_name>=<variant>;
+    supported <version> when schema <lo>..<hi>;
+    may_exist <version> when schema <lo>..<hi>;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
+    rule data_preserved;
+    rule rollback_equivalent;
+  }
+}
+```
+
+`dbsystem` expands to a kernel spec with scalar state and `Map<Column, Bool>`
+column lifecycle maps. It never uses nested `Map<_, Set<_>>` state. `fslc check`
+and `fslc verify` work on it after expansion; `fslc db check` additionally emits
+stable fsl-db findings and returns `verified_under_assumptions` for successful
+formal checks. Environment schema ranges are finite reachable snapshots in the
+declared migration order; rollout percentages and offline TTLs must be modeled as
+finite coexistence windows/ticks. API/offline and bounded preservation/rollback
+checks are dialect-level compatibility checks. Feature flags are finite declared
+variants inside an environment and add `DB-ASSUME-FINITE-FLAG-STATE`; they do
+not prove rollout percentages. Generic `requires` / `provides` capabilities
+cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
+other artifact profiles in the same snapshot model. See `docs/DESIGN-db.md`.
+
+Functional DDD / async effect dialect (v0; expands to the same kernel and
+reports stable fsl-domain findings):
+
+```fsl
+domain <Name> {
+  implementation_profile functional_ddd
+
+  enum OrderStatus { Pending, Approved, Cancelled }
+
+  aggregate Order {
+    id OrderId
+    state { status: OrderStatus = Pending; }
+
+    command ApproveOrder {}
+    event OrderApproved {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    error CannotApprove
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+    evolve PaymentCaptureRequested { }
+    evolve PaymentCaptured { }
+    evolve PaymentFailed { }
+    evolve PaymentCaptureTimedOut { }
+
+    invariant noLateApprove {
+      status == Cancelled -> not can(ApproveOrder)
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry { max_attempts 3 }
+    timeout after 10m emits PaymentCaptureTimedOut
+    compensation { emits PaymentFailed }
+  }
+
+  saga OrderFulfillment {
+    starts_on OrderApproved
+    outbox OrderOutbox
+    inbox FulfillmentInbox
+
+    step RequestPayment {
+      async
+      emits PaymentCaptureRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+      timeout after 10m emits PaymentCaptureTimedOut
+    }
+  }
+}
+```
+
+`domain` models aggregate consistency boundaries, command intent, accepted
+events, domain errors, pure `decide`/`evolve`, async effect lifecycles, and
+saga/process-manager coordination. It lowers each command+decide+evolve path to
+a kernel `action`, aggregate state to prefixed kernel state, saga steps to
+event-flag guarded actions, and effect lifecycle state to finite
+`Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Domain
+enum members are namespaced during lowering, so two domain enums may both contain
+`Pending`. Domain expressions may use `X in [A, B]` and `can(Command)`; these are
+resolved from the typed domain tree and lowered structurally to kernel
+expressions. Bare enum members use the expected logical type; an untyped member
+shared by multiple enums is an error. Finite membership becomes an equality
+disjunction (`X in []` is `false`). `can(Command)` resolves within the current
+aggregate and becomes the conjunction of the command's `requires` clauses and
+the negation of each rejection condition. Unknown symbols, cross-aggregate
+commands, type mismatches, and unsupported calls are reported at the original
+domain expression.
+
+Domain declarations use `enum Name { Member, ... }` for finite variants and
+`type Name = lo..hi` for bounded numeric ranges. The legacy spelling
+`type Name = A | B` remains accepted in the current 2.x edition and produces the
+stable `deprecated_domain_enum_union` warning over the complete declaration,
+including a canonical replacement. `fslc check`, `fslc verify`, and
+`fslc domain check` accept `--edition current|next`; `next` rejects the legacy
+union spelling. `fslc lint` reports the edition finding without mutation, and
+`fslc migrate --edition next` supplies the checked canonical edit. Empty enums
+and duplicate members are errors, reported at the declaration and duplicate
+member respectively.
+
+The native Rust frontend also retains a private origin chain for domain state,
+actions, guards, statements, and properties. Verification, counterexample, and
+`explain` diagnostics use the original domain declaration as their primary
+display name and keep generated Kernel names as machine detail. The chain
+records source file/full span, declaration path, lowering steps,
+primary/secondary sources, and explicit generated-only nodes. Requirement IDs
+remain an independent traceability relation. Public Kernel v1 output is
+unchanged. Opt-in Public Kernel v2 publishes the chain as a top-level provenance
+graph with portable source identities, exact byte/line coordinates,
+target bindings, source-node reverse lookup, and explicit assurance/completeness.
+
+When a domain aggregate state field omits its initializer, the current edition
+preserves the established Bool `false`, enum first-member, range lower-bound, or
+external-placeholder `0` choice and emits `implicit_initial_value`. The warning
+contains the selected value, reason, current/next severity, field span, and a
+machine-applicable explicit-initializer insertion. The next edition requires the
+initializer to be explicit.
+
+Use `fslc domain check` for stable fsl-domain findings and the nested kernel
+result (`verified_under_assumptions` on success), `fslc domain analyze` for the
+aggregate/effect summary, `fslc domain expand` to inspect a generated kernel FSL
+debug view,
+`fslc domain generate --target typescript|python|kotlin|swift|rust` for
+Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
+scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
+event / effect evidence. The v0 implementation proves the finite modeled
+lifecycle; replay is observation evidence and saga history adds
+`DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`.
+The native scaffold emitters consume checked Public Kernel v1 JSON plus the
+versioned `domain-scaffold-metadata.v1` compatibility bridge; they do not
+receive the private domain AST or reparse source expressions. Kernel/metadata
+version and dialect mismatches, duplicate Kernel members, and missing lowered
+type/state/action counterparts fail closed. Source expressions and effect/saga
+topology remain authoritative in the companion because Public Kernel v1 does
+not encode them. All five target outputs are locked to pre-migration goldens,
+and the valid domain corpus is generated for every target.
+It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
+production exactly-once semantics. See `docs/DESIGN-domain.md` and
+`docs/DESIGN-effect.md`.
 
 `fslc verify` can override a `verify` block's `instances`/`values` bounds from
 the command line, without editing the spec:
@@ -118,6 +336,8 @@ written against the original `verify { instances Case = N }` bound.
 
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
+Fairness applies to a whole action instance. To model fairness only under a
+condition, split that condition into a separately guarded `fair action`.
 
 **Action parameter types** (`<p>: <type name>`): a domain type, enum, or the
 builtin `Bool` — anything BMC can enumerate. `Bool` behaves exactly like a
@@ -134,6 +354,11 @@ two-state safety (the pre-transition state can be referenced with `old()`), and
 boundedly. With `--engine induction` and `decreases <int expr>`, a `leadsTo` can
 be proved unbounded by a well-founded ranking argument.
 
+FSL verifies finite transition systems; it does not declare higher-order axioms
+over the refinement relation itself. Laws such as refinement reflexivity or
+transitivity are checked through concrete refinement chains or finite state-machine
+models, not quantified as algebraic axioms.
+
 Response properties inside a `leadsTo` block:
 
 ```fsl
@@ -141,6 +366,7 @@ leadsTo <Name> {
   <expr> ~> <expr>                      // once P holds (including the same instant), Q eventually holds
   <expr> ~> within K <expr>             // Q must hold within K steps after P
   forall x: T { <expr> ~> <expr> }      // checked independently per binding (only an outer forall may nest)
+  helpful <action>(<binding expr>, ...)  // optional; per-binding progress action for ranked induction
   decreases <int expr>                  // optional; induction-only ranking measure
 }
 ```
@@ -151,10 +377,34 @@ constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under
 `fslc verify --engine induction`, the verifier proves the ranked response by
 checking, under the proved invariants, that whenever `P` is pending and `Q` is
-false: the measure is non-negative; some action is enabled; and every enabled
-action either makes `Q` true or keeps `P` true while strictly decreasing the
-measure. Ranked proof success is independent of `--depth`; `--depth` is still
-used for the base BMC check and reachable/coverage evidence.
+false: the measure is non-negative; progress is possible; and the enabled-action
+discipline is satisfied. Without `helpful`, every enabled action must either make
+`Q` true or keep `P` true while strictly decreasing the measure. With one or more
+`helpful action(args...)` lines, only the matching helpful action instance must
+strictly decrease the measure when it fires; unrelated action instances must
+keep the pending obligation true (unless they make `Q` true) and must not
+increase the measure -- an unbounded increase between helpful firings could
+outpace the guaranteed decrease and prevent `Q` from ever being reached, even
+though the helpful action keeps firing under fairness. The matching
+helpful action must be a lower-layer `fair action` and must be enabled whenever
+the obligation is pending. `helpful` is metadata for the ranked proof: it does
+not create a fairness assumption. Ranked proof success is independent of
+`--depth`; `--depth` is still used for the base BMC check and
+reachable/coverage evidence.
+
+**With two or more distinct `helpful` action names**, each instance's
+enabledness must not flicker: once a helpful instance becomes enabled while
+the obligation is pending, it must stay enabled until it fires (or `Q` holds).
+"Some helpful match is enabled at every pending state" is not enough on its
+own -- if *which* instance is enabled keeps changing (e.g. two helpful
+actions enabled on alternating conditions), no single instance is ever
+*continuously* enabled, so its `fair` declaration never actually obligates it
+to run, and the leadsTo can be genuinely false even though the disjunctive
+enabledness check passes. This is reported as
+`rank_failure:"helpful_action_enabledness_not_sticky"`. The common single
+per-binding `helpful step(c)` idiom above is unaffected: with one helpful
+action, "always enabled while pending" already implies it is continuously
+enabled.
 
 **Placement.** `decreases` is a sibling of the response body inside the
 `leadsTo` block, *outside* any `forall` wrapper — never nested inside the
@@ -174,19 +424,28 @@ leadsTo Responds {
 }
 ```
 
-**Per-entity measures fail under interleaving.** The ranking discipline
-above applies to *every* enabled action, not just the one that resolves the
-pending binding. A measure that mentions only the bound entity, e.g.
-`decreases level[c]` inside `forall c: Case { level[c] > 0 ~> level[c] == 0 }`,
-therefore always fails: an action that advances a *different* entity (say
-`step(c=1)` while the pending binding is `c=0`) leaves `level[c=0]`
-unchanged, and the discipline requires every enabled action to strictly
-decrease the measure. The verifier reports this as
-`rank_failure: "non_decreasing_action"`, with the CTI's `last_action`
-showing the other entity's binding — this is by design, not a bug. Proving
-per-entity liveness under interleaving needs a fairness-aware discipline
-(only the binding's own "helpful" action must decrease); that is not
-implemented and is tracked separately (issue #72).
+**Per-entity measures under interleaving need `helpful`.** A measure that
+mentions only the bound entity, e.g. `decreases level[c]` inside
+`forall c: Case { level[c] > 0 ~> level[c] == 0 }`, is not enough by itself:
+an action that advances a different entity can leave `level[c]` unchanged. Add
+the per-binding progress action:
+
+```fsl
+leadsTo Responds {
+  forall c: Case { level[c] > 0 ~> level[c] == 0 }
+  helpful step(c)
+  decreases level[c]
+}
+```
+
+With this form, `step(c)` must be declared `fair action`, must be enabled in
+every pending state for that binding, and must strictly decrease `level[c]`
+when it fires. Other interleavings may preserve the pending obligation
+without decreasing this per-entity measure, but must not increase it.
+Diagnostics distinguish `progress_action_not_fair`,
+`helpful_action_not_enabled`, `non_decreasing_helpful_action`,
+`non_helpful_action_increases_measure`, `pending_not_preserved`, and (with
+two or more helpful actions) `helpful_action_enabledness_not_sticky`.
 
 **Working idiom: a global sum measure.** Sum the tracked quantity across the
 domain with the built-in `sum()` aggregate (§3): `decreases sum(k: Case of
@@ -196,13 +455,10 @@ unchanged whether `Case` is sized via `verify { instances Case = N }` or
 shrunk with a CLI `--instances` override. Because every fair `step` decrements
 exactly one `level[k]`, every enabled action strictly decreases the total, so
 induction returns `"proved"` with `"completeness": "unbounded"`. This idiom
-only covers designs where *every* enabled action decreases the total; a
-design where some enabled action advances the domain without shrinking the
-sum is still an open case, needing the fairness-aware "helpful action"
-discipline from issue #72 above. (Conditional expressions can't substitute
-for a per-branch measure either: `if/then/else` is legal only in
-refinement-mapping expressions (§10), not in the general expression grammar
-that `decreases` draws from.)
+only covers designs where *every* enabled action decreases the total. For
+per-entity progress under interleaving, prefer the `helpful` form above.
+(A conditional measure can select between integer expressions, but it does not
+by itself prove the per-entity decrease required by the `helpful` form.)
 
 ## 2. Types
 
@@ -211,6 +467,7 @@ that `decreases` draws from.)
 | `Int` / `Bool` | `count: Int` | Unbounded integer / boolean |
 | Domain type | `type Qty = 0..5` | Bounded integer. **The range is checked automatically** (§6) |
 | Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
+| Inline state initializer | `state { qty: Qty = 0 }` | Deterministic sugar for the equivalent root assignment in `init` |
 | Entity kind | `entity Claim` / `process Claim ...` | Finite identity sort. Allowed in any layer incl. kernel `spec`; size set by `verify { instances Claim = N }`; desugars to `type Claim = 0..N-1` |
 | Number kind | `number Amount` | Finite numeric sort. Allowed in any layer incl. kernel `spec`; range set by `verify { values Amount = lo..hi }`; desugars to `type` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
@@ -219,15 +476,27 @@ that `decreases` draws from.)
 | `Map<K, V>` | `stock: Map<ItemId, Qty>` | K is recommended to be a bounded scalar (domain type / enum / Bool) |
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
+| `relation A -> B` | `delegates: relation User -> User` | A bounded binary relation over bounded scalar endpoints |
 
 **Scalar** = Int / Bool / domain type / enum. In a `state` declaration,
 `x: lo..hi` is accepted as an anonymous domain type and is equivalent to
 declaring `type X = lo..hi` and writing `x: X`.
 
+A Kernel state field may use `name: Type = expr` for a simple deterministic
+initial value. It is normalized to an ordinary root assignment before checking,
+so Monitor, explicit exploration, BMC, induction, and Public Kernel v1 observe
+the same semantics as an equivalent `init` block. The expression may use
+constants, enum members, constructors, `none`, and deterministic collection
+literals, but it must not read any state root or another initializer. Indexed,
+field, conditional-statement, quantified, relational, and bulk initialization
+remain in `init`. Assigning the same root both inline and in `init` is a semantic
+error that reports both source locations. See
+[`DESIGN-initialization.md`](DESIGN-initialization.md).
+
 **Types legal as state variables** (anything else is rejected by `check` as a type error):
 scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 | `Map<bounded scalar, scalar | Option<scalar> | struct>`
-| `Set<bounded scalar>` | `Seq<scalar, N>`
+| `Set<bounded scalar>` | `Seq<scalar, N>` | `relation bounded-scalar -> bounded-scalar`
 
 - Nesting structs, Set/Map/Seq inside a struct field,
   `Option<Option<...>>`, and `Option<Set/Map/Seq/struct>` are not allowed
@@ -243,26 +512,63 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 
 ## 3. Expressions
 
+Named predicates factor repeated or business-significant expressions:
+
+```fsl
+def eligible(c: Claim) = submitted[c] and amount[c] <= AUTO_LIMIT
+invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
+```
+
+Calls must name a `def` in the same source file and match its arity. Definitions
+may call earlier or later definitions but cannot be directly or mutually
+recursive. They are expanded before semantic checking; the verifier and
+runtime see the same kernel expression as hand expansion. Expansion rejects
+variable capture instead of inventing internal binder names. See
+[`DESIGN-def.md`](DESIGN-def.md).
+
 - Arithmetic: `+ - * / %`, unary `-`, `min(a, b)` / `max(a, b)` / `abs(a)`
   (since `a//b` would turn everything after `//` into a comment, write division
   as `a / b` with whitespace)
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
-- Quantification (bounded): `forall x: T { expr }` / `exists x: T { expr }` (can be filtered with `where expr`),
-  the v0 form `forall i in lo..hi: expr` is also allowed. Expression quantifiers
-  can also range over a Set or Seq value: `forall x in active { ... }` /
-  `exists x in queue { ... }`; for Seq this ranges over the live prefix values.
-- Aggregation: `count(x: T where expr)`, `sum(x: T of expr [where expr])`
-- Cardinality predicates: `unique(x: T where expr)` / `exactlyOne(x: T where expr)`;
-  `x in set_or_seq [where expr]` is also allowed. `unique` means at most one
-  matching binding, while `exactlyOne` means exactly one.
-- Option: `x == none` / `x != none` / `x is some(v)` (v is bound within that expression).
-  **`x == some(e)` is a type error** — extract with `x is some(v)` and compare
+- Conditional: `if condition then when_true else when_false`. The condition is
+  `Bool`; both branches are checked and must have the same logical type. It is
+  available anywhere an expression is accepted, including guards, assignments,
+  properties, function arguments, ranking expressions, constants, and
+  refinement mappings. Conditional expressions associate to the right and each
+  branch extends to the enclosing delimiter; use parentheses when a following
+  operator should apply to the whole conditional. Concrete evaluation executes
+  only the selected branch, while name and type checking always visits both.
+- Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each optionally
+  followed by `where predicate`. The predicate is `Bool` and is scoped after
+  `x` is bound. Maps and unbounded collections are not binder domains.
+- Quantification (bounded): the canonical forms are `forall binder { expr }`
+  and `exists binder { expr }`. The 2.x legacy colon/no-braces spelling such as
+  `forall i in lo..hi: expr` remains accepted but is non-canonical. A Seq binder
+  visits its live prefix in position order and preserves duplicate values.
+- Aggregation: `count(binder)` and `sum(binder of value)`. Examples include
+  `count(x: T where p)`, `count(x in queue where p)`,
+  `sum(x in queue of x.amount where p)`, and range equivalents. Empty domains
+  produce `0`; Seq duplicates contribute once per live position, while Set
+  membership contributes once per distinct member.
+- Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
+  means at most one matching binding, while `exactlyOne` means exactly one.
+- Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
+  Equality is structural: `none` equals only `none`, while two `some` values are
+  equal exactly when their payloads are equal. `x is some(v)` remains the form
+  that binds `v`; equality never introduces a binding. The binding is available
+  only in the logical continuation where the match is true, such as the
+  right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
+  not a global binding. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
 - Seq: `Seq {}` / `Seq { 1, 2 }`, `.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`, `==` is equality of length and all elements
+- Relation: `r.contains(a, b)`, `r.add(a, b)`, `r.remove(a, b)`,
+  `reachable(r, a, b)`, `acyclic(r)`, `functional(r)`, `injective(r)`,
+  `domain(r)`, `range(r)`. `reachable` and `acyclic` require a self-relation
+  (`relation T -> T`); endpoint type/arity errors include repair hints.
 - Inside ensures / trans only: read the pre-transition state with `old(expr)`
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
   optional `within K` before Q for a bounded deadline, and optional
@@ -282,7 +588,8 @@ variable.
 ## 4. Statements (init / action bodies)
 
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
-- Updating a Set/Seq uses the **reassignment idiom**: `s = s.add(x)`, `q = q.pop()`
+- Updating a Set/Seq/relation uses the **reassignment idiom**:
+  `s = s.add(x)`, `q = q.pop()`, `r = r.add(a, b)`
 - `if expr { stmt... } else { stmt... }` is allowed in both `init` and action bodies
   (can be nested with an if inside the else)
 - `forall x: T { stmt... }` (bulk initialization / bulk update)
@@ -302,7 +609,11 @@ variable.
 - For `Map<K, Struct>` values, field writes are tracked per field. Updating two
   different fields of the same element in one action, such as `m[k].f1 = 1`
   followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same
-  path is a semantics error.
+  path is a semantics error. Indexed writes are rejected unless their indices
+  are provably distinct constants; guards such as `requires k != j` and local
+  constant bindings do not establish distinctness. The checked Kernel model rejects it before any
+  verifier backend runs, so native `check`/`verify` and the browser Worker
+  return the same `kind:"semantics"` classification.
 
   ```fsl
   type K = 0..1
@@ -318,8 +629,8 @@ variable.
   Observed result: `fslc check struct_fields_ok.fsl` returned `result:"ok"`,
   and `fslc verify struct_fields_ok.fsl --depth 1` returned
   `result:"verified"`. Changing the action to assign `m[k].f1` twice returned
-  `result:"error"`, `kind:"semantics"` from `fslc verify`, with message
-  `double assignment to 'm' field 'f1' on the same path`.
+  `result:"error"`, `kind:"semantics"` from both `fslc check` and
+  `fslc verify`.
 - **requires**: enabled only when all hold.
 - **ensures**: checked in the post-transition state. A violation is
   `violation_kind: "ensures"`.
@@ -336,7 +647,7 @@ variable.
 | action coverage | Each action is enabled at least once within depth K | diagnosis of the blocking requires in `action_coverage` |
 | Deadlock | Reaching a state where all actions become disabled | warning (`violated` with `--deadlock error`) |
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |
-| leadsTo | A P ~> Q violation via a lasso up to depth K or via deadlock stagnation | `violated` / `leadsTo` / `bindings` + trace |
+| leadsTo | A P ~> Q violation via a missed `within` deadline, a lasso up to depth K, or deadlock stagnation (deadline misses and stagnation are detected as soon as `--depth` reaches the deadline/stalling step, and at every larger depth after that, not only when it lands exactly on that step) | `violated` / `leadsTo` / `bindings` + trace |
 
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.
@@ -348,11 +659,11 @@ variable.
   states**, `terminal` lets you select **which stops are intentional**.
   Example: `terminal { status == Done or status == Failed }`.
   - **requirements**: `terminal { }` is a `requirements_item` and passes
-    through unchanged to the kernel spec (§13.2). Inside a spec that uses
-    `process E { ... }`, write the predicate against the synthesized stage
-    map — the lowercased process/entity name + `_stage` (e.g. `process Claim`
-    → `claim_stage`), so `terminal { forall c: Claim { claim_stage[c] ==
-    Approved or claim_stage[c] == Rejected } }`.
+    through to the kernel spec (§13.2). Inside a spec that uses `process E {
+    ... }`, use the source-level accessor, for example `terminal { forall c:
+    Claim { stage(c) == Approved or stage(c) == Rejected } }`. It resolves from
+    `c`'s entity type and lowers to the generated stage map; the generated
+    `claim_stage` name is not part of requirements source syntax.
   - **business**: no `terminal` syntax exists at all — it is derived
     automatically from each process's sink stages (stages with no outgoing
     `transition`); see §13.3.
@@ -364,25 +675,103 @@ variable.
 ## 7. The verifier `fslc`
 
 ```
-fslc check     <file.fsl>                        # syntax / names / types only (fast)
-fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc check     <file.fsl|file.md>                  # syntax / names / types only (fast; .md = literate FSL)
+fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
+fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
+fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
+fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
+fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
+               [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
+               [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
+               [--engine auto]                   # explicit first, transparent fallback to bmc when
+                                                 #   explicit can't decide (leadsTo, nondeterministic init,
+                                                 #   unknown_budget); "engine"/"engine_fallback" in the result
+               [--lemma "<expr>"]...             # independently prove auxiliary candidates,
+                                                 # then retry CTIs with proved lemmas only
+               [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
                [--property <Name>]               # check one named property in isolation —
                                                  #   invariant / trans / leadsTo / reachable (for probing)
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
-fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
-fslc replay    <file.fsl> --trace <events.json>  # conformance check of an event log (§12)
+fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
+                                                 # opt-in scope sweep over bounded verification
+fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test scaffold JSON
+fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
+fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
+                                                 # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
+fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
+               [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
+                                                 # bounded semantic change analysis
+fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
+                                                 # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]  # spec mutation (§15)
+fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
+               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
+fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
+fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
+fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
+fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
+fslc domain expand <file.fsl> [-o out.fsl]                      # generated kernel FSL
+fslc domain generate <file.fsl> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain testgen <file.fsl> [--target vitest] [-o out]       # domain adapter/conformance scaffold
+fslc domain replay <file.fsl> --logs events.jsonl              # domain runtime replay evidence
+fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
+fslc db observe <file.fsl> --trace events.json                  # runtime observation evidence
+fslc db import <file.sql> [--name Name] [-o out.fsl]            # minimal SQL DDL -> dbsystem
+fslc ai check <file.fsl> [--depth K] [--engine bmc|induction]   # ai_component hard-contract findings (§13.6)
+fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime event replay evidence
 ```
+
+Edition lint findings use the stable taxonomies `deprecated`,
+`non_canonical`, `ambiguous_intent`, and `unsupported_in_edition`. Migration
+handles legacy domain enums/operators, declaration string metadata, colon
+quantifiers, unambiguous local inline action mappings, and implicit defaults.
+It refuses source/comment movement that cannot be proven safe. `&&` remains an
+invalid token and is therefore reported with an `and` suggestion but is never
+machine-applied. See `docs/DESIGN-migration.md` for atomicity and bulk-update
+steps.
+
+The native Rust-only `kernel` command runs after dialect lowering and semantic
+checking. Its versioned JSON contains structural types for every expression,
+source spans, requirement/lowering origin, simultaneous-update semantics, and
+explicit partial-operation failure conditions; an external compiler never needs
+the Python AST or an FSL expression parser. `conformance` emits bounded concrete
+success, disabled, and rollback-failure vectors under the companion schema.
+Nested options use tagged `none`/`some` objects so no reachable states collapse.
+Public Kernel v1 explicitly rejects `compose` export because current lowering
+does not retain truthful per-component filenames; direct and other lowered
+dialects remain supported.
+Compatibility rules, schemas, fixtures, and Rust API entry points are specified
+in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md). Public Kernel v2 is
+opt-in and specified by
+[`DESIGN-kernel-origin-v2.md`](DESIGN-kernel-origin-v2.md); it replaces the lossy
+v1 origin object with target references into a queryable provenance graph. Its
+`completeness` field must be checked before relying on source coverage.
+
+`verify --from-state state.json` replaces the declared `init` for one bounded
+run and asks what can happen from that complete current state. The JSON shape is
+exactly `Monitor.state` / replay logical state: all variables and Map keys are
+required, enums are member names, Option is value or `null`, Set/Seq are arrays,
+and relation is an array of pairs. Missing/extra/type-invalid values are rejected
+before solving. Snapshot runs bypass the verdict cache, disable symmetry
+reduction (the identities are concrete), and reject `--engine induction`.
+Results add `initial_state.source:"snapshot"` and
+`faithfulness:{scope:"bounded_from_snapshot",spec_init:"not_used",induction:"not_applicable"}`
+so bounded `verified` cannot be mistaken for verification from the spec init.
+See `DESIGN-from-state.md`.
 
 In addition to `reachable` and action coverage, `scenarios` outputs, for each
 `leadsTo P ~> Q`, a `respond_<Name>[_<binding>]` scenario. Each scenario has
@@ -399,24 +788,132 @@ from the run and from checked-property outputs (`invariants_checked`,
 `transitions_checked`, `leads_to`, and `reachables`). When `--property` and
 `--exclude-property` name the same property, exclusion wins.
 
+`verify --engine induction --lemma "EXPR"` accepts repeatable auxiliary
+invariant candidates for an `unknown_cti` repair loop. Each expression is first
+proved independently against the original init/actions and implicit type
+bounds, without assuming the original user invariants. A false candidate is
+`rejected` with its reachable counterexample; a non-inductive candidate is
+rejected with its own CTI; invalid candidates carry a parse/type error. Only
+candidates whose independent result is `proved` may enter the original proof.
+The verifier evaluates those candidates on each target CTI, adds the first one
+that is actually false on that CTI, and retries. JSON fields `lemmas` and
+`lemma_cti_exclusions` record adjudication and the exact CTI/violated steps.
+When the target reaches `proved`, `auxiliary_invariant_recommendation` emits the
+declarations to persist in the source; the command never rewrites the file.
+There is no unverified-assumption mode. `--lemma` with the BMC engine is a usage
+error. Candidate text/order is part of the verification cache key.
+
+`sweep` is an opt-in wrapper around `verify`; it does not change normal
+verification. It evaluates a deterministic grid of `--instances NAME=lo..hi`,
+`--values NAME=lo..hi`, and `--depth lo..hi` overrides, records each underlying
+verification result under `sweep.results`, and returns the first failing scope
+under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
+bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
+passing sweep means "no counterexample in this grid", not an unbounded proof.
+
+`diff` compares state-machine meaning instead of source text. It runs bounded
+refinement in both directions: NEW→OLD failure is `behavior_added`, while
+OLD→NEW failure is `behavior_removed`. It separately checks implication between
+the conjunctions of user invariants (`invariant_weakened` /
+`invariant_strengthened`) and replays OLD `forbidden` scenarios against NEW
+(`forbidden_relaxed`). Directional failures include counterexample witnesses.
+Same-named compatible state/actions are mapped automatically; name mismatches
+are `unknown` unless `--mapping` supplies that direction. An arbitrary mapping
+is never inverted automatically.
+
+The JSON result is `semantic_diff` with `bounded`, `scope`, `directions`,
+`summary`, `findings`, and `gate`. A changed `verify { instances/values }`
+scope is reported as `scope_changed`, and shared OLD bounds are rebuilt under
+the NEW scope recorded by `scope.comparison:"new"` and
+`scope.applied_to_old`. With no findings, `summary` is
+`["no_semantic_change"]`. Findings are analysis output and therefore exit 0 by
+default. Only findings explicitly listed by comma-separated `--forbid` make
+the gate fail and exit 1. All comparisons remain bounded to `--depth`; clean
+output is not an unbounded equivalence proof.
+
+`diff --git BASE..HEAD [spec.fsl]` is the VCS/CI adapter. It resolves and
+records both full commit hashes, materializes both complete tracked trees, and
+then invokes the same two-path comparison. This makes relative imports resolve
+from their own revision. Omitting the spec compares every changed `.fsl` path
+and returns `semantic_diff_batch`; supplying one spec preserves
+`semantic_diff`. Both forms include `vcs.materialization:
+"git_archive_full_tree"`. The ordinary two-path form never invokes Git and
+works outside a repository.
+
+`approval create` binds a reviewed `ledger`, `html`, or `scenarios` artifact to
+the fully lowered, location-insensitive kernel digest and the current clean Git
+commit. The versioned JSON sidecar also records the normalized artifact digest,
+generator/version/options, approved requirement IDs, approver, and UTC time.
+Creation regenerates the artifact and rejects a stale review file. `approval
+check` returns `approved` only while the spec, rendering, and renderer bindings
+all match; otherwise it returns `drifted` with `spec_changed`,
+`rendering_changed`, and/or `renderer_changed`. `ledger --approval` adds the
+same status per requirement and includes the full baseline digest. `approval
+diff` materializes the approved commit and invokes the ordinary bounded semantic
+diff against the current working file. See `docs/DESIGN-approval.md`.
+
+Without `--signing-key`, `approval create` emits the unchanged unsigned
+`fslc.approval.v1` record. With an Ed25519 PKCS#8 PEM signing key it emits
+`fslc.approval.v2`; every check, diff, or ledger use of that record requires the
+matching SPKI PEM `--trust-key`. The v2 detached signature covers the full
+canonical record, and a cryptographic mismatch is `signature-invalid` rather
+than an approval. Trust-key possession authenticates a signer but authorization
+remains an organizational policy. The exact canonicalization and key formats
+are specified in `docs/DESIGN-approval.md`.
+
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / typestate,
-`1` = violated / reachable_failed / unknown_cti / nonconformant / refinement_failed,
+mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+typestate / sweep_passed / observed_conformant /
+imported / imported_with_warnings,
+`1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
+refinement_failed / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`), `3` = internal error.
+`--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
+result; `imported`/`imported_with_warnings` is `fslc db import`'s.
 
 ### Kinds of result
 
 | result | Meaning | Next move |
 |---|---|---|
 | `verified` | No violation up to depth K (+ all reachable satisfied); `completeness:"bounded"` | To raise confidence, use `--engine induction` |
-| `proved` | **The invariant holds in all executions** (unbounded depth); `completeness:"unbounded"` | Done |
+| `proved` | **The invariant holds in all executions** (unbounded depth); `completeness:"unbounded"`. From `--engine induction`, or from `--engine explicit` when exploration closes (`closure:true`) | Done |
 | `violated` | A counterexample exists. Comes with `violation_kind` and the shortest trace | Read the trace and fix the spec |
 | `reachable_failed` | reachable not reached within depth K | Read each `unreached[].classification`: raise `--depth` for `insufficient_depth`, or fix the blocking constraint for `over_constrained` |
-| `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8) |
+| `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
+| `unknown_budget` | `--engine explicit` exceeded `--explicit-budget` before closing | Raise the budget, or use `--engine bmc`/`induction` for this spec |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
+`--engine auto` composes explicit and bmc: it tries explicit first (faster,
+and can reach `proved`+`closure:true`) and falls back transparently to bmc
+when explicit cannot decide the spec on its own — an unsupported feature
+(`leadsTo`, nondeterministic/partial init) or `unknown_budget`. Every result
+carries `engine: "explicit"` or `engine: "bmc"` naming whichever engine
+actually decided it; a fallback additionally carries
+`engine_fallback: {from: "explicit", reason: "...", kind: "unsupported"|"budget"}`
+so a caller can tell a bounded bmc verdict from an unbounded explicit one
+without re-deriving it. `auto` never changes the default engine (still
+`bmc`) and is Rust-only, like `explicit` itself. See
+`docs/DESIGN-explicit-engine.md` §6a.
+
 `violation_kind`: `invariant` | `trans` | `ensures` | `type_bound` | `partial_op` | `deadlock` | `leadsTo`.
+
+A `violated` result with `violation_kind` `invariant`/`type_bound` additionally
+carries **blame assignment** (issue #170), localizing the counterexample
+instead of just showing it: top-level `blame.conjuncts[]` (`{index, text,
+holds, violating_bindings?}`) names which AND-conjunct of the invariant is
+false when it is built from more than one (a 1-element list otherwise); each
+action-bearing `trace[k]` (k≥1) gets its own `blame: {guards[], effects[]}`
+naming the `requires` clauses and state-writing statements that fed the
+blamed conjunct(s) at that step (a backward slice over the concrete
+counterexample, not a new solver query). `fslc explain`'s counterfactuals
+inherit both automatically. Vacuity findings (`vacuous_implication` /
+`vacuous_leadsto`) gain `classification` (`insufficient_depth` |
+`over_constrained`) and `blocking` (the other invariants making the
+antecedent/trigger impossible, empty when it's merely unreached within
+depth) — same shape as `reachable_failed`'s `unreached[].blocking_requires`.
+Blame identifies; it never proposes a repair (weakening a guard, dropping a
+conjunct) — that would cut against the anti-hollowing principle. All of this
+is strictly additive to the JSON contract.
 
 Diagnostics that identify a faithfulness/intent gap may also carry
 `faithfulness_class` plus `recommended_action`. Current classes are:
@@ -429,11 +926,24 @@ Progress-preserving refinement failures are reported as `refinement_failed` with
 `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
 `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
 
-`verify` / `verify --engine induction` results include `checked_to_depth` and
-`cost: {"elapsed_s": ...}`. BMC `verified` is explicitly bounded; when the final
+Every `verify` result includes `checked_to_depth` and one fixed `cost` object:
+total `elapsed_s`, `solver` check count/time plus nullable common Z3 statistics,
+and deterministic `properties` rows with per-property check counts and time.
+Native and browser Workers use the same keys and nullability. Z3 counters are
+the maximum snapshot observed across constituent checks rather than a sum of
+possibly cumulative snapshots; timing values are nondeterministic. The explicit
+engine uses the same shape with zero solver checks and null Z3 statistics. See
+[`DESIGN-verification-cost.md`](DESIGN-verification-cost.md). BMC `verified` is
+explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
 exploration, `verified` also includes a `hint` that the state space is not
 obviously saturated at that depth and suggests a larger `--depth` or induction.
+
+Native and browser BMC set Z3 `random_seed` and `smt.random_seed` to `0`.
+This makes each backend deterministic under a fixed Z3 build, but concrete
+counterexamples and reachable/deadlock witnesses remain non-unique across
+native and WebAssembly builds. Consumers must use the verdict and replayable
+witness contract, not a particular satisfying assignment.
 
 When a leadsTo is declared and the result is `verified` / `proved`,
 `leads_to: { "<Name>": { "checked_to_depth": K } }` is attached
@@ -483,6 +993,38 @@ or, when the target predicate is unsatisfiable under type bounds/invariants:
 }
 ```
 
+### Literate Markdown FSL
+
+Markdown files (`.md`) containing ` ```fsl ` fenced code blocks are accepted
+directly by `fslc check`, `fslc verify`, and `fslc scenarios` — no flags or
+extraction step needed. Lines outside fsl blocks are blanked (replaced with
+empty lines) so that all diagnostic positions (line numbers, columns in error
+messages and counterexamples) point to the original Markdown document.
+Multiple fsl blocks in one document are treated as one compilation unit, so
+definitions can be split across sections:
+
+    # Cart invariant
+
+    ```fsl
+    spec Cart {
+      state { count: 0..3 }
+      init  { count = 0 }
+    ```
+
+    ## Actions (continued in a second fsl block)
+
+    ```fsl
+      action inc() { requires count < 3  count = count + 1 }
+      invariant Bounded { count >= 0 and count <= 3 }
+    }
+    ```
+
+A `.md` file with no ` ```fsl ` fences is rejected with a clear diagnostic.
+Non-fsl fenced blocks (` ```python `, etc.) are ignored. `use`/compose paths
+resolve relative to the Markdown file's directory (same as for `.fsl` files);
+a literate `.md` may `use`/compose `.fsl` files this way, but using another
+`.md` file as a compose target is not supported.
+
 ## 8. Recommended workflow: make proved the standard
 
 1. Write the spec → `fslc check` (the fast syntax/type loop)
@@ -494,9 +1036,9 @@ or, when the target predicate is unsatisfiable under type bounds/invariants:
    unreachable." Add an **auxiliary invariant** that excludes it (one that is
    itself a truth of the domain) and return to step 3
 
-In practice, auxiliary invariants often converge in a single round
-(real examples in `DOGFOOD-1.md` / `DOGFOOD-2.md`: "if attempts == 3, locked,"
-"only Captured has a refund," "no duplicates in the queue").
+Useful auxiliary invariants are domain truths such as "if attempts == 3, locked,"
+"only Captured has a refund," and "no duplicates in the queue," rather than
+proof-only artifacts.
 
 ## 9. Idiom collection
 
@@ -671,12 +1213,16 @@ refinement CartImplRefinesCart {
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
 
-Only in the expressions of a refinement mapping file may you use
-`if <expr> then <expr> else <expr>`. This is valid only in the right-hand side
-of `map` and in the argument expressions of `action ... -> abs(<expr list>)`,
-and is not part of the expression grammar of an ordinary `.fsl` spec file. The
-two arms of then/else must have the same logical type
-(Bool, Int/domain/enum, Option, struct).
+All four authoring routes—standalone `action`, inline `implements` action,
+requirement-action `maps`, and auto/identity synthesis—resolve to the same typed
+action-correspondence IR. The common validation checks impl identity and typed
+parameters, target identity/arity, argument expressions, and auto-mapped actor
+compatibility. A duplicate diagnostic names both origin kinds and source
+locations; explicit entries still take precedence over auto synthesis.
+
+Refinement maps and action arguments use the same expression grammar and type
+rules as ordinary specs, including `if <condition> then <expr> else <expr>`.
+Both branches are name- and type-checked even when the condition is constant.
 
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
@@ -687,6 +1233,16 @@ with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs
 `map_out_of_bounds`), `impl_trace`, and the post-mapping `abs_before` /
 `abs_after_*`. A static error (a missing map, an unknown action, etc.) is
 `kind: "type"` (exit 2).
+
+Give impl and abs **distinct enum/struct type names**, even when a state
+variable pair is mapped 1:1. Type metadata is merged by name for refinement
+checking; a same-named enum (or struct) declared with a different member
+list (or field set) on each side is rejected as `kind: "type"` (exit 2)
+rather than merged — merging would let an impl-only member get silently
+reinterpreted as whichever abs member sits at the same ordinal index. Domain
+types (`type X = lo..hi`) may safely share a name with different bounds; an
+out-of-range value there is still caught as `map_out_of_bounds`/
+`abs_state_mismatch`.
 
 ### Chain checking (composition of mappings)
 
@@ -739,8 +1295,11 @@ This pulls the named abstract `leadsTo` through the state mapping and checks
 `P(α(impl_state)) ~> Q(α(impl_state))` on impl executions. If the lower layer can
 spin forever or deadlock while the abstract response remains pending, the result
 is `refinement_failed` with `kind:"progress_lost"` and
-`violation_kind:"leadsTo"`. The `by` actions are review metadata and must name
-impl actions; fairness still comes from lower-layer `fair action` declarations.
+`violation_kind:"leadsTo"`. `progress_failure` distinguishes
+`lasso_blocks_progress` from `deadlock_or_stall_blocks_progress`. The `by`
+actions are review metadata and must name impl actions; they do not create
+fairness or prove implementation conformance. Fairness still comes from
+lower-layer `fair action` declarations.
 For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
 `verify --engine induction`.
 
@@ -830,13 +1389,20 @@ Recommended workflow: **`verify` / `prove` the spec → generate the scaffold wi
 is used as an oracle in random-walk testing.
 
 `testgen` separates a language-independent scenario-collection core (`scenarios`)
-from per-target emitters, so the same scenarios render to multiple harnesses:
+from per-target emitters, so the same scenarios render to multiple harnesses. In
+the native implementation all six emitters consume one validated adapter built
+from Public Kernel v1, scenario JSON, and the versioned fixed-seed
+`testgen-trace.v1` conformance trace; they do not read the private model or AST.
+Schema/version/spec mismatches, unknown state/action/parameter names, and
+malformed input fail closed. Compose uses an explicit checked names/order bridge because
+Public Kernel intentionally rejects incomplete multi-file provenance; it enters
+the same adapter rather than falling back after an export error.
 
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.
 - `--target vitest`: emits a self-contained TypeScript (Vitest) file. Deterministic
   scenarios and forbidden-rejection assertions translate directly; the random walk
-  is **baked at generation time** — the Python `Monitor` runs the fixed-seed walk and
+  is **baked at generation time** — the concrete Monitor runs the fixed-seed walk and
   the `(action, params, expected_state)` trace is embedded as a static fixture, so the
   generated tests need **no `fslc`/Python at runtime**. The output extension defaults
   to `<spec>.test.ts`.
@@ -880,6 +1446,7 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 
 ```bash
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
+fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
 fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
@@ -888,9 +1455,60 @@ fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # se
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
 ```
 
+External compilers emit the native replay contract as a closed versioned JSON
+object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):
+
+```json
+{"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.2.0","kernel_schema_version":"1.0.0","spec":"ShoppingCart","initial":{"stock":{"0":1},"cart":{"0":0}},"events":[{"tick":1,"action":null,"params":{},"state":{"stock":{"0":1},"cart":{"0":0}}},{"tick":2,"action":"add_to_cart","params":{"u":0,"i":0},"state":{"stock":{"0":0},"cart":{"0":1}}}]}
+```
+
+`initial` is the complete tick-0 state and every event has the exact Public
+Kernel action/parameter names plus its complete post-state. Since trace schema
+1.1, `action:null` with `{}` params is an explicit stutter observation whose
+complete state must equal the current logical state; 1.0 remains action-only.
+Inserting or deleting equal-state stutters preserves the projected action trace
+and final state. Ticks are exactly `1..N`, including stutters. Optional non-empty
+`timestamp` is ignored opaque producer metadata, not
+formal time. Trace v1 accepts Kernel `1.0.0` and `2.0.0`. Malformed contracts
+fail as input errors; typed initial/post-state divergence is nonconformant with
+leaf mismatch evidence. Invariants apply to observation points and atomic
+Monitor successors, not to unreported implementation intermediates. Bare arrays
+and `{events:[...]}` remain the explicit
+unversioned action-only adapter. Testgen and verifier trace JSON are not replay
+input. See `docs/DESIGN-replay-trace.md`.
+
+Trace schema 1.2 additionally checks every `leadsTo P ~> within K Q` at the
+initial state and each action/stutter observation. The deadline `p + K` is
+inclusive: `Q` there succeeds, while absence of `Q` fails with bounded-liveness
+evidence. Safety is evaluated first. Successful output separates
+`checks.safety` from `checks.bounded_liveness`; an unfinished finite obligation
+is `pending`, and unbounded `leadsTo` properties are named but not claimed as
+checked. Schemas 1.0/1.1 retain their earlier safety-only meaning.
+
+The `--from-log` form reuses the exact refinement mapping grammar to translate
+external JSONL records into spec actions and logical state; it does not add a
+second mapping language. Each non-empty line is
+`{"action":"external_name","params":{...},"state":{...}}`, where `state`
+is the observed post-action state. In the mapping, `impl` labels the external
+log schema, `abs` must name the replayed spec, `map` entries cover every spec
+state variable, and `action external(params) -> spec_action(exprs)` (or
+`stutter`) maps the event. The Monitor executes the mapped action and compares
+its result with the mapped observed state on every line. The first divergence
+reports zero-based `failed_at_record` / `failed_at_event`, one-based `log_line`,
+and either the Monitor violation or a `state_mismatch` with leaf paths.
+
+This first version requires full observation: a missing field or Map key is a
+`log_mapping` nonconformance, not an unconstrained value. See
+`DESIGN-log-replay.md` for the record schema, mapping example, and the boundary
+with `db observe` / `ai replay` / `domain replay`.
+
 Since `replay` checks only finite logs, **`leadsTo` is out of scope** (stated
 explicitly in the output `note`). `Monitor` requires init to be deterministic
-(forall bulk assignment is allowed).
+(forall bulk assignment is allowed). For a Map/index target (`m[K] = ...`),
+"assign exactly once" is per concrete key, not per variable: separate flat
+`m[K1] = ...` / `m[K2] = ...` statements for two *different* keys are fine;
+the same key assigned twice, or a key that is itself a bound loop variable
+(where two iterations could alias), is still rejected.
 
 ## 13. The three-layer dialects (consulting / requirements / design) and traceability
 
@@ -902,14 +1520,189 @@ are connected by refinement: **business ⊒ requirements ⊒ design ⊒ implemen
 
 ### 13.1 Declaration tags (traceability common to all layers)
 
-If you write `"ID: original text"` just before the `{` of an invariant /
-reachable / leadsTo / action, then violations, CTIs, coverage diagnoses, and
-scenarios carry `requirement: {id, text}`:
+The canonical relationship syntax is a typed annotation immediately before the
+linked declaration. Violations, CTIs, coverage diagnoses, and scenarios then
+carry `requirement: {id, text}`:
 
 ```fsl
-invariant PaidLedger "REQ-3: the ledger matches the number of payments" { ... }
-action submit(c: Case, a: Amount) "REQ-1: amounts at or below the threshold are auto-approved" { ... }
+@requirement("REQ-LEDGER-003", "the ledger matches the number of payments")
+invariant PaidLedger { ... }
+
+@requirement("REQ-EXPENSE-001", "amounts at or below the threshold are auto-approved")
+action submit(c: Case, a: Amount) { ... }
 ```
+
+A `requirement`, `acceptance`, `forbidden`, `policy`, `goal`, or `control`
+declaration owns the ID after its keyword. `@requirement(...)` links another
+declaration to such an ID; process `covers ID "text"` is canonical dialect sugar
+for the same typed relationship. The older `"ID: original text"` slot before a
+declaration body remains accepted migration input, but `fslc lint` reports it as
+`legacy_string_metadata` and `fslc migrate --edition next` converts safe cases
+to `@requirement(...)`.
+
+The reserved `"undecided: reason"` tag marks a reviewed, intentionally deferred
+decision. It is metadata and is never verified as a property. It may be attached
+to `init`, `action`, `invariant`, `trans`, `reachable`, or `leadsTo`; for example:
+
+```fsl
+init "undecided: initial operating mode is pending" { mode = Manual }
+action route() "undecided: routing policy is pending" { ... }
+```
+
+`fslc ledger` and `fslc html` list these declarations and the requirement IDs
+whose state dependencies overlap them. `analyze --profile ai-review` keeps an
+underspecification finding but marks an exact declaration match as
+`acknowledged:true`. The legacy direct declaration syntax still has one string
+slot, but native lowering adapts it to a typed annotation carrier that can hold
+requirements, undecided markers, kinds, and namespaced custom annotations
+together — the same carrier the canonical `@...` syntax below populates.
+Requirement blocks therefore merge their outer requirement with an inner
+legacy marker instead of overwriting it. Explicit `covers` and requirement-block
+annotations keep their own exact source spans, and `undecided` is reserved
+rather than accepted as an explicit requirement ID. JSON consumers that expose
+multiple relations use a `requirements` array while preserving the existing
+singular field as a lexical compatibility projection. See
+`DESIGN-undecided.md` and `DESIGN-annotations.md`. This is implemented by the
+authoritative native Rust CLI and is not backported to the frozen Python
+reference implementation.
+
+A document itself may carry typed annotations before its dialect keyword, and
+(as of issue #241) a declaration inside the document may carry typed
+annotations immediately before it, in either order relative to legacy
+metadata that also targets the same declaration:
+
+```fsl
+@requirement("REQ-CHECKOUT-001", "this document owns the checkout contract")
+@acme.review(owner.platform, 2, true)
+spec Checkout {
+  state { paid: Bool }
+
+  @requirement("REQ-CHECKOUT-003", "the ledger matches payments")
+  @undecided("late gateway completion policy is pending")
+  @kind("safety")
+  invariant PaidLedger { paid == paid }
+}
+```
+
+The shared lexer skips a leading BOM, whitespace, and `//` comments before an
+annotation group (top-level or nested); comments and blank lines between
+stacked annotations, or between the last annotation and its target, do not
+break attachment. Built-ins are `@requirement(id, text?)`, `@undecided(reason)`,
+`@kind(id, text?)`, and custom multi-segment namespaces
+(`@acme.review.owner(...)`) with string/integer/Boolean/symbol-path arguments;
+multiple annotations may stack on one declaration in any order without
+changing the checked result. At top level, keywords inside annotation
+arguments do not participate in dialect dispatch; empty and unknown documents
+report `FSL-DIALECT-EMPTY` / `FSL-DIALECT-UNKNOWN` with exact locations and the
+deterministic supported-keyword list (see `DESIGN-dialect-dispatch.md`).
+
+#### 13.1.1 Canonical ID policy
+
+The grammar accepts broad IDs so existing taxonomies remain representable.
+`fslc lint`, independently of parsing and verification, applies a built-in
+kind-aware policy:
+
+| Kind | Built-in template(s) |
+|---|---|
+| requirement | `REQ-{scope}-{number:3}`, `NFR-{scope}-{number:3}`, `INV-{scope}-{number:3}` |
+| acceptance | `AC-{scope}-{number:3}` |
+| forbidden | `FB-{scope}-{number:3}` |
+| policy | `POL-{scope}-{number:3}` |
+| goal | `GOAL-{scope}-{number:3}` |
+| control | `CTRL-{scope}-{number:3}` |
+| model | `MODEL-{scope}-{number:3}` |
+| assumption | `ASSUME-{scope}-{number:3}` |
+
+`scope` is uppercase ASCII alphanumeric and may contain hyphen-separated
+segments; `number:3` is exactly three decimal digits. A mismatch is reported as
+the non-machine-applicable `non_canonical_id` finding: ID renaming is never
+performed automatically because references can cross source, tests, code,
+telemetry, and external evidence.
+
+Pass `--project fsl-project.toml` to replace selected kinds while retaining the
+built-in defaults for omitted kinds:
+
+```toml
+[id_policy.patterns]
+requirement = ["PAY-{number}", "NFR-{scope}-{number:3}"]
+acceptance = "TEST-{number}"
+```
+
+Values are a string or non-empty string array. Templates support `{scope}`,
+`{number}`, and positive-width `{number:N}`. Invalid policy configuration fails
+with exit 2. Values use the manifest reader's closed subset: double-quoted
+JSON-compatible strings and arrays without trailing commas or inline comments;
+single-quoted TOML strings are rejected. Model and assumption templates must
+start with distinct literal prefixes that overlap neither each other nor
+requirement templates. Lint does not search parent directories: the manifest
+is explicit, and JSON output records its
+source and the fully resolved patterns. See `DESIGN-id-policy.md`.
+
+Declaration-level annotations attach to `init`, `action` (including sync and
+mapped/requirement actions), `invariant`, `trans`, `reachable`, `until`,
+`unless`, `leadsTo`, process `transition` (alongside `covers`), and
+`requirement`/`acceptance`/`forbidden` blocks (a `requirement` block's own
+annotations fan out to every action/property it contains, the same way its
+`id`/`text` already does). An annotation with no following declaration in the
+same block, or one preceding a declaration kind that does not accept
+annotations, reports `FSL-ANNOTATION-TARGET` at the annotation's span; malformed
+arguments, namespaces, or syntax report `FSL-ANNOTATION-ARGUMENTS` /
+`FSL-ANNOTATION-PATH` / `FSL-ANNOTATION-SYNTAX`. The new syntax and the legacy
+string/`covers` forms both desugar into the same typed relation and simply
+union when both are present on one declaration (identical `(id, text)` pairs
+deduplicate; conflicting text for one requirement ID is a checked-model error).
+As of issue #281, the same `@...` grammar also attaches to nested
+declarations in the three specialized frontends that do not share this
+parser: `domain` (aggregate `command`, `decide`, `evolve`, `invariant`,
+`projection`, `effect`, saga `step`), `ai_component` (`tool`, the `tools
+[a, b];` shorthand, the `authority` block and each of its rule lines,
+`fallback` and each `when` item, `check`), and `dbsystem` (`migration`, and
+each `rule` line inside `check compatibility { ... }`). A `command`/`decide`
+pair (plus any `evolve` block the decide's emitted events reach) union onto
+the one action they together generate; an `effect`'s or saga `step`'s
+annotations broadcast to every action it generates (a step's own action and
+its `_timeout` variant; an effect's per-outcome `_complete_*` actions, its
+`_retry` action, and its success-sticky progress property). Everywhere else
+in these three dialects — a migration operation line, a `dbsystem`/
+`ai_component` scalar declaration, a domain declaration outside the accepted
+list — a stray annotation still reports the coded `FSL-ANNOTATION-TARGET`
+diagnostic. See `DESIGN-annotations.md`'s "domain/db/ai nested declaration
+syntax" section for the full attachment table, the `AiAuthority` rule
+restructuring, and how a `dbsystem` migration/compatibility-rule annotation
+reaches the checked model without going through the lossy legacy
+`quote_meta` string convention. `@...` on a nested declaration remains a
+native-only surface addition — the frozen Python reference does not parse
+it, so specs that use it are outside the Python-parity corpus by
+construction.
+
+#### 13.1.2 Rationale for tooling and AI consumption
+
+A `//` comment is lexer trivia (`rust/fsl-syntax/src/lexer.rs`): it never
+reaches the AST, `KernelModel`, `python_ast()`, the JSON result envelope, the
+LSP index, or the audit ledger. A fact a downstream tool or an AI agent must
+not lose — that an auxiliary invariant exists to close a k-induction CTI, or
+that an implementation guard is deliberately stronger than its abstract
+counterpart — should therefore ride the annotation carrier instead of living
+only in prose:
+
+- Use the built-in `@kind(id, text?)` to classify and explain a declaration in
+  one line, e.g. `@kind("aux_invariant", "closes the k-induction CTI for
+  attempts_bounded")`. `Kind` never alters guards, actions, property kinds,
+  verification, or lowering. It survives in the checked `KernelModel` for
+  in-process consumers that explicitly call `annotations_for`; the current
+  JSON envelope, LSP index, and audit ledger do not project generic annotations.
+- For a short rationale that does not naturally fit a classification, the
+  recommended custom namespace is `@doc.rationale("...")` (an ordinary
+  `Custom` annotation; see 13.1). It carries the same verification-inert
+  checked-model representation as any other custom namespace and needs no
+  grammar change. A public JSON, LSP, or audit consumer still needs an explicit
+  projection contract before it can query that rationale.
+- Multi-sentence narrative — what a spec demonstrates, a walkthrough of why a
+  design works, a pedagogical bug marker in an intentionally-broken example —
+  stays an ordinary `//` comment. Annotation argument strings have no escape
+  syntax and stop at the first `"` or newline (`lex_string`), so they cannot
+  hold prose; forcing narrative into an annotation argument makes a spec
+  harder to read, not easier.
 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
@@ -923,20 +1716,20 @@ requirements ExpenseRequirements {
   process Claim with amount: Amount {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
-    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-1 "The applicant submits an expense claim by entering an amount"
-    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
-    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
-    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
-    transition pay          Approved  -> Paid      by Finance covers REQ-4 "Only approved claims are paid"
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-EXPENSE-002 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-EXPENSE-004 "Only approved claims are paid"
   }
 
   kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+  acceptance AC-EXPENSE-001 "Approval flow: a low-amount claim is auto-approved and paid" {
     submit(0, 1) auto_approve(0) pay(0)
     expect Claim 0 in Paid
   }
-  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+  acceptance AC-EXPENSE-002 "Rejection flow: a high-amount claim ends in manager rejection" {
     submit(1, 2) reject(1)
     expect Claim 1 in Rejected
   }
@@ -954,7 +1747,10 @@ verify {
   carried field's type `T` is a `number`, `Bool`, or an enum declared in the
   same requirements spec:
   - `number` fields default to the domain's `lo` bound; `f: T = <expr>` is an
-    optional explicit initializer (a compile-time constant expression).
+    optional explicit initializer (a compile-time constant expression). Omission
+    is retained in the current edition with the stable
+    `implicit_initial_value` warning and an insertion edit for the selected lower
+    bound.
   - `Bool` and enum fields have no invented default — `f: Bool = true/false`
     and `f: T = Member` are **required**; omitting the initializer is a
     check-time error (no silently-chosen `false` or first enum member).
@@ -976,8 +1772,9 @@ verify {
   `maps <abs_act>(...)` clause on the requirement-level action; `maps auto`
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
   An impl action with both a `maps` clause and a matching inline `action ...`
-  item is a duplicate-correspondence, `kind: "type"` check-time error (same as
-  a mapping file that lists the same action twice). Auto-mapped process
+  item is a duplicate-correspondence, `kind: "type"` check-time error naming
+  both origins and locations (same as a mapping file that lists the same action
+  twice). Auto-mapped process
   transitions are actor-checked; a transition whose actor differs from the
   business action's actor is a check-time error.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
@@ -996,11 +1793,18 @@ verify {
   `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
   correspondence to the upper layer.
 - `terminal { <expr> }` is allowed at the top level of a `requirements` spec
-  and passes through to the kernel unchanged (§6) — there is exactly one
-  `terminal` block per spec, same as the kernel. If the spec uses
-  `process E { ... }`, the predicate must reference the synthesized stage map
-  (`<entity-lowercased>_stage`, e.g. `claim_stage` for `process Claim`), not
-  `stage(c)` (that natural-language form is business-only, §13.3).
+  and lowers to the kernel (§6) — there is exactly one `terminal` block per
+  spec, same as the kernel. `stage(c)` is available in all requirements
+  expression contexts when `c` is a typed entity parameter or binder. The
+  entity type selects its process and stage enum, and the checked expression
+  lowers to the generated stage-map index. No sink stage becomes terminal
+  automatically in requirements.
+- A process may use a qualified path when one entity participates in several
+  processes: `process claims.Claim { ... }`. Unqualified `stage(c)` is an error
+  when several processes correspond to `Claim`; use
+  `claims.Claim.stage(c)` (arbitrary-depth `SymbolPath`) to select one. A
+  missing process, non-entity argument, unknown stage member, or unresolved
+  qualifier is a source-located type error.
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
@@ -1192,12 +1996,330 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   auxiliary invariant (the `age + remaining work <= K` form) (derived from the
   CTI; real examples in `examples/nfr/`).
 
-### 13.5 What is not handled (the boundary of the layers)
+### 13.5 Database compatibility layer: `dbsystem` (fsl-db)
+
+`dbsystem` models migration compatibility across databases, application
+artifacts, API/offline payloads, and environments. It is a dialect expansion, not
+a DB engine model: optimizer behavior, lock timing, wall-clock TTLs,
+probability, and full production-data completeness are outside the formal model.
+
+Core shape:
+
+```fsl
+dbsystem <Name> {
+  database <db> {
+    schema <initial_version>
+    table <table> {
+      column <column>: <db_type> present backfilled not_null;
+      column <future_column>: <db_type> absent;
+    }
+  }
+
+  migration <name> from <v0> to <v1> [rollbackable] {
+    add <table>.<column> nullable;
+    backfill <table>.<column>;
+    set_not_null <table>.<column>;
+    rename <table>.<old> to <table>.<new>;
+    split <table>.<source> into <table>.<a>, <table>.<b> lossless|lossy|irreversible;
+    merge <table>.<a>, <table>.<b> into <table>.<target> lossless|lossy|irreversible;
+    drop <table>.<column> destructive|irreversible;
+  }
+
+  artifact <version> {
+    reads <table>.<column>, ...;
+    writes <table>.<column>, ...;
+    requires <capability_namespace>.<capability>, ...;
+    provides <capability_namespace>.<capability>, ...;
+    calls api.<operation>, ...;
+    accepts api.<operation>, ...;
+    expects response.<field>, ...;
+    responds response.<field>, ...;
+    emits_offline api.<operation> ttl <finite_ticks>;
+  }
+
+  environment <env> {
+    schema <lo>..<hi>;
+    flag <flag_name> { <variant>, ... } default <variant>;
+    active <version> when schema <lo>..<hi> when flag <flag_name>=<variant>;
+    supported <version> when schema <lo>..<hi>;
+    may_exist <version> when schema <lo>..<hi>;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+    rule destructive_operations_annotated;
+    rule preservation_transforms_annotated;
+    rule api_calls_accepted;
+    rule api_responses_expected;
+    rule offline_payloads_accepted;
+    rule artifact_capabilities_provided;
+    rule data_preserved;
+    rule rollback_equivalent;
+  }
+}
+```
+
+If `check compatibility` is omitted, default rules cover read/write lifecycle,
+destructive annotations, preservation-transform annotations, and API/offline
+compatibility. `data_preserved` and `rollback_equivalent` are opt-in bounded
+checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`.
+
+Feature flags are finite environment dimensions. `fslc db check` enumerates the
+declared variants with schema snapshots and reports
+`DB-ASSUME-FINITE-FLAG-STATE`; this is a rollout/kill-switch compatibility
+check, not a percentage or probability proof. Omit `flag` / `when flag` to keep
+the existing artifact/window-only model.
+
+Current formal violation kinds include:
+
+- `column_removed_while_still_read`
+- `column_removed_while_still_written`
+- `not_null_before_backfill`
+- `destructive_migration_unannotated`
+- `preservation_transform_unannotated`
+- `data_preservation_loss`
+- `rollback_not_equivalent`
+- `api_call_not_accepted`
+- `api_response_field_missing`
+- `offline_payload_not_accepted`
+- `required_capability_missing`
+
+Use `fslc db check` when you want fsl-db vocabulary:
+
+```bash
+fslc db check examples/db/safe_add_nullable_column.fsl
+fslc db check examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl --engine induction
+fslc db observe examples/db/runtime_observation_target.fsl --trace examples/db/runtime_observation_mismatch.json
+fslc db import examples/db/minimal_import.sql --name ImportedFromSql -o /tmp/imported.fsl
+fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrisma
+```
+
+Successful checks return `verified_under_assumptions` with the finite rollout and
+capability-completeness assumptions. Compatibility failures return
+`finding_schema_version: "fsl-db-finding.v0"` plus `findings[]` containing the
+environment, artifact, migration/schema element, minimal conflict set, and repair
+candidates. Runtime observation returns `observed_mismatch` with
+`formal_result: "not_run"`; absence from logs is not proof of unused behavior.
+Use ordinary `fslc verify` when you want to inspect the generated kernel
+counterexample directly.
+
+Generic `requires` / `provides` capabilities let AI model/prompt/retriever/tool
+schema and output schema profiles share the same compatibility check as
+DB/API/mobile/server artifacts. A `requires tool.RefundPaymentV2` declaration is
+safe only when an active or supported artifact in the same environment snapshot
+`provides tool.RefundPaymentV2`. These profiles are finite coexistence facts,
+not evaluator or statistical quality claims.
+
+Importer boundary: SQL DDL import is `sql-ddl-minimal.v0`. The first
+source-specific ORM importer is `prisma-schema-minimal.v0`, which imports Prisma
+`model` scalar fields and reports relation/list/model attributes as
+`unsupported_prisma` warnings. Production-data preservation evidence and
+DB-engine evidence live in separate JSON schemas under `schemas/fslc/db/` and
+use `formal_result: "not_run"`; they never upgrade sampled/audited evidence into
+`verified` or `proved`.
+
+### 13.6 AI hard-contract layer: `ai_component` (fsl-ai)
+
+`ai_component` models the deterministic, guard-backed slice of an AI component:
+tool declarations, symbolic tool schemas, business precondition evidence,
+authority, human approval, forbidden tools, and fallback routing. It is a
+dialect expansion, not a stochastic kernel. Probability, evaluator scoring,
+groundedness judgments, prompt-injection semantic judgments, and confidence
+intervals remain outside this formal kernel model and are handled as external
+evidence.
+
+Core shape:
+
+```fsl
+ai_component RefundAgentToolSafety {
+  model refund_model_v1;
+  prompt refund_prompt_v1;
+  input RefundRequestV1;
+  output RefundDecisionV1;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+  }
+
+  tool RefundPayment irreversible {
+    schema RefundPaymentV1;
+    precondition order_paid;
+    precondition amount_refundable;
+  }
+
+  tool DeleteCustomerData irreversible {
+    schema DeleteCustomerDataV1;
+  }
+
+  authority {
+    may_execute SearchOrder;
+    requires_human_approval RefundPayment;
+    forbidden DeleteCustomerData;
+  }
+
+  fallback {
+    when low_confidence require human_review;
+  }
+}
+```
+
+`model`/`prompt`/`input`/`output`/`tool`/`authority`/`fallback` are the fields
+most specs need. Three more are optional, each at most once: `retriever
+<id>;`, `temperature <number>;`, and a `tools [Name, ...]` shorthand that
+declares bare tools with no schema/precondition/effect. A `tool` block's
+`precondition <name>;` line is repeatable (0 or more) and it may also declare
+one `effect <name>;`. None of these fields — nor `authority`, `fallback`, or
+the `check hard { }` block below — accept a `"description text"` tag; every
+field here is a bare identifier or number, unlike the declaration-tag
+convention in §13.1.
+
+An `ai_component` may also declare which hard rules get an explicit,
+separately-reported invariant:
+
+```fsl
+  check hard {
+    rule tool_authority;
+    rule human_approval_required;
+    rule forbidden_tool_blocked;
+    rule tool_schema_declared;
+    rule tool_precondition_declared;
+  }
+```
+
+Omitting `check hard { }` checks all five rules (the default); naming an
+unknown rule is a check-time error. Narrowing the set only removes an
+explicit, separately-reported invariant for `forbidden_tool_blocked` /
+`human_approval_required` — the structural guards themselves (no
+execute-action is ever generated for a forbidden tool; an approval-required
+tool's execute action always carries a `requires human_approved` guard) are
+generated unconditionally either way. `tool_authority`,
+`tool_schema_declared`, and `tool_precondition_declared` are checked
+unconditionally regardless of this block.
+
+`ai_component` lowers to a kernel spec with finite tool state:
+
+- `Tool` enum
+- `human_approved: Map<Tool, Bool>`
+- `tool_executed: Map<Tool, Bool>`
+- generated `approve_*` / `execute_*` actions
+- generated invariants for approval-before-execution and forbidden tools
+
+Use `fslc ai check` when you want fsl-ai vocabulary:
+
+```bash
+fslc ai check examples/ai/refund_agent_tool_safety.fsl
+fslc ai check examples/ai/recursive_support_agent.fsl
+fslc ai replay examples/ai/refund_agent_tool_safety.fsl --logs examples/ai/runtime_human_approval_bypass.jsonl
+fslc ai eval examples/ai/support_answer_quality.fsl --property LooseQuality
+fslc ai regress examples/ai/support_answer_quality.fsl --migration PromptV7ToV8 --before-records examples/ai/support_eval_v7.jsonl --after-records examples/ai/support_eval_v8_regressed.jsonl
+fslc ai drift examples/ai/support_answer_quality.fsl --logs examples/ai/runtime_drift_current.jsonl --baseline-logs examples/ai/runtime_drift_baseline.jsonl
+fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
+```
+
+Successful `ai_component` hard-contract checks return
+`verified_under_assumptions`. Recursive `agent` checks return
+`agent_analyzed` with `formal_result: "not_run"` because they are structural
+graph analysis, not kernel proof. `fslc ai replay` accepts JSONL or
+`{ "events": [...] }` and returns
+`replay_conformant` / `replay_nonconformant` with
+`formal_result: "not_run"` because replay is observation evidence. Findings use
+`finding_schema_version: "fsl-ai-finding.v0"` and include
+`guarantee_kind`:
+
+- `syntactic_hard`: schema/authority/approval/forbidden/precondition guard facts.
+- `agent_structural`: recursive-agent scope, grant, visibility, delegation, and
+  tool-reachability findings.
+- `runtime_observed`: declared component capability differs from observed events.
+- `statistically_supported` / `statistically_unsupported`: precomputed eval JSONL
+  and Wilson confidence-bound evidence from `fslc ai eval`; never displayed as
+  `proved`.
+- `evaluator_supported`: reserved for external evaluator-backed evidence and must
+  not be displayed as `proved`.
+
+Project-level fsl-ai evidence declarations can combine `ai_component`,
+`dataset`, `evaluator`, `failure_mode`, `statistical_property`,
+`ai_migration`, and `observed_property`. `fslc ai check` parses these files and
+returns `ai_project_analyzed`; `fslc ai eval` checks Bernoulli/proportion
+metrics from precomputed JSONL with Wilson intervals; `fslc ai regress` checks
+aggregate `no_regression` metric drop/increase clauses; `fslc ai compare`
+reports metric deltas without a threshold claim; `fslc ai drift` checks runtime
+telemetry thresholds and drift; and `fslc ai compat` emits a finite
+`dbsystem artifact` capability profile. All of these use
+`formal_result:"not_run"`.
+
+Recursive `agent` shape:
+
+```fsl
+agent SupportOrchestrator {
+  context [CustomerTicket, ApprovedSupportDocs];
+  tools [SearchDocs, CheckPolicy, CreateDraft];
+  authority {
+    may_execute [SearchDocs, CheckPolicy, CreateDraft];
+  }
+  review_gate PolicyCheckAgent;
+
+  agent RetrievalAgent {
+    trust medium;
+    grant authority [SearchDocs];
+    grant context [ApprovedSupportDocs];
+    tools [SearchDocs];
+    authority { may_execute [SearchDocs]; }
+    output RetrievedSources visibility [parent, PolicyCheckAgent];
+  }
+
+  agent PolicyCheckAgent {
+    trust high;
+    grant authority [CheckPolicy];
+    grant context [CustomerTicket, ApprovedSupportDocs];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+    contract { hard { rule PolicyMustCiteSource; } }
+    output PolicyDecision visibility parent;
+  }
+
+  orchestration {
+    RetrievalAgent -> PolicyCheckAgent;
+  }
+
+  failure_policy {
+    when RetrievalAgent.failed -> retry up_to 2;
+    when RetrievalAgent.failed_after_retry -> HumanReviewPending;
+  }
+}
+```
+
+Nested agents are ordinary agents scoped by their parent, not a distinct
+`sub_agent` type. Nesting creates lexical names such as
+`SupportOrchestrator.RetrievalAgent`; runtime collaboration is declared
+separately in `orchestration`. Parent authority/context is not inherited
+implicitly. A child must receive explicit `grant authority` and `grant context`,
+and each grant must stay inside the immediate parent boundary. `model`/
+`prompt` are also valid at any agent level (root or child), and a direct
+`tool { }` block works inside an agent the same way it does inside
+`ai_component`. `review_gate <Child>;` names a **direct child** agent through
+which every orchestration path to a high-authority-tool descendant must pass;
+a path that skips all declared review gates is flagged
+`policy_review_bypass_in_orchestration`. `trust` is a free identifier, not a
+validated enum — only the literal `low` currently drives a dedicated check
+(a low-trust agent's path to a high-authority tool); other values parse but
+have no distinct check yet. `contract { hard { rule <Name>; } }` is parsed
+and listed per agent, but — unlike `ai_component`'s `check hard { }` — its
+rule names are not validated against a known set and are not yet
+cross-checked against anything; treat it as forward-declared metadata.
+
+Design details: `docs/DESIGN-ai-hard.md`.
+
+### 13.7 What is not handled (the boundary of the layers)
 
 The majority of non-functional requirements (permissions, audit, capacity,
 reliability behavior, discrete-time SLA) can be handled (§13.4). What remains
 outside FSL is: **probability, percentiles (99.9% etc.), real time (wall-clock
-ms), usability, and prose rationale** (write these in each layer's document).
+ms), usability, DB optimizer/lock timing, full production-data proof, evaluator
+truth judgments, and prose rationale** (write these in each layer's document).
 FSL is responsible for the **checkable skeleton** of each artifact.
 
 ## 14. Library API
@@ -1211,7 +2333,12 @@ result = prove(spec, k_ind=1, base_depth=8)   # k-induction
 ```
 
 Returns a dict with the same structure as the CLI (the CLI wraps it with a
-`"fsl": "1.0"` envelope).
+`"fsl": "1.0"` envelope). Native CLI and browser Worker `check`/`verify`
+envelopes also contain `versions.verifier`, `versions.core`, and
+`versions.solver` objects. Each object has `name` and `version`; the solver
+object additionally has `backend`. Solver versions come from the loaded native
+or browser Z3 runtime rather than a CLI constant. The machine-readable contract
+is `schemas/fslc/envelope.v1.schema.json`.
 
 ## 15. Validation suite (the spec ≠ intent gap)
 
@@ -1242,6 +2369,14 @@ DESIGN-*.md).
 - **`fslc mutate`** — mechanically mutates the spec and measures whether each
   mutant is killed by the existing net of checks. A surviving mutant = behavior
   constrained by no property = a place where an invariant is missing.
+  `--from mutants.jsonl` additionally adjudicates externally generated
+  mutations expressed as a full `mutated_spec` or an exact
+  `replace:{target,replacement,occurrence?}` instruction. Valid external
+  mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
+  instruction, parse, name, type, and construction errors are `invalid`, never
+  killed, and are excluded from combined/per-source kill-rate denominators.
+  Every entry carries `source:"builtin"|"external"`; `--max-mutants` caps only
+  the built-in catalog, so `--max-mutants 0 --from ...` runs external-only.
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
   `empty_formalization` warning (the semantic-level extension of
   `--strict-tags`). → [`DESIGN-mutate.md`](DESIGN-mutate.md)
@@ -1252,6 +2387,47 @@ DESIGN-*.md).
   narration. Moves human review from reading logical formulas to adjudicating
   concrete examples. JSON mode remains available without `--readable`. →
   [`DESIGN-explain.md`](DESIGN-explain.md)
+- **`fslc analyze`** — emits structural observation JSON. `--projection tsg`
+  returns the Typed Semantic Graph of requirements, actions, state, properties,
+  and scenarios. Graph projections return connected components, SCCs,
+  representative cycles, degree, and structural metrics such as cycle rank and
+  fan-in/fan-out hubs. `--projection action_dependency_graph` exposes structural
+  action enables/conflict edges; `--projection impact_graph --focus NODE` emits
+  the upstream/downstream slice around a TSG node. It accepts multiple files or
+  directories in batch mode;
+  directories are expanded recursively for `*.fsl` and sorted deterministically.
+  Standalone refinement mappings can be viewed with `--projection
+  refinement_graph`; this is an unresolved structural view because the command
+  has no impl/abs model paths. Project manifests can be viewed with `--projection
+  traceability_graph`; their action edges use the checked correspondence IR and
+  include synthesized auto mappings. `--projection code_audit --code <path>`
+  maps exact executable Kernel requirement targets to language-independent
+  `@fsl.trace` source annotations; missing/orphan/mismatched pairs remain review
+  findings with `formal_status:not_a_violation`. It is single-spec and JSON-only.
+  `--format dot` and `--format mermaid` export graph-shaped
+  projections for review diagrams while keeping JSON as the default. `--profile
+  ai-review` emits review findings such as `disconnected_requirement`,
+  `unanchored_property`, `progressless_cycle`, `unwritten_state`,
+  `unread_state`, `unguarded_action`, `conservation_candidate`,
+  `divergent_choice`, and `unconstrained_effect`. The last two use a fixed
+  depth-4 BMC probe: they include `evidence_basis:"bounded_bmc"`, the reachable
+  branch witness, and a question-form `spec_question` asking which outcome is
+  intended. Exact matches with `undecided:` declarations remain visible with
+  `acknowledged:true` and `acknowledged_by`; unmatched semantic findings carry
+  no acknowledgement fields. A BMC-backed `unconstrained_effect` suppresses the same state's
+  structural `unread_state`; semantic action witnesses similarly suppress a
+  duplicate `unguarded_action`. Absence is not proof of determinism beyond the
+  bound. See [`DESIGN-underspecification.md`](DESIGN-underspecification.md).
+  Exact identifier checks additionally emit `tag_stale_reference` when a
+  code-shaped tag token no longer exists and `tag_formula_disjoint` when a tag
+  names a current state/constant absent from that declaration's formal
+  definition. `--export tag-review` emits tagged declarations one at a time
+  with their rendered formal definition under schema `tag-review.v0`; it does
+  not judge natural-language meaning or call a model.
+  These findings carry `formal_status: "not_a_violation"`; a structural cycle or
+  disconnected component is not a proof failure. Versioned schemas for the TSG,
+  graph projections, and findings are published under `schemas/fslc/analysis/`. →
+  [`DESIGN-analysis.md`](DESIGN-analysis.md)
 - **`fslc html`** — a self-contained HTML report over the same explain/verify
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
@@ -1261,8 +2437,8 @@ DESIGN-*.md).
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under `skills/`, with
-the shared language reference in `skills/fsl/SKILL.md`; the real-run record is in
-[`DOGFOOD-9.md`](DOGFOOD-9.md).
+the shared language reference in `skills/fsl/SKILL.md`. A maintained worked example
+is under [`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examples/validation).
 
 ## 16. Promotion judgment to ghost types (typestate)
 
@@ -1275,4 +2451,8 @@ guard, and the precondition lives in an external structure — cannot be express
 in the type and remains as a runtime/verification obligation). An entity's
 `applicability` is `full` only when all transitions are derivable/branching.
 With `--ts`, it outputs a TypeScript scaffold for the derivable portion.
+The native Rust command performs this judgment from the versioned public Kernel
+JSON v1 contract, not private parser/model structures, and fails closed on an
+unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
+compatible with the frozen reference output.
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)

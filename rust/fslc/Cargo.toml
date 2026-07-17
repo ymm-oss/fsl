@@ -1,0 +1,43 @@
+[package]
+name = "fslc-rust"
+description = "Native FSL command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fslc"
+path = "src/main.rs"
+required-features = ["native-cli"]
+
+[features]
+default = ["native-cli"]
+native-cli = [
+    "dep:base64",
+    "dep:ed25519-dalek",
+    "dep:fsl-solver-z3",
+    "dep:fsl-tools",
+    "dep:sha2",
+]
+
+[dependencies]
+base64 = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true, optional = true }
+fsl-core = { path = "../fsl-core" }
+fsl-runtime = { path = "../fsl-runtime" }
+fsl-solver = { path = "../fsl-solver" }
+fsl-solver-z3 = { path = "../fsl-solver-z3", optional = true }
+fsl-syntax = { path = "../fsl-syntax" }
+fsl-tools = { path = "../fsl-tools", optional = true }
+fsl-verifier = { path = "../fsl-verifier" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = { workspace = true, optional = true }
+
+[build-dependencies]
+sha2.workspace = true
+
+[lints]
+workspace = true

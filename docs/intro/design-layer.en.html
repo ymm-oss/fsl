@@ -18,9 +18,10 @@
 
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">Writing the Design Layer</p>
     <h1 class="reveal">Turn a requirements contract into<br><span class="hl">implementable, provable state</span>.</h1>
-    <p class="lead reveal">The design layer is an ordinary <code>spec</code>: internal state, actions, queues, and outboxes. A separate <code>refinement</code> mapping proves the design still obeys the requirements above, and the same spec becomes the oracle for implementation conformance below.</p>
+    <p class="lead reveal">The design layer is an ordinary <code>spec</code>: internal state, actions, queues, and outboxes. A separate <code>refinement</code> mapping proves the design still obeys the requirements above, and the same spec becomes the oracle for implementation conformance below — this file <b>is</b> the design document, not a stand-in for one, so there's nothing else to keep in sync.</p>
   </div>
 </section>
 
@@ -163,7 +164,7 @@
     </div>
 
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0"><b>Two mapping mechanisms hide internal detail.</b> <code>action ... -&gt; stutter</code> hides an internal-only operation, and a <code>map</code> expression absorbs internal fields (for example <code>map stock[i] = impl_stock[i] - reserved[i]</code> hides a <code>reserved</code> field). <code>maps auto</code> synthesizes identity entries for same-named state and actions; explicit entries override it. <code>if … then … else …</code> is allowed <i>only</i> inside mapping expressions, never in an ordinary <code>spec</code>.</p>
+      <p style="margin:0"><b>Two mapping mechanisms hide internal detail.</b> <code>action ... -&gt; stutter</code> hides an internal-only operation, and a <code>map</code> expression absorbs internal fields (for example <code>map stock[i] = impl_stock[i] - reserved[i]</code> hides a <code>reserved</code> field). <code>maps auto</code> synthesizes identity entries for same-named state and actions; explicit entries override it. Mapping expressions use the same <code>if … then … else …</code> syntax and type rules as ordinary specs.</p>
     </div>
   </div>
 </section>

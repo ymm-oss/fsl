@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements TypedAnnotationOutputs {
+  state { ready: Bool }
+  init { ready = false }
+
+  requirement REQ-OUTER "outer requirement" {
+    action publish() "REQ-ACTION: action requirement" { ready = true }
+    reachable Published "REQ-REACH: reachability requirement" { ready == true }
+    invariant BooleanReady "REQ-SAFETY: safety requirement" { ready == ready }
+  }
+}

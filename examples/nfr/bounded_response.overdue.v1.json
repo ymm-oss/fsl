@@ -1,0 +1,12 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
+  "schema_version": "1.2.0",
+  "kernel_schema_version": "1.0.0",
+  "spec": "BoundedResponse",
+  "initial": {"stage": 0},
+  "events": [
+    {"tick": 1, "action": "advance", "params": {}, "state": {"stage": 1}},
+    {"tick": 2, "action": null, "params": {}, "state": {"stage": 1}},
+    {"tick": 3, "action": null, "params": {}, "state": {"stage": 1}}
+  ]
+}

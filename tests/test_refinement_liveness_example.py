@@ -45,6 +45,8 @@ def test_preserve_progress_catches_liveness_drop():
     assert refine["kind"] == "progress_lost"
     assert refine["violation_kind"] == "leadsTo"
     assert refine["invariant"] == "EveryClaimDecided"
+    assert refine["progress_failure"] == "lasso_blocks_progress"
+    assert "lower-layer `fair action`" in refine["hint"]
     assert refine["progress"] == {
         "leadsTo": "EveryClaimDecided",
         "actions": ["approve", "reject"],

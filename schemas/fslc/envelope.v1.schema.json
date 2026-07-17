@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/envelope.v1.schema.json",
+  "title": "FSL native CLI and Worker check/verify envelope v1",
+  "type": "object",
+  "required": ["fsl", "versions", "result"],
+  "properties": {
+    "fsl": { "const": "1.0" },
+    "result": { "type": "string", "minLength": 1 },
+    "cost": { "$ref": "#/$defs/verificationCost" },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifier", "core", "solver"],
+      "properties": {
+        "verifier": { "$ref": "#/$defs/component" },
+        "core": { "$ref": "#/$defs/component" },
+        "solver": { "$ref": "#/$defs/solverComponent" }
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "component": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "solverComponent": {
+      "type": "object",
+      "required": ["name", "version", "backend"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "verificationCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsed_s", "solver", "properties"],
+      "properties": {
+        "elapsed_s": { "type": "number", "minimum": 0 },
+        "solver": { "$ref": "#/$defs/solverStatistics" },
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/propertyStatistics" }
+        }
+      }
+    },
+    "solverStatistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checks",
+        "check_elapsed_s",
+        "conflicts",
+        "decisions",
+        "propagations",
+        "memory_mb"
+      ],
+      "properties": {
+        "checks": { "type": "integer", "minimum": 0 },
+        "check_elapsed_s": { "type": "number", "minimum": 0 },
+        "conflicts": { "$ref": "#/$defs/nullableCount" },
+        "decisions": { "$ref": "#/$defs/nullableCount" },
+        "propagations": { "$ref": "#/$defs/nullableCount" },
+        "memory_mb": {
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "propertyStatistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "checks", "elapsed_s"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "checks": { "type": "integer", "minimum": 1 },
+        "elapsed_s": { "type": "number", "minimum": 0 }
+      }
+    },
+    "nullableCount": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    }
+  }
+}

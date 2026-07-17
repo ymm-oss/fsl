@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>設計ノート — なぜこの設計か</title>
+<meta name="description" content="fslcがなぜこう設計されているかを説明する、正本のDESIGN-*.mdへの案内。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="design-notes">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">実例と背景</p>
+    <h1 class="reveal"><span class="hl">設計ノート</span></h1>
+    <p class="lead reveal">このマニュアルは「どう使うか」を説明します。「なぜこう設計されているか」の正本は、実地で得た知見を保守される契約へ抽象化した<code>docs/DESIGN-*.md</code>です。ここはその案内図で、リンク先はGitHub上の.mdファイルです。</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">検証器・カーネル</p>
+    <h2 class="reveal">検証エンジンとカーネル機能のDESIGN</h2>
+    <table class="matrix reveal">
+      <tr><th>文書</th><th>主題</th></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-v1.md">DESIGN-v1.md</a></td><td>言語設計の原点 — 設計原則G1〜G5、型システムの判断、修復プロトコル、ロードマップ</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-induction.md">DESIGN-induction.md</a></td><td>k帰納法エンジン（proved / unknown_cti / CTI）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-trans.md">DESIGN-trans.md</a></td><td><code>trans</code>（遷移不変条件・2状態安全性）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-temporal.md">DESIGN-temporal.md</a></td><td><code>leadsTo</code>、弱公平性（lasso反例）、respondシナリオ</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-refinement.md">DESIGN-refinement.md</a></td><td>詳細化チェック（マッピングファイル、条件式、progress保存）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-compose.md">DESIGN-compose.md</a></td><td>スペック合成（名前空間、同期アクション、internal）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-bridge.md">DESIGN-bridge.md</a></td><td>実装接続（runtime Monitor / replay / testgen）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-scenarios.md">DESIGN-scenarios.md</a></td><td><code>scenarios</code>とカバレッジのunsat-core診断</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-seq.md">DESIGN-seq.md</a></td><td><code>Seq&lt;T,N&gt;</code>（partial_op、型ホワイトリスト）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-option-struct.md">DESIGN-option-struct.md</a></td><td>構造体内のOptionフィールド</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-divmod.md">DESIGN-divmod.md</a></td><td>整数除算<code>/</code>と剰余<code>%</code>（ゼロ除算の全域定義、partial_op、Euclidean）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-spec-domains.md">DESIGN-spec-domains.md</a></td><td>カーネル<code>spec</code>の<code>entity</code>/<code>number</code>（ドメインと検証境界の分離）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-init-if.md">DESIGN-init-if.md</a></td><td><code>init</code>内の文レベル<code>if</code>（パス条件つき初期状態制約への変換）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-inline-range.md">DESIGN-inline-range.md</a></td><td>インライン無名範囲型（<code>x: lo..hi</code>）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md">DESIGN-forbidden.md</a></td><td><code>forbidden</code>（否定的受け入れ基準・過小制約の検出）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md">DESIGN-vacuity.md</a></td><td>空虚性検査（前提が到達不能な不変条件、トリガが到達不能なleadsTo等）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md">DESIGN-strict-tags.md</a></td><td><code>--strict-tags</code>リント（タグ無し宣言・未参照要件の検出）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md">DESIGN-mutate.md</a></td><td><code>fslc mutate</code>（スペックのミューテーション、要件別ストレスレポート）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md">DESIGN-explain.md</a></td><td><code>fslc explain --readable</code>（検証範囲、骨格の列挙、反事実、witnessの説明文）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md">DESIGN-html-report.md</a></td><td><code>fslc html</code>（explain+verify根拠からの自己完結ビジュアルレポート）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md">DESIGN-typestate.md</a></td><td><code>fslc typestate</code>（状態機械→ghost型への昇格判断とTSひな形）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ledger.md">DESIGN-ledger.md</a></td><td><code>fslc ledger</code>（検証根拠を要件ID別の監査台帳Markdownに変換）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-nfr.md">DESIGN-nfr.md</a></td><td>非機能要件（対応表、離散時間SLA：time/urgent/age/deadline）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md">DESIGN-analysis.md</a></td><td><code>fslc analyze</code>（Typed Semantic Graph、グラフ投影、AIレビュー所見）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-undecided.md">DESIGN-undecided.md</a></td><td><code>undecided:</code> 宣言メタデータ、影響要件の投影、レポート表示、未決定領域所見の acknowledged 表示</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-docs-site.md">DESIGN-docs-site.md</a></td><td>このマニュアルサイトのIA・ナビ・生成リファレンステンプレートの設計判断（Relational Designで作成）</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">3層ダイアレクト・拡張方言</p>
+    <h2 class="reveal">layers / dialects / domain / db / ai / stochastic / ui</h2>
+    <table class="matrix reveal">
+      <tr><th>文書</th><th>主題</th></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-layers.md">DESIGN-layers.md</a></td><td>共有カーネル＋3方言（業務/要件/設計）の全体構想と検証</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-dialects.md">DESIGN-dialects.md</a></td><td>方言の実装仕様（宣言タグ、fsl-req、fsl-biz）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-precedence-policy.md">DESIGN-precedence-policy.md</a></td><td>業務層のno-bypass優先順位ポリシー（#75）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a></td><td>fsl-domain — aggregate所有、command/event decide/evolve、saga、effect lifecycle、scaffold</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-effect.md">DESIGN-effect.md</a></td><td>fsl-domainが使うfsl-effectのライフサイクル意味論（correlation、retry、timeout）</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-db.md">DESIGN-db.md</a></td><td>fsl-db — 複数環境のスキーマ/成果物/フィーチャーフラグ互換性、SQL/Prismaインポータ</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></td><td>fsl-ai — tool authority、人間承認、forbidden tool、recursive agent構造分析</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></td><td>fsl-stochastic — 事前計算evalJSONL、Wilson区間、統計的支持と形式証明の境界</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ui.md">DESIGN-ui.md</a></td><td>fsl-ui（画面遷移ダイアレクトのスパイク検討、#9のgo/no-go）</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">実務ガイド</p>
+    <h2 class="reveal">深掘り資料</h2>
+    <div class="panel reveal">
+      <p><code>fslc analyze</code>の実務ガイド（457行、チーム向け）は現在日本語のみで、Markdownのまま維持されています——<a href="https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a>。マニュアルの<a href="analysis.ja.html">構造分析の章</a>から要点を読んだ後、こちらで深掘りしてください。</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

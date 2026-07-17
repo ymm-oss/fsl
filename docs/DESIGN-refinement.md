@@ -58,13 +58,25 @@ refinement CartImplRefinesCart {
   order). They may be written bare (`u`) or with a type annotation matching the
   impl action declaration (`u: UserId`). The abs-side arguments are expressions
   using them and the impl state.
+- Every surface route lowers to one typed `ActionCorrespondence`:
+  `impl_action: ActionRef`, resolved `impl_params: Vec<ParamDef>`, a typed
+  action/stutter target, `CorrespondenceOrigin`, and a source span. Standalone
+  files, inline `implements`, requirement-action `maps`, and auto synthesis use
+  the same resolver for impl/target existence, parameter annotations, arity,
+  argument expression types, actor compatibility, and duplicate detection.
+  Progress declarations and the concrete Monitor consume the same action
+  identity. Success JSON remains the existing name-to-target projection.
 - `preserve progress { respond <AbsLeadsTo> by <impl_action>, ... }` is an
   optional liveness-preserving refinement check. It does not change ordinary
   safety refinement. When present, fslc pulls the named abstract `leadsTo` P/Q
   through the state mapping and runs the same bounded lasso/stall search on impl
   executions. The `by` actions are validated impl action names and are returned
-  in JSON as review context; fairness still comes from the impl actions marked
-  `fair`.
+  in JSON as review context; they do not create fairness or implementation
+  conformance by themselves. Fairness still comes from the impl actions marked
+  `fair`. Failures report `kind:"progress_lost"` plus
+  `progress_failure:"lasso_blocks_progress"` or
+  `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
+  `progress:{leadsTo, actions}` so repair can target the lower-layer action.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
@@ -130,26 +142,17 @@ requirements Impl {
 }
 ```
 
-This is not a new mechanism: `refinement_action`'s transformer output
-(`("action_map", name, params, target, loc)`) is the same AST node the
-separate-file parser already produces, and the inline desugar
-(dialects.py `_expand_requirements_with_display`) already merges
-`implements["maps"]` (the block's items) into the same `mapping_items` list
-as the auto-derived action maps from requirement-action `maps` clauses and
-process transitions, before building the same `("refinement", ...)` AST that
-`refine.py.build_refinement` consumes for both the inline and separate-file
-paths. Adding the grammar alternative was the entire change; `dialects.py`
-and `refine.py` needed none.
+The Rust frontend preserves the route as `CorrespondenceOrigin`, then lowers
+the shared surface item into the typed IR described in §1. Requirement-action
+`maps` clauses and branch maps are adapted to the same item before validation;
+implicit identity/stutter correspondences call the same resolver directly.
 
 Two consequences fall out of reusing the same merge, not from new logic:
 
-- **Duplicate correspondence.** `build_refinement` already rejects a second
-  `action_map` entry for the same impl action name
-  (`kind: "type"`, `"duplicate action map for '<name>'"`). Since the inline
-  block's items are merged ahead of the auto-derived ones, an impl action that
-  has *both* a `maps` clause and a matching inline `action ...` item now hits
-  that same pre-existing check — mirroring what a separate-file mapping that
-  lists an action twice already does.
+- **Duplicate correspondence.** A second correspondence for the same impl
+  action is rejected before semantic resolution. The diagnostic reports both
+  origin kinds and both line/column sites, whether the conflict is within a
+  standalone file or between `implements` and an action-level `maps` clause.
 - **Branch-split action names.** `branches` splits an action into aliased
   kernel actions (`name__b1`, `name__b2`, ...; dialects.py
   `_split_branch_action`), so the impl spec `build_refinement` type-checks
@@ -207,10 +210,10 @@ expression bug).
   range but with a different value is reported as before as an
   init-correspondence violation (`abs_state_mismatch`).
 
-## 2.5 Conditional Expressions in Mapping Expressions (v2.2 — Resolving DOGFOOD-3 F9)
+## 2.5 Shared Conditional Expressions (v2.7 — issue #245)
 
-**Only in the expressions of the mapping file** is a conditional expression
-allowed:
+Refinement mappings use the same conditional expression as every other FSL
+expression context:
 
 ```fsl
 refinement SeatImplRefinesBooking {
@@ -228,10 +231,9 @@ refinement SeatImplRefinesBooking {
 }
 ```
 
-- Syntax: `if <expr> then <expr> else <expr>` (else required; nesting allowed.
-  `then`/`else` are keywords only inside the mapping-expression grammar). It
-  **cannot be used in ordinary .fsl spec files** (grammatically, it appears only
-  in expressions inside refinement).
+- Syntax: `if <expr> then <expr> else <expr>` (else required; nesting is
+  right-associative). The shared parser accepts it in ordinary specs,
+  refinements, requirements, and lowered domain expressions.
 - Typing rule: both arms of then/else are the same logical type. Option vs
   Option (including none), enum vs enum, Int/domain vs Int/domain, Bool vs Bool,
   struct vs struct are allowed. A type mismatch is `kind: "type"` at check time.
@@ -240,13 +242,15 @@ refinement SeatImplRefinesBooking {
   per field (the same convention as the existing merge of an if statement). The
   value of a none arm is don't care (a free variable is fine — if present is
   false it is not read).
-- Allowed positions: the right-hand side of `map`, and the argument expressions
-  of `action ... -> b(<expr list>)`.
-- An AST node `("ite", c, a, b)` is added to eval_expr (a general-purpose
-  implementation), but it is not generated from the body-spec grammar. If in the
-  future this is opened to general expressions, additional design such as the
-  path condition of partial_op would be needed, so it is not opened in this
-  release (this limitation is also stated in LANGUAGE.md).
+- The surface and Kernel AST use one `Conditional` node. Refinement no longer
+  has a separate expression parser.
+- Concrete evaluation executes only the selected branch. Static name/type
+  checking visits both branches. Symbolic evaluation uses one typed `ite`.
+- A partial operation in a branch is guarded by that branch's path condition,
+  so an unselected division, remainder, or sequence operation cannot fail.
+- Public Kernel JSON continues to use the existing `kind: "ite"` node. Because
+  the node and its semantics already existed in both v1 and v2 schemas, this
+  change does not alter either schema version.
 
 ## 3. CLI / JSON
 
@@ -336,6 +340,17 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 6. **static checks**: missing map / unknown action / missing correspondence →
    kind: type, exit 2.
 7. **bounds**: the mapping value is out of the abs type range → map_out_of_bounds.
+8. **conflicting same-named type**: impl and abs both declare a type with the
+   same name but a different shape (an enum with different members, or a
+   struct with different fields) → kind: type, exit 2. Type metadata is
+   merged by name for refinement checking (`_merge_types_meta`); a same name
+   with a different member list would otherwise let an impl-only member get
+   silently reinterpreted as whichever abs member sits at the same ordinal
+   index, turning a real refinement violation into a false "refines". Domain
+   types with different bounds are still allowed to share a name — an
+   out-of-range impl value there is already caught downstream as
+   `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
+   layers distinct type names.
 8. No regression of existing features (refine is a completely independent CLI
    path).
 

@@ -9,7 +9,16 @@ extension or by manual copy.
 FSL work is split by layer so an agent does not turn PM requirements into design
 artifacts by accident — but the layers are also **connected by refinement**, and
 verifying that connection (cross-layer alignment / traceability) is one of FSL's
-primary uses, not a tail-end advanced topic:
+primary uses, not a tail-end advanced topic.
+
+**A `.fsl` spec replaces the prose spec/design doc you would write anyway** — one
+source is both what people read and what the verifier checks, so there is no second
+document to drift out of sync. That is why broad coverage across
+business/requirements/design layers is the default target, not a per-feature
+verification-ROI decision: high-risk-first is a valid adoption *order*, not the end
+state of coverage. The resulting corpus is a living single source of truth, continuously
+re-verified as it changes (regression, drift, cross-layer change-impact via
+`refine`), and doubles as onboarding context for humans and AI alike:
 
 | Skill | Use for | Main deliverable |
 |---|---|---|
@@ -20,6 +29,23 @@ primary uses, not a tail-end advanced topic:
 | [`fsl-design-review/`](fsl-design-review/) | design review, variants, SOLID/LSP/OCP/substitutability judgment | contract-conformance report |
 | [`fsl-from-code/`](fsl-from-code/) | reverse-engineering a design spec from existing code, anchored by conformance back to that code | kernel `spec` + conformance harness |
 | [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
+
+The shared `fsl/` reference also covers three cross-cutting dialects that sit
+outside the business/requirements/design progression:
+
+- `dbsystem` (fsl-db) — schema migration / artifact read-write compatibility
+  checks and `fslc db check` findings; SQL/Prisma importers, runtime
+  observation, bounded preservation checks, finite feature flags, and external
+  DB evidence schemas are covered as explicit boundaries.
+- `domain` (fsl-domain) — Functional DDD aggregate/command/event modeling and
+  async effect lifecycles via `fslc domain check`; scaffold generation,
+  runtime replay, and the production exactly-once/queue-delivery boundary are
+  covered as explicit limits.
+- `ai_component` and recursive `agent` composition (fsl-ai) — tool-authority
+  hard contracts and agent-graph structure via `fslc ai check`/`replay`, plus
+  the external statistical/migration/drift evidence commands
+  (`fslc ai eval`/`regress`/`compare`/`drift`/`compat`); LLM truth,
+  groundedness, and statistical quality claims stay outside formal proof.
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or

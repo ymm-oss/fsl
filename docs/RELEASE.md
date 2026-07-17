@@ -1,0 +1,149 @@
+# Release procedure
+
+This document is the authoritative execution procedure for FSL releases. The
+internal `.claude/skills/release/SKILL.md` defines the wider branch lifecycle;
+change both in the same pull request when either contract changes.
+
+The release path is:
+
+```text
+short-lived branch -> main -> production -> vX.Y.Z
+```
+
+FSL is distributed by the tag-driven GitHub Release workflow only. Do not
+publish the frozen Python compatibility reference to PyPI or the Rust crates to
+crates.io.
+
+The `production` branch and its required `production-policy` check must already
+be adopted before promotion. When the latest released baseline predates that
+workflow, follow the internal release skill's one-time reviewed bootstrap; a
+`pull_request_target` workflow cannot validate its own first installation when
+it is absent from the base branch.
+
+## Supported native targets
+
+Each target ships both `fslc` and `fslc-lsp`, with a SHA-256 file for each
+binary.
+
+| Target | Runner | Binary suffix |
+|---|---|---|
+| macOS arm64 (Apple Silicon, macOS 14+) | `macos-15` | `macos-arm64` |
+| Linux x64 | `ubuntu-24.04` | `linux-x64` |
+| Linux arm64 | `ubuntu-24.04-arm` | `linux-arm64` |
+| Windows x64 | `windows-latest` | `windows-x64.exe` |
+
+Intel macOS (`macos-x64`) is not supported. Releases also contain the VS Code
+extension and the Public Kernel contract bundles produced by
+`.github/workflows/release.yml`.
+`install.sh` resolves the latest published tag once and uses that same tag for
+the repository content and both native binaries.
+
+Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
+runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
+It also rejects a dynamic dependency on `libz3`.
+
+## 1. Prepare the release commit on main
+
+1. Start from a clean, current `main`. Fetch `origin` and confirm local `HEAD`
+   equals `origin/main`.
+2. Review the non-empty `CHANGELOG.md` `[Unreleased]` section and confirm it
+   describes every notable change since the previous tag.
+3. Choose `X.Y.Z` using SemVer. Confirm that local and remote tag `vX.Y.Z` and
+   the corresponding GitHub Release do not exist.
+4. On a short-lived branch from `main`, change
+   `[workspace.package].version` in `rust/Cargo.toml`. Regenerate
+   `rust/Cargo.lock` with Cargo, then prove the lockfile and CLI version agree:
+
+   ```bash
+   cargo check --manifest-path rust/Cargo.toml --workspace
+   cargo check --manifest-path rust/Cargo.toml --workspace --locked
+   test "$(cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- --version)" = "fslc X.Y.Z"
+   ```
+
+   Do not hand-edit `rust/Cargo.lock`. Do not bump `pyproject.toml` for a native
+   GitHub Release; the Python package is a frozen, unpublished compatibility
+   reference.
+5. Move all current `[Unreleased]` entries under
+   `## [X.Y.Z] - YYYY-MM-DD`, leaving an empty `## [Unreleased]`. Update the
+   link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and `[X.Y.Z]`
+   compares the previous tag with `vX.Y.Z`.
+6. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
+   the GitHub Release body.
+7. Run the complete product gate:
+
+   ```bash
+   ./tools/check-native-integration.sh
+   ```
+
+8. Commit `chore(release): vX.Y.Z`, open a pull request to `main`, and merge it
+   only after required checks pass. Record the exact merged `main` SHA as the
+   release candidate.
+
+## 2. Prove and promote the candidate
+
+1. Dispatch `.github/workflows/release.yml` on the recorded candidate. A
+   `workflow_dispatch` run builds and smoke-tests every artifact but cannot
+   attach files to a GitHub Release, even when the selected ref is a tag.
+2. Verify the completed run's `head_sha` equals the recorded candidate SHA and
+   all four native targets, the VS Code extension, and both Kernel bundles
+   pass. Do not reuse evidence from a moving branch after its SHA changes.
+3. Open the release-promotion pull request from `main` to `production`, stating
+   the candidate SHA, version, changes, residual risk, gate results, and dry-run
+   URL.
+4. Merge without squashing away promoted history. Verify the resulting
+   `production` tree matches the approved `main` tree and record the new
+   `production` HEAD. Never tag `main`.
+
+## 3. Revalidate and tag production
+
+1. On the exact `production` HEAD, verify `rust/Cargo.toml`, `rust/Cargo.lock`,
+   the changelog section, and `fslc --version` all identify `X.Y.Z`.
+2. Rerun `./tools/check-native-integration.sh` and dispatch the manual release
+   workflow from `production`. Require the run's `head_sha` to equal the
+   recorded production HEAD and every job to pass; pre-promotion evidence is
+   not valid for a distinct production merge commit.
+3. Regenerate a temporary notes file from the complete `X.Y.Z` section in the
+   exact production HEAD's `CHANGELOG.md`, excluding its version heading. Review
+   it, show it to the user, and stop if it is empty; do not reuse a file derived
+   from the pre-promotion candidate.
+4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
+   and that pushing the tag uploads a draft, verifies its remote inventory, then
+   makes the GitHub Release and notes public. Obtain one explicit confirmation
+   for that complete publication immediately before running:
+
+   ```bash
+   git tag -a vX.Y.Z PRODUCTION_SHA -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+5. Watch the tag-triggered workflow to completion. The workflow rejects any
+   native binary whose `fslc --version` differs from the tag.
+
+## 4. Verify the release
+
+1. Confirm the published body is non-empty and matches the `X.Y.Z` changelog
+   section.
+2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
+   four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
+   the VS Code extension and both Kernel bundle/checksum pairs are present.
+3. Download the current machine's supported binary and checksum, verify the
+   checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
+4. Report the promotion pull request, production SHA, tag SHA, release URL,
+   workflow runs, non-empty notes, asset inventory, checksum, and version smoke
+   test.
+
+## Failure handling
+
+- For a transient job failure, inspect it and use
+  `gh run rerun RUN_ID --failed`. Do not retag merely to retry the same commit.
+- Use `workflow_dispatch` for build diagnosis. It is the only dry-run path and
+  never attaches Release assets.
+- Never force-move, delete, or reuse a pushed release tag. If the tagged commit
+  or artifacts are wrong, fix the defect upstream, promote it, and cut a new
+  patch version.
+- The tag workflow uploads notes and all assets to a non-public draft, verifies
+  the remote inventory, and only then makes the Release public. If any publish
+  step fails, leave the draft non-public until the defect is fixed upstream.
+  Do not report completion.
+- Follow the internal release skill's `release/vX.Y` stabilization and hotfix
+  procedures when `main` cannot be promoted as a whole.

@@ -8,6 +8,8 @@ import json
 from html import escape
 from pathlib import Path
 
+from .assurance import assurance_label, classify_element, classify_result
+
 
 def default_output_name(file: str) -> str:
     return str(Path(file).with_suffix(".html"))
@@ -20,9 +22,24 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
     title = f"{spec} - FSL Specification Report"
     status = verification.get("result", "unknown")
     state = skeleton.get("state") or {}
-    actions = skeleton.get("actions") or []
-    properties = skeleton.get("properties") or []
-    auto_checks = skeleton.get("auto_checks") or []
+    enums = skeleton.get("enums") or {}
+    domains = skeleton.get("domains") or []
+    kpis = skeleton.get("kpis") or []
+    stage_flows = skeleton.get("stage_flows") or []
+    kind = skeleton.get("spec_kind")
+
+    all_actions = skeleton.get("actions") or []
+    actions = [a for a in all_actions if not a.get("generated")]
+    generated_actions = [a for a in all_actions if a.get("generated")]
+
+    all_properties = skeleton.get("properties") or []
+    properties = [p for p in all_properties if not p.get("generated")]
+    generated_properties = [p for p in all_properties if p.get("generated")]
+
+    auto_checks = list(skeleton.get("auto_checks") or [])
+    auto_checks.extend(_generated_action_check(a) for a in generated_actions)
+    auto_checks.extend(_generated_property_check(p) for p in generated_properties)
+
     witnesses = explained.get("witnesses") or []
     counterfactuals = explained.get("counterfactuals") or []
     warnings = verification.get("warnings") or []
@@ -31,12 +48,15 @@ def render_html_report(file: str, source: str, explained: dict, verification: di
     covered = sum(1 for ok in coverage.values() if ok)
     coverage_label = f"{covered}/{len(coverage)}" if coverage else "n/a"
 
+    subtitle = _hero_subtitle(len(state), len(actions), len(properties), domains, kpis)
+
     body = "\n".join([
-        _hero(spec, file, depth, status, len(state), len(actions), len(properties), coverage_label, warnings),
-        _status_section(verification),
-        _model_section(state, actions),
+        _hero(spec, file, depth, status, len(state), len(actions), len(properties), coverage_label, warnings, subtitle, kind),
+        _model_section(state, actions, enums, domains, kpis, stage_flows),
         _actions_section(actions, coverage),
-        _properties_section(properties, auto_checks),
+        _properties_section(properties, auto_checks, verification),
+        _status_section(verification),
+        _refinement_section(verification),
         _trace_section(verification),
         _witness_section(witnesses),
         _counterfactual_section(counterfactuals),
@@ -377,6 +397,27 @@ pre {
   color: var(--muted);
   font: 12px/1.45 var(--mono);
 }
+.relation-graphs {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
+}
+.edge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.edge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: var(--teal-2);
+  color: var(--teal);
+  font: 700 12px/1.2 var(--mono);
+}
 .callout {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -439,6 +480,21 @@ details > div { padding: 0 12px 12px; }
   color: var(--muted);
   background: #fbfcf8;
 }
+.req-caption {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 400;
+  font-family: var(--sans);
+  overflow-wrap: anywhere;
+}
+.panel-pad ul {
+  margin: 0;
+  padding-left: 20px;
+}
+.panel-pad h3 {
+  margin-bottom: 8px;
+}
 @media (max-width: 960px) {
   .shell { grid-template-columns: 1fr; }
   .side {
@@ -468,10 +524,10 @@ def _sidebar(spec: str) -> str:
     <aside class="side" aria-label="Report navigation">
       <div class="mark"><span class="mark-dot" aria-hidden="true"></span><span>{escape(spec)}</span></div>
       <nav>
-        <a href="#status">Status</a>
         <a href="#model">Model</a>
         <a href="#actions">Actions</a>
         <a href="#properties">Properties</a>
+        <a href="#status">Status</a>
         <a href="#traces">Traces</a>
         <a href="#witnesses">Witnesses</a>
         <a href="#counterfactuals">Counterfactuals</a>
@@ -481,14 +537,46 @@ def _sidebar(spec: str) -> str:
 """
 
 
-def _hero(spec, file, depth, status, states, actions, properties, coverage, warnings) -> str:
+def _hero_subtitle(states: int, actions: int, properties: int, domains: list, kpis: list) -> str:
+    prop_word = "property" if properties == 1 else "properties"
+    action_word = "action" if actions == 1 else "actions"
+    state_word = "state variable" if states == 1 else "state variables"
+    text = f"A model of {states} {state_word}, {actions} {action_word}, and {properties} {prop_word}."
+    extras = []
+    if domains:
+        extras.append(f"{len(domains)} entity/domain declaration(s)")
+    if kpis:
+        extras.append(f"{len(kpis)} KPI(s)")
+    if extras:
+        text += " Tracks " + " and ".join(extras) + "."
+    return text
+
+
+def _generated_action_check(action: dict) -> dict:
+    gen = action.get("generated")
+    text = "generated by verifier"
+    if isinstance(gen, dict) and gen.get("kind") == "time_tick":
+        text = "generated by verifier (time-tick action)"
+    return {"kind": "generated_action", "name": action.get("name"), "target": action.get("name"), "text": text}
+
+
+def _generated_property_check(prop: dict) -> dict:
+    return {
+        "kind": prop.get("kind") or "generated",
+        "name": prop.get("name"),
+        "target": prop.get("name"),
+        "text": prop.get("body_text") or "generated by verifier",
+    }
+
+
+def _hero(spec, file, depth, status, states, actions, properties, coverage, warnings, subtitle, kind=None) -> str:
     status_class = _status_class(status)
     return f"""
       <header class="hero">
         <div>
           <p class="eyebrow">FSL specification report</p>
-          <h1>{escape(spec)}</h1>
-          <p class="sub">Review the written model through verification status, action/state influence, concrete traces, and counterfactual evidence.</p>
+          <h1>{escape(spec)}{_kind_badge(kind)}</h1>
+          <p class="sub">{escape(subtitle)}</p>
         </div>
         <div class="meta-grid" aria-label="Report summary">
           {_metric("Result", f'<span class="badge {status_class}">{escape(str(status))}</span>')}
@@ -506,13 +594,28 @@ def _hero(spec, file, depth, status, states, actions, properties, coverage, warn
 """
 
 
+def _kind_badge(kind) -> str:
+    """A neutral pill next to the spec title classifying the whole spec (e.g. `ui`)."""
+    if not kind:
+        return ""
+    label = escape(str(kind.get("id", "")))
+    text = kind.get("text")
+    title = f' title="{escape(str(text))}"' if text else ""
+    return f' <span class="badge neutral kind"{title}>{label}</span>'
+
+
 def _metric(label, value) -> str:
     return f'<div class="metric"><span>{escape(label)}</span><strong>{value}</strong></div>'
 
 
 def _status_section(verification: dict) -> str:
+    assurance = assurance_label(
+        classify_result(verification),
+        depth=verification.get("checked_to_depth", verification.get("depth")),
+    )
     rows = [
         ("Result", _badge(verification.get("result", "unknown"))),
+        ("Assurance", escape(assurance)),
         ("Completeness", escape(str(verification.get("completeness", "n/a")))),
         ("Checked depth", escape(str(verification.get("checked_to_depth", verification.get("depth", "n/a"))))),
         ("Note", escape(str(verification.get("note", "")))),
@@ -539,6 +642,69 @@ def _status_section(verification: dict) -> str:
             </table>
           </div>
           {warning_html}
+        </div>
+      </section>
+"""
+
+
+def _refinement_violation(verification: dict):
+    if verification.get("result") == "refinement_failed":
+        return verification
+    impl = verification.get("implements")
+    if isinstance(impl, dict) and impl.get("result") == "refinement_failed":
+        return impl.get("violation") or impl
+    return None
+
+
+def _refinement_section(verification: dict) -> str:
+    violation = _refinement_violation(verification)
+    if not violation:
+        return ""
+    impl_action = violation.get("impl_action") or violation.get("action") or {}
+    abs_action = violation.get("abs_action") or violation.get("abstract_action") or {}
+    edge = ""
+    if impl_action or abs_action:
+        impl_name = impl_action.get("name") if isinstance(impl_action, dict) else impl_action
+        abs_name = abs_action.get("name") if isinstance(abs_action, dict) else abs_action
+        edge = (
+            '<div class="callout bad">'
+            f"<strong>Action correspondence</strong> "
+            f"<code>{escape(str(impl_name or 'impl step'))}</code> -&gt; "
+            f"<code>{escape(str(abs_name or 'abstract step'))}</code>"
+            "</div>"
+        )
+    impl_payload = _drop_empty({
+        "impl": violation.get("impl"),
+        "action": impl_action,
+        "state": violation.get("impl_state"),
+        "trace": violation.get("impl_trace"),
+    })
+    abs_payload = _drop_empty({
+        "abs": violation.get("abs"),
+        "action": abs_action,
+        "alpha_before": violation.get("alpha_before"),
+        "alpha_after_expected": violation.get("alpha_after_expected"),
+        "alpha_after_actual": violation.get("alpha_after_actual"),
+        "mismatch": violation.get("mismatch"),
+    })
+    return f"""
+      <section class="section" id="refinement">
+        <div class="section-head">
+          <div>
+            <h2>Refinement Evidence</h2>
+            <p>Side-by-side implementation and abstract states for the refinement failure.</p>
+          </div>
+        </div>
+        {edge}
+        <div class="grid-2">
+          <div class="panel panel-pad">
+            <h3>Implementation Side</h3>
+            {_json_pre(impl_payload)}
+          </div>
+          <div class="panel panel-pad">
+            <h3>Abstract Side</h3>
+            {_json_pre(abs_payload)}
+          </div>
         </div>
       </section>
 """
@@ -621,11 +787,16 @@ def _violation_rows(verification: dict) -> list:
     return rows
 
 
-def _model_section(state: dict, actions: list) -> str:
+def _model_section(state: dict, actions: list, enums: dict, domains: list, kpis: list, stage_flows: list) -> str:
     rows = "".join(
-        f"<tr><td><code>{escape(name)}</code></td><td>{escape(_type_text(ty))}</td></tr>"
+        f"<tr><td><code>{escape(name)}</code></td><td>{escape(_type_text(ty, enums))}</td></tr>"
         for name, ty in sorted(state.items())
     )
+    extra = "".join(filter(None, [
+        _domains_panel(domains),
+        _kpis_panel(kpis),
+        _stage_flow_panel(stage_flows),
+    ]))
     return f"""
       <section class="section" id="model">
         <div class="section-head">
@@ -643,11 +814,72 @@ def _model_section(state: dict, actions: list) -> str:
           </div>
           <div>{_influence_svg(list(sorted(state)), actions)}</div>
         </div>
+        {extra}
       </section>
 """
 
 
+def _domains_panel(domains: list) -> str:
+    if not domains:
+        return ""
+    items = "".join(f"<li>{escape(d)}</li>" for d in domains)
+    return f'<div class="panel panel-pad"><h3>Entities &amp; Domains</h3><ul>{items}</ul></div>'
+
+
+def _kpis_panel(kpis: list) -> str:
+    if not kpis:
+        return ""
+    rows = "".join(
+        "<tr>"
+        f"<td><code>{escape(str(k.get('name', '')))}</code></td>"
+        f"<td>count of {escape(str(k.get('entity', '')))} in {escape(str(k.get('stage', '')))}</td>"
+        "</tr>"
+        for k in kpis
+    )
+    return f"""
+      <div class="panel table-wrap">
+        <table>
+          <thead><tr><th>KPI</th><th>Definition</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>
+"""
+
+
+def _stage_flow_panel(stage_flows: list) -> str:
+    if not stage_flows:
+        return ""
+    blocks = []
+    for flow in stage_flows:
+        transitions = flow.get("transitions", [])
+        has_actor = any(t.get("actor") for t in transitions)
+        stage_chips = "".join(f'<span class="chip">{escape(s)}</span>' for s in flow.get("stages", []))
+        tr_rows = "".join(
+            "<tr>"
+            f"<td>{escape(str(t.get('from', '')))}</td><td>{escape(str(t.get('to', '')))}</td>"
+            f"<td><code>{escape(str(t.get('action', '')))}</code></td>"
+            + (f"<td>{escape(str(t.get('actor', '')))}</td>" if has_actor else "")
+            + "</tr>"
+            for t in transitions
+        )
+        actor_header = "<th>Actor</th>" if has_actor else ""
+        blocks.append(f"""
+          <div class="panel table-wrap">
+            <div class="panel-pad">
+              <h3>{escape(str(flow.get('state', '')))}: {escape(str(flow.get('type', '')))} stages</h3>
+              <div class="chips">{stage_chips}</div>
+            </div>
+            <table>
+              <thead><tr><th>From</th><th>To</th><th>Action</th>{actor_header}</tr></thead>
+              <tbody>{tr_rows}</tbody>
+            </table>
+          </div>
+""")
+    return "".join(blocks)
+
+
 def _actions_section(actions: list, coverage: dict) -> str:
+    has_actor = any(action.get("actor") for action in actions)
     rows = []
     for action in actions:
         name = action.get("name", "")
@@ -656,21 +888,29 @@ def _actions_section(actions: list, coverage: dict) -> str:
         )
         requires = _chip_list(_strip_lead(action.get("requires_text"), "requires "), "require")
         writes = _chip_list(action.get("writes"), "write")
-        ensures = _chip_list(_strip_lead(action.get("ensures_text"), "ensures "))
+        ensures_items = _strip_lead(action.get("ensures_text"), "ensures ")
+        ensures = _chip_list(ensures_items) if ensures_items else ""
         markers = []
         if action.get("fair"):
             markers.append('<span class="chip fair">fair</span>')
         if name in coverage:
             markers.append(_badge("covered" if coverage[name] else "uncovered"))
         params_html = escape(params) if params else '<span class="chip">none</span>'
+        requirement = action.get("requirement")
+        if has_actor and _is_actor_only_requirement(requirement):
+            requirement = None  # the Actor column already owns "by <actor>"
+        name_cell = f"<code>{escape(name)}</code>{_requirement_caption(requirement)}"
+        actor_cell = f"<td>{escape(str(action.get('actor') or ''))}</td>" if has_actor else ""
         rows.append(
             "<tr>"
-            f"<td><code>{escape(name)}</code><br>{''.join(markers)}</td>"
+            f"<td>{name_cell}<br>{''.join(markers)}</td>"
             f"<td>{params_html}</td>"
+            f"{actor_cell}"
             f"<td>{requires}</td><td>{writes}</td><td>{ensures}</td>"
-            f"<td>{_requirement(action.get('requirement'))}</td>"
             "</tr>"
         )
+    actor_header = "<th>Actor</th>" if has_actor else ""
+    colspan = 6 if has_actor else 5
     return f"""
       <section class="section" id="actions">
         <div class="section-head">
@@ -681,28 +921,49 @@ def _actions_section(actions: list, coverage: dict) -> str:
         </div>
         <div class="panel table-wrap">
           <table>
-            <thead><tr><th>Action</th><th>Params</th><th>Requires</th><th>Writes</th><th>Ensures</th><th>Requirement</th></tr></thead>
-            <tbody>{''.join(rows) or '<tr><td colspan="6">No actions.</td></tr>'}</tbody>
+            <thead><tr><th>Action</th><th>Params</th>{actor_header}<th>Requires</th><th>Writes</th><th>Ensures</th></tr></thead>
+            <tbody>{''.join(rows) or f'<tr><td colspan="{colspan}">No actions.</td></tr>'}</tbody>
           </table>
         </div>
       </section>
 """
 
 
-def _properties_section(properties: list, auto_checks: list) -> str:
+_PROPERTY_KIND_TO_GROUP = {
+    "invariant": "invariants",
+    "trans": "transitions",
+    "leadsTo": "leadstos",
+    "reachable": "reachables",
+}
+
+
+def _properties_section(properties: list, auto_checks: list, verification: dict | None = None) -> str:
+    has_deadline = any(p.get("within") is not None for p in properties)
     prop_rows = []
     for prop in properties:
         within = prop.get("within")
-        within_html = f'<span class="chip fair">within {escape(str(within))}</span>' if within is not None else '<span class="chip">none</span>'
+        within_cell = (
+            f'<td><span class="chip fair">within {escape(str(within))}</span></td>'
+            if within is not None else "<td></td>"
+        ) if has_deadline else ""
+        name_cell = f"<code>{escape(str(prop.get('name', '')))}</code>{_requirement_caption(prop.get('requirement'))}"
+        group = _PROPERTY_KIND_TO_GROUP.get(prop.get("kind"))
+        assurance_cell = (
+            f"<td>{escape(assurance_label(classify_element(group, prop.get('name'), verification), depth=verification.get('checked_to_depth', verification.get('depth'))))}</td>"
+            if verification is not None and group else "<td></td>"
+        )
         prop_rows.append(
             "<tr>"
             f"<td>{escape(str(prop.get('kind', '')))}</td>"
-            f"<td><code>{escape(str(prop.get('name', '')))}</code></td>"
-            f"<td>{within_html}</td>"
+            f"<td>{name_cell}</td>"
+            f"{within_cell}"
+            f"{assurance_cell}"
             f"<td>{escape(str(prop.get('body_text', '')))}</td>"
-            f"<td>{_requirement(prop.get('requirement'))}</td>"
             "</tr>"
         )
+    deadline_header = "<th>Deadline</th>" if has_deadline else ""
+    assurance_header = "<th>Assurance</th>" if verification is not None else ""
+    prop_colspan = 3 + (1 if has_deadline else 0) + (1 if verification is not None else 0)
     check_rows = []
     for check in auto_checks:
         label = check.get("target") or check.get("action") or check.get("name")
@@ -724,8 +985,8 @@ def _properties_section(properties: list, auto_checks: list) -> str:
         <div class="stack">
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Kind</th><th>Name</th><th>Deadline</th><th>Body</th><th>Requirement</th></tr></thead>
-              <tbody>{''.join(prop_rows) or '<tr><td colspan="5">No user properties.</td></tr>'}</tbody>
+              <thead><tr><th>Kind</th><th>Name</th>{deadline_header}{assurance_header}<th>Body</th></tr></thead>
+              <tbody>{''.join(prop_rows) or f'<tr><td colspan="{prop_colspan}">No user properties.</td></tr>'}</tbody>
             </table>
           </div>
           <div class="panel table-wrap">
@@ -747,7 +1008,7 @@ def _trace_section(verification: dict) -> str:
         content = '<p class="empty">No counterexample trace was emitted. Reachable witnesses may still appear below.</p>'
     else:
         violated_step = verification.get("violated_at_step") if is_counterexample else None
-        content = _trace_timeline(trace, violated_step)
+        content = _trace_timeline(trace, violated_step) + _relation_graphs(trace)
     return f"""
       <section class="section" id="traces">
         <div class="section-head">
@@ -852,18 +1113,18 @@ def _counterfactual_section(counterfactuals: list) -> str:
                 "violation": item.get("violation"),
                 "note": item.get("note"),
             }))
+            name_cell = f"<code>{escape(str(item.get('invariant', '')))}</code>{_requirement_caption(item.get('requirement'))}"
             rows.append(
                 "<tr>"
-                f"<td><code>{escape(str(item.get('invariant', '')))}</code></td>"
+                f"<td>{name_cell}</td>"
                 f"<td>{weak_text}</td>"
-                f"<td>{_requirement(item.get('requirement'))}</td>"
                 f"<td>{detail}</td>"
                 "</tr>"
             )
         content = f"""
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Invariant</th><th>Weakening</th><th>Requirement</th><th>Evidence</th></tr></thead>
+              <thead><tr><th>Invariant</th><th>Weakening</th><th>Evidence</th></tr></thead>
               <tbody>{''.join(rows)}</tbody>
             </table>
           </div>
@@ -1004,6 +1265,42 @@ def _trace_timeline(trace: list, violated_step=None) -> str:
     return f'<div class="timeline">{"".join(steps)}</div>'
 
 
+def _relation_graphs(trace: list) -> str:
+    panels = []
+    for entry in trace:
+        step = entry.get("step")
+        state = entry.get("state") or {}
+        for name, value in state.items():
+            if not _looks_like_relation(value):
+                continue
+            edges = "".join(
+                f'<span class="edge">{escape(str(src))} -&gt; {escape(str(dst))}</span>'
+                for src, dst in value
+            )
+            panels.append(
+                '<div class="mini-card">'
+                f'<h3><span>{escape(str(name))}</span><span class="badge info">step {escape(str(step))}</span></h3>'
+                f'<div class="edge-list">{edges}</div>'
+                '</div>'
+            )
+    if not panels:
+        return ""
+    return f"""
+      <div class="relation-graphs">
+        <h3>Relation Graphs</h3>
+        <div class="cards">{''.join(panels)}</div>
+      </div>
+"""
+
+
+def _looks_like_relation(value) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, list) and len(item) == 2 for item in value)
+    )
+
+
 def _first_reachable_witness(verification: dict):
     reachables = verification.get("reachables") or {}
     for item in reachables.values():
@@ -1012,23 +1309,33 @@ def _first_reachable_witness(verification: dict):
     return None
 
 
-def _type_text(ty) -> str:
+def _type_text(ty, enums=None) -> str:
     if isinstance(ty, list):
         ty = tuple(ty)
     if not isinstance(ty, tuple) or not ty:
         return str(ty)
     tag = ty[0]
+    if tag == "bool":
+        return "Bool"
+    if tag == "int":
+        return "Int"
     if tag == "domain":
         return f"{ty[1]}..{ty[2]}"
     if tag == "map":
-        return f"Map<{_type_text(ty[1])}, {_type_text(ty[2])}>"
+        return f"Map<{_type_text(ty[1], enums)}, {_type_text(ty[2], enums)}>"
     if tag == "option":
-        return f"Option<{_type_text(ty[1])}>"
+        return f"Option<{_type_text(ty[1], enums)}>"
     if tag == "set":
-        return f"Set<{_type_text(ty[1])}>"
+        return f"Set<{_type_text(ty[1], enums)}>"
     if tag == "seq":
-        return f"Seq<{_type_text(ty[1])}, {ty[2]}>"
-    if tag in ("enum", "struct", "named", "name"):
+        return f"Seq<{_type_text(ty[1], enums)}, {ty[2]}>"
+    if tag == "relation":
+        return f"relation {_type_text(ty[1], enums)} -> {_type_text(ty[2], enums)}"
+    if tag == "enum":
+        name = str(ty[1])
+        members = (enums or {}).get(name)
+        return f"{name} {{{', '.join(members)}}}" if members else name
+    if tag in ("struct", "named", "name"):
         return str(ty[1])
     return str(ty)
 
@@ -1051,16 +1358,31 @@ def _chip_list(items, kind="") -> str:
     ) + "</div>"
 
 
-def _requirement(req) -> str:
+def _is_actor_only_requirement(req) -> bool:
+    """True when a requirement's whole content is a business-dialect `by
+    <actor>` annotation (no distinct id/prose beyond that) — i.e. it's exactly
+    what the Actor column already displays, so captioning it too is redundant."""
     if not req:
-        return '<span class="chip">none</span>'
+        return False
+    text = req.get("text")
+    return isinstance(text, str) and text.startswith("by ")
+
+
+def _requirement_caption(req) -> str:
+    """Render `{id, text}` meta as an inline caption under a declaration's own
+    name — the primary human-language label — rather than a trailing column;
+    when there's no meta at all, this renders nothing (no "none" filler)."""
+    if not req:
+        return ""
     rid = req.get("id")
     text = req.get("text")
     if rid and text:
-        return f'<code>{escape(str(rid))}</code><br>{escape(str(text))}'
-    if rid:
-        return f'<code>{escape(str(rid))}</code>'
-    return escape(str(text))
+        label = f"{rid}: {text}"
+    elif rid:
+        label = str(rid)
+    else:
+        label = str(text)
+    return f'<div class="req-caption">{escape(label)}</div>'
 
 
 def _params(params: dict) -> str:
@@ -1080,6 +1402,10 @@ def _json_pre(data) -> str:
 
 def _json_code(data) -> str:
     return f"<code>{escape(json.dumps(data, ensure_ascii=False, sort_keys=True))}</code>"
+
+
+def _drop_empty(data: dict) -> dict:
+    return {k: v for k, v in data.items() if v is not None and v != {} and v != []}
 
 
 def _badge(value) -> str:

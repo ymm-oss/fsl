@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/db/preservation-evidence.v0.schema.json",
+  "title": "fsl-db production preservation evidence v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "formal_result",
+    "result",
+    "dbsystem",
+    "evidence_id",
+    "evidence_kind",
+    "target",
+    "scope",
+    "redaction",
+    "assumptions",
+    "findings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-db-preservation-evidence.v0"
+    },
+    "formal_result": {
+      "const": "not_run"
+    },
+    "result": {
+      "enum": [
+        "evidence_supported",
+        "evidence_failed",
+        "evidence_inconclusive",
+        "evidence_invalid"
+      ]
+    },
+    "dbsystem": {
+      "type": "string"
+    },
+    "evidence_id": {
+      "type": "string"
+    },
+    "evidence_kind": {
+      "enum": [
+        "sampled_diff",
+        "offline_diff_job",
+        "shadow_read",
+        "dual_read_comparison",
+        "post_migration_audit"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "required": ["rule", "migration"],
+      "properties": {
+        "rule": {
+          "enum": ["data_preserved", "rollback_equivalent"]
+        },
+        "migration": {
+          "type": "string"
+        },
+        "schema_elements": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["environment", "sample_count"],
+      "properties": {
+        "environment": {"type": "string"},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "mismatch_count": {"type": "integer", "minimum": 0},
+        "source_snapshot": {"type": "string"},
+        "target_snapshot": {"type": "string"}
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": {"type": "string"},
+        "forbidden_fields": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": {"type": "string"},
+          "text": {"type": "string"}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "severity", "message"],
+        "properties": {
+          "kind": {"type": "string"},
+          "severity": {"enum": ["info", "warning", "error"]},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}

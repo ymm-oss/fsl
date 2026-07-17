@@ -1,0 +1,115 @@
+domain OrderAsyncEffect {
+  implementation_profile functional_ddd
+
+  enum OrderStatus { Pending, Approved, Cancelled }
+  enum PaymentStatus { NotRequested, PaymentPending, Captured, Failed, TimedOut }
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      status: OrderStatus = Pending;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command ApproveOrder {}
+    command CancelOrder {}
+    command RequestPaymentCapture {
+      input payment_request_id: PaymentRequestId
+    }
+
+    event OrderApproved {}
+    event OrderCancelled {}
+    event PaymentCaptureRequested {
+      payment_request_id: PaymentRequestId
+    }
+    event PaymentCaptured {
+      payment_request_id: PaymentRequestId
+    }
+    event PaymentFailed {
+      payment_request_id: PaymentRequestId
+    }
+    event PaymentCaptureTimedOut {
+      payment_request_id: PaymentRequestId
+    }
+
+    error CannotCancelCapturedOrder
+    error CannotCaptureUnapprovedOrder
+    error DuplicatePaymentCapture
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    decide CancelOrder {
+      rejects CannotCancelCapturedOrder when payment_status == Captured
+      requires status in [Pending, Approved]
+      emits OrderCancelled
+    }
+
+    decide RequestPaymentCapture {
+      rejects CannotCaptureUnapprovedOrder when status != Approved
+      rejects DuplicatePaymentCapture when payment_status in [PaymentPending, Captured]
+      emits PaymentCaptureRequested
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+
+    evolve OrderCancelled {
+      status = Cancelled
+    }
+
+    evolve PaymentCaptureRequested {
+      payment_status = PaymentPending
+    }
+
+    evolve PaymentCaptured {
+      requires status != Cancelled
+      payment_status = Captured
+    }
+
+    evolve PaymentFailed {
+      payment_status = Failed
+    }
+
+    evolve PaymentCaptureTimedOut {
+      payment_status = TimedOut
+    }
+
+    invariant noDuplicateCapture {
+      payment_status == Captured -> not can(RequestPaymentCapture)
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry {
+      max_attempts 3
+      backoff exponential
+    }
+    timeout after 10m emits PaymentCaptureTimedOut
+    compensation {
+      emits PaymentFailed
+    }
+  }
+
+  await PaymentResult {
+    waits_for one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    on PaymentCaptured -> PaymentCaptured
+    on PaymentFailed -> PaymentFailed
+    on PaymentCaptureTimedOut -> PaymentCaptureTimedOut
+  }
+
+  projection OrderObservedState {
+    from Order
+    fields [status, payment_status]
+  }
+}

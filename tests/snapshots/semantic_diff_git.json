@@ -1,0 +1,135 @@
+{
+  "fsl": "1.0",
+  "result": "semantic_diff",
+  "old": {
+    "file": "BASE:root.fsl",
+    "spec": "Root"
+  },
+  "new": {
+    "file": "HEAD:root.fsl",
+    "spec": "Root"
+  },
+  "bounded": {
+    "depth": 2,
+    "completeness": "bounded"
+  },
+  "scope": {
+    "old": {
+      "instances": {},
+      "values": {}
+    },
+    "new": {
+      "instances": {},
+      "values": {}
+    },
+    "comparison": "new",
+    "applied_to_old": {
+      "instances": {},
+      "values": {}
+    }
+  },
+  "directions": {
+    "new_to_old": {
+      "result": "refinement_failed",
+      "checked_to_depth": 2,
+      "kind": "abs_requires_failed",
+      "violated_at_step": 2
+    },
+    "old_to_new": {
+      "result": "refines",
+      "checked_to_depth": 2
+    }
+  },
+  "summary": [
+    "behavior_added"
+  ],
+  "findings": [
+    {
+      "kind": "behavior_added",
+      "direction": "new_to_old",
+      "witness": {
+        "trace_type": "counterexample",
+        "trace": [
+          {
+            "step": 0,
+            "state": {
+              "child.flag": false
+            }
+          },
+          {
+            "step": 1,
+            "state": {
+              "child.flag": true
+            },
+            "action": {
+              "name": "enable",
+              "params": {
+                "x": 0
+              },
+              "loc": {
+                "line": 4,
+                "column": 3
+              }
+            },
+            "changes": {
+              "child.flag": {
+                "from": false,
+                "to": true
+              }
+            }
+          },
+          {
+            "step": 2,
+            "state": {
+              "child.flag": true
+            },
+            "action": {
+              "name": "enable",
+              "params": {
+                "x": 0
+              },
+              "loc": {
+                "line": 4,
+                "column": 3
+              }
+            },
+            "changes": {}
+          }
+        ],
+        "violation": {
+          "kind": "abs_requires_failed",
+          "violated_at_step": 2,
+          "impl_action": {
+            "name": "enable",
+            "params": {
+              "x": 0
+            },
+            "loc": {
+              "line": 4,
+              "column": 3
+            }
+          },
+          "mismatch": []
+        }
+      }
+    }
+  ],
+  "gate": {
+    "forbidden": [],
+    "violations": [],
+    "passed": true
+  },
+  "vcs": {
+    "kind": "git",
+    "range": "BASE..HEAD",
+    "base": {
+      "revision": "BASE",
+      "commit": "base-commit"
+    },
+    "head": {
+      "revision": "HEAD",
+      "commit": "head-commit"
+    },
+    "materialization": "git_archive_full_tree"
+  }
+}

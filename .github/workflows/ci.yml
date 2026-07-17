@@ -1,7 +1,10 @@
 name: ci
 
-# PRs run one full suite plus a smaller cross-version smoke suite for fast
-# feedback. main, scheduled, and manual runs keep the full Python 3.9-3.12 matrix.
+env:
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+# Python is a frozen reference implementation and optional LSP surface. The
+# required product gate executes only the authoritative Rust and WASM surfaces.
 
 on:
   push:
@@ -15,78 +18,71 @@ permissions:
   contents: read
 
 jobs:
-  pr-full:
-    name: full pytest (py3.12)
-    if: github.event_name == 'pull_request'
+  rust-workspace:
+    name: rust workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Check Rust workspace
+        run: ./tools/check-native-integration.sh rust
+
+  wasm:
+    name: WASM
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.12"
-          cache: pip
+          targets: wasm32-unknown-unknown
 
-      - name: Install (editable + dev deps)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            rust/spikes/z3js-worker/package-lock.json
+            rust/fsl-wasm/package-lock.json
 
-      - name: Run full test suite
-        run: pytest -q
+      - name: Cache pinned wasm-bindgen CLI
+        id: wasm-bindgen-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/bin/wasm-bindgen-test-runner
+            ~/.cargo/bin/wasm2es6js
+          key: ${{ runner.os }}-wasm-bindgen-cli-0.2.126
 
-  pr-compat-smoke:
-    name: compat smoke (py${{ matrix.python-version }})
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+      - name: Install pinned wasm-bindgen CLI
+        if: steps.wasm-bindgen-cache.outputs.cache-hit != 'true'
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+
+      - name: Check WASM integration
+        run: ./tools/check-native-integration.sh wasm
+
+  rust-native-z3:
+    name: native Z3 4.16 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        os: [ubuntu-latest, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
+          components: clippy,rustfmt
 
-      - name: Install (editable + dev deps)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run compatibility smoke tests
-        run: >
-          pytest -q
-          tests/test_version.py
-          tests/test_v1.py
-          tests/test_temporal.py
-          tests/test_logic_temporal_sugar.py
-
-  full-matrix:
-    name: full pytest (py${{ matrix.python-version }})
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install (editable + dev deps)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run full test suite
-        run: pytest -q
+      - name: Test pinned native solver and BMC crates
+        working-directory: rust
+        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust

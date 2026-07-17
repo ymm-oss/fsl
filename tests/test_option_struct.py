@@ -138,20 +138,20 @@ spec BadOptionStructBound {
     assert r["invariant"] == "_bounds_s"
 
 
-def test_option_struct_some_equality_is_type_error_bug10():
+def test_option_struct_some_equality_is_structural():
     src = """
-spec BadSomeEq {
+spec SomeEq {
   type K = 0..1
   struct S { v: Option<K> }
   state { s: S }
-  init { s = S { v: none } }
-  action bad() {
+  init { s = S { v: some(0) } }
+  action clear() {
     requires s.v == some(0)
+    s.v = none
   }
-  invariant I { true }
+  invariant I { s.v == none or s.v == some(0) }
 }
 """
-    with pytest.raises(FslError) as exc:
-        verify(_spec(src), 1)
-    assert exc.value.kind == "type"
-    assert "Option == and !=" in str(exc.value)
+    assert verify(_spec(src), 1)["result"] == "verified"
+    monitor = Monitor(_spec(src))
+    assert any(action["action"] == "clear" for action in monitor.enabled())

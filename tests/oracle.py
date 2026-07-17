@@ -17,7 +17,7 @@ import subprocess
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fslc.cli import exit_code, run_verify
 from fslc.model import FslError, domain_range
@@ -48,10 +48,75 @@ class OracleResult:
     reachables: dict[str, dict[str, Any]] = field(default_factory=dict)
     deadlock: dict[str, Any] | None = None
     states_explored: int = 0
+    phys_snapshots: list[dict] = field(default_factory=list)
+    action_coverage: set[str] = field(default_factory=set)
 
 
 class UnsupportedOracle(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class BoundedPropertyOracle:
+    name: str
+    before: Callable[[dict[str, Any]], bool]
+    after: Callable[[dict[str, Any]], bool]
+    within: int
+
+
+def bounded_liveness_oracle(
+    observations: list[dict[str, Any]],
+    properties: list[BoundedPropertyOracle],
+) -> dict[str, Any]:
+    """Independent finite-prefix oracle for unbound ``leadsTo ... within``.
+
+    Observation index is the logical tick, including stutters. Q may hold on
+    the deadline observation. A remaining obligation is pending, not proof of
+    either satisfaction or failure.
+    """
+    pending: dict[str, int] = {}
+    for step, state in enumerate(observations):
+        for prop in properties:
+            if prop.within < 0:
+                raise UnsupportedOracle("leadsTo within must be non-negative")
+            if prop.after(state):
+                pending.pop(prop.name, None)
+                continue
+            pending_since = pending.get(prop.name)
+            if pending_since is not None:
+                deadline = pending_since + prop.within
+                if step >= deadline:
+                    return {
+                        "status": "violated",
+                        "property": prop.name,
+                        "pending_since": pending_since,
+                        "deadline": deadline,
+                        "within": prop.within,
+                        "tick": step,
+                    }
+                continue
+            if prop.before(state):
+                pending[prop.name] = step
+                if prop.within == 0:
+                    return {
+                        "status": "violated",
+                        "property": prop.name,
+                        "pending_since": step,
+                        "deadline": step,
+                        "within": 0,
+                        "tick": step,
+                    }
+    obligations = [
+        {
+            "property": prop.name,
+            "pending_since": pending[prop.name],
+            "deadline": pending[prop.name] + prop.within,
+            "within": prop.within,
+        }
+        for prop in properties
+        if prop.name in pending
+    ]
+    return {"status": "pending" if obligations else "passed", "pending": obligations}
 
 
 def normalize(value: Any) -> Any:
@@ -114,12 +179,19 @@ def _record_violation(
         }
 
 
-def bfs_oracle(source_or_path: str | Path, depth: int) -> OracleResult:
+def bfs_oracle(source_or_path: str | Path, depth: int, collect_phys: int = 0) -> OracleResult:
+    """Z3-free BFS oracle. ``collect_phys > 0`` additionally captures up to
+    that many unique concrete ``Monitor._phys`` snapshots (initial state plus
+    every newly-visited state, in BFS order) into ``OracleResult.phys_snapshots``,
+    so one exploration can feed both a verdict-agreement check and an
+    expression-agreement check (see ``tests/agreement.py``)."""
     mon0 = Monitor(source_or_path)
     initial = mon0.reset()
     out = OracleResult(spec=mon0.spec["name"], depth=depth)
     initial_trace = [{"step": 0, "state": initial}]
     _record_reachables(mon0, out, initial_trace, 0)
+    if collect_phys > 0:
+        out.phys_snapshots.append(copy.deepcopy(mon0._phys))  # noqa: SLF001
 
     queue = deque([(mon0, initial_trace, 0)])
     visited = {state_key(mon0)}
@@ -132,6 +204,7 @@ def bfs_oracle(source_or_path: str | Path, depth: int) -> OracleResult:
             enabled = sorted(mon.enabled(), key=action_key)
         except Exception as exc:
             raise UnsupportedOracle(f"Monitor.enabled() could not enumerate this state: {exc}") from exc
+        out.action_coverage.update(action["action"] for action in enabled)
         if not enabled and (out.deadlock is None or d < out.deadlock["depth"]):
             out.deadlock = {"depth": d, "trace": list(trace), "state": mon.state}
         if d >= depth:
@@ -151,9 +224,63 @@ def bfs_oracle(source_or_path: str | Path, depth: int) -> OracleResult:
             if key in visited:
                 continue
             visited.add(key)
+            if collect_phys > 0 and len(out.phys_snapshots) < collect_phys:
+                out.phys_snapshots.append(copy.deepcopy(child._phys))  # noqa: SLF001
             queue.append((child, next_trace, d + 1))
 
     return out
+
+
+def assert_verdict_agrees(
+    case: VerifyCase,
+    oracle: OracleResult,
+    result: dict[str, Any],
+    *,
+    allow_error_kinds: frozenset = frozenset(),
+) -> None:
+    """The verify-vs-oracle decision table shared by ``test_oracle_agreement.py``
+    and ``test_dialect_conformance.py``. If ``result`` is a declared/allowed
+    ``error`` (``kind`` in ``allow_error_kinds``), it is accepted without
+    further checks; any other ``error`` fails loudly."""
+    if result.get("result") == "error":
+        assert result.get("kind") in allow_error_kinds, {
+            "case": case.id, "undeclared_error": result,
+        }
+        return
+
+    violation_kinds = {entry["kind"] for entry in oracle.violations.values()}
+    if oracle.violations:
+        assert result["result"] == "violated", {
+            "false_negative": result.get("result") in {"verified", "proved"},
+            "case": case.id,
+            "oracle_violations": oracle.violations,
+            "fslc": result,
+        }
+        assert result.get("violation_kind") in violation_kinds
+        assert result.get("violated_at_step") == min(v["depth"] for v in oracle.violations.values())
+        return
+
+    if case.deadlock == "error" and oracle.deadlock is not None:
+        assert result["result"] == "violated", result
+        assert result.get("violation_kind") == "deadlock"
+        return
+
+    mon_reachable_names = set(oracle.reachables)
+    spec_reachable_names = {reach["name"] for reach in Monitor(case.path).spec["reachables"]}
+    if spec_reachable_names - mon_reachable_names:
+        assert result["result"] == "reachable_failed", {
+            "case": case.id,
+            "missing": sorted(spec_reachable_names - mon_reachable_names),
+            "fslc": result,
+        }
+        return
+
+    if result["result"] == "violated":
+        # The concrete oracle does not model leadsTo lasso checks.  A finite
+        # leadsTo counterexample from fslc is not an oracle disagreement here.
+        assert result.get("violation_kind") == "leadsTo", result
+    else:
+        assert result["result"] in {"verified", "proved"}, result
 
 
 def run_verify_case(case: VerifyCase) -> dict[str, Any]:

@@ -6,9 +6,6 @@ from __future__ import annotations
 
 from .model import _err, binder_range, domain_range
 
-_OPTION_EQ_HINT = "use `x is some(v)` to compare the contained value"
-
-
 def _is_enum_member(name, spec):
     for info in spec["types"].values():
         if info["kind"] == "enum" and name in info["members"]:
@@ -179,28 +176,19 @@ def option_logical_eq(a, b, dom):
     _err("struct Option field comparison requires Option values", kind="type")
 
 
-def option_none_cmp(a, b, op, dom):
-    if isinstance(a, tuple) and a[0] == "option_val" and isinstance(b, tuple) and b[0] == "none":
-        present = a[1]
-        return dom.not_(present) if op == "==" else present
-    if isinstance(b, tuple) and b[0] == "option_val" and isinstance(a, tuple) and a[0] == "none":
-        present = b[1]
-        return dom.not_(present) if op == "==" else present
-    return None
-
-
-def reject_option_binop(a, b, op):
+def option_compare(a, b, op, dom):
     def tag(v):
         if isinstance(v, tuple) and v[0] in ("option_val", "none"):
             return v[0]
         return None
     ta, tb = tag(a), tag(b)
     if ta is None and tb is None:
-        return
-    if op in ("==", "!=") and ta == "none" and tb == "none":
-        return
+        return None
     if op in ("==", "!="):
-        _err("Option == and != are only defined against none", kind="type", hint=_OPTION_EQ_HINT)
+        if ta is None or tb is None:
+            _err("Option comparison requires two Option values", kind="type")
+        equal = option_logical_eq(a, b, dom)
+        return dom.not_(equal) if op == "!=" else equal
     _err(f"Option values cannot be used with '{op}'", kind="type")
 
 
@@ -280,6 +268,12 @@ def eval_index(base_e, idx, state, spec, dom):
 
 
 def eval_field(base, field):
+    # Production-log mapping expressions reuse the refinement expression AST,
+    # but JSON objects arrive as ordinary dicts rather than FSL struct tuples.
+    if isinstance(base, dict):
+        if field not in base:
+            _err(f"unknown field '{field}'")
+        return base[field]
     if isinstance(base, tuple) and base[0] == "struct_map_val":
         fields = base[3]
         if field not in fields:

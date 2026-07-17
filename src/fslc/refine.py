@@ -58,8 +58,10 @@ _ENSURES_NOTE = (
 
 _PROGRESS_HINT = (
     "the impl refines the abstract safety contract, but admits an execution where "
-    "the pulled-back abstract leadsTo remains pending forever; add fairness/progress "
-    "to the lower layer or review the progress mapping"
+    "the pulled-back abstract leadsTo remains pending. Fairness must come from "
+    "lower-layer `fair action` declarations for the implementation actions named "
+    "by preserve progress; action mappings do not create fairness or prove "
+    "implementation conformance by themselves"
 )
 
 
@@ -90,6 +92,11 @@ def _types_compatible(abs_ty, impl_ty):
                 _types_compatible(abs_ty[1], impl_ty[1])
                 and abs_ty[2] == impl_ty[2]
             )
+        if abs_ty[0] == "relation":
+            return (
+                _types_compatible(abs_ty[1], impl_ty[1])
+                and _types_compatible(abs_ty[2], impl_ty[2])
+            )
     if abs_ty[0] == "domain" and impl_ty[0] == "int":
         return True
     if abs_ty[0] == "enum" and impl_ty[0] == "enum" and abs_ty[1] == impl_ty[1]:
@@ -97,10 +104,45 @@ def _types_compatible(abs_ty, impl_ty):
     return False
 
 
+def _type_defs_conflict(impl_info, abs_info):
+    """True if two same-named type declarations are unsafe to merge.
+
+    Domain types with different bounds are deliberately allowed to share a
+    name: an impl value outside the abs range is still caught downstream as
+    an `abs_state_mismatch` when the mapped value is checked against the abs
+    bounds. Enums (and structs) have no such downstream bounds check — an
+    impl-only member's ordinal position gets silently reinterpreted as
+    whichever abs member sits at that index, so a same name with a
+    different member list (or field set) must be rejected here instead,
+    otherwise a real refinement violation can come back as a false
+    "refines".
+    """
+    if impl_info["kind"] != abs_info["kind"]:
+        return True
+    if impl_info["kind"] == "enum":
+        return impl_info["members"] != abs_info["members"]
+    if impl_info["kind"] == "struct":
+        return impl_info["fields"] != abs_info["fields"]
+    return False
+
+
 def _merge_types_meta(impl_spec, abs_spec):
     """Merge type metadata; abs types take precedence on name clash."""
     merged = dict(impl_spec["types"])
     for name, info in abs_spec["types"].items():
+        impl_info = impl_spec["types"].get(name)
+        if impl_info is not None and _type_defs_conflict(impl_info, info):
+            _err(
+                f"type '{name}' is declared differently in the impl and abs specs "
+                f"(impl: {impl_info}, abs: {info})",
+                kind="type",
+                hint=(
+                    f"refinement merges type metadata by name, so a same-named type "
+                    f"with a different definition cannot be resolved safely; give the "
+                    f"impl and abs layers distinct type names (e.g. enum ImplStatus vs "
+                    f"enum AbsStatus) instead of reusing '{name}' for two different types"
+                ),
+            )
         merged[name] = info
     return merged
 
@@ -147,6 +189,10 @@ def _subst_binder(expr, binder_var, key_val):
             return (tag, b, walk(e[2]))
         if tag == "method":
             return ("method", walk(e[1]), e[2], [walk(a) for a in e[3]])
+        if tag in ("rel_reachable",):
+            return (tag, walk(e[1]), walk(e[2]), walk(e[3]))
+        if tag in ("rel_acyclic", "rel_functional", "rel_injective", "rel_domain", "rel_range"):
+            return (tag, walk(e[1]))
         return e
 
     return walk(expr)
@@ -220,6 +266,12 @@ def _expand_alpha_scalar(logical, ty, z3_val, out, types_meta):
             out[f"{logical}__len"] = z3_val[2]
         else:
             _err(f"map for Seq '{logical}' must produce a Seq expression", kind="type")
+        return
+    if ty[0] == "relation":
+        if isinstance(z3_val, tuple) and z3_val[0] == "relation_val":
+            out[logical] = z3_val[1]
+        else:
+            out[logical] = z3_val
         return
     _err(f"unsupported abstraction type {ty} for '{logical}'", kind="type")
 
@@ -789,11 +841,13 @@ def _progress_action_summary(decl):
 def _progress_failure(
         impl_spec, abs_spec, ctx, model, leadsto, decl, binding_types,
         extra_binds, step, pending_since, loop_start=None, stutter=False):
+    progress_failure = "deadlock_or_stall_blocks_progress" if stutter else "lasso_blocks_progress"
     out = {
         "result": "refinement_failed",
         "impl": impl_spec["name"],
         "abs": abs_spec["name"],
         "kind": "progress_lost",
+        "progress_failure": progress_failure,
         "violation_kind": "leadsTo",
         "invariant": leadsto["name"],
         "bindings": _display_leadsto_bindings(model, extra_binds, abs_spec, binding_types),

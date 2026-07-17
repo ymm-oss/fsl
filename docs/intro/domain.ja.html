@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fsl-domain によるFunctional DDDと非同期Effect — FSL 日本語マニュアル</title>
+<meta name="description" content="fsl-domainでFunctional DDDのaggregate、command、event、純粋なdecide/evolve、saga、非同期effect、scaffold、runtime replay、conformance adapterを扱う方法。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="domain">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Functional DDD / async effects</p>
+    <h1 class="reveal"><code>domain</code> でドメイン遷移と非同期 effect を仕様として確認する</h1>
+    <p class="lead reveal">fsl-domain は、aggregate の所有範囲、command の意図、受理された event、純粋な <code>decide/evolve</code>、非同期 effect lifecycle、saga/process-manager を1つの仕様にまとめる dialect です。仕様は既存 kernel へ lower されて形式検証され、構造的なリスクは安定 JSON の finding として、runtime の実挙動は replay の観測証拠として返ります。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a> と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-effect.md">DESIGN-effect.md</a> にあります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">何を防ぐか</p>
+    <h2 class="reveal">ドメイン境界と非同期の破れをリリース前に見つける</h2>
+    <p class="lead narrow reveal">実装では、command の受理判定に I/O が混ざる、届いた完了イベントがどのリクエストの完了か分からない、決済のような取り消せない処理が再送で二重に走る、といった破れが起きます。fsl-domain はドメインを有限の遷移系として lower し、こうしたリスクを検証と finding で機械的に返します。</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>純粋な core の完全性</h3>
+        <p>すべての command に <code>decide</code> が、すべての event に <code>evolve</code> があること、<code>evolve</code> が aggregate 外の状態を書かないことを検査します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>correlation</h3>
+        <p>async effect の完了は、<code>correlation_id</code> で結ばれた pending なリクエストが先に存在することを要求します。宣言が欠ければ <code>uncorrelated_async_completion</code> です。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>idempotency</h3>
+        <p>irreversible な effect には <code>idempotency_key</code> が必須です。欠けていれば error finding が形式検証そのものを止めます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>止まらない process</h3>
+        <p>pending のまま離脱手段がない effect、完了観測のない saga step、循環する wait を warning / error として報告します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">モデル</p>
+    <h2 class="reveal"><code>domain</code> は既存カーネルへ lower される</h2>
+    <p class="lead narrow reveal"><code>domain</code> は新しい verifier kernel ではありません。宣言を typed IR に読み込み、既存の状態機械 kernel へ展開します。展開結果は <code>fslc domain expand</code> でそのまま FSL として確認できます。</p>
+    <table class="matrix reveal">
+      <tr><th>domain の要素</th><th>展開後の形</th><th>実際の例（<code>fslc domain expand</code> の出力）</th></tr>
+      <tr><td>aggregate の state field</td><td>snake_case の kernel state 変数。</td><td><code>Order.status</code> → <code>order_status: OrderStatus</code></td></tr>
+      <tr><td>command + <code>decide</code> + <code>evolve</code></td><td>1つの kernel action。<code>requires</code> は guard に、<code>rejects E when C</code> は <code>requires not (C)</code> になります。</td><td><code>RequestPaymentCapture</code> → <code>order_request_payment_capture(payment_request_id)</code></td></tr>
+      <tr><td>event の発生</td><td>step ごとの Bool flag。直前 step でどの event が起きたかを表します。</td><td><code>event_PaymentCaptured: Bool</code></td></tr>
+      <tr><td>enum member</td><td>namespace 化された member。別の enum が同じ語を使っても衝突しません。</td><td><code>Pending</code> → <code>OrderStatus_Pending</code></td></tr>
+      <tr><td>aggregate invariant / <code>can(Command)</code></td><td>kernel invariant。<code>can(C)</code> は C の decide 前提条件（すべての <code>requires</code> と各 <code>rejects ... when</code> の否定）に展開されます。</td><td><code>noDuplicateCapture</code> → <code>Order_noDuplicateCapture</code></td></tr>
+      <tr><td>effect の lifecycle</td><td>correlation ごとの有限 map と、completion / retry の kernel action。</td><td><code>capture_payment_status: Map&lt;PaymentRequestId, CapturePaymentEffectStatus&gt;</code>、<code>capture_payment_attempts</code>（<code>0..3</code>）</td></tr>
+      <tr><td>saga の step / compensation</td><td>event flag で guard された kernel action と、完了を観測する observe action。</td><td><code>saga_order_fulfillment_capture_payment</code>、<code>saga_order_fulfillment_observe_payment_captured</code></td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">effect の lifecycle は <code>correlation_id</code> を key とする有限状態機械 <code>NotStarted -&gt; Pending -&gt; Succeeded | Failed | TimedOut | Cancelled | Compensated</code> です。completion action は該当 correlation が <code>Pending</code> であることを要求し、retry action は <code>Failed / TimedOut</code> かつ <code>attempts &lt; max_attempts</code> を要求します。<code>Succeeded</code> は sticky で、生成 kernel の transition 検査 <code>CapturePayment_SuccessSticky</code> がそれを担保します。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">基本形</p>
+    <h2 class="reveal">aggregate と effect を同じ仕様に書く</h2>
+    <p class="lead narrow reveal"><code>decide</code> は state と command から「受理 event か、名前つき reject か」を決める純粋関数、<code>evolve</code> は受理 event を state に適用する純粋関数です。I/O は effect の側だけに置きます。</p>
+    <div class="panel reveal">
+      <pre><code>domain OrderAsyncEffect {
+  implementation_profile functional_ddd
+
+  enum OrderStatus { Pending, Approved, Cancelled }
+  enum PaymentStatus { NotRequested, PaymentPending, Captured, Failed, TimedOut }
+
+  aggregate Order {
+    id OrderId
+    state {
+      status: OrderStatus = Pending;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command ApproveOrder {}
+    command CancelOrder {}
+    command RequestPaymentCapture { input payment_request_id: PaymentRequestId }
+
+    event OrderApproved {}
+    event OrderCancelled {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+
+    error CannotCancelCapturedOrder
+    error CannotCaptureUnapprovedOrder
+    error DuplicatePaymentCapture
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    decide CancelOrder {
+      rejects CannotCancelCapturedOrder when payment_status == Captured
+      requires status in [Pending, Approved]
+      emits OrderCancelled
+    }
+
+    decide RequestPaymentCapture {
+      rejects CannotCaptureUnapprovedOrder when status != Approved
+      rejects DuplicatePaymentCapture when payment_status in [PaymentPending, Captured]
+      emits PaymentCaptureRequested
+    }
+
+    evolve OrderApproved { status = Approved }
+    evolve OrderCancelled { status = Cancelled }
+    evolve PaymentCaptureRequested { payment_status = PaymentPending }
+    evolve PaymentCaptured {
+      requires status != Cancelled
+      payment_status = Captured
+    }
+    evolve PaymentFailed { payment_status = Failed }
+    evolve PaymentCaptureTimedOut { payment_status = TimedOut }
+
+    invariant noDuplicateCapture {
+      payment_status == Captured -> not can(RequestPaymentCapture)
+    }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentCaptureRequested.payment_request_id
+    handles PaymentCaptureRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    retry {
+      max_attempts 3
+      backoff exponential
+    }
+    timeout after 10m emits PaymentCaptureTimedOut
+    compensation {
+      emits PaymentFailed
+    }
+  }
+}</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>effect の宣言</th><th>意味</th></tr>
+      <tr><td><code>async</code></td><td>完了が別の step で届く非同期 effect。<code>correlation_id</code> が必須になります。</td></tr>
+      <tr><td><code>irreversible</code></td><td>取り消せない副作用（決済など）。<code>idempotency_key</code> が必須で、compensation がなければ warning です。</td></tr>
+      <tr><td><code>correlation_id Event.field</code></td><td>リクエストと完了を結ぶ key。lifecycle map の添字になります。</td></tr>
+      <tr><td><code>idempotency_key Order.id</code></td><td>二重コミットを防ぐための安定 key の宣言。</td></tr>
+      <tr><td><code>handles</code> / <code>emits one_of [...]</code></td><td>受けるリクエスト event と、返しうる完了 event の集合。</td></tr>
+      <tr><td><code>retry { max_attempts 3 }</code></td><td>失敗・タイムアウト後の再試行上限。kernel では <code>attempts &lt; 3</code> guard になります。</td></tr>
+      <tr><td><code>timeout after 10m emits ...</code></td><td>pending からの離脱。<code>10m</code> は wall-clock ではなくモデル上の event です。</td></tr>
+      <tr><td><code>reliable</code> + <code>outbox</code></td><td>配送保証を主張する effect は outbox 境界とペアで書きます。なければ <code>reliable_effect_without_outbox_boundary</code> warning です。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">saga</p>
+    <h2 class="reveal">saga で境界越しの process を調整する</h2>
+    <p class="lead narrow reveal">複数 step の eventual な process は <code>saga</code> で書きます。<code>starts_on</code> の event で開始し、各 step は <code>emits</code> でリクエストを出し、<code>awaits one_of [...]</code> で完了を待ち、<code>timeout after</code> で離脱します。<code>compensation</code> は「X が Y の後に起きたら Z を出す」という補償を宣言します。</p>
+    <div class="panel reveal">
+      <pre><code>saga OrderFulfillment {
+  starts_on OrderApproved
+  outbox OrderOutbox
+  inbox FulfillmentInbox
+
+  step ReserveInventory {
+    async
+    emits InventoryReservationRequested
+    awaits one_of [InventoryReserved, InventoryReservationFailed]
+    timeout after 5m emits InventoryReservationFailed
+  }
+
+  step CapturePayment {
+    async
+    requires InventoryReserved
+    emits PaymentCaptureRequested
+    awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    timeout after 10m emits PaymentCaptureTimedOut
+  }
+
+  step ShipOrder {
+    requires PaymentCaptured
+    emits ShipmentRequested
+  }
+
+  compensation {
+    when PaymentFailed after InventoryReserved {
+      emits InventoryReleaseRequested
+    }
+  }
+}</code></pre>
+    </div>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">saga の <code>awaits</code> / <code>after</code> は、step ごとの event 観測 action（<code>saga_order_fulfillment_observe_payment_captured</code> のような生成 action）として kernel に入り、結果 JSON に <code>DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY</code> という assumption が付きます。durable な process history は無限の kernel proof としては扱わず、<code>fslc domain replay</code> の有限ログ観測で確認する境界です。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">実行</p>
+    <h2 class="reveal">kernel 検証と domain 専用コマンドを使う</h2>
+    <p class="lead narrow reveal"><code>domain</code> ファイルは kernel へ lower されるため、通常の <code>fslc check</code> / <code>fslc verify</code> もそのまま通ります。dialect の境界（finding、scaffold、replay）は <code>fslc domain</code> サブコマンドが担います。</p>
+    <div class="panel reveal">
+      <pre><code>fslc check  examples/domain/order_async_effect.fsl
+fslc verify examples/domain/order_async_effect.fsl --depth 8
+fslc domain check   examples/domain/order_async_effect.fsl
+fslc domain analyze examples/domain/order_fulfillment_saga.fsl
+fslc domain expand  examples/domain/order_async_effect.fsl
+fslc domain generate examples/domain/order_functional_ddd.fsl --target typescript -o src/domain
+fslc domain testgen  examples/domain/order_functional_ddd.fsl --target vitest -o order.domain.test.ts
+fslc domain replay   examples/domain/order_async_effect.fsl --logs examples/domain/order_async_effect_replay.jsonl</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>結果</th><th>読み方</th></tr>
+      <tr><td><code>verified_under_assumptions</code></td><td><code>domain check</code> の成功。<code>formal_result: "verified"</code> で、kernel の詳細（<code>invariants_checked</code>、<code>action_coverage</code> など）は <code>kernel</code> にネストされ、<code>generated_actions</code> と assumption 一覧が並びます。</td></tr>
+      <tr><td><code>violated</code> + <code>formal_result: "not_run"</code></td><td>severity <code>error</code> の finding が形式検証の前に止めました。exit code は 1 です。</td></tr>
+      <tr><td><code>analyzed</code></td><td><code>domain analyze</code>。aggregate / effect / saga の所有関係（state、commands、events、steps、compensations、outbox/inbox）の要約 JSON です。</td></tr>
+      <tr><td><code>generated</code></td><td><code>domain generate</code> / <code>domain testgen</code>。生成された <code>files</code> の一覧と出力先を返します。</td></tr>
+      <tr><td><code>conformance_checked</code> / <code>nonconformant</code></td><td><code>domain replay</code>。有限ログの観測結果で、<code>guarantee_kind: "runtime_observed"</code> が付きます。形式証明ではありません。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">finding</p>
+    <h2 class="reveal">error は検証を止め、warning は設計リスクを知らせる</h2>
+    <p class="lead narrow reveal">finding は <code>fsl-domain-finding.v0</code> schema の安定 JSON です。severity <code>error</code> は「このまま kernel を回すと保証を過大に主張してしまう」構造的欠陥で、kernel を実行せずに <code>violated</code> を返します。severity <code>warning</code> は設計レビュー上のリスクで、それ単体では kernel の実行を止めません。</p>
+    <table class="matrix reveal">
+      <tr><th>finding</th><th>severity</th><th>意味</th></tr>
+      <tr><td><code>missing_decide_for_command</code></td><td>error</td><td>command に対応する <code>decide</code> がありません。</td></tr>
+      <tr><td><code>missing_evolve_for_event</code></td><td>error</td><td>event に対応する <code>evolve</code> がありません。</td></tr>
+      <tr><td><code>aggregate_boundary_violation</code></td><td>error</td><td><code>evolve</code> が aggregate の外の状態を直接書いています。</td></tr>
+      <tr><td><code>uncorrelated_async_completion</code></td><td>error</td><td>async effect に <code>correlation_id</code> がありません。replay では「先行リクエストのない完了」も同じ kind で報告されます。</td></tr>
+      <tr><td><code>irreversible_effect_without_idempotency_key</code></td><td>error</td><td>irreversible な effect に <code>idempotency_key</code> がありません。</td></tr>
+      <tr><td><code>process_wait_cycle</code></td><td>error</td><td>saga の wait graph が循環していて、外部の完了なしには進めません。</td></tr>
+      <tr><td><code>pending_effect_without_timeout_or_fallback</code></td><td>warning</td><td>pending からの離脱手段（<code>timeout</code> / <code>retry</code>）がありません。</td></tr>
+      <tr><td><code>late_completion_without_stale_policy</code></td><td>warning</td><td>キャンセル後などに遅れて届く成功完了への stale policy がありません。</td></tr>
+      <tr><td><code>missing_compensation_for_irreversible_effect</code></td><td>warning</td><td>irreversible な effect に compensation（effect 直付けまたは saga 側）がありません。</td></tr>
+      <tr><td><code>reliable_effect_without_outbox_boundary</code></td><td>warning</td><td><code>reliable</code> 宣言に outbox 境界が伴っておらず、runtime の配送証拠を過大に主張しています。</td></tr>
+      <tr><td><code>saga_dead_end</code></td><td>warning</td><td>step のない saga、または完了観測（<code>awaits</code> / <code>timeout</code>）のない async step です。</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">実例: <code>examples/domain/unsafe_irreversible_effect_without_idempotency.fsl</code> に <code>fslc domain check</code> を実行すると、error 1件（<code>irreversible_effect_without_idempotency_key</code>）と warning 2件（<code>pending_effect_without_timeout_or_fallback</code>、<code>missing_compensation_for_irreversible_effect</code>）が返り、error があるため <code>result: "violated"</code>、<code>formal_result: "not_run"</code> になります。各 finding には <code>repair_candidates</code>（例: <code>add idempotency_key &lt;stable key&gt; to irreversible effect CapturePayment</code>）が付き、LLM の write→verify→repair ループにそのまま渡せます。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">scaffold と replay</p>
+    <h2 class="reveal">実装 scaffold と runtime 観測へつなぐ</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><code>domain generate</code></h3>
+        <p><code>--target typescript</code> が最も充実しています: <code>types.ts</code>、<code>&lt;aggregate&gt;/decide.ts</code>、<code>&lt;aggregate&gt;/evolve.ts</code>、<code>&lt;aggregate&gt;/adapter.ts</code>、effect があれば <code>effects.ts</code>、saga があれば <code>process-manager.ts</code>。<code>python | kotlin | swift | rust</code> は pure-domain の簡易 scaffold です（python は <code>domain_scaffold.py</code> 1ファイル）。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>domain testgen</code></h3>
+        <p>vitest の conformance test scaffold を生成します。Monitor（具象 evaluator）が固定 seed で焼き込んだ trace を replay する形で、adapter（<code>makeAdapter()</code>）を実装に接続するまで各テストは skip されます。既存 <code>testgen</code> と同じ adapter boundary に繋がります。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><code>domain replay</code></h3>
+        <p>JSONL / JSON の runtime log をモデルに流します。event kind は <code>command</code> / <code>domain_event</code> / <code>effect_request</code> / <code>effect_completion</code> の4種です。</p>
+      </div>
+    </div>
+    <div class="panel reveal" style="margin-top:24px">
+      <div class="panel-head">examples/domain/order_async_effect_replay.jsonl → conformance_checked</div>
+      <pre><code>{"event":"command","aggregate":"Order","command":"ApproveOrder","params":{}}
+{"event":"command","aggregate":"Order","command":"RequestPaymentCapture","params":{"payment_request_id":"p1"}}
+{"event":"domain_event","aggregate":"Order","name":"PaymentCaptureRequested","params":{"payment_request_id":"p1"}}
+{"event":"effect_request","effect":"CapturePayment","correlation_id":"p1"}
+{"event":"effect_completion","effect":"CapturePayment","name":"PaymentCaptured","correlation_id":"p1","params":{"payment_request_id":"p1"}}</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>replay 結果の key</th><th>実際の値（上記ログでの実行結果）</th></tr>
+      <tr><td><code>result</code></td><td><code>conformance_checked</code>。ログがモデルと食い違うと <code>nonconformant</code> です。</td></tr>
+      <tr><td><code>events_observed</code></td><td><code>["PaymentCaptureRequested", "PaymentCaptured"]</code></td></tr>
+      <tr><td><code>pending_effects</code></td><td><code>[]</code> — 未完了のまま残った correlation の一覧です。</td></tr>
+      <tr><td><code>final_state</code></td><td>replay 後のモデル状態。<code>Order.payment_status: "PaymentStatus_Captured"</code>、<code>effect.CapturePayment.status</code> の correlation <code>0</code> が <code>Succeeded</code>、<code>attempts</code> が <code>1</code> になります。</td></tr>
+      <tr><td><code>nonconformant</code> 時の finding</td><td><code>command_rejected_by_model</code>、<code>uncorrelated_async_completion</code>、<code>duplicate_irreversible_effect_commit</code>、<code>effect_completion_rejected_by_model</code> など。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">境界</p>
+    <h2 class="reveal">証明できることと、できないことを分ける</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>kernel が証明すること</h3>
+        <p>bounded な aggregate invariant、rejected な command が no-op であること（reject 条件は guard に lower されるため状態を変えません）、completion-requires-request、retry bound、success status の stickiness。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>有限モデル仮定</h3>
+        <p><code>DOMAIN-ASSUME-FINITE-DOMAIN-MODEL</code>: 明示宣言のない ID・scalar 入力型は <code>0..1</code> の有限範囲としてモデル化されます。無限の id 空間への証明ではありません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>saga history</h3>
+        <p><code>DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY</code>: <code>awaits</code> / <code>after</code> は step ごとの観測 flag です。durable な process history は replay evidence で確認します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>外部世界</h3>
+        <p>実際の payment gateway、queue delivery、wall-clock time（<code>10m</code> はモデル上の event です）、無限 key 空間にわたる本番 idempotency は証明しません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>生成コード</h3>
+        <p><code>DOMAIN-ASSUME-GENERATED-SCAFFOLD</code>: 生成物は scaffold であり、本番アーキテクチャの証明ではありません。runtime conformance には adapter / replay の evidence 境界が必要です。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>replay は観測証拠</h3>
+        <p><code>conformance_checked</code> は「この有限ログがモデルと一致した」という観測であり、形式証明ではありません。ログの不在は非発生の証明にはなりません。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">次に読む</p>
+    <h2 class="reveal">設計と例へ進む</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>設計判断</h3>
+        <p>lowering、finding schema、effect lifecycle の意味論、残る境界は design doc にまとまっています。</p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a> <a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-effect.md">DESIGN-effect.md</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>動く例</h3>
+        <p>async effect、saga と compensation、Functional DDD の基本形、idempotency 欠如の unsafe 例、replay 用ログの fixture があります。</p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/tree/main/examples/domain">examples/domain</a></p>
+      </div>
+      <div class="syntax-card">
+        <h3>通常の文法</h3>
+        <p><code>domain</code> は FSL の既存 verifier に展開されます。展開先の基本構文は文法ページで確認できます。</p>
+        <p><a class="btn" href="syntax.ja.html">文法・構文へ</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

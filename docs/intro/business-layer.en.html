@@ -18,6 +18,7 @@
 
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">Writing the Business Layer</p>
     <h1 class="reveal">Turn business rules into<br><span class="hl">checkable structure</span>.</h1>
     <p class="lead reveal">The <code>business</code> layer describes actors, entities, business processes, controls, goals, and KPIs before implementation details appear.</p>
@@ -248,7 +249,7 @@ verify { values Amount = 0..3 }</code></pre>
     initial Draft
     transition submit Draft -&gt; Submitted by Employee with a: Amount
       when a &gt; 0 set amount = a
-      covers REQ-1 "The applicant submits an expense claim by entering an amount"
+      covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
   }
 }</code></pre>
       </div>

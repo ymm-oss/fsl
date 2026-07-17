@@ -10,9 +10,10 @@ on grammar transform-time semantic errors. Compose/requirements expansion
 :class:`fslc.model.FslError` directly (not wrapped in ``VisitError``).
 The CLI translates all of these into the machine-readable JSON error envelope.
 """
+from lark import Lark
 from lark.exceptions import UnexpectedInput
 
-from .grammar import PARSER, Ast
+from .grammar import GRAMMAR, PARSER, Ast
 from .compose import expand_compose
 from .dialects import (
     apply_verify_bounds_overrides,
@@ -21,6 +22,59 @@ from .dialects import (
     expand_requirements_with_display,
     expand_spec_domains,
 )
+from .db_expand import expand_dbsystem
+from .db_parser import parse_dbsystem
+from .ai_expand import expand_ai_component
+from .ai_parser import parse_ai_component
+from .domain_expand import expand_domain
+from .domain_parser import parse_domain
+from .predicates import expand_named_predicates
+from .dialect_registry import inspect_source
+
+
+_EXPR_PARSER = None
+
+
+def parse_expr(src):
+    """Parse one standalone FSL expression (used by CLI lemma candidates)."""
+    global _EXPR_PARSER
+    if _EXPR_PARSER is None:
+        _EXPR_PARSER = Lark(
+            GRAMMAR,
+            parser="earley",
+            start="expr",
+            maybe_placeholders=True,
+            propagate_positions=True,
+        )
+    try:
+        tree = _EXPR_PARSER.parse(src)
+    except UnexpectedInput as exc:
+        exc.source = src
+        raise
+    return Ast().transform(tree)
+
+
+def parse_surface_src(src):
+    """Parse the shared FSL grammar without applying frontend lowering.
+
+    This is the differential seam used by the Rust parser port. Specialized
+    db/AI/domain grammars have their own typed surface IR and are intentionally
+    rejected here; :func:`parse_src` remains the public all-frontend entrypoint.
+    """
+    dispatch = inspect_source(src)
+    if dispatch.keyword in {"dbsystem", "ai_component", "agent", "domain"}:
+        from .model import FslError
+
+        raise FslError(
+            "specialized frontend source has no shared-grammar surface AST",
+            kind="semantics",
+        )
+    try:
+        tree = PARSER.parse(dispatch.source)
+    except UnexpectedInput as exc:
+        exc.source = src
+        raise
+    return Ast().transform(tree)
 
 
 def parse_src(src, base_dir=None, bounds_overrides=None):
@@ -30,12 +84,55 @@ def parse_src(src, base_dir=None, bounds_overrides=None):
     comes from ``fslc verify --instances``/``--values`` and replaces the matching
     ``verify { ... }`` bounds before dialect desugaring runs.
     """
-    try:
-        tree = PARSER.parse(src)
-    except UnexpectedInput as e:
-        e.source = src
-        raise
-    ast = Ast().transform(tree)
+    dispatch = inspect_source(src)
+    parser_source = dispatch.source
+    if dispatch.keyword == "dbsystem":
+        has_bounds_overrides = bool(
+            bounds_overrides
+            and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
+        )
+        if has_bounds_overrides:
+            from .model import FslError
+            raise FslError(
+                "--instances/--values do not apply to dbsystem; set finite schema windows in the dbsystem file",
+                kind="semantics",
+            )
+        system = parse_dbsystem(parser_source)
+        expanded = expand_dbsystem(system)
+        return expanded.ast, expanded.display_names
+
+    if dispatch.keyword == "ai_component":
+        has_bounds_overrides = bool(
+            bounds_overrides
+            and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
+        )
+        if has_bounds_overrides:
+            from .model import FslError
+            raise FslError(
+                "--instances/--values do not apply to ai_component; declare finite tool authority in the ai_component file",
+                kind="semantics",
+            )
+        component = parse_ai_component(parser_source)
+        expanded = expand_ai_component(component)
+        return expanded.ast, expanded.display_names
+
+    if dispatch.keyword == "domain":
+        has_bounds_overrides = bool(
+            bounds_overrides
+            and (bounds_overrides.get("instances") or bounds_overrides.get("values"))
+        )
+        if has_bounds_overrides:
+            from .model import FslError
+            raise FslError(
+                "--instances/--values do not apply to domain; declare finite ID/value ranges in the domain file",
+                kind="semantics",
+            )
+        domain = parse_domain(parser_source)
+        expanded = expand_domain(domain)
+        return expanded.ast, expanded.display_names
+
+    ast = parse_surface_src(parser_source)
+    ast = expand_named_predicates(ast)
     if bounds_overrides:
         ast = apply_verify_bounds_overrides(ast, bounds_overrides)
     display_names = {}

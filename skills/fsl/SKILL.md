@@ -25,21 +25,45 @@ when the value is keeping the layers aligned, reach for the connected workflow
 
 Before reaching for a spec, run this filter. FSL is not for every task, and forcing
 it where it does not fit wastes effort and produces hollow specs. **This is a
-judgment aid, not a gate**: when the answer is "no," say so and recommend the better
-tool (usually ordinary tests) instead of writing FSL anyway.
+judgment aid, not a gate**: when neither payoff below applies, say so and recommend
+the better tool (usually ordinary tests) instead of writing FSL anyway.
 
-**The one test — judge by _interaction_, not size:** can some **order of operations
-or combination of flags** reach a state that must never happen? Even 3 states + 2
-flags qualify if back / cancel / retry / permission branching is involved; a hundred
-states on one linear path do not.
+**Two payoffs justify writing FSL, and either alone is enough — this is not a single
+verification-ROI gate:**
 
-Three gates, top to bottom — stop at the first "no":
+- **Verification payoff**: can some order of operations or combination of flags reach
+  a state that must never happen?
+- **Documentation payoff**: would this feature get a spec or design doc written for it
+  regardless? If so, write that doc as FSL — the `.fsl` source replaces the prose doc
+  you would write anyway, so it is simultaneously what people read and what the
+  verifier checks, with zero drift between the two.
 
-1. **State machine?** Can you draw boxes (states) + arrows (operations)? No → static
-   display, simple CRUD, decoration. Out of scope; recommend ordinary tests.
-2. **Interaction can reach a bad state?** order / flags / permissions / async /
-   retry combine into a forbidden state. No → linear path; tests usually suffice
-   (low priority).
+"Out of scope" is reserved for what FSL cannot express (gate 3 below), not for
+"verification ROI too low." A linear-path or CRUD feature that would be documented
+regardless is in scope as a thin verifiable doc, even with no forbidden state to
+prove. Because of the documentation payoff, broad coverage across
+business/requirements/design layers is the default target, not the exception —
+replacing a prose doc needs no per-feature verification-ROI proof; treat high-risk-
+first as adoption *sequencing* when capacity is limited, not as where coverage stops.
+
+**The verification test — judge by _interaction_, not size:** can some **order of
+operations or combination of flags** reach a state that must never happen? Even 3
+states + 2 flags qualify if back / cancel / retry / permission branching is involved;
+a hundred states on one linear path do not by verification payoff alone — check the
+documentation payoff above before ruling a feature out.
+
+Three gates, top to bottom. Gates 1 and 3 stop on genuine inexpressibility (no
+payoff rescues those); at gate 2, check the documentation payoff before ruling a
+feature out of scope:
+
+1. **State machine?** Can you draw boxes (states) + arrows (operations)? No →
+   nothing to model (static display, decoration with no state to speak of). Out of
+   scope; recommend ordinary tests.
+2. **Interaction can reach a bad state, or would this be documented anyway?** order /
+   flags / permissions / async / retry combine into a forbidden state → verification
+   payoff, write it. Otherwise, a linear path or simple CRUD flow that would still
+   get a spec/design doc → documentation payoff, write it as a thin verifiable doc
+   (low priority, not out of scope). Neither → tests usually suffice.
 3. **Finite & discrete?** real-time values, probability, continuous quantities, or
    free-text meaning are **not** the core. No → the core won't fit the model; FSL is
    at most an aid. (SLA is fine only as a *relative, discrete-step* deadline, not a
@@ -49,7 +73,8 @@ Keep "**low priority** (possible but thin)" distinct from "**out of scope** (not
 expressible)." High-yield: payments/refunds, approvals/send-backs,
 inventory/allocation, permissions/audit, queues/async, SLA/timeout/retry, screen
 transitions / double-submit / unsaved-changes. Out of scope: real time, probability,
-continuous money, free-text correctness, absolute latency.
+continuous money, free-text correctness, absolute latency — what FSL cannot express,
+not merely what scores low on verification payoff alone.
 
 **The second lens — one of FSL's primary uses, not a fourth gate: is there
 connectivity value?** The three gates score a spec *as a single island*, but that is
@@ -65,15 +90,22 @@ much — is the **abstraction tax**: if there is really only one hard altitude, 
 manufacture three layers — you would just write the same thing three times at
 different verbosity. Island-shaped hard spots stay single-spec, exactly as before. So
 the wider you write across genuine layers, the more alignment you can mechanically
-manage — but this stays a judgment lens, never a mandate to make every task
-three-layered (FSL is the contract spine, not the entire product process). (Same
-criterion in the manual's "When to Use FSL" chapter.)
+manage — but this stays a judgment lens, never a mandate to manufacture a layer that
+does not genuinely exist (FSL formalizes the contract layers that are actually
+there; natural-language discovery, UI/API/visual design, coding, and testing still
+happen in their own tools). (Same criterion in the manual's "When to Use FSL"
+chapter.)
 
 Even past the gates, the value is conditional: **FSL checks the spec, not the
 product.** If no human owns the rules, or (for conformance) no faithful Adapter/log
 is feasible, keep it to lightweight pre-implementation review and do not claim
 implementation conformance. A spec that no mutation kills is hollow comfort — check
 `fslc mutate` kill-rate (a very low kill-rate signals a hollow spec).
+
+The resulting spec corpus is not a one-time deliverable: treat it as a living single
+source of truth, re-verified on every change (CI regression, drift detection, and
+cross-layer change-impact via `refine`), and read directly — by humans and by AI — as
+onboarding context for the flow it documents.
 
 Full rationale, plus the per-feature vs per-project distinction, is the manual's
 "When to Use FSL" chapter (`docs/intro/when-to-use.{ja,en}.html`).
@@ -104,20 +136,30 @@ why weakening the upper layer to make a lower one pass defeats the point.
 ## Prerequisite: the fslc verifier
 
 This skill only supplies language knowledge; verification is done by the `fslc`
-CLI. If it is not installed, run `pip install -e .` from the FSL repository (the
-root containing `pyproject.toml`) — the only dependencies are lark and z3-solver,
-and no native build is required. In environments where `fslc` is not on PATH,
-`python -m fslc ...` works identically.
+CLI. If it is not installed, run `bash install.sh` from the FSL repository (or
+`bash ~/.fsl/install.sh` after cloning there). The installer places the
+checksummed native Rust binary on the public `fslc` path; Python is optional and
+used only for the frozen compatibility-reference development surface. The
+`fslc-lsp` language server is also native Rust and does not require Python.
 
 ## How to run
 
 ```bash
-fslc <subcommand> ...            # if installed as editable
-python -m fslc <subcommand> ...  # or via the venv python
+fslc <subcommand> ...            # authoritative native Rust CLI
 ```
 
+The Python implementation is a frozen compatibility reference. New language/CLI
+features are not backported to it. Use the native `fslc` binary for
+`undecided:` syntax and its ledger/HTML/analyze output; do not route new work
+through `python -m fslc`.
+
+External compilers and generators must use `fslc kernel <spec>` rather than the
+Python AST or source re-parsing. Validate independent implementations with
+`fslc conformance <spec> --depth N`; versioning and rollback semantics are in
+`docs/DESIGN-kernel-contract.md`.
+
 Output is always a single JSON document on stdout. exit: 0=success
-(verified/proved/generated), 1=property not satisfied
+(verified/proved/generated/analyzed), 1=property not satisfied
 (violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
 (parse/type/semantics/io), 3=internal error.
 
@@ -185,6 +227,37 @@ This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
 "unfounded fabrications (untagged)."
 
+### Preserve intentionally deferred decisions with `undecided:`
+
+When the specification owner has explicitly decided to leave a choice open,
+record that review decision on the declaration instead of inventing a guard or
+property:
+
+```fsl
+init "undecided: initial operating mode will be selected at rollout" {
+  mode = Manual
+}
+action route() "undecided: routing policy is pending owner approval" {
+  ...
+}
+```
+
+`undecided:` is metadata, not a verification condition. Verification still
+checks every behavior allowed by the spec. `fslc ledger` and `fslc html` list
+the declaration, reason, and state-dependency-derived affected requirement IDs.
+`analyze --profile ai-review` keeps matching `divergent_choice` /
+`unconstrained_effect` findings visible and marks them `acknowledged:true` with
+`acknowledged_by`; an unmatched finding has no acknowledgement fields and stays
+in the unresolved review queue.
+
+Use this marker only after a human owner deliberately accepts the deferral. Do
+not use it to hide an agent's uncertainty, a missing source requirement, or a
+failed formalization guess. The declaration has one tag slot, so an
+`undecided:` declaration cannot simultaneously carry an `ID: text` tag; reports
+derive affected IDs from state dependencies. Full syntax and limits are in
+`reference.md` and `docs/DESIGN-undecided.md`. This feature belongs to the
+native Rust CLI and is intentionally not added to the frozen Python reference.
+
 ## Natural language → syntax mapping (from the formalization memo to the spec)
 
 Map the sentences extracted during requirement normalization (the memo above) to
@@ -199,6 +272,7 @@ the formalization memo.**
 | "must never" / "always the case" (prohibition, invariance) | `invariant` (safety) |
 | "prohibit/constrain a change from one state to the next" (two-state safety) | `trans` (use `old()` to reference the pre-transition state) |
 | "can only do X when Y" (precondition) | an action's `requires` |
+| a long/repeated business condition needs a stable name | file-local non-recursive `def name(p: Type) = expr`, then call it from guards/properties |
 | "once X happens, Y must eventually happen" (response, progress) | `leadsTo` + `fair` on the action that drives progress |
 | "P must become Q within K steps" (bounded response) | `leadsTo Name { P ~> within K Q }` |
 | "keep P true until Q" (safety, Q may never happen) | `unless Name { P unless Q }` |
@@ -207,6 +281,7 @@ the formalization memo.**
 | business-flow reachability / completion goal | `goal G "..." some Case can reach Target` or `goal G "..." all Case can be Target [or Target ...]` |
 | "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
 | "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
+| "A is linked to B" / graph reachability / acyclicity / functional relation | `state { r: relation A -> B }` plus `.contains/.add/.remove`, `reachable`, `acyclic`, `functional`, `injective`, `domain`, `range` |
 | "within K times / K ticks" (deadline) | kernel `leadsTo ... within K` for step deadlines, or requirements `time` + `deadline` for SLA/tick semantics (reference §11) |
 | upper/lower bound or non-negativity of a number | kernel: `type T = lo..hi`; business/requirements dialects: `number T` plus `verify { values T = lo..hi }` (do not hand-write boundary invariants) |
 | "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
@@ -221,11 +296,18 @@ the formalization memo.**
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
+   To ask a bounded operational what-if from a complete `Monitor.state` JSON,
+   use `fslc verify file.fsl --from-state state.json --depth 8`; this replaces
+   `init`, is BMC-only, and is stamped `bounded_from_snapshot`.
 3. Once verified, run `fslc verify file.fsl --engine induction` → done at `proved`
    (note: `--depth K` **includes** step K. Invariants become infinite-depth under
    `proved`; `leadsTo` remains bounded unless it declares `decreases <int expr>`,
    in which case induction can prove that response with an unbounded ranking
-   argument)
+   argument). If induction returns `unknown_cti`, candidate auxiliary invariants
+   may be machine-judged with repeatable `--lemma "EXPR"`: only independently
+   `proved` candidates are used, rejected candidates retain counterexample/CTI
+   evidence, and successful output recommends declarations to write back. Never
+   treat a candidate as an assumption without this adjudication.
 4. As needed: `fslc explain file.fsl --depth 8 --readable`
    (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
    checks, a "what if this rule were absent" counterfactual for each user
@@ -233,20 +315,66 @@ the formalization memo.**
    that surfaces verification bounds, fairness, KPI projections, branch lowering,
    and synthesized refinement mappings. For PMs/consultants, ask them to
    adjudicate concrete traces rather than logical formulas),
+   `fslc analyze file.fsl --profile ai-review`
+   (emits structural review findings over the Typed Semantic Graph, such as
+   disconnected requirements, unanchored properties, progressless cycles,
+   unwritten state, and unguarded actions, plus depth-4 BMC-backed
+   `divergent_choice` / `unconstrained_effect` questions. Present
+   `spec_question` to the specification owner instead of choosing a branch or
+   inventing a constraint. If `acknowledged:true`, retain the finding and show
+   its `acknowledged_by` declaration/reason as an intentional deferral; if
+   the fields are absent, keep it in the unresolved review queue. `analyze` also supports batch
+   file/directory review, standalone `refinement_graph`, project
+   `traceability_graph`, DOT/Mermaid graph exports, and JSON schemas under
+   `schemas/fslc/analysis/`. These are review signals with
+   `formal_status:"not_a_violation"`, not proof failures),
+   When you add natural-language judgment on top of `analyze` output, keep it
+   agent-side: cite exact source text and TSG node ids, keep
+   `formal_status:"not_a_violation"`, do not turn suggestions into fslc
+   violations or CI failures, and do not send source/requirement/comment text to
+   an external model unless the user or environment has explicitly opted in,
+   For tag/formula alignment, first run
+   `fslc analyze file.fsl --export tag-review` and compare one declaration tuple
+   at a time. Treat `tag_stale_reference` / `tag_formula_disjoint` as exact
+   identifier evidence only, not semantic proof,
    `fslc mutate file.fsl --depth 8 --by-requirement`
    (shows how many model mutations the spec's properties kill; a survivor is not a
    failure but a candidate for a missing invariant / acceptance / forbidden. For a
    spec whose baseline is not verified, it emits no mutation report and returns the
-   baseline result), `fslc scenarios` (integration-test skeleton JSON),
+   baseline result. Track survivors and kill-rate against an accepted baseline: a
+   regression in that delta is the signal; one absolute survivor count is not),
+   `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
-   (log conformance), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
-   of a detailed spec).
+   (normalized spec-action log conformance), or `fslc replay --from-log
+   events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
+   refinement syntax), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
+   of a detailed spec), and `fslc diff old.fsl new.fsl --depth 8` (bounded
+   semantic change analysis with behavior/invariant/forbidden witnesses). Diff
+   findings are informational by default; add an explicit comma-separated
+   `--forbid` policy to make selected kinds fail CI.
+   In a Git/PR workflow use `fslc diff --git BASE..HEAD [spec.fsl]`: both full
+   trees are materialized so imports resolve at their own revision. Omit the
+   path to compare all changed `.fsl` files. Do not replace this with two
+   `git show` temporary files for imported or composed specifications.
+   For AI tool-boundary contracts, use `fslc ai check file.fsl` on
+   `ai_component` specs and `fslc ai replay file.fsl --logs events.jsonl` for
+   runtime event evidence. For recursive fsl-ai agent composition, use
+   `fslc ai check file.fsl` on `agent` specs; it returns `agent_analyzed` and
+   deterministic `agent_ir` / graph summaries for lexical scope, explicit
+   authority/context grants, visibility, orchestration, tool reachability, and
+   failure policy. These check syntactic/structural hard facts such as tool
+   authority, forbidden tools, human approval, and agent graph boundaries;
+   evaluator-backed and statistical AI claims are evidence, not formal proof,
+   and are out of Phase 1.
    Note: what verify/induction guarantees is the **internal consistency of the
    spec**, which is separate from **whether the implementation honors the spec
    contract**. If implementation conformance is also required, anchor to the
    implementation with `testgen` (pytest via an Adapter) / `replay` (matching
    against execution logs).
+   For scope-sensitive failures, use `fslc sweep file.fsl --instances Case=1..3
+   --depth 1..8 [--property Name]`; it reports each run under `sweep.results` and
+   the first failing scope under `sweep.minimal_counterexample`.
 
 ## Connected workflow (across layers — when alignment is the deliverable)
 
@@ -315,6 +443,7 @@ existing result/kind fields:
 | `violated` / `partial_op` | pop/head on an empty Seq, index out of range, or divisor 0 | Guard with `requires q.size() > 0` / `requires d != 0` or an `if` |
 | `violated` / `ensures` | Postcondition not satisfied | Decide whether the body or the ensures is correct, and fix accordingly |
 | `violated` / `leadsTo` | Response-property counterexample (lasso / stall) | Check the trace's `loop_start`. Either add `fair` to the action that drives progress, or fix the spec |
+| `unknown_cti` / `leadsTo_rank` | Ranked response proof failed | Read `rank_failure`: `progress_action_not_fair` means `helpful` named a non-fair action; `helpful_action_not_enabled` means the matching progress action is blocked while P is pending; `non_decreasing_helpful_action` means the helpful action fires without lowering the measure; otherwise repair the rank or pending preservation |
 | `reachable_failed` | A state you want to reach is unreachable | Read `action_coverage`'s `blocking_requires` (unsat core). Loosen a guard / add an action / increase `--depth` |
 | `unknown_cti` | The invariant is true but not inductive | **The CTI's starting state = a phantom state satisfying all invariants. Add an auxiliary invariant (one that is a domain truth) that excludes it, then re-run.** Check `suggested_invariants` first — for the monotone-counter idiom the result carries ready-made candidate expressions. Track record: converges in one round (e.g. "no duplicates in the queue," "refunds only from Captured") |
 | warning / `vacuous_implication` | The antecedent of an implication invariant is never reached within depth | Check whether an action / reachable witness that makes the antecedent hold is missing, or whether the antecedent expression is reversed or too strong relative to intent. Do not simply weaken the consequent |
@@ -322,16 +451,17 @@ existing result/kind fields:
 | warning / `always_true_requires` | Under the context of the preceding requires, this requires clause is not effective as a constraint | Decide whether the clause is redundant or whether a path to the state where the clause bites is missing. Do not delete it automatically |
 | warning / `tautology_over_frozen` | An invariant that depends only on frozen variables no action ever assigns to, and is dynamically always true (a dead ghost = hollow) | Make the variable `const`, or suspect a missing action that should change it. A sign that the invariant "thinks it is checking a contract but checks nothing" |
 | `error` / `parse` | Syntax error | Follow `loc` and `expected` (candidate tokens) |
-| `error` / `type` | Type error | Follow the `hint` (e.g. `x == some(e)` → bind with `x is some(v)` and compare) |
+| `error` / `type` | Type error | Follow the `hint`; Option equality requires compatible payload types, while ordering remains invalid |
 | `error` / `semantics` | Double assignment, etc. | Do not assign to the same variable twice on the same path (an if's then/else are separate paths, so it is allowed) |
 | `error` / `vacuous` | init is unsatisfiable (contradictory assignments, etc.) | Review init. Check that you are not giving one state variable contradictory values. A violation from an out-of-range value is different and becomes `violated`/`type_bound` |
 | `refinement_failed` / `abs_requires_failed` | A detailed-layer transition breaks an upper-layer guard (e.g. a shortcut skipping approval) | Read `impl_action` and `impl_trace`. Add a guard to the detailed layer, or review the interpretation of the correspondence (`maps` / mapping) |
 | `refinement_failed` / `abs_state_mismatch` / `stutter_changed_abs` / `map_out_of_bounds` | Mapping inconsistency (an update has no correspondence / a stutter nonetheless changes upper-layer state / a mapped value is out of the type's range) | Compare the `mismatch` path with `abs_before/after`. Fix the mapping expression or the action correspondence |
-| `refinement_failed` / `progress_lost` | A `preserve progress` mapping pulled an upper `leadsTo` into the lower layer and found a lasso/stall | Read `impl_trace`, `pending_since`, `loop_start`/`stutter`, and the `progress.actions`. Add/restore `fair` on the lower progress action, add a lower-layer ranked `leadsTo`, or revise the progress mapping |
+| `refinement_failed` / `progress_lost` | A `preserve progress` mapping pulled an upper `leadsTo` into the lower layer and found a lasso/stall | Read `progress_failure`, `impl_trace`, `pending_since`, `loop_start`/`stutter`, and the `progress.actions`. Add/restore lower-layer `fair action` on the progress action, add a lower-layer ranked `leadsTo`, or revise the progress mapping |
 | `implements.result: violated` within verify | The requirements layer deviates from the upper (business) layer | The contents of `implements.violation` have the same shape as refinement_failed. Same procedure as above + check the `requirement` on the requirements side |
 | `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
 | `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
 | `error` / `forbidden_setup` | A precondition (non-final) step of the forbidden is not enabled (invalid trace) | Review the setup procedure. The non-final steps are there to reach that point and are not treated as success |
+| `statistically_unsupported` / `dataset_invalid` / `evaluator_untrusted` / `insufficient_samples` (fsl-ai evidence commands) | External statistical/migration/drift evidence failed a gate — there is no kernel counterexample to read | Route by the status priority list in `docs/DESIGN-stochastic.md`: fix the evidence (records, calibration, sample size) or the component/rollout — not the spec, and do not expect a trace |
 
 For an action whose coverage is `false`, `blocking_requires` pinpoints "which
 requires is blocking it" on a per-clause basis, and `hint` summarizes the
@@ -351,8 +481,9 @@ preserve progress {
 
 This checks the upper `leadsTo` after pulling it through the state mapping. A
 failure is `refinement_failed / progress_lost`. The `by` actions are validated
-impl action names and review metadata; the actual lasso exclusion still comes
-from lower-layer `fair action` declarations.
+impl action names and review metadata; they do not create fairness or prove
+implementation conformance. The actual lasso exclusion still comes from
+lower-layer `fair action` declarations.
 
 When a counterexample makes you **change an interpretation** (added a guard,
 loosened an invariant, decided how to handle an exception), record that judgment in
@@ -424,10 +555,18 @@ spec Cart {
 }
 ```
 
+This template uses `type X = lo..hi` throughout, the fastest path to a checkable
+kernel spec. When the spec should also read as documentation, prefer `entity X` /
+`number X` with the bound moved to a `verify { instances/values }` block instead:
+`type Claim = 0..2` reads as a false domain fact ("there are only 3 claims"), while
+`entity Claim` + `verify { instances Claim = 3 }` states a verification bound, not a
+domain truth. See reference.md §10, "Authoring specs as readable documentation."
+
 ## Rules to always follow (structural pitfalls)
 
-- **No sentinel values (-1, etc.) → use `Option<T>`**. `x == some(e)` is a type
-  error — extract with `x is some(v)`. `== none` / `!= none` are allowed.
+- **No sentinel values (-1, etc.) → use `Option<T>`**. Use structural
+  `==` / `!=` when comparing complete Option values; use `x is some(v)` when
+  the payload must be bound for a following expression.
 - **Do not hand-write "non-negative"-style invariants** → `type Qty = 0..N` checks
   them automatically.
 - A **double assignment on the same execution path is an error**. Assigning to the
@@ -435,10 +574,13 @@ spec Cart {
 - Updates to Set/Seq are **re-assignments**: `s = s.add(x)`, `q = q.pop()`.
 - Seq `pop/head/at` and the divisor of `/` `%` **must always be guarded** (requires
   or if). Forgetting is detected as partial_op.
-- When talking about a Seq in an invariant, use an index guard:
-  `forall i in 0..CAP-1 { i < q.size() => P(q.at(i)) }` (write the range as
-  `0..CAP-1`, derived from the const — hard-coding a literal will not track a
-  capacity change).
+- For an **element-wise** property over a Seq in an invariant, prefer member
+  quantification: `forall x in q { P(x) }` (no index arithmetic, nothing to get
+  off-by-one). Keep the index-guard idiom — `forall i in 0..CAP-1 { i < q.size() =>
+  P(q.at(i)) }` (range derived from the const, never a hard-coded literal) — only
+  for properties about position, ordering, adjacency, or no-duplicates, where the
+  index itself carries meaning. See reference.md §10, "Authoring specs as readable
+  documentation."
 - **Nested Maps (`Map<K1, Map<K2,V>>`) are not allowed** → flatten two axes into a
   single product domain type (`type Cell = 0..ROOMS*SLOTS-1`) and recover the axes
   with `c / SLOTS` and `c % SLOTS`.
@@ -484,6 +626,10 @@ important constraints and high-risk specs.
   independently write the dynamics + properties, then `replay` each other's
   `scenarios` against the other's spec to expose discrepancies. Costly, so use it
   selectively.
+- **Liveness negative controls must be able to stall**: removing `fair` is not a
+  useful probe when every maximal execution terminates structurally. A negative
+  control for `leadsTo` must admit a lasso, deadlock, or other pending stall that
+  the checked progress rule is expected to reject.
 
 ## Role-specific authoring entry points
 
@@ -575,6 +721,36 @@ the relevant role skill directs it.
   generated by `fslc testgen` into the implementation. observe has the same shape
   as the spec's logical state (enum as a name, Option as None|value, Seq as a list,
   composition as `alias.var` keys)
+- **Functional DDD / async effects**: `domain` specs lower aggregate state,
+  command/decide/event/evolve, invariants, saga/process-manager steps, and finite
+  async effect lifecycles to the kernel. Use `fslc domain check` for fsl-domain
+  findings plus the nested kernel result, `fslc domain expand` to inspect the
+  generated spec, `fslc domain generate --target typescript|python|kotlin|swift|rust`
+  / `fslc domain testgen` for scaffolds, and `fslc domain replay --logs` for
+  runtime command/event/effect evidence. Treat generated code as a scaffold; real
+  gateway behavior, queue delivery, wall-clock timeouts, and production
+  exactly-once semantics remain outside the proof boundary.
+- **AI hard contracts**: `ai_component` specs lower tool authority / human
+  approval / forbidden-tool guards to the kernel. Use `fslc ai check` for
+  hard-contract findings and `fslc ai replay --logs` for runtime JSONL evidence;
+  `replay_conformant` is not proof, and evaluator/statistical AI quality remains
+  outside the kernel. If you add `check hard { rule ...; }`, name only the
+  rules you mean to certify explicitly — omitting the block is the safe
+  default (checks all 5); do not add it as a shortcut past a violation (full
+  field list and the verified narrowing behavior: reference.md §1). For
+  recursive `agent` review-gate coverage, declare `review_gate <Child>;` on
+  every path that must pass human/policy review before reaching a
+  high-authority tool — an undeclared path is a silent bypass, not a warning.
+  For statistical/migration/drift evidence over precomputed
+  eval JSONL (`dataset`/`evaluator`/`statistical_property`/`ai_migration`/
+  `observed_property` project-level blocks), use `fslc ai eval`/`regress`/
+  `compare`/`drift`/`compat` (syntax and flags in reference.md §1/§7); every
+  result is `formal_result:"not_run"`, never `proved`.
+- **Recursive AI agents**: `agent` specs are ordinary scoped agents nested inside
+  parents, not `sub_agent`s. Use `fslc ai check` to get `agent_analyzed`,
+  `agent_ir`, and graph summaries for explicit grants, visibility,
+  orchestration/delegation, tool reachability, review-gate bypass, and
+  failure_policy. This is structural evidence with `formal_result:"not_run"`.
 - **Ghost types (typestate)**: `fslc typestate file.fsl [--ts]` — determines how
   far a state machine (a struct field with enum values / a state variable /
   an `Option<_>` slot) can be mapped onto the host language's typestate (derivable /

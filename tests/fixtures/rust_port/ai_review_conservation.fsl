@@ -1,0 +1,16 @@
+spec ConservationCandidate {
+  state { stock: Int, reserved: Int, audit: Int }
+  init { stock = 2  reserved = 0  audit = 0 }
+  action reserve() {
+    stock = stock - 2
+    reserved = reserved + 1
+  }
+  action release() {
+    stock = stock + 2
+    reserved = reserved - 1
+  }
+  action audit_event() {
+    audit = audit + 1
+  }
+  invariant Any "MODEL: baseline" { true }
+}

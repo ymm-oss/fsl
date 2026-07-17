@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//! Native report generators and specialized FSL dialect engines.
+
+mod ai;
+mod analysis;
+mod analysis_export;
+mod analysis_graph;
+mod db;
+mod db_import;
+mod domain;
+mod domain_codegen;
+mod html;
+mod ledger;
+mod mutate;
+mod public_kernel;
+mod refinement_analysis;
+mod testgen;
+mod typestate;
+mod undecided;
+
+pub use ai::{check_ai, replay_ai};
+pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_findings};
+pub use analysis_export::export_analysis_graph;
+pub use db::{DbToolError, check_db, observe_db, validate_db};
+pub use db_import::{DbImport, import_db};
+pub use domain::{
+    analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
+    domain_scaffold_metadata,
+};
+pub use html::render_html_report;
+pub use ledger::{render_ledger, render_ledger_with_approvals};
+pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
+pub use refinement_analysis::analyze_refinement;
+pub use testgen::{
+    TestgenInput, compose_testgen_input, generate_testgen, public_kernel_testgen_input,
+};
+pub use typestate::analyze_typestate;
+pub use undecided::undecided_declarations;
+
+/// Complete a deterministic graph envelope from already normalized nodes and edges.
+#[must_use]
+pub fn complete_analysis_graph(
+    projection: &str,
+    nodes: &[serde_json::Value],
+    edges: &[serde_json::Value],
+) -> serde_json::Value {
+    analysis_graph::graph_envelope(projection, nodes, edges)
+}

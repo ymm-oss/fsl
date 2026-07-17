@@ -1,6 +1,6 @@
 // Self-spec: fslc CLI result classification and repair discipline.
 //
-// Models src/fslc/cli.py exit_code():
+// Models the native CLI result/exit classification in rust/fslc/src/main.rs:
 //   exit 0: ok / verified / proved / scenarios / conformant / generated /
 //           refines / typestate / mutated / explained
 //   exit 1: violated / reachable_failed / unknown_cti / nonconformant /

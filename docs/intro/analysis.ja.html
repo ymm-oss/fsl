@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fslc analyze による構造分析 — FSL 日本語マニュアル</title>
+<meta name="description" content="fslc analyze で影響範囲、要件とのつながり、AIレビュー所見、グラフ出力を使い、FSL仕様レビューの探索時間を短くする方法。" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="analysis">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">構造の観測</p>
+    <h1 class="reveal"><code>fslc analyze</code> でレビューの入口を作る</h1>
+    <p class="lead reveal"><code>fslc analyze</code> は、FSL 仕様を「どの要件・操作・状態・性質がつながっているか」というレビュー用の地図にします。検証の前後で、影響範囲、根拠の薄い宣言、トレーサビリティの穴を短時間で見つけるためのコマンドです。</p>
+    <p class="reveal dim" style="margin-top:18px">実装設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md">DESIGN-analysis.md</a> に、チーム向けの実務ガイド（もっと深掘りしたい場合）は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a> にあります。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">何ができるか</p>
+    <h2 class="reveal">仕様を読む前に、見るべき場所を絞る</h2>
+    <p class="lead narrow reveal">レビューで時間がかかるのは、正誤判断そのものよりも「どこを読むべきか」「この要件は下位設計の何に対応するか」を探す時間です。<code>analyze</code> はその探索を機械的に先に済ませます。</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>影響範囲をつかむ</h3>
+        <p><code>action_state_graph</code> で、各操作が読む・書く状態変数を一覧化します。変更した操作がどの状態に効くかを、全文読解や grep だけに頼らず確認できます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>要件とのつながりを追う</h3>
+        <p><code>requirement_property_graph</code> と <code>traceability_graph</code> で、要件ID、性質、シナリオ、下位設計の操作の対応を見ます。上位要求が設計側でどこに落ちているかを確認できます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>レビュー候補を出す</h3>
+        <p><code>--profile ai-review</code> は、根拠の薄い性質、guard のない更新操作、一度も書かれない状態などを「要確認」として出します。これは違反判定ではなく、レビューの優先順位付けです。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>共有できる形にする</h3>
+        <p>JSON、DOT、Mermaid、JSON Schema で出力できます。PR説明、CI、エディタ診断、外部可視化ツールに同じ観点を渡せます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">効果</p>
+    <h2 class="reveal">レビュー時間が減る理由</h2>
+    <table class="matrix reveal">
+      <tr><th>手作業で時間がかかること</th><th><code>analyze</code> で先に出せるもの</th><th>効果</th></tr>
+      <tr><td>変更した操作がどの状態に影響するか探す</td><td>操作と状態の read/write グラフ</td><td>影響範囲の探索を短縮し、読む対象を絞れる。</td></tr>
+      <tr><td>要件IDが実際の性質や設計操作に結びついているか追う</td><td>要件・性質・シナリオ・refinement のグラフ</td><td>トレーサビリティ確認を再現可能にできる。</td></tr>
+      <tr><td>全宣言を均等に読んで怪しい箇所を探す</td><td><code>ai-review</code> findings</td><td>最初に見るべき候補を並べ、レビューの順序を決めやすくする。</td></tr>
+      <tr><td>PRコメント用に根拠を説明する</td><td>witness、candidate repair、do-not-assume 付き JSON</td><td>指摘の根拠と注意点をそのまま共有できる。</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><code>analyze</code> はレビューを置き換えるものではありません。仕様判断は人間が行います。効果が出るのは、レビュー前半の「探索」と「根拠集め」を短くできるからです。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">境界</p>
+    <h2 class="reveal">analyze は verify ではない</h2>
+    <p class="lead narrow reveal"><code>fslc analyze</code> は、検証済みの spec モデルから決定的な構造 JSON を作ります。Z3、到達可能性探索、ログ replay、詳細化証明は実行しません。</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>レビューに使う</h3>
+        <p>孤立した要件、根拠の薄い性質、グラフ上の循環、トレーサビリティの穴を深い検証の前に見つけます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>証明とは分ける</h3>
+        <p>形式的な証拠や実装適合が必要なときは <code>verify</code>、<code>refine</code>、<code>replay</code> を使います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>status を正直に読む</h3>
+        <p>構造所見は <code>formal_status: "not_a_violation"</code> を持ちます。循環があるだけでバグとは言いません。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">コマンド</p>
+    <h2 class="reveal">目的別に出力する</h2>
+    <div class="panel reveal">
+      <pre><code>fslc analyze spec.fsl --projection tsg --format json
+fslc analyze spec.fsl --projection action_state_graph --format json
+fslc analyze spec.fsl --projection action_dependency_graph --format json
+fslc analyze spec.fsl --projection impact_graph --focus state:stock --format json
+fslc analyze spec.fsl --projection requirement_property_graph --format json
+fslc analyze spec.fsl --projection property_state_graph --format json
+fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze spec.fsl --export tag-review
+fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
+fslc analyze fsl-project.toml --projection traceability_graph --format json
+fslc analyze spec.fsl --projection action_state_graph --format dot
+fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>出力</th><th>見えるもの</th><th>主な使いどころ</th></tr>
+      <tr><td><code>tsg</code></td><td>spec、状態、操作、ガード、効果、性質、要件、シナリオを含む Typed Semantic Graph 全体。</td><td>独自ツールや下流の投影で使う元データを得る。</td></tr>
+      <tr><td><code>action_state_graph</code></td><td>操作と、その操作が読む・書く状態変数のつながり。</td><td>変更の影響範囲を確認する。</td></tr>
+      <tr><td><code>action_dependency_graph</code></td><td>状態を介した操作間の <code>enables</code> と、同じ状態を書く <code>conflicts_with</code> のつながり。</td><td>スケジューラ意味論とは区別して、相互依存しやすい操作をレビューする。</td></tr>
+      <tr><td><code>impact_graph --focus NODE</code></td><td>focus node の upstream/downstream TSG closure と hop distance。</td><td>変更点に何が流れ込み、変更点から何に影響し得るかを見る。</td></tr>
+      <tr><td><code>requirement_property_graph</code></td><td>要件IDと、それが covers する操作、性質、シナリオ、KPI、control のつながり。</td><td>要件の根拠や孤立を確認する。</td></tr>
+      <tr><td><code>property_state_graph</code></td><td>ユーザー定義の性質と、それが読む・検査する状態変数のつながり。</td><td>性質が何を監視しているか確認する。</td></tr>
+      <tr><td><code>refinement_graph</code></td><td>単体の mapping file に含まれる impl/abs 名、state map、action map、stutter、preserve-progress 宣言。</td><td>詳細化の対応関係をレビューする。</td></tr>
+      <tr><td><code>traceability_graph</code></td><td>project manifest から business、requirements、design、refinement mapping を横断した構造。</td><td>上位要件が下位設計へ落ちているか確認する。</td></tr>
+      <tr><td><code>--profile ai-review</code></td><td>構造上のレビュー候補と、その witness、修正候補、早合点してはいけないこと。</td><td>レビューの初動で見る順序を決める。</td></tr>
+      <tr><td><code>--export tag-review</code></td><td>タグ付き宣言を、整形済み形式定義・識別子とともに1宣言ずつ出力。</td><td>人間または明示承認された外部レビュアーへ安定した局所レビュー単位を渡す。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">AIレビュー</p>
+    <h2 class="reveal">最初の所見</h2>
+    <div class="cards reveal">
+      <div class="card">
+        <h3><code>disconnected_requirement</code></h3>
+        <p>要件が宣言されているのに、操作、性質、シナリオ、KPI、control などの有用な構造アンカーにつながっていません。</p>
+      </div>
+      <div class="card">
+        <h3><code>unanchored_property</code></h3>
+        <p>ユーザー定義の性質に、要件タグ、シナリオ・ガバナンス上の根拠、または action-state の根拠がありません。</p>
+      </div>
+      <div class="card">
+        <h3><code>progressless_cycle</code></h3>
+        <p>要件またはシナリオにつながる複数操作の循環に、<code>leadsTo</code>、<code>fair action</code>、<code>terminal</code> などの進捗ストーリーが見えません。</p>
+      </div>
+      <div class="card">
+        <h3><code>unguarded_action</code></h3>
+        <p>状態を書き換える操作に <code>requires</code> がありません。常に実行可能でよい操作なのか、guard を書き忘れていないかを確認します。</p>
+      </div>
+      <div class="card">
+        <h3><code>unwritten_state</code></h3>
+        <p>初期化され、読まれている状態変数を、どの操作も書き換えていません。固定値なら const 化、そうでなければ更新操作の抜けを疑います。</p>
+      </div>
+      <div class="card">
+        <h3><code>unread_state</code></h3>
+        <p>状態変数は書かれますが、guard、性質、ensures、シナリオへ到達する transitive relevance chain がありません。</p>
+      </div>
+      <div class="card">
+        <h3><code>conservation_candidate</code></h3>
+        <p>counter 風の効果が重み付き和を構造的に保存しています。候補 invariant として扱い、<code>verify</code> で証明します。</p>
+      </div>
+      <div class="card">
+        <h3><code>tag_stale_reference</code> / <code>tag_formula_disjoint</code></h3>
+        <p>タグ中のコード形状識別子が、現在の仕様またはタグ対象の形式定義にありません。局所的なドリフト根拠であり、自然言語の意味判定ではありません。</p>
+      </div>
+      <div class="card">
+        <h3><code>divergent_choice</code></h3>
+        <p>深さ4のBMC witness が、同じ到達状態で2操作が有効になり、invariant または acceptance の結果が分かれることを示します。どちらが意図かを質問し、acknowledged 後も所見を残します。</p>
+      </div>
+      <div class="card">
+        <h3><code>unconstrained_effect</code></h3>
+        <p>深さ4のBMC witness が、契約の観測グラフ外の状態へ2操作が異なる次値を書けることを示します。重複する <code>unread_state</code> は抑制しますが、acknowledgement によってこの所見自体を消すことはありません。</p>
+      </div>
+    </div>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">cycle 所見は名前の英単語を見ません。未決定領域の所見は有界レビュー証拠であり、決定性の証明ではありません。所見がないことは「深さ4以内では witness がない」という意味だけです。<code>undecided:</code> 宣言との完全一致は <code>acknowledged:true</code> と <code>acknowledged_by</code> を追加し、一致しない所見には acknowledgement フィールドを追加せず、未処理のまま残します。このタグは意図的な先送りを記録するメタデータで、検証条件ではありません。詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-undecided.md">DESIGN-undecided.md</a>。</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">スキーマ</p>
+    <h2 class="reveal">出力の種類</h2>
+    <table class="matrix reveal">
+      <tr><th>出力</th><th>schema version</th><th>用途</th></tr>
+      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>下流の投影やツールが使う安定したグラフデータ。Schema は <code>schemas/fslc/analysis/tsg.v0.schema.json</code>。</td></tr>
+      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>components、SCC、cycles、degree、cycle rank や fan-in/fan-out hub などの structural metrics を含むレビュー用グラフ要約。DOT/Mermaid はこのデータの表示形式です。</td></tr>
+      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>witness、repair、caveat、editor diagnostics 用の任意 source location を含む構造化レビュー所見。</td></tr>
+      <tr><td>Tag review export</td><td><code>tag-review.v0</code></td><td>外部の意味レビュー向け宣言単位タグ/形式定義tuple。モデル呼出しも違反判定も行いません。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">限界</p>
+    <h2 class="reveal">できないことも明確に分ける</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>自然言語の推論はしない</h3>
+        <p>要件文はグラフに保持しますが、その意味を core analyzer が推論することはありません。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>証明の証拠ではない</h3>
+        <p>所見、project traceability、refinement graph は構造だけを示します。反例、到達可能性、詳細化の成否が必要な場合は <code>verify</code>、<code>refine</code>、<code>chain</code> を使います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>自動修正しない</h3>
+        <p>candidate repair は選択肢です。guard を足す、const にする、要件タグを追加する、といった判断は仕様の意図を確認してから行います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>editor signals は opt-in</h3>
+        <p><code>FSLC_LSP_ANALYSIS_DIAGNOSTICS=1</code> を設定すると、<code>fslc-lsp</code> が決定的な TSG 構造レビュー findings を Information 診断として出します。</p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

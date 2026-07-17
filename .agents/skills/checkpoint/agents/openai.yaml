@@ -1,0 +1,7 @@
+interface:
+  display_name: "Checkpoint FSL task"
+  short_description: "Save verified task state before context changes or handoff"
+  default_prompt: "Reconcile tasks/active.md with Git, changed files, and observed verification results."
+
+policy:
+  allow_implicit_invocation: false

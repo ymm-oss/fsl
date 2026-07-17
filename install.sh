@@ -30,170 +30,113 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if ! command -v python3 >/dev/null 2>&1; then
-  fail "Python 3.9 or later is required. Install Python 3 from https://www.python.org/ and re-run."
-fi
-
-PYTHON_BIN=$(command -v python3)
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
-  PY_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' 2>/dev/null || echo "unknown")
-  fail "Python 3.9 or later is required (current: ${PY_VERSION}). Update from https://www.python.org/ and re-run."
-fi
-
-is_fsl_repo() {
-  repo="$1"
-  [ -f "$repo/pyproject.toml" ] || return 1
-  [ -d "$repo/src/fslc" ] || return 1
-  [ -f "$repo/specs/cart_v1.fsl" ] || return 1
-  grep -q 'name = "fslc"' "$repo/pyproject.toml" 2>/dev/null
+latest_release_tag() {
+  local api metadata tag
+  api="https://api.github.com/repos/ymm-oss/fsl/releases/latest"
+  if command -v curl >/dev/null 2>&1; then
+    metadata=$(curl -fsSL "$api")
+  elif command -v wget >/dev/null 2>&1; then
+    metadata=$(wget -qO- "$api")
+  else
+    fail "curl or wget is required to resolve the latest FSL release."
+  fi
+  tag=$(printf '%s\n' "$metadata" | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p')
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The latest GitHub Release has an invalid tag: $tag"
+  printf '%s\n' "$tag"
 }
 
-find_repo_upwards() {
-  start="$1"
-  dir=$(cd "$start" 2>/dev/null && pwd -P) || return 1
-  while :; do
-    if is_fsl_repo "$dir"; then
-      printf '%s\n' "$dir"
-      return 0
-    fi
-    [ "$dir" = "/" ] && return 1
-    dir=$(dirname "$dir")
-  done
-}
+command -v git >/dev/null 2>&1 || fail "git is required. Install it from https://git-scm.com/."
+RELEASE_TAG=$(latest_release_tag)
 
-REPO_DIR=""
-if REPO_DIR=$(find_repo_upwards "$PWD"); then
-  :
+if [ -e "$INSTALL_DIR" ]; then
+  [ -d "$INSTALL_DIR/.git" ] || fail "$INSTALL_DIR already exists but is not a Git repository. Remove or move it and re-run."
+  unexpected=$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all | awk '$0 !~ /^\?\? \.native\//')
+  [ -z "$unexpected" ] || fail "$INSTALL_DIR has local changes. Move them or remove the directory and re-run."
+  echo "Updating the FSL repository to $RELEASE_TAG: $INSTALL_DIR"
+  git -C "$INSTALL_DIR" fetch --force --depth 1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" || fail "Failed to fetch $RELEASE_TAG."
+  git -C "$INSTALL_DIR" checkout --detach "$RELEASE_TAG" || fail "Failed to check out $RELEASE_TAG."
 else
-  SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
-  if [ -n "$SCRIPT_SOURCE" ] && [ -f "$SCRIPT_SOURCE" ]; then
-    SCRIPT_DIR=$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd -P)
-    if REPO_DIR=$(find_repo_upwards "$SCRIPT_DIR"); then
-      :
-    fi
-  fi
+  echo "Fetching FSL $RELEASE_TAG: $INSTALL_DIR"
+  git clone --branch "$RELEASE_TAG" --depth 1 "$CLONE_URL" "$INSTALL_DIR" || fail "Failed to fetch $RELEASE_TAG. Check your network connection."
 fi
+REPO_DIR=$(cd "$INSTALL_DIR" && pwd -P)
 
-if [ -z "$REPO_DIR" ]; then
-  if ! command -v git >/dev/null 2>&1; then
-    fail "git is required. Install it from https://git-scm.com/, or fetch the repository from GitHub and run ./install.sh."
-  fi
+NATIVE_DIR="$REPO_DIR/.native/bin"
+FSL_BIN="$NATIVE_DIR/fslc"
+FSL_LSP_BIN="$NATIVE_DIR/fslc-lsp"
+mkdir -p "$NATIVE_DIR"
 
-  if [ -e "$INSTALL_DIR" ]; then
-    [ -d "$INSTALL_DIR/.git" ] || fail "$INSTALL_DIR already exists but is not a Git repository. Remove or move it and re-run."
-    echo "Updating the FSL repository: $INSTALL_DIR"
-    git -C "$INSTALL_DIR" pull --ff-only || fail "Failed to update $INSTALL_DIR. Check for local changes, or remove it and re-run."
-  else
-    echo "Fetching the FSL repository: $INSTALL_DIR"
-    # Public repository. Use the gh CLI if available; otherwise clone over https (no authentication required).
-    if command -v gh >/dev/null 2>&1; then
-      gh repo clone ymm-oss/fsl "$INSTALL_DIR" || fail "Failed to fetch the repository. Check your network connection."
-    else
-      git clone "$CLONE_URL" "$INSTALL_DIR" || fail "Failed to fetch the repository. Check your network connection (no authentication is required since this is a public repository)."
-    fi
-  fi
-  REPO_DIR=$(cd "$INSTALL_DIR" && pwd -P)
-else
-  REPO_DIR=$(cd "$REPO_DIR" && pwd -P)
-  if [ -d "$REPO_DIR/.git" ]; then
-    # Developer working tree (git checkout): use it in place
-    echo "Using this repository: $REPO_DIR"
-  elif [ "$REPO_DIR" = "$INSTALL_DIR" ]; then
-    # Already placed at $INSTALL_DIR (re-run)
-    echo "Using the already-installed folder: $REPO_DIR"
-  else
-    case "$REPO_DIR/" in
-      "$INSTALL_DIR"/*)
-        # If somehow run from within $INSTALL_DIR, use it in place
-        echo "Using this folder: $REPO_DIR"
-        ;;
-      *)
-        # Source extracted from a ZIP, etc.: place it at a stable location ($INSTALL_DIR) before using it
-        echo "Placing the downloaded folder at $INSTALL_DIR."
-        SRC_DIR="$REPO_DIR"
-        mkdir -p "$INSTALL_DIR"
-        # Keep .venv (preserve the environment on re-run); replace the sources
-        find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name .venv -exec rm -rf {} + 2>/dev/null || true
-        (
-          cd "$SRC_DIR" && for item in * .[!.]*; do
-            case "$item" in .venv|.git) continue ;; esac
-            [ -e "$item" ] || continue
-            cp -R "$item" "$INSTALL_DIR/"
-          done
-        ) || fail "Failed to place files at $INSTALL_DIR. Remove $INSTALL_DIR and re-run."
-        REPO_DIR=$(cd "$INSTALL_DIR" && pwd -P)
-        is_fsl_repo "$REPO_DIR" || fail "Failed to place files at $INSTALL_DIR. Remove $INSTALL_DIR and re-run."
-        echo "Placed at: ${REPO_DIR} (you may delete the downloaded folder)"
-        ;;
-    esac
-  fi
-fi
-
-VENV_DIR="$REPO_DIR/.venv"
-VENV_PYTHON="$VENV_DIR/bin/python"
-FSL_BIN="$VENV_DIR/bin/fslc"
-FSL_LSP_BIN="$VENV_DIR/bin/fslc-lsp"
-
-echo "Preparing the Python virtual environment: $VENV_DIR"
-PYTHONPATH= "$PYTHON_BIN" -m venv "$VENV_DIR" || fail "Failed to create the Python virtual environment. On Linux where python3-venv is required, install it via your OS package manager and re-run."
-
-[ -x "$VENV_PYTHON" ] || fail "$VENV_PYTHON not found. Remove $VENV_DIR and re-run."
-
-echo "Upgrading pip."
-PYTHONPATH= "$VENV_PYTHON" -m pip install --upgrade pip || fail "Failed to upgrade pip. Check your network connection or Python environment and re-run."
-
-echo "Installing fslc (with the LSP server)."
-PIP_INSTALL_LOG=$(mktemp)
-# Use a relative spec via a subshell cd: pip silently no-ops on an absolute
-# path combined with extras ("/abs/path[lsp]"), whereas ".[lsp]" is reliable.
-if ( cd "$REPO_DIR" && PYTHONPATH= "$VENV_PYTHON" -m pip install ".[lsp]" ) >"$PIP_INSTALL_LOG" 2>&1; then
-  rm -f "$PIP_INSTALL_LOG"
-else
-  rm -f "$PIP_INSTALL_LOG"
-  echo "pip install . failed, so falling back to a local placement using the existing dependencies."
-  if ! PYTHONPATH= "$VENV_PYTHON" -c 'import lark, z3' >/dev/null 2>&1; then
-    fail "The dependencies lark and z3-solver are required. Check your network connection and re-run."
-  fi
-  SITE_PACKAGES=$(PYTHONPATH= "$VENV_PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
-  case "$SITE_PACKAGES" in
-    "$VENV_DIR"/*)
-      ;;
-    *)
-      fail "Cannot safely determine the site-packages location. Check $VENV_DIR and re-run."
-      ;;
+native_target() {
+  local os arch
+  os=$(uname -s)
+  arch=$(uname -m)
+  case "$os:$arch" in
+    Darwin:arm64|Darwin:aarch64) echo "macos-arm64" ;;
+    Linux:x86_64|Linux:amd64) echo "linux-x64" ;;
+    Linux:aarch64|Linux:arm64) echo "linux-arm64" ;;
+    *) fail "No native FSL release is available for $os/$arch." ;;
   esac
-  rm -rf "$SITE_PACKAGES/fslc" "$SITE_PACKAGES/fslc-1.1.0.dist-info"
-  cp -R "$REPO_DIR/src/fslc" "$SITE_PACKAGES/fslc"
-  mkdir -p "$SITE_PACKAGES/fslc-1.1.0.dist-info"
-  {
-    echo "Metadata-Version: 2.1"
-    echo "Name: fslc"
-    echo "Version: 1.1.0"
-  } > "$SITE_PACKAGES/fslc-1.1.0.dist-info/METADATA"
-  {
-    echo "fslc"
-  } > "$SITE_PACKAGES/fslc-1.1.0.dist-info/top_level.txt"
-  cat > "$FSL_BIN" <<EOF
-#!$VENV_PYTHON
-from fslc.cli import main
-raise SystemExit(main())
-EOF
-  chmod +x "$FSL_BIN"
-fi
+}
 
-[ -x "$FSL_BIN" ] || fail "$FSL_BIN not found. Check the result of pip install and re-run."
+download_file() {
+  local url="$1"
+  local destination="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$destination"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$url" -O "$destination"
+  else
+    fail "curl or wget is required to download the native FSL binaries."
+  fi
+}
+
+RELEASE_URL="https://github.com/ymm-oss/fsl/releases/download/$RELEASE_TAG"
+stage_release_asset() {
+  local asset="$1"
+  local destination="$2"
+  local expected_hash actual_hash
+  echo "Installing native Rust binary: $asset"
+  download_file "$RELEASE_URL/$asset" "$destination.download" || fail "Failed to download $asset from $RELEASE_TAG."
+  download_file "$RELEASE_URL/$asset.sha256" "$destination.sha256.download" || fail "Failed to download the checksum for $asset."
+  expected_hash=$(awk '{print $1}' "$destination.sha256.download")
+  if command -v shasum >/dev/null 2>&1; then
+    actual_hash=$(shasum -a 256 "$destination.download" | awk '{print $1}')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual_hash=$(sha256sum "$destination.download" | awk '{print $1}')
+  else
+    fail "shasum or sha256sum is required to verify the native binaries."
+  fi
+  [ "$expected_hash" = "$actual_hash" ] || fail "Checksum verification failed for $asset."
+  rm -f "$destination.sha256.download"
+  chmod +x "$destination.download"
+}
+
+TARGET=$(native_target)
+STAGING_DIR=$(mktemp -d "$NATIVE_DIR/.install.XXXXXX")
+trap 'rm -rf "$STAGING_DIR"' EXIT
+stage_release_asset "fslc-$TARGET" "$STAGING_DIR/fslc"
+stage_release_asset "fslc-lsp-$TARGET" "$STAGING_DIR/fslc-lsp"
+
+mv "$STAGING_DIR/fslc.download" "$FSL_BIN"
+mv "$STAGING_DIR/fslc-lsp.download" "$FSL_LSP_BIN"
+rm -rf "$STAGING_DIR"
+trap - EXIT
 
 LOCAL_BIN="$HOME/.local/bin"
 mkdir -p "$LOCAL_BIN"
 
 link_command() {
-  cmd_name="$1"
-  target="$2"
-  link_path="$LOCAL_BIN/$cmd_name"
+  local cmd_name="$1"
+  local target="$2"
+  local link_path="$LOCAL_BIN/$cmd_name"
+  local link_target
   if [ -L "$link_path" ]; then
     link_target=$(readlink "$link_path" || true)
     if [ "$link_target" = "$target" ]; then
       echo "The $cmd_name command link is already set up: $link_path"
+    elif [ "$link_target" = "$REPO_DIR/.venv/bin/$cmd_name" ]; then
+      ln -sfn "$target" "$link_path"
+      echo "Migrated the $cmd_name command link from Python to the native binary: $link_path"
     else
       echo "Warning: $link_path points to a different location (${link_target}). Not overwriting."
     fi
@@ -206,9 +149,8 @@ link_command() {
 }
 
 link_command fslc "$FSL_BIN"
-# The VSCode extension launches `fslc-lsp` from PATH; link it when present
-# (the offline fallback above installs fslc only, without the LSP server).
-[ -x "$FSL_LSP_BIN" ] && link_command fslc-lsp "$FSL_LSP_BIN"
+# The VS Code extension launches `fslc-lsp` from PATH.
+link_command fslc-lsp "$FSL_LSP_BIN"
 
 case ":$PATH:" in
   *":$LOCAL_BIN:"*)
@@ -232,19 +174,25 @@ if [ "$INSTALL_SKILL" -eq 1 ]; then
     SKILL_SRC="$REPO_DIR/skills/$SKILL_NAME"
     SKILL_DST="$HOME/.claude/skills/$SKILL_NAME"
     [ -d "$SKILL_SRC" ] || fail "$SKILL_SRC not found. Check that the repository was fetched correctly and re-run."
-    if [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
-      echo "The Claude Code skill already exists: $SKILL_DST — to update this skill, run rm -rf \"$SKILL_DST\" and re-run."
+    if [ -L "$SKILL_DST" ] && [ "$(readlink "$SKILL_DST")" = "$SKILL_SRC" ]; then
+      echo "The Claude Code skill link is current: $SKILL_DST"
+    elif [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
+      SKILL_BACKUP="$SKILL_DST.pre-native-v3"
+      [ ! -e "$SKILL_BACKUP" ] && [ ! -L "$SKILL_BACKUP" ] || fail "$SKILL_BACKUP already exists. Move it and re-run."
+      mv "$SKILL_DST" "$SKILL_BACKUP"
+      ln -s "$SKILL_SRC" "$SKILL_DST"
+      echo "Linked Claude Code skill: $SKILL_DST (previous copy preserved at $SKILL_BACKUP)"
     else
-      cp -R "$SKILL_SRC" "$SKILL_DST"
-      echo "Copied Claude Code skill: $SKILL_DST"
+      ln -s "$SKILL_SRC" "$SKILL_DST"
+      echo "Linked Claude Code skill: $SKILL_DST"
     fi
   done
 else
-  echo "Skipped copying the Claude Code skills."
+  echo "Skipped linking the Claude Code skills."
 fi
 
 echo "Running a smoke test."
-CHECK_OUTPUT=$(PYTHONPATH= "$FSL_BIN" check "$REPO_DIR/specs/cart_v1.fsl") || fail "Smoke test failed. Check the result of $FSL_BIN check $REPO_DIR/specs/cart_v1.fsl."
+CHECK_OUTPUT=$("$FSL_BIN" check "$REPO_DIR/specs/cart_v1.fsl") || fail "Smoke test failed. Check the result of $FSL_BIN check $REPO_DIR/specs/cart_v1.fsl."
 case "$CHECK_OUTPUT" in
   *'"result": "ok"'*|*'"result":"ok"'*)
     echo "Smoke test ok: fslc check specs/cart_v1.fsl"

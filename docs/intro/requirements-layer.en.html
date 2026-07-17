@@ -18,6 +18,7 @@
 
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">Writing the Requirements Layer</p>
     <h1 class="reveal">Make requirements<br><span class="hl">readable by counterexample</span>.</h1>
     <p class="lead reveal">The <code>requirements</code> layer carries requirement IDs, inputs, guards, acceptance flows, forbidden flows, and NFRs. It makes business intent concrete enough for design and tests.</p>
@@ -80,22 +81,22 @@
       with a: Amount
       when a &gt; 0
       set amount = a
-      covers REQ-1 "The applicant submits an expense claim by entering an amount"
+      covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
 
     transition auto_approve Submitted -&gt; Approved by System
       when amount &lt;= AUTO_LIMIT
-      covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved"
+      covers REQ-EXPENSE-002 "Claims at or below AUTO_LIMIT are auto-approved"
 
     transition mgr_approve Submitted -&gt; Approved by Manager
       when amount &gt; AUTO_LIMIT
-      covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+      covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT are approved by a manager"
 
     transition reject Submitted -&gt; Rejected by Manager
       when amount &gt; AUTO_LIMIT
-      covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+      covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT may be rejected by a manager"
 
     transition pay Approved -&gt; Paid by Finance
-      covers REQ-4 "Only approved claims are paid"
+      covers REQ-EXPENSE-004 "Only approved claims are paid"
   }
 }
 
@@ -112,7 +113,7 @@ verify {
       <tr><td><code>with a: Amount</code></td><td>Operation input.</td><td>A value passed when the transition runs.</td></tr>
       <tr><td><code>when ...</code></td><td>Enabled condition.</td><td>Thresholds, permissions, state, deadlines.</td></tr>
       <tr><td><code>set amount = a</code></td><td>Carried-data update.</td><td>Stores values needed later.</td></tr>
-      <tr><td><code>covers REQ-1 "..."</code></td><td>Requirement ID and source text.</td><td>Flows into diagnostics, counterexamples, and scenarios.</td></tr>
+      <tr><td><code>covers REQ-EXPENSE-001 "..."</code></td><td>Requirement ID and source text.</td><td>Flows into diagnostics, counterexamples, and scenarios.</td></tr>
     </table>
   </div>
 </section>
@@ -126,7 +127,7 @@ verify {
     <div class="split reveal" style="margin-top:24px">
       <div class="panel" style="margin-top:0">
         <h3>Acceptance flow</h3>
-        <pre><code>acceptance AC-1 "low-amount claims can be paid" {
+        <pre><code>acceptance AC-EXPENSE-001 "low-amount claims can be paid" {
   submit(0, 1)
   auto_approve(0)
   pay(0)
@@ -136,7 +137,7 @@ verify {
       </div>
       <div class="panel" style="margin-top:0">
         <h3>Forbidden flow</h3>
-        <pre><code>forbidden FB-1 "draft claims cannot be paid" {
+        <pre><code>forbidden FB-EXPENSE-001 "draft claims cannot be paid" {
   pay(0)
   expect rejected
 }</code></pre>

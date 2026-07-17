@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/ai/statistical-result.v0.schema.json",
+  "title": "fsl-ai statistical result v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "result",
+    "status",
+    "formal_result",
+    "dataset",
+    "slice",
+    "metric",
+    "n",
+    "estimate",
+    "interval",
+    "threshold",
+    "evaluator",
+    "assumptions",
+    "findings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-ai-statistical-result.v0"
+    },
+    "fsl": {
+      "const": "fsl-stochastic.v0"
+    },
+    "result": {
+      "enum": [
+        "dataset_invalid",
+        "evaluator_untrusted",
+        "slice_missing",
+        "insufficient_samples",
+        "inconclusive",
+        "statistically_unsupported",
+        "statistically_supported"
+      ]
+    },
+    "status": {
+      "enum": [
+        "dataset_invalid",
+        "evaluator_untrusted",
+        "slice_missing",
+        "insufficient_samples",
+        "inconclusive",
+        "statistically_unsupported",
+        "statistically_supported"
+      ]
+    },
+    "formal_result": {
+      "const": "not_run"
+    },
+    "dataset": {
+      "type": ["string", "object"]
+    },
+    "slice": {
+      "type": ["string", "object"]
+    },
+    "metric": {
+      "type": "string"
+    },
+    "n": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "estimate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "interval": {
+      "type": "object",
+      "required": ["method", "confidence", "lower", "upper"],
+      "properties": {
+        "method": {
+          "const": "wilson"
+        },
+        "confidence": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "lower": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "upper": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "threshold": {
+      "type": "object",
+      "required": ["operator", "value"],
+      "properties": {
+        "operator": {
+          "enum": ["ci_lower_gte", "ci_upper_lte", "min_samples_>=", "min_samples_>", "min_samples_==", "min_samples_<=", "min_samples_<", "none"]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "trust_status"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "trust_status": {
+          "enum": ["trusted", "untrusted", "unknown"]
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

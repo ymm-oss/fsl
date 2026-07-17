@@ -105,9 +105,38 @@ fundamental principle of not expanding into the kernel).
   transcribing a Figma flow diagram into fsl-ui and checking it** (the AI-Native
   position). Designers writing it directly is unrealistic.
 - **Decision**: go if there is demand for UI-flow checking (`expand_ui` + tests +
-  dogfooding). If demand is thin, the operation of "write screen flows in plain fsl" (the
+  field validation). If demand is thin, the operation of "write screen flows in plain fsl" (the
   spike's ReturnUI as a template) delivers enough value for now. **The F-UI-1 fix is
   useful independently of the dialect, so it has already been merged ahead.**
+
+## Shipped increment: the spec-level `kind` tag (Tier 1, not the dialect)
+
+Between "write screen flows in plain fsl" (the ReturnUI template) and a full
+`expand_ui` dialect there is a much cheaper middle purchase, now implemented: an
+**optional spec-level tag** classifying the whole spec.
+
+```fsl
+spec ReturnUI "ui: return-request screen flow (behavioral slice only)" { … }
+```
+
+- **What it buys**: the "this is a UI spec" recognition — for a *human reader* (a
+  leading, typed, in-header cue, and a badge in `fslc explain --readable` / `fslc html`)
+  and for a *machine* (`skeleton.spec_kind = {id, text}` in the explain JSON is a
+  read-off-able ontology classification). This is the spec-unit version of the
+  screen/navigate ontology, without the lossy desugaring.
+- **What it deliberately does not do**: no `screen`/`navigate`/`modal` line-level
+  vocabulary (that is Tier 3, the `expand_ui` dialect, gated on demand — it is where
+  cost jumps discontinuously and the F-UI-2/3/4 expander risk lives).
+- **Cost / faithfulness**: zero kernel semantics (the tag desugars to nothing — the
+  same invariant principle below), so the corpus snapshot is unchanged. The tag text is
+  metadata only and never verified; keep the parenthetical scope note (`behavioral slice
+  only`) so heightened recognition does not outrun what FSL actually models.
+- **Files it moved**: `grammar.py` (optional `meta_tag?` on `spec_def`), `model.py`
+  (`spec["kind"]`), `explain.py` (`skeleton.spec_kind` + readable line), `html_report.py`
+  (title badge), `docs/LANGUAGE.md`, `skills/fsl/reference.md`, this note, and a
+  regression test. The surfaced field remains `spec_kind` to distinguish spec metadata
+  from the established diagnostic `kind`; faithfulness routing is provenance-scoped and
+  does not interpret arbitrary nested payload keys as diagnostics.
 
 ## Invariant principle
 

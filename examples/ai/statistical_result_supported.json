@@ -1,0 +1,44 @@
+{
+  "schema_version": "fsl-ai-statistical-result.v0",
+  "fsl": "fsl-stochastic.v0",
+  "result": "statistically_supported",
+  "status": "statistically_supported",
+  "formal_result": "not_run",
+  "dataset": {
+    "id": "SupportEvalV3",
+    "source": "precomputed_jsonl"
+  },
+  "slice": "all",
+  "metric": "accuracy",
+  "n": 200,
+  "estimate": 0.95,
+  "interval": {
+    "method": "wilson",
+    "confidence": 0.95,
+    "lower": 0.9099,
+    "upper": 0.9727
+  },
+  "threshold": {
+    "operator": "ci_lower_gte",
+    "value": 0.90
+  },
+  "evaluator": {
+    "id": "gold_labels_v3",
+    "trust_status": "trusted"
+  },
+  "assumptions": [
+    {
+      "id": "STOCHASTIC-ASSUME-FIXED-DATASET",
+      "text": "the precomputed eval JSONL is fixed for this run"
+    },
+    {
+      "id": "STOCHASTIC-ASSUME-SAMPLE-INDEPENDENCE-NOT-PROVED",
+      "text": "sample independence is assumed from dataset construction metadata and is not proved by fslc"
+    },
+    {
+      "id": "STOCHASTIC-ASSUME-EVALUATOR-CALIBRATION-EXTERNAL",
+      "text": "evaluator calibration is separate evidence"
+    }
+  ],
+  "findings": []
+}

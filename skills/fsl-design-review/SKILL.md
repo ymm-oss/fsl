@@ -79,7 +79,9 @@ but **they are not checked** (fslc says nothing even if you violate them).
 
 ### Step 4 — Check, and translate the result into a design judgment
 
-`fslc refine impl.fsl abs.fsl map.fsl` (+ `verify` each spec on its own).
+`fslc refine impl.fsl abs.fsl map.fsl` (+ `verify` each spec on its own). Also run
+`verify --strict-tags` (traceability) and `explain --readable` (the doc rendering) —
+standard practice for every review, not high-risk-only.
 The mechanical repair steps for the result follow the fsl skill's repair protocol
 table, but in design exploration you must always decide, before fixing, "**is the
 design proposal bad, or is the contract excessive?**" — either conclusion is a
@@ -151,6 +153,16 @@ code diverges from it — make this distinction explicit in the report.
 
 ## Recommended practices (optional — by risk and importance)
 
+- **Structural review before repair**: for AI-authored or heavily patched specs,
+  run `fslc analyze <file> --profile ai-review` alongside `check`/`verify`.
+  Findings such as `disconnected_requirement`, `unanchored_property`,
+  `progressless_cycle`, `unread_state`, and `conservation_candidate` are review
+  signals, not LSP/refinement failures. Use them to ask whether the contract has
+  traceability holes, missing progress intent, dead state clusters, or implicit
+  invariants worth proving before changing the spec. Do not weaken a contract
+  merely to remove an
+  `analyze` finding; the finding's `formal_status` is normally
+  `not_a_violation`.
 - **Variant matrix**: when there are multiple variants, push the refine of all
   variants × the abstract contract (a mechanical check that "all variants are
   substitutable"). Only for high-risk contracts.

@@ -29,9 +29,8 @@ from .values import (
     eval_quant,
     eval_sum,
     logical_map_access,
+    option_compare,
     option_logical_eq,
-    option_none_cmp,
-    reject_option_binop,
     seq_compare,
     struct_compare,
 )
@@ -195,7 +194,29 @@ def _check_deterministic_init(spec):
             hint=_INIT_HINT,
         )
 
-    def walk(stmts, definitely_assigned, possibly_assigned, in_forall=False):
+    def dup_key(lv, bound_names):
+        # A Map/index target keyed by a concrete value -- an enum member or
+        # numeric literal, not a forall-bound variable -- is identified by
+        # (base, key) so separate flat `m[K1] = ...` / `m[K2] = ...`
+        # statements for distinct keys of the same map aren't flagged as
+        # duplicates (this is exactly how dialect-generated init code, e.g.
+        # fsl-db's per-column `column_exists[Col] = ...`, populates a map
+        # one key at a time). A symbolic/bound-variable key, or any other
+        # target shape, falls back to the base variable name alone, same as
+        # before -- unable to statically prove the keys differ.
+        if lv[0] == "index":
+            key_expr = lv[2]
+            if (
+                isinstance(key_expr, tuple)
+                and key_expr[0] == "var"
+                and key_expr[1] not in bound_names
+            ):
+                return (lv[1], key_expr)
+            if isinstance(key_expr, tuple) and key_expr[0] == "num":
+                return (lv[1], key_expr)
+        return _logical_var_from_lv(lv)
+
+    def walk(stmts, definitely_assigned, possibly_assigned, in_forall=False, bound_names=frozenset()):
         definitely_assigned = set(definitely_assigned)
         possibly_assigned = set(possibly_assigned)
         for st in stmts:
@@ -204,11 +225,12 @@ def _check_deterministic_init(spec):
                 logical = _logical_var_from_lv(st[1])
                 if logical is None:
                     _err("invalid init assignment target", kind="semantics", hint=_INIT_HINT)
-                if logical in possibly_assigned:
+                key = dup_key(st[1], bound_names)
+                if key in possibly_assigned:
                     duplicate_assignment(logical, in_forall)
                 check_expr(st[2], definitely_assigned)
                 definitely_assigned.add(logical)
-                possibly_assigned.add(logical)
+                possibly_assigned.add(key)
             elif tag == "forall_stmt":
                 if in_forall:
                     _err("nested forall in init is not supported", kind="semantics", hint=_INIT_HINT)
@@ -220,6 +242,7 @@ def _check_deterministic_init(spec):
                     definitely_assigned,
                     possibly_assigned,
                     in_forall=True,
+                    bound_names=bound_names | {binder[1]},
                 )
                 definitely_assigned = body_definite
                 possibly_assigned = body_possible
@@ -231,12 +254,14 @@ def _check_deterministic_init(spec):
                     definitely_assigned,
                     possibly_assigned,
                     in_forall=in_forall,
+                    bound_names=bound_names,
                 )
                 else_definite, else_possible = walk(
                     else_stmts,
                     definitely_assigned,
                     possibly_assigned,
                     in_forall=in_forall,
+                    bound_names=bound_names,
                 )
                 definitely_assigned = then_definite & else_definite
                 possibly_assigned = then_possible | else_possible
@@ -258,6 +283,8 @@ def _default_phys_value(entry, spec):
         return 0
     if ty[0] == "bool":
         return False
+    if ty[0] == "relation":
+        return {}
     if ty[0] == "set":
         elem_ty = ty[1]
         return {i: False for i in _map_domain(elem_ty, spec)}
@@ -331,6 +358,13 @@ def _empty_phys_state(spec):
         elif ty[0] == "set":
             elem_ty = ty[1]
             state[phys] = {i: False for i in _map_domain(elem_ty, spec)}
+        elif ty[0] == "relation":
+            src_ty, dst_ty = ty[1], ty[2]
+            state[phys] = {
+                _relation_key(src_ty, dst_ty, src, dst, spec): False
+                for src in _map_domain(src_ty, spec)
+                for dst in _map_domain(dst_ty, spec)
+            }
         elif ty[0] == "struct":
             if entry.get("option_part") == "present":
                 state[phys] = False
@@ -347,6 +381,84 @@ def _as_bool(v):
     if isinstance(v, bool):
         return v
     raise _EvalError(f"expected bool, got {v!r}")
+
+
+def _relation_endpoint_index(ty, value, spec):
+    if ty[0] == "bool":
+        if not isinstance(value, bool):
+            _err("relation Bool endpoint expects a Bool value", kind="type")
+        return 1 if value else 0
+    lo, _hi = domain_range(ty, spec["types"])
+    return int(value) - lo
+
+
+def _relation_key(src_ty, dst_ty, src, dst, spec):
+    dst_size = len(list(_map_domain(dst_ty, spec)))
+    return _relation_endpoint_index(src_ty, src, spec) * dst_size + \
+        _relation_endpoint_index(dst_ty, dst, spec)
+
+
+def _same_relation_endpoint_type(src_ty, dst_ty):
+    return src_ty == dst_ty
+
+
+def _relation_type_error(message):
+    _err(
+        message,
+        kind="type",
+        hint=(
+            "relation helpers operate on binary relation state. Use .contains(a, b), "
+            ".add(a, b), .remove(a, b), reachable(r, a, b), acyclic(r), "
+            "functional(r), injective(r), domain(r), or range(r)."
+        ),
+    )
+
+
+def _relation_parts(base):
+    if isinstance(base, tuple) and base[0] == "relation_val":
+        return base[1], base[2], base[3]
+    return None
+
+
+def _relation_contains(rel, src_ty, dst_ty, src, dst, spec):
+    return bool(rel.get(_relation_key(src_ty, dst_ty, src, dst, spec), False))
+
+
+def _relation_reachable(rel, ty, src, dst, spec):
+    values = list(_map_domain(ty, spec))
+    frontier = [
+        nxt for nxt in values
+        if _relation_contains(rel, ty, ty, src, nxt, spec)
+    ]
+    seen = set()
+    while frontier:
+        node = frontier.pop(0)
+        if node == dst:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        frontier.extend(
+            nxt for nxt in values
+            if nxt not in seen and _relation_contains(rel, ty, ty, node, nxt, spec)
+        )
+    return False
+
+
+def _relation_projection(rel, src_ty, dst_ty, spec, side):
+    elem_ty = src_ty if side == "domain" else dst_ty
+    out = {i: False for i in _map_domain(elem_ty, spec)}
+    src_values = list(_map_domain(src_ty, spec))
+    dst_values = list(_map_domain(dst_ty, spec))
+    for src in src_values:
+        for dst in dst_values:
+            if not _relation_contains(rel, src_ty, dst_ty, src, dst, spec):
+                continue
+            if side == "domain":
+                out[src] = True
+            else:
+                out[dst] = True
+    return ("set_val", out, elem_ty)
 
 
 def eval_concrete(e, state, binds, spec, old_state=None, in_ensures=False):
@@ -436,6 +548,71 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
     if tag == "method":
         base = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
         return _eval_method(base, e[2], e[3], state, binds, spec, old_state, in_ensures)
+    if tag == "rel_reachable":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("reachable() expects a relation as its first argument")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"reachable() requires a self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        src = eval_concrete(e[2], state, binds, spec, old_state, in_ensures)
+        dst = eval_concrete(e[3], state, binds, spec, old_state, in_ensures)
+        return _relation_reachable(rel, src_ty, src, dst, spec)
+    if tag == "rel_acyclic":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("acyclic() expects a relation")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"acyclic() requires a binary self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        return all(not _relation_reachable(rel, src_ty, v, v, spec)
+                   for v in _map_domain(src_ty, spec))
+    if tag == "rel_functional":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("functional() expects a relation")
+        rel, src_ty, dst_ty = parts
+        for src in _map_domain(src_ty, spec):
+            count = sum(
+                1 for dst in _map_domain(dst_ty, spec)
+                if _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+            )
+            if count > 1:
+                return False
+        return True
+    if tag == "rel_injective":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("injective() expects a relation")
+        rel, src_ty, dst_ty = parts
+        for dst in _map_domain(dst_ty, spec):
+            count = sum(
+                1 for src in _map_domain(src_ty, spec)
+                if _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+            )
+            if count > 1:
+                return False
+        return True
+    if tag == "rel_domain":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("domain() expects a relation")
+        return _relation_projection(parts[0], parts[1], parts[2], spec, "domain")
+    if tag == "rel_range":
+        rel_val = eval_concrete(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("range() expects a relation")
+        return _relation_projection(parts[0], parts[1], parts[2], spec, "range")
     if tag == "is":
         return _eval_is(e[1], e[2], state, binds, spec, old_state, in_ensures)
     if tag == "not":
@@ -460,18 +637,17 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         a = eval_concrete(e[2], state, binds, spec, old_state, in_ensures)
         b = eval_concrete(e[3], state, binds, spec, old_state, in_ensures)
         if op in ("==", "!="):
-            none_cmp = _option_none_cmp(a, b, op)
-            if none_cmp is not None:
-                return none_cmp
+            option_cmp = _option_compare(a, b, op)
+            if option_cmp is not None:
+                return option_cmp
             struct_cmp = _struct_compare(a, b, op, spec)
             if struct_cmp is not None:
                 return struct_cmp
             seq_cmp = _seq_compare(a, b, op, spec)
             if seq_cmp is not None:
                 return seq_cmp
-            _reject_option_binop(a, b, op)
         else:
-            _reject_option_binop(a, b, op)
+            _option_compare(a, b, op)
         if op == "+":
             return a + b
         if op == "-":
@@ -501,6 +677,9 @@ def _eval_concrete_impl(e, state, binds, spec, old_state=None, in_ensures=False)
         _err(f"unknown operator '{op}'")
     if tag in ("forall", "exists"):
         return _eval_quant(e, state, binds, spec, old_state, in_ensures)
+    if tag == "ite":
+        branch = e[2] if eval_concrete(e[1], state, binds, spec, old_state, in_ensures) else e[3]
+        return eval_concrete(branch, state, binds, spec, old_state, in_ensures)
     if tag in ("unique", "exactly_one"):
         return _eval_one(e, state, binds, spec, old_state, in_ensures)
     if tag == "count":
@@ -545,6 +724,8 @@ def _read_logical(name, ty, state, spec):
         return ("set_val", m, ty[1])
     if ty[0] == "seq":
         return ("seq_val", state[f"{name}__data"], state[f"{name}__len"], ty[1], ty[2])
+    if ty[0] == "relation":
+        return ("relation_val", state[name], ty[1], ty[2])
     return state[name]
 
 
@@ -588,6 +769,25 @@ def _eval_set_method(m, elem_ty, method, args, state, binds, spec, old_state, in
     return None
 
 
+def _eval_relation_method(rel, src_ty, dst_ty, method, args, state, binds, spec,
+                          old_state, in_ensures):
+    if method == "contains":
+        if len(args) != 2:
+            _err("relation.contains expects 2 arguments", kind="type")
+        src = eval_concrete(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_concrete(args[1], state, binds, spec, old_state, in_ensures)
+        return _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+    if method in ("add", "remove"):
+        if len(args) != 2:
+            _err(f"relation.{method} expects 2 arguments", kind="type")
+        src = eval_concrete(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_concrete(args[1], state, binds, spec, old_state, in_ensures)
+        nm = dict(rel)
+        nm[_relation_key(src_ty, dst_ty, src, dst, spec)] = method == "add"
+        return ("relation_val", nm, src_ty, dst_ty)
+    return None
+
+
 def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spec,
                        old_state, in_ensures, loc=None):
     if method == "push":
@@ -626,6 +826,16 @@ def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spe
 
 
 def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures, loc=None):
+    relation_parts = _relation_parts(base)
+    if relation_parts is not None:
+        res = _eval_relation_method(
+            relation_parts[0], relation_parts[1], relation_parts[2], method, args,
+            state, binds, spec, old_state, in_ensures,
+        )
+        if res is not None:
+            return res
+        _err(f"unknown method '{method}' on relation", kind="type")
+
     set_parts = _set_elem_ty(base)
     if set_parts is not None:
         res = _eval_set_method(set_parts[0], set_parts[1], method, args, state, binds, spec,
@@ -641,7 +851,7 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures, 
         if res is not None:
             return res
         _err(f"unknown method '{method}' on Seq")
-    _err("method call on value that is neither Set nor Seq")
+    _err("method call on value that is neither relation, Set, nor Seq")
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
@@ -732,12 +942,8 @@ def _option_logical_eq(a, b):
     return option_logical_eq(a, b, _CONC)
 
 
-def _option_none_cmp(a, b, op):
-    return option_none_cmp(a, b, op, _CONC)
-
-
-def _reject_option_binop(a, b, op):
-    return reject_option_binop(a, b, op)
+def _option_compare(a, b, op):
+    return option_compare(a, b, op, _CONC)
 
 
 
@@ -799,6 +1005,20 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
                 m[idx] = True
             pend[n] = m
             return ("scalar", n)
+        if ty[0] == "relation" and rhs[0] == "set_lit":
+            if rhs[1]:
+                _err(
+                    "relation literals only support the empty initializer Set {}; "
+                    "use r = r.add(a, b) to add pairs",
+                    kind="type",
+                )
+            src_ty, dst_ty = ty[1], ty[2]
+            pend[n] = {
+                _relation_key(src_ty, dst_ty, src, dst, spec): False
+                for src in _map_domain(src_ty, spec)
+                for dst in _map_domain(dst_ty, spec)
+            }
+            return ("scalar", n)
         if ty[0] == "seq" and rhs[0] == "seq_lit":
             elem_ty, cap = ty[1], ty[2]
             if len(rhs[1]) > cap:
@@ -820,6 +1040,11 @@ def _apply_assign(lv, rhs, pend, state, binds, spec, loc=None):
                 pend[n] = val[1]
             else:
                 pend[n] = val
+        elif ty[0] == "relation":
+            if isinstance(val, tuple) and val[0] == "relation_val":
+                pend[n] = val[1]
+            else:
+                _err("relation assignment requires Set {} or a relation operation expression")
         elif ty[0] == "seq":
             if isinstance(val, tuple) and val[0] == "seq_val":
                 pend[f"{n}__data"] = val[1]
@@ -1015,6 +1240,18 @@ def _logical_val(state, name, ty, spec):
         m = state[name]
         elems = [_display_value(elem_ty, i, spec) for i in _map_domain(elem_ty, spec) if m.get(i)]
         return sorted(elems, key=str)
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        rel = state[name]
+        pairs = []
+        for src in _map_domain(src_ty, spec):
+            for dst in _map_domain(dst_ty, spec):
+                if rel.get(_relation_key(src_ty, dst_ty, src, dst, spec)):
+                    pairs.append([
+                        _display_value(src_ty, src, spec),
+                        _display_value(dst_ty, dst, spec),
+                    ])
+        return pairs
     if ty[0] == "seq":
         elem_ty, cap = ty[1], ty[2]
         data = state[f"{name}__data"]

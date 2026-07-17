@@ -1,0 +1,34 @@
+dbsystem SafeAiArtifactCompat {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+    }
+  }
+
+  artifact support_agent_v8 {
+    reads users.id;
+    requires tool.RefundPaymentV2, retriever.SupportDocsV14;
+    provides output.AnswerSchemaV2;
+  }
+
+  artifact server_v3 {
+    provides tool.RefundPaymentV2;
+  }
+
+  artifact support_docs_index_v14 {
+    provides retriever.SupportDocsV14;
+  }
+
+  artifact ios_v2 {
+    requires output.AnswerSchemaV2;
+  }
+
+  environment prod {
+    schema 0..0;
+    active support_agent_v8;
+    active server_v3;
+    active support_docs_index_v14;
+    may_exist ios_v2;
+  }
+}

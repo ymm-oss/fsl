@@ -1,0 +1,4 @@
+{not-json
+{"id":"ambiguous","replace":{"target":"// duplicate marker","replacement":"// changed"}}
+{"id":"other","mutated_spec":"spec Other { type Count = 0..1 state { x: Count } init { x = 0 } action inc() { requires x == 0 x = 1 } invariant Bound { x <= 1 } }"}
+{"id":"bad-type","mutated_spec":"spec Guarded { type Count = 0..1 state { x: Missing } init { x = 0 } action inc() { requires x == 0 x = 1 } invariant Bound { x <= 1 } }"}

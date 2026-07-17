@@ -21,12 +21,7 @@ reading the verification results as it repairs it.
 1. **Install FSL and the skill**
 
    ```bash
-   # If you downloaded and unzipped the ZIP from GitHub
-   cd ~/Downloads/fsl-main
-   bash install.sh
-
-   # If you use the GitHub CLI
-   gh repo clone ymm-oss/fsl ~/.fsl
+   git clone https://github.com/ymm-oss/fsl.git ~/.fsl
    bash ~/.fsl/install.sh
    ```
 
@@ -66,8 +61,7 @@ fsl/
 ├── docs/
 │   ├── README.md           # map of docs (start here)
 │   ├── LANGUAGE.md         # language reference — read this if you are writing specs
-│   ├── DESIGN-*.md         # design documents (language / three-layer dialects / NFR / each feature — 12 in total)
-│   └── DOGFOOD-1..7.md     # dogfooding findings (record of bugs and discoveries)
+│   └── DESIGN-*.md         # authoritative design contracts and distilled findings
 ├── specs/                  # sample specs (*.fsl) — all the correct ones are proved at k=1
 │   ├── cart_v1.fsl         #   basic form of Option / ensures / reachable
 │   ├── cart_v1_buggy.fsl   #   missing guard — returns the shortest type_bound violation counterexample
@@ -109,15 +103,15 @@ fsl/
 
 ## Easiest of all: just download the executable (no Python needed)
 
-`fslc` is distributed as a **standalone single binary**. You need neither a Python install,
-`pip`, nor `git`. Just grab the one file for your OS from GitHub **Releases**
+`fslc` is distributed as a **single native executable**. You need neither a Python install,
+`pip`, nor a separately installed Z3. Just grab the one file for your OS from GitHub **Releases**
 and it runs.
 
 | OS / arch | File to download |
 | --- | --- |
 | macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
-| Linux (x86_64) | `fslc-linux-x64` |
-| Linux (ARM64) | `fslc-linux-arm64` |
+| Linux (x86_64, glibc 2.39+) | `fslc-linux-x64` |
+| Linux (ARM64, glibc 2.39+) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |
 
 ```bash
@@ -134,37 +128,39 @@ chmod +x fslc-macos-arm64
 Each file ships with a companion `*.sha256`. You can verify it with
 `shasum -a 256 -c fslc-macos-arm64.sha256`.
 
-> This binary bundles even z3's native library, so all features including `verify`
-> work with no external dependencies. If you need skill integration or editable development,
+The Linux binaries target the Ubuntu 24.04 ABI baseline (glibc 2.39 or newer).
+
+> This binary bundles Z3, so all features including `verify` work without a separately
+> installed solver. Normal operating-system runtime libraries still apply. If you need skill integration or editable development,
 > use the setup instructions below.
 
 ## Easy setup (for PMs, consultants, and non-engineers)
 
-No programming knowledge is required. Just these three steps:
+No programming knowledge is required. Git is used to keep every installed file
+on one published Release tag.
 
-1. **Download** — open ymm-oss/fsl on GitHub in your browser and click the green
-   **"Code" ▾ → "Download ZIP"** (no login needed, since it is a public repository).
-   Double-click the downloaded zip to unzip it.
+1. **Install Git** from [git-scm.com](https://git-scm.com/) if `git --version`
+   does not work in your terminal.
 2. **Open a terminal** (on Mac, "Terminal.app"; search your apps for "terminal").
-3. In the folder you unzipped, **run the install command**:
+3. **Run the install commands**:
 
    ```bash
-   cd ~/Downloads/fsl-main      # adjust to the name of the folder you unzipped
-   bash install.sh
+   git clone https://github.com/ymm-oss/fsl.git ~/.fsl
+   bash ~/.fsl/install.sh
    ```
 
 This places FSL itself in `~/.fsl`, the `fslc` command in `~/.local/bin/fslc`, and
-the Claude Code skills in `~/.claude/skills/`
-(once placed, you can delete the folder you downloaded).
+the Claude Code skills in `~/.claude/skills/`.
+The installer checks out the latest published Release tag in `~/.fsl`, so the
+skills, examples, `fslc`, and `fslc-lsp` always come from the same release.
 
-> For those who use the GitHub CLI, or engineers: if you have run `gh auth login`, this one line also works:
-> `gh repo clone ymm-oss/fsl ~/.fsl && bash ~/.fsl/install.sh`
+> If you use the GitHub CLI, `gh repo clone ymm-oss/fsl ~/.fsl` can replace the
+> `git clone` command above.
 
 What gets installed:
 
-- the `fslc` command (used from `~/.local/bin/fslc`)
-- the `fslc-lsp` language server (`~/.local/bin/fslc-lsp`) — the VSCode extension in
-  `editors/vscode/` launches it from `PATH`
+- the native Rust `fslc` and `fslc-lsp` commands (used from `~/.local/bin`; Python is not required)
+  — the VSCode extension in `editors/vscode/` launches `fslc-lsp` from `PATH`
 - the Claude Code skills (`~/.claude/skills/fsl*`)
 - samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
 
@@ -176,6 +172,14 @@ Uninstall:
 rm -rf ~/.fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
 ```
 
+Official releases are the checksummed native binaries, VSCode extension, and
+Kernel bundles attached to GitHub Releases. The retained Python compatibility
+reference is installed from this repository and is not published to PyPI; the
+Rust workspace crates are not published to crates.io. Publishing either surface
+requires an explicit manifest, workflow, and documentation change.
+Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
+procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
+
 ## Developer setup
 
 First get the repository:
@@ -184,7 +188,8 @@ First get the repository:
 git clone https://github.com/ymm-oss/fsl && cd fsl
 ```
 
-There are only two dependencies: `lark` (pure Python) and `z3-solver`
+The commands below install the retained Python reference implementation for differential
+testing. There are only two runtime dependencies: `lark` (pure Python) and `z3-solver`
 (a prebuilt wheel that bundles the native libz3). **No C++ compiler or separate Z3 install is needed**,
 and on Mac / Windows / Linux it is all done with just `pip install` (requires Python 3.9+).
 
@@ -227,6 +232,7 @@ fslc verify specs/cart_v1.fsl --vacuity error   # detect vacuous properties (unr
 fslc verify specs/cart_v1.fsl --strict-tags     # match untagged declarations (fabrication candidates) and unreferenced requirements (omission candidates)
 fslc mutate specs/cart_v1.fsl                    # spec mutation: measure how much the properties constrain behavior
 fslc explain specs/cart_v1.fsl                   # skeleton enumeration + counterfactuals (what would happen without this rule)
+fslc analyze specs/cart_v1.fsl --profile ai-review # structural review findings (not proof failures)
 fslc html specs/cart_v1.fsl -o cart_report.html  # self-contained HTML report for team review
 fslc typestate specs/order_workflow.fsl --ts    # state machine → applicability check for phantom types + TS scaffold
 # (in the requirements dialect, the forbidden block can also write "operation sequences that should be rejected")
@@ -237,7 +243,7 @@ python -m fslc verify specs/cart_v1_buggy.fsl
 
 The output is JSON on stdout (`fslc chain` also writes its human status table to
 stderr). Exit codes: 0 = verified / proved / refines /
-conformant / generated / mutated / explained / typestate; 1 = violated /
+conformant / generated / mutated / explained / analyzed / typestate; 1 = violated /
 refinement_failed / reachable_failed / unknown_cti / nonconformant;
 2 = spec error (`error`, including vacuity under `--vacuity error`); 3 = internal error.
 `cart_v1_buggy.fsl` returns the shortest counterexample trace for the automatic bounds check (`type_bound`).

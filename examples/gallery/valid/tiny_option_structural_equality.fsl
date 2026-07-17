@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0
+// expected-command: verify --depth 1 --deadlock ignore
+// expected-result: verified
+spec GalleryOptionStructuralEquality {
+  enum K { A, B }
+  state {
+    empty: Option<K>,
+    first: Option<K>,
+    same: Option<K>,
+    different: Option<K>
+  }
+  init {
+    empty = none
+    first = some(A)
+    same = some(A)
+    different = some(B)
+  }
+  action keep() {
+    first = some(A)
+  }
+  invariant TruthTable {
+    empty == none and
+    empty != first and
+    first != none and
+    first == same and
+    first != different
+  }
+  invariant PatternStillBinds { first is some(value) => value == A }
+}

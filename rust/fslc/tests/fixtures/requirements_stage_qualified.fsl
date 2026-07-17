@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements QualifiedStageEvidence {
+  process claims.Claim {
+    stages Draft, Approved
+    initial Draft
+    transition approve Draft -> Approved by Manager
+  }
+
+  process legacy.Claim {
+    stages Imported, Archived
+    initial Imported
+    transition archive Imported -> Archived by Manager
+  }
+
+  invariant QualifiedStage {
+    forall c: Claim {
+      claims.Claim.stage(c) == Draft and legacy.Claim.stage(c) == Imported
+    }
+  }
+}
+
+verify { instances Claim = 1 }

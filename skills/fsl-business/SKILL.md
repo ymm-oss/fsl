@@ -84,3 +84,7 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
   that the lower layer must refine, and the seam is verified at the lower layer's
   `verify` time. Author this spec so that seam can hold — do not leave controls/goals
   that only a later weakening could satisfy.
+- The business spec is the readable, verified process document — consultants and
+  reviewers read the `.fsl` (or its `fslc explain --readable` rendering) directly
+  instead of a separate prose write-up. See `skills/fsl/reference.md` → "Authoring
+  specs as readable documentation" for the shared tagging/ID conventions.

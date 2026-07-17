@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import z3
 
 from .diagnostics import with_faithfulness
+from .render import _display_from, expr_to_text, public_var
 from .model import (
     FslError,
     annotate_display_name,
@@ -19,8 +20,11 @@ from .model import (
     display_label,
     domain_range,
     eval_const,
+    binder_static_type as _binder_static_type,
+    expr_static_type as _expr_static_type,
     phys_z3_sort,
     resolve_action_name,
+    validate_state_snapshot,
     z3_sort,
 )
 from .values import (
@@ -40,9 +44,8 @@ from .values import (
     eval_sum,
     iter_binder_terms,
     logical_map_access,
+    option_compare,
     option_logical_eq,
-    option_none_cmp,
-    reject_option_binop,
     seq_compare,
     struct_compare,
 )
@@ -552,6 +555,29 @@ def _enum_phys_constraints(spec, state):
     return cons
 
 
+def _lemma_exclusions(model, states, upto, lemmas, spec, expr_cache):
+    """Return proved lemma candidates that are false on this concrete CTI."""
+    exclusions = []
+    for lemma in lemmas or []:
+        violated_steps = []
+        for step, state in enumerate(states[:upto + 1]):
+            try:
+                cond = _inv_constraint(lemma, state, spec, expr_cache)
+                value = model.eval(cond, model_completion=True)
+            except (FslError, z3.Z3Exception):
+                violated_steps = []
+                break
+            if z3.is_false(value):
+                violated_steps.append(step)
+        if violated_steps:
+            exclusions.append({
+                "name": lemma["name"],
+                "expression": lemma["expression"],
+                "violated_steps": violated_steps,
+            })
+    return exclusions
+
+
 
 def _type_of_expr(e, spec, ctx_ty=None):
     """Rough type inference for literals; ctx_ty used for enum member names."""
@@ -691,6 +717,8 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
                 return ("set_val", state[n], ty[1])
             if ty[0] == "seq":
                 return ("seq_val", state[f"{n}__data"], state[f"{n}__len"], ty[1], ty[2])
+            if ty[0] == "relation":
+                return ("relation_val", state[n], ty[1], ty[2])
         if n in state:
             return state[n]
         _err(f"unknown identifier '{n}'")
@@ -720,19 +748,17 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         a = eval_expr(e[2], state, binds, spec, old_state, in_ensures)
         b = eval_expr(e[3], state, binds, spec, old_state, in_ensures)
         if op in ("==", "!="):
-            none_cmp = _option_none_cmp(a, b, op)
-            if none_cmp is not None:
-                return none_cmp
+            option_cmp = _option_compare(a, b, op)
+            if option_cmp is not None:
+                return option_cmp
             struct_cmp = _struct_compare(a, b, op, spec)
             if struct_cmp is not None:
                 return struct_cmp
             seq_cmp = _seq_compare(a, b, op, spec)
             if seq_cmp is not None:
                 return seq_cmp
-            _reject_option_binop(a, b, op)
         else:
-            _reject_option_binop(a, b, op)
-        a, b = _unify_option_cmp(a, b)
+            _option_compare(a, b, op)
         if op == "+":
             return a + b
         if op == "-":
@@ -770,6 +796,81 @@ def _eval_expr_uncached(e, state, binds, spec, old_state=None, in_ensures=False)
         return _eval_count(e, state, binds, spec, old_state, in_ensures)
     if tag == "sum":
         return _eval_sum(e, state, binds, spec, old_state, in_ensures)
+    if tag == "rel_reachable":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("reachable() expects a relation as its first argument")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"reachable() requires a self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        src = eval_expr(e[2], state, binds, spec, old_state, in_ensures)
+        dst = eval_expr(e[3], state, binds, spec, old_state, in_ensures)
+        return _relation_reachable_expr(rel, src_ty, src, dst, spec)
+    if tag == "rel_acyclic":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("acyclic() expects a relation")
+        rel, src_ty, dst_ty = parts
+        if not _same_relation_endpoint_type(src_ty, dst_ty):
+            _relation_type_error(
+                f"acyclic() requires a binary self-relation, got relation {src_ty} -> {dst_ty}"
+            )
+        checks = [
+            z3.Not(_relation_reachable_expr(rel, src_ty, _z3_domain_value(src_ty, v),
+                                            _z3_domain_value(src_ty, v), spec))
+            for v in _relation_endpoint_values(src_ty, spec)
+        ]
+        return z3.And(*checks) if checks else z3.BoolVal(True)
+    if tag == "rel_functional":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("functional() expects a relation")
+        rel, src_ty, dst_ty = parts
+        checks = []
+        dst_values = _relation_endpoint_values(dst_ty, spec)
+        for src in _relation_endpoint_values(src_ty, spec):
+            zsrc = _z3_domain_value(src_ty, src)
+            for i, left in enumerate(dst_values):
+                for right in dst_values[i + 1:]:
+                    checks.append(z3.Not(z3.And(
+                        _relation_contains(rel, src_ty, dst_ty, zsrc, _z3_domain_value(dst_ty, left), spec),
+                        _relation_contains(rel, src_ty, dst_ty, zsrc, _z3_domain_value(dst_ty, right), spec),
+                    )))
+        return z3.And(*checks) if checks else z3.BoolVal(True)
+    if tag == "rel_injective":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("injective() expects a relation")
+        rel, src_ty, dst_ty = parts
+        checks = []
+        src_values = _relation_endpoint_values(src_ty, spec)
+        for dst in _relation_endpoint_values(dst_ty, spec):
+            zdst = _z3_domain_value(dst_ty, dst)
+            for i, left in enumerate(src_values):
+                for right in src_values[i + 1:]:
+                    checks.append(z3.Not(z3.And(
+                        _relation_contains(rel, src_ty, dst_ty, _z3_domain_value(src_ty, left), zdst, spec),
+                        _relation_contains(rel, src_ty, dst_ty, _z3_domain_value(src_ty, right), zdst, spec),
+                    )))
+        return z3.And(*checks) if checks else z3.BoolVal(True)
+    if tag == "rel_domain":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("domain() expects a relation")
+        return _relation_set_from_projection(parts[0], parts[1], parts[2], spec, "domain")
+    if tag == "rel_range":
+        rel_val = eval_expr(e[1], state, binds, spec, old_state, in_ensures)
+        parts = _relation_parts(rel_val)
+        if parts is None:
+            _relation_type_error("range() expects a relation")
+        return _relation_set_from_projection(parts[0], parts[1], parts[2], spec, "range")
     if tag == "min":
         a, b = eval_expr(e[1], state, binds, spec, old_state, in_ensures), \
                eval_expr(e[2], state, binds, spec, old_state, in_ensures)
@@ -845,12 +946,8 @@ def _option_logical_eq(a, b):
     return option_logical_eq(a, b, _SYM)
 
 
-def _option_none_cmp(a, b, op):
-    return option_none_cmp(a, b, op, _SYM)
-
-
-def _reject_option_binop(a, b, op):
-    return reject_option_binop(a, b, op)
+def _option_compare(a, b, op):
+    return option_compare(a, b, op, _SYM)
 
 
 def _z3_div(a, b):
@@ -859,16 +956,6 @@ def _z3_div(a, b):
 
 def _z3_mod(a, b):
     return z3.If(b == 0, z3.IntVal(0), a % b)
-
-
-def _unify_option_cmp(a, b):
-    if isinstance(a, tuple) and a[0] == "option_val":
-        if isinstance(b, tuple) and b[0] == "none":
-            return a[1], z3.BoolVal(False)
-    if isinstance(b, tuple) and b[0] == "option_val":
-        if isinstance(a, tuple) and a[0] == "none":
-            return z3.BoolVal(False), b[1]
-    return a, b
 
 
 def _logical_map_access(logical, idx, state, spec):
@@ -1005,7 +1092,36 @@ def _eval_seq_method(data, length, elem_ty, cap, method, args, state, binds, spe
     return None
 
 
+def _eval_relation_method(rel, src_ty, dst_ty, method, args, state, binds, spec,
+                          old_state, in_ensures):
+    if method == "contains":
+        if len(args) != 2:
+            _err("relation.contains expects 2 arguments", kind="type")
+        src = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_expr(args[1], state, binds, spec, old_state, in_ensures)
+        return _relation_contains(rel, src_ty, dst_ty, src, dst, spec)
+    if method in ("add", "remove"):
+        if len(args) != 2:
+            _err(f"relation.{method} expects 2 arguments", kind="type")
+        src = eval_expr(args[0], state, binds, spec, old_state, in_ensures)
+        dst = eval_expr(args[1], state, binds, spec, old_state, in_ensures)
+        key = _relation_key(src_ty, dst_ty, src, dst, spec)
+        val = z3.BoolVal(method == "add")
+        return ("relation_val", z3.Store(rel, key, val), src_ty, dst_ty)
+    return None
+
+
 def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
+    relation_parts = _relation_parts(base)
+    if relation_parts is not None:
+        res = _eval_relation_method(
+            relation_parts[0], relation_parts[1], relation_parts[2], method, args,
+            state, binds, spec, old_state, in_ensures,
+        )
+        if res is not None:
+            return res
+        _err(f"unknown method '{method}' on relation", kind="type")
+
     set_parts = _set_elem_ty(base, state, spec)
     if set_parts is not None:
         res = _eval_set_method(
@@ -1027,7 +1143,7 @@ def _eval_method(base, method, args, state, binds, spec, old_state, in_ensures):
             return res
         _err(f"unknown method '{method}' on Seq")
 
-    _err("method call on value that is neither Set nor Seq")
+    _err("method call on value that is neither relation, Set, nor Seq")
 
 
 def _eval_is(inner, pat, state, binds, spec, old_state, in_ensures):
@@ -1067,6 +1183,15 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
                 m = z3.Store(m, idx, z3.BoolVal(True))
             pend[n] = m
             return ("scalar", n)
+        if ty[0] == "relation" and rhs[0] == "set_lit":
+            if rhs[1]:
+                _err(
+                    "relation literals only support the empty initializer Set {}; "
+                    "use r = r.add(a, b) to add pairs",
+                    kind="type",
+                )
+            pend[n] = z3.K(z3.IntSort(), z3.BoolVal(False))
+            return ("scalar", n)
         if ty[0] == "seq" and rhs[0] == "seq_lit":
             elem_ty, cap = ty[1], ty[2]
             if len(rhs[1]) > cap:
@@ -1095,6 +1220,11 @@ def _apply_assign(lv, rhs, pend, state, binds, spec):
                 pend[n] = val[1]
             else:
                 pend[n] = val
+        elif ty[0] == "relation":
+            if isinstance(val, tuple) and val[0] == "relation_val":
+                pend[n] = val[1]
+            else:
+                _err("relation assignment requires Set {} or a relation operation expression")
         elif ty[0] == "seq":
             if isinstance(val, tuple) and val[0] == "seq_val":
                 pend[f"{n}__data"] = val[1]
@@ -1395,6 +1525,118 @@ def init_constraints(spec, s0):
     return cons
 
 
+def _snapshot_scalar_expr(value, ty):
+    if ty[0] == "bool":
+        return z3.BoolVal(value)
+    return z3.IntVal(value)
+
+
+def _snapshot_default_scalar(ty):
+    if ty[0] == "bool":
+        return False
+    if ty[0] == "domain":
+        return ty[1]
+    return 0
+
+
+def state_snapshot_constraints(spec, state, snapshot):
+    """Pin a symbolic state to complete Monitor/replay logical-state JSON."""
+
+    normalized = validate_state_snapshot(spec, snapshot)
+    cons = []
+
+    def add_scalar(phys, ty, value):
+        cons.append(state[phys] == _snapshot_scalar_expr(value, ty))
+
+    def add_value(name, ty, value):
+        if ty[0] in ("int", "bool", "domain", "enum"):
+            add_scalar(_phys_for_logical(spec, name), ty, value)
+            return
+        if ty[0] == "option":
+            present = value is not None
+            cons.append(state[f"{name}__present"] == z3.BoolVal(present))
+            if present:
+                add_scalar(f"{name}__value", ty[1], value)
+            return
+        if ty[0] == "struct":
+            for field, field_ty in spec["types"][ty[1]]["fields"].items():
+                field_value = value[field]
+                if field_ty[0] == "option":
+                    present = field_value is not None
+                    cons.append(state[f"{name}__{field}__present"] == z3.BoolVal(present))
+                    if present:
+                        add_scalar(f"{name}__{field}__value", field_ty[1], field_value)
+                else:
+                    add_scalar(f"{name}__{field}", field_ty, field_value)
+            return
+        if ty[0] == "map":
+            key_ty, value_ty = ty[1], ty[2]
+            for key, item in value.items():
+                zkey = _z3_domain_value(key_ty, key)
+                if value_ty[0] == "option":
+                    present = item is not None
+                    cons.append(z3.Select(state[f"{name}__present"], zkey) == present)
+                    if present:
+                        cons.append(
+                            z3.Select(state[f"{name}__value"], zkey)
+                            == _snapshot_scalar_expr(item, value_ty[1])
+                        )
+                elif value_ty[0] == "struct":
+                    for field, field_ty in spec["types"][value_ty[1]]["fields"].items():
+                        field_value = item[field]
+                        if field_ty[0] == "option":
+                            present = field_value is not None
+                            cons.append(
+                                z3.Select(state[f"{name}__{field}__present"], zkey) == present
+                            )
+                            if present:
+                                cons.append(
+                                    z3.Select(state[f"{name}__{field}__value"], zkey)
+                                    == _snapshot_scalar_expr(field_value, field_ty[1])
+                                )
+                        else:
+                            cons.append(
+                                z3.Select(state[f"{name}__{field}"], zkey)
+                                == _snapshot_scalar_expr(field_value, field_ty)
+                            )
+                else:
+                    cons.append(
+                        z3.Select(state[name], zkey) == _snapshot_scalar_expr(item, value_ty)
+                    )
+            return
+        if ty[0] == "set":
+            array = z3.K(state[name].sort().domain(), z3.BoolVal(False))
+            for item in value:
+                array = z3.Store(array, _z3_domain_value(ty[1], item), z3.BoolVal(True))
+            cons.append(state[name] == array)
+            return
+        if ty[0] == "seq":
+            cons.append(state[f"{name}__len"] == z3.IntVal(len(value)))
+            for index in range(ty[2]):
+                item = value[index] if index < len(value) else _snapshot_default_scalar(ty[1])
+                cons.append(
+                    z3.Select(state[f"{name}__data"], z3.IntVal(index))
+                    == _snapshot_scalar_expr(item, ty[1])
+                )
+            return
+        if ty[0] == "relation":
+            array = z3.K(state[name].sort().domain(), z3.BoolVal(False))
+            for source, target in value:
+                key = _relation_key(
+                    ty[1], ty[2],
+                    _z3_domain_value(ty[1], source),
+                    _z3_domain_value(ty[2], target), spec,
+                )
+                array = z3.Store(array, key, z3.BoolVal(True))
+            cons.append(state[name] == array)
+            return
+        _err(f"unsupported state snapshot type {ty}", kind="type")
+
+    for logical, ty in spec["state"].items():
+        add_value(logical, ty, normalized[logical])
+    return cons
+
+
 def _pend_to_constraints(pend, s0):
     out = []
     for phys, val in pend.items():
@@ -1511,6 +1753,134 @@ def _z3_domain_value(kty, value):
     if kty[0] == "bool":
         return z3.BoolVal(bool(value))
     return z3.IntVal(value)
+
+
+def _relation_endpoint_values(ty, spec):
+    return list(_map_domain(ty, spec))
+
+
+def _relation_endpoint_size(ty, spec):
+    return len(_relation_endpoint_values(ty, spec))
+
+
+def _relation_endpoint_index(ty, value, spec):
+    if ty[0] == "bool":
+        if isinstance(value, bool):
+            return z3.IntVal(1 if value else 0)
+        if isinstance(value, z3.ExprRef) and value.sort().kind() == z3.Z3_BOOL_SORT:
+            return z3.If(value, z3.IntVal(1), z3.IntVal(0))
+        _err("relation Bool endpoint expects a Bool expression", kind="type")
+    lo, _hi = domain_range(ty, spec["types"])
+    if isinstance(value, bool):
+        value = z3.IntVal(1 if value else 0)
+    elif isinstance(value, int):
+        value = z3.IntVal(value)
+    return value - z3.IntVal(lo)
+
+
+def _relation_key(src_ty, dst_ty, src, dst, spec):
+    dst_size = _relation_endpoint_size(dst_ty, spec)
+    return _relation_endpoint_index(src_ty, src, spec) * z3.IntVal(dst_size) + \
+        _relation_endpoint_index(dst_ty, dst, spec)
+
+
+def _relation_contains(rel, src_ty, dst_ty, src, dst, spec):
+    return z3.Select(rel, _relation_key(src_ty, dst_ty, src, dst, spec))
+
+
+def _same_relation_endpoint_type(src_ty, dst_ty):
+    return src_ty == dst_ty
+
+
+def _relation_type_error(message):
+    _err(
+        message,
+        kind="type",
+        hint=(
+            "relation helpers operate on binary relation state. Use .contains(a, b), "
+            ".add(a, b), .remove(a, b), reachable(r, a, b), acyclic(r), "
+            "functional(r), injective(r), domain(r), or range(r)."
+        ),
+    )
+
+
+def _relation_parts(base):
+    if isinstance(base, tuple) and base[0] == "relation_val":
+        return base[1], base[2], base[3]
+    return None
+
+
+def _relation_reachable_expr(rel, ty, src, dst, spec):
+    values = _relation_endpoint_values(ty, spec)
+    if not values:
+        return z3.BoolVal(False)
+
+    def const(v):
+        return _z3_domain_value(ty, v)
+
+    # path_at_most(k, a, b): "a reaches b in <= k hops". Below the top level,
+    # `a` only ever ranges over the finite domain `values` (never an arbitrary
+    # symbolic expression), so those calls are memoized on (k, a) to turn the
+    # naive O(n^n) unrolled tree into an O(n^2)-node shared DAG.
+    memo = {}
+
+    def path_from_value(k, v):
+        key = (k, v)
+        cached = memo.get(key)
+        if cached is not None:
+            return cached
+        a = const(v)
+        direct = _relation_contains(rel, ty, ty, a, dst, spec)
+        if k <= 1:
+            result = direct
+        else:
+            via = [
+                z3.And(
+                    _relation_contains(rel, ty, ty, a, const(mid), spec),
+                    path_from_value(k - 1, mid),
+                )
+                for mid in values
+            ]
+            result = z3.Or(direct, *via)
+        memo[key] = result
+        return result
+
+    n = len(values)
+    direct = _relation_contains(rel, ty, ty, src, dst, spec)
+    if n <= 1:
+        return direct
+    via = [
+        z3.And(
+            _relation_contains(rel, ty, ty, src, const(mid), spec),
+            path_from_value(n - 1, mid),
+        )
+        for mid in values
+    ]
+    return z3.Or(direct, *via)
+
+
+def _relation_set_from_projection(rel, src_ty, dst_ty, spec, side):
+    elem_ty = src_ty if side == "domain" else dst_ty
+    arr = z3.K(z3_sort(elem_ty, spec["types"]), z3.BoolVal(False))
+    src_values = _relation_endpoint_values(src_ty, spec)
+    dst_values = _relation_endpoint_values(dst_ty, spec)
+    for src in src_values:
+        zsrc = _z3_domain_value(src_ty, src)
+        present = z3.Or(*[
+            _relation_contains(rel, src_ty, dst_ty, zsrc, _z3_domain_value(dst_ty, dst), spec)
+            for dst in dst_values
+        ]) if dst_values else z3.BoolVal(False)
+        if side == "domain":
+            arr = z3.Store(arr, zsrc, present)
+    if side == "range":
+        for dst in dst_values:
+            zdst = _z3_domain_value(dst_ty, dst)
+            present = z3.Or(*[
+                _relation_contains(rel, src_ty, dst_ty, _z3_domain_value(src_ty, src), zdst, spec)
+                for src in src_values
+            ]) if src_values else z3.BoolVal(False)
+            arr = z3.Store(arr, zdst, present)
+    return ("set_val", arr, elem_ty)
 
 
 def _symmetric_type_names(spec):
@@ -1712,6 +2082,21 @@ def _logical_val(model, state, name, ty, spec):
             else:
                 obj[fn] = _display_value(fty, _py_val(model, state[f"{name}__{fn}"]), spec)
         return obj
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        pairs = []
+        for src in _relation_endpoint_values(src_ty, spec):
+            for dst in _relation_endpoint_values(dst_ty, spec):
+                key = _relation_key(
+                    src_ty, dst_ty, _z3_domain_value(src_ty, src),
+                    _z3_domain_value(dst_ty, dst), spec,
+                )
+                if _py_val(model, z3.Select(state[name], key)):
+                    pairs.append([
+                        _display_value(src_ty, src, spec),
+                        _display_value(dst_ty, dst, spec),
+                    ])
+        return pairs
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
         mout = {}
@@ -1772,114 +2157,6 @@ def compute_changes(prev, curr):
         elif pa != pb:
             changes[k] = {"from": pa, "to": pb}
     return changes
-
-
-def _binder_static_type(binder, spec):
-    if binder[0] == "binder_typed":
-        ty_name = binder[2]
-        if ty_name in spec["types"]:
-            return spec["types"][ty_name]["ty"]
-    if binder[0] == "binder_collection":
-        coll_ty = _expr_static_type(binder[2], spec, {})
-        if coll_ty and coll_ty[0] in ("set", "seq"):
-            return coll_ty[1]
-    return ("int",)
-
-
-def _merge_ite_static_types(a, b):
-    if a is None:
-        return b
-    if b is None:
-        return a
-    if a == b:
-        return a
-    if a[0] == "option" and b[0] == "option":
-        inner_a, inner_b = a[1], b[1]
-        if inner_a == ("int",):
-            return b
-        if inner_b == ("int",):
-            return a
-        return ("option", _merge_ite_static_types(inner_a, inner_b))
-    if a[0] in ("int", "domain", "enum") and b[0] in ("int", "domain", "enum"):
-        if a[0] == "int":
-            return b
-        return a
-    _err(f"if arms must have the same type: {a} vs {b}", kind="type")
-
-
-def _expr_static_type(e, spec, env):
-    tag = e[0]
-    if tag == "num":
-        return ("int",)
-    if tag == "bool":
-        return ("bool",)
-    if tag == "none":
-        return ("option", ("int",))
-    if tag == "var":
-        n = e[1]
-        if n in env:
-            return env[n]
-        if n in spec["state"]:
-            return spec["state"][n]
-        for name, info in spec["types"].items():
-            if info["kind"] == "enum" and n in info["members"]:
-                return ("enum", name)
-        return None
-    if tag == "some":
-        inner = _expr_static_type(e[1], spec, env)
-        return ("option", inner or ("int",))
-    if tag == "struct_lit":
-        return ("struct", e[1])
-    if tag == "index":
-        base = e[1]
-        if isinstance(base, str):
-            base_ty = spec["state"].get(base) or env.get(base)
-        elif base[0] == "var":
-            base_ty = spec["state"].get(base[1]) or env.get(base[1])
-        else:
-            base_ty = _expr_static_type(base, spec, env)
-        if base_ty and base_ty[0] == "map":
-            return base_ty[2]
-        return None
-    if tag == "field":
-        base_ty = _expr_static_type(e[1], spec, env)
-        if base_ty and base_ty[0] == "struct":
-            return spec["types"][base_ty[1]]["fields"].get(e[2])
-        return None
-    if tag == "method":
-        method = e[2]
-        base_ty = _expr_static_type(e[1], spec, env)
-        if method in ("contains",):
-            return ("bool",)
-        if method == "size":
-            return ("int",)
-        if method in ("add", "remove", "push", "pop"):
-            return base_ty
-        if method == "head":
-            if base_ty and base_ty[0] == "seq":
-                return base_ty[1]
-            return ("int",)
-        if method == "at":
-            if base_ty and base_ty[0] == "seq":
-                return base_ty[1]
-            return ("int",)
-        return None
-    if tag == "bin":
-        if e[1] in ("+", "-", "*", "/", "%"):
-            return ("int",)
-        return ("bool",)
-    if tag == "ite":
-        c_ty = _expr_static_type(e[1], spec, env)
-        if c_ty and c_ty != ("bool",):
-            _err(f"if condition must be Bool, got {c_ty}", kind="type")
-        a_ty = _expr_static_type(e[2], spec, env)
-        b_ty = _expr_static_type(e[3], spec, env)
-        return _merge_ite_static_types(a_ty, b_ty)
-    if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
-        return ("bool",)
-    if tag in ("count", "sum", "min", "max", "abs"):
-        return ("int",)
-    return None
 
 
 def _collect_pattern_binding_types(e, spec, env, out):
@@ -1964,6 +2241,73 @@ def violating_bindings(model, inv_expr, state, spec):
         return None
 
     return search(inv_expr, {}, {})
+
+
+def _split_conjuncts(expr):
+    """An invariant's top-level AND structure, split into closed conjunct ASTs
+    in source order (issue #170 blame assignment). Descends through `forall`
+    (which distributes over `and`) and `bin and` only -- `exists`/`=>` stop
+    the descent, since splitting past them would change what's being blamed.
+    Each leaf is re-wrapped with the `forall` binders accumulated on the path
+    to it, so every returned conjunct is independently evaluable. A
+    conjunct-free invariant yields a 1-element list (uniform shape for
+    callers)."""
+    def walk(e, binders):
+        if isinstance(e, tuple) and e and e[0] == "forall":
+            return walk(e[2], binders + [e[1]])
+        if isinstance(e, tuple) and e and e[0] == "bin" and e[1] == "and":
+            return walk(e[2], binders) + walk(e[3], binders)
+        wrapped = e
+        for binder in reversed(binders):
+            wrapped = ("forall", binder, wrapped)
+        return [wrapped]
+
+    return walk(expr, [])
+
+
+def _conjunct_blame(model, inv, state, spec, expr_cache):
+    """Per top-level conjunct of `inv["expr"]`: its rendered text, whether it
+    holds under `model`, and (for a false conjunct) the violating bindings.
+    Model evaluation only -- no new solver calls.
+
+    Implicit `_bounds_*` invariants (`type_bound` violations) are handled
+    specially: their expr can embed synthetic internal names with no
+    `display_names` entry (Map's `__k` binder, a Seq's `<var>__data`/
+    `<var>__len` phys names) that were never meant to be rendered -- the
+    same reason `explain._auto_checks` prints only the target variable for
+    these, never the body. Treat the whole invariant as one opaque,
+    already-known-false conjunct instead of risking a leaked internal name
+    (caught by `tests/test_robustness.py`'s no-`__` corpus sweep while
+    implementing this).
+
+    A user conjunct whose truth `model.eval` cannot decide outright (only
+    the `set_bounds`/`map_value_bounds` bound-check nodes themselves, which
+    compile to a bare `z3.ForAll` rather than an unrolled ground formula --
+    ordinary user `forall`/`exists` unroll and always decide) reports
+    `holds: None` rather than guessing."""
+    if inv.get("implicit"):
+        target = public_var(inv.get("logical_var"), spec)
+        return [{"index": 0, "text": f"{target} stays within its declared type bounds", "holds": False}]
+
+    display_names = spec.get("display_names")
+    out = []
+    for idx, conj in enumerate(_split_conjuncts(inv["expr"])):
+        with _eval_cache_scope(expr_cache, id(state)):
+            cond = eval_expr(conj, state, {}, spec)
+        evaluated = model.eval(cond, model_completion=True)
+        if z3.is_true(evaluated):
+            holds = True
+        elif z3.is_false(evaluated):
+            holds = False
+        else:
+            holds = None
+        entry = {"index": idx, "text": expr_to_text(conj, display_names), "holds": holds}
+        if holds is False:
+            vb = violating_bindings(model, conj, state, spec)
+            if vb:
+                entry["violating_bindings"] = vb
+        out.append(entry)
+    return out
 
 
 def _display_max(spec):
@@ -2080,6 +2424,17 @@ def _logical_eq_var(spec, s1, s2, name, ty):
         for i in _map_domain(elem_ty, spec):
             key = _z3_domain_value(elem_ty, i)
             parts.append(z3.Select(m1, key) == z3.Select(m2, key))
+        return z3.And(*parts) if parts else z3.BoolVal(True)
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        parts = []
+        for src in _relation_endpoint_values(src_ty, spec):
+            for dst in _relation_endpoint_values(dst_ty, spec):
+                key = _relation_key(
+                    src_ty, dst_ty, _z3_domain_value(src_ty, src),
+                    _z3_domain_value(dst_ty, dst), spec,
+                )
+                parts.append(z3.Select(s1[name], key) == z3.Select(s2[name], key))
         return z3.And(*parts) if parts else z3.BoolVal(True)
     if ty[0] == "map":
         kty, vty = ty[1], ty[2]
@@ -2870,6 +3225,96 @@ _LEADSTO_RANK_PROGRESS_HINT = (
     "from every state where P holds and Q is false, each enabled action must "
     "either make Q true, or keep P true and strictly decrease the measure"
 )
+_LEADSTO_HELPFUL_PROGRESS_HINT = (
+    "helpful marks which action instance is responsible for progress. The "
+    "matching action must be declared `fair action`, must be enabled whenever "
+    "the obligation is pending, and must strictly decrease the rank when it fires; "
+    "other actions must keep the pending obligation true (unless they make Q true) "
+    "and must not increase the measure -- an unbounded increase between helpful "
+    "firings can outpace the guaranteed decrease and prevent Q from ever being reached"
+)
+
+
+def _model_bool(model, expr):
+    return z3.is_true(model.eval(expr, model_completion=True))
+
+
+def _helpful_arg_value(expr, extra_binds, spec, loc=None):
+    try:
+        val = eval_expr(expr, {}, extra_binds, spec)
+    except Exception as ex:
+        _err(
+            "helpful action arguments must be state-independent leadsto binders, "
+            "constants, enum members, or arithmetic over those values",
+            kind="type",
+            loc=loc,
+            hint="use `helpful actionName(c)` to bind the helpful action to the pending forall entity",
+        )
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, int):
+        return val
+    if isinstance(val, z3.ExprRef):
+        simplified = z3.simplify(val)
+        if z3.is_int_value(simplified):
+            return simplified.as_long()
+        if z3.is_true(simplified):
+            return True
+        if z3.is_false(simplified):
+            return False
+    _err(
+        "helpful action arguments must resolve to concrete bounded values",
+        kind="type",
+        loc=loc,
+        hint="helpful metadata is a per-binding action selector, not a state predicate",
+    )
+
+
+def _helpful_matches(leadsto, extra_binds, instances, spec):
+    out = []
+    for helper in leadsto.get("helpful") or []:
+        name = helper["action"]
+        action_def = next((a for a in spec["actions"] if a["name"] == name), None)
+        if action_def is None:
+            continue
+        params = [p[0] for p in action_def["params"]]
+        expected = [
+            _helpful_arg_value(arg, extra_binds, spec, helper.get("loc"))
+            for arg in helper.get("args") or []
+        ]
+        for idx, inst in enumerate(instances):
+            if inst["action"] != name:
+                continue
+            if all(inst["binds"].get(param) == value for param, value in zip(params, expected)):
+                out.append((idx, helper))
+    return out
+
+
+def _display_instance(inst, spec):
+    act = inst["action_def"]
+    return annotate_display_name({
+        "name": display_label(inst["action"], spec),
+        "params": {pk: _display_param(pk, pv, act, spec) for pk, pv in inst["binds"].items()},
+    }, inst["action"], spec)
+
+
+def _display_helpful_instances(matches, instances, spec):
+    seen = set()
+    out = []
+    for idx, _helper in matches:
+        if idx in seen:
+            continue
+        seen.add(idx)
+        out.append(_display_instance(instances[idx], spec))
+    return out
+
+
+def _helpful_labels(leadsto):
+    labels = []
+    for helper in leadsto.get("helpful") or []:
+        args = ", ".join(_leadsto_measure_label(arg) for arg in helper.get("args") or [])
+        labels.append(f"{helper['action']}({args})")
+    return labels
 
 
 def _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, detail):
@@ -2924,21 +3369,166 @@ def _prove_leadsto_rank_no_deadlock(spec, leadsto, extra_binds, binding_types, i
         solver.add(_inv_constraint(inv, state, spec, expr_cache))
     p = _eval_at_state(leadsto["P"], state, extra_binds, spec, expr_cache)
     q = _eval_at_state(leadsto["Q"], state, extra_binds, spec, expr_cache)
-    enabled = _action_enabled_exprs(state, instances, spec, expr_cache)
-    solver.add(p, z3.Not(q), _deadlock_from_enabled(enabled))
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if leadsto.get("helpful"):
+        enabled = [
+            _enabled_instance(instances[idx], state, spec, extra_binds, expr_cache)
+            for idx, _helper in helpful_matches
+        ]
+        no_helpful_enabled = z3.Not(z3.Or(*enabled)) if enabled else z3.BoolVal(True)
+        solver.add(p, z3.Not(q), no_helpful_enabled)
+        failure_kind = "helpful_action_not_enabled"
+        blocked_actions = _display_helpful_instances(helpful_matches, instances, spec)
+        message = (
+            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
+            "while no matching helpful action instance is enabled"
+        )
+        hint = _LEADSTO_HELPFUL_PROGRESS_HINT
+    else:
+        enabled = _action_enabled_exprs(state, instances, spec, expr_cache)
+        solver.add(p, z3.Not(q), _deadlock_from_enabled(enabled))
+        failure_kind = "deadlock"
+        blocked_actions = None
+        message = (
+            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
+            "in a state with no enabled action"
+        )
+        hint = _LEADSTO_RANK_DEADLOCK_HINT
     if solver.check() != z3.sat:
         return None
     model = solver.model()
     measure = _eval_int_measure(leadsto, state, extra_binds, spec, expr_cache)
-    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, {
-        "rank_failure": "deadlock",
+    detail = {
+        "rank_failure": failure_kind,
         "measure_value": _model_int(model, measure),
+        "message": message,
+        "hint": hint,
+    }
+    if blocked_actions is not None:
+        detail["helpful_actions"] = blocked_actions
+        detail["helpful"] = _helpful_labels(leadsto)
+    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, detail)
+
+
+def _prove_leadsto_rank_helpful_fairness(spec, leadsto, extra_binds, binding_types, invariants, instances):
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if not helpful_matches:
+        return None
+    nonfair = [
+        (idx, helper) for idx, helper in helpful_matches
+        if not instances[idx]["action_def"].get("fair")
+    ]
+    if not nonfair:
+        return None
+
+    expr_cache = {}
+    state = make_ind_state(spec, f"rank_{leadsto['name']}_fair")
+    solver = z3.Solver()
+    solver.add(*_enum_phys_constraints(spec, state))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, state, spec, expr_cache))
+    p = _eval_at_state(leadsto["P"], state, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], state, extra_binds, spec, expr_cache)
+    solver.add(p, z3.Not(q))
+    if solver.check() != z3.sat:
+        return None
+
+    model = solver.model()
+    measure = _eval_int_measure(leadsto, state, extra_binds, spec, expr_cache)
+    return _rank_failure_common(spec, leadsto, model, state, extra_binds, binding_types, {
+        "rank_failure": "progress_action_not_fair",
+        "measure_value": _model_int(model, measure),
+        "helpful_actions": _display_helpful_instances(nonfair, instances, spec),
         "message": (
-            f"leadsTo '{display_label(leadsto['name'], spec)}' can be pending "
-            "in a state with no enabled action"
+            f"leadsTo '{display_label(leadsto['name'], spec)}' uses helpful action "
+            "metadata, but a matching progress action is not declared fair"
         ),
-        "hint": _LEADSTO_RANK_DEADLOCK_HINT,
+        "hint": (
+            "helpful only identifies the per-binding progress action. Add `fair` "
+            "to the lower-layer action instance that must eventually run; helpful "
+            "does not create a fairness assumption."
+        ),
     })
+
+
+def _prove_leadsto_rank_helpful_sticky(spec, leadsto, extra_binds, binding_types, invariants, instances):
+    """Each helpful instance must stay enabled (or Q resolve) until it fires.
+
+    `_prove_leadsto_rank_no_deadlock` only proves that *some* helpful match is
+    enabled at every pending state -- a disjunction. With a single helpful
+    match that is enough (it is then the one enabled at every such state, so
+    it is continuously enabled while pending). With more than one, the
+    disjunction can be satisfied by a *different* instance at each step (e.g.
+    two helpful actions whose enabledness alternates), in which case no
+    single instance is ever continuously enabled and its `fair` declaration
+    is never obligated to fire -- the induction would then report "proved"
+    for a leadsTo that BMC can find a genuine fair counterexample to. This
+    check additionally requires that once a helpful instance becomes enabled
+    while pending, no other action can disable it again before it either
+    fires itself or Q becomes true, which is what actually licenses invoking
+    that instance's weak fairness.
+    """
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if len(helpful_matches) < 2:
+        return None
+
+    expr_cache = {}
+    cur = make_ind_state(spec, f"rank_{leadsto['name']}_sticky_cur")
+    nxt = make_ind_state(spec, f"rank_{leadsto['name']}_sticky_next")
+    choice = z3.Int(f"__rank_sticky_choice_{leadsto['name']}")
+    solver = z3.Solver()
+    solver.add(choice >= 0, choice < len(instances))
+    solver.add(*_enum_phys_constraints(spec, cur))
+    for inv in invariants:
+        solver.add(_inv_constraint(inv, cur, spec, expr_cache))
+    with _eval_cache_scope(expr_cache, id(cur)):
+        solver.add(transition(spec, instances, cur, nxt, choice, expr_cache))
+
+    p = _eval_at_state(leadsto["P"], cur, extra_binds, spec, expr_cache)
+    q = _eval_at_state(leadsto["Q"], cur, extra_binds, spec, expr_cache)
+    q_next = _eval_at_state(leadsto["Q"], nxt, extra_binds, spec, expr_cache)
+
+    for idx, helper in helpful_matches:
+        enabled_cur = _enabled_instance(instances[idx], cur, spec, extra_binds, expr_cache)
+        enabled_next = _enabled_instance(instances[idx], nxt, spec, extra_binds, expr_cache)
+        solver.push()
+        solver.add(p, z3.Not(q), enabled_cur, choice != idx, z3.Not(q_next), z3.Not(enabled_next))
+        sat = solver.check()
+        if sat == z3.sat:
+            model = solver.model()
+            trace = _build_trace(model, [cur, nxt], [choice], instances, spec, 1)
+            solver.pop()
+            return _attach_requirement({
+                "result": "unknown_cti",
+                "spec": spec["name"],
+                "violation_kind": "leadsTo_rank",
+                "invariant": leadsto["name"],
+                "loc": leadsto.get("loc"),
+                "bindings": _display_leadsto_bindings(model, extra_binds, spec, binding_types),
+                "measure": _leadsto_measure_label(leadsto.get("decreases")),
+                "rank_failure": "helpful_action_enabledness_not_sticky",
+                "helpful_actions": _display_helpful_instances([(idx, helper)], instances, spec),
+                "last_action": _last_action(model, [choice], instances, 1, spec),
+                "cti": {
+                    "states": trace,
+                    "violated_at": 1,
+                },
+                "message": (
+                    f"helpful action '{_display_helpful_instances([(idx, helper)], instances, spec)[0]['name']}' "
+                    f"can become disabled again while leadsTo '{display_label(leadsto['name'], spec)}' is "
+                    "still pending, without itself having fired"
+                ),
+                "hint": (
+                    "with more than one `helpful` action, each instance's enabledness must not "
+                    "flicker: once a helpful instance becomes enabled while the obligation is "
+                    "pending, it must stay enabled until it fires (or Q holds) -- otherwise its "
+                    "weak fairness is never triggered, since it is never continuously enabled. "
+                    "Guard the other actions so they cannot disable a pending helpful instance, "
+                    "or split into a leadsTo per helpful action so each owns a stable region"
+                ),
+            }, leadsto)
+        solver.pop()
+    return None
 
 
 def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, invariants, instances):
@@ -2961,19 +3551,43 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
     measure = _eval_int_measure(leadsto, cur, extra_binds, spec, expr_cache)
     measure_next = _eval_int_measure(leadsto, nxt, extra_binds, spec, expr_cache)
     progress = z3.Or(q_next, z3.And(p_next, measure_next < measure))
-    solver.add(p, z3.Not(q), z3.Not(progress))
+    helpful_matches = _helpful_matches(leadsto, extra_binds, instances, spec)
+    if helpful_matches:
+        helpful_choice = z3.Or(*[choice == idx for idx, _helper in helpful_matches])
+        # A non-helpful action must not increase the measure either: an
+        # unbounded increase between successive (fairness-guaranteed, but
+        # not fairness-scheduled) helpful firings could outpace the bounded
+        # decrease each firing provides, so Q would never actually be
+        # reached even though the helpful action keeps firing.
+        pending_preserved = z3.Or(q_next, z3.And(p_next, measure_next <= measure))
+        allowed = z3.Or(
+            z3.And(helpful_choice, progress),
+            z3.And(z3.Not(helpful_choice), pending_preserved),
+        )
+        hint = _LEADSTO_HELPFUL_PROGRESS_HINT
+    else:
+        allowed = progress
+        hint = _LEADSTO_RANK_PROGRESS_HINT
+    solver.add(p, z3.Not(q), z3.Not(allowed))
     if solver.check() != z3.sat:
         return None
 
     model = solver.model()
     trace = _build_trace(model, [cur, nxt], [choice], instances, spec, 1)
-    q_next_holds = z3.is_true(model.eval(q_next, model_completion=True))
-    p_next_holds = z3.is_true(model.eval(p_next, model_completion=True))
-    decreases = z3.is_true(model.eval(measure_next < measure, model_completion=True))
+    q_next_holds = _model_bool(model, q_next)
+    p_next_holds = _model_bool(model, p_next)
+    decreases = _model_bool(model, measure_next < measure)
+    increases = _model_bool(model, measure_next > measure)
+    choice_idx = model.eval(choice, model_completion=True).as_long()
+    helpful_idx_set = {idx for idx, _helper in helpful_matches}
     rank_failure = "non_decreasing_action"
     if not q_next_holds and not p_next_holds:
         rank_failure = "pending_not_preserved"
-    return _attach_requirement({
+    elif helpful_matches and choice_idx in helpful_idx_set and not decreases:
+        rank_failure = "non_decreasing_helpful_action"
+    elif helpful_matches and choice_idx not in helpful_idx_set and increases:
+        rank_failure = "non_helpful_action_increases_measure"
+    detail = {
         "result": "unknown_cti",
         "spec": spec["name"],
         "violation_kind": "leadsTo_rank",
@@ -2989,12 +3603,36 @@ def _prove_leadsto_rank_progress(spec, leadsto, extra_binds, binding_types, inva
             "states": trace,
             "violated_at": 1,
         },
-        "message": (
+        "hint": hint,
+    }
+    if helpful_matches:
+        detail["helpful_actions"] = _display_helpful_instances(helpful_matches, instances, spec)
+    if rank_failure == "pending_not_preserved":
+        detail["message"] = (
+            f"enabled action '{trace[1]['action']['name']}' can make "
+            f"leadsTo '{display_label(leadsto['name'], spec)}' no longer pending "
+            "without making Q true"
+        )
+    elif rank_failure == "non_decreasing_helpful_action":
+        detail["message"] = (
+            f"helpful action '{trace[1]['action']['name']}' can leave "
+            f"leadsTo '{display_label(leadsto['name'], spec)}' pending without "
+            "strictly decreasing the measure"
+        )
+    elif rank_failure == "non_helpful_action_increases_measure":
+        detail["message"] = (
+            f"non-helpful action '{trace[1]['action']['name']}' can increase the "
+            f"measure while leadsTo '{display_label(leadsto['name'], spec)}' is "
+            "still pending, which could outpace the helpful action's guaranteed decrease"
+        )
+    else:
+        detail["message"] = (
             f"enabled action '{trace[1]['action']['name']}' can leave "
             f"leadsTo '{display_label(leadsto['name'], spec)}' pending without "
             "strictly decreasing the measure"
-        ),
-        "hint": _LEADSTO_RANK_PROGRESS_HINT,
+        )
+    return _attach_requirement({
+        **detail,
     }, leadsto)
 
 
@@ -3008,6 +3646,14 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
             for extra_binds in expand_leadsto_bindings(leadsto, spec):
                 failure = _prove_leadsto_rank_lower_bound(
                     spec, leadsto, extra_binds, binding_types, invariants)
+                if failure is not None:
+                    return failure, None
+                failure = _prove_leadsto_rank_helpful_fairness(
+                    spec, leadsto, extra_binds, binding_types, invariants, instances)
+                if failure is not None:
+                    return failure, None
+                failure = _prove_leadsto_rank_helpful_sticky(
+                    spec, leadsto, extra_binds, binding_types, invariants, instances)
                 if failure is not None:
                     return failure, None
                 failure = _prove_leadsto_rank_no_deadlock(
@@ -3024,6 +3670,8 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 "proof": "ranking",
                 "decreases": _leadsto_measure_label(leadsto.get("decreases")),
             }
+            if leadsto.get("helpful"):
+                proved[leadsto["name"]]["helpful"] = _helpful_labels(leadsto)
             continue
 
         try:
@@ -3038,6 +3686,16 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 for extra_binds in expand_leadsto_bindings(candidate_leadsto, spec):
                     failure = _prove_leadsto_rank_lower_bound(
                         spec, candidate_leadsto, extra_binds, binding_types, invariants)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+                    failure = _prove_leadsto_rank_helpful_fairness(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
+                    if failure is not None:
+                        candidate_failed = True
+                        break
+                    failure = _prove_leadsto_rank_helpful_sticky(
+                        spec, candidate_leadsto, extra_binds, binding_types, invariants, instances)
                     if failure is not None:
                         candidate_failed = True
                         break
@@ -3062,6 +3720,8 @@ def _prove_ranked_leadstos(spec, leadstos, invariants, instances):
                 "decreases": _leadsto_measure_label(candidate),
                 "synthesized": True,
             }
+            if leadsto.get("helpful"):
+                proved[leadsto["name"]]["helpful"] = _helpful_labels(leadsto)
             break
     return None, proved
 
@@ -3237,33 +3897,41 @@ def _reachable_blocking_entry(kind, source, spec, source_lines=None):
     return _attach_requirement(entry, source)
 
 
-def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
-    entry = _attach_requirement({
-        "name": reach["name"],
-        "loc": reach.get("loc"),
-    }, reach)
+def _diagnose_unreachable_expr(expr, spec, depth, source_lines=None, tag="diag", exclude_name=None):
+    """Is `expr` (an exists-wrapped reachable/vacuity-antecedent/leadsTo-trigger
+    predicate) satisfiable within the state's static/implicit invariants alone
+    (ignoring dynamics/depth)? If unsat, the unsat core names exactly the
+    invariants making it impossible; if sat, the real cause is more likely
+    "not reached within `depth` steps" than "structurally impossible". Shared
+    by `_diagnose_unreached_reachable` (issue #23) and vacuity finding
+    localization (issue #170) -- same solver-only, dynamics-free check.
 
-    state = make_state(spec, f"reach_diag_{id(reach)}")
+    `exclude_name` skips one invariant by name -- required for
+    `vacuous_implication`, whose target expr is that same invariant's own
+    antecedent: asserting `antecedent => consequent` directly constrains the
+    antecedent (trivially so when `consequent` is `false`), which would make
+    the unsat core always name the invariant being diagnosed instead of the
+    actual blocking assumptions."""
+    state = make_state(spec, f"{tag}_diag_{id(expr)}")
     expr_cache = {}
     s = z3.Solver()
     s.set(unsat_core=True)
 
     lit_map = {}
     for idx, inv in enumerate(spec.get("invariants", [])):
-        lit = z3.Bool(f"__reach_diag_inv_{idx}")
+        if exclude_name is not None and inv.get("name") == exclude_name:
+            continue
+        lit = z3.Bool(f"__{tag}_diag_inv_{idx}")
         s.assert_and_track(_inv_constraint(inv, state, spec, expr_cache), lit)
         lit_map[lit] = inv
 
-    target_lit = z3.Bool("__reach_diag_target")
+    target_lit = z3.Bool(f"__{tag}_diag_target")
     with _eval_cache_scope(expr_cache, id(state)):
-        target = eval_expr(reach["expr"], state, {}, spec)
+        target = eval_expr(expr, state, {}, spec)
     s.assert_and_track(target, target_lit)
 
-    status = s.check()
-    if status != z3.unsat:
-        entry["classification"] = "insufficient_depth"
-        entry["hint"] = _REACHABLE_INSUFFICIENT_HINT.format(depth=depth)
-        return entry
+    if s.check() != z3.unsat:
+        return {"classification": "insufficient_depth", "blocking": []}
 
     blocking = []
     for core_lit in s.unsat_core():
@@ -3272,9 +3940,22 @@ def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
             continue
         kind = "type_bound" if inv.get("implicit") else "invariant"
         blocking.append(_reachable_blocking_entry(kind, inv, spec, source_lines))
-    if not blocking:
-        blocking.append(_reachable_blocking_entry("reachable", reach, spec, source_lines))
+    return {"classification": "over_constrained", "blocking": blocking}
 
+
+def _diagnose_unreached_reachable(reach, spec, depth, source_lines=None):
+    entry = _attach_requirement({
+        "name": reach["name"],
+        "loc": reach.get("loc"),
+    }, reach)
+
+    diag = _diagnose_unreachable_expr(reach["expr"], spec, depth, source_lines, tag="reach")
+    if diag["classification"] == "insufficient_depth":
+        entry["classification"] = "insufficient_depth"
+        entry["hint"] = _REACHABLE_INSUFFICIENT_HINT.format(depth=depth)
+        return entry
+
+    blocking = diag["blocking"] or [_reachable_blocking_entry("reachable", reach, spec, source_lines)]
     names = [
         b.get("name") or b.get("text") or b.get("kind", "constraint")
         for b in blocking
@@ -3387,6 +4068,90 @@ def _referenced_state_vars(expr, spec):
 
     walk(expr)
     return refs
+
+
+def _lvalue_text(lv, display_names):
+    tag = lv[0]
+    if tag == "var":
+        return _display_from(display_names, lv[1])
+    if tag == "index":
+        return f"{_display_from(display_names, lv[1])}[{expr_to_text(lv[2], display_names)}]"
+    if tag == "field_lv":
+        return f"{_lvalue_text(lv[1], display_names)}.{lv[2]}"
+    return str(lv)
+
+
+def _walk_executed_assigns(stmts, state, binds, model, spec, expr_cache):
+    """The `assign` statements on the model-decided execution path through
+    `stmts` -- `if`/`forall_stmt` are resolved concretely against `model`
+    (unlike the real transition encoding in `compute_updates`, which must
+    stay branch-agnostic and builds an ITE covering both branches for the
+    solver to decide later). Blame-only: given an already-decided model,
+    resolving the taken branch this way is exact and does not touch the
+    solve path."""
+    out = []
+    for st in stmts:
+        tag = st[0]
+        if tag == "assign":
+            out.append(st)
+        elif tag == "if":
+            _, cond, then_stmts, else_stmts, _loc = st
+            with _eval_cache_scope(expr_cache, id(state)):
+                c = eval_expr(cond, state, binds, spec)
+            branch = then_stmts if z3.is_true(model.eval(c, model_completion=True)) else else_stmts
+            out.extend(_walk_executed_assigns(branch, state, binds, model, spec, expr_cache))
+        elif tag == "forall_stmt":
+            binder, body = st[1], st[2]
+            for w, b2 in iter_binder_terms(binder, state, binds, spec, None, False, _SYM, eval_expr):
+                if w is not None and z3.is_false(model.eval(w, model_completion=True)):
+                    continue
+                out.extend(_walk_executed_assigns(body, state, b2, model, spec, expr_cache))
+    return out
+
+
+def _blame_trace_steps(model, states, choices, instances, spec, expr_cache, t, false_conjs):
+    """Per action-bearing trace step (k = 1..t), which guards/effects
+    contributed to the blamed conjuncts -- a dynamic backward slice over the
+    concrete, model-decided trace (not a per-statement unsat core: the
+    transition is one monolithic conjunction, and tracking every statement
+    would fork the Z3 encoding, exactly the bmc/Monitor divergence risk this
+    repo guards against). Returns `{step: {"guards": [...], "effects": [...]}}`
+    for every step, possibly with empty lists."""
+    display_names = spec.get("display_names")
+    read_set = set()
+    for conj in false_conjs:
+        read_set |= _referenced_state_vars(conj, spec)
+
+    blame_by_step = {}
+    for k in range(t, 0, -1):
+        idx = model.eval(choices[k - 1], model_completion=True).as_long()
+        inst = instances[idx]
+        _guard_terms, binds = _eval_requires(inst["requires"], inst["lets"], states[k - 1], inst["binds"], spec)
+
+        effects = []
+        for st in _walk_executed_assigns(inst["stmts"], states[k - 1], binds, model, spec, expr_cache):
+            root = _lvalue_base_name(st[1])
+            if root is None or root not in read_set:
+                continue
+            entry = {
+                "target": public_var(root, spec),
+                "text": f"{_lvalue_text(st[1], display_names)} = {expr_to_text(st[2], display_names)}",
+            }
+            if st[3]:
+                entry["loc"] = st[3]
+            effects.append(entry)
+            read_set |= _referenced_state_vars(st[2], spec)
+
+        guards = []
+        for req in inst["requires"]:
+            if _referenced_state_vars(req["expr"], spec) & read_set:
+                guard_entry = {"text": expr_to_text(req["expr"], display_names)}
+                if req.get("loc"):
+                    guard_entry["loc"] = req["loc"]
+                guards.append(guard_entry)
+
+        blame_by_step[k] = {"guards": guards, "effects": effects}
+    return blame_by_step
 
 
 def _init_model_for_frozen_check(spec):
@@ -3642,6 +4407,7 @@ def _requires_clause_locally_implied(inst, req_idx, spec):
 def _requires_vacuity_candidates(instances, spec):
     pending = {}
     suppress = {}
+    generated = set(spec.get("generated_names") or [])
     for idx, inst in enumerate(instances):
         if inst["action_def"].get("sync"):
             # Synchronized compose actions are excluded: their clauses are
@@ -3653,6 +4419,8 @@ def _requires_vacuity_candidates(instances, spec):
             # by verifying the component spec on its own (no loss of detection).
             continue
         aname = inst["action"]
+        if aname in generated:
+            continue
         action_pending = pending.setdefault(aname, {})
         action_suppress = suppress.setdefault(aname, set())
         for req_idx, req in enumerate(inst["requires"]):
@@ -3688,11 +4456,12 @@ def _check_requires_clause_can_constrain(s, inst, req_idx, state, spec, expr_cac
     return can_constrain
 
 
-def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, coverage, depth, spec):
+def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, coverage, depth, spec,
+                                source_lines=None):
     findings = []
     for item in pending_vacuity:
         if item["kind"] == "vacuous_implication":
-            findings.append(_vacuity_warning(
+            finding = _vacuity_warning(
                 "vacuous_implication",
                 item["name"],
                 item.get("loc"),
@@ -3703,9 +4472,13 @@ def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, covera
                 _VACUOUS_IMPLICATION_HINT,
                 item.get("source"),
                 spec,
+            )
+            finding.update(_diagnose_unreachable_expr(
+                item["expr"], spec, depth, source_lines, tag="vacuity", exclude_name=item["name"],
             ))
+            findings.append(finding)
         elif item["kind"] == "vacuous_leadsto":
-            findings.append(_vacuity_warning(
+            finding = _vacuity_warning(
                 "vacuous_leadsto",
                 item["name"],
                 item.get("loc"),
@@ -3716,7 +4489,11 @@ def _finalize_vacuity_findings(pending_vacuity, pending_requires_vacuity, covera
                 _VACUOUS_LEADSTO_HINT,
                 item.get("source"),
                 spec,
+            )
+            finding.update(_diagnose_unreachable_expr(
+                item["expr"], spec, depth, source_lines, tag="vacuity", exclude_name=item["name"],
             ))
+            findings.append(finding)
         elif item["kind"] == "tautology_over_frozen":
             frozen_vars = ", ".join(item.get("frozen_vars", ()))
             findings.append(_vacuity_warning(
@@ -4109,7 +4886,8 @@ def _build_cover_trace(s, states, choices, instances, spec, step, idx, expr_cach
 
 
 def _bmc_explore(
-        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn"):
+        spec, depth, deadlock_mode="warn", track_cover=False, vacuity_mode="warn",
+        initial_snapshot=None):
     invariants = spec.get("invariants", [])
     transitions = spec.get("transitions", [])
     leadstos = spec.get("leadstos", [])
@@ -4123,7 +4901,11 @@ def _bmc_explore(
     s.set(unsat_core=True)
     inv_s = z3.Solver()
     with _eval_cache_scope(expr_cache, id(states[0])):
-        init_cons = init_constraints(spec, states[0])
+        init_cons = (
+            init_constraints(spec, states[0])
+            if initial_snapshot is None
+            else state_snapshot_constraints(spec, states[0], initial_snapshot)
+        )
     s.add(*init_cons)
     inv_s.add(*init_cons)
 
@@ -4212,6 +4994,22 @@ def _bmc_explore(
             if inv_s.check() == z3.sat:
                 m = inv_s.model()
                 trace = _build_trace(m, states, choices, instances, spec, t)
+                conjunct_blame = _conjunct_blame(m, inv, states[t], spec, expr_cache)
+                if inv.get("implicit"):
+                    # The invariant's own expr may embed synthetic internal
+                    # names unsafe to feed into _referenced_state_vars's
+                    # exact-name matching (see _conjunct_blame) -- reference
+                    # the target logical variable directly instead.
+                    false_conjs = [("var", inv["logical_var"])] if inv.get("logical_var") else []
+                else:
+                    conjuncts = _split_conjuncts(inv["expr"])
+                    false_conjs = [conjuncts[e["index"]] for e in conjunct_blame if e["holds"] is False]
+                trace_blame = _blame_trace_steps(
+                    m, states, choices, instances, spec, expr_cache, t, false_conjs
+                ) if t > 0 else {}
+                for entry in trace:
+                    if entry["step"] > 0:
+                        entry["blame"] = trace_blame.get(entry["step"], {"guards": [], "effects": []})
                 return _attach_requirement({
                     "result": "violated",
                     "spec": spec["name"],
@@ -4220,6 +5018,7 @@ def _bmc_explore(
                     "loc": inv.get("loc"),
                     "violated_at_step": t,
                     "violating_bindings": violating_bindings(m, inv["expr"], states[t], spec),
+                    "blame": {"conjuncts": conjunct_blame},
                     "last_action": _last_action(m, choices, instances, t, spec),
                     "trace": trace,
                 }, inv)
@@ -4460,18 +5259,23 @@ def _bmc_explore(
 
 def verify(
         spec, depth, deadlock_mode="warn", source_lines=None, vacuity_mode="warn",
-        property_name=None, exclude_property_names=None):
+        property_name=None, exclude_property_names=None, initial_snapshot=None):
     started = time.perf_counter()
     filtered, property_error = _select_properties(
         spec, property_name, exclude_property_names)
     if property_error is not None:
         return _finish_result(property_error, spec, depth, started, completeness="bounded")
     spec = filtered
+    if initial_snapshot is not None:
+        # A production snapshot names concrete identities; symmetry reduction
+        # must not discard it merely because its labels are non-canonical.
+        spec = {**spec, "symmetry": {}}
     explored = _bmc_explore(
         spec,
         depth,
         deadlock_mode=deadlock_mode,
         vacuity_mode=vacuity_mode,
+        initial_snapshot=initial_snapshot,
     )
     if explored["result"] != "explored":
         return _finish_result(explored, spec, depth, started, completeness="bounded")
@@ -4518,6 +5322,7 @@ def verify(
         explored["coverage"],
         depth,
         spec,
+        source_lines=source_lines,
     ) if vacuity_mode != "ignore" else []
     if vacuity_mode == "error" and vacuity_findings:
         return _finish_result({
@@ -4711,7 +5516,8 @@ def scenarios(spec, depth, deadlock_mode="warn", source_lines=None, allow_unreac
 
 def prove(
         spec, k_ind, base_depth, deadlock_mode="warn", vacuity_mode="warn",
-        property_name=None, exclude_property_names=None):
+        property_name=None, exclude_property_names=None,
+        auxiliary_invariants=None, lemma_probes=None):
     """k-induction: base BMC then step-case invariant proof."""
     started = time.perf_counter()
     filtered, property_error = _select_properties(
@@ -4737,6 +5543,15 @@ def prove(
                 ),
             }, spec, base_depth, started)
 
+    if auxiliary_invariants:
+        filtered = dict(filtered)
+        filtered["invariants"] = (
+            list(filtered.get("invariants", [])) + list(auxiliary_invariants)
+        )
+        filtered["user_invariants"] = (
+            list(filtered.get("user_invariants", [])) + list(auxiliary_invariants)
+        )
+
     spec = filtered
     invariants = spec.get("invariants", [])
     transitions = spec.get("transitions", [])
@@ -4749,6 +5564,15 @@ def prove(
         vacuity_mode=vacuity_mode,
     )
     if base["result"] in ("violated", "reachable_failed", "error"):
+        if base.get("result") == "violated" and base.get("violation_kind") == "leadsTo":
+            instances = build_instances(spec)
+            rank_failure, _ranked_leadstos = _prove_ranked_leadstos(
+                spec, leadstos, invariants, instances)
+            if rank_failure is not None:
+                rank_failure.setdefault("checked_to_depth", base_depth)
+                rank_failure.setdefault("completeness", "bounded")
+                return _finish_result(
+                    rank_failure, spec, base_depth, started, completeness="bounded")
         return _add_result_metadata(
             base,
             base.get("checked_to_depth", base_depth),
@@ -4810,8 +5634,10 @@ def prove(
                 if s.check() == z3.sat:
                     model = s.model()
                     trace = _build_trace(model, states, choices, instances, spec, 1)
+                    exclusions = _lemma_exclusions(
+                        model, states, 1, lemma_probes, spec, expr_cache)
                     s.pop()
-                    return _finish_result(_attach_requirement({
+                    result = _attach_requirement({
                         "result": "unknown_cti",
                         "spec": spec["name"],
                         "trans": trans["name"],
@@ -4826,7 +5652,11 @@ def prove(
                         "invariants_checked": [i["name"] for i in invariants],
                         "transitions_checked": [tr["name"] for tr in transitions],
                         **_cti_hint_fields(trace, spec),
-                    }, trans), spec, base_depth, started, completeness="bounded")
+                    }, trans)
+                    if exclusions:
+                        result["_lemma_exclusions"] = exclusions
+                    return _finish_result(
+                        result, spec, base_depth, started, completeness="bounded")
                 s.pop()
 
         remaining = still_remaining
@@ -4836,7 +5666,9 @@ def prove(
     if remaining:
         inv, k, model = last_cti
         trace = _build_trace(model, states, choices, instances, spec, k)
-        return _finish_result(_attach_requirement({
+        exclusions = _lemma_exclusions(
+            model, states, k, lemma_probes, spec, expr_cache)
+        result = _attach_requirement({
             "result": "unknown_cti",
             "spec": spec["name"],
             "invariant": inv["name"],
@@ -4848,7 +5680,11 @@ def prove(
                 "violated_at": k,
             },
             **_cti_hint_fields(trace, spec),
-        }, inv), spec, base_depth, started, completeness="bounded")
+        }, inv)
+        if exclusions:
+            result["_lemma_exclusions"] = exclusions
+        return _finish_result(
+            result, spec, base_depth, started, completeness="bounded")
 
     rank_failure, ranked_leadstos = _prove_ranked_leadstos(
         spec, leadstos, invariants, instances)
@@ -4901,3 +5737,169 @@ def prove(
                 f"invariants proved for all depths; leadsTo checked to depth {base_depth} only"
             )
     return _finish_result(result, spec, base_depth, started, completeness="unbounded")
+
+
+def _lemma_only_spec(spec, lemma):
+    out = dict(spec)
+    implicit = [inv for inv in spec.get("invariants", []) if inv.get("implicit")]
+    out["invariants"] = implicit + [lemma]
+    out["user_invariants"] = [lemma]
+    out["transitions"] = []
+    out["leadstos"] = []
+    out["reachables"] = []
+    return out
+
+
+def _lemma_parse_error(expression, exc):
+    out = {
+        "result": "error",
+        "kind": "parse",
+        "message": str(exc).split("\n")[0],
+    }
+    if getattr(exc, "line", None) is not None:
+        out["loc"] = {"line": exc.line, "column": exc.column}
+    return out
+
+
+def _lemma_proof_summary(proof, name):
+    return {
+        "result": "proved",
+        "k": proof.get("k_used", {}).get(name),
+        "checked_to_depth": proof.get("checked_to_depth"),
+        "completeness": proof.get("completeness"),
+    }
+
+
+def prove_with_lemmas(
+        spec, lemma_expressions, k_ind, base_depth, deadlock_mode="warn",
+        vacuity_mode="warn", property_name=None, exclude_property_names=None):
+    """Adjudicate lemma candidates independently, then use only proved ones."""
+    from lark.exceptions import UnexpectedInput, VisitError
+    from .parser import parse_expr
+
+    started = time.perf_counter()
+    reports = []
+    proved_candidates = []
+    occupied_names = {
+        item["name"]
+        for collection in ("invariants", "transitions", "leadstos", "reachables")
+        for item in spec.get(collection, []) or []
+    }
+    for index, expression in enumerate(lemma_expressions, start=1):
+        name = f"AuxiliaryLemma{index}"
+        while name in occupied_names:
+            name += "Candidate"
+        occupied_names.add(name)
+        try:
+            expr = parse_expr(expression)
+            lemma = {
+                "name": name,
+                "expr": expr,
+                "implicit": False,
+                "loc": None,
+                "meta": None,
+                "expression": expression,
+            }
+            proof = prove(
+                _lemma_only_spec(spec, lemma),
+                k_ind,
+                base_depth,
+                deadlock_mode=deadlock_mode,
+                vacuity_mode=vacuity_mode,
+            )
+        except UnexpectedInput as exc:
+            reports.append({
+                "expression": expression,
+                "name": name,
+                "status": "rejected",
+                "used": False,
+                "proof": _lemma_parse_error(expression, exc),
+            })
+            continue
+        except VisitError as exc:
+            orig = exc.orig_exc
+            proof = {
+                "result": "error",
+                "kind": getattr(orig, "kind", "semantics"),
+                "message": str(orig),
+            }
+        except (FslError, z3.Z3Exception) as exc:
+            proof = {
+                "result": "error",
+                "kind": getattr(exc, "kind", "type"),
+                "message": str(exc),
+            }
+
+        if proof.get("result") == "proved":
+            report = {
+                "expression": expression,
+                "name": name,
+                "status": "proved",
+                "used": False,
+                "proof": _lemma_proof_summary(proof, name),
+            }
+            proved_candidates.append((lemma, report))
+        else:
+            stable_proof = {key: value for key, value in proof.items() if key != "cost"}
+            report = {
+                "expression": expression,
+                "name": name,
+                "status": "rejected",
+                "used": False,
+                "proof": stable_proof,
+            }
+        reports.append(report)
+
+    used = []
+    remaining = list(proved_candidates)
+    cti_exclusions = []
+    while True:
+        result = prove(
+            spec,
+            k_ind,
+            base_depth,
+            deadlock_mode=deadlock_mode,
+            vacuity_mode=vacuity_mode,
+            property_name=property_name,
+            exclude_property_names=exclude_property_names,
+            auxiliary_invariants=used,
+            lemma_probes=[lemma for lemma, _report in remaining],
+        )
+        exclusions = result.pop("_lemma_exclusions", [])
+        if result.get("result") != "unknown_cti" or not exclusions:
+            break
+        by_name = {entry["name"]: entry for entry in exclusions}
+        chosen_index = next(
+            (idx for idx, (lemma, _report) in enumerate(remaining)
+             if lemma["name"] in by_name),
+            None,
+        )
+        if chosen_index is None:
+            break
+        lemma, report = remaining.pop(chosen_index)
+        evidence = by_name[lemma["name"]]
+        report["used"] = True
+        used.append(lemma)
+        cti_exclusions.append({
+            "lemma": lemma["expression"],
+            "target": result.get("invariant") or result.get("trans"),
+            "k": result.get("k"),
+            "violated_steps": evidence["violated_steps"],
+            "cti": result.get("cti"),
+        })
+
+    result = dict(result)
+    result["lemmas"] = reports
+    result["lemma_cti_exclusions"] = cti_exclusions
+    if result.get("result") == "proved" and used:
+        result["auxiliary_invariant_recommendation"] = {
+            "message": (
+                "write the used proved lemmas into the specification as auxiliary invariants"
+            ),
+            "declarations": [
+                f"invariant {lemma['name']} {{ {lemma['expression']} }}"
+                for lemma in used
+            ],
+        }
+    result["cost"] = _result_cost(started)
+    return result

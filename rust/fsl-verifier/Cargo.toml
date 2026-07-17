@@ -1,0 +1,19 @@
+[package]
+name = "fsl-verifier"
+description = "Backend-neutral symbolic evaluator and bounded verifier for FSL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fsl-core = { path = "../fsl-core" }
+fsl-solver = { path = "../fsl-solver" }
+
+[dev-dependencies]
+fsl-runtime = { path = "../fsl-runtime" }
+fsl-solver-z3 = { path = "../fsl-solver-z3" }
+
+[lints]
+workspace = true

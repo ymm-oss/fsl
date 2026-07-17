@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+governance Broken {
+  preservation MissingBefore {
+    after After from "../../self/monitor_action_boundary.fsl"
+    checked_by refinement "../../refinement_chain/mid_refines_top.fsl"
+  }
+}

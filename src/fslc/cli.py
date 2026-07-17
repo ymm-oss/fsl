@@ -6,6 +6,9 @@ import sys
 import json
 import argparse
 import re
+import itertools
+import hashlib
+import os
 
 from lark.exceptions import UnexpectedInput, VisitError
 
@@ -13,9 +16,18 @@ from pathlib import Path
 
 from .diagnostics import with_faithfulness, trace_type_for
 from .parser import parse, parse_src, parse_refinement
-from .model import build_spec, check_spec, FslError, strict_tag_warnings
-from .bmc import verify, prove, scenarios
+from .model import (
+    build_spec,
+    check_spec,
+    FslError,
+    strict_tag_warnings,
+    validate_state_snapshot,
+)
+from .bmc import verify, prove, prove_with_lemmas, scenarios
+from . import verify_cache
 from .refine import build_refinement, refine, refine_chain
+from .semantic_diff import semantic_diff
+from .git_diff import semantic_diff_git
 from .runtime import Monitor
 from .acceptance import validate_acceptance, validate_forbidden
 from .testgen import TestgenScenarioError, generate_test_bundle, default_output_name
@@ -30,6 +42,41 @@ from .ledger import (
     default_output_name as default_ledger_output_name,
     render_ledger,
 )
+from .analysis import (
+    analyze as analyze_structure,
+    analyze_projection,
+    analyze_project_manifest,
+    analyze_refinement_ast,
+    build_tsg,
+    export_graph,
+    export_tag_review,
+)
+from .analysis.projections import SUPPORTED_PROJECTIONS
+from .analysis.schema import FINDINGS_SCHEMA_VERSION
+from .db_check import check_dbsystem, load_dbsystem, observe_dbsystem
+from .db_import import import_db_file
+from .ai_check import check_ai_source, load_ai_source, replay_ai_events, select_ai_component
+from .ai_parser import is_ai_agent_source
+from .ai_project import AiProject, is_ai_project_source
+from .ai_stochastic import (
+    ai_compat_profile_from_file,
+    compare_ai_records,
+    drift_ai_project,
+    evaluate_ai_project,
+    load_ai_project_file,
+    regress_ai_project,
+)
+from .domain_check import (
+    analyze_domain,
+    check_domain_source,
+    expand_domain_source,
+    generate_domain_scaffold,
+    generate_domain_tests,
+    load_domain,
+    replay_domain_logs,
+)
+from .domain_parser import is_domain_source, parse_domain
+from .domain_testgen import default_domain_testgen_output
 
 FSL_VERSION = "1.0"
 
@@ -277,9 +324,74 @@ def _bounds_skip_warnings(ids, kind, bounds_overrides):
     ]
 
 
+def _domain_enum_union_findings(file):
+    try:
+        source = Path(file).read_text(encoding="utf-8")
+        if not is_domain_source(source):
+            return []
+        domain = parse_domain(source)
+    except (OSError, FslError, UnexpectedInput, VisitError):
+        return []
+
+    findings = []
+    for type_def in domain.types:
+        if type_def.source_form != "legacy_enum_union":
+            continue
+        replacement = f"enum {type_def.name} {{ {', '.join(type_def.members)} }}"
+        findings.append({
+            "kind": "deprecated_domain_enum_union",
+            "code": "deprecated_domain_enum_union",
+            "severity": "warning",
+            "message": (
+                f"domain enum union syntax for '{type_def.name}' is deprecated; "
+                f"use `{replacement}`"
+            ),
+            "loc": {"file": str(file), **(type_def.loc or {})},
+            "canonical_replacement": replacement,
+        })
+    return findings
+
+
+def _apply_domain_edition(result, file, edition):
+    findings = _domain_enum_union_findings(file)
+    if edition == "next" and findings:
+        errors = []
+        for finding in findings:
+            error = dict(finding)
+            error["severity"] = "error"
+            error["message"] += "; legacy domain enum unions are not accepted in the next edition"
+            errors.append(error)
+        return _envelope({
+            "result": "error",
+            "kind": "deprecated_domain_enum_union",
+            "edition": edition,
+            "findings": errors,
+        })
+
+    output = dict(result)
+    if findings:
+        output["warnings"] = [*output.get("warnings", []), *findings]
+    if edition == "next":
+        output["edition"] = edition
+    return output
+
+
 def run_check(file, strict_tags=False, requirements=None):
     try:
         src = open(file, encoding="utf-8").read()
+        if is_ai_agent_source(src) or is_ai_project_source(src):
+            analysis = check_ai_source(load_ai_source(file))
+            spec = analysis.get("ai_agent") or analysis.get("ai_project")
+            out = {
+                "result": "ok",
+                "spec": spec,
+                "dialect": analysis["dialect"],
+                "warnings": [],
+                "ai_analysis_result": analysis["result"],
+            }
+            if analysis.get("ai_agent"):
+                out["agent_analysis_result"] = analysis["result"]
+            return _envelope(out)
         ast, display_names = _parse_file(file, src)
         spec = build_spec(ast, display_names, semantic_check=False)
         acc, _ = _acceptance_error(spec)
@@ -345,10 +457,288 @@ def run_typestate(file):
                           "message": f"file not found: {file}"})
 
 
+ANALYZE_FORMATS = {"json", "dot", "mermaid"}
+ANALYZE_PROJECTIONS = [
+    "tsg",
+    *sorted(SUPPORTED_PROJECTIONS),
+    "refinement_graph",
+    "traceability_graph",
+]
+
+
+def run_analyze(file, projection="tsg", profile=None, output_format="json", focus=None,
+                export_kind=None):
+    paths = list(file) if isinstance(file, (list, tuple)) else [file]
+    if len(paths) != 1 or any(Path(p).is_dir() for p in paths):
+        return _run_analyze_batch(
+            paths, projection, profile, output_format, focus, export_kind,
+        )
+    return _run_analyze_one_enveloped(
+        paths[0], projection, profile, output_format, focus, export_kind,
+    )
+
+
+def _run_analyze_batch(paths, projection="tsg", profile=None, output_format="json", focus=None,
+                       export_kind=None):
+    try:
+        if export_kind:
+            raise FslError("tag-review export accepts exactly one specification file", kind="semantics")
+        if output_format != "json":
+            raise FslError("batch analyze supports only --format json", kind="semantics")
+        if focus:
+            raise FslError("batch analyze does not support --focus; run impact_graph per file", kind="semantics")
+        files = _expand_analyze_paths(paths)
+        entries = []
+        errors = []
+        for path in files:
+            result = _run_analyze_one_enveloped(str(path), projection, profile, output_format, focus)
+            entry = _batch_file_entry(path, result)
+            entries.append(entry)
+            if result.get("result") != "analyzed":
+                errors.append({
+                    "file": _display_path(path),
+                    "result": result.get("result"),
+                    "kind": result.get("kind"),
+                    "message": result.get("message"),
+                    "loc": result.get("loc"),
+                })
+        out = {
+            "result": "analyzed" if not errors else "error",
+            "analysis": "structure",
+            "mode": "batch",
+            "projection": projection,
+            "profile": profile,
+            "files": entries,
+            "errors": errors,
+        }
+        if errors:
+            out["kind"] = "batch"
+            out["message"] = "one or more files failed structural analysis"
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {e.filename}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def _run_analyze_one_enveloped(file, projection="tsg", profile=None, output_format="json", focus=None,
+                               export_kind=None):
+    try:
+        out = _run_analyze_one(file, projection, profile, output_format, focus, export_kind)
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def _run_analyze_one(file, projection="tsg", profile=None, output_format="json", focus=None,
+                     export_kind=None):
+    if output_format not in ANALYZE_FORMATS:
+        raise FslError(f"unsupported analyze format: {output_format}", kind="semantics")
+    if output_format != "json" and profile:
+        raise FslError("DOT/Mermaid export is supported for graph projections, not profiles", kind="semantics")
+    if focus and profile:
+        raise FslError("--focus is supported only with graph projections, not profiles", kind="semantics")
+    if focus and projection != "impact_graph":
+        raise FslError("--focus is supported only with --projection impact_graph", kind="semantics")
+    if projection == "impact_graph" and not focus:
+        raise FslError("--projection impact_graph requires --focus <node-id>", kind="semantics")
+    if export_kind:
+        if export_kind != "tag-review":
+            raise FslError(f"unsupported analyze export: {export_kind}", kind="semantics")
+        if profile or focus or output_format != "json" or projection != "tsg":
+            raise FslError(
+                "--export tag-review cannot be combined with --profile, --focus, "
+                "--projection, or non-JSON --format",
+                kind="semantics",
+            )
+
+    path = Path(file)
+    if _is_project_manifest(path):
+        if export_kind:
+            raise FslError("tag-review export requires an FSL specification", kind="semantics")
+        if profile:
+            raise FslError("project traceability analysis does not support --profile", kind="semantics")
+        if projection != "traceability_graph":
+            raise FslError(
+                "project manifests support only --projection traceability_graph",
+                kind="semantics",
+            )
+        out = {
+            "result": "analyzed",
+            **analyze_project_manifest(str(path), projection),
+        }
+    else:
+        src = open(file, encoding="utf-8").read()
+        ast, display_names = _parse_file(file, src)
+        if ast[0] == "refinement":
+            if export_kind:
+                raise FslError("tag-review export requires an FSL specification", kind="semantics")
+            if profile:
+                return {
+                    "result": "analyzed",
+                    "refinement": ast[1],
+                    "analysis": "structure",
+                    "profile": profile,
+                    "schema_version": FINDINGS_SCHEMA_VERSION,
+                    "findings": [],
+                }
+            if projection not in ("tsg", "refinement_graph"):
+                raise FslError(
+                    "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
+                    kind="semantics",
+                )
+            out = {
+                "result": "analyzed",
+                "refinement": ast[1],
+                **analyze_refinement_ast(ast, projection),
+            }
+        else:
+            spec = build_spec(ast, display_names)
+            if export_kind:
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **export_tag_review(spec),
+                }
+            elif profile:
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **analyze_structure(spec, profile=profile),
+                }
+            elif projection == "tsg":
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **build_tsg(spec),
+                }
+            elif projection in SUPPORTED_PROJECTIONS:
+                out = {
+                    "result": "analyzed",
+                    "spec": spec["name"],
+                    **analyze_projection(spec, projection, focus=focus),
+                }
+            else:
+                raise FslError(f"unsupported analyze projection: {projection}", kind="semantics")
+
+    if output_format == "json":
+        return out
+    if not out.get("nodes") or "edges" not in out:
+        raise FslError(f"--format {output_format} requires a graph projection", kind="semantics")
+    return {
+        "result": "analyzed",
+        "analysis": out.get("analysis", "structure"),
+        "projection": out.get("projection", projection),
+        "format": output_format,
+        "content": export_graph(out, output_format),
+    }
+
+
+def _expand_analyze_paths(paths):
+    files = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            files.extend(sorted((item for item in p.rglob("*.fsl") if item.is_file()), key=_display_path))
+        else:
+            if not p.exists():
+                raise FileNotFoundError(2, "No such file or directory", str(p))
+            files.append(p)
+    seen = set()
+    out = []
+    for p in files:
+        marker = p.resolve(strict=False)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        out.append(p)
+    return sorted(out, key=_display_path)
+
+
+def _batch_file_entry(path, result):
+    entry = {
+        "file": _display_path(path),
+        "result": result.get("result"),
+    }
+    for key in ("spec", "refinement", "projection", "profile", "schema_version", "formal_status"):
+        if key in result:
+            entry[key] = result[key]
+    if result.get("result") == "analyzed":
+        entry["summary"] = _analysis_summary(result)
+        if result.get("profile") == "ai-review":
+            entry["findings"] = result.get("findings", [])
+    else:
+        for key in ("kind", "message", "loc", "expected", "hint"):
+            if key in result:
+                entry[key] = result[key]
+    return entry
+
+
+def _analysis_summary(result):
+    summary = {}
+    if "nodes" in result:
+        summary["nodes"] = len(result.get("nodes") or [])
+    if "edges" in result:
+        summary["edges"] = len(result.get("edges") or [])
+    if "findings" in result:
+        summary["findings"] = len(result.get("findings") or [])
+    if "components" in result:
+        summary["components"] = len(result.get("components") or [])
+    if "cycles" in result:
+        summary["cycles"] = len(result.get("cycles") or [])
+    if "errors" in result:
+        summary["errors"] = len(result.get("errors") or [])
+    return summary
+
+
+def _is_project_manifest(path):
+    return path.suffix == ".toml"
+
+
+def _display_path(path):
+    p = Path(path)
+    try:
+        return p.resolve(strict=False).relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return p.as_posix()
+
+
 def _read_spec(file, bounds_overrides=None):
     src = open(file, encoding="utf-8").read()
     ast, display_names = _parse_file(file, src, bounds_overrides)
-    return build_spec(ast, display_names), src.splitlines()
+    return build_spec(ast, display_names), src.splitlines(), ast, display_names, src
 
 
 def _parse_instances_override(raw):
@@ -381,6 +771,40 @@ def _parse_values_override(raw):
     return name, (lo, hi)
 
 
+def _parse_sweep_int_range(raw, flag):
+    name, sep, rng = raw.partition("=")
+    name = name.strip()
+    lo_s, dots, hi_s = rng.partition("..")
+    if not sep or not name or not dots:
+        raise FslError(
+            f"invalid {flag} value '{raw}': expected NAME=LO..HI", kind="semantics")
+    try:
+        lo, hi = int(lo_s.strip()), int(hi_s.strip())
+    except ValueError:
+        raise FslError(
+            f"invalid {flag} value '{raw}': bounds must be integers", kind="semantics")
+    if lo > hi:
+        raise FslError(
+            f"invalid {flag} value '{raw}': lower bound must be <= upper bound",
+            kind="semantics",
+        )
+    return name, (lo, hi)
+
+
+def _parse_sweep_depth(raw):
+    lo_s, dots, hi_s = raw.partition("..")
+    if not dots:
+        raise FslError(f"invalid --depth value '{raw}': expected LO..HI", kind="semantics")
+    try:
+        lo, hi = int(lo_s.strip()), int(hi_s.strip())
+    except ValueError:
+        raise FslError("invalid --depth value: bounds must be integers", kind="semantics")
+    if lo < 0 or lo > hi:
+        raise FslError(
+            f"invalid --depth value '{raw}': expected 0 <= LO <= HI", kind="semantics")
+    return lo, hi
+
+
 def _build_bounds_overrides(instances, values):
     overrides = {"instances": {}, "values": {}}
     for raw in instances or []:
@@ -392,28 +816,229 @@ def _build_bounds_overrides(instances, values):
     return overrides
 
 
+def _build_sweep_ranges(instances, values):
+    instance_ranges = {}
+    for raw in instances or []:
+        name, bounds = _parse_sweep_int_range(raw, "--instances")
+        if bounds[0] < 1:
+            raise FslError(
+                f"invalid --instances value '{raw}': instance lower bound must be >= 1",
+                kind="semantics",
+            )
+        instance_ranges[name] = bounds
+    value_ranges = {}
+    for raw in values or []:
+        name, bounds = _parse_sweep_int_range(raw, "--values")
+        value_ranges[name] = bounds
+    return instance_ranges, value_ranges
+
+
+def _sweep_counterexample(result):
+    return result.get("result") in {
+        "violated",
+        "reachable_failed",
+        "unknown_cti",
+        "nonconformant",
+        "refinement_failed",
+    }
+
+
+def _sweep_summary(result):
+    out = {
+        "result": result.get("result"),
+        "checked_to_depth": result.get("checked_to_depth"),
+    }
+    for key in ("invariant", "trans", "violation_kind", "violated_at_step", "rank_failure"):
+        if key in result:
+            out[key] = result[key]
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def run_sweep(
+        file, depth_range, deadlock_mode, engine="bmc", k_ind=1,
+        vacuity_mode="warn", strict_tags=False, requirements=None,
+        property_name=None, instances=None, values=None):
+    try:
+        depth_lo, depth_hi = _parse_sweep_depth(depth_range)
+        instance_ranges, value_ranges = _build_sweep_ranges(instances, values)
+        instance_names = sorted(instance_ranges)
+        value_names = sorted(value_ranges)
+        instance_options = [
+            range(instance_ranges[name][0], instance_ranges[name][1] + 1)
+            for name in instance_names
+        ]
+        value_options = [
+            [(value_ranges[name][0], hi)
+             for hi in range(value_ranges[name][0], value_ranges[name][1] + 1)]
+            for name in value_names
+        ]
+
+        results = []
+        minimal = None
+        spec_name = None
+        instance_product = itertools.product(*instance_options) if instance_names else [()]
+        value_product_template = list(itertools.product(*value_options)) if value_names else [()]
+        for instance_combo in instance_product:
+            instance_scope = dict(zip(instance_names, instance_combo))
+            instance_args = [f"{name}={value}" for name, value in instance_scope.items()]
+            for value_combo in value_product_template:
+                value_scope = dict(zip(value_names, value_combo))
+                value_args = [f"{name}={lo}..{hi}" for name, (lo, hi) in value_scope.items()]
+                for depth in range(depth_lo, depth_hi + 1):
+                    verification = run_verify(
+                        file,
+                        depth,
+                        deadlock_mode,
+                        engine=engine,
+                        k_ind=k_ind,
+                        vacuity_mode=vacuity_mode,
+                        strict_tags=strict_tags,
+                        requirements=requirements,
+                        property_name=property_name,
+                        instances=instance_args,
+                        values=value_args,
+                    )
+                    spec_name = spec_name or verification.get("spec")
+                    entry = {
+                        "scope": {
+                            "instances": instance_scope,
+                            "values": {
+                                name: [bounds[0], bounds[1]]
+                                for name, bounds in value_scope.items()
+                            },
+                            "depth": depth,
+                        },
+                        "summary": _sweep_summary(verification),
+                        "verification": verification,
+                    }
+                    results.append(entry)
+                    if minimal is None and _sweep_counterexample(verification):
+                        minimal = entry
+
+        out = {
+            "result": "sweep_failed" if minimal else "sweep_passed",
+            "spec": spec_name,
+            "sweep": {
+                "minimality_order": ["instances", "values", "depth"],
+                "ranges": {
+                    "instances": {
+                        name: [lo, hi] for name, (lo, hi) in instance_ranges.items()
+                    },
+                    "values": {
+                        name: [lo, hi] for name, (lo, hi) in value_ranges.items()
+                    },
+                    "depth": [depth_lo, depth_hi],
+                },
+                "results": results,
+                "minimal_counterexample": minimal,
+            },
+        }
+        return _envelope(out)
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def _verify_cache_lookup(ast, display_names, src, engine, depth, k_ind, deadlock_mode,
+                          vacuity_mode, property_name, exclude_property_names,
+                          strict_tags, requirements, instances, values, lemmas):
+    """Best-effort cache lookup. Returns ``(cache_key, xdepth_key, hit_or_None)``;
+    ``cache_key`` is ``None`` if the run is uncacheable (cache disabled, or the
+    key computation itself failed) -- callers must treat that as a plain miss
+    and never let a cache-layer problem affect the verdict."""
+    try:
+        if not verify_cache.enabled():
+            return None, None, None
+        requirements_sha256 = None
+        if requirements:
+            requirements_sha256 = hashlib.sha256(Path(requirements).read_bytes()).hexdigest()
+        cache_key, xdepth_key = verify_cache.compute_key(
+            ast=ast, display_names=display_names, src=src, engine=engine, depth=depth,
+            k_ind=k_ind, deadlock_mode=deadlock_mode, vacuity_mode=vacuity_mode,
+            property_name=property_name, exclude_property_names=exclude_property_names,
+            strict_tags=strict_tags, requirements_sha256=requirements_sha256,
+            instances=instances, values=values, lemmas=lemmas,
+        )
+        return cache_key, xdepth_key, verify_cache.lookup(cache_key, xdepth_key, depth)
+    except Exception:  # noqa: BLE001 -- any cache-layer failure degrades to an uncached run
+        return None, None, None
+
+
 def run_verify(
         file, depth, deadlock_mode, engine="bmc", k_ind=1, vacuity_mode="warn",
         strict_tags=False, requirements=None, property_name=None,
-        exclude_property_names=None, instances=None, values=None):
+        exclude_property_names=None, instances=None, values=None, use_cache=True,
+        lemmas=None, from_state=None):
     try:
+        if lemmas and engine != "induction":
+            return _error_envelope(
+                "usage",
+                "--lemma requires --engine induction",
+            )
+        if from_state is not None and engine != "bmc":
+            raise FslError(
+                "--from-state is available only with the BMC engine; induction "
+                "proves the spec init contract and cannot start from one snapshot",
+                kind="semantics",
+            )
         bounds_overrides = _build_bounds_overrides(instances, values)
         has_bounds_overrides = bool(bounds_overrides["instances"] or bounds_overrides["values"])
-        spec, source_lines = _read_spec(file, bounds_overrides)
+        spec, source_lines, ast, display_names, src = _read_spec(file, bounds_overrides)
+        initial_snapshot = None
+        if from_state is not None:
+            try:
+                initial_snapshot = json.loads(Path(from_state).read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                raise FslError(f"file not found: {from_state}", kind="io")
+            except json.JSONDecodeError as exc:
+                raise FslError(
+                    f"invalid state JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+                    kind="io",
+                )
+            validate_state_snapshot(spec, initial_snapshot)
         acc, acc_skipped = _acceptance_error(spec, skip_out_of_range=has_bounds_overrides)
         if acc:
             return _envelope(acc)
         forb, forb_skipped = _forbidden_error(spec, skip_out_of_range=has_bounds_overrides)
         if forb:
             return _envelope(forb)
-        if engine == "induction":
-            out = prove(
-                spec, k_ind, depth,
-                deadlock_mode=deadlock_mode,
-                vacuity_mode=vacuity_mode,
-                property_name=property_name,
-                exclude_property_names=exclude_property_names,
+
+        cache_key = xdepth_key = cached = None
+        if use_cache and initial_snapshot is None:
+            cache_key, xdepth_key, cached = _verify_cache_lookup(
+                ast, display_names, src, engine, depth, k_ind, deadlock_mode, vacuity_mode,
+                property_name, exclude_property_names, strict_tags, requirements,
+                instances, values, lemmas,
             )
+        verify_mode = cached is not None and os.environ.get("FSLC_CACHE_VERIFY") == "1"
+        if cached is not None and not verify_mode:
+            out, source = cached
+            out = dict(out)
+            out["cache"] = {"hit": True, "key": cache_key, "source": source}
+            return _envelope(out)
+
+        if engine == "induction":
+            if lemmas:
+                out = prove_with_lemmas(
+                    spec,
+                    lemmas,
+                    k_ind,
+                    depth,
+                    deadlock_mode=deadlock_mode,
+                    vacuity_mode=vacuity_mode,
+                    property_name=property_name,
+                    exclude_property_names=exclude_property_names,
+                )
+            else:
+                out = prove(
+                    spec, k_ind, depth,
+                    deadlock_mode=deadlock_mode,
+                    vacuity_mode=vacuity_mode,
+                    property_name=property_name,
+                    exclude_property_names=exclude_property_names,
+                )
         else:
             out = verify(
                 spec,
@@ -423,7 +1048,18 @@ def run_verify(
                 vacuity_mode=vacuity_mode,
                 property_name=property_name,
                 exclude_property_names=exclude_property_names,
+                initial_snapshot=initial_snapshot,
             )
+        if verify_mode:
+            cached_out, _source = cached
+            if cached_out.get("result") != out.get("result"):
+                return _envelope({
+                    "result": "error", "kind": "internal",
+                    "message": (
+                        f"verify cache divergence: cached result={cached_out.get('result')!r} "
+                        f"fresh result={out.get('result')!r} for key={cache_key}"
+                    ),
+                })
         impl = _implements_result(spec, depth)
         if impl:
             out = dict(out)
@@ -442,6 +1078,24 @@ def run_verify(
                 "instances": dict(bounds_overrides["instances"]),
                 "values": {k: [lo, hi] for k, (lo, hi) in bounds_overrides["values"].items()},
             }
+        if initial_snapshot is not None:
+            out = dict(out)
+            out["initial_state"] = {
+                "source": "snapshot",
+                "path": str(from_state),
+                "complete": True,
+                "replaces_spec_init": True,
+            }
+            out["faithfulness"] = {
+                "scope": "bounded_from_snapshot",
+                "spec_init": "not_used",
+                "induction": "not_applicable",
+            }
+        if cache_key is not None and cached is None:
+            try:
+                verify_cache.store(cache_key, xdepth_key, out)
+            except Exception:  # noqa: BLE001 -- a failed write must never affect the verdict
+                pass
         return _envelope(out)
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -466,7 +1120,7 @@ def run_verify(
 
 def run_scenarios(file, depth, deadlock_mode="warn"):
     try:
-        spec, source_lines = _read_spec(file)
+        spec, source_lines, _ast, _display_names, _src = _read_spec(file)
         return _envelope(scenarios(spec, depth, deadlock_mode=deadlock_mode, source_lines=source_lines))
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -489,9 +1143,33 @@ def run_scenarios(file, depth, deadlock_mode="warn"):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_replay(file, trace_path):
+def run_replay(file, trace_path=None, *, from_log=None, mapping_path=None):
     try:
-        spec, _ = _read_spec(file)
+        spec, *_rest = _read_spec(file)
+        if from_log is not None:
+            if trace_path is not None:
+                return _envelope({
+                    "result": "error",
+                    "kind": "io",
+                    "message": "--trace and --from-log are mutually exclusive",
+                })
+            if mapping_path is None:
+                return _envelope({
+                    "result": "error",
+                    "kind": "io",
+                    "message": "--mapping is required with --from-log",
+                })
+            from .log_replay import build_log_mapping, load_jsonl, replay_mapped_log
+
+            mapping_src = open(mapping_path, encoding="utf-8").read()
+            mapping = build_log_mapping(parse_refinement(mapping_src), spec)
+            return _envelope(replay_mapped_log(spec, load_jsonl(from_log), mapping))
+        if trace_path is None:
+            return _envelope({
+                "result": "error",
+                "kind": "io",
+                "message": "one of --trace or --from-log is required",
+            })
         mon = Monitor(spec)
         raw = open(trace_path, encoding="utf-8").read()
         data = json.loads(raw)
@@ -557,8 +1235,8 @@ def run_replay(file, trace_path):
 
 def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
     try:
-        impl_spec, _ = _read_spec(impl_file)
-        abs_spec, _ = _read_spec(abs_file)
+        impl_spec, *_rest_impl = _read_spec(impl_file)
+        abs_spec, *_rest_abs = _read_spec(abs_file)
         mapping_src = open(mapping_file, encoding="utf-8").read()
         mapping = build_refinement(parse_refinement(mapping_src), impl_spec, abs_spec)
         if not rest:
@@ -574,7 +1252,7 @@ def run_refine(impl_file, abs_file, mapping_file, depth=8, rest=None):
         prev = abs_spec
         i = 0
         while i < len(rest):
-            nxt_spec, _ = _read_spec(rest[i])
+            nxt_spec, *_rest_nxt = _read_spec(rest[i])
             nxt_map = build_refinement(
                 parse_refinement(open(rest[i + 1], encoding="utf-8").read()),
                 prev, nxt_spec)
@@ -653,13 +1331,16 @@ def run_testgen(file, depth=8, output=None, deadlock_mode="warn", write_file=Tru
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS):
+def run_mutate(
+        file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS,
+        external_mutants=None):
     try:
         return _envelope(mutate_file(
             file,
             depth=depth,
             by_requirement=by_requirement,
             max_mutants=max_mutants,
+            external_mutants=external_mutants,
         ))
     except UnexpectedInput as e:
         return _parse_error_result(e)
@@ -675,9 +1356,9 @@ def run_mutate(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTA
     except FslError as e:
         return _error_envelope(e.kind, str(e), _loc_from_exc(e),
                                getattr(e, "expected", None), getattr(e, "hint", None))
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         return _envelope({"result": "error", "kind": "io",
-                          "message": f"file not found: {file}"})
+                          "message": f"file not found: {e.filename or file}"})
     except Exception as e:
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
@@ -706,10 +1387,10 @@ def run_explain(file, depth=8, readable=False):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
+def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True, engine="bmc"):
     try:
         explained = explain_file(file, depth=depth)
-        verification = run_verify(file, depth, deadlock_mode)
+        verification = run_verify(file, depth, deadlock_mode, engine=engine)
         source = open(file, encoding="utf-8").read()
         content = render_html_report(file, source, explained, verification)
         out_path = output or default_html_output_name(file)
@@ -743,16 +1424,30 @@ def run_html(file, depth=8, output=None, deadlock_mode="warn", write_file=True):
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
-def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None, write_file=True):
-    """Generate a business audit ledger (markdown) from verifier evidence (#24)."""
+def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None, write_file=True,
+               engine="bmc", evidence=None):
+    """Generate a business audit ledger (markdown) from verifier evidence (#24).
+
+    ``engine="induction"`` lets a requirement's assurance class reach
+    ``proved`` (issue #171); without it a ledger can only ever show
+    ``bounded``. ``evidence`` is a list of saved stdout envelopes (JSON files)
+    from external-evidence producers (``fslc ai eval/replay/drift``, ``fslc db
+    observe``, ``fslc domain replay``, ...) to fold into the per-requirement
+    assurance classification.
+    """
     try:
         src = Path(file).read_text(encoding="utf-8")
         ast, display_names = parse_src(src, str(Path(file).parent))
         spec = build_spec(ast, display_names)
-        verification = run_verify(file, depth, deadlock_mode)
+        verification = run_verify(file, depth, deadlock_mode, engine=engine)
         scenarios_result = run_scenarios(file, depth, deadlock_mode)
         replay_result = run_replay(file, impl_log) if impl_log else None
-        content = render_ledger(file, spec, verification, scenarios_result, replay_result)
+        evidence_results = [
+            (path, json.loads(Path(path).read_text(encoding="utf-8")))
+            for path in (evidence or [])
+        ]
+        content = render_ledger(file, spec, verification, scenarios_result, replay_result,
+                                 evidence_results=evidence_results)
         out_path = output or default_ledger_output_name(file)
         if write_file and output:
             open(output, "w", encoding="utf-8").write(content)
@@ -781,12 +1476,508 @@ def run_ledger(file, depth=8, output=None, deadlock_mode="ignore", impl_log=None
         return _envelope({"result": "error", "kind": "internal", "message": str(e)})
 
 
+def run_db_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
+    try:
+        system = load_dbsystem(file)
+        return _envelope(check_dbsystem(
+            system,
+            depth=depth,
+            engine=engine,
+            deadlock_mode=deadlock_mode,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_db_observe(file, trace):
+    try:
+        system = load_dbsystem(file)
+        return _envelope(observe_dbsystem(system, trace))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_db_import(file, name="ImportedDb", output=None, source_format="auto"):
+    try:
+        imported = import_db_file(file, name=name, source_format=source_format)
+        result = {
+            "result": "imported_with_warnings" if imported.warnings else "imported",
+            "dialect": "fsl-db-mvp.v0",
+            "source_format": imported.source_format,
+            "dbsystem": imported.system.name,
+            "warnings": imported.warnings,
+            "dbsystem_source": imported.source,
+        }
+        if output:
+            Path(output).write_text(imported.source, encoding="utf-8")
+            result["output"] = output
+            result.pop("dbsystem_source", None)
+        return _envelope(result)
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
+    try:
+        source = load_ai_source(file)
+        return _envelope(check_ai_source(
+            source,
+            depth=depth,
+            engine=engine,
+            deadlock_mode=deadlock_mode,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_replay(file, logs, component=None):
+    try:
+        source = load_ai_source(file)
+        selected = select_ai_component(source, component)
+        return _envelope(replay_ai_events(selected, logs))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_eval(file, records=None, dataset=None, slice_name=None, property_name=None):
+    try:
+        project = load_ai_project_file(file)
+        return _envelope(evaluate_ai_project(
+            project,
+            records_path=records,
+            dataset_name=dataset,
+            slice_name=slice_name,
+            property_name=property_name,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_regress(file, migration=None, before_records=None, after_records=None, dataset=None):
+    try:
+        if not before_records or not after_records:
+            raise FslError("ai regress requires --before-records and --after-records", kind="semantics")
+        project = load_ai_project_file(file)
+        return _envelope(regress_ai_project(
+            project,
+            migration_name=migration,
+            before_records_path=before_records,
+            after_records_path=after_records,
+            dataset_name=dataset,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_compare(before_records, after_records, dataset=None, from_label=None, to_label=None):
+    try:
+        return _envelope(compare_ai_records(
+            before_records,
+            after_records,
+            dataset_name=dataset,
+            from_label=from_label,
+            to_label=to_label,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_drift(file, logs, baseline_logs=None, property_name=None, window=None, baseline=None):
+    try:
+        project = load_ai_project_file(file)
+        return _envelope(drift_ai_project(
+            project,
+            current_logs_path=logs,
+            baseline_logs_path=baseline_logs,
+            property_name=property_name,
+            window=window,
+            baseline_label=baseline,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_ai_compat(file, environment=None):
+    try:
+        return _envelope(ai_compat_profile_from_file(file, environment=environment))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_compat_check(file, include_ai=False):
+    try:
+        result = run_db_check(file)
+        if include_ai:
+            result.setdefault("compat", {})["include_ai"] = True
+            result.setdefault("compat", {})["source"] = "dbsystem artifact capability model"
+        return result
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_check(file, depth=8, engine="bmc", deadlock_mode="warn"):
+    try:
+        domain = load_domain(file)
+        return _envelope(check_domain_source(
+            domain,
+            depth=depth,
+            engine=engine,
+            deadlock_mode=deadlock_mode,
+        ))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_analyze(file):
+    try:
+        return _envelope(analyze_domain(load_domain(file)))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_expand(file, output=None, write_file=True):
+    try:
+        out = expand_domain_source(load_domain(file))
+        if output and write_file:
+            Path(output).write_text(out["kernel_source"], encoding="utf-8")
+            out = dict(out)
+            out["output"] = output
+            out.pop("kernel_source", None)
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_generate(file, target="typescript", output=None, write_file=True):
+    try:
+        out = generate_domain_scaffold(load_domain(file), target=target)
+        if output and write_file:
+            root = Path(output)
+            root.mkdir(parents=True, exist_ok=True)
+            for item in out["files"]:
+                path = root / item["path"]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(item["content"], encoding="utf-8")
+            out = dict(out)
+            out["output"] = output
+            out["files"] = [{"path": item["path"]} for item in out["files"]]
+        return _envelope(out)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_testgen(file, depth=8, output=None, deadlock_mode="warn",
+                       write_file=True, strict=False, target="vitest"):
+    try:
+        out = generate_domain_tests(
+            file,
+            depth=depth,
+            deadlock_mode=deadlock_mode,
+            target=target,
+            strict=strict,
+        )
+        out_path = output or default_domain_testgen_output(file, target=target)
+        out = dict(out)
+        out["output"] = out_path
+        if output and write_file:
+            Path(output).write_text(out["content"], encoding="utf-8")
+            out.pop("content", None)
+        return _envelope(out)
+    except TestgenScenarioError as e:
+        return _envelope(e.scenario_result)
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError:
+        return _envelope({"result": "error", "kind": "io",
+                          "message": f"file not found: {file}"})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_domain_replay(file, logs):
+    try:
+        return _envelope(replay_domain_logs(file, logs))
+    except json.JSONDecodeError as e:
+        return _envelope({"result": "error", "kind": "io", "message": f"invalid JSON: {e}"})
+    except ValueError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_diff(old, new, depth=8, mapping=None, forbid=None):
+    """Run a bounded semantic comparison and return the standard JSON envelope."""
+    try:
+        if isinstance(forbid, str):
+            forbid = [item.strip() for item in forbid.split(",") if item.strip()]
+        return _envelope(semantic_diff(old, new, depth, mapping, forbid))
+    except UnexpectedInput as e:
+        return _parse_error_result(e)
+    except VisitError as e:
+        orig = e.orig_exc
+        return _error_envelope(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            _loc_from_exc(orig),
+            getattr(orig, "expected", None),
+            getattr(orig, "hint", None),
+        )
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
+def run_diff_git(git_range, spec=None, depth=8, mapping=None, forbid=None):
+    """Run semantic diff against two materialized Git revisions."""
+    try:
+        if isinstance(forbid, str):
+            forbid = [item.strip() for item in forbid.split(",") if item.strip()]
+        return _envelope(semantic_diff_git(
+            git_range, spec, depth, mapping, forbid,
+        ))
+    except FslError as e:
+        return _error_envelope(e.kind, str(e), _loc_from_exc(e),
+                               getattr(e, "expected", None), getattr(e, "hint", None))
+    except FileNotFoundError as e:
+        return _envelope({"result": "error", "kind": "io", "message": str(e)})
+    except Exception as e:
+        return _envelope({"result": "error", "kind": "internal", "message": str(e)})
+
+
 def exit_code(result):
     r = result.get("result")
+    if r in ("semantic_diff", "semantic_diff_batch"):
+        return 0 if result.get("gate", {}).get("passed", True) else 1
     if r in ("verified", "proved", "scenarios", "conformant", "generated",
-             "refines", "typestate", "mutated", "explained"):
+             "refines", "typestate", "mutated", "explained", "analyzed",
+             "verified_under_assumptions", "agent_analyzed", "replay_conformant",
+             "observed_conformant", "imported", "imported_with_warnings",
+             "expanded", "conformance_checked", "ai_project_analyzed",
+             "statistically_supported", "observed_supported", "compared",
+             "compat_profile_generated"):
         return 0
-    if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant", "refinement_failed"):
+    if r == "sweep_passed":
+        return 0
+    if r in ("violated", "reachable_failed", "unknown_cti", "nonconformant",
+             "refinement_failed", "sweep_failed", "replay_nonconformant",
+             "observed_mismatch", "statistically_unsupported",
+             "dataset_invalid", "evaluator_untrusted", "slice_missing",
+             "insufficient_samples", "inconclusive"):
         return 1
     if r == "error":
         kind = result.get("kind")
@@ -811,6 +2002,7 @@ def _build_arg_parser():
     c.add_argument("file")
     c.add_argument("--strict-tags", action="store_true")
     c.add_argument("--requirements", default=None)
+    c.add_argument("--edition", choices=["current", "next"], default="current")
 
     v = sub.add_parser("verify")
     v.add_argument("file")
@@ -835,6 +2027,32 @@ def _build_arg_parser():
                         "(NAME=LO..HI; repeatable)")
     v.add_argument("--strict-tags", action="store_true")
     v.add_argument("--requirements", default=None)
+    v.add_argument("--no-cache", action="store_true",
+                   help="skip the persistent verdict cache for this run (neither reads nor writes it)")
+    v.add_argument("--lemma", action="append", dest="lemmas", default=None,
+                   help="candidate auxiliary invariant expression (induction only; repeatable)")
+    v.add_argument("--from-state", default=None,
+                   help="replace spec init with a complete Monitor/replay logical-state "
+                        "JSON snapshot (BMC only)")
+    v.add_argument("--edition", choices=["current", "next"], default="current")
+
+    sw = sub.add_parser("sweep", help="run bounded verification across a scope grid")
+    sw.add_argument("file")
+    sw.add_argument("--depth", default="0..8",
+                    help="depth range LO..HI to sweep (default: 0..8)")
+    sw.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    sw.add_argument("--k", type=int, default=1, dest="k_ind",
+                    help="max induction depth (induction engine only)")
+    sw.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    sw.add_argument("--vacuity", choices=["warn", "error", "ignore"], default="warn")
+    sw.add_argument("--property", dest="property_name", default=None,
+                    help="check a single named property in isolation")
+    sw.add_argument("--instances", action="append", default=None,
+                    help="sweep an entity bound (NAME=LO..HI; repeatable)")
+    sw.add_argument("--values", action="append", default=None,
+                    help="sweep a number upper bound as LO..LO through LO..HI")
+    sw.add_argument("--strict-tags", action="store_true")
+    sw.add_argument("--requirements", default=None)
 
     sc = sub.add_parser("scenarios")
     sc.add_argument("file")
@@ -843,7 +2061,12 @@ def _build_arg_parser():
 
     rp = sub.add_parser("replay")
     rp.add_argument("file")
-    rp.add_argument("--trace", required=True)
+    replay_input = rp.add_mutually_exclusive_group(required=True)
+    replay_input.add_argument("--trace")
+    replay_input.add_argument("--from-log", dest="from_log",
+                              help="production JSONL records to map and replay")
+    rp.add_argument("--mapping",
+                    help="refinement-syntax log mapping (required with --from-log)")
 
     tg = sub.add_parser("testgen")
     tg.add_argument("file")
@@ -860,6 +2083,8 @@ def _build_arg_parser():
     mt.add_argument("--depth", type=int, default=8)
     mt.add_argument("--by-requirement", action="store_true")
     mt.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS)
+    mt.add_argument("--from", dest="mutants_from",
+                    help="adjudicate external JSONL mutants in addition to the built-in catalog")
 
     ex = sub.add_parser("explain")
     ex.add_argument("file")
@@ -871,6 +2096,8 @@ def _build_arg_parser():
     hr.add_argument("--depth", type=int, default=8)
     hr.add_argument("-o", "--output", default=None)
     hr.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    hr.add_argument("--engine", choices=["bmc", "induction"], default="bmc",
+                    help="use k-induction so a proved report can show assurance class 'proved'")
 
     lg = sub.add_parser("ledger",
                         help="generate a business audit ledger (markdown) by requirement id")
@@ -880,6 +2107,12 @@ def _build_arg_parser():
     lg.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="ignore")
     lg.add_argument("--impl-log", default=None,
                     help="optional implementation trace JSON to score conformance (fslc replay)")
+    lg.add_argument("--engine", choices=["bmc", "induction"], default="bmc",
+                    help="use k-induction so a requirement's assurance class can reach 'proved' (#171)")
+    lg.add_argument("--evidence", action="append", default=None,
+                    help="path to a saved stdout envelope (JSON) from an external-evidence producer "
+                         "(fslc ai eval/replay/drift, fslc db observe, fslc domain replay, ...); "
+                         "repeatable")
 
     rf = sub.add_parser("refine")
     rf.add_argument("impl")
@@ -888,6 +2121,17 @@ def _build_arg_parser():
     rf.add_argument("rest", nargs="*",
                     help="chain check: appending more (abs map) pairs runs an end-to-end composed check")
     rf.add_argument("--depth", type=int, default=8)
+
+    df = sub.add_parser("diff", help="compare OLD and NEW specification semantics")
+    df.add_argument("old", nargs="?")
+    df.add_argument("new", nargs="?")
+    df.add_argument("--git", dest="git_range", default=None, metavar="BASE..HEAD",
+                    help="compare a spec (or every changed .fsl file) across two Git revisions")
+    df.add_argument("--depth", type=int, default=8)
+    df.add_argument("--mapping", default=None,
+                    help="optional refinement mapping for one comparison direction")
+    df.add_argument("--forbid", default="",
+                    help="comma-separated finding kinds that should fail the gate")
 
     ch = sub.add_parser("chain", help="run a project manifest across business, requirements, design, and impl")
     ch.add_argument("path", nargs="?", default="fsl-project.toml")
@@ -899,6 +2143,119 @@ def _build_arg_parser():
     ts.add_argument("--ts", action="store_true",
                     help="emit only the derivable entities' TypeScript to stdout instead of JSON")
 
+    an = sub.add_parser("analyze",
+                        help="emit structural analysis JSON for a spec")
+    an.add_argument("file", nargs="+")
+    an.add_argument("--projection",
+                    choices=ANALYZE_PROJECTIONS,
+                    default="tsg",
+                    help="structural projection to emit")
+    an.add_argument("--profile", choices=["ai-review"], default=None,
+                    help="emit AI-readable structural review findings")
+    an.add_argument("--export", choices=["tag-review"], default=None,
+                    dest="export_kind",
+                    help="export declaration-level tag/formula review tuples")
+    an.add_argument("--focus",
+                    help="node id for --projection impact_graph, e.g. state:stock or action:checkout")
+    an.add_argument("--format", choices=sorted(ANALYZE_FORMATS), default="json",
+                    dest="output_format")
+
+    db = sub.add_parser("db", help="database compatibility dialect commands")
+    db_sub = db.add_subparsers(dest="db_cmd", required=True)
+    dbc = db_sub.add_parser("check", help="check a dbsystem and emit fsl-db findings")
+    dbc.add_argument("file")
+    dbc.add_argument("--depth", type=int, default=8)
+    dbc.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    dbc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    dbo = db_sub.add_parser("observe", help="compare runtime observation logs to dbsystem declarations")
+    dbo.add_argument("file")
+    dbo.add_argument("--trace", required=True)
+    dbi = db_sub.add_parser("import", help="import SQL DDL or a minimal ORM schema into dbsystem")
+    dbi.add_argument("file")
+    dbi.add_argument("--name", default="ImportedDb")
+    dbi.add_argument("--source", choices=["auto", "sql", "prisma"], default="auto",
+                     help="source format to import (default: auto by extension)")
+    dbi.add_argument("-o", "--output")
+
+    compat = sub.add_parser("compat", help="shared compatibility commands")
+    compat_sub = compat.add_subparsers(dest="compat_cmd", required=True)
+    compat_check = compat_sub.add_parser("check", help="check dbsystem compatibility, optionally including AI capability profiles")
+    compat_check.add_argument("file")
+    compat_check.add_argument("--include-ai", action="store_true")
+
+    ai = sub.add_parser("ai", help="AI dialect commands")
+    ai_sub = ai.add_subparsers(dest="ai_cmd", required=True)
+    aic = ai_sub.add_parser("check", help="check an ai_component hard contract or recursive agent structure")
+    aic.add_argument("file")
+    aic.add_argument("--depth", type=int, default=8)
+    aic.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    aic.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    air = ai_sub.add_parser("replay", help="compare AI runtime JSONL events to ai_component declarations")
+    air.add_argument("file")
+    air.add_argument("--logs", required=True)
+    air.add_argument("--component", help="ai_component to replay when FILE is a project-level fsl-ai file")
+    aie = ai_sub.add_parser("eval", help="evaluate precomputed AI eval JSONL against statistical_property thresholds")
+    aie.add_argument("file")
+    aie.add_argument("--records")
+    aie.add_argument("--dataset")
+    aie.add_argument("--slice", dest="slice_name")
+    aie.add_argument("--property", dest="property_name")
+    aig = ai_sub.add_parser("regress", help="check ai_migration no_regression metrics")
+    aig.add_argument("file")
+    aig.add_argument("--migration")
+    aig.add_argument("--before-records", required=True)
+    aig.add_argument("--after-records", required=True)
+    aig.add_argument("--dataset")
+    aicmp = ai_sub.add_parser("compare", help="compare two precomputed AI eval JSONL files")
+    aicmp.add_argument("--from", dest="from_records", required=True)
+    aicmp.add_argument("--to", dest="to_records", required=True)
+    aicmp.add_argument("--from-label")
+    aicmp.add_argument("--to-label")
+    aicmp.add_argument("--dataset")
+    aid = ai_sub.add_parser("drift", help="check observed_property thresholds and drift from runtime telemetry")
+    aid.add_argument("file")
+    aid.add_argument("--logs", required=True)
+    aid.add_argument("--baseline-logs")
+    aid.add_argument("--window")
+    aid.add_argument("--baseline")
+    aid.add_argument("--property", dest="property_name")
+    aicp = ai_sub.add_parser("compat", help="generate an AI artifact capability profile for dbsystem")
+    aicp.add_argument("file")
+    aicp.add_argument("--environment")
+
+    dom = sub.add_parser("domain", help="Functional DDD / async effect dialect commands")
+    dom_sub = dom.add_subparsers(dest="domain_cmd", required=True)
+    domc = dom_sub.add_parser("check", help="check domain/effect structure and verify generated kernel")
+    domc.add_argument("file")
+    domc.add_argument("--depth", type=int, default=8)
+    domc.add_argument("--engine", choices=["bmc", "induction"], default="bmc")
+    domc.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    domc.add_argument("--edition", choices=["current", "next"], default="current")
+    doma = dom_sub.add_parser("analyze", help="emit aggregate/effect ownership findings")
+    doma.add_argument("file")
+    domx = dom_sub.add_parser("expand", help="expand domain/effect dialect to kernel FSL")
+    domx.add_argument("file")
+    domx.add_argument("-o", "--output")
+    domg = dom_sub.add_parser("generate", help="generate Functional DDD implementation scaffold")
+    domg.add_argument("file")
+    domg.add_argument("--profile", choices=["functional-ddd"], default="functional-ddd")
+    domg.add_argument(
+        "--target",
+        choices=["typescript", "kotlin", "swift", "python", "rust"],
+        default="typescript",
+    )
+    domg.add_argument("-o", "--output")
+    domr = dom_sub.add_parser("replay", help="replay runtime command/event/effect logs")
+    domr.add_argument("file")
+    domr.add_argument("--logs", required=True)
+    domt = dom_sub.add_parser("testgen", help="generate domain adapter/conformance scaffold")
+    domt.add_argument("file")
+    domt.add_argument("--depth", type=int, default=8)
+    domt.add_argument("--target", choices=["vitest", "pytest", "swift", "kotlin", "dart", "phpunit"], default="vitest")
+    domt.add_argument("--deadlock", choices=["warn", "error", "ignore"], default="warn")
+    domt.add_argument("--strict", action="store_true")
+    domt.add_argument("-o", "--output")
+
     return ap
 
 
@@ -909,6 +2266,7 @@ def _dispatch(args):
         return 0
     if args.cmd == "check":
         result = run_check(args.file, args.strict_tags, args.requirements)
+        result = _apply_domain_edition(result, args.file, args.edition)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "typestate":
         result = run_typestate(args.file)
@@ -921,11 +2279,45 @@ def _dispatch(args):
     elif args.cmd == "scenarios":
         result = run_scenarios(args.file, args.depth, args.deadlock)
         print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "sweep":
+        result = run_sweep(args.file, args.depth, args.deadlock,
+                           engine=args.engine, k_ind=args.k_ind,
+                           vacuity_mode=args.vacuity,
+                           strict_tags=args.strict_tags,
+                           requirements=args.requirements,
+                           property_name=args.property_name,
+                           instances=args.instances,
+                           values=args.values)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "replay":
-        result = run_replay(args.file, args.trace)
+        result = run_replay(
+            args.file,
+            args.trace,
+            from_log=args.from_log,
+            mapping_path=args.mapping,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "refine":
         result = run_refine(args.impl, args.abs, args.mapping, args.depth, rest=args.rest)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "diff":
+        if args.git_range:
+            if args.new is not None:
+                result = _envelope({
+                    "result": "error", "kind": "semantics",
+                    "message": "--git accepts at most one spec path",
+                })
+            else:
+                result = run_diff_git(
+                    args.git_range, args.old, args.depth, args.mapping, args.forbid,
+                )
+        elif args.old is None or args.new is None:
+            result = _envelope({
+                "result": "error", "kind": "semantics",
+                "message": "diff requires OLD NEW or --git BASE..HEAD [SPEC]",
+            })
+        else:
+            result = run_diff(args.old, args.new, args.depth, args.mapping, args.forbid)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "chain":
         from .chain import format_chain_table, run_chain
@@ -948,7 +2340,13 @@ def _dispatch(args):
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "mutate":
-        result = run_mutate(args.file, args.depth, args.by_requirement, args.max_mutants)
+        result = run_mutate(
+            args.file,
+            args.depth,
+            args.by_requirement,
+            args.max_mutants,
+            external_mutants=args.mutants_from,
+        )
         print(json.dumps(result, indent=2, ensure_ascii=False))
         sys.exit(0)
     elif args.cmd == "explain":
@@ -959,7 +2357,7 @@ def _dispatch(args):
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "html":
         result = run_html(args.file, args.depth, args.output, args.deadlock,
-                          write_file=bool(args.output))
+                          write_file=bool(args.output), engine=args.engine)
         if result.get("result") == "generated":
             content = result.pop("content")
             if args.output:
@@ -971,7 +2369,8 @@ def _dispatch(args):
             print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.cmd == "ledger":
         result = run_ledger(args.file, args.depth, args.output, args.deadlock,
-                            impl_log=args.impl_log, write_file=bool(args.output))
+                            impl_log=args.impl_log, write_file=bool(args.output),
+                            engine=args.engine, evidence=args.evidence)
         if result.get("result") == "generated":
             content = result.pop("content")
             if args.output:
@@ -980,6 +2379,151 @@ def _dispatch(args):
                 sys.stdout.write(content)
                 sys.exit(0)
         else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "analyze":
+        result = run_analyze(
+            args.file, args.projection, args.profile, args.output_format,
+            args.focus, args.export_kind,
+        )
+        if args.output_format != "json" and result.get("result") == "analyzed" and "content" in result:
+            sys.stdout.write(result["content"])
+        else:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "db":
+        if args.db_cmd == "check":
+            result = run_db_check(args.file, args.depth, args.engine, args.deadlock)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.db_cmd == "observe":
+            result = run_db_observe(args.file, args.trace)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.db_cmd == "import":
+            result = run_db_import(
+                args.file,
+                name=args.name,
+                output=args.output,
+                source_format=args.source,
+            )
+            if result.get("result") == "imported" and not args.output:
+                sys.stdout.write(result["dbsystem_source"])
+                sys.exit(0)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown db command: {args.db_cmd}",
+            })
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "compat":
+        if args.compat_cmd == "check":
+            result = run_compat_check(args.file, include_ai=args.include_ai)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown compat command: {args.compat_cmd}",
+            })
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "ai":
+        if args.ai_cmd == "check":
+            result = run_ai_check(args.file, args.depth, args.engine, args.deadlock)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "replay":
+            result = run_ai_replay(args.file, args.logs, component=args.component)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "eval":
+            result = run_ai_eval(
+                args.file,
+                records=args.records,
+                dataset=args.dataset,
+                slice_name=args.slice_name,
+                property_name=args.property_name,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "regress":
+            result = run_ai_regress(
+                args.file,
+                migration=args.migration,
+                before_records=args.before_records,
+                after_records=args.after_records,
+                dataset=args.dataset,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "compare":
+            result = run_ai_compare(
+                args.from_records,
+                args.to_records,
+                dataset=args.dataset,
+                from_label=args.from_label,
+                to_label=args.to_label,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "drift":
+            result = run_ai_drift(
+                args.file,
+                args.logs,
+                baseline_logs=args.baseline_logs,
+                property_name=args.property_name,
+                window=args.window,
+                baseline=args.baseline,
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.ai_cmd == "compat":
+            result = run_ai_compat(args.file, environment=args.environment)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown ai command: {args.ai_cmd}",
+            })
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+    elif args.cmd == "domain":
+        if args.domain_cmd == "check":
+            result = run_domain_check(args.file, args.depth, args.engine, args.deadlock)
+            result = _apply_domain_edition(result, args.file, args.edition)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "analyze":
+            result = run_domain_analyze(args.file)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "expand":
+            result = run_domain_expand(args.file, args.output, write_file=bool(args.output))
+            if result.get("result") == "expanded" and not args.output:
+                sys.stdout.write(result["kernel_source"])
+                sys.exit(0)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "generate":
+            result = run_domain_generate(
+                args.file,
+                target=args.target,
+                output=args.output,
+                write_file=bool(args.output),
+            )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "replay":
+            result = run_domain_replay(args.file, args.logs)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif args.domain_cmd == "testgen":
+            result = run_domain_testgen(
+                args.file,
+                depth=args.depth,
+                output=args.output,
+                deadlock_mode=args.deadlock,
+                write_file=bool(args.output),
+                strict=args.strict,
+                target=args.target,
+            )
+            if result.get("result") == "generated" and not args.output:
+                sys.stdout.write(result["content"])
+                sys.exit(0)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            result = _envelope({
+                "result": "error",
+                "kind": "parse",
+                "message": f"unknown domain command: {args.domain_cmd}",
+            })
             print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         result = run_verify(args.file, args.depth, args.deadlock,
@@ -990,7 +2534,11 @@ def _dispatch(args):
                             property_name=args.property_name,
                             exclude_property_names=args.exclude_property_names,
                             instances=args.instances,
-                            values=args.values)
+                            values=args.values,
+                            use_cache=not args.no_cache,
+                            lemmas=args.lemmas,
+                            from_state=args.from_state)
+        result = _apply_domain_edition(result, args.file, args.edition)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
     sys.exit(exit_code(result))

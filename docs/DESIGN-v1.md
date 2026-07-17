@@ -103,12 +103,12 @@ state { cart: Map<UserId, Option<ItemId>> }
   - `cart[u] is some(i)` — a value is present, and **binds `i`**. When written
     in `requires`, the binding is usable throughout the rest of that action body
     (subsequent requires, assignments, ensures)
-  - Simple comparisons `cart[u] == none` / `!= none` are also allowed (when no
-    binding is needed)
-  - `==` / `!=` on Option is allowed **only for comparison against `none`**.
-    `x == some(e)` or comparison between two Options is a `type` error, with a
-    rewrite hint toward `is some(v)` (G1 "one way to write a given thing,"
-    G5 "eliminating silent errors")
+  - Structural comparisons `cart[u] == none` / `!= none` and
+    `cart[u] == some(e)` / `!= some(e)` are allowed when no binding is needed.
+    Two present values compare their payloads; two absent values are equal and
+    their internal payload storage is ignored.
+  - Equality never binds a name. Use `is some(v)` when later expressions need
+    the contained value (G1 "one way to write a given thing").
 - Partial functions (an unwrap like `value(x)` / `x!`) are **not provided**, so
   as not to create an entry point to the undefined behavior of a guardless
   unwrap (G5). Extraction always passes through `is some(x)` = total.

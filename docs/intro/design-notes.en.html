@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design Notes — why it's built this way</title>
+<meta name="description" content="A guide to the authoritative DESIGN-*.md contracts that explain why fslc is built this way." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="design-notes">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Examples &amp; Background</p>
+    <h1 class="reveal"><span class="hl">Design Notes</span></h1>
+    <p class="lead reveal">This manual explains how to use FSL. The authoritative source for why it is designed this way is <code>docs/DESIGN-*.md</code>, where field findings are distilled into maintained contracts. This page is the map — links go to the .md files on GitHub.</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Verifier &amp; kernel</p>
+    <h2 class="reveal">DESIGN docs for the verification engine and kernel features</h2>
+    <table class="matrix reveal">
+      <tr><th>Document</th><th>Subject</th></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-v1.md">DESIGN-v1.md</a></td><td>The language's origin design — principles G1-G5, type-system decisions, the repair protocol, the roadmap</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-induction.md">DESIGN-induction.md</a></td><td>The k-induction engine (proved / unknown_cti / CTI)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-trans.md">DESIGN-trans.md</a></td><td><code>trans</code> (transition invariant / two-state safety)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-temporal.md">DESIGN-temporal.md</a></td><td><code>leadsTo</code>, weak fairness (lasso counterexamples), respond scenarios</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-refinement.md">DESIGN-refinement.md</a></td><td>Refinement checking (mapping files, conditional expressions, preserve progress)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-compose.md">DESIGN-compose.md</a></td><td>Spec composition (namespaces, synchronized actions, internal)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-bridge.md">DESIGN-bridge.md</a></td><td>The implementation bridge (runtime Monitor / replay / testgen)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-scenarios.md">DESIGN-scenarios.md</a></td><td><code>scenarios</code> and unsat-core coverage diagnostics</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-seq.md">DESIGN-seq.md</a></td><td><code>Seq&lt;T,N&gt;</code> (partial_op, the type whitelist)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-option-struct.md">DESIGN-option-struct.md</a></td><td>Option fields in structs</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-divmod.md">DESIGN-divmod.md</a></td><td>Integer division <code>/</code> and remainder <code>%</code> (a total definition of division by zero, partial_op, Euclidean)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-spec-domains.md">DESIGN-spec-domains.md</a></td><td><code>entity</code> / <code>number</code> in the kernel <code>spec</code> (domain vs. verification bound)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-init-if.md">DESIGN-init-if.md</a></td><td>Statement-level <code>if</code> in <code>init</code> (lowered to path-conditional initial-state constraints)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-inline-range.md">DESIGN-inline-range.md</a></td><td>Inline anonymous range types (<code>x: lo..hi</code>)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md">DESIGN-forbidden.md</a></td><td><code>forbidden</code> (negative acceptance criteria / detecting under-constraint)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md">DESIGN-vacuity.md</a></td><td>Vacuity checking (invariants whose antecedent is unreachable, leadsTo whose trigger is unreachable, etc.)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md">DESIGN-strict-tags.md</a></td><td>The <code>--strict-tags</code> lint (untagged declarations, unreferenced requirements)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md">DESIGN-mutate.md</a></td><td><code>fslc mutate</code> (spec mutation, per-requirement stress report)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md">DESIGN-explain.md</a></td><td><code>fslc explain --readable</code> (verification bounds, skeleton enumeration, counterfactuals, witness narration)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md">DESIGN-html-report.md</a></td><td><code>fslc html</code> (a self-contained visual report from explain + verify evidence)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md">DESIGN-typestate.md</a></td><td><code>fslc typestate</code> (deciding when a state machine promotes to a ghost type, plus a TS scaffold)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ledger.md">DESIGN-ledger.md</a></td><td><code>fslc ledger</code> (turning verifier evidence into a per-requirement Markdown audit ledger)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-nfr.md">DESIGN-nfr.md</a></td><td>Non-functional requirements (the mapping table, discrete-time SLA: time/urgent/age/deadline)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md">DESIGN-analysis.md</a></td><td><code>fslc analyze</code> (the Typed Semantic Graph, graph projections, AI-review findings)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-undecided.md">DESIGN-undecided.md</a></td><td><code>undecided:</code> declaration metadata, affected-requirement projection, report surfaces, and acknowledged underspecification findings</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-docs-site.md">DESIGN-docs-site.md</a></td><td>The IA, navigation, and generated-reference template decisions for this manual site (produced with Relational Design)</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Three-layer dialects &amp; extensions</p>
+    <h2 class="reveal">layers / dialects / domain / db / ai / stochastic / ui</h2>
+    <table class="matrix reveal">
+      <tr><th>Document</th><th>Subject</th></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-layers.md">DESIGN-layers.md</a></td><td>The shared-kernel + three-dialects concept (business/requirements/design) and its validation</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-dialects.md">DESIGN-dialects.md</a></td><td>The dialects' implementation spec (declaration tags, fsl-req, fsl-biz)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-precedence-policy.md">DESIGN-precedence-policy.md</a></td><td>The business-layer no-bypass precedence policy (#75)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a></td><td>fsl-domain — aggregate ownership, command/event decide/evolve, sagas, effect lifecycle, scaffolds</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-effect.md">DESIGN-effect.md</a></td><td>The fsl-effect lifecycle semantics used by fsl-domain (correlation, retry, timeout)</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-db.md">DESIGN-db.md</a></td><td>fsl-db — multi-environment schema/artifact/feature-flag compatibility, SQL/Prisma importers</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a></td><td>fsl-ai — tool authority, human approval, forbidden tools, recursive agent structure analysis</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></td><td>fsl-stochastic — precomputed eval JSONL, Wilson intervals, the boundary between statistical support and formal proof</td></tr>
+      <tr><td><a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ui.md">DESIGN-ui.md</a></td><td>fsl-ui (the screen-transition dialect spike, go/no-go for #9)</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Practical guide</p>
+    <h2 class="reveal">Deeper reading</h2>
+    <div class="panel reveal">
+      <p>The practical <code>fslc analyze</code> guide (457 lines, team-facing) is currently Japanese-only and stays a plain Markdown file — <a href="https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a>. Read the essentials in the manual's <a href="analysis.en.html">Structural Analysis chapter</a> first, then go deeper there.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

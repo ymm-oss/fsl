@@ -1,0 +1,8 @@
+spec DesignLayer {
+  type Item = 0..0
+  state { y: Map<Item, Bool> }
+  init { forall i: Item { y[i] = false } }
+  action noop(i: Item) {
+    y[i] = y[i]
+  }
+}

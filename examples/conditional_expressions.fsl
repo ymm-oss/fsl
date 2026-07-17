@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ConditionalExpressions {
+  type Count = 0..2
+
+  state {
+    count: Count,
+    fast: Bool
+  }
+
+  init {
+    count = if true then 0 else 1 / 0
+    fast = false
+  }
+
+  action advance() {
+    requires if fast then count < 2 else count == 0
+    count = if fast then count + 1 else 2
+    fast = not fast
+  }
+
+  invariant InBounds {
+    (if fast then count else 2 - count) >= 0
+  }
+}

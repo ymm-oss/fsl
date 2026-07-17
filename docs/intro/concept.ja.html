@@ -19,10 +19,11 @@
 <!-- 0. HERO -->
 <section class="hero">
   <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">形式手法を知らない人のためのFSL</p>
     <h1 class="reveal">仕様書は<span class="hl">“読める”</span>。<br>でも<span class="hl">“正しい”</span>かは、<br>確かめられない。</h1>
     <p class="lead reveal">AIが、仕様もコードもテストも高速に書く時代。<br>では、それが「本当に正しい」保証は、誰がするのでしょう。</p>
-    <p class="reveal" style="margin-top:24px">FSL は、仕様を <b>機械が総当たりで確かめる</b> ための言語です。<br>このページを最後まで読むと、その意味が体でわかります。<span class="dim">（10分・専門用語なし）</span></p>
+    <p class="reveal" style="margin-top:24px">FSL は、仕様を <b>機械が総当たりで確かめる</b> ための言語です。<br>これまで書いていたプレーンテキストの仕様書の<b>代わりに</b>書きます。人が読む説明と機械が検証する対象が同じ1つのテキストになるので、両者がズレることはありません。<br>このページを最後まで読むと、その意味が体でわかります。<span class="dim">（10分・専門用語なし）</span></p>
     <div class="scroll-hint reveal">▽ スクロール</div>
   </div>
 </section>
@@ -184,6 +185,7 @@
       <div class="arrow-down">↓ シナリオ生成・テスト生成・ログ再生</div>
       <div class="layer"><h3>実装・品質確認</h3><p>仕様からテスト雛形やシナリオを生成。実装のログが仕様に従うかも確認。</p></div>
     </div>
+    <p class="narrow reveal" style="margin-top:24px">これは実装前に一度だけ済ませる証明ではありません。この鎖はCIの上で生き続けます。どの層への変更も、その都度すべて再検証され、<code>refine</code> は上位層の変更を下位層への機械的なチェックに変換し、ズレは次のコミットで見つかります——本番で事故として発覚するのではなく。同じ仕様の鎖は、新しく入るエンジニアにとっても、コードを引き継ぐAIエージェントにとっても、そのままオンボーディング資料になります。</p>
   </div>
 </section>
 
@@ -195,6 +197,7 @@
     <div class="callout warn reveal">
       <p style="margin:0 0 10px"><b>確かめるのは「書いたルールの範囲」だけ。</b> ルール自体が間違っていれば、検証結果も間違ったルールに基づきます。</p>
       <p style="margin:0 0 10px"><b>テストの代わりにはなりません。</b> 実装・UI・外部連携の確認はテストの役割。両者は補い合う関係です。</p>
+      <p style="margin:0 0 10px"><b>ただし、仕様書の代わりにはなります。</b> 手で書いていたプレーンテキストの設計書・仕様書、それを機械も検証できる形にしたのが FSL です。<code>fslc html</code> や <code>explain --readable</code> は、同じソースを人が読むための説明としてそのまま描画するので、別に保守すべき文書は増えません。</p>
       <p style="margin:0"><b>最後は人が判断する。</b> 「AIが書いた仕様が、本当に元の業務ルールを表しているか」は、人が確認します。FSL はその判断を助ける外部の基準です。</p>
     </div>
   </div>

@@ -84,6 +84,46 @@ ranking argument only proves the response while the pending obligation remains
 inside the ranked region. Fairness is not consulted here; every enabled action
 must make progress or establish `Q`.
 
+**With one or more `helpful action(args)` lines**, the third obligation is
+relaxed for non-matching actions, and two extra obligations are added to
+compensate (`bmc.py` `_prove_leadsto_rank_helpful_fairness`,
+`_prove_leadsto_rank_helpful_sticky`, `_prove_leadsto_rank_no_deadlock`,
+`_prove_leadsto_rank_progress`):
+
+```
+// every matching helpful instance i must be a fair action           (helpful_fairness)
+Inv(s) ∧ P(s) ∧ ¬Q(s)                          ⇒ ∃ i. enabled_i(s)     (no_deadlock: disjunction)
+Inv(s) ∧ P(s) ∧ ¬Q(s) ∧ enabled_i(s) ∧ T_a(s,s'), a ≠ i, ¬Q(s')
+                                                ⇒ enabled_i(s')         (helpful_sticky, i indexed)
+Inv(s) ∧ P(s) ∧ ¬Q(s) ∧ T_i(s,s')              ⇒ Q(s') ∨ (P(s') ∧ M(s') < M(s))
+Inv(s) ∧ P(s) ∧ ¬Q(s) ∧ T_a(s,s'), a ∉ helpful ⇒ Q(s') ∨ (P(s') ∧ M(s') ≤ M(s))
+```
+
+The disjunctive `no_deadlock` obligation ("some helpful instance is enabled")
+is not by itself enough to invoke any single instance's fairness: with two or
+more helpful instances, *which* one is enabled can differ from state to
+state, so no single instance is necessarily *continuously* enabled and its
+`fair` declaration is never obligated to fire. `helpful_sticky` closes this
+gap by requiring that once instance `i` becomes enabled while pending, no
+other action can disable it again before it fires (or `Q` holds) -- only then
+does `no_deadlock` + `fair` actually license weak fairness for that instance.
+(With a single helpful instance, `helpful_sticky` is vacuous: `no_deadlock`
+alone already proves it enabled at every pending state, i.e. continuously
+enabled while pending.)
+
+The last obligation is the other half: a non-helpful action must not
+*increase* the measure either, only the helpful instance's own transition
+must strictly decrease it. Without this bound, an unrelated action could pump
+the measure up by more than the helpful action brings it down each time it
+fires, so `Q` would never be reached even though the helpful action keeps
+firing under fairness.
+
+Failure of any of these is `unknown_cti` / `rank_failure`:
+`progress_action_not_fair`, `helpful_action_not_enabled`,
+`helpful_action_enabledness_not_sticky`, `non_decreasing_helpful_action`, or
+`non_helpful_action_increases_measure` (§2.6 of `DESIGN-temporal.md`, §10 of
+`LANGUAGE.md`).
+
 ### 2.4 Soundness notes (for implementers)
 
 - Do **not** put Init into the premise (doing so makes it the same as BMC and not a proof).
@@ -159,11 +199,16 @@ JSON (the shape finalized in §9, generalized to multiple states):
 
 ```
 fslc verify <file.fsl> --engine induction [--k N] [--depth K]
+            [--lemma "<expr>"]...
 ```
 
 - `--engine bmc` (default) behaves exactly as before. Code paths are untouched outside the shared parts.
 - `--k N`: maximum induction depth K_ind. Default 1.
 - `--depth K`: BMC depth of the base case + reachable witness search depth. Default 8.
+- `--lemma EXPR`: repeatable, independently proved auxiliary-invariant
+  candidates. Only `proved` candidates may enter the target proof; see
+  `DESIGN-induction-lemmas.md` for the adjudication, CTI-exclusion, JSON, and
+  cache contract.
 - Output on success:
 
 ```json
@@ -174,7 +219,11 @@ fslc verify <file.fsl> --engine induction [--k N] [--depth K]
   "engine": "induction",
   "completeness": "unbounded",
   "checked_to_depth": 8,
-  "cost": {"elapsed_s": 0.01},
+  "cost": {
+    "elapsed_s": 0.01,
+    "solver": {"checks": 12, "check_elapsed_s": 0.004, "conflicts": 2, "decisions": 8, "propagations": 21, "memory_mb": 18.2},
+    "properties": [{"kind": "invariant", "name": "ShippedWasPaid", "checks": 2, "elapsed_s": 0.001}]
+  },
   "k_used": { "ShippedWasPaid": 1, "RevenueConsistent": 2, "_bounds_orders": 1 },
   "base_depth": 8,
   "invariants_checked": [...],

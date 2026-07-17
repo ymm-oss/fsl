@@ -1,0 +1,22 @@
+[
+  "1 + 2 * 3 == 7 and not false",
+  "not q.contains(1) => some(2) is some(v)",
+  "orders[i].buyer is some(u)",
+  "forall i: Item where i > 0 { stock[i] >= 0 }",
+  "exists i in 0..CAP-1: q.at(i) == job",
+  "forall x in active where x != 0: owners[x] != none",
+  "sum(i: Idx of q.at(i) where i < q.size())",
+  "count(i: Item where stock[i] == 0)",
+  "min(abs(x), max(old(y), 2))",
+  "reachable(edges, source, target)",
+  "acyclic(edges) and functional(edges) and injective(edges)",
+  "domain(edges).contains(source) and range(edges).contains(target)",
+  "unique(i: Item where selected[i])",
+  "exactlyOne(i in choices where enabled[i])",
+  "Order { st: Open, qty: 0, buyer: none }",
+  "Set { 1, 2, 3 }.remove(2).contains(1)",
+  "Seq { 1, 2 }.push(3).head()",
+  "some(Order { st: Closed, qty: 1, buyer: some(user) })",
+  "stage(request) == Approved",
+  "eligible(user, cart[item], total)"
+]

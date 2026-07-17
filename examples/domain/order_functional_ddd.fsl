@@ -1,0 +1,63 @@
+domain OrderFunctionalDdd {
+  implementation_profile functional_ddd
+
+  enum OrderStatus { Pending, Approved, Cancelled, Shipped }
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      status: OrderStatus = Pending;
+      refund_issued: Bool = false;
+    }
+
+    command ApproveOrder {}
+    command CancelOrder {}
+    command ShipOrder {}
+
+    event OrderApproved {}
+    event OrderCancelled {}
+    event OrderShipped {}
+
+    error CannotCancelShippedOrder
+    error CannotCancelAlreadyCancelledOrder
+    error CannotShipUnapprovedOrder
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    decide CancelOrder {
+      rejects CannotCancelShippedOrder when status == Shipped
+      rejects CannotCancelAlreadyCancelledOrder when status == Cancelled
+      emits OrderCancelled
+    }
+
+    decide ShipOrder {
+      rejects CannotShipUnapprovedOrder when status != Approved
+      emits OrderShipped
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+
+    evolve OrderCancelled {
+      status = Cancelled
+    }
+
+    evolve OrderShipped {
+      status = Shipped
+    }
+
+    invariant noCancelAfterShipping {
+      status == Shipped -> not can(CancelOrder)
+    }
+  }
+
+  projection OrderObservedState {
+    from Order
+    fields [status, refund_issued]
+  }
+}

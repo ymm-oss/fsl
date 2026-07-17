@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/db/finding.v0.schema.json",
+  "title": "fsl-db finding v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "fsl",
+    "result",
+    "kind",
+    "severity",
+    "environment",
+    "migration",
+    "schema_element",
+    "artifact",
+    "artifact_version",
+    "failed_rule",
+    "witness",
+    "minimal_conflict_set",
+    "repair_candidates",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-db-finding.v0"
+    },
+    "fsl": {
+      "type": "string"
+    },
+    "result": {
+      "enum": ["violated", "observed_mismatch"]
+    },
+    "kind": {
+      "enum": [
+        "column_removed_while_still_read",
+        "column_removed_while_still_written",
+        "not_null_before_backfill",
+        "destructive_migration_unannotated",
+        "preservation_transform_unannotated",
+        "data_preservation_loss",
+        "rollback_not_equivalent",
+        "api_call_not_accepted",
+        "api_response_field_missing",
+        "offline_payload_not_accepted",
+        "required_capability_missing",
+        "declared_unused_but_observed",
+        "unsupported_artifact_observed",
+        "legacy_api_still_called"
+      ]
+    },
+    "severity": {
+      "enum": ["info", "warning", "error"]
+    },
+    "environment": {
+      "type": ["string", "null"]
+    },
+    "migration": {
+      "type": ["string", "null"]
+    },
+    "schema_element": {
+      "type": ["string", "null"]
+    },
+    "artifact": {
+      "type": ["string", "null"]
+    },
+    "artifact_version": {
+      "type": ["string", "null"]
+    },
+    "failed_rule": {
+      "type": "string"
+    },
+    "witness": {
+      "type": "object"
+    },
+    "minimal_conflict_set": {
+      "type": "object"
+    },
+    "repair_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "weakens_spec", "description"],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "weakens_spec": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "redaction": {
+      "type": "object"
+    }
+  }
+}

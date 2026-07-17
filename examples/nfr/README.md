@@ -12,7 +12,11 @@ refinement.
 - `sla_worker_design.fsl` + `sla_worker_refines.fsl`: a design layer that
   **refines** `sla_worker.fsl`, plus the mapping.
 - `support_sla.fsl`: a second requirements-dialect SLA fixture (the non-vacuous
-  deadline-urgency pattern from DOGFOOD-8).
+  deadline-urgency pattern specified in `docs/DESIGN-nfr.md`).
+- `bounded_response.fsl`: a solver-free replay fixture with one bounded and one
+  unbounded `leadsTo`; `bounded_response.within.v1.json` responds at the
+  inclusive deadline and `bounded_response.overdue.v1.json` misses it through
+  stutter observations.
 
 The modeled SLA is: once a request is submitted, it is finished within 4 discrete
 ticks. `urgent start, finish` means `tick` is disabled whenever work can start or
@@ -25,6 +29,10 @@ fslc verify examples/nfr/sla_worker.fsl --depth 10 --deadlock ignore
 fslc verify examples/nfr/sla_worker.fsl --depth 10 --deadlock ignore --engine induction
 fslc refine examples/nfr/sla_worker_design.fsl examples/nfr/sla_worker.fsl \
             examples/nfr/sla_worker_refines.fsl --depth 6        # => refines
+fslc replay examples/nfr/bounded_response.fsl \
+             --trace examples/nfr/bounded_response.within.v1.json   # => conformant
+fslc replay examples/nfr/bounded_response.fsl \
+             --trace examples/nfr/bounded_response.overdue.v1.json  # => bounded liveness failure
 ```
 
 Removing `urgent start, finish` leaves `tick` unconstrained by runnable work and

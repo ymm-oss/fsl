@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ymm-oss/fsl/schemas/fslc/db/engine-evidence.v0.schema.json",
+  "title": "fsl-db engine evidence v0",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "formal_result",
+    "result",
+    "engine",
+    "adapter",
+    "migration",
+    "checks",
+    "redaction",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "fsl-db-engine-evidence.v0"
+    },
+    "formal_result": {
+      "const": "not_run"
+    },
+    "result": {
+      "enum": [
+        "engine_evidence_supported",
+        "engine_evidence_failed",
+        "engine_evidence_inconclusive",
+        "engine_evidence_invalid"
+      ]
+    },
+    "engine": {
+      "type": "object",
+      "required": ["vendor"],
+      "properties": {
+        "vendor": {"type": "string"},
+        "version": {"type": "string"},
+        "configuration_fingerprint": {"type": "string"}
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "required": ["kind", "tool"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "migration_dry_run",
+            "lock_timeout_report",
+            "online_ddl_validator",
+            "optimizer_plan_check",
+            "vendor_tool_output"
+          ]
+        },
+        "tool": {"type": "string"},
+        "tool_version": {"type": "string"}
+      }
+    },
+    "migration": {
+      "type": "string"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "status"],
+        "properties": {
+          "kind": {"type": "string"},
+          "status": {"enum": ["passed", "failed", "inconclusive"]},
+          "message": {"type": "string"},
+          "max_wait_ms": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": {"type": "string"},
+        "forbidden_fields": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": {"type": "string"},
+          "text": {"type": "string"}
+        }
+      }
+    }
+  }
+}

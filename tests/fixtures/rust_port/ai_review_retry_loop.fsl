@@ -1,0 +1,14 @@
+spec RetryLoop {
+  enum St { Pending, Failed }
+  state { st: St }
+  init { st = Pending }
+  action fail() "REQ-RETRY: 失敗した処理を再試行対象にする" {
+    requires st == Pending
+    st = Failed
+  }
+  action retry() "REQ-RETRY: 再試行で保留状態へ戻す" {
+    requires st == Failed
+    st = Pending
+  }
+  invariant Tagged "MODEL: baseline" { true }
+}

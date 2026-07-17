@@ -1,6 +1,6 @@
 # FSL — `trans` (transition invariant / two-state safety) implementation design
 
-Motivation: DOGFOOD-11 F24. In the self-spec we want to assert **transition prohibitions** such
+Motivation: in the self-spec we want to assert **transition prohibitions** such
 as "after Reject it stays Nonconformant" or "after ToolFault it is unrepairable," but
 conventionally the only way to express this indirectly was a ghost variable + a one-state
 invariant, or embedding it into an action guard. `trans` is syntax for writing cross-action

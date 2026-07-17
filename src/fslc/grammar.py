@@ -14,11 +14,11 @@ verify_def: "verify" "{" verify_item* "}"
 verify_item: "instances" NAME "=" INT ";"? -> verify_instances
            | "values" NAME "=" expr ".." expr ";"? -> verify_values
 
-spec_def: "spec" NAME "{" item* "}"
+spec_def: "spec" NAME meta_tag? "{" item* "}"
 
 compose_def: "compose" NAME "{" compose_item* "}"
 ?compose_item: use_def | internal_def | compose_state | compose_init
-             | sync_action | action_def
+             | sync_action | action_def | def_def
              | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def
 use_def: "use" NAME "as" NAME "from" STRING
 internal_def: "internal" NAME "." NAME
@@ -38,21 +38,23 @@ refinement_def: "refinement" NAME "{" refinement_item* "}"
 refinement_impl: "impl" NAME
 refinement_abs: "abs" NAME
 maps_auto_def: "maps" "auto"
-map_def: "map" NAME ["[" binder "]"] "=" ref_expr
+map_def: "map" NAME ["[" binder "]"] "=" expr
 refinement_action: "action" NAME "(" [refinement_param ("," refinement_param)*] ")" "->" action_target
 refinement_param: NAME [":" type]
 action_target: stutter_target | mapped_action_target
 stutter_target: "stutter"
-mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
+mapped_action_target: NAME "(" [expr ("," expr)*] ")"
 preserve_progress_def: "preserve" "progress" "{" progress_item* "}"
 ?progress_item: progress_respond
 progress_respond: "respond" NAME "by" NAME ("," NAME)* ","?
 
 ?item: const_def | type_def | enum_def | struct_def | entity_def | number_def
-     | state_def | init_def | action_def
+     | state_def | init_def | action_def | def_def
      | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 
 const_def: "const" NAME "=" expr
+def_def: "def" NAME "(" [def_param ("," def_param)*] ")" "=" expr
+def_param: NAME ":" qname
 type_def: plain_type_def | symmetric_type_def
 plain_type_def: "type" NAME "=" expr ".." expr
 symmetric_type_def: "symmetric" "type" NAME "=" expr ".." expr
@@ -66,9 +68,10 @@ entity_def: "entity" NAME
 number_def: "number" NAME
 
 state_def: "state" "{" var_decl ("," var_decl)* ","? "}"
-var_decl: NAME ":" type
+var_decl: NAME ":" type ["=" expr]
 ?type: "Int"  -> t_int
      | "Bool" -> t_bool
+     | "relation" type "->" type -> t_relation
      | expr ".." expr -> t_range
      | "Map" "<" type "," type ">" -> t_map
      | "Set" "<" type ">" -> t_set
@@ -112,8 +115,10 @@ terminal_def: "terminal" "{" expr "}"
 until_def: "until" NAME meta_tag? "{" expr _UNTIL expr "}"
 unless_def: "unless" NAME meta_tag? "{" expr _UNLESS expr "}"
 
-leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body leadsto_decreases? "}"
+leadsto_def: "leadsTo" NAME meta_tag? "{" lt_body leadsto_item* "}"
+?leadsto_item: leadsto_helpful | leadsto_decreases
 leadsto_decreases: "decreases" expr
+leadsto_helpful: "helpful" NAME "(" [expr_list] ")"
 meta_tag: STRING
 ?lt_body: lt_forall | lt_implies
 lt_forall: "forall" binder [":"] "{" lt_body "}"
@@ -150,6 +155,7 @@ postfix_suffix: "[" expr "]" -> idx_suffix
                | "." "size" "(" ")" -> method_size
                | "." NAME -> field_suffix
 ?atom: INT -> num
+     | _IF expr "then" expr _ELSE expr -> ite
      | "true" -> true_lit
      | "false" -> false_lit
      | "none" -> none_lit
@@ -160,26 +166,28 @@ postfix_suffix: "[" expr "]" -> idx_suffix
      | "stage" "(" expr ")" -> stage_e
      | "count" "(" NAME ":" qname "where" expr ")" -> count_e
      | "sum" "(" NAME ":" qname "of" expr ["where" expr] ")" -> sum_e
+     | "reachable" "(" expr "," expr "," expr ")" -> rel_reachable_e
+     | "acyclic" "(" expr ")" -> rel_acyclic_e
+     | "functional" "(" expr ")" -> rel_functional_e
+     | "injective" "(" expr ")" -> rel_injective_e
+     | "domain" "(" expr ")" -> rel_domain_e
+     | "range" "(" expr ")" -> rel_range_e
      | "min" "(" expr "," expr ")" -> min_e
      | "max" "(" expr "," expr ")" -> max_e
      | "abs" "(" expr ")" -> abs_e
      | "old" "(" expr ")" -> old_e
      | "unique" "(" binder ")" -> unique_e
      | "exactlyOne" "(" binder ")" -> exactly_one_e
+     | NAME "(" [expr_list] ")" -> call_e
      | NAME -> var
      | "(" expr ")"
 struct_fields: "{" NAME ":" expr ("," NAME ":" expr)* ","? "}"
 expr_list: expr ("," expr)*
 
-?ref_expr: _IF ref_expr "then" ref_expr _ELSE ref_expr -> ite
-         | NAME ref_struct_fields -> struct_lit
-         | expr
-ref_struct_fields: "{" NAME ":" ref_expr ("," NAME ":" ref_expr)* ","? "}" -> struct_fields
-
 requirements_def: "requirements" NAME "{" requirements_item* "}"
 ?requirements_item: implements_def | requirement_def | acceptance_def | forbidden_def | kpi_def
                   | const_def | type_def | enum_def | struct_def | entity_def | number_def
-                  | state_def | init_def | req_action_def | process_def | time_def
+                  | state_def | init_def | req_action_def | process_def | time_def | def_def
                   | invariant_def | trans_def | reachable_def | leadsto_def | until_def | unless_def | terminal_def
 implements_def: "implements" NAME "from" STRING "{" implements_item* "}"
 ?implements_item: map_def | maps_auto_def | refinement_action | preserve_progress_def
@@ -193,10 +201,10 @@ branches_def: "branches" "{" branch_when+ "}"
 branch_when: "when" expr "{" stmt* "}" maps_clause
 maps_clause: "maps" req_action_target
 req_action_target: stutter_target | req_mapped_action_target
-req_mapped_action_target: NAME "(" [ref_expr ("," ref_expr)*] ")"
+req_mapped_action_target: NAME "(" [expr ("," expr)*] ")"
 acceptance_def: "acceptance" REQ_ID STRING "{" acceptance_step* acceptance_expect "}"
 acceptance_step: NAME "(" [acceptance_arg ("," acceptance_arg)*] ")"
-acceptance_arg: ref_expr
+acceptance_arg: expr
 acceptance_expect: "expect" expr -> acceptance_expect
                  | "expect" NAME INT "in" NAME -> acceptance_expect_stage
 forbidden_def: "forbidden" REQ_ID STRING "{" acceptance_step* "expect" "rejected" "}"
@@ -349,6 +357,9 @@ class Ast(Transformer):
     def var(self, meta, n):
         return ("var", n)
 
+    def call_e(self, meta, n, args=None):
+        return ("call", n, list(args or []), _loc(meta))
+
     def idx_suffix(self, meta, e):
         return ("idx", e)
 
@@ -458,6 +469,24 @@ class Ast(Transformer):
     def sum_e(self, meta, v, ty, body, cond=None):
         return ("sum", v, ty, body, cond)
 
+    def rel_reachable_e(self, meta, rel, src, dst):
+        return ("rel_reachable", rel, src, dst)
+
+    def rel_acyclic_e(self, meta, rel):
+        return ("rel_acyclic", rel)
+
+    def rel_functional_e(self, meta, rel):
+        return ("rel_functional", rel)
+
+    def rel_injective_e(self, meta, rel):
+        return ("rel_injective", rel)
+
+    def rel_domain_e(self, meta, rel):
+        return ("rel_domain", rel)
+
+    def rel_range_e(self, meta, rel):
+        return ("rel_range", rel)
+
     def min_e(self, meta, a, b):
         return ("min", a, b)
 
@@ -554,6 +583,9 @@ class Ast(Transformer):
     def t_map(self, meta, k, v):
         return ("map", k, v)
 
+    def t_relation(self, meta, src, dst):
+        return ("relation", src, dst)
+
     def t_set(self, meta, elem):
         return ("set", elem)
 
@@ -563,8 +595,10 @@ class Ast(Transformer):
     def t_name(self, meta, n):
         return ("name", n)
 
-    def var_decl(self, meta, n, ty):
-        return ("decl", n, ty)
+    def var_decl(self, meta, n, ty, initializer=None):
+        if initializer is None:
+            return ("decl", n, ty)
+        return ("decl", n, ty, initializer, _loc(meta))
 
     def entity_def(self, meta, name):
         return ("entity", name, _loc(meta))
@@ -583,6 +617,14 @@ class Ast(Transformer):
 
     def const_def(self, meta, n, e):
         return ("const", n, e)
+
+    def def_param(self, meta, n, ty):
+        return ("def_param", n, ty)
+
+    def def_def(self, meta, n, *parts):
+        params = [part for part in parts if part[0] == "def_param"]
+        expr = next(part for part in reversed(parts) if part[0] != "def_param")
+        return ("def", n, params, expr, _loc(meta))
 
     def plain_type_def(self, meta, n, lo, hi):
         return ("type", n, lo, hi)
@@ -750,17 +792,22 @@ class Ast(Transformer):
     def leadsto_decreases(self, meta, measure):
         return ("decreases", measure)
 
+    def leadsto_helpful(self, meta, name, args=None):
+        return ("helpful", name, list(args or []), _loc(meta))
+
     def leadsto_def(self, meta, name, *rest):
-        req_meta, body, measure = None, None, None
+        req_meta, body, measure, helpful = None, None, None, []
         for r in rest:
             if isinstance(r, dict):
                 req_meta = r
             elif isinstance(r, tuple) and r[0] == "decreases":
                 measure = r[1]
+            elif isinstance(r, tuple) and r[0] == "helpful":
+                helpful.append({"action": r[1], "args": r[2], "loc": r[3]})
             else:
                 body = r
         binders, p, q, within = _flatten_leadsto(body)
-        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure, within)
+        return ("leadsto", name, binders, p, q, _loc(meta), req_meta, measure, within, helpful)
 
     def top_def(self, meta, child):
         return child
@@ -781,7 +828,13 @@ class Ast(Transformer):
         return child
 
     def spec_def(self, meta, name, *items):
-        return ("spec", name, [i for i in items if i])
+        kept = [i for i in items if i]
+        # An optional leading meta_tag (a dict from _parse_meta) classifies the
+        # whole spec, e.g. `spec ReturnUI "ui: screen flow" { ... }`. It is carried
+        # as a pseudo-item so the ("spec", name, items) shape stays a 3-tuple.
+        if kept and isinstance(kept[0], dict):
+            return ("spec", name, [("__spec_meta", kept[0])] + kept[1:])
+        return ("spec", name, kept)
 
     def refinement_impl(self, meta, name):
         return ("impl", name)

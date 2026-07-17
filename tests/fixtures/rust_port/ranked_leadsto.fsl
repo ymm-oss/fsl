@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec RankedLeadsto {
+  state { x: Int }
+  init { x = 0 }
+
+  action inc() {
+    requires x < 5
+    x = x + 1
+  }
+
+  invariant XRange { x >= 0 and x <= 5 }
+  leadsTo ReachFive {
+    x < 5 ~> x == 5
+    decreases 5 - x
+  }
+}

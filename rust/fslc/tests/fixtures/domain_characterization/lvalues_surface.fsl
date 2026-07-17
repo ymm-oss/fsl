@@ -1,0 +1,26 @@
+domain DomainLvalueCharacterization {
+  // SPDX-License-Identifier: Apache-2.0
+  type ItemId = 0..1
+  type Quantity = 0..2
+
+  value_object Counter {
+    value: Quantity = 0;
+  }
+
+  aggregate Inventory {
+    id ItemId
+    state {
+      total: Quantity = 0;
+      counts: Map<ItemId, Quantity>;
+      counter: Counter;
+    }
+    command Adjust { item: ItemId }
+    event Adjusted { item: ItemId }
+    decide Adjust { emits Adjusted }
+    evolve Adjusted {
+      total = total + 1
+      counts[item] = counts[item] + 1
+      counter.value = total
+    }
+  }
+}

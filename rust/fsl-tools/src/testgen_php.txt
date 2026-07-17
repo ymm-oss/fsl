@@ -1,0 +1,24 @@
+<?php
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (PHPUnit, PHP 8.1+ / PHPUnit 10+).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired, setUp() marks
+// every test skipped (mirroring the other targets' skip-when-unwired behaviour).
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+interface Adapter
+{
+    public function reset(): void;
+    // Return ['ok' => bool, 'kind' => ?string] for forbidden-rejection scenarios;
+    // null is fine for ordinary steps.
+    public function step(string $action, array $params): ?array;
+    public function observe(): array;
+}

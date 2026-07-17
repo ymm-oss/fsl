@@ -101,6 +101,60 @@
       "result": "error"
     }
   },
+  "examples/ai/recursive_support_agent.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/ai/refund_agent_tool_safety.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/ai/support_answer_quality.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/annotations/annotated_ai_component.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/annotations/annotated_claims.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/annotations/annotated_dbsystem.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/annotations/annotated_domain.fsl": {
+    "check": {
+      "kind": "parse",
+      "result": "error"
+    }
+  },
+  "examples/collection_aggregates.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/conditional_expressions.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
   "examples/consulting/asis_expense.fsl": {
     "check": {
       "result": "ok",
@@ -123,6 +177,172 @@
     "check": {
       "kind": "semantics",
       "result": "error"
+    }
+  },
+  "examples/db/runtime_observation_target.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_add_nullable_column.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_ai_artifact_compat.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_api_offline_compat.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_destructive_drop_with_annotation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_dual_write_backfill_switch_read_drop_old.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_feature_flag_kill_switch_compat.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_rename_preservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/safe_rollback_equivalence.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_ai_artifact_provider_gap.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_annotated_drop_with_old_server.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_api_response_field_removed.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_destructive_drop_without_annotation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_drop_column_with_old_server.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_drop_column_with_worker.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_feature_flag_provider_gap.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_lossy_merge_preservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_lossy_split_preservation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_not_null_before_backfill.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_offline_payload_rejected.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/db/unsafe_rollback_drop.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/db/unsafe_split_without_annotation.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/domain/order_async_effect.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/domain/order_fulfillment_saga.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": [
+        "none"
+      ]
+    }
+  },
+  "examples/domain/order_functional_ddd.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/domain/unsafe_irreversible_effect_without_idempotency.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
     }
   },
   "examples/e2e/1_business.fsl": {
@@ -332,18 +552,6 @@
     },
     "verify": {
       "kind": "semantics",
-      "result": "error"
-    }
-  },
-  "examples/gallery/errors/type_option_some_equality.fsl": {
-    "check": {
-      "result": "ok",
-      "warnings": [
-        "none"
-      ]
-    },
-    "verify": {
-      "kind": "type",
       "result": "error"
     }
   },
@@ -816,6 +1024,30 @@
       "warnings": []
     }
   },
+  "examples/gallery/valid/tiny_option_structural_equality.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    },
+    "verify": {
+      "action_coverage": {
+        "keep": true
+      },
+      "deadlock_found": false,
+      "invariants_checked": [
+        "_bounds_empty",
+        "_bounds_first",
+        "_bounds_same",
+        "_bounds_different",
+        "TruthTable",
+        "PatternStillBinds"
+      ],
+      "reachables": {},
+      "result": "verified",
+      "transitions_checked": [],
+      "warnings": []
+    }
+  },
   "examples/gallery/valid/tiny_traffic_light.fsl": {
     "check": {
       "result": "ok",
@@ -858,6 +1090,12 @@
       },
       "result": "verified",
       "transitions_checked": [],
+      "warnings": []
+    }
+  },
+  "examples/kernel_inline_initializer.fsl": {
+    "check": {
+      "result": "ok",
       "warnings": []
     }
   },
@@ -914,6 +1152,18 @@
     "check": {
       "kind": "semantics",
       "result": "error"
+    }
+  },
+  "examples/named_predicate.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
+    }
+  },
+  "examples/nfr/bounded_response.fsl": {
+    "check": {
+      "result": "ok",
+      "warnings": []
     }
   },
   "examples/nfr/sla_worker.fsl": {
@@ -1049,6 +1299,12 @@
     "check": {
       "result": "ok",
       "warnings": []
+    }
+  },
+  "examples/requirements_stage.fsl": {
+    "check": {
+      "kind": "type",
+      "result": "error"
     }
   },
   "examples/self/fslc_monitor.fsl": {

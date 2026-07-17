@@ -1,22 +1,35 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
-"""PostToolUse hook: run ``fslc check`` on an edited ``.fsl`` file.
+"""PostToolUse hook: run native Rust ``fslc check`` on an edited FSL file."""
 
-This is the fast inner-loop signal the repo relies on (parse + type check), not the
-slow full ``pytest`` suite. Reads the Claude Code hook JSON from stdin; if the
-edited/written file is a ``.fsl`` spec, it runs the *working-tree* verifier
-(``.venv/bin/python -m fslc check``) on it. On failure it forwards the fslc output to
-stderr and exits 2 so Claude sees the diagnostics and can repair. On success — or when
-there is no working-tree venv (e.g. CI) or the file is not a ``.fsl`` — it exits 0
-quietly.
-
-Note: the global ``fslc`` on PATH points at ``~/.fsl``, a different tree, so this hook
-deliberately uses the repo venv's interpreter.
-"""
 import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
+
+
+def project_root(data: dict) -> Path:
+    configured = os.environ.get("CLAUDE_PROJECT_DIR")
+    return Path(configured or data.get("cwd") or os.getcwd()).resolve()
+
+
+def native_check_command(root: Path, path: str) -> list[str]:
+    return [
+        "cargo",
+        "run",
+        "--quiet",
+        "--manifest-path",
+        str(root / "rust" / "Cargo.toml"),
+        "-p",
+        "fslc-rust",
+        "--bin",
+        "fslc",
+        "--",
+        "check",
+        path,
+    ]
 
 
 def main() -> int:
@@ -27,20 +40,22 @@ def main() -> int:
     path = (data.get("tool_input") or {}).get("file_path") or ""
     if not path.endswith(".fsl"):
         return 0
-    root = data.get("cwd") or os.getcwd()
-    py = os.path.join(root, ".venv", "bin", "python")
-    if not os.path.exists(py):
-        return 0  # no working-tree venv; nothing to check against
+    root = project_root(data)
+    if shutil.which("cargo") is None or not (root / "rust" / "Cargo.toml").is_file():
+        sys.stderr.write(
+            "Native FSL check unavailable: install Cargo and verify rust/Cargo.toml exists.\n"
+        )
+        return 2
     proc = subprocess.run(
-        [py, "-m", "fslc", "check", path],
+        native_check_command(root, path),
+        cwd=root,
         capture_output=True,
         text=True,
-        cwd=root,
+        check=False,
     )
     if proc.returncode != 0:
-        sys.stderr.write(
-            "fslc check failed for {}:\n{}{}".format(path, proc.stdout, proc.stderr)
-        )
+        details = (proc.stdout + proc.stderr)[-12000:]
+        sys.stderr.write(f"native fslc check failed for {path}:\n{details}")
         return 2
     return 0
 

@@ -127,7 +127,7 @@ Add an "how to write NFRs" section to LANGUAGE.md / skills:
 3. examples/nfr/: a hand-written kernel version (proved, with auxiliary invariants) and
    the dialect version side by side + README.
 4. LANGUAGE.md (time/deadline in §13, a new "how to write NFRs" section), skills/fsl
-   (SKILL.md rules + reference.md), DOGFOOD-5.md (record of this spike).
+   (SKILL.md rules + reference.md), with executable cases under `examples/nfr/`.
 
 ## 6. Discrete-time SLA across layers (issue #56)
 
@@ -179,3 +179,18 @@ disproportionate cost or a kernel-semantics change the architecture forbids
 
 The guidance above (verify a timed property at the clock-owning layer; share the
 clock to carry it across a refinement) is the supported approach.
+
+## 7. Runtime evidence for bounded responses (issue #225)
+
+There are two intentionally different runtime-visible deadline forms:
+
+- requirements `deadline age <= K` lowers to an invariant and is checked as
+  safety by Monitor/replay;
+- `leadsTo P ~> within K Q` is a bounded response and trace schema 1.2 checks it
+  with the solver-free bounded-liveness monitor.
+
+Both count logical observations, not timestamps. For bounded `leadsTo`, the
+trigger observation is `p`, the inclusive deadline is `p + K`, and both action
+and stutter events advance time. Finite prefixes may end with pending
+obligations; unbounded response claims still require verifier evidence. See
+`examples/nfr/bounded_response.fsl` and its positive/overdue replay traces.

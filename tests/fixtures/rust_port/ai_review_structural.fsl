@@ -1,0 +1,14 @@
+spec StructuralReview {
+  state { active: Bool, frozen: Bool, audit: Int }
+  init { active = false  frozen = false  audit = 0 }
+  action activate() {
+    requires not active
+    active = true
+  }
+  action bump_audit() {
+    requires active
+    audit = audit + 1
+  }
+  invariant FrozenReadable { frozen == false }
+  invariant Floating { true }
+}

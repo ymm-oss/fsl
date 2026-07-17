@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Structural Analysis with fslc analyze — FSL Manual</title>
+<meta name="description" content="How to use fslc analyze to shorten FSL review discovery time with impact graphs, requirement traceability, AI-review findings, and graph exports." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="analysis">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Structural observation</p>
+    <h1 class="reveal">Use <code>fslc analyze</code> to create a review entry point</h1>
+    <p class="lead reveal"><code>fslc analyze</code> turns an FSL spec into a review map: which requirements, actions, state variables, and properties are connected. Use it before or after verification to find impact scope, weakly anchored declarations, and traceability gaps quickly.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md">DESIGN-analysis.md</a>. A deeper, team-facing practical guide exists as <a href="https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a> — currently Japanese-only.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">What it does</p>
+    <h2 class="reveal">Narrow the review before reading the whole spec</h2>
+    <p class="lead narrow reveal">The slow part of review is often not the final correctness judgment. It is discovering what to read and how an upper requirement maps to lower design. <code>analyze</code> does that discovery mechanically first.</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>See impact scope</h3>
+        <p><code>action_state_graph</code> lists which state variables each action reads and writes. That makes it easier to see what a changed action can affect without relying only on grep or full manual reading.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Follow requirement links</h3>
+        <p><code>requirement_property_graph</code> and <code>traceability_graph</code> connect requirement IDs, properties, scenarios, and lower-layer design actions. Use them to check where upper intent lands in design.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Surface review candidates</h3>
+        <p><code>--profile ai-review</code> flags review-required structures such as weakly anchored properties, unguarded updating actions, and state that is read but never written. These are prioritization signals, not violation verdicts.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Share the same view</h3>
+        <p>Outputs are available as JSON, DOT, Mermaid, and JSON Schema-backed contracts. The same review view can feed PR descriptions, CI, editor diagnostics, and visualization tools.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Effect</p>
+    <h2 class="reveal">Why it can reduce review time</h2>
+    <table class="matrix reveal">
+      <tr><th>Manual review work</th><th>What <code>analyze</code> emits first</th><th>Effect</th></tr>
+      <tr><td>Find which state a changed action affects</td><td>Action/state read-write graph</td><td>Shortens impact discovery and narrows what to read.</td></tr>
+      <tr><td>Trace whether requirement IDs reach properties or design actions</td><td>Requirement, property, scenario, and refinement graphs</td><td>Makes traceability review reproducible.</td></tr>
+      <tr><td>Read every declaration evenly to find suspicious spots</td><td><code>ai-review</code> findings</td><td>Gives reviewers an ordered starting point.</td></tr>
+      <tr><td>Explain the basis for a PR comment</td><td>JSON with witness, candidate repair, and do-not-assume fields</td><td>Provides shareable evidence and caveats for the comment.</td></tr>
+    </table>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0"><code>analyze</code> does not replace review. Humans still judge the intended behavior. Its effect comes from shortening the early discovery and evidence-gathering phase.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Boundary</p>
+    <h2 class="reveal">Analyze is not verify</h2>
+    <p class="lead narrow reveal"><code>fslc analyze</code> builds deterministic structural JSON from the validated spec model. It does not call Z3, explore reachable states, replay logs, or prove refinement.</p>
+    <div class="syntax-grid reveal" style="margin-top:24px">
+      <div class="syntax-card">
+        <h3>Use it for review</h3>
+        <p>Find disconnected requirements, unanchored properties, graph cycles, and traceability gaps before deeper verification work.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Keep proof separate</h3>
+        <p>Use <code>verify</code>, <code>refine</code>, and <code>replay</code> when you need formal evidence or implementation conformance.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Read the status honestly</h3>
+        <p>Structural findings carry <code>formal_status: "not_a_violation"</code>. A cycle is not automatically a bug.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Commands</p>
+    <h2 class="reveal">Run outputs by purpose</h2>
+    <div class="panel reveal">
+      <pre><code>fslc analyze spec.fsl --projection tsg --format json
+fslc analyze spec.fsl --projection action_state_graph --format json
+fslc analyze spec.fsl --projection action_dependency_graph --format json
+fslc analyze spec.fsl --projection impact_graph --focus state:stock --format json
+fslc analyze spec.fsl --projection requirement_property_graph --format json
+fslc analyze spec.fsl --projection property_state_graph --format json
+fslc analyze specs/ examples/e2e/ --profile ai-review --format json
+fslc analyze spec.fsl --export tag-review
+fslc analyze specs/cart_refines.fsl --projection refinement_graph --format json
+fslc analyze fsl-project.toml --projection traceability_graph --format json
+fslc analyze spec.fsl --projection action_state_graph --format dot
+fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></pre>
+    </div>
+    <table class="matrix reveal" style="margin-top:24px">
+      <tr><th>Output</th><th>What it shows</th><th>Main use</th></tr>
+      <tr><td><code>tsg</code></td><td>The full Typed Semantic Graph over specs, state, actions, guards, effects, properties, requirements, and scenarios.</td><td>Get source graph data for custom tools or downstream projections.</td></tr>
+      <tr><td><code>action_state_graph</code></td><td>Actions connected to state variables they read and write.</td><td>Review impact scope.</td></tr>
+      <tr><td><code>action_dependency_graph</code></td><td>Action-to-action <code>enables</code> edges through state bridges, plus write/write <code>conflicts_with</code> edges.</td><td>Review interleaving-sensitive dependencies without treating them as scheduler semantics.</td></tr>
+      <tr><td><code>impact_graph --focus NODE</code></td><td>The upstream and downstream TSG closure around a focus node, with hop distances.</td><td>Ask what feeds a changed node and what can be affected by it.</td></tr>
+      <tr><td><code>requirement_property_graph</code></td><td>Requirement IDs connected to covered actions, properties, scenarios, KPI, and control nodes.</td><td>Review requirement anchoring and isolation.</td></tr>
+      <tr><td><code>property_state_graph</code></td><td>User properties connected to the state variables they read or check.</td><td>Review what each property observes.</td></tr>
+      <tr><td><code>refinement_graph</code></td><td>Standalone mapping files: impl/abs names, state maps, action maps, stutters, and preserve-progress declarations.</td><td>Review refinement correspondences.</td></tr>
+      <tr><td><code>traceability_graph</code></td><td>Project-manifest structure across business, requirements, design, and refinement mapping files.</td><td>Check whether upper requirements land in lower design.</td></tr>
+      <tr><td><code>--profile ai-review</code></td><td>Structural review candidates with witnesses, repair candidates, and do-not-assume caveats.</td><td>Choose the first places to inspect.</td></tr>
+      <tr><td><code>--export tag-review</code></td><td>One tagged declaration at a time with its rendered formal definition and identifiers.</td><td>Give a human or explicitly approved external reviewer a stable local review tuple.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">AI-review</p>
+    <h2 class="reveal">Initial findings</h2>
+    <div class="cards reveal">
+      <div class="card">
+        <h3><code>disconnected_requirement</code></h3>
+        <p>A requirement is declared but has no useful structural anchor such as an action, property, scenario, KPI, or control.</p>
+      </div>
+      <div class="card">
+        <h3><code>unanchored_property</code></h3>
+        <p>A user property has no requirement tag, scenario/governance anchor, or action-state anchor.</p>
+      </div>
+      <div class="card">
+        <h3><code>progressless_cycle</code></h3>
+        <p>A requirement/scenario-linked multi-action cycle has no visible progress story such as <code>leadsTo</code>, <code>fair action</code>, or <code>terminal</code>.</p>
+      </div>
+      <div class="card">
+        <h3><code>unwritten_state</code></h3>
+        <p>A state variable is initialized and read, but no action writes it. If it is fixed data, consider making that explicit; otherwise suspect missing behavior.</p>
+      </div>
+      <div class="card">
+        <h3><code>unread_state</code></h3>
+        <p>A state variable is written, but no transitive relevance chain reaches a guard, property, ensures clause, or scenario.</p>
+      </div>
+      <div class="card">
+        <h3><code>unguarded_action</code></h3>
+        <p>An action that writes state has no <code>requires</code> clause. Review whether it should really be always enabled or whether a guard was omitted.</p>
+      </div>
+      <div class="card">
+        <h3><code>conservation_candidate</code></h3>
+        <p>Counter-like effects structurally preserve a weighted sum. Treat it as a candidate invariant, then prove it with <code>verify</code>.</p>
+      </div>
+      <div class="card">
+        <h3><code>tag_stale_reference</code> / <code>tag_formula_disjoint</code></h3>
+        <p>Exact code-shaped tag identifiers are missing from the current spec or the tagged formal definition. This is local drift evidence, not natural-language meaning judgment.</p>
+      </div>
+      <div class="card">
+        <h3><code>divergent_choice</code></h3>
+        <p>A depth-4 BMC witness shows two actions enabled in one reachable state and splitting an invariant or acceptance outcome. The finding asks which outcome is intended and remains visible even when acknowledged.</p>
+      </div>
+      <div class="card">
+        <h3><code>unconstrained_effect</code></h3>
+        <p>A depth-4 BMC witness shows two actions writing different next values to state outside the contract-observation graph. It supersedes the duplicate <code>unread_state</code> signal, but is never suppressed by acknowledgement.</p>
+      </div>
+    </div>
+    <div class="callout reveal" style="margin-top:24px">
+      <p style="margin:0">The cycle finding does not inspect English keywords in names. The underspecification findings are bounded review evidence, not proof of determinism: absence means only “not witnessed within depth 4.” An exact match with an <code>undecided:</code> declaration adds <code>acknowledged:true</code> and <code>acknowledged_by</code>; unmatched findings have no acknowledgement fields and remain unresolved. The tag records intentional deferral and is not a verification condition. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-undecided.md">DESIGN-undecided.md</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Schemas</p>
+    <h2 class="reveal">Output families</h2>
+    <table class="matrix reveal">
+      <tr><th>Output</th><th>Schema version</th><th>Use</th></tr>
+      <tr><td>Typed Semantic Graph</td><td><code>tsg.v0</code></td><td>Stable graph data for downstream projections and tools. Schema: <code>schemas/fslc/analysis/tsg.v0.schema.json</code>.</td></tr>
+      <tr><td>Graph projections</td><td><code>analysis-graph.v0</code></td><td>Review graph summaries with components, SCCs, cycles, degree, and structural metrics such as cycle rank and fan-in/fan-out hubs. DOT/Mermaid exports are views over this data.</td></tr>
+      <tr><td>AI-review findings</td><td><code>analysis-findings.v0</code></td><td>Structured review findings with witnesses, repairs, caveats, and optional source locations for editor diagnostics.</td></tr>
+      <tr><td>Tag review export</td><td><code>tag-review.v0</code></td><td>Declaration-local tag/formal-definition tuples for an external meaning review; no model call and no violation verdict.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">Limits</p>
+    <h2 class="reveal">Make the boundaries explicit</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>No natural-language inference</h3>
+        <p>Requirement text is carried through the graph, but the core analyzer does not interpret its meaning.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>No proof evidence</h3>
+        <p>Findings, project traceability, and refinement graphs show structure only. Run <code>verify</code>, <code>refine</code>, or <code>chain</code> for counterexamples, reachability, or refinement results.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>No automatic fixes</h3>
+        <p>Candidate repairs are options. Add a guard, make a value constant, or add a requirement tag only after confirming the intended behavior.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Editor signals are opt-in</h3>
+        <p><code>fslc-lsp</code> surfaces deterministic TSG structural-review findings as informational diagnostics when <code>FSLC_LSP_ANALYSIS_DIAGNOSTICS=1</code> is set.</p>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer data-nav></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

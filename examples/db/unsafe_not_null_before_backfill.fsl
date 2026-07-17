@@ -1,0 +1,30 @@
+dbsystem UnsafeNotNullBeforeBackfill {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column email: Text absent;
+    }
+  }
+
+  migration add_required_email from 0 to 1 {
+    add users.email not_null;
+  }
+
+  artifact server_v1 {
+    reads users.id;
+    writes users.id;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v1 when schema 0..1;
+    supported server_v1 when schema 0..1;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule not_null_after_backfill;
+  }
+}

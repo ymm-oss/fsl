@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec CorrespondenceAbs {
+  type N = 0..1
+  state { done: Bool }
+  init { done = false }
+  action settle(x: N) { done = true }
+}

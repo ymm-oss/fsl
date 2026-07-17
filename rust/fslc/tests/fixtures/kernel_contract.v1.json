@@ -1,0 +1,2359 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/kernel.v1.schema.json",
+  "schema_version": "1.0.0",
+  "language_version": "1.0",
+  "spec": {
+    "name": "KernelContract",
+    "source": {
+      "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+      "dialect": "kernel"
+    }
+  },
+  "semantics": {
+    "assignment": "simultaneous",
+    "reads": "pre_state",
+    "requires_false": "not_enabled",
+    "failure_state": "rollback",
+    "old": "pre_state",
+    "integer_division": "euclidean",
+    "terminal_deadlock": "terminal_states_excluded",
+    "fairness": "weak"
+  },
+  "constants": [
+    {
+      "name": "CAP",
+      "type": {
+        "kind": "int"
+      },
+      "value": 2,
+      "span": null,
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "CAP",
+        "lowered": false,
+        "generated": false
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Id",
+      "span": null,
+      "symmetric": false,
+      "definition": {
+        "kind": "domain",
+        "lo": 0,
+        "hi": 1
+      },
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "Id",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "Qty",
+      "span": null,
+      "symmetric": false,
+      "definition": {
+        "kind": "domain",
+        "lo": 0,
+        "hi": 2
+      },
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "Qty",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "Slot",
+      "span": null,
+      "symmetric": false,
+      "definition": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            }
+          },
+          {
+            "name": "qty",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "kind": "named",
+              "name": "Status"
+            }
+          }
+        ]
+      },
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "Slot",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "Status",
+      "span": null,
+      "symmetric": false,
+      "definition": {
+        "kind": "enum",
+        "members": [
+          "Open",
+          "Closed"
+        ]
+      },
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "Status",
+        "lowered": false,
+        "generated": false
+      }
+    }
+  ],
+  "state": [
+    {
+      "name": "active",
+      "type": {
+        "kind": "option",
+        "item": {
+          "kind": "named",
+          "name": "Id"
+        }
+      },
+      "span": null,
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "active",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "queue",
+      "type": {
+        "kind": "seq",
+        "item": {
+          "kind": "named",
+          "name": "Id"
+        },
+        "capacity": 2
+      },
+      "span": null,
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "queue",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "seen",
+      "type": {
+        "kind": "set",
+        "item": {
+          "kind": "named",
+          "name": "Id"
+        }
+      },
+      "span": null,
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "seen",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "slots",
+      "type": {
+        "kind": "map",
+        "key": {
+          "kind": "named",
+          "name": "Id"
+        },
+        "value": {
+          "kind": "named",
+          "name": "Slot"
+        }
+      },
+      "span": null,
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "slots",
+        "lowered": false,
+        "generated": false
+      }
+    },
+    {
+      "name": "total",
+      "type": {
+        "kind": "named",
+        "name": "Qty"
+      },
+      "span": null,
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "total",
+        "lowered": false,
+        "generated": false
+      }
+    }
+  ],
+  "init": {
+    "statements": [
+      {
+        "kind": "forall",
+        "type": {
+          "kind": "statement"
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 18,
+          "column": 5,
+          "end_line": 18,
+          "end_column": 11
+        },
+        "binder": {
+          "name": "i",
+          "type": {
+            "kind": "named",
+            "name": "Id"
+          },
+          "kind": "typed"
+        },
+        "statements": [
+          {
+            "kind": "assign",
+            "type": {
+              "kind": "statement"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 19,
+              "column": 7,
+              "end_line": 19,
+              "end_column": 12
+            },
+            "target": {
+              "kind": "index",
+              "type": {
+                "kind": "named",
+                "name": "Slot"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 19,
+                "column": 7,
+                "end_line": 19,
+                "end_column": 12
+              },
+              "name": "slots",
+              "index": {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 19,
+                  "column": 7,
+                  "end_line": 19,
+                  "end_column": 12
+                },
+                "name": "i"
+              }
+            },
+            "value": {
+              "kind": "struct_lit",
+              "type": {
+                "kind": "named",
+                "name": "Slot"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 19,
+                "column": 7,
+                "end_line": 19,
+                "end_column": 12
+              },
+              "name": "Slot",
+              "fields": {
+                "status": {
+                  "kind": "var",
+                  "type": {
+                    "kind": "named",
+                    "name": "Status"
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 19,
+                    "column": 7,
+                    "end_line": 19,
+                    "end_column": 12
+                  },
+                  "name": "Open"
+                },
+                "qty": {
+                  "kind": "num",
+                  "type": {
+                    "kind": "domain",
+                    "lo": 0,
+                    "hi": 2
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 19,
+                    "column": 7,
+                    "end_line": 19,
+                    "end_column": 12
+                  },
+                  "value": 0
+                },
+                "owner": {
+                  "kind": "none",
+                  "type": {
+                    "kind": "option",
+                    "item": {
+                      "kind": "named",
+                      "name": "Id"
+                    }
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 19,
+                    "column": 7,
+                    "end_line": 19,
+                    "end_column": 12
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "kind": "assign",
+        "type": {
+          "kind": "statement"
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 21,
+          "column": 5,
+          "end_line": 21,
+          "end_column": 11
+        },
+        "target": {
+          "kind": "var",
+          "type": {
+            "kind": "option",
+            "item": {
+              "kind": "named",
+              "name": "Id"
+            }
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 21,
+            "column": 5,
+            "end_line": 21,
+            "end_column": 11
+          },
+          "name": "active"
+        },
+        "value": {
+          "kind": "none",
+          "type": {
+            "kind": "option",
+            "item": {
+              "kind": "named",
+              "name": "Id"
+            }
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 21,
+            "column": 5,
+            "end_line": 21,
+            "end_column": 11
+          }
+        }
+      },
+      {
+        "kind": "assign",
+        "type": {
+          "kind": "statement"
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 22,
+          "column": 5,
+          "end_line": 22,
+          "end_column": 9
+        },
+        "target": {
+          "kind": "var",
+          "type": {
+            "kind": "set",
+            "item": {
+              "kind": "named",
+              "name": "Id"
+            }
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 22,
+            "column": 5,
+            "end_line": 22,
+            "end_column": 9
+          },
+          "name": "seen"
+        },
+        "value": {
+          "kind": "set_lit",
+          "type": {
+            "kind": "set",
+            "item": {
+              "kind": "named",
+              "name": "Id"
+            }
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 22,
+            "column": 5,
+            "end_line": 22,
+            "end_column": 9
+          },
+          "items": []
+        }
+      },
+      {
+        "kind": "assign",
+        "type": {
+          "kind": "statement"
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 23,
+          "column": 5,
+          "end_line": 23,
+          "end_column": 10
+        },
+        "target": {
+          "kind": "var",
+          "type": {
+            "kind": "seq",
+            "item": {
+              "kind": "named",
+              "name": "Id"
+            },
+            "capacity": 2
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 23,
+            "column": 5,
+            "end_line": 23,
+            "end_column": 10
+          },
+          "name": "queue"
+        },
+        "value": {
+          "kind": "seq_lit",
+          "type": {
+            "kind": "seq",
+            "item": {
+              "kind": "named",
+              "name": "Id"
+            },
+            "capacity": 2
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 23,
+            "column": 5,
+            "end_line": 23,
+            "end_column": 10
+          },
+          "items": []
+        }
+      },
+      {
+        "kind": "assign",
+        "type": {
+          "kind": "statement"
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 24,
+          "column": 5,
+          "end_line": 24,
+          "end_column": 10
+        },
+        "target": {
+          "kind": "var",
+          "type": {
+            "kind": "named",
+            "name": "Qty"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 24,
+            "column": 5,
+            "end_line": 24,
+            "end_column": 10
+          },
+          "name": "total"
+        },
+        "value": {
+          "kind": "num",
+          "type": {
+            "kind": "domain",
+            "lo": 0,
+            "hi": 2
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 24,
+            "column": 5,
+            "end_line": 24,
+            "end_column": 10
+          },
+          "value": 0
+        }
+      }
+    ],
+    "requirement": null,
+    "origin": {
+      "dialect": "kernel",
+      "declaration": "init",
+      "lowered": false,
+      "generated": false
+    },
+    "span": {
+      "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+      "line": 18,
+      "column": 5,
+      "end_line": 18,
+      "end_column": 11
+    }
+  },
+  "actions": [
+    {
+      "name": "add",
+      "parameters": [
+        {
+          "name": "i",
+          "type": {
+            "kind": "named",
+            "name": "Id"
+          },
+          "finite_domain": {
+            "lo": 0,
+            "hi": 1
+          }
+        }
+      ],
+      "fair": false,
+      "guards": [
+        {
+          "kind": "requires",
+          "expression": {
+            "kind": "binary",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 28,
+              "column": 5,
+              "end_line": 28,
+              "end_column": 13
+            },
+            "operator": "<",
+            "left": {
+              "kind": "var",
+              "type": {
+                "kind": "named",
+                "name": "Qty"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 28,
+                "column": 5,
+                "end_line": 28,
+                "end_column": 13
+              },
+              "name": "total"
+            },
+            "right": {
+              "kind": "num",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 28,
+                "column": 5,
+                "end_line": 28,
+                "end_column": 13
+              },
+              "value": 2
+            }
+          }
+        },
+        {
+          "kind": "requires",
+          "expression": {
+            "kind": "not",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 29,
+              "column": 5,
+              "end_line": 29,
+              "end_column": 13
+            },
+            "operand": {
+              "kind": "method",
+              "type": {
+                "kind": "bool"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 29,
+                "column": 5,
+                "end_line": 29,
+                "end_column": 13
+              },
+              "receiver": {
+                "kind": "var",
+                "type": {
+                  "kind": "set",
+                  "item": {
+                    "kind": "named",
+                    "name": "Id"
+                  }
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 29,
+                  "column": 5,
+                  "end_line": 29,
+                  "end_column": 13
+                },
+                "name": "seen"
+              },
+              "method": "contains",
+              "arguments": [
+                {
+                  "kind": "var",
+                  "type": {
+                    "kind": "named",
+                    "name": "Id"
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 29,
+                    "column": 5,
+                    "end_line": 29,
+                    "end_column": 13
+                  },
+                  "name": "i"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "requires": [
+        {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 28,
+            "column": 5,
+            "end_line": 28,
+            "end_column": 13
+          },
+          "operator": "<",
+          "left": {
+            "kind": "var",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 28,
+              "column": 5,
+              "end_line": 28,
+              "end_column": 13
+            },
+            "name": "total"
+          },
+          "right": {
+            "kind": "num",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 28,
+              "column": 5,
+              "end_line": 28,
+              "end_column": 13
+            },
+            "value": 2
+          }
+        },
+        {
+          "kind": "not",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 29,
+            "column": 5,
+            "end_line": 29,
+            "end_column": 13
+          },
+          "operand": {
+            "kind": "method",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 29,
+              "column": 5,
+              "end_line": 29,
+              "end_column": 13
+            },
+            "receiver": {
+              "kind": "var",
+              "type": {
+                "kind": "set",
+                "item": {
+                  "kind": "named",
+                  "name": "Id"
+                }
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 29,
+                "column": 5,
+                "end_line": 29,
+                "end_column": 13
+              },
+              "name": "seen"
+            },
+            "method": "contains",
+            "arguments": [
+              {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 29,
+                  "column": 5,
+                  "end_line": 29,
+                  "end_column": 13
+                },
+                "name": "i"
+              }
+            ]
+          }
+        }
+      ],
+      "lets": [],
+      "updates": [
+        {
+          "kind": "assign",
+          "type": {
+            "kind": "statement"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 30,
+            "column": 5,
+            "end_line": 30,
+            "end_column": 11
+          },
+          "target": {
+            "kind": "var",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 30,
+              "column": 5,
+              "end_line": 30,
+              "end_column": 11
+            },
+            "name": "active"
+          },
+          "value": {
+            "kind": "some",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 30,
+              "column": 5,
+              "end_line": 30,
+              "end_column": 11
+            },
+            "operand": {
+              "kind": "var",
+              "type": {
+                "kind": "named",
+                "name": "Id"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 30,
+                "column": 5,
+                "end_line": 30,
+                "end_column": 11
+              },
+              "name": "i"
+            }
+          }
+        },
+        {
+          "kind": "assign",
+          "type": {
+            "kind": "statement"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 31,
+            "column": 5,
+            "end_line": 31,
+            "end_column": 9
+          },
+          "target": {
+            "kind": "var",
+            "type": {
+              "kind": "set",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 31,
+              "column": 5,
+              "end_line": 31,
+              "end_column": 9
+            },
+            "name": "seen"
+          },
+          "value": {
+            "kind": "method",
+            "type": {
+              "kind": "set",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 31,
+              "column": 5,
+              "end_line": 31,
+              "end_column": 9
+            },
+            "receiver": {
+              "kind": "var",
+              "type": {
+                "kind": "set",
+                "item": {
+                  "kind": "named",
+                  "name": "Id"
+                }
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 31,
+                "column": 5,
+                "end_line": 31,
+                "end_column": 9
+              },
+              "name": "seen"
+            },
+            "method": "add",
+            "arguments": [
+              {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 31,
+                  "column": 5,
+                  "end_line": 31,
+                  "end_column": 9
+                },
+                "name": "i"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "assign",
+          "type": {
+            "kind": "statement"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 32,
+            "column": 5,
+            "end_line": 32,
+            "end_column": 10
+          },
+          "target": {
+            "kind": "var",
+            "type": {
+              "kind": "seq",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              },
+              "capacity": 2
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 32,
+              "column": 5,
+              "end_line": 32,
+              "end_column": 10
+            },
+            "name": "queue"
+          },
+          "value": {
+            "kind": "method",
+            "type": {
+              "kind": "seq",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              },
+              "capacity": 2
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 32,
+              "column": 5,
+              "end_line": 32,
+              "end_column": 10
+            },
+            "receiver": {
+              "kind": "var",
+              "type": {
+                "kind": "seq",
+                "item": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "capacity": 2
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 32,
+                "column": 5,
+                "end_line": 32,
+                "end_column": 10
+              },
+              "name": "queue"
+            },
+            "method": "push",
+            "arguments": [
+              {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 32,
+                  "column": 5,
+                  "end_line": 32,
+                  "end_column": 10
+                },
+                "name": "i"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "assign",
+          "type": {
+            "kind": "statement"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 33,
+            "column": 5,
+            "end_line": 33,
+            "end_column": 10
+          },
+          "target": {
+            "kind": "var",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 33,
+              "column": 5,
+              "end_line": 33,
+              "end_column": 10
+            },
+            "name": "total"
+          },
+          "value": {
+            "kind": "binary",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 33,
+              "column": 5,
+              "end_line": 33,
+              "end_column": 10
+            },
+            "operator": "+",
+            "left": {
+              "kind": "var",
+              "type": {
+                "kind": "named",
+                "name": "Qty"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 33,
+                "column": 5,
+                "end_line": 33,
+                "end_column": 10
+              },
+              "name": "total"
+            },
+            "right": {
+              "kind": "num",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 33,
+                "column": 5,
+                "end_line": 33,
+                "end_column": 10
+              },
+              "value": 1
+            }
+          }
+        }
+      ],
+      "update_semantics": "simultaneous",
+      "ensures": [
+        {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 34,
+            "column": 5,
+            "end_line": 34,
+            "end_column": 12
+          },
+          "operator": "==",
+          "left": {
+            "kind": "var",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 34,
+              "column": 5,
+              "end_line": 34,
+              "end_column": 12
+            },
+            "name": "total"
+          },
+          "right": {
+            "kind": "binary",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 34,
+              "column": 5,
+              "end_line": 34,
+              "end_column": 12
+            },
+            "operator": "+",
+            "left": {
+              "kind": "old",
+              "type": {
+                "kind": "named",
+                "name": "Qty"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 34,
+                "column": 5,
+                "end_line": 34,
+                "end_column": 12
+              },
+              "operand": {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Qty"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 34,
+                  "column": 5,
+                  "end_line": 34,
+                  "end_column": 12
+                },
+                "name": "total"
+              }
+            },
+            "right": {
+              "kind": "num",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 34,
+                "column": 5,
+                "end_line": 34,
+                "end_column": 12
+              },
+              "value": 1
+            }
+          }
+        }
+      ],
+      "partial_operations": [],
+      "requirement": {
+        "id": "REQ-208-ADD",
+        "text": "additions are atomic"
+      },
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "REQ-208-ADD",
+        "lowered": false,
+        "generated": false
+      },
+      "span": {
+        "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+        "line": 27,
+        "column": 3,
+        "end_line": 27,
+        "end_column": 9
+      }
+    },
+    {
+      "name": "remove",
+      "parameters": [],
+      "fair": true,
+      "guards": [
+        {
+          "kind": "requires",
+          "expression": {
+            "kind": "binary",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 38,
+              "column": 5,
+              "end_line": 38,
+              "end_column": 13
+            },
+            "operator": ">",
+            "left": {
+              "kind": "method",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 38,
+                "column": 5,
+                "end_line": 38,
+                "end_column": 13
+              },
+              "receiver": {
+                "kind": "var",
+                "type": {
+                  "kind": "seq",
+                  "item": {
+                    "kind": "named",
+                    "name": "Id"
+                  },
+                  "capacity": 2
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 38,
+                  "column": 5,
+                  "end_line": 38,
+                  "end_column": 13
+                },
+                "name": "queue"
+              },
+              "method": "size",
+              "arguments": []
+            },
+            "right": {
+              "kind": "num",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 38,
+                "column": 5,
+                "end_line": 38,
+                "end_column": 13
+              },
+              "value": 0
+            }
+          }
+        }
+      ],
+      "requires": [
+        {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 38,
+            "column": 5,
+            "end_line": 38,
+            "end_column": 13
+          },
+          "operator": ">",
+          "left": {
+            "kind": "method",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 38,
+              "column": 5,
+              "end_line": 38,
+              "end_column": 13
+            },
+            "receiver": {
+              "kind": "var",
+              "type": {
+                "kind": "seq",
+                "item": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "capacity": 2
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 38,
+                "column": 5,
+                "end_line": 38,
+                "end_column": 13
+              },
+              "name": "queue"
+            },
+            "method": "size",
+            "arguments": []
+          },
+          "right": {
+            "kind": "num",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 38,
+              "column": 5,
+              "end_line": 38,
+              "end_column": 13
+            },
+            "value": 0
+          }
+        }
+      ],
+      "lets": [],
+      "updates": [
+        {
+          "kind": "assign",
+          "type": {
+            "kind": "statement"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 39,
+            "column": 5,
+            "end_line": 39,
+            "end_column": 11
+          },
+          "target": {
+            "kind": "var",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 39,
+              "column": 5,
+              "end_line": 39,
+              "end_column": 11
+            },
+            "name": "active"
+          },
+          "value": {
+            "kind": "some",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 39,
+              "column": 5,
+              "end_line": 39,
+              "end_column": 11
+            },
+            "operand": {
+              "kind": "method",
+              "type": {
+                "kind": "named",
+                "name": "Id"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 39,
+                "column": 5,
+                "end_line": 39,
+                "end_column": 11
+              },
+              "receiver": {
+                "kind": "var",
+                "type": {
+                  "kind": "seq",
+                  "item": {
+                    "kind": "named",
+                    "name": "Id"
+                  },
+                  "capacity": 2
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 39,
+                  "column": 5,
+                  "end_line": 39,
+                  "end_column": 11
+                },
+                "name": "queue"
+              },
+              "method": "head",
+              "arguments": []
+            }
+          }
+        },
+        {
+          "kind": "assign",
+          "type": {
+            "kind": "statement"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 40,
+            "column": 5,
+            "end_line": 40,
+            "end_column": 10
+          },
+          "target": {
+            "kind": "var",
+            "type": {
+              "kind": "seq",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              },
+              "capacity": 2
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 40,
+              "column": 5,
+              "end_line": 40,
+              "end_column": 10
+            },
+            "name": "queue"
+          },
+          "value": {
+            "kind": "method",
+            "type": {
+              "kind": "seq",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              },
+              "capacity": 2
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 40,
+              "column": 5,
+              "end_line": 40,
+              "end_column": 10
+            },
+            "receiver": {
+              "kind": "var",
+              "type": {
+                "kind": "seq",
+                "item": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "capacity": 2
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 40,
+                "column": 5,
+                "end_line": 40,
+                "end_column": 10
+              },
+              "name": "queue"
+            },
+            "method": "pop",
+            "arguments": []
+          }
+        }
+      ],
+      "update_semantics": "simultaneous",
+      "ensures": [],
+      "partial_operations": [
+        {
+          "operation": "head",
+          "failure_condition": {
+            "kind": "binary",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 39,
+              "column": 5,
+              "end_line": 39,
+              "end_column": 11
+            },
+            "operator": "==",
+            "left": {
+              "kind": "method",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 39,
+                "column": 5,
+                "end_line": 39,
+                "end_column": 11
+              },
+              "receiver": {
+                "kind": "var",
+                "type": {
+                  "kind": "seq",
+                  "item": {
+                    "kind": "named",
+                    "name": "Id"
+                  },
+                  "capacity": 2
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 39,
+                  "column": 5,
+                  "end_line": 39,
+                  "end_column": 11
+                },
+                "name": "queue"
+              },
+              "method": "size",
+              "arguments": []
+            },
+            "right": {
+              "kind": "num",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 39,
+                "column": 5,
+                "end_line": 39,
+                "end_column": 11
+              },
+              "value": 0
+            }
+          },
+          "state_effect_on_failure": "rollback",
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 39,
+            "column": 5,
+            "end_line": 39,
+            "end_column": 11
+          }
+        },
+        {
+          "operation": "pop",
+          "failure_condition": {
+            "kind": "binary",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 40,
+              "column": 5,
+              "end_line": 40,
+              "end_column": 10
+            },
+            "operator": "==",
+            "left": {
+              "kind": "method",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 40,
+                "column": 5,
+                "end_line": 40,
+                "end_column": 10
+              },
+              "receiver": {
+                "kind": "var",
+                "type": {
+                  "kind": "seq",
+                  "item": {
+                    "kind": "named",
+                    "name": "Id"
+                  },
+                  "capacity": 2
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 40,
+                  "column": 5,
+                  "end_line": 40,
+                  "end_column": 10
+                },
+                "name": "queue"
+              },
+              "method": "size",
+              "arguments": []
+            },
+            "right": {
+              "kind": "num",
+              "type": {
+                "kind": "int"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 40,
+                "column": 5,
+                "end_line": 40,
+                "end_column": 10
+              },
+              "value": 0
+            }
+          },
+          "state_effect_on_failure": "rollback",
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 40,
+            "column": 5,
+            "end_line": 40,
+            "end_column": 10
+          }
+        }
+      ],
+      "requirement": {
+        "id": "REQ-208-REMOVE",
+        "text": "queue removal is guarded"
+      },
+      "origin": {
+        "dialect": "kernel",
+        "declaration": "REQ-208-REMOVE",
+        "lowered": false,
+        "generated": false
+      },
+      "span": {
+        "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+        "line": 37,
+        "column": 3,
+        "end_line": 37,
+        "end_column": 7
+      }
+    }
+  ],
+  "properties": {
+    "invariants": [
+      {
+        "name": "Capacity",
+        "source_kind": "invariant",
+        "expression": {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 43,
+            "column": 3,
+            "end_line": 43,
+            "end_column": 12
+          },
+          "operator": "<=",
+          "left": {
+            "kind": "var",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 43,
+              "column": 3,
+              "end_line": 43,
+              "end_column": 12
+            },
+            "name": "total"
+          },
+          "right": {
+            "kind": "var",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 43,
+              "column": 3,
+              "end_line": 43,
+              "end_column": 12
+            },
+            "name": "CAP"
+          }
+        },
+        "requirement": {
+          "id": "REQ-208-CAP",
+          "text": "total stays within capacity"
+        },
+        "origin": {
+          "dialect": "kernel",
+          "declaration": "REQ-208-CAP",
+          "lowered": false,
+          "generated": false
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 43,
+          "column": 3,
+          "end_line": 43,
+          "end_column": 12
+        }
+      }
+    ],
+    "transitions": [
+      {
+        "name": "EmptyUntilAdd",
+        "source_kind": "unless",
+        "expression": {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 49,
+            "column": 3,
+            "end_line": 49,
+            "end_column": 9
+          },
+          "operator": "=>",
+          "left": {
+            "kind": "binary",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 49,
+              "column": 3,
+              "end_line": 49,
+              "end_column": 9
+            },
+            "operator": "and",
+            "left": {
+              "kind": "old",
+              "type": {
+                "kind": "bool"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 49,
+                "column": 3,
+                "end_line": 49,
+                "end_column": 9
+              },
+              "operand": {
+                "kind": "binary",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 49,
+                  "column": 3,
+                  "end_line": 49,
+                  "end_column": 9
+                },
+                "operator": "==",
+                "left": {
+                  "kind": "var",
+                  "type": {
+                    "kind": "named",
+                    "name": "Qty"
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 49,
+                    "column": 3,
+                    "end_line": 49,
+                    "end_column": 9
+                  },
+                  "name": "total"
+                },
+                "right": {
+                  "kind": "num",
+                  "type": {
+                    "kind": "domain",
+                    "lo": 0,
+                    "hi": 2
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 49,
+                    "column": 3,
+                    "end_line": 49,
+                    "end_column": 9
+                  },
+                  "value": 0
+                }
+              }
+            },
+            "right": {
+              "kind": "not",
+              "type": {
+                "kind": "bool"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 49,
+                "column": 3,
+                "end_line": 49,
+                "end_column": 9
+              },
+              "operand": {
+                "kind": "old",
+                "type": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 49,
+                  "column": 3,
+                  "end_line": 49,
+                  "end_column": 9
+                },
+                "operand": {
+                  "kind": "binary",
+                  "type": {
+                    "kind": "bool"
+                  },
+                  "span": {
+                    "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                    "line": 49,
+                    "column": 3,
+                    "end_line": 49,
+                    "end_column": 9
+                  },
+                  "operator": ">",
+                  "left": {
+                    "kind": "var",
+                    "type": {
+                      "kind": "named",
+                      "name": "Qty"
+                    },
+                    "span": {
+                      "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                      "line": 49,
+                      "column": 3,
+                      "end_line": 49,
+                      "end_column": 9
+                    },
+                    "name": "total"
+                  },
+                  "right": {
+                    "kind": "num",
+                    "type": {
+                      "kind": "int"
+                    },
+                    "span": {
+                      "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                      "line": 49,
+                      "column": 3,
+                      "end_line": 49,
+                      "end_column": 9
+                    },
+                    "value": 0
+                  }
+                }
+              }
+            }
+          },
+          "right": {
+            "kind": "binary",
+            "type": {
+              "kind": "bool"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 49,
+              "column": 3,
+              "end_line": 49,
+              "end_column": 9
+            },
+            "operator": "or",
+            "left": {
+              "kind": "binary",
+              "type": {
+                "kind": "bool"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 49,
+                "column": 3,
+                "end_line": 49,
+                "end_column": 9
+              },
+              "operator": "==",
+              "left": {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Qty"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 49,
+                  "column": 3,
+                  "end_line": 49,
+                  "end_column": 9
+                },
+                "name": "total"
+              },
+              "right": {
+                "kind": "num",
+                "type": {
+                  "kind": "domain",
+                  "lo": 0,
+                  "hi": 2
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 49,
+                  "column": 3,
+                  "end_line": 49,
+                  "end_column": 9
+                },
+                "value": 0
+              }
+            },
+            "right": {
+              "kind": "binary",
+              "type": {
+                "kind": "bool"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 49,
+                "column": 3,
+                "end_line": 49,
+                "end_column": 9
+              },
+              "operator": ">",
+              "left": {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Qty"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 49,
+                  "column": 3,
+                  "end_line": 49,
+                  "end_column": 9
+                },
+                "name": "total"
+              },
+              "right": {
+                "kind": "num",
+                "type": {
+                  "kind": "int"
+                },
+                "span": {
+                  "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                  "line": 49,
+                  "column": 3,
+                  "end_line": 49,
+                  "end_column": 9
+                },
+                "value": 0
+              }
+            }
+          }
+        },
+        "requirement": {
+          "id": "REQ-208-UNLESS",
+          "text": "empty remains empty until an add"
+        },
+        "origin": {
+          "dialect": "kernel",
+          "declaration": "REQ-208-UNLESS",
+          "lowered": false,
+          "generated": false
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 49,
+          "column": 3,
+          "end_line": 49,
+          "end_column": 9
+        }
+      },
+      {
+        "name": "Monotone",
+        "source_kind": "trans",
+        "expression": {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 44,
+            "column": 3,
+            "end_line": 44,
+            "end_column": 8
+          },
+          "operator": ">=",
+          "left": {
+            "kind": "var",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 44,
+              "column": 3,
+              "end_line": 44,
+              "end_column": 8
+            },
+            "name": "total"
+          },
+          "right": {
+            "kind": "old",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 44,
+              "column": 3,
+              "end_line": 44,
+              "end_column": 8
+            },
+            "operand": {
+              "kind": "var",
+              "type": {
+                "kind": "named",
+                "name": "Qty"
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 44,
+                "column": 3,
+                "end_line": 44,
+                "end_column": 8
+              },
+              "name": "total"
+            }
+          }
+        },
+        "requirement": {
+          "id": "REQ-208-MONO",
+          "text": "total never decreases"
+        },
+        "origin": {
+          "dialect": "kernel",
+          "declaration": "REQ-208-MONO",
+          "lowered": false,
+          "generated": false
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 44,
+          "column": 3,
+          "end_line": 44,
+          "end_column": 8
+        }
+      }
+    ],
+    "reachables": [
+      {
+        "name": "Full",
+        "source_kind": "reachable",
+        "expression": {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 45,
+            "column": 3,
+            "end_line": 45,
+            "end_column": 12
+          },
+          "operator": "==",
+          "left": {
+            "kind": "var",
+            "type": {
+              "kind": "named",
+              "name": "Qty"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 45,
+              "column": 3,
+              "end_line": 45,
+              "end_column": 12
+            },
+            "name": "total"
+          },
+          "right": {
+            "kind": "var",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 45,
+              "column": 3,
+              "end_line": 45,
+              "end_column": 12
+            },
+            "name": "CAP"
+          }
+        },
+        "requirement": {
+          "id": "REQ-208-FULL",
+          "text": "capacity can be reached"
+        },
+        "origin": {
+          "dialect": "kernel",
+          "declaration": "REQ-208-FULL",
+          "lowered": false,
+          "generated": false
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 45,
+          "column": 3,
+          "end_line": 45,
+          "end_column": 12
+        }
+      }
+    ],
+    "leads_to": [
+      {
+        "name": "Drained",
+        "source_kind": "leadsto",
+        "binders": [],
+        "before": {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 46,
+            "column": 3,
+            "end_line": 46,
+            "end_column": 10
+          },
+          "operator": ">",
+          "left": {
+            "kind": "method",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 46,
+              "column": 3,
+              "end_line": 46,
+              "end_column": 10
+            },
+            "receiver": {
+              "kind": "var",
+              "type": {
+                "kind": "seq",
+                "item": {
+                  "kind": "named",
+                  "name": "Id"
+                },
+                "capacity": 2
+              },
+              "span": {
+                "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+                "line": 46,
+                "column": 3,
+                "end_line": 46,
+                "end_column": 10
+              },
+              "name": "queue"
+            },
+            "method": "size",
+            "arguments": []
+          },
+          "right": {
+            "kind": "num",
+            "type": {
+              "kind": "int"
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 46,
+              "column": 3,
+              "end_line": 46,
+              "end_column": 10
+            },
+            "value": 0
+          }
+        },
+        "after": {
+          "kind": "binary",
+          "type": {
+            "kind": "bool"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 46,
+            "column": 3,
+            "end_line": 46,
+            "end_column": 10
+          },
+          "operator": "!=",
+          "left": {
+            "kind": "var",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 46,
+              "column": 3,
+              "end_line": 46,
+              "end_column": 10
+            },
+            "name": "active"
+          },
+          "right": {
+            "kind": "none",
+            "type": {
+              "kind": "option",
+              "item": {
+                "kind": "named",
+                "name": "Id"
+              }
+            },
+            "span": {
+              "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+              "line": 46,
+              "column": 3,
+              "end_line": 46,
+              "end_column": 10
+            }
+          }
+        },
+        "within": null,
+        "decreases": null,
+        "requirement": {
+          "id": "REQ-208-DRAIN",
+          "text": "queued work is eventually selected"
+        },
+        "origin": {
+          "dialect": "kernel",
+          "declaration": "REQ-208-DRAIN",
+          "lowered": false,
+          "generated": false
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 46,
+          "column": 3,
+          "end_line": 46,
+          "end_column": 10
+        }
+      }
+    ],
+    "terminal": {
+      "source_kind": "terminal",
+      "expression": {
+        "kind": "binary",
+        "type": {
+          "kind": "bool"
+        },
+        "span": {
+          "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+          "line": 52,
+          "column": 3,
+          "end_line": 52,
+          "end_column": 11
+        },
+        "operator": "==",
+        "left": {
+          "kind": "var",
+          "type": {
+            "kind": "named",
+            "name": "Qty"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 52,
+            "column": 3,
+            "end_line": 52,
+            "end_column": 11
+          },
+          "name": "total"
+        },
+        "right": {
+          "kind": "var",
+          "type": {
+            "kind": "int"
+          },
+          "span": {
+            "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+            "line": 52,
+            "column": 3,
+            "end_line": 52,
+            "end_column": 11
+          },
+          "name": "CAP"
+        }
+      },
+      "span": {
+        "file": "rust/fslc/tests/fixtures/kernel_contract.fsl",
+        "line": 52,
+        "column": 3,
+        "end_line": 52,
+        "end_column": 11
+      }
+    }
+  },
+  "fsl": "1.0",
+  "result": "kernel"
+}

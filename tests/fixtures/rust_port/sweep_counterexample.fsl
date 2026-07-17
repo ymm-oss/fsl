@@ -1,0 +1,21 @@
+requirements SweepCounterexample {
+  entity Case
+
+  state { selected: Map<Case, Bool> }
+
+  init {
+    forall c: Case { selected[c] = false }
+  }
+
+  action select(c: Case) {
+    requires not selected[c]
+    selected[c] = true
+  }
+
+  invariant AtMostOne {
+    count(c: Case where selected[c]) <= 1
+  }
+}
+verify {
+  instances Case = 2
+}

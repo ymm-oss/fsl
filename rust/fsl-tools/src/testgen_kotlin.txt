@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Auto-generated FSL conformance tests (kotlin.test).
+// Source: __SOURCE__
+//
+// Wire `makeAdapter()` to your implementation. Until it is wired it returns null
+// and every test returns early (kotlin.test has no portable runtime skip), so the
+// suite passes trivially rather than failing — mirroring the other targets.
+//
+// The random-walk trace below was baked at generation time by the FSL Monitor
+// (the spec's concrete interpreter) under a fixed seed, so these tests need no
+// `fslc`/Python at runtime — they replay the baked oracle states and assert.
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+data class StepResult(val ok: Boolean, val kind: String? = null)
+
+/**
+ * Connect your implementation to the spec actions/state.
+ *  - reset(): put the implementation in the same initial state as spec `init`
+ *  - step(action, params): drive one spec action; return a StepResult for
+ *    forbidden-rejection scenarios (null is fine for ordinary steps)
+ *  - observe(): project implementation state onto the spec's logical-state shape
+ *    (enum = name string, Option = null|value, Seq = List, Map = Map with string
+ *     keys, struct = Map)
+ */
+interface Adapter {
+    fun reset()
+    fun step(action: String, params: Map<String, Any?>): StepResult?
+    fun observe(): Map<String, Any?>
+}
+
+// Wire your implementation here. Return your adapter instead of null.
+fun makeAdapter(): Adapter? = null
+
+// Assert only the fields the spec mentions; recurse into nested (Map/struct)
+// shapes. Kotlin's `==` is deep on List/Map and discriminates Int from Double, so
+// leaf assertEquals does the right thing.
+fun assertPartial(observed: Map<String, Any?>, expected: Map<String, Any?>) {
+    for ((key, value) in expected) {
+        assertTrue(observed.containsKey(key), "missing state key $key")
+        val seen = observed[key]
+        if (value is Map<*, *> && seen is Map<*, *>) {
+            @Suppress("UNCHECKED_CAST")
+            assertPartial(seen as Map<String, Any?>, value as Map<String, Any?>)
+        } else {
+            assertEquals(value, seen, "state $key")
+        }
+    }
+}
+
+fun assertRejected(result: StepResult?, expectedKind: String?) {
+    assertNotNull(result, "forbidden step must return a StepResult")
+    assertFalse(result.ok)
+    if (expectedKind != null) {
+        assertEquals(expectedKind, result.kind)
+    }
+}

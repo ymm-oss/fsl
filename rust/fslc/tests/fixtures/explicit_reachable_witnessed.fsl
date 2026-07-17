@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitReachableWitnessed {
+  type Count = 0..3
+
+  state { count: Count }
+  init { count = 0 }
+
+  action inc() {
+    requires count < 3
+    count = count + 1
+  }
+
+  reachable HitTwo { count == 2 }
+}

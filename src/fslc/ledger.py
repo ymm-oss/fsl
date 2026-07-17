@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .assurance import ASSURANCE_ORDER, NOT_RUN, assurance_label, classify_result, requirement_assurance
+
 
 def default_output_name(file: str) -> str:
     return f"{Path(file).stem}_ledger.md"
@@ -31,7 +33,10 @@ _META_GROUPS = ("invariants", "actions", "leadstos", "reachables", "transitions"
 
 
 def _requirement_registry(spec: dict) -> dict:
-    """{req_id: {text, controls, owner, severity}} for every tagged element."""
+    """{req_id: {text, controls, owner, severity, elements}} for every tagged
+    element. ``elements`` is {group: [name, ...]} — which invariant/action/
+    leadsTo/reachable/transition names carry this requirement id, used to
+    compute the requirement's assurance class (see ``assurance.py``)."""
     control_by_id = {c["id"]: c for c in (spec.get("controls") or [])}
     reg: dict = {}
     for group in _META_GROUPS:
@@ -41,10 +46,12 @@ def _requirement_registry(spec: dict) -> dict:
                 continue
             rid = meta["id"]
             entry = reg.setdefault(
-                rid, {"text": meta.get("text"), "controls": [], "owner": None, "severity": None}
+                rid, {"text": meta.get("text"), "controls": [], "owner": None,
+                      "severity": None, "elements": {}}
             )
             if entry["text"] is None:
                 entry["text"] = meta.get("text")
+            entry["elements"].setdefault(group, []).append(item.get("name"))
             for ctrl in meta.get("controls") or []:
                 cid = ctrl.get("id")
                 if cid and cid not in [c["id"] for c in entry["controls"]]:
@@ -208,6 +215,25 @@ def _esc(text) -> str:
     return str(text or "").replace("|", "\\|").replace("\n", " ")
 
 
+def _assurance_cell(ac: dict | None, verification: dict) -> str:
+    """The 保証クラス column/detail text for one requirement's assurance entry
+    (see ``assurance.requirement_assurance``) — every source, strongest first,
+    deduplicated by label."""
+    if not ac or not ac.get("sources"):
+        return assurance_label(NOT_RUN)
+    depth = verification.get("checked_to_depth", verification.get("depth"))
+    labels = []
+    for src in sorted(ac["sources"], key=lambda s: ASSURANCE_ORDER.index(s["assurance"])):
+        under = ac.get("under_assumptions", False) if src["kind"] == "formal" else False
+        label = assurance_label(
+            src["assurance"], depth=depth, confidence=src.get("confidence"),
+            under_assumptions=under,
+        )
+        if label not in labels:
+            labels.append(label)
+    return " + ".join(labels)
+
+
 def _confirmed_reqs(scenarios_result: dict) -> dict:
     """req_id -> list of passing scenario names (acceptance/forbidden/reachable)."""
     out: dict = {}
@@ -218,10 +244,13 @@ def _confirmed_reqs(scenarios_result: dict) -> dict:
     return out
 
 
-def render_ledger(file, spec, verification, scenarios_result, replay_result=None) -> str:
+def render_ledger(file, spec, verification, scenarios_result, replay_result=None,
+                   evidence_results=None) -> str:
     registry = _requirement_registry(spec)
     findings = _collect_findings(verification)
     confirmed = _confirmed_reqs(scenarios_result or {})
+    evidence_dicts = [ev for _src, ev in (evidence_results or [])]
+    assurance = requirement_assurance(registry, verification, evidence_dicts)
 
     by_req: dict = {}
     spec_level = []
@@ -239,6 +268,12 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
     L.append("")
     L.append(f"- 対象: `{file}`")
     L.append(f"- 保証限界: {_guarantee_line(verification)}")
+    L.append(
+        "- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / "
+        "`bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / "
+        "`statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。"
+        "詳細は `docs/DESIGN-assurance-classes.md`。"
+    )
     L.append("- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。")
     if replay_result is not None:
         rr = replay_result.get("result")
@@ -251,8 +286,8 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
     # page 1 — risk list
     L.append("## リスク一覧（要件ID別）")
     L.append("")
-    L.append("| 要件ID | 業務目的 | 状態 | 検出種別 | リスク | 判断者 | 次アクション |")
-    L.append("|---|---|---|---|---|---|---|")
+    L.append("| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |")
+    L.append("|---|---|---|---|---|---|---|---|")
     for rid in all_ids:
         reg = registry.get(rid, {})
         fs = by_req.get(rid, [])
@@ -267,10 +302,12 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
             action = "—"
         risk = _esc(reg.get("severity") or ("要確認" if fs else "—"))
         owner = _esc(reg.get("owner") or ("____" if fs else "—"))
-        L.append(f"| {_esc(rid)} | {purpose} | {status} | {_esc(types)} | {risk} | {owner} | {_esc(action)} |")
+        ac = assurance.get(rid)
+        assurance_col = _esc(_assurance_cell(ac, verification))
+        L.append(f"| {_esc(rid)} | {purpose} | {status} | {assurance_col} | {_esc(types)} | {risk} | {owner} | {_esc(action)} |")
     if spec_level:
         types = ", ".join(sorted({f["trace_type"] for f in spec_level}))
-        L.append(f"| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {_esc(types)} | 要確認 | ____ | 下記詳細 |")
+        L.append(f"| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {_esc(assurance_label(classify_result(verification), depth=verification.get('checked_to_depth')))} | {_esc(types)} | 要確認 | ____ | 下記詳細 |")
     L.append("")
 
     # page 2+ — per-requirement detail
@@ -291,12 +328,29 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
                 gov += f"（owner: {reg['owner']}"
                 gov += f", severity: {reg['severity']}）" if reg.get("severity") else "）"
             L.append(f"- {gov}")
+        if rid != "（仕様全体）":
+            L.append(f"- 保証クラス: {_assurance_cell(assurance.get(rid), verification)}")
         for f in fs:
             L.append(f"- **検出**: `{f['trace_type']}` — {_esc(f.get('name'))}")
             L.append(f"  - 反例要約: {_esc(f['summary'])}")
             L.append(f"  - 業務翻訳: {_translate(f)}")
             L.append(f"  - 次アクション: {_esc(_next_action(f))}")
         L.append(f"- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: {reg.get('owner') or '____'}　期限: ____")
+        L.append("")
+
+    # external evidence (fsl-ai/db/domain not_run producers, --evidence)
+    if evidence_results:
+        L.append("## 外部エビデンス")
+        L.append("")
+        L.append("| ファイル | producer結果 | 保証クラス | 対象要件ID |")
+        L.append("|---|---|---|---|")
+        for src, ev in evidence_results:
+            req_ids = list(ev.get("requirements") or [])
+            req = ev.get("requirement")
+            if isinstance(req, dict) and req.get("id"):
+                req_ids.append(req["id"])
+            label = assurance_label(classify_result(ev), confidence=None)
+            L.append(f"| `{_esc(src)}` | {_esc(ev.get('result'))} | {_esc(label)} | {_esc(', '.join(req_ids) or '（仕様全体）')} |")
         L.append("")
 
     # appendix — raw JSON demoted

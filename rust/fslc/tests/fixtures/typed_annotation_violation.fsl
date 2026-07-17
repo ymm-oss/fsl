@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements TypedAnnotationViolation {
+  state { ready: Bool }
+  init { ready = false }
+
+  requirement REQ-OUTER "outer requirement" {
+    action wait() { ready = ready }
+    invariant InitiallyReady "REQ-SAFETY: safety requirement" { ready == true }
+  }
+}

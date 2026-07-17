@@ -73,7 +73,8 @@ _STATE_TYPE_HINT = (
     "v1 state variables may use: scalar (Int, Bool, domain, enum), "
     "Option<scalar>, struct (scalar or Option<scalar> fields only), "
     "Map<bounded-scalar (Bool/domain/enum), scalar | Option<scalar> | struct>, "
-    "Set<bounded-scalar (Bool/domain/enum)>, or Seq<scalar, N>"
+    "Set<bounded-scalar (Bool/domain/enum)>, Seq<scalar, N>, or "
+    "relation bounded-scalar -> bounded-scalar"
 )
 
 
@@ -120,6 +121,12 @@ def resolve_type(ty, types, consts=None):
         return _resolve_inline_range(ty, consts)
     if ty[0] == "map":
         return ("map", resolve_type(ty[1], types, consts), resolve_type(ty[2], types, consts))
+    if ty[0] == "relation":
+        return (
+            "relation",
+            resolve_type(ty[1], types, consts),
+            resolve_type(ty[2], types, consts),
+        )
     if ty[0] == "set":
         return ("set", resolve_type(ty[1], types, consts))
     if ty[0] == "seq":
@@ -141,6 +148,8 @@ def is_bounded(ty, types_meta):
         return True
     if ty[0] == "map":
         return is_bounded(ty[1], types_meta)
+    if ty[0] == "relation":
+        return is_bounded(ty[1], types_meta) and is_bounded(ty[2], types_meta)
     if ty[0] == "set":
         return is_bounded(ty[1], types_meta)
     return False
@@ -154,6 +163,147 @@ def domain_range(ty, types_meta):
     if ty[0] == "enum":
         return 0, len(types_meta[ty[1]]["members"]) - 1
     _err(f"expected bounded type, got {ty}", kind="type")
+
+
+def _snapshot_scalar(value, ty, types_meta, path):
+    if ty[0] == "bool":
+        if not isinstance(value, bool):
+            _err(f"{path}: expected Bool, got {value!r}", kind="type")
+        return value
+    if ty[0] == "int":
+        if not isinstance(value, int) or isinstance(value, bool):
+            _err(f"{path}: expected Int, got {value!r}", kind="type")
+        return value
+    if ty[0] == "domain":
+        if not isinstance(value, int) or isinstance(value, bool):
+            _err(f"{path}: expected bounded integer, got {value!r}", kind="type")
+        lo, hi = domain_range(ty, types_meta)
+        if value < lo or value > hi:
+            _err(f"{path}: value {value} is out of range [{lo}..{hi}]", kind="type")
+        return value
+    if ty[0] == "enum":
+        members = types_meta[ty[1]]["members"]
+        if not isinstance(value, str) or value not in members:
+            _err(
+                f"{path}: expected {ty[1]} enum member {members}, got {value!r}",
+                kind="type",
+            )
+        return members.index(value)
+    _err(f"{path}: expected scalar type, got {ty}", kind="type")
+
+
+def _snapshot_domain_values(ty, types_meta):
+    if ty[0] == "bool":
+        return [False, True]
+    lo, hi = domain_range(ty, types_meta)
+    return list(range(lo, hi + 1))
+
+
+def _snapshot_display_key(key, ty, types_meta):
+    if ty[0] == "bool":
+        return "true" if key else "false"
+    if ty[0] == "enum":
+        return types_meta[ty[1]]["members"][key]
+    return str(key)
+
+
+def _validate_snapshot_value(value, ty, types_meta, path):
+    if ty[0] in ("bool", "int", "domain", "enum"):
+        return _snapshot_scalar(value, ty, types_meta, path)
+    if ty[0] == "option":
+        if value is None:
+            return None
+        return _validate_snapshot_value(value, ty[1], types_meta, path)
+    if ty[0] == "struct":
+        if not isinstance(value, dict):
+            _err(f"{path}: expected object for struct {ty[1]}", kind="type")
+        fields = types_meta[ty[1]]["fields"]
+        missing = sorted(set(fields) - set(value))
+        extra = sorted(set(value) - set(fields))
+        if missing:
+            _err(f"{path}: missing struct field '{missing[0]}'", kind="type")
+        if extra:
+            _err(f"{path}: unknown struct field '{extra[0]}'", kind="type")
+        return {
+            field: _validate_snapshot_value(value[field], field_ty, types_meta,
+                                            f"{path}.{field}")
+            for field, field_ty in fields.items()
+        }
+    if ty[0] == "map":
+        if not isinstance(value, dict):
+            _err(f"{path}: expected object for Map", kind="type")
+        expected = {
+            _snapshot_display_key(key, ty[1], types_meta): key
+            for key in _snapshot_domain_values(ty[1], types_meta)
+        }
+        missing = sorted(set(expected) - set(value))
+        extra = sorted(set(value) - set(expected))
+        if missing:
+            _err(f"{path}: missing Map key '{missing[0]}'", kind="type")
+        if extra:
+            _err(f"{path}: unknown Map key '{extra[0]}'", kind="type")
+        return {
+            key: _validate_snapshot_value(
+                value[display], ty[2], types_meta, f"{path}[{display}]"
+            )
+            for display, key in expected.items()
+        }
+    if ty[0] == "set":
+        if not isinstance(value, list):
+            _err(f"{path}: expected array for Set", kind="type")
+        normalized = [
+            _validate_snapshot_value(item, ty[1], types_meta, f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+        if len(normalized) != len(set(normalized)):
+            _err(f"{path}: duplicate Set element", kind="type")
+        return frozenset(normalized)
+    if ty[0] == "seq":
+        if not isinstance(value, list):
+            _err(f"{path}: expected array for Seq", kind="type")
+        if len(value) > ty[2]:
+            _err(f"{path}: Seq length {len(value)} exceeds capacity {ty[2]}", kind="type")
+        return [
+            _validate_snapshot_value(item, ty[1], types_meta, f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if ty[0] == "relation":
+        if not isinstance(value, list):
+            _err(f"{path}: expected array of pairs for relation", kind="type")
+        normalized = []
+        for index, pair in enumerate(value):
+            if not isinstance(pair, list) or len(pair) != 2:
+                _err(f"{path}[{index}]: relation entry must be a two-element array",
+                     kind="type")
+            normalized.append((
+                _validate_snapshot_value(pair[0], ty[1], types_meta, f"{path}[{index}][0]"),
+                _validate_snapshot_value(pair[1], ty[2], types_meta, f"{path}[{index}][1]"),
+            ))
+        if len(normalized) != len(set(normalized)):
+            _err(f"{path}: duplicate relation pair", kind="type")
+        return frozenset(normalized)
+    _err(f"{path}: unsupported snapshot type {ty}", kind="type")
+
+
+def validate_state_snapshot(spec, snapshot):
+    """Validate Monitor/replay logical-state JSON and return internal values."""
+
+    if not isinstance(snapshot, dict):
+        _err("state snapshot must be a JSON object", kind="type")
+    display_names = spec.get("display_names") or {}
+    public_to_logical = {display_names.get(name, name): name for name in spec["state"]}
+    missing = sorted(set(public_to_logical) - set(snapshot))
+    extra = sorted(set(snapshot) - set(public_to_logical))
+    if missing:
+        _err(f"missing state variable '{missing[0]}'", kind="type")
+    if extra:
+        _err(f"unknown state variable '{extra[0]}'", kind="type")
+    return {
+        logical: _validate_snapshot_value(
+            snapshot[public], spec["state"][logical], spec["types"], f"state.{public}"
+        )
+        for public, logical in public_to_logical.items()
+    }
 
 
 def enum_member_index(types_meta, member_name):
@@ -188,6 +338,12 @@ def resolve_type_ref(ty, types, consts=None):
             resolve_type_ref(ty[1], types, consts),
             resolve_type_ref(ty[2], types, consts),
         )
+    if ty[0] == "relation":
+        return (
+            "relation",
+            resolve_type_ref(ty[1], types, consts),
+            resolve_type_ref(ty[2], types, consts),
+        )
     if ty[0] == "set":
         return ("set", resolve_type_ref(ty[1], types, consts))
     if ty[0] == "seq":
@@ -198,6 +354,292 @@ def resolve_type_ref(ty, types, consts=None):
     if ty[0] == "option":
         return ("option", resolve_type_ref(ty[1], types, consts))
     _err(f"unknown type form {ty}", kind="type")
+
+
+def binder_static_type(binder, spec, preserve_names=False):
+    if binder[0] == "binder_typed":
+        ty_name = binder[2]
+        if ty_name in spec["types"]:
+            return ("named", ty_name) if preserve_names else spec["types"][ty_name]["ty"]
+    if binder[0] == "binder_collection":
+        coll_ty = expr_static_type(binder[2], spec, {}, preserve_names)
+        if coll_ty and coll_ty[0] in ("set", "seq"):
+            return coll_ty[1]
+    return ("int",)
+
+
+def _merge_ite_static_types(a, b, preserve_names=False):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if a == b:
+        return a
+    if a[0] == "option" and b[0] == "option":
+        inner_a, inner_b = a[1], b[1]
+        if inner_a is None:
+            return b
+        if inner_b is None:
+            return a
+        if inner_a == ("int",):
+            return b
+        if inner_b == ("int",):
+            return a
+        return ("option", _merge_ite_static_types(inner_a, inner_b, preserve_names))
+    if preserve_names:
+        _err(f"if arms must have the same type: {a} vs {b}", kind="type")
+    if a[0] in ("int", "domain", "enum") and b[0] in ("int", "domain", "enum"):
+        if a[0] == "int":
+            return b
+        return a
+    _err(f"if arms must have the same type: {a} vs {b}", kind="type")
+
+
+def expr_static_type(e, spec, env, preserve_names=False):
+    tag = e[0]
+    if tag == "num":
+        return ("int",)
+    if tag == "bool":
+        return ("bool",)
+    if tag == "none":
+        return ("option", None if preserve_names else ("int",))
+    if tag == "var":
+        n = e[1]
+        if n in env:
+            return env[n]
+        if n in spec["state"]:
+            return spec["state_type_refs"][n] if preserve_names else spec["state"][n]
+        for name, info in spec["types"].items():
+            if info["kind"] == "enum" and n in info["members"]:
+                return ("enum", name)
+        return None
+    if tag == "some":
+        return ("option", expr_static_type(e[1], spec, env, preserve_names))
+    if tag == "struct_lit":
+        return ("struct", e[1])
+    if tag == "index":
+        base = e[1]
+        if isinstance(base, str):
+            base_ty = (
+                spec["state_type_refs"].get(base)
+                if preserve_names
+                else spec["state"].get(base)
+            ) or env.get(base)
+        elif base[0] == "var":
+            name = base[1]
+            base_ty = (
+                spec["state_type_refs"].get(name)
+                if preserve_names
+                else spec["state"].get(name)
+            ) or env.get(name)
+        else:
+            base_ty = expr_static_type(base, spec, env, preserve_names)
+        if base_ty and base_ty[0] == "map":
+            return base_ty[2]
+        return None
+    if tag == "field":
+        base_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if base_ty and base_ty[0] in ("struct", "named"):
+            type_name = base_ty[1]
+            if spec["types"].get(type_name, {}).get("kind") != "struct":
+                return None
+            fields = spec["types"][type_name][
+                "field_refs" if preserve_names else "fields"
+            ]
+            return fields.get(e[2])
+        return None
+    if tag == "method":
+        method = e[2]
+        base_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if base_ty and base_ty[0] == "relation":
+            if method == "contains":
+                return ("bool",)
+            if method in ("add", "remove"):
+                return base_ty
+            _err(f"unknown method '{method}' on relation", kind="type")
+        if method == "contains":
+            return ("bool",)
+        if method == "size":
+            return ("int",)
+        if method in ("add", "remove", "push", "pop"):
+            return base_ty
+        if method in ("head", "at"):
+            return base_ty[1] if base_ty and base_ty[0] == "seq" else ("int",)
+        return None
+    if tag == "bin":
+        return ("int",) if e[1] in ("+", "-", "*", "/", "%") else ("bool",)
+    if tag == "ite":
+        condition_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if condition_ty and condition_ty != ("bool",):
+            _err(f"if condition must be Bool, got {condition_ty}", kind="type")
+        return _merge_ite_static_types(
+            expr_static_type(e[2], spec, env, preserve_names),
+            expr_static_type(e[3], spec, env, preserve_names),
+            preserve_names,
+        )
+    if tag in ("not", "is", "forall", "exists", "unique", "exactly_one"):
+        return ("bool",)
+    if tag in ("rel_reachable", "rel_acyclic", "rel_functional", "rel_injective"):
+        return ("bool",)
+    if tag in ("rel_domain", "rel_range"):
+        rel_ty = expr_static_type(e[1], spec, env, preserve_names)
+        if not rel_ty or rel_ty[0] != "relation":
+            _err(f"{tag[4:]}() expects a relation", kind="type")
+        return ("set", rel_ty[1] if tag == "rel_domain" else rel_ty[2])
+    if tag in ("count", "sum", "min", "max", "abs"):
+        return ("int",)
+    if tag == "old":
+        return expr_static_type(e[1], spec, env, preserve_names)
+    return None
+
+
+def _normalized_type_identity(ty, spec):
+    if ty is None:
+        return None
+    if ty[0] == "named":
+        info = spec["types"][ty[1]]
+        return (info["kind"], ty[1])
+    if ty[0] == "option":
+        return ("option", _normalized_type_identity(ty[1], spec))
+    return ty
+
+
+def _option_payload_types_compatible(left, right, spec):
+    left = _normalized_type_identity(left, spec)
+    right = _normalized_type_identity(right, spec)
+    if left is None or right is None or left == right:
+        return True
+    if left[0] == "option" and right[0] == "option":
+        return _option_payload_types_compatible(left[1], right[1], spec)
+    return left[0] in ("int", "domain") and right[0] in ("int", "domain")
+
+
+def _extend_pattern_type(expr, spec, env):
+    if expr[0] == "is" and expr[2][0] == "pat_some":
+        option_ty = expr_static_type(expr[1], spec, env, True)
+        if option_ty and option_ty[0] == "option":
+            env[expr[2][1]] = option_ty[1]
+    elif expr[0] == "bin":
+        _extend_pattern_type(expr[2], spec, env)
+        _extend_pattern_type(expr[3], spec, env)
+
+
+def _validate_option_equalities_expr(expr, spec, env):
+    if not isinstance(expr, tuple):
+        return
+    tag = expr[0]
+    if tag == "bin":
+        if expr[1] in ("==", "!="):
+            left = expr_static_type(expr[2], spec, env, True)
+            right = expr_static_type(expr[3], spec, env, True)
+            if (left and left[0] == "option") or (right and right[0] == "option"):
+                if not left or not right or left[0] != "option" or right[0] != "option":
+                    _err("Option comparison requires two Option values", kind="type")
+                if not _option_payload_types_compatible(left[1], right[1], spec):
+                    _err("Option comparison requires matching payload types", kind="type")
+        _validate_option_equalities_expr(expr[2], spec, env)
+        right_env = dict(env)
+        _extend_pattern_type(expr[2], spec, right_env)
+        _validate_option_equalities_expr(expr[3], spec, right_env)
+        return
+    if tag in ("forall", "exists"):
+        binder, body = expr[1], expr[2]
+        local = {**env, binder[1]: binder_static_type(binder, spec, True)}
+        if len(binder) > 3 and binder[3] is not None:
+            _validate_option_equalities_expr(binder[3], spec, local)
+        _validate_option_equalities_expr(body, spec, local)
+        return
+    if tag in ("unique", "exactly_one"):
+        binder = expr[1]
+        local = {**env, binder[1]: binder_static_type(binder, spec, True)}
+        if len(binder) > 3 and binder[3] is not None:
+            _validate_option_equalities_expr(binder[3], spec, local)
+        return
+    if tag in ("count", "sum"):
+        type_name = expr[2]
+        local = {**env, expr[1]: ("named", type_name)}
+        for child in expr[3:]:
+            _validate_option_equalities_expr(child, spec, local)
+        return
+    for child in expr[1:]:
+        if isinstance(child, tuple):
+            _validate_option_equalities_expr(child, spec, env)
+        elif isinstance(child, dict):
+            for value in child.values():
+                _validate_option_equalities_expr(value, spec, env)
+        elif isinstance(child, list):
+            for value in child:
+                _validate_option_equalities_expr(value, spec, env)
+
+
+def _validate_option_equalities_statements(statements, spec, env):
+    for statement in statements:
+        if statement[0] == "assign":
+            _validate_option_equalities_lvalue(statement[1], spec, env)
+            _validate_option_equalities_expr(statement[2], spec, env)
+        elif statement[0] == "if":
+            _validate_option_equalities_expr(statement[1], spec, env)
+            _validate_option_equalities_statements(statement[2], spec, env)
+            _validate_option_equalities_statements(statement[3], spec, env)
+        elif statement[0] == "forall_stmt":
+            binder = statement[1]
+            local = {**env, binder[1]: binder_static_type(binder, spec, True)}
+            if len(binder) > 3 and binder[3] is not None:
+                _validate_option_equalities_expr(binder[3], spec, local)
+            _validate_option_equalities_statements(statement[2], spec, local)
+
+
+def _validate_option_equalities_lvalue(lvalue, spec, env):
+    if lvalue[0] == "index":
+        _validate_option_equalities_expr(lvalue[2], spec, env)
+    elif lvalue[0] == "field_lv":
+        _validate_option_equalities_lvalue(lvalue[1], spec, env)
+
+
+def validate_option_equalities(spec):
+    _validate_option_equalities_statements(spec["init"], spec, {})
+    for action in spec["actions"]:
+        env = {
+            param[0]: (
+                ("bool",)
+                if param[3] == "Bool"
+                else (("named", param[3]) if param[3] else ("int",))
+            )
+            for param in action["params"]
+        }
+        guards = [("requires", item) for item in action["requires"]] + [
+            ("let", item) for item in action["lets"]
+        ]
+        guards.sort(
+            key=lambda entry: (
+                (entry[1].get("loc") or {}).get("line", 0),
+                (entry[1].get("loc") or {}).get("column", 0),
+            )
+        )
+        for kind, item in guards:
+            expr = item["expr"]
+            _validate_option_equalities_expr(expr, spec, env)
+            if kind == "let":
+                env[item["name"]] = expr_static_type(expr, spec, env, True)
+            else:
+                _extend_pattern_type(expr, spec, env)
+        _validate_option_equalities_statements(action["stmts"], spec, env)
+        for ensure in action["ensures"]:
+            _validate_option_equalities_expr(ensure["expr"], spec, env)
+    for property_ in (
+        spec["invariants"] + spec["transitions"] + spec["reachables"]
+    ):
+        _validate_option_equalities_expr(property_["expr"], spec, {})
+    for leadsto in spec["leadstos"]:
+        env = {}
+        for binder in leadsto["binders"]:
+            env[binder[1]] = binder_static_type(binder, spec, True)
+        _validate_option_equalities_expr(leadsto["P"], spec, env)
+        _validate_option_equalities_expr(leadsto["Q"], spec, env)
+        if leadsto["decreases"] is not None:
+            _validate_option_equalities_expr(leadsto["decreases"], spec, env)
+    if spec["terminal"] is not None:
+        _validate_option_equalities_expr(spec["terminal"], spec, {})
 
 
 def collect_types(items, consts):
@@ -292,6 +734,15 @@ def expand_phys_var(logical_name, ty, types_meta, out):
             "logical": logical_name,
             "ty": ("set", elem),
             "elem_ty": elem,
+        })
+        return
+    if ty[0] == "relation":
+        out.append({
+            "phys": logical_name,
+            "logical": logical_name,
+            "ty": ty,
+            "source_ty": ty[1],
+            "target_ty": ty[2],
         })
         return
     if ty[0] == "seq":
@@ -418,6 +869,8 @@ def z3_sort(ty, types_meta):
         return z3.BoolSort()
     if ty[0] == "map":
         return z3.ArraySort(z3_sort(ty[1], types_meta), z3_sort(ty[2], types_meta))
+    if ty[0] == "relation":
+        return z3.ArraySort(z3.IntSort(), z3.BoolSort())
     if ty[0] == "set":
         return z3.ArraySort(z3_sort(ty[1], types_meta), z3.BoolSort())
     if ty[0] == "option":
@@ -794,6 +1247,35 @@ def check_seq_literal_sizes(state, init, actions, types_meta):
         _check_seq_literals_in_stmts(act["stmts"], state, types_meta)
 
 
+def validate_leadsto_helpful_actions(leadstos, actions):
+    """Check leadsTo-local helpful metadata names real action instances.
+
+    Full semantic obligations (fairness/enabledness/rank decrease) are verifier
+    facts. The model layer only rejects misspelled action names and arity
+    mismatches so authors get fast feedback from `fslc check`.
+    """
+    by_name = {act["name"]: act for act in actions}
+    for leadsto in leadstos:
+        for helper in leadsto.get("helpful") or []:
+            aname = helper["action"]
+            if aname not in by_name:
+                _err(
+                    f"leadsTo '{leadsto['name']}' helpful action '{aname}' is not declared",
+                    kind="type",
+                    loc=helper.get("loc"),
+                    hint="helpful metadata must name an existing action; it does not infer action names",
+                )
+            expected = len(by_name[aname].get("params") or [])
+            got = len(helper.get("args") or [])
+            if got != expected:
+                _err(
+                    f"leadsTo '{leadsto['name']}' helpful action '{aname}' expects "
+                    f"{expected} argument(s), got {got}",
+                    kind="type",
+                    loc=helper.get("loc"),
+                )
+
+
 def validate_state_var_type(ty, types_meta, path):
     """Whitelist validation for state variable types (DESIGN-seq §7)."""
     if is_scalar_type(ty):
@@ -829,6 +1311,15 @@ def validate_state_var_type(ty, types_meta, path):
         if not is_bounded_scalar_type(ty[1]):
             _err(
                 f"{path}: Set element must be a bounded scalar (Bool, domain, or enum)",
+                kind="type",
+                hint=_STATE_TYPE_HINT,
+            )
+        return
+    if ty[0] == "relation":
+        src_ty, dst_ty = ty[1], ty[2]
+        if not is_bounded_scalar_type(src_ty) or not is_bounded_scalar_type(dst_ty):
+            _err(
+                f"{path}: relation endpoints must be bounded scalars (Bool, domain, or enum)",
                 kind="type",
                 hint=_STATE_TYPE_HINT,
             )
@@ -1025,6 +1516,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
     dialect_controls = None
     dialect_governance = None
     dialect_warnings = []
+    spec_kind = None
     for it in items:
         if it[0] == "__display_names":
             dialect_display_names.update(it[1])
@@ -1048,6 +1540,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
             dialect_governance = it[1]
         elif it[0] == "__warnings":
             dialect_warnings.extend(it[1])
+        elif it[0] == "__spec_meta":
+            spec_kind = it[1]
 
     check_stage_usage(items)
 
@@ -1061,6 +1555,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
 
     state = {}
     init = []
+    inline_init = []
     actions = []
     invariants = []
     transitions = []
@@ -1073,12 +1568,17 @@ def build_spec(tree, display_names=None, semantic_check=True):
     for it in items:
         tag = it[0]
         if tag == "state":
-            for _, n, ty_ast in it[1]:
+            for declaration in it[1]:
+                _, n, ty_ast, *initializer = declaration
                 _check_reserved(n, "state variable")
                 if n in state:
                     _err(f"duplicate state variable '{n}'", kind="name")
                 state[n] = resolve_type(ty_ast, types_meta, consts)
                 state_type_refs[n] = resolve_type_ref(ty_ast, types_meta, consts)
+                if initializer:
+                    inline_init.append(
+                        ("assign", ("var", n), initializer[0], initializer[1])
+                    )
         elif tag == "init":
             init = it[1]
         elif tag == "action":
@@ -1117,6 +1617,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "loc": it[5],
                 "decreases": it[7] if len(it) > 7 else None,
                 "within": within,
+                "helpful": it[9] if len(it) > 9 else [],
             }, it[6] if len(it) > 6 else None))
         elif tag == "until":
             transitions.append(_with_meta({
@@ -1132,6 +1633,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 "loc": it[4],
                 "decreases": None,
                 "within": None,
+                "helpful": [],
             }, it[5] if len(it) > 5 else None))
         elif tag == "unless":
             transitions.append(_with_meta({
@@ -1163,6 +1665,8 @@ def build_spec(tree, display_names=None, semantic_check=True):
                 _err("duplicate terminal block", kind="semantics")
             terminal = it[1]
             terminal_loc = it[2] if len(it) > 2 else None
+
+    init = inline_init + init
 
     if not state:
         _err("spec has no state block", kind="semantics")
@@ -1201,6 +1705,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         _err("spec has no actions", kind="semantics")
 
     check_seq_literal_sizes(state, init, actions, types_meta)
+    validate_leadsto_helpful_actions(leadstos, actions)
 
     all_display_names = dict(display_names or {})
     all_display_names.update(dialect_display_names)
@@ -1215,7 +1720,7 @@ def build_spec(tree, display_names=None, semantic_check=True):
         if info.get("symmetric") and info["kind"] in ("domain", "enum")
     }
 
-    return {
+    spec = {
         "name": name,
         "consts": consts,
         "types": types_meta,
@@ -1243,7 +1748,10 @@ def build_spec(tree, display_names=None, semantic_check=True):
         "controls": dialect_controls,
         "governance": dialect_governance,
         "symmetry": symmetry,
+        "kind": spec_kind,
     }
+    validate_option_equalities(spec)
+    return spec
 
 
 def check_spec(tree, display_names=None):

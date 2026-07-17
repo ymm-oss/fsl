@@ -12,10 +12,17 @@ replace the layer-specific skills; it routes work to them, preserves the layer
 boundaries, and keeps proof, refinement, and implementation-conformance claims
 separate.
 
-FSL is the checkable contract spine, not the entire product process. Natural
-language discovery, UI/API design, coding, and testing still happen in their
-normal tools; FSL supplies the machine-checkable contracts and counterexamples
-that constrain those artifacts.
+FSL is the checkable contract spine, not the entire product process — but that
+spine is broad by default: a spec replaces the prose business/requirements/design
+doc you would write anyway, so wide coverage across those layers needs no
+per-feature verification-ROI case. Natural language discovery, UI/API design,
+coding, and testing still happen in their normal tools; FSL supplies the
+machine-checkable contracts and counterexamples that constrain those artifacts.
+
+The resulting spec corpus is the project's living single source of truth: each
+layer is re-verified on every change (regression, drift, and cross-layer
+change-impact via `refine`), and it doubles as onboarding context for humans and AI
+approaching the flow it documents.
 
 ## Routing
 
@@ -28,6 +35,12 @@ Before authoring a layer, read and follow the corresponding skill:
   handoff: `../fsl-design/SKILL.md`
 - Design review, variants, substitutability, SOLID/LSP/OCP judgment:
   `../fsl-design-review/SKILL.md`
+- Cross-cutting dialect concerns — DB migration compatibility (`dbsystem`,
+  `fslc db`), Functional DDD / async effects (`domain`, `fslc domain`), AI
+  tool-boundary and agent contracts plus statistical evidence (`ai_component`/
+  `agent`, `fslc ai`): `../fsl/SKILL.md` → "Advanced features". These sit
+  outside the business→requirements→design progression and are not stage-gated
+  by this skill.
 - Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md` and
   `../fsl/reference.md`
 
@@ -78,12 +91,17 @@ rules in this skill.
 | Implementation | Adapter or event log connected to real behavior | testgen pytest or replay; do not claim conformance before this |
 | Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, optional mutate/vacuity |
 
-For high-risk contracts, add:
+For every layer, also run:
+
+- `fslc verify <file> --strict-tags` (traceability — untagged declarations and
+  unreferenced requirement IDs)
+- `fslc explain <file> --readable` (renders the spec as a readable digest; this is
+  the spec's documentation, not a separate report)
+
+For high-risk contracts, add the more expensive checks:
 
 - `fslc verify <file> --vacuity error`
-- `fslc verify <file> --strict-tags`
 - `fslc mutate <file> --by-requirement`
-- `fslc explain <file> --readable`
 
 ## Claim Discipline
 

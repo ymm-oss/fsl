@@ -1,0 +1,17 @@
+[package]
+name = "fsl-solver-z3js"
+description = "Browser z3-solver npm backend for the FSL solver contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fsl-solver = { path = "../fsl-solver" }
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+
+[lints]
+workspace = true

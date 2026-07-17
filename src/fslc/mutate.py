@@ -4,8 +4,11 @@
 """Specification mutation testing for FSL kernel ASTs."""
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
+
+from lark.exceptions import UnexpectedInput, VisitError
 
 from .acceptance import validate_acceptance, validate_forbidden
 from .bmc import verify
@@ -493,13 +496,215 @@ def _public_mutant(mutant, status, killed_by=None, dead_actions=None):
         "status": status,
         "killed_by": killed_by,
         "requirement": mutant.requirement,
+        "source": "builtin",
     }
     if status == "survived" and mutant.action in (dead_actions or set()):
         out["note"] = "action dead at baseline — survival expected"
     return out
 
 
-def mutate_file(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS):
+def _invalid_detail(kind, message, loc=None):
+    out = {"kind": kind, "message": message}
+    if loc is not None:
+        out["loc"] = loc
+    return out
+
+
+def _external_public(record, status, *, killed_by=None, invalid=None):
+    out = {
+        "id": record["id"],
+        "op": record.get("op", "external"),
+        "loc": None,
+        "target": record.get("description") or record["id"],
+        "status": status,
+        "killed_by": killed_by,
+        "requirement": record.get("requirement"),
+        "source": "external",
+        "input_kind": record.get("input_kind"),
+        "line": record["line"],
+    }
+    if invalid is not None:
+        out["invalid"] = invalid
+    return out
+
+
+def _replace_instruction(source, instruction):
+    if not isinstance(instruction, dict):
+        raise ValueError("replace must be an object")
+    target = instruction.get("target")
+    replacement = instruction.get("replacement")
+    occurrence = instruction.get("occurrence")
+    if not isinstance(target, str) or not target:
+        raise ValueError("replace.target must be a non-empty string")
+    if not isinstance(replacement, str):
+        raise ValueError("replace.replacement must be a string")
+    starts = []
+    pos = 0
+    while True:
+        found = source.find(target, pos)
+        if found < 0:
+            break
+        starts.append(found)
+        pos = found + len(target)
+    if occurrence is None:
+        if len(starts) != 1:
+            raise ValueError(
+                f"replace.target must match exactly once without occurrence; matched {len(starts)} times"
+            )
+        selected = 0
+    else:
+        if isinstance(occurrence, bool) or not isinstance(occurrence, int) or occurrence < 1:
+            raise ValueError("replace.occurrence must be a positive 1-based integer")
+        if occurrence > len(starts):
+            raise ValueError(
+                f"replace.occurrence {occurrence} exceeds {len(starts)} match(es)"
+            )
+        selected = occurrence - 1
+    start = starts[selected]
+    return source[:start] + replacement + source[start + len(target):]
+
+
+def _external_source(record, baseline_source):
+    full_keys = [key for key in ("mutated_spec", "spec") if key in record]
+    has_nested_replace = "replace" in record
+    has_flat_replace = "target" in record or "replacement" in record
+    modes = len(full_keys) + int(has_nested_replace or has_flat_replace)
+    if modes != 1:
+        raise ValueError(
+            "provide exactly one mutation form: mutated_spec/spec or replace"
+        )
+    if full_keys:
+        source = record[full_keys[0]]
+        if not isinstance(source, str):
+            raise ValueError(f"{full_keys[0]} must be a string")
+        return source, "full_spec"
+    instruction = record.get("replace")
+    if instruction is None:
+        instruction = {
+            "target": record.get("target"),
+            "replacement": record.get("replacement"),
+            "occurrence": record.get("occurrence"),
+        }
+    return _replace_instruction(baseline_source, instruction), "replacement"
+
+
+def _load_external_records(path, baseline_source):
+    records = []
+    seen_ids = set()
+    with Path(path).open(encoding="utf-8") as fh:
+        for line_no, raw in enumerate(fh, start=1):
+            if not raw.strip():
+                continue
+            fallback_id = f"external:{line_no}"
+            try:
+                value = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                record = {"id": fallback_id, "line": line_no, "input_kind": None}
+                records.append((record, None, _invalid_detail("json", str(exc))))
+                continue
+            if not isinstance(value, dict):
+                record = {"id": fallback_id, "line": line_no, "input_kind": None}
+                records.append((record, None, _invalid_detail(
+                    "shape", "each JSONL line must be an object")))
+                continue
+            record = dict(value)
+            record_id = record.get("id", fallback_id)
+            if not isinstance(record_id, str) or not record_id.strip():
+                record_id = fallback_id
+                invalid = _invalid_detail("shape", "id must be a non-empty string")
+                record.update({"id": record_id, "line": line_no, "input_kind": None})
+                records.append((record, None, invalid))
+                continue
+            record.update({"id": record_id, "line": line_no})
+            if record_id in seen_ids:
+                record["input_kind"] = None
+                records.append((record, None, _invalid_detail(
+                    "shape", f"duplicate external mutant id '{record_id}'")))
+                continue
+            seen_ids.add(record_id)
+            try:
+                source, input_kind = _external_source(record, baseline_source)
+            except ValueError as exc:
+                record["input_kind"] = None
+                records.append((record, None, _invalid_detail("instruction", str(exc))))
+                continue
+            record["input_kind"] = input_kind
+            records.append((record, source, None))
+    return records
+
+
+def _external_spec(source, base_dir, expected_name):
+    try:
+        ast, display_names = parse_src(source, base_dir)
+    except UnexpectedInput as exc:
+        loc = None
+        if getattr(exc, "line", -1) > 0 and getattr(exc, "column", -1) > 0:
+            loc = {"line": exc.line, "column": exc.column}
+        return None, None, _invalid_detail(
+            "parse",
+            str(exc).split("\n")[0],
+            loc,
+        )
+    except VisitError as exc:
+        orig = exc.orig_exc
+        return None, None, _invalid_detail(
+            getattr(orig, "kind", "semantics"),
+            str(orig),
+            getattr(orig, "loc", None),
+        )
+    except FslError as exc:
+        return None, None, _invalid_detail(
+            exc.kind, str(exc), getattr(exc, "loc", None))
+    if ast[0] != "spec":
+        return None, None, _invalid_detail(
+            "semantics", "external mutant must be a spec-like FSL file")
+    if ast[1] != expected_name:
+        return None, None, _invalid_detail(
+            "spec_name",
+            f"external mutant spec name '{ast[1]}' does not match baseline '{expected_name}'",
+        )
+    try:
+        return build_spec(ast, display_names), display_names, None
+    except FslError as exc:
+        return None, None, _invalid_detail(
+            exc.kind, str(exc), getattr(exc, "loc", None))
+
+
+def _kill_rate(killed, survived):
+    judged = killed + survived
+    return round(killed / judged, 4) if judged else None
+
+
+def _summary(mutants):
+    by_source = {}
+    for source in ("builtin", "external"):
+        entries = [item for item in mutants if item["source"] == source]
+        killed = sum(item["status"] == "killed" for item in entries)
+        survived = sum(item["status"] == "survived" for item in entries)
+        invalid = sum(item["status"] == "invalid" for item in entries)
+        by_source[source] = {
+            "total": len(entries),
+            "killed": killed,
+            "survived": survived,
+            "invalid": invalid,
+            "kill_rate": _kill_rate(killed, survived),
+        }
+    killed = sum(item["status"] == "killed" for item in mutants)
+    survived = sum(item["status"] == "survived" for item in mutants)
+    invalid = sum(item["status"] == "invalid" for item in mutants)
+    return {
+        "total": len(mutants),
+        "killed": killed,
+        "survived": survived,
+        "invalid": invalid,
+        "kill_rate": _kill_rate(killed, survived),
+        "by_source": by_source,
+    }
+
+
+def mutate_file(
+        file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUTANTS,
+        external_mutants=None):
     src = Path(file).read_text(encoding="utf-8")
     ast, display_names = parse_src(src, str(Path(file).parent))
     if ast[0] != "spec":
@@ -524,7 +729,6 @@ def mutate_file(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUT
 
     dead_actions = _coverage_false_actions(baseline)
     public_mutants = []
-    killed = 0
     by_req = _requirement_index(baseline_spec) if by_requirement else {}
 
     for mutant in selected:
@@ -541,13 +745,65 @@ def mutate_file(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUT
                 mutant, "survived", dead_actions=dead_actions))
             continue
 
-        killed += 1
         killed_by = oracle["killed_by"]
         public_mutants.append(_public_mutant(
             mutant, "killed", killed_by=killed_by, dead_actions=dead_actions))
         killer_req = oracle.get("killer_requirement")
         if by_requirement and killer_req and killer_req.get("id") in by_req:
             by_req[killer_req["id"]]["kills"] += 1
+
+    if external_mutants is not None:
+        base_dir = str(Path(file).parent)
+        for record, mutated_source, invalid in _load_external_records(
+                external_mutants, src):
+            if invalid is not None:
+                public_mutants.append(_external_public(
+                    record, "invalid", invalid=invalid))
+                continue
+            mutated_spec, _mutated_display_names, invalid = _external_spec(
+                mutated_source, base_dir, name)
+            if invalid is not None:
+                public_mutants.append(_external_public(
+                    record, "invalid", invalid=invalid))
+                continue
+            try:
+                oracle = _oracle(
+                    mutated_spec,
+                    depth,
+                    source_lines=mutated_source.splitlines(),
+                )
+            except FslError as exc:
+                public_mutants.append(_external_public(
+                    record,
+                    "invalid",
+                    invalid=_invalid_detail(
+                        exc.kind, str(exc), getattr(exc, "loc", None)),
+                ))
+                continue
+            oracle_result = oracle.get("result") or {}
+            if (
+                not oracle["clean"]
+                and oracle_result.get("result") == "error"
+                and oracle_result.get("kind") not in {"acceptance", "forbidden"}
+            ):
+                public_mutants.append(_external_public(
+                    record,
+                    "invalid",
+                    invalid=_invalid_detail(
+                        oracle_result.get("kind"),
+                        oracle_result.get("message", "invalid external mutant"),
+                        oracle_result.get("loc"),
+                    ),
+                ))
+                continue
+            if oracle["clean"]:
+                public_mutants.append(_external_public(record, "survived"))
+                continue
+            public_mutants.append(_external_public(
+                record, "killed", killed_by=oracle["killed_by"]))
+            killer_req = oracle.get("killer_requirement")
+            if by_requirement and killer_req and killer_req.get("id") in by_req:
+                by_req[killer_req["id"]]["kills"] += 1
 
     if by_requirement:
         for req_id, data in by_req.items():
@@ -557,13 +813,16 @@ def mutate_file(file, depth=8, by_requirement=False, max_mutants=DEFAULT_MAX_MUT
             "by_requirement kills are an observed lower bound within this mutant set and depth"
         )
 
-    survived = len(selected) - killed
+    if external_mutants is not None:
+        notes.append(
+            "invalid external mutants are generation-quality findings and are excluded from kill-rate denominators"
+        )
     return {
         "result": "mutated",
         "spec": name,
         "depth": depth,
         "baseline": baseline.get("result", "verified"),
-        "summary": {"total": len(selected), "killed": killed, "survived": survived},
+        "summary": _summary(public_mutants),
         "mutants": public_mutants,
         "by_requirement": by_req,
         "notes": notes,

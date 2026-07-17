@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+spec ReviewChoice {
+  state { ready: Bool, approved: Bool }
+  init "undecided: initial review mode is pending" {
+    ready = true
+    approved = false
+  }
+  action approve() "undecided: approval versus rejection policy is pending" {
+    requires ready
+    ready = false
+    approved = true
+  }
+  action reject() {
+    requires ready
+    ready = false
+    approved = false
+  }
+  invariant ApprovedWhenDone "REQ-1: a completed review is approved" {
+    ready or approved
+  }
+}

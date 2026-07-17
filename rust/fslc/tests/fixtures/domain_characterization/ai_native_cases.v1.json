@@ -1,0 +1,43 @@
+{
+  "spdx": "Apache-2.0",
+  "schema_version": "domain-ai-native-characterization.v1",
+  "cases": [
+    {
+      "id": "canonical-first-pass",
+      "prompt": "Model approval with canonical logic, finite membership, and can(Command).",
+      "attempts": ["expressions_valid.fsl"],
+      "misuse": {"operator": 0, "enum": 0, "internal_generated_name": 0}
+    },
+    {
+      "id": "legacy-operator-repair",
+      "prompt": "Model the same approval guard using familiar programming-language operators.",
+      "attempts": ["legacy_logical_parse_error.fsl", "expressions_valid.fsl"],
+      "misuse": {"operator": 2, "enum": 0, "internal_generated_name": 0},
+      "diagnostic_expression_line": 6
+    },
+    {
+      "id": "unknown-enum-member-check-gap",
+      "prompt": "Reject a state using an enum member that is not declared.",
+      "attempts": ["invalid_unknown_member.fsl"],
+      "misuse": {"operator": 0, "enum": 1, "internal_generated_name": 0}
+    },
+    {
+      "id": "generated-enum-name-check-gap",
+      "prompt": "Use the aggregate status without referring to compiler-generated names.",
+      "attempts": ["ai_internal_name_misuse.fsl"],
+      "misuse": {"operator": 0, "enum": 0, "internal_generated_name": 1}
+    }
+  ],
+  "baseline": {
+    "case_count": 4,
+    "initial_check_successes": 1,
+    "initial_check_success_rate": "1/4",
+    "repairs_until_check_success": [0, 1, 1, 1],
+    "operator_misuse_count": 2,
+    "enum_misuse_count": 1,
+    "internal_generated_name_misuse_count": 1,
+    "diagnostic_expression_hits": 1,
+    "diagnostic_expression_total": 1,
+    "diagnostic_expression_hit_rate": "1/1"
+  }
+}

@@ -1,0 +1,63 @@
+domain DomainEffectSagaCharacterization {
+  // SPDX-License-Identifier: Apache-2.0
+  implementation_profile functional_ddd
+
+  type OrderId = 0..1
+  type PaymentRequestId = 0..1
+  type Status = Draft | Approved | Paid | Failed
+
+  aggregate Order {
+    id OrderId
+    state { status: Status = Draft; }
+
+    command Approve {}
+    command RequestPayment { payment_request_id: PaymentRequestId }
+
+    event Approved {}
+    event PaymentRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentTimedOut { payment_request_id: PaymentRequestId }
+
+    decide Approve {
+      requires status == Draft
+      emits Approved
+    }
+    decide RequestPayment {
+      requires status == Approved
+      emits PaymentRequested
+    }
+
+    evolve Approved { status = Approved }
+    evolve PaymentRequested { status = Approved }
+    evolve PaymentCaptured { status = Paid }
+    evolve PaymentFailed { status = Failed }
+    evolve PaymentTimedOut { status = Failed }
+  }
+
+  effect CapturePayment {
+    async
+    irreversible
+    idempotency_key Order.id
+    correlation_id PaymentRequested.payment_request_id
+    handles PaymentRequested
+    emits one_of [PaymentCaptured, PaymentFailed, PaymentTimedOut]
+    retry { max_attempts 2 }
+    timeout after 3m emits PaymentTimedOut
+    compensation { emits PaymentFailed }
+  }
+
+  saga PaymentFlow {
+    starts_on Approved
+    step Capture {
+      async
+      requires Approved and not PaymentFailed
+      emits PaymentRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentTimedOut]
+      timeout after 3m emits PaymentTimedOut
+    }
+    invariant terminalOutcome {
+      PaymentCaptured or PaymentFailed or PaymentTimedOut -> not PaymentRequested
+    }
+  }
+}

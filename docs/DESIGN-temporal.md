@@ -1,8 +1,7 @@
 # FSL v2.0-lite — `leadsTo`, Fairness, and Ranked Induction Implementation Design
 
-The first two items of DESIGN-v1.md §10 v2.0. The motivation is DOGFOOD-1 F1 /
-DOGFOOD-2 F7: "eventually Y after X" (a response property) cannot be written with
-state alone.
+The first two items of DESIGN-v1.md §10 v2.0. The motivation is that "eventually
+Y after X" is a response property and cannot be written with state alone.
 
 ## 1. Syntax
 
@@ -176,6 +175,19 @@ that persistence condition, a trigger could disappear before `Q` and the rank
 would no longer justify the original response property. Fairness annotations are
 not used by the ranking proof; every enabled action must make ranked progress.
 
+With one or more `helpful action(args)` lines, only the matching instance(s)
+must decrease `M`; other actions must instead keep the obligation pending
+(or resolve it) *without increasing* `M`. Two extra obligations then license
+using each matching instance's `fair` declaration: every matching instance
+must itself be `fair` (`helpful_fairness`), and -- when two or more distinct
+`helpful` actions are declared -- once an instance becomes enabled while
+pending, no other action may disable it again before it fires or `Q` holds
+(`helpful_sticky`). Without `helpful_sticky`, the weaker "some helpful match
+is enabled at every pending state" does not by itself prove any single
+instance continuously enabled (which instance is enabled can vary by state),
+so its `fair` declaration is never actually obligated to fire. See
+`DESIGN-induction.md` §2.3 for the full obligation set and rationale.
+
 ## 3. Positioning and Result of the Check
 
 - **violated (counterexample found) is a definite violation** (the lasso is a
@@ -240,7 +252,11 @@ For a ranked response proved by induction:
 
 If a ranking obligation fails, induction returns `unknown_cti` with
 `violation_kind: "leadsTo_rank"`, `rank_failure` (`unbounded_below`,
-`deadlock`, `non_decreasing_action`, or `pending_not_preserved`), the relevant
+`deadlock`, `non_decreasing_action`, or `pending_not_preserved`; with
+`helpful`, also `progress_action_not_fair`, `helpful_action_not_enabled`,
+`non_decreasing_helpful_action`, `non_helpful_action_increases_measure`, and
+-- with two or more distinct helpful actions --
+`helpful_action_enabledness_not_sticky`), the relevant
 binding, a logical-state CTI, and the selected action/measure values when the
 failure is a transition-progress failure.
 
@@ -261,15 +277,33 @@ failure is a transition-progress failure.
   - `_logical_eq(spec, s1, s2)` — a helper that returns the logical equality of
     §2.3 (built using the phys_vars metadata — Option's present/value, Seq's
     data/len).
-  - The leadsTo check, after `_bmc_explore` (like verify's reachable handling),
-    runs on the shared solver per leadsTo × binding with push/pop:
-    `s.add(Or over (i,j,p) of [loop ∧ P ∧ ¬Q sequence ∧ fairness_ok])` → if sat,
-    identify (i, j, p) from the model (attach a selector Bool to each (i,j,p)
-    candidate and read it from the model) and build the trace.
+  - The lasso/fairness leadsTo check, after `_bmc_explore` (like verify's
+    reachable handling), runs on the shared solver per leadsTo × binding with
+    push/pop: `s.add(Or over (i,j,p) of [loop ∧ P ∧ ¬Q sequence ∧
+    fairness_ok])` → if sat, identify (i, j, p) from the model (attach a
+    selector Bool to each (i,j,p) candidate and read it from the model) and
+    build the trace.
   - enabled_a reuses the same `_eval_requires` conjunction as the coverage check
     (expr_cache works).
-  - The deadlock stall (§2.4) reuses the enabled expression of the existing
-    deadlock check.
+  - The deadlock stall (§2.4) is checked *inside* `_bmc_explore`, per step,
+    before that step's forward-transition assertion is added to the shared
+    solver (`_check_leadsto_stutter_at_step`, alongside the existing deadlock
+    check) — not after the loop like the lasso check above. This ordering is
+    load-bearing: the per-step BMC unrolling permanently asserts "some action
+    fires" for every non-final step, so a deadlock-stall probe issued only
+    after the full trace is built can never be satisfiable below the depth
+    horizon. Reuses the enabled expression of the existing deadlock check.
+  - The `within` deadline probe must run inline, per step, for the same
+    reason: at step `t`, the single window whose deadline lands on `t` starts
+    at `p = t - within`, and the probe `P(states[p]) ∧ ∀ q ∈ [p, t]:
+    ¬Q(states[q])` is issued before step `t`'s forward-transition assertion.
+    A missed deadline is prefix-satisfiable regardless of what follows, so
+    the inline probe subsumes a post-loop sweep — and unlike a post-loop
+    sweep it still fires when the path deadlocks after the deadline (a
+    post-loop probe misses exactly that combination once `--depth` extends
+    past the deadlock; issue #266). The native Rust verifier implements this
+    (`check_leadsto_deadlines` in `rust/fsl-verifier/src/bmc.rs`); the frozen
+    Python reference still probes post-loop and retains the known gap.
   - Symmetry reduction (§2.5.1) adds canonical row-order constraints only inside
     the lasso/stall push/pop queries. It is not asserted on the shared path
     solver, so safety/reachability behavior and finite transition construction
@@ -286,6 +320,24 @@ failure is a transition-progress failure.
 - **cli.py**: minimal changes (only a new violation_kind).
 - **scenarios**: leadsTo is out of scope (future: leave a comment about the
   possibility of turning a pending→achieved trace into a scenario).
+
+## 5.1 Solver-free bounded runtime monitoring (issue #225)
+
+Public replay trace 1.2 evaluates `leadsTo P ~> within K Q` without Z3. The
+runtime monitor consumes the same checked `LeadsToDef` as the verifier and
+tracks the oldest outstanding trigger per static binder assignment. For a
+trigger at observation `p`, `Q` may become true through observation `p + K`;
+otherwise that deadline is the violating observation. `within 0` therefore
+requires `Q` in the same observation as `P`.
+
+This is deliberately only bounded prefix monitoring. A trace that ends early
+reports pending obligations, and declarations without `within` are reported as
+unchecked rather than inferred from a finite prefix. Action and stutter
+observations both advance the logical clock. Unsupported collection binders or
+`where` filters fail closed. Differential tests feed a native BMC
+counterexample into the monitor and require identical property, binding,
+trigger, and deadline evidence. The external contract and JSON fields are
+specified in `DESIGN-replay-trace.md`.
 
 ## 6. Test Plan (tests/test_temporal.py)
 
@@ -359,5 +411,4 @@ binding), generate the **shortest trace from when P holds until Q holds**:
   leadsTo to the §6 table, and "history ghost variable vs leadsTo: when to use
   which" to the §9 idiom collection (a fact of state → ghost, a response
   property → leadsTo).
-- Add `fair` + `WaiterGetsLock` to mutex_queue.fsl as a worked example (resolving
-  DOGFOOD-2 F7).
+- Add `fair` + `WaiterGetsLock` to mutex_queue.fsl as a worked example.

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Errors &amp; Exit Codes — reading result / kind / exit codes</title>
+<meta name="description" content="The fslc JSON envelope, the 0-3 exit-code contract, and an index for reading violation_kind, CTI, vacuity, and deadlock output." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body class="docs-page" data-page="errors">
+<div class="progress"></div>
+
+<header class="topbar" data-nav></header>
+
+<aside class="docs-sidebar" data-nav></aside>
+
+<main>
+
+<section class="hero">
+  <div class="wrap narrow center">
+    <nav class="breadcrumb" data-nav></nav>
+    <p class="kicker reveal">Reference</p>
+    <h1 class="reveal">Errors &amp; <span class="hl">Exit Codes</span></h1>
+    <p class="lead reveal">"Read the counterexample and fix it" is FSL's core loop. This page indexes the <code>result</code>/<code>kind</code>/<code>violation_kind</code> vocabulary, the exit-code contract, and how to read each failure shape.</p>
+  </div>
+</section>
+
+<hr class="soft" />
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">The contract</p>
+    <h2 class="reveal">The JSON envelope and exit codes</h2>
+    <p class="lead narrow reveal">Every command prints one JSON object to stdout, and its <code>result</code> field maps to a process exit code. That mapping (<code>exit_code()</code>) is reproduced verbatim on the <a href="cli.en.html">CLI Reference</a> page — here is the short version.</p>
+    <table class="matrix reveal">
+      <tr><th>Exit code</th><th>Meaning</th><th>Typical <code>result</code></th></tr>
+      <tr><td><code>0</code></td><td>Success</td><td><code>verified</code> / <code>proved</code> / <code>refines</code> / <code>conformant</code> / <code>generated</code> / <code>typestate</code> / <code>mutated</code> / <code>explained</code> / <code>ok</code>, etc.</td></tr>
+      <tr><td><code>1</code></td><td>The check ran to completion but didn't hold</td><td><code>violated</code> / <code>reachable_failed</code> / <code>unknown_cti</code> / <code>nonconformant</code> / <code>refinement_failed</code>, etc.</td></tr>
+      <tr><td><code>2</code></td><td>Spec error</td><td><code>result: "error"</code> with <code>kind</code> in <code>parse</code>/<code>name</code>/<code>type</code>/<code>semantics</code>/<code>io</code> (also vacuity errors under <code>--vacuity error</code>)</td></tr>
+      <tr><td><code>3</code></td><td>Internal error</td><td><code>result: "error"</code> with <code>kind: "internal"</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Learning from broken examples</p>
+    <h2 class="reveal">An index of common failure shapes</h2>
+    <p class="lead narrow reveal">The broken specs under <code>examples/gallery/errors/</code> are teaching material for reading diagnostics. At first, reading only <code>message</code>, <code>hint</code>, <code>trace</code>, and <code>invariant</code> is enough.</p>
+    <table class="matrix reveal">
+      <tr><th>kind</th><th>File</th><th>What the output looks like</th></tr>
+      <tr><td><code>parse</code></td><td><code>errors/parse_missing_expression.fsl</code></td><td><code>{"result":"error","kind":"parse","expected":"one of: ..."}</code></td></tr>
+      <tr><td><code>type</code></td><td><code>errors/type_undeclared_type.fsl</code></td><td><code>unknown type 'UserId'</code></td></tr>
+      <tr><td><code>semantics</code></td><td><code>errors/semantics_duplicate_assignment.fsl</code></td><td><code>double assignment to 'x' on the same execution path</code></td></tr>
+      <tr><td><code>vacuous</code></td><td><code>errors/vacuous_contradictory_init.fsl</code></td><td><code>init constraints are unsatisfiable</code></td></tr>
+      <tr><td><code>invariant</code></td><td><code>errors/violated_invariant_counter.fsl</code></td><td><code>{"result":"violated","violation_kind":"invariant"}</code></td></tr>
+      <tr><td><code>type_bound</code></td><td><code>errors/violated_type_bound_missing_guard.fsl</code></td><td><code>_bounds_stock</code> is broken</td></tr>
+      <tr><td><code>ensures</code></td><td><code>errors/violated_ensures_wrong_postcondition.fsl</code></td><td>the action name appears in the <code>invariant</code> field</td></tr>
+      <tr><td><code>partial_op</code></td><td><code>errors/violated_partial_op_unchecked_pop.fsl</code></td><td><code>guard the action with requires q.size() &gt; 0</code></td></tr>
+      <tr><td><code>leadsTo</code></td><td><code>errors/violated_leads_to_starvation.fsl</code></td><td>a loop-shaped trace and a fairness hint appear</td></tr>
+      <tr><td><code>deadlock</code></td><td><code>errors/violated_deadlock_terminal.fsl</code></td><td><code>violation_kind: "deadlock"</code> under <code>--deadlock error</code></td></tr>
+      <tr><td><code>refinement_failed</code></td><td><code>errors/refinement_failed_map.fsl</code></td><td>a refinement-failure subkind such as <code>abs_requires_failed</code></td></tr>
+      <tr><td><code>acceptance</code></td><td><code>errors/error_acceptance_false_expect.fsl</code></td><td>returns the failure state of a false <code>expect</code></td></tr>
+    </table>
+    <p class="reveal" style="margin-top:14px">Detailed actual JSON excerpts are in <code>examples/gallery/errors/README.md</code>. The files themselves are indexed from the <a href="examples.en.html">Example Gallery</a>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker reveal">What to read even when it succeeds</p>
+    <h2 class="reveal">What to check even when <code>result</code> is a success</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3>warnings</h3>
+        <p><code>verified</code>/<code>proved</code> don't guarantee an empty <code>warnings</code> array — reachable deadlocks and similar non-bug-but-worth-knowing facts land here.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>completeness</h3>
+        <p><code>"bounded"</code> means "no counterexample up to this depth"; <code>"unbounded"</code> means induction proved it at infinite depth. See <a href="guide.en.html">Workflow</a> for the difference.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>unknown_cti</h3>
+        <p>k-induction returned a counterexample-to-induction. Reachability is undetermined; adding an auxiliary invariant is the standard move — see <a href="mechanism.en.html">Mechanisms</a>.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>action_coverage</h3>
+        <p>Flags actions that were never enabled during the search — a way to catch an action you thought was reachable but actually isn't.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer data-nav></footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>
