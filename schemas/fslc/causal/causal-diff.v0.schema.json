@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/causal-diff.v0.schema.json",
+  "title": "fslc causal diff v0",
+  "type": "object",
+  "required": [
+    "result",
+    "schema_version",
+    "formal_result",
+    "before",
+    "after",
+    "changes",
+    "do_not_assume"
+  ],
+  "properties": {
+    "result": { "const": "causal_diffed" },
+    "schema_version": { "const": "causal-diff.v0" },
+    "formal_result": { "const": "not_run" },
+    "before": { "type": "string" },
+    "after": { "type": "string" },
+    "changes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/change" }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "change": {
+      "type": "object",
+      "required": ["kind", "id", "support_transition"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "claim_added",
+            "claim_removed",
+            "claim_content_changed",
+            "claim_lifecycle_changed",
+            "variable_added",
+            "variable_removed",
+            "variable_changed",
+            "feedback_added",
+            "feedback_removed",
+            "feedback_changed",
+            "scope_vocabulary_changed",
+            "clock_changed",
+            "timebase_changed",
+            "horizon_changed",
+            "evidence_ref_added",
+            "evidence_ref_removed"
+          ]
+        },
+        "id": { "type": "string" },
+        "before_version": { "type": "integer", "minimum": 1 },
+        "after_version": { "type": "integer", "minimum": 1 },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "before_status": { "enum": ["active", "retired"] },
+        "after_status": { "enum": ["active", "retired"] },
+        "support_transition": { "const": "not_available" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

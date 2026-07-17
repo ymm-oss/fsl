@@ -2444,7 +2444,50 @@ The native Rust command performs this judgment from the versioned public Kernel
 JSON v1 contract, not private parser/model structures, and fails closed on an
 unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
 compatible with the frozen reference output.
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details></div>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
+<details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. The causal profile (review-only causal hypothesis graphs)<span class="tree-blurb"> — Review-only causal hypothesis graphs — never proved/verified.</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> is a standalone sidecar document (its own <code>.fsl</code> file,
+never part of a kernel spec) that structures long-horizon causal hypotheses:
+interventions, mediators, outcomes, contexts, time lags, persistence, delayed
+feedback, measurement bindings, and applicability scope. <strong>FSL never proves
+real-world causality</strong>: every causal output carries
+<code>formal_result: "not_run"</code> and a <code>do_not_assume</code> array, no output path
+attaches <code>proved</code>/<code>verified</code> to a causal claim, and there is deliberately no
+<code>fslc causal verify</code> command.</p>
+<pre><code class="language-bash">fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+</code></pre>
+<p><code>fslc check model.fsl</code> on a causal file routes to the causal checker
+automatically. A model declares one discrete <code>timebase</code>
+(<code>tick | hour | day | week</code>) and a finite <code>horizon</code>; <code>uses &lt;alias&gt; from
+"&lt;path&gt;"</code> imports kernel/business/requirements specs so variables can bind
+actions (<code>binds action alias.name</code>) and observe KPIs, states, or properties
+(<code>observes kpi alias.name</code>, etc.). Claims are directed hypotheses
+<code>claim &lt;Id&gt; a -&gt; b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }</code> with stable IDs and monotonically increasing
+content versions; retired claims keep their identity and history. Cycles with
+a positive minimum lag sum are allowed but must be acknowledged with a
+<code>feedback</code> declaration (an unacknowledged cycle is a warning; a zero-lag cycle
+is an error). Feedback loops are classified <code>reinforcing | balancing |
+unknown</code> from the sign product of edge polarities (<code>unknown</code> absorbs), and the
+timeline reports Minkowski-sum first-response windows (exact minimum; the
+maximum is an upper bound when the pair is connected through a feedback SCC).
+<code>--profile causal-review</code> emits deterministic review findings (all
+<code>formal_status: "not_a_violation"</code>) such as <code>single_hypothesis_bottleneck</code>,
+<code>high_leverage_untested_claim</code>, <code>opposing_path_polarity</code>,
+<code>potential_common_cause</code>, <code>feedback_without_damping_story</code>,
+<code>deadline_before_earliest_effect</code>, <code>observation_window_misses_effect</code>,
+<code>measurement_cadence_too_coarse</code> (fires exactly when a measurement cadence
+exceeds an arriving claim's minimum persistence; unknown persistence is
+reported as <code>not_evaluable</code>, never guessed), and <code>unknown_lag_blocks_timeline</code>.
+<code>fslc causal diff</code> compares two model files by stable claim ID and content
+version; its <code>support_transition</code> stays <code>not_available</code> until external
+evidence exists. Versioned schemas live under <code>schemas/fslc/causal/</code>; the
+browser Worker does not expose causal commands. Working models live in
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>.
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>
 </section>
 

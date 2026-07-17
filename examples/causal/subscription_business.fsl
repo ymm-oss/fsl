@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+// Business-layer companion for the SubscriptionRetention causal model.
+// The causal model binds its intervention to enable_onboarding_support and
+// observes the KPI projections declared here.
+business SubscriptionBusiness {
+
+  actor Customer, System
+  entity Sub
+
+  process Sub {
+    stages Onboarding, FirstSuccess, Habit, Retained, Churned
+    initial Onboarding
+
+    transition enable_onboarding_support Onboarding   -> FirstSuccess by System
+    transition build_habit               FirstSuccess -> Habit        by Customer
+    transition retain                    Habit        -> Retained     by System
+    transition churn                     Onboarding   -> Churned      by Customer
+  }
+
+  kpi first_success_7d   = count Sub in FirstSuccess
+  kpi weekly_active_days = count Sub in Habit
+  kpi retention_90d      = count Sub in Retained
+  kpi seasonality_index  = count Sub in Churned
+}
+
+verify {
+  instances Sub = 3
+}

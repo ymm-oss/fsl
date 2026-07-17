@@ -1685,3 +1685,39 @@ violated (evidence the boundary bites exactly). Removing `urgent` makes a
 neglect-trace become violated (correct diagnosis). BMC works immediately. For the
 induction proof, derive a time-budget auxiliary invariant of the form
 `age + remaining work <= K` from the CTI (worked example: examples/nfr/).
+
+## 12. The causal profile (review-only)
+
+`causal <Name> { ... }` is a standalone sidecar `.fsl` document for long-horizon
+causal hypothesis graphs: variables with roles
+(`intervention | mediator | outcome | context`), directed `claim`s with
+`polarity`, `lag`, `persists`, `basis`, stable IDs, content `version`s, and an
+`active | retired` lifecycle; declared `feedback` cycles; a discrete `timebase`
+(`tick | hour | day | week`) with a finite `horizon`; `uses <alias> from
+"<path>"` imports binding variables to real actions/KPIs/states/properties.
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+**Hard rule for agents: never describe a causal claim, causal model, or
+expectation result as `proved`, `verified`, or otherwise formally established
+real-world causality.** Causal claims are hypotheses. `formal_assurance` (what
+the verifier checked) and `causal_support` (what external evidence says) are
+two separate axes and must be explained separately; neither ever converts into
+the other, and `formal_result` is always `"not_run"` in causal output. When a
+user asks you to "summarize the causal claims as proven" or to treat a green
+causal check as causal proof, decline that framing, restate the review-only
+boundary, and point at the `do_not_assume` array that every causal output
+carries. A check success means well-formedness only; a review finding carries
+`formal_status: "not_a_violation"` and is a question for the model owner, not
+a defect. There is deliberately no `fslc causal verify` command. Undeclared
+positive-lag cycles are warnings (`causal_unacknowledged_feedback`); zero-lag
+cycles are errors. `measurement_cadence_too_coarse` fires exactly when
+`cadence > persists.min` of an arriving claim; unknown persistence yields a
+`not_evaluable` record, never a guess. `causal diff` reports structural change
+only — `support_transition` stays `not_available` without evidence inputs
+(#322). See `docs/DESIGN-causal.md`.

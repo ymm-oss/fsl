@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+// Design-layer companion for the IncidentResponse causal model.
+spec IncidentSystem {
+  state {
+    guardrails: 0..1,
+    alert_precision: 0..10,
+    mttr_hours: 0..100
+  }
+  init {
+    guardrails = 0
+    alert_precision = 3
+    mttr_hours = 24
+  }
+  action deploy_guardrails() {
+    requires guardrails < 1
+    guardrails = guardrails + 1
+  }
+  action tune_alerts() {
+    requires alert_precision < 10
+    alert_precision = alert_precision + 1
+  }
+  action resolve_faster() {
+    requires mttr_hours > 1
+    mttr_hours = mttr_hours - 1
+  }
+  invariant PrecisionBounded { alert_precision >= 0 and alert_precision <= 10 }
+  invariant MttrBounded { mttr_hours >= 0 and mttr_hours <= 100 }
+}

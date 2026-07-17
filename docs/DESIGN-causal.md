@@ -547,7 +547,58 @@ do-calculus/identifiability; effect-size estimation; converting temporal
 co-occurrence into causal support; letting external tools overwrite
 `causal_support`.
 
-## 12. Test obligations for Phase 1
+## 12. Phase 1 implementation notes (fixed by #321)
+
+Deterministic details settled during the Phase 1 implementation; they refine,
+never contradict, the sections above.
+
+- **Variable fields `deadline N` and `window a..b`** (both optional, timebase
+  units, measured from the intervention change): `deadline` on an outcome
+  feeds `deadline_before_earliest_effect`; `window` on an observed variable
+  feeds `observation_window_misses_effect` (a window that ends before an
+  arriving claim's `lag.min` or starts after `lag.max + persists.max` cannot
+  overlap the response).
+- **Measurement kinds in v0** are `action` (via `binds`), `kpi`, `state`, and
+  `property`. Typed-predicate bindings are deferred to a follow-up design.
+- **Diagnostic kinds added for well-formedness**: `causal_invalid_model`
+  (missing/duplicate timebase, horizon, or required claim field; invalid
+  enum values; clock unit ≠ timebase) and `causal_scope_invalid` (undeclared
+  dimension/token, contradictory or cyclic relations, duplicate dimension in a
+  selection). Both are errors; analysis never starts on them.
+- **Unacknowledged-cycle rule** (warning `causal_unacknowledged_feedback` and
+  finding `unacknowledged_feedback_loop`): computed at edge granularity on the
+  SCC condensation — any active claim inside a nontrivial SCC that is not part
+  of a declared feedback's claim list triggers one warning per SCC. No cycle
+  enumeration.
+- **Timeline bounds**: `first_pass.min` is exact (Dijkstra over `lag.min`,
+  known-lag edges only). `first_pass.max` is exact on acyclic routes; when the
+  pair is connected through a nontrivial SCC (`via_feedback: true`), it is an
+  upper bound that charges the SCC with the sum of its internal known
+  `lag.max` values. A reachable pair with no fully-known-lag path reports
+  `first_pass: "unknown"` plus the `unknown_lag_blocks_timeline` finding.
+- **Deterministic thresholds** (integer arithmetic, documented in the finding
+  witness): `long_horizon_without_leading_indicator` fires when
+  `earliest * 2 >= horizon` and no observable path variable has
+  `earliest * 4 <= horizon`; indicator classes compare against the largest
+  outcome earliest `E` — `leading` when `3 * earliest <= E`, `lagging` when
+  `3 * earliest >= 2 * E`, else `intermediate`.
+- **`high_leverage_untested_claim`** requires the evidence-free claim to be a
+  cut (removal disconnects) for at least two distinct outcomes;
+  `single_hypothesis_bottleneck` requires one claim or mediator to be a cut
+  for every outcome reachable from an intervention.
+- **CLI routing**: `fslc check` on a causal document routes to the causal
+  checker via the pre-dispatch `is_causal_source` sniff (the same mechanism as
+  legacy AI project files); `causal` is deliberately not in the dialect
+  registry, so the frozen Python `DIALECT_KEYWORDS` parity gate does not move.
+  LSP diagnostics and the document index apply the same sniff.
+- **Worker waiver**: the browser Worker exposes only `check`/`verify` by
+  standing policy; causal commands are CLI-only and fall through to the
+  Worker's deny-by-default error. This is an explicit waiver, not an omission.
+- **Phase 1 evidence handling**: `evidence <Id> from "<path>"` declarations
+  are recorded and referenced by ID; the artifact file is never opened, parsed,
+  or validated (that is #322), and no support values are emitted anywhere.
+
+## 13. Test obligations for Phase 1
 
 The scope three-valued comparison (§4.4), polarity sign product with unknown
 absorption (§6), and `reinforcing / balancing / unknown` loop classification

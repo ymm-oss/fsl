@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/causal-findings.v0.schema.json",
+  "title": "fslc causal analyze --profile causal-review findings v0",
+  "type": "object",
+  "required": [
+    "result",
+    "schema_version",
+    "formal_result",
+    "model",
+    "profile",
+    "findings",
+    "do_not_assume"
+  ],
+  "properties": {
+    "result": { "const": "causal_analyzed" },
+    "schema_version": { "const": "causal-findings.v0" },
+    "formal_result": { "const": "not_run" },
+    "model": { "type": "string" },
+    "profile": { "const": "causal-review" },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "not_evaluable": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/not_evaluable" }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "finding_id",
+        "analysis",
+        "finding_type",
+        "severity",
+        "formal_status",
+        "involved_nodes",
+        "witness",
+        "do_not_assume"
+      ],
+      "properties": {
+        "finding_id": { "type": "string" },
+        "analysis": { "enum": ["causal_structure", "causal_time"] },
+        "finding_type": {
+          "enum": [
+            "outcome_without_intervention_path",
+            "orphan_causal_variable",
+            "single_hypothesis_bottleneck",
+            "high_leverage_untested_claim",
+            "opposing_path_polarity",
+            "potential_common_cause",
+            "unacknowledged_feedback_loop",
+            "feedback_without_damping_story",
+            "redundant_paths_share_same_bottleneck",
+            "deadline_before_earliest_effect",
+            "observation_window_misses_effect",
+            "measurement_cadence_too_coarse",
+            "long_horizon_without_leading_indicator",
+            "unknown_lag_blocks_timeline",
+            "feedback_period_exceeds_horizon"
+          ]
+        },
+        "severity": { "const": "review_required" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "formal_status": { "const": "not_a_violation" },
+        "involved_nodes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "witness": { "type": "object" },
+        "why_it_matters": { "type": "string" },
+        "candidate_repairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": { "kind": { "type": "string" } },
+            "additionalProperties": true
+          }
+        },
+        "do_not_assume": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "not_evaluable": {
+      "type": "object",
+      "required": ["finding_type", "reason", "involved_nodes"],
+      "properties": {
+        "finding_type": { "type": "string" },
+        "reason": { "type": "string" },
+        "involved_nodes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

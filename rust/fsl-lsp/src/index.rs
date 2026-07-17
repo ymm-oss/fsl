@@ -93,7 +93,9 @@ impl DocumentIndex {
     /// Returns the compiler parse diagnostic for invalid source.
     #[allow(clippy::too_many_lines)]
     pub fn build(source: &str, _path: Option<&str>) -> Result<Self, IndexError> {
-        let refinement = if fslc_rust::frontend_output::is_ai_project(source) {
+        let refinement = if fslc_rust::frontend_output::is_ai_project(source)
+            || fsl_syntax::is_causal_source(source)
+        {
             false
         } else {
             matches!(

@@ -2387,3 +2387,51 @@ DESIGN-*.md があります)。
 スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
 バイト列は、凍結された参照実装の出力と互換のままです。
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)
+
+## 17. causal プロファイル(レビュー専用の因果仮説グラフ)
+
+`causal <Name> { ... }` は独立したサイドカードキュメント(それ自体が 1 つの
+`.fsl` ファイルで、kernel spec の一部にはなりません)で、長期の因果仮説 —
+介入、媒介、成果、文脈、時間 lag、持続、遅延 feedback、計測バインディング、
+適用範囲 — を構造化します。**FSL は現実世界の因果関係を証明しません**:
+すべての causal 出力は `formal_result: "not_run"` と `do_not_assume` 配列を
+運び、causal claim に `proved`/`verified` を付与する出力経路は存在せず、
+`fslc causal verify` というコマンドは意図的にありません。
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+causal ファイルへの `fslc check model.fsl` は自動的に causal checker へ
+ルーティングされます。モデルは 1 つの離散 `timebase`
+(`tick | hour | day | week`)と有限の `horizon` を宣言します。`uses <alias>
+from "<path>"` で kernel/business/requirements spec をインポートし、variable が
+action をバインドしたり(`binds action alias.name`)、KPI・state・property を
+観測したり(`observes kpi alias.name` など)できます。claim は方向付き仮説
+`claim <Id> a -> b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }` で、安定 ID と単調増加する content version を
+持ちます。retired な claim は識別性と履歴を保持します。最小 lag 合計が正の
+cycle は許可されますが `feedback` 宣言による認識が必要です(未認識の cycle は
+warning、lag 合計 0 の cycle は error)。feedback loop は edge polarity の符号積
+(`unknown` は吸収元)から `reinforcing | balancing | unknown` に分類され、
+timeline は Minkowski 和の初回反応 window を報告します(最小値は正確、
+feedback SCC を経由するペアの最大値は上界)。
+`--profile causal-review` は決定的なレビュー findings(すべて
+`formal_status: "not_a_violation"`)を出力します — 例えば
+`single_hypothesis_bottleneck`、`high_leverage_untested_claim`、
+`opposing_path_polarity`、`potential_common_cause`、
+`feedback_without_damping_story`、`deadline_before_earliest_effect`、
+`observation_window_misses_effect`、`measurement_cadence_too_coarse`
+(計測 cadence が到達 claim の最小持続を超えるとき正確に発火します。unknown な
+持続は推測せず `not_evaluable` として報告)、`unknown_lag_blocks_timeline`。
+`fslc causal diff` は 2 つのモデルファイルを安定 claim ID と content version で
+比較します。`support_transition` は外部 evidence が存在するまで
+`not_available` のままです。バージョン付き schema は `schemas/fslc/causal/` に
+あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
+[`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal)
+にあります。
+→ [`DESIGN-causal.md`](DESIGN-causal.md)

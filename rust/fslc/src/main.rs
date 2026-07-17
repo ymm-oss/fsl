@@ -907,6 +907,19 @@ fn command() -> Result<(Value, i32), String> {
             let path = literate_guard
                 .as_ref()
                 .map_or(&display_path, |state| &state.path);
+            // Standalone causal models are never kernel specs; route them to
+            // the causal checker instead of failing dialect dispatch.
+            if std::fs::read_to_string(path)
+                .is_ok_and(|source| fsl_syntax::is_causal_source(&source))
+            {
+                if args.next().is_some() {
+                    return Err(
+                        "fslc check on a causal model accepts no options; use fslc causal check"
+                            .to_owned(),
+                    );
+                }
+                return Ok(run_causal_check(path));
+            }
             let mut strict_tags = false;
             let mut requirements = None;
             let mut edition = "current".to_owned();
@@ -1021,6 +1034,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok((result, status))
         }
         "ai" => ai_command(args),
+        "causal" => causal_command(args),
         "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
             let path = PathBuf::from(
@@ -1965,6 +1979,218 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
         }
         _ => Err(format!("unknown ai subcommand '{subcommand}'")),
     }
+}
+
+#[allow(clippy::too_many_lines)]
+fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc causal <check|analyze|diff> ...".to_owned())?;
+    match subcommand.as_str() {
+        "check" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal check requires a file".to_owned())?,
+            );
+            if let Some(option) = args.next() {
+                return Err(format!("unknown causal check option '{option}'"));
+            }
+            Ok(run_causal_check(&path))
+        }
+        "analyze" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal analyze requires a file".to_owned())?,
+            );
+            let mut projection = None;
+            let mut profile = None;
+            let mut format = "json".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--projection" => {
+                        projection = Some(required_option_value(&mut args, "--projection")?);
+                    }
+                    "--profile" => {
+                        profile = Some(required_option_value(&mut args, "--profile")?);
+                    }
+                    "--format" => format = required_option_value(&mut args, "--format")?,
+                    _ => return Err(format!("unknown causal analyze option '{option}'")),
+                }
+            }
+            Ok(run_causal_analyze(
+                &path,
+                projection.as_deref(),
+                profile.as_deref(),
+                &format,
+            ))
+        }
+        "diff" => {
+            let before = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
+            );
+            let after = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
+            );
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--format" => {
+                        if required_option_value(&mut args, "--format")? != "json" {
+                            return Err("causal diff supports only --format json".to_owned());
+                        }
+                    }
+                    _ => return Err(format!("unknown causal diff option '{option}'")),
+                }
+            }
+            Ok(run_causal_diff(&before, &after))
+        }
+        other => Err(format!(
+            "unknown causal subcommand '{other}' (expected check | analyze | diff; there is deliberately no 'causal verify')"
+        )),
+    }
+}
+
+fn causal_error_output(error: &fsl_tools::CausalError) -> (Value, i32) {
+    let kind = if error.kind == "parse" {
+        "parse"
+    } else {
+        "semantics"
+    };
+    let mut output = error_output(kind, &error.message);
+    if let Some(object) = output.as_object_mut() {
+        object.insert("diagnostic".to_owned(), json!(error.kind));
+        object.insert(
+            "loc".to_owned(),
+            json!({"line": error.line, "column": error.column}),
+        );
+    }
+    (output, 2)
+}
+
+fn load_causal_model(
+    path: &Path,
+) -> Result<(fsl_tools::CausalModel, Vec<fsl_tools::CausalWarning>), (Value, i32)> {
+    let source = std::fs::read_to_string(path).map_err(|error| {
+        (
+            error_output("io", &format!("cannot read {}: {error}", path.display())),
+            2,
+        )
+    })?;
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let resolver = fsl_core::FsResolver::new(base);
+    fsl_tools::build_causal_model(&source, &resolver).map_err(|error| causal_error_output(&error))
+}
+
+fn merge_causal_envelope(value: Value) -> (Value, i32) {
+    let Value::Object(body) = value else {
+        return (error_output("internal", "invalid causal result"), 3);
+    };
+    let mut output = envelope();
+    output.extend(body);
+    (Value::Object(output), 0)
+}
+
+fn run_causal_check(path: &Path) -> (Value, i32) {
+    match load_causal_model(path) {
+        Ok((model, warnings)) => {
+            merge_causal_envelope(fsl_tools::causal_check_json(&model, &warnings))
+        }
+        Err(error) => error,
+    }
+}
+
+fn run_causal_analyze(
+    path: &Path,
+    projection: Option<&str>,
+    profile: Option<&str>,
+    format: &str,
+) -> (Value, i32) {
+    if !matches!(format, "json" | "dot" | "mermaid") {
+        return (
+            error_output(
+                "usage",
+                &format!("unsupported causal analyze format: {format}"),
+            ),
+            2,
+        );
+    }
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let analysis = match (projection, profile) {
+        (Some(projection), None) => match projection {
+            "causal_graph" => fsl_tools::causal_graph_projection(&model),
+            "causal_timeline" => fsl_tools::causal_timeline_projection(&model),
+            "causal_traceability_graph" => fsl_tools::causal_traceability_projection(&model),
+            other => {
+                return (
+                    error_output("usage", &format!("unknown causal projection '{other}'")),
+                    2,
+                );
+            }
+        },
+        (None, Some("causal-review")) => {
+            if format != "json" {
+                return (
+                    error_output(
+                        "usage",
+                        "--profile causal-review supports only --format json",
+                    ),
+                    2,
+                );
+            }
+            fsl_tools::causal_review_json(&model)
+        }
+        (None, Some(other)) => {
+            return (
+                error_output("usage", &format!("unknown causal profile '{other}'")),
+                2,
+            );
+        }
+        (Some(_), Some(_)) | (None, None) => {
+            return (
+                error_output(
+                    "usage",
+                    "fslc causal analyze requires exactly one of --projection or --profile",
+                ),
+                2,
+            );
+        }
+    };
+    if format == "json" {
+        return merge_causal_envelope(analysis);
+    }
+    let content = if format == "mermaid" {
+        fsl_tools::causal_mermaid(&analysis)
+    } else {
+        fsl_tools::causal_dot(&analysis)
+    };
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("causal_analyzed"));
+    output.insert("formal_result".to_owned(), json!("not_run"));
+    output.insert(
+        "projection".to_owned(),
+        analysis.get("projection").cloned().unwrap_or(Value::Null),
+    );
+    output.insert("format".to_owned(), json!(format));
+    output.insert("content".to_owned(), json!(content));
+    (Value::Object(output), 0)
+}
+
+fn run_causal_diff(before: &Path, after: &Path) -> (Value, i32) {
+    let (before_model, _) = match load_causal_model(before) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let (after_model, _) = match load_causal_model(after) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    merge_causal_envelope(fsl_tools::causal_diff_json(&before_model, &after_model))
 }
 
 #[allow(clippy::too_many_lines)]

@@ -6,6 +6,9 @@ mod ai;
 mod analysis;
 mod analysis_export;
 mod analysis_graph;
+mod causal;
+mod causal_analysis;
+mod causal_projection;
 mod db;
 mod db_import;
 mod domain;
@@ -22,6 +25,20 @@ mod undecided;
 pub use ai::{check_ai, replay_ai};
 pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_findings};
 pub use analysis_export::export_analysis_graph;
+pub use causal::{
+    Binding, BindingKind, CausalError, CausalModel, CausalWarning, Claim, ClaimStatus, Clock,
+    Feedback, ImportedSpec, Interval, Lag, Persistence, Polarity, ScopeVocabulary, Variable,
+    VariableRole, active_adjacency, build_causal_model, reachable_from,
+    strongly_connected_components,
+};
+pub use causal_analysis::{
+    causal_check_json, causal_review_findings, earliest_from, feedback_loop_classes,
+    indicator_classes, latest_bound_from, polarity_reach,
+};
+pub use causal_projection::{
+    causal_diff_json, causal_dot, causal_graph_projection, causal_mermaid, causal_review_json,
+    causal_timeline_projection, causal_traceability_projection,
+};
 pub use db::{DbToolError, check_db, observe_db, validate_db};
 pub use db_import::{DbImport, import_db};
 pub use domain::{

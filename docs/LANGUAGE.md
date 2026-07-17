@@ -2455,3 +2455,52 @@ JSON v1 contract, not private parser/model structures, and fails closed on an
 unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
 compatible with the frozen reference output.
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)
+
+## 17. The causal profile (review-only causal hypothesis graphs)
+
+`causal <Name> { ... }` is a standalone sidecar document (its own `.fsl` file,
+never part of a kernel spec) that structures long-horizon causal hypotheses:
+interventions, mediators, outcomes, contexts, time lags, persistence, delayed
+feedback, measurement bindings, and applicability scope. **FSL never proves
+real-world causality**: every causal output carries
+`formal_result: "not_run"` and a `do_not_assume` array, no output path
+attaches `proved`/`verified` to a causal claim, and there is deliberately no
+`fslc causal verify` command.
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+`fslc check model.fsl` on a causal file routes to the causal checker
+automatically. A model declares one discrete `timebase`
+(`tick | hour | day | week`) and a finite `horizon`; `uses <alias> from
+"<path>"` imports kernel/business/requirements specs so variables can bind
+actions (`binds action alias.name`) and observe KPIs, states, or properties
+(`observes kpi alias.name`, etc.). Claims are directed hypotheses
+`claim <Id> a -> b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }` with stable IDs and monotonically increasing
+content versions; retired claims keep their identity and history. Cycles with
+a positive minimum lag sum are allowed but must be acknowledged with a
+`feedback` declaration (an unacknowledged cycle is a warning; a zero-lag cycle
+is an error). Feedback loops are classified `reinforcing | balancing |
+unknown` from the sign product of edge polarities (`unknown` absorbs), and the
+timeline reports Minkowski-sum first-response windows (exact minimum; the
+maximum is an upper bound when the pair is connected through a feedback SCC).
+`--profile causal-review` emits deterministic review findings (all
+`formal_status: "not_a_violation"`) such as `single_hypothesis_bottleneck`,
+`high_leverage_untested_claim`, `opposing_path_polarity`,
+`potential_common_cause`, `feedback_without_damping_story`,
+`deadline_before_earliest_effect`, `observation_window_misses_effect`,
+`measurement_cadence_too_coarse` (fires exactly when a measurement cadence
+exceeds an arriving claim's minimum persistence; unknown persistence is
+reported as `not_evaluable`, never guessed), and `unknown_lag_blocks_timeline`.
+`fslc causal diff` compares two model files by stable claim ID and content
+version; its `support_transition` stays `not_available` until external
+evidence exists. Versioned schemas live under `schemas/fslc/causal/`; the
+browser Worker does not expose causal commands. Working models live in
+[`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal).
+→ [`DESIGN-causal.md`](DESIGN-causal.md)

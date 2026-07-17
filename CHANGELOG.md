@@ -12,6 +12,31 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- `fslc causal check|analyze|diff` (Phase 1 of the review-only causal profile,
+  `docs/DESIGN-causal.md`): a standalone `causal <Name> { ... }` document —
+  parsed outside the dialect registry via a pre-dispatch sniff, so the frozen
+  Python `DIALECT_KEYWORDS` parity gate does not move — is typed into a
+  `CausalModel` (roles, measurement bindings resolved against imported
+  kernel/business specs, closed scope vocabulary, claim content versions and
+  the `active|retired` lifecycle, clock mappings, fail-closed well-formedness
+  diagnostics including `causal_instantaneous_loop` and
+  `causal_unacknowledged_feedback`). `causal analyze` emits deterministic
+  `causal_graph` / `causal_timeline` / `causal_traceability_graph`
+  projections (JSON/Mermaid/DOT; SCC-condensed, Dijkstra-exact earliest
+  first-pass, upper-bounded latest through feedback, capped representative
+  paths with truncation metadata) and a `causal-review` profile with 15
+  structural/temporal findings, all `formal_status: "not_a_violation"` with
+  `do_not_assume`. `causal diff` compares stable claim IDs and content
+  versions with `support_transition: "not_available"` until #322's evidence
+  exists. No output path attaches `proved`/`verified` to a causal claim and
+  there is deliberately no `causal verify`; `fsl-runtime`, `fsl-solver*`,
+  `fsl-verifier`, Public Kernel v1, and the frozen Python reference are
+  untouched. Ships `schemas/fslc/causal/` (check/graph/findings/diff v0),
+  three dogfood models under `examples/causal/`, LSP sniff handling,
+  `docs/LANGUAGE.md` §17 + `docs/LANGUAGE.ja.md` §17,
+  `skills/fsl/reference.md` §12 with the agent-facing "never present causal
+  claims as proved/verified" hard rule, and a docs-contract regression
+  (issue #321).
 - Accepted `docs/DESIGN-causal.md`: the design contract for the review-only
   `causal` profile (typed causal hypothesis graphs). It fixes the three-plane
   architecture (causal specification / formal expectation / external
