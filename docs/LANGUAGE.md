@@ -2366,19 +2366,30 @@ DESIGN-*.md).
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)
 - **`fslc mutate`** — mechanically mutates the spec and measures whether each
-  mutant is killed by the existing net of checks. A surviving mutant = behavior
-  constrained by no property = a place where an invariant is missing.
+  mutant is killed by the existing net of checks. The score is **bounded
+  mutant-set sensitivity**: `kill_rate = killed / (killed + survived)` over a
+  selected finite mutant set, at the selected `--depth`, under the
+  verify/acceptance/forbidden/refinement oracle. It moves with the operator
+  mix, the `--max-mutants` cap, the depth, and the oracle — it is not a
+  production defect-detection rate, not a probability that the spec is
+  correct, and not a completeness measure. Survivors are a review queue, not
+  automatic missing-invariant findings: a survivor may be an equivalent
+  mutant, behavior dead at baseline, an effect visible only beyond the depth
+  bound, or genuine under-constraint.
   `--from mutants.jsonl` additionally adjudicates externally generated
   mutations expressed as a full `mutated_spec` or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid external
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are `invalid`, never
-  killed, and are excluded from combined/per-source kill-rate denominators.
+  killed, and are excluded from combined/per-source kill-rate denominators
+  (they measure external generator quality, not spec strength).
   Every entry carries `source:"builtin"|"external"`; `--max-mutants` caps only
   the built-in catalog, so `--max-mutants 0 --from ...` runs external-only.
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
   `empty_formalization` warning (the semantic-level extension of
-  `--strict-tags`). → [`DESIGN-mutate.md`](DESIGN-mutate.md)
+  `--strict-tags`); per-requirement kill counts and this warning are observed
+  lower bounds within the chosen mutant set and depth.
+  → [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +

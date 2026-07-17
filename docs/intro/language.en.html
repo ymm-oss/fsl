@@ -2359,19 +2359,30 @@ DESIGN-*.md).</p>
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
 <li><strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
-  mutant is killed by the existing net of checks. A surviving mutant = behavior
-  constrained by no property = a place where an invariant is missing.
+  mutant is killed by the existing net of checks. The score is <strong>bounded
+  mutant-set sensitivity</strong>: <code>kill_rate = killed / (killed + survived)</code> over a
+  selected finite mutant set, at the selected <code>--depth</code>, under the
+  verify/acceptance/forbidden/refinement oracle. It moves with the operator
+  mix, the <code>--max-mutants</code> cap, the depth, and the oracle — it is not a
+  production defect-detection rate, not a probability that the spec is
+  correct, and not a completeness measure. Survivors are a review queue, not
+  automatic missing-invariant findings: a survivor may be an equivalent
+  mutant, behavior dead at baseline, an effect visible only beyond the depth
+  bound, or genuine under-constraint.
   <code>--from mutants.jsonl</code> additionally adjudicates externally generated
   mutations expressed as a full <code>mutated_spec</code> or an exact
   <code>replace:{target,replacement,occurrence?}</code> instruction. Valid external
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are <code>invalid</code>, never
-  killed, and are excluded from combined/per-source kill-rate denominators.
+  killed, and are excluded from combined/per-source kill-rate denominators
+  (they measure external generator quality, not spec strength).
   Every entry carries <code>source:"builtin"|"external"</code>; <code>--max-mutants</code> caps only
   the built-in catalog, so <code>--max-mutants 0 --from ...</code> runs external-only.
   <code>--by-requirement</code> flags "a requirement that kills no behavior mutant" as an
   <code>empty_formalization</code> warning (the semantic-level extension of
-  <code>--strict-tags</code>). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
+  <code>--strict-tags</code>); per-requirement kill counts and this warning are observed
+  lower bounds within the chosen mutant set and depth.
+  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
 <li><strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +

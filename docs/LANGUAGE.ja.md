@@ -2293,20 +2293,29 @@ DESIGN-*.md があります)。
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)
 - **`fslc mutate`** — spec を機械的に変異させ、各ミュータントが既存の検査の網に
-  よって殺されるかを測定します。生き残ったミュータント = どのプロパティにも制約
-  されない振る舞い = invariant が欠けている場所です。
+  よって殺されるかを測定します。スコアは**有界ミュータント集合への感度
+  (bounded mutant-set sensitivity)**です: 選択された有限のミュータント集合・
+  選択された `--depth`・verify/acceptance/forbidden/refinement オラクルの下での
+  `kill_rate = killed / (killed + survived)`。値はオペレーターの構成、
+  `--max-mutants` の上限、深さ、オラクルに依存して動きます — 本番の欠陥検出率
+  でも、spec が正しい確率でも、完全性の尺度でもありません。生存者は自動的に
+  「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
+  等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
+  初めて見える効果、あるいは本物の制約不足かもしれません。
   `--from mutants.jsonl` はさらに、完全な `mutated_spec`、または正確な
   `replace:{target,replacement,occurrence?}` 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
-  combined/per-source のキル率の分母から除外されます。
+  combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
+  なく、外部ジェネレーターの品質を測ります)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
   組み込みのカタログだけを上限にするので、`--max-mutants 0 --from ...` は外部のみ
   を実行します。
   `--by-requirement` は「どの振る舞いミュータントも殺さない要件」を
   `empty_formalization` 警告としてフラグします(`--strict-tags` の意味レベルの
-  拡張)。→ [`DESIGN-mutate.md`](DESIGN-mutate.md)
+  拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
+  観測された下界です。→ [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で

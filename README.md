@@ -232,7 +232,7 @@ fslc verify specs/order_system.fsl --depth 8    # compose: synchronized composit
 # Validation suite (closes the gap between spec ≠ intent; see docs/DESIGN-{forbidden,vacuity,...})
 fslc verify specs/cart_v1.fsl --vacuity error   # detect vacuous properties (unreachable antecedent/trigger, always-true requires)
 fslc verify specs/cart_v1.fsl --strict-tags     # match untagged declarations (fabrication candidates) and unreferenced requirements (omission candidates)
-fslc mutate specs/cart_v1.fsl                    # spec mutation: measure how much the properties constrain behavior
+fslc mutate specs/cart_v1.fsl                    # spec mutation: bounded mutant-set sensitivity of the property net (survivors are a review queue)
 fslc explain specs/cart_v1.fsl                   # skeleton enumeration + counterfactuals (what would happen without this rule)
 fslc analyze specs/cart_v1.fsl --profile ai-review # structural review findings (not proof failures)
 fslc html specs/cart_v1.fsl -o cart_report.html  # self-contained HTML report for team review

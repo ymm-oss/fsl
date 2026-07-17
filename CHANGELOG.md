@@ -11,6 +11,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
+### Fixed
+- Mutation documentation no longer overstates the score: `kill_rate =
+  killed / (killed + survived)` is now defined everywhere as bounded
+  mutant-set sensitivity — dependent on the operator mix, `--max-mutants`
+  cap, `--depth`, and the verify/acceptance/forbidden/refinement oracle — not
+  a production defect-detection rate, spec-correctness probability, or
+  completeness measure. Survivors are documented as a review queue
+  (equivalent mutants, dead-at-baseline behavior, beyond-depth effects, or
+  genuine under-constraint) instead of "a place where an invariant is
+  missing", and `empty_formalization`/per-requirement kills as observed lower
+  bounds within the chosen mutant set and depth. Aligned across
+  `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `docs/DESIGN-mutate.md`,
+  `README.md`, `skills/fsl/reference.md`, and the generated site reference; a
+  new `rust/fslc/tests/mutation_docs_contract.rs` regression keeps the
+  stronger survivor claim from returning (issue #338).
+
 ### Added
 - Documented a rationale convention for annotating a declaration so tooling and
   AI agents can see the "why" that used to live only in `//` comments (lexer
