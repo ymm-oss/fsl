@@ -29,6 +29,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
+### Fixed
+- `docs/LANGUAGE.ja.md` now carries the Japanese translation of the
+  "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
+  literate Markdown feature, so `docs/intro/language.ja.html` documents the
+  `.md` input support instead of silently omitting it (issue #346).
+
 ### Added
 - Documented a rationale convention for preserving a declaration's "why" in
   the checked model instead of only in `//` comments (lexer trivia): use the
