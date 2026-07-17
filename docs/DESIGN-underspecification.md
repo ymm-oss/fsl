@@ -58,8 +58,10 @@ witness was found.
 
 The native probe reuses the runtime Monitor's initialization, enabled-instance
 enumeration, and step semantics, plus the CLI's trace rendering — the same
-concrete semantics the replay/monitor surface uses, so no second transition
-relation exists to drift. Path states are constrained by all invariants.
+concrete semantics the replay/monitor surface uses, so the probe introduces no
+transition relation of its own that could drift from the runtime's (the
+verifier's symbolic relation is a separate, cross-checked implementation of the
+same semantics). Path states are constrained by all invariants.
 Branch successors are not constrained by the invariants (the probe compares
 each successor's `attempted_state`) so `divergent_choice` can expose a choice
 whose property truth values split.
