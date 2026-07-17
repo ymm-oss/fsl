@@ -40,10 +40,10 @@ pub use causal_analysis::{
     indicator_classes, latest_bound_from, polarity_reach,
 };
 pub use causal_evidence::{
-    Applicability, EVIDENCE_SCHEMA_VERSION, EvidenceArtifact, EvidenceError,
-    LIFECYCLE_SCHEMA_VERSION, LifecycleStatus, ScopeApplication, SupportOverlay, aggregate_support,
-    artifact_digest, canonical_json, causal_evidence_graph, lifecycle_record_digest,
-    parse_artifact, validate_lifecycle_chain,
+    Applicability, CAUSAL_SUPPORT_UNTESTED, EVIDENCE_SCHEMA_VERSION, EvidenceArtifact,
+    EvidenceError, FORMAL_ASSURANCE_NOT_RUN, LIFECYCLE_SCHEMA_VERSION, LifecycleStatus,
+    ScopeApplication, SupportOverlay, aggregate_support, artifact_digest, canonical_json,
+    causal_evidence_graph, lifecycle_record_digest, parse_artifact, validate_lifecycle_chain,
 };
 pub use causal_expectation::{CompiledExpectation, compile_expectations};
 pub use causal_ledger_projection::build_ledger;

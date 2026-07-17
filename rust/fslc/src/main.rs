@@ -2561,15 +2561,18 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
         .map(|claim| {
             json!({
                 "id": format!("claim:{}", claim.id),
-                "formal_assurance": "not_run",
-                "causal_support": "untested",
+                "formal_assurance": fsl_tools::FORMAL_ASSURANCE_NOT_RUN,
+                "causal_support": fsl_tools::CAUSAL_SUPPORT_UNTESTED,
             })
         })
         .collect();
     let mut output = envelope();
     output.insert("result".to_owned(), json!("causal_expectations_checked"));
     output.insert("schema_version".to_owned(), json!("causal-expectations.v0"));
-    output.insert("formal_result".to_owned(), json!("not_run"));
+    output.insert(
+        "formal_result".to_owned(),
+        json!(fsl_tools::FORMAL_ASSURANCE_NOT_RUN),
+    );
     output.insert("model".to_owned(), json!(model.name));
     output.insert("claims".to_owned(), json!(claims));
     output.insert("expectations".to_owned(), json!(expectations));
@@ -3157,7 +3160,7 @@ fn run_causal_observe_expectations(
                         "study_protocol": null
                     }
                 },
-                "formal_result": "not_run",
+                "formal_result": fsl_tools::FORMAL_ASSURANCE_NOT_RUN,
                 "artifact_digest": ""
             });
             let digest = fsl_tools::artifact_digest(&artifact);
@@ -3268,15 +3271,18 @@ fn run_causal_observe_expectations(
         .map(|claim| {
             json!({
                 "id": format!("claim:{}", claim.id),
-                "formal_assurance": "not_run",
-                "causal_support": "untested",
+                "formal_assurance": fsl_tools::FORMAL_ASSURANCE_NOT_RUN,
+                "causal_support": fsl_tools::CAUSAL_SUPPORT_UNTESTED,
             })
         })
         .collect();
     let mut output = envelope();
     output.insert("result".to_owned(), json!("causal_expectations_observed"));
     output.insert("schema_version".to_owned(), json!("causal-observation.v0"));
-    output.insert("formal_result".to_owned(), json!("not_run"));
+    output.insert(
+        "formal_result".to_owned(),
+        json!(fsl_tools::FORMAL_ASSURANCE_NOT_RUN),
+    );
     output.insert("model".to_owned(), json!(model.name));
     output.insert("claims".to_owned(), json!(claims));
     output.insert("expectations".to_owned(), json!(expectation_results));

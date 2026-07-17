@@ -26,6 +26,8 @@ pub const DESIGN_VOCABULARY: &[&str] = &[
     "expert_judgment",
 ];
 pub const SUPPORT_VOCABULARY: &[&str] = &["supports", "challenges", "inconclusive"];
+pub const FORMAL_ASSURANCE_NOT_RUN: &str = "not_run";
+pub const CAUSAL_SUPPORT_UNTESTED: &str = "untested";
 
 /// Fatal evidence-plane error: analysis does not start.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1197,8 +1199,8 @@ pub fn causal_evidence_graph(
                 "id": format!("claim:{}", claim.id),
                 "version": claim.version,
                 "status": if claim.status == crate::causal::ClaimStatus::Active { "active" } else { "retired" },
-                "formal_assurance": "not_run",
-                "causal_support": overlay.support.get(&claim.id).cloned().unwrap_or_else(|| "untested".to_owned()),
+                "formal_assurance": FORMAL_ASSURANCE_NOT_RUN,
+                "causal_support": overlay.support.get(&claim.id).cloned().unwrap_or_else(|| CAUSAL_SUPPORT_UNTESTED.to_owned()),
             })
         })
         .collect();

@@ -14,7 +14,8 @@ use serde_json::{Value, json};
 
 use crate::causal::{CausalModel, Claim, ClaimStatus, Lag};
 use crate::causal_evidence::{
-    EvidenceArtifact, LifecycleStatus, ScopeApplication, SupportOverlay, compare_scope,
+    CAUSAL_SUPPORT_UNTESTED, EvidenceArtifact, FORMAL_ASSURANCE_NOT_RUN, LifecycleStatus,
+    ScopeApplication, SupportOverlay, compare_scope,
 };
 use crate::causal_plan::PlanArtifact;
 
@@ -42,7 +43,7 @@ pub fn build_ledger(
             .support
             .get(&claim.id)
             .cloned()
-            .unwrap_or_else(|| "untested".to_owned());
+            .unwrap_or_else(|| CAUSAL_SUPPORT_UNTESTED.to_owned());
 
         let (applicable_plans, excluded_plans, plan_external_refs) =
             evaluate_plans(model, claim, plans);
@@ -65,7 +66,7 @@ pub fn build_ledger(
             "id": format!("claim:{}", claim.id),
             "version": claim.version,
             "status": if is_active { "active" } else { "retired" },
-            "formal_assurance": "not_run",
+            "formal_assurance": FORMAL_ASSURANCE_NOT_RUN,
             "causal_support": support,
             "plans": {
                 "applicable": applicable_plans,
@@ -83,7 +84,7 @@ pub fn build_ledger(
     json!({
         "result": "causal_ledger",
         "schema_version": "causal-ledger.v0",
-        "formal_result": "not_run",
+        "formal_result": FORMAL_ASSURANCE_NOT_RUN,
         "model": model.name,
         "as_of": as_of,
         "claims": claim_entries,
