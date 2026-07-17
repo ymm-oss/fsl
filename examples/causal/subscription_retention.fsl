@@ -70,6 +70,11 @@ causal SubscriptionRetention {
     persists 7..30
     basis hypothesis
     evidence EXP_ONBOARDING_2026
+    scope {
+      population new_users
+      environment production
+      segment self_serve
+    }
   }
 
   claim C_FirstSuccess_Habit first_success -> habit_formation {

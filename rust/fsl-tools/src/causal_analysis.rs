@@ -705,6 +705,75 @@ pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
         }
     }
 
+    // Measurement findings (issue #322).
+    for outcome in &outcomes {
+        for intervention in &interventions {
+            if !reach_any[intervention.id.as_str()].contains(&outcome.id) {
+                continue;
+            }
+            for cut in cut_variables(model, &intervention.id, &outcome.id) {
+                let Some(variable) = model.variables.get(&cut) else {
+                    continue;
+                };
+                if variable.role == VariableRole::Mediator && !variable.observable() {
+                    builder.push(&Finding {
+                        kind: "unobserved_mediator",
+                        analysis: "causal_structure",
+                        confidence: 0.85,
+                        involved: vec![
+                            format!("variable:{cut}"),
+                            format!("variable:{}", intervention.id),
+                            format!("variable:{}", outcome.id),
+                        ],
+                        witness: json!({"mediator": cut, "intervention": intervention.id, "outcome": outcome.id}),
+                        why: format!(
+                            "every path from '{}' to '{}' passes through unmeasured mediator '{cut}'",
+                            intervention.id, outcome.id
+                        ),
+                        repairs: &["add_measurement", "add_alternative_path"],
+                    });
+                }
+                if variable.observes.is_none() && variable.proxy.is_some() {
+                    builder.push(&Finding {
+                        kind: "proxy_only_critical_variable",
+                        analysis: "causal_structure",
+                        confidence: 0.8,
+                        involved: vec![format!("variable:{cut}")],
+                        witness: json!({"variable": cut, "intervention": intervention.id, "outcome": outcome.id}),
+                        why: format!(
+                            "high-leverage variable '{cut}' is observed only through a proxy"
+                        ),
+                        repairs: &["add_measurement", "ask_spec_question"],
+                    });
+                }
+            }
+            // unsupported_assumption_chain: no path from the intervention to
+            // the outcome contains a hypothesis-basis claim.
+            let hypothesis_on_path = model.active_claims().any(|claim| {
+                claim.basis == "hypothesis"
+                    && reach_any[intervention.id.as_str()].contains(&claim.source)
+                    && reachable_any(model, &claim.target).contains(&outcome.id)
+            });
+            if !hypothesis_on_path {
+                builder.push(&Finding {
+                    kind: "unsupported_assumption_chain",
+                    analysis: "causal_structure",
+                    confidence: 0.85,
+                    involved: vec![
+                        format!("variable:{}", intervention.id),
+                        format!("variable:{}", outcome.id),
+                    ],
+                    witness: json!({"reason": "every path is composed of assumption-basis claims only"}),
+                    why: format!(
+                        "the causal story from '{}' to '{}' rests on assumptions alone",
+                        intervention.id, outcome.id
+                    ),
+                    repairs: &["add_evidence_plan", "upgrade_assumption_to_hypothesis"],
+                });
+            }
+        }
+    }
+
     // --- time findings ---
     for outcome in &outcomes {
         let Some(deadline) = outcome.deadline else {

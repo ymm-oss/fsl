@@ -2419,7 +2419,29 @@ feedback SCC を経由するペアの最大値は上界)。
 持続は推測せず <code>not_evaluable</code> として報告)、<code>unknown_lag_blocks_timeline</code>。
 <code>fslc causal diff</code> は 2 つのモデルファイルを安定 claim ID と content version で
 比較します。<code>support_transition</code> は外部 evidence が存在するまで
-<code>not_available</code> のままです。バージョン付き schema は <code>schemas/fslc/causal/</code> に
+<code>not_available</code> のままです。</p>
+<p>外部 evidence はバージョン付き artifact で取り込みます
+(<code>fsl-causal-evidence.v0</code>: 閉じた <code>design</code> 語彙
+<code>randomized_experiment | quasi_experiment | observational | expert_judgment</code>、
+方向付き <code>support</code> <code>supports | challenges | inconclusive</code>、claim ID <strong>と
+content version</strong> の pin、scope token、ISO-8601 の <code>period</code>/<code>valid_until</code>、
+canonical payload に対する <code>artifact_digest</code>)。加えて独立した append-only の
+lifecycle chain(<code>fsl-causal-evidence-lifecycle.v0</code>: digest で連結された
+record 列。<code>retracted</code>/<code>superseded</code> は terminal で payload を書き換えません)。
+<code>fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph</code>(または
+<code>--profile causal-review</code>)は artifact を fail-closed に検証し —
+schema/digest/lifecycle chain の違反は分析を開始させません — 決定的な
+claim ごとの <code>causal_support</code> を集約します: <code>untested</code>、<code>supported</code>、
+<code>challenged</code>、<code>inconclusive</code>、<code>mixed</code>、<code>unsupported_by_current_evidence</code>。
+現行 claim version を pin し、scope が claim scope を <code>subsumes</code> し、
+freshness が宣言され、lifecycle が <code>active</code> で、観測 window が claim の最小
+lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+collapse されます(lineage 内の矛盾は <code>inconclusive</code>)。staleness は明示的な
+<code>--as-of</code> 日付に対してだけ判定され、実行環境の時計は決して使いません。
+<strong><code>causal_support</code> と <code>formal_assurance</code> は直交する 2 軸</strong>です: evidence は
+<code>formal_assurance: "not_run"</code> を決して変えず、どの support 値も verdict では
+ありません。バージョン付き schema は <code>schemas/fslc/causal/</code> に
 あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
 <a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>
 にあります。

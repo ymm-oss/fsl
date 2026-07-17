@@ -341,3 +341,149 @@ fn check_and_review_outputs_are_deterministic() {
     let (second, _) = run_cli(&["causal", "analyze", RETENTION, "--profile", "causal-review"]);
     assert_eq!(first, second);
 }
+
+const EVIDENCE: &str = "examples/causal/evidence/onboarding-2026.causal.json";
+const LIFECYCLE: &str = "examples/causal/evidence/onboarding-2026.lifecycle.json";
+
+#[test]
+fn evidence_graph_overlays_support_without_touching_formal_assurance() {
+    let (output, status) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--projection",
+        "causal_evidence_graph",
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+    ]);
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["schema_version"], "causal-evidence-graph.v0");
+    assert_review_only(&output);
+    let claims = output["claims"].as_array().expect("claims");
+    for claim in claims {
+        // Evidence never changes the formal axis (issue #322 invariant).
+        assert_eq!(claim["formal_assurance"], "not_run");
+    }
+    let supported = claims
+        .iter()
+        .find(|claim| claim["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("target claim");
+    assert_eq!(supported["causal_support"], "supported");
+    let untested = claims
+        .iter()
+        .find(|claim| claim["id"] == "claim:C_Habit_Retention")
+        .expect("untested claim");
+    assert_eq!(untested["causal_support"], "untested");
+    let edge = &output["edges"][0];
+    assert_eq!(edge["applicable"], true);
+    assert_eq!(edge["scope_relation"], "subsumes");
+}
+
+#[test]
+fn evidence_without_lifecycle_chain_is_excluded_from_support() {
+    let (output, status) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--projection",
+        "causal_evidence_graph",
+        "--evidence",
+        EVIDENCE,
+    ]);
+    assert_eq!(status, 0);
+    let claim = output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|claim| claim["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("claim")
+        .clone();
+    assert_eq!(claim["causal_support"], "unsupported_by_current_evidence");
+    assert!(
+        output["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|finding| finding["finding_type"] == "unknown_lifecycle")
+    );
+}
+
+#[test]
+fn stale_evidence_requires_explicit_as_of() {
+    let (output, _) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--projection",
+        "causal_evidence_graph",
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+        "--as-of",
+        "2028-01-01",
+    ]);
+    let claim = output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|claim| claim["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("claim")
+        .clone();
+    assert_eq!(claim["causal_support"], "unsupported_by_current_evidence");
+    assert!(
+        output["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|finding| finding["finding_type"] == "stale_evidence")
+    );
+}
+
+#[test]
+fn tampered_artifact_digest_fails_closed() {
+    let scratch = tempfile_dir();
+    let mut artifact: Value = serde_json::from_str(
+        &std::fs::read_to_string(repository_root().join(EVIDENCE)).expect("read artifact"),
+    )
+    .expect("artifact JSON");
+    artifact["support"] = serde_json::json!("challenges");
+    let path = scratch.join("tampered.causal.json");
+    std::fs::write(&path, artifact.to_string()).expect("write artifact");
+    let (output, status) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--projection",
+        "causal_evidence_graph",
+        "--evidence",
+        path.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(status, 2);
+    assert_eq!(output["result"], "error");
+    assert_eq!(output["diagnostic"], "causal_evidence_digest_mismatch");
+}
+
+#[test]
+fn review_profile_with_evidence_appends_support_map() {
+    let (output, status) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--profile",
+        "causal-review",
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+    ]);
+    assert_eq!(status, 0);
+    assert_eq!(
+        output["causal_support"]["C_Onboarding_FirstSuccess"],
+        "supported"
+    );
+    // The review profile still never claims formal verdicts.
+    assert_review_only(&output);
+}

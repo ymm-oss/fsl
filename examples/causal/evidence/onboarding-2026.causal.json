@@ -12,9 +12,15 @@
   "derived_from": [],
   "support": "supports",
   "scope": {
-    "population": ["new_users"],
-    "environment": ["production"],
-    "segment": ["self_serve"]
+    "population": [
+      "new_users"
+    ],
+    "environment": [
+      "production"
+    ],
+    "segment": [
+      "self_serve"
+    ]
   },
   "period": {
     "start": "2026-01-01",
@@ -28,8 +34,11 @@
     "upper": 0.13,
     "confidence": 0.95
   },
-  "assumptions": ["randomization_integrity", "no_interference"],
+  "assumptions": [
+    "randomization_integrity",
+    "no_interference"
+  ],
   "observation": null,
-  "artifact_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-  "formal_result": "not_run"
+  "formal_result": "not_run",
+  "artifact_digest": "sha256:7adbab3132974c7ce42b4036dac17e217762da7f11a4929be93672ff355a58e8"
 }

@@ -2005,6 +2005,9 @@ fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             let mut projection = None;
             let mut profile = None;
             let mut format = "json".to_owned();
+            let mut evidence = Vec::new();
+            let mut lifecycle = Vec::new();
+            let mut as_of = None;
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--projection" => {
@@ -2014,6 +2017,15 @@ fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                         profile = Some(required_option_value(&mut args, "--profile")?);
                     }
                     "--format" => format = required_option_value(&mut args, "--format")?,
+                    "--evidence" => evidence.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--evidence",
+                    )?)),
+                    "--lifecycle" => lifecycle.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--lifecycle",
+                    )?)),
+                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
                     _ => return Err(format!("unknown causal analyze option '{option}'")),
                 }
             }
@@ -2022,6 +2034,9 @@ fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                 projection.as_deref(),
                 profile.as_deref(),
                 &format,
+                &evidence,
+                &lifecycle,
+                as_of.as_deref(),
             ))
         }
         "diff" => {
@@ -2102,11 +2117,79 @@ fn run_causal_check(path: &Path) -> (Value, i32) {
     }
 }
 
+type LoadedEvidence = (
+    std::collections::BTreeMap<String, fsl_tools::EvidenceArtifact>,
+    fsl_tools::SupportOverlay,
+);
+
+fn load_causal_evidence(
+    model: &fsl_tools::CausalModel,
+    evidence_paths: &[PathBuf],
+    lifecycle_paths: &[PathBuf],
+    as_of: Option<&str>,
+) -> Result<LoadedEvidence, (Value, i32)> {
+    let read_json = |path: &PathBuf| -> Result<Value, (Value, i32)> {
+        let source = std::fs::read_to_string(path).map_err(|error| {
+            (
+                error_output("io", &format!("cannot read {}: {error}", path.display())),
+                2,
+            )
+        })?;
+        serde_json::from_str(&source).map_err(|error| {
+            (
+                error_output(
+                    "parse",
+                    &format!("invalid JSON in {}: {error}", path.display()),
+                ),
+                2,
+            )
+        })
+    };
+    let evidence_error = |error: &fsl_tools::EvidenceError| {
+        let mut output = error_output("semantics", &error.message);
+        if let Some(object) = output.as_object_mut() {
+            object.insert("diagnostic".to_owned(), json!(error.kind));
+        }
+        (output, 2)
+    };
+    let mut artifacts = std::collections::BTreeMap::new();
+    for path in evidence_paths {
+        let value = read_json(path)?;
+        let artifact = fsl_tools::parse_artifact(&value).map_err(|error| evidence_error(&error))?;
+        if artifacts
+            .insert(artifact.evidence_id.clone(), artifact)
+            .is_some()
+        {
+            return Err((
+                error_output(
+                    "semantics",
+                    "duplicate evidence_id across --evidence inputs",
+                ),
+                2,
+            ));
+        }
+    }
+    for path in lifecycle_paths {
+        let value = read_json(path)?;
+        let (evidence_id, status) = fsl_tools::validate_lifecycle_chain(&value, &artifacts)
+            .map_err(|error| evidence_error(&error))?;
+        if let Some(artifact) = artifacts.get_mut(&evidence_id) {
+            artifact.lifecycle_status = status;
+        }
+    }
+    let overlay = fsl_tools::aggregate_support(model, &artifacts, as_of);
+    Ok((artifacts, overlay))
+}
+
+#[allow(clippy::too_many_lines)]
 fn run_causal_analyze(
     path: &Path,
     projection: Option<&str>,
     profile: Option<&str>,
     format: &str,
+    evidence_paths: &[PathBuf],
+    lifecycle_paths: &[PathBuf],
+    as_of: Option<&str>,
 ) -> (Value, i32) {
     if !matches!(format, "json" | "dot" | "mermaid") {
         return (
@@ -2121,11 +2204,31 @@ fn run_causal_analyze(
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
+    let evidence = if evidence_paths.is_empty() {
+        None
+    } else {
+        match load_causal_evidence(&model, evidence_paths, lifecycle_paths, as_of) {
+            Ok(loaded) => Some(loaded),
+            Err(error) => return error,
+        }
+    };
     let analysis = match (projection, profile) {
         (Some(projection), None) => match projection {
             "causal_graph" => fsl_tools::causal_graph_projection(&model),
             "causal_timeline" => fsl_tools::causal_timeline_projection(&model),
             "causal_traceability_graph" => fsl_tools::causal_traceability_projection(&model),
+            "causal_evidence_graph" => {
+                let Some((artifacts, overlay)) = &evidence else {
+                    return (
+                        error_output(
+                            "usage",
+                            "--projection causal_evidence_graph requires at least one --evidence artifact",
+                        ),
+                        2,
+                    );
+                };
+                fsl_tools::causal_evidence_graph(&model, artifacts, overlay)
+            }
             other => {
                 return (
                     error_output("usage", &format!("unknown causal projection '{other}'")),
@@ -2143,7 +2246,19 @@ fn run_causal_analyze(
                     2,
                 );
             }
-            fsl_tools::causal_review_json(&model)
+            let mut review = fsl_tools::causal_review_json(&model);
+            if let Some((_, overlay)) = &evidence
+                && let Some(object) = review.as_object_mut()
+            {
+                if let Some(Value::Array(findings)) = object.get_mut("findings") {
+                    findings.extend(overlay.findings.iter().cloned());
+                }
+                if let Some(Value::Array(entries)) = object.get_mut("not_evaluable") {
+                    entries.extend(overlay.not_evaluable.iter().cloned());
+                }
+                object.insert("causal_support".to_owned(), json!(overlay.support));
+            }
+            review
         }
         (None, Some(other)) => {
             return (

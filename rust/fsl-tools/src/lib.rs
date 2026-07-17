@@ -8,6 +8,7 @@ mod analysis_export;
 mod analysis_graph;
 mod causal;
 mod causal_analysis;
+mod causal_evidence;
 mod causal_projection;
 mod db;
 mod db_import;
@@ -34,6 +35,11 @@ pub use causal::{
 pub use causal_analysis::{
     causal_check_json, causal_review_findings, earliest_from, feedback_loop_classes,
     indicator_classes, latest_bound_from, polarity_reach,
+};
+pub use causal_evidence::{
+    Applicability, EvidenceArtifact, EvidenceError, LifecycleStatus, ScopeApplication,
+    SupportOverlay, aggregate_support, artifact_digest, canonical_json, causal_evidence_graph,
+    lifecycle_record_digest, parse_artifact, validate_lifecycle_chain,
 };
 pub use causal_projection::{
     causal_diff_json, causal_dot, causal_graph_projection, causal_mermaid, causal_review_json,

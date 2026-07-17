@@ -12,6 +12,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Causal evidence plane (Phase 2, issue #322): `fslc causal analyze --evidence
+  artifact.json [--lifecycle chain.json] [--as-of YYYY-MM-DD]` validates
+  `fsl-causal-evidence.v0` artifacts (closed design/support vocabularies,
+  claim ID + content-version pins, scope tokens, ISO-8601 periods, canonical
+  sha256 `artifact_digest`) and independent append-only
+  `fsl-causal-evidence-lifecycle.v0` digest chains, fail-closed on
+  schema/digest/chain violations. A new `causal_evidence_graph` projection
+  (and the `causal-review` profile) overlays a deterministic per-claim
+  `causal_support` — `untested | supported | challenged | inconclusive |
+  mixed | unsupported_by_current_evidence` — counting only artifacts that pin
+  the current claim version with `subsumes` scope, declared freshness, an
+  active lifecycle, and an observation window at least the claim's minimum
+  lag; one source lineage is one vote and staleness is judged only against an
+  explicit `--as-of` date. Sixteen evidence/measurement review findings
+  (`evidence_scope_mismatch`, `evidence_window_shorter_than_lag`,
+  `duplicate_evidence_source`, `unobserved_mediator`,
+  `unsupported_assumption_chain`, ...) join the causal-review profile, all
+  `formal_status: "not_a_violation"`. Evidence never changes a claim's
+  `formal_assurance: "not_run"` — the two axes stay orthogonal by contract
+  and by test. Ships three new schemas under `schemas/fslc/causal/`, a
+  digest-stamped example artifact + lifecycle chain under
+  `examples/causal/evidence/`, and docs/skills updates.
 - `fslc causal check|analyze|diff` (Phase 1 of the review-only causal profile,
   `docs/DESIGN-causal.md`): a standalone `causal <Name> { ... }` document —
   parsed outside the dialect registry via a pre-dispatch sniff, so the frozen

@@ -2484,8 +2484,30 @@ exceeds an arriving claim's minimum persistence; unknown persistence is
 reported as <code>not_evaluable</code>, never guessed), and <code>unknown_lag_blocks_timeline</code>.
 <code>fslc causal diff</code> compares two model files by stable claim ID and content
 version; its <code>support_transition</code> stays <code>not_available</code> until external
-evidence exists. Versioned schemas live under <code>schemas/fslc/causal/</code>; the
-browser Worker does not expose causal commands. Working models live in
+evidence exists.</p>
+<p>External evidence enters through versioned artifacts
+(<code>fsl-causal-evidence.v0</code>: closed <code>design</code> vocabulary
+<code>randomized_experiment | quasi_experiment | observational | expert_judgment</code>,
+directed <code>support</code> <code>supports | challenges | inconclusive</code>, claim-ID <strong>and
+content-version</strong> pins, scope tokens, ISO-8601 <code>period</code>/<code>valid_until</code>, an
+<code>artifact_digest</code> over the canonical payload) plus independent append-only
+lifecycle chains (<code>fsl-causal-evidence-lifecycle.v0</code>: digest-linked records;
+<code>retracted</code>/<code>superseded</code> are terminal and never rewrite the payload).
+<code>fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph</code> (or
+<code>--profile causal-review</code>) validates artifacts fail-closed — schema/digest/
+lifecycle-chain violations stop the analysis — and aggregates a deterministic
+per-claim <code>causal_support</code>: <code>untested</code>, <code>supported</code>, <code>challenged</code>,
+<code>inconclusive</code>, <code>mixed</code>, or <code>unsupported_by_current_evidence</code>. Only artifacts
+that pin the current claim version, whose scope <code>subsumes</code> the claim scope,
+with declared freshness, an <code>active</code> lifecycle, and an observation window at
+least the claim's minimum lag count; one source lineage collapses to one vote
+(contradictions inside a lineage are <code>inconclusive</code>). Staleness is judged only
+against an explicit <code>--as-of</code> date — never the wall clock. <strong><code>causal_support</code>
+and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never changes
+<code>formal_assurance: "not_run"</code>, and no support value is a verdict. Versioned
+schemas live under <code>schemas/fslc/causal/</code>; the browser Worker does not expose
+causal commands. Working models live in
 <a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>.
 → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>

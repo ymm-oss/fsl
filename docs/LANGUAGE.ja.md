@@ -2430,7 +2430,30 @@ feedback SCC を経由するペアの最大値は上界)。
 持続は推測せず `not_evaluable` として報告)、`unknown_lag_blocks_timeline`。
 `fslc causal diff` は 2 つのモデルファイルを安定 claim ID と content version で
 比較します。`support_transition` は外部 evidence が存在するまで
-`not_available` のままです。バージョン付き schema は `schemas/fslc/causal/` に
+`not_available` のままです。
+
+外部 evidence はバージョン付き artifact で取り込みます
+(`fsl-causal-evidence.v0`: 閉じた `design` 語彙
+`randomized_experiment | quasi_experiment | observational | expert_judgment`、
+方向付き `support` `supports | challenges | inconclusive`、claim ID **と
+content version** の pin、scope token、ISO-8601 の `period`/`valid_until`、
+canonical payload に対する `artifact_digest`)。加えて独立した append-only の
+lifecycle chain(`fsl-causal-evidence-lifecycle.v0`: digest で連結された
+record 列。`retracted`/`superseded` は terminal で payload を書き換えません)。
+`fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph`(または
+`--profile causal-review`)は artifact を fail-closed に検証し —
+schema/digest/lifecycle chain の違反は分析を開始させません — 決定的な
+claim ごとの `causal_support` を集約します: `untested`、`supported`、
+`challenged`、`inconclusive`、`mixed`、`unsupported_by_current_evidence`。
+現行 claim version を pin し、scope が claim scope を `subsumes` し、
+freshness が宣言され、lifecycle が `active` で、観測 window が claim の最小
+lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
+`--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+**`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は
+`formal_assurance: "not_run"` を決して変えず、どの support 値も verdict では
+ありません。バージョン付き schema は `schemas/fslc/causal/` に
 あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
 [`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal)
 にあります。

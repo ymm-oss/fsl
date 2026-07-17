@@ -598,7 +598,53 @@ never contradict, the sections above.
   are recorded and referenced by ID; the artifact file is never opened, parsed,
   or validated (that is #322), and no support values are emitted anywhere.
 
-## 13. Test obligations for Phase 1
+## 13. Phase 2 implementation notes (fixed by #322)
+
+- **Digest conventions.** `artifact_digest` = `sha256:` over the canonical
+  JSON (recursively sorted keys, compact separators) of the artifact with the
+  `artifact_digest` field removed. A lifecycle `record_digest` = the same
+  canonicalization of the record with `record_digest` removed plus the
+  chain's `evidence_id` and `artifact_digest` injected. Tampering with either
+  is a fatal `causal_evidence_digest_mismatch` /
+  `causal_evidence_lifecycle_mismatch`.
+- **Fail-closed boundary.** Artifact schema violations (unknown design/
+  support/observation fields, non-`not_run` `formal_result`), digest
+  mismatches, and lifecycle-chain violations (sequence gaps/forks, broken
+  digest links, records after a terminal status, unresolvable
+  `superseded_by`) stop the analysis with exit 2. Applicability conditions
+  (version pin, scope, freshness, lifecycle status, window-vs-lag, lineage)
+  are warnings: the artifact stays in history and in the graph but is
+  excluded from current support.
+- **Staleness needs `--as-of`.** `stale_evidence` compares `valid_until`
+  against an explicit `--as-of YYYY-MM-DD` only; without `--as-of`, a
+  declared `valid_until` is accepted as-declared (never the wall clock, so
+  identical inputs always produce identical output). Missing `valid_until`
+  is `unknown_freshness` and excludes the artifact regardless.
+- **Window conversion.** `period.end - period.start` converts to timebase
+  units from ISO-8601 date differences: exact for `day` and `hour`
+  (days × 24); `week` only when the difference is a whole number of weeks;
+  `tick` and fractional conversions are `not_evaluable` (never rounded).
+  `w < lag_min` excludes with `evidence_window_shorter_than_lag`;
+  `w == lag_min` passes.
+- **Lineage.** The lineage root is the transitive `derived_from` root when
+  present, else `source_study_id`, else the artifact itself. Roots sharing
+  members emit `duplicate_evidence_source`; one root is one vote; support
+  contradictions inside a root collapse to `inconclusive` with
+  `conflicting_evidence`.
+- **Support vocabulary.** Aggregation follows the #322 table verbatim;
+  `unsupported_by_current_evidence` applies when a claim is referenced by
+  artifacts (or declares evidence references) but no artifact is currently
+  applicable. `causal_support` never appears without an adjacent
+  `formal_assurance: "not_run"` in graph output.
+- **CLI surface.** `--evidence` and `--lifecycle` are repeatable;
+  `--projection causal_evidence_graph` requires at least one `--evidence`;
+  `--profile causal-review` with `--evidence` appends evidence findings and
+  a `causal_support` map to the review envelope. Measurement findings
+  (`unobserved_mediator`, `proxy_only_critical_variable`,
+  `unsupported_assumption_chain`) are model-structural and fire without
+  evidence inputs.
+
+## 14. Test obligations for Phase 1
 
 The scope three-valued comparison (§4.4), polarity sign product with unknown
 absorption (§6), and `reinforcing / balancing / unknown` loop classification

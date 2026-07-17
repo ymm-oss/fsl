@@ -2500,7 +2500,30 @@ exceeds an arriving claim's minimum persistence; unknown persistence is
 reported as `not_evaluable`, never guessed), and `unknown_lag_blocks_timeline`.
 `fslc causal diff` compares two model files by stable claim ID and content
 version; its `support_transition` stays `not_available` until external
-evidence exists. Versioned schemas live under `schemas/fslc/causal/`; the
-browser Worker does not expose causal commands. Working models live in
+evidence exists.
+
+External evidence enters through versioned artifacts
+(`fsl-causal-evidence.v0`: closed `design` vocabulary
+`randomized_experiment | quasi_experiment | observational | expert_judgment`,
+directed `support` `supports | challenges | inconclusive`, claim-ID **and
+content-version** pins, scope tokens, ISO-8601 `period`/`valid_until`, an
+`artifact_digest` over the canonical payload) plus independent append-only
+lifecycle chains (`fsl-causal-evidence-lifecycle.v0`: digest-linked records;
+`retracted`/`superseded` are terminal and never rewrite the payload).
+`fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph` (or
+`--profile causal-review`) validates artifacts fail-closed — schema/digest/
+lifecycle-chain violations stop the analysis — and aggregates a deterministic
+per-claim `causal_support`: `untested`, `supported`, `challenged`,
+`inconclusive`, `mixed`, or `unsupported_by_current_evidence`. Only artifacts
+that pin the current claim version, whose scope `subsumes` the claim scope,
+with declared freshness, an `active` lifecycle, and an observation window at
+least the claim's minimum lag count; one source lineage collapses to one vote
+(contradictions inside a lineage are `inconclusive`). Staleness is judged only
+against an explicit `--as-of` date — never the wall clock. **`causal_support`
+and `formal_assurance` are orthogonal axes**: evidence never changes
+`formal_assurance: "not_run"`, and no support value is a verdict. Versioned
+schemas live under `schemas/fslc/causal/`; the browser Worker does not expose
+causal commands. Working models live in
 [`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal).
 → [`DESIGN-causal.md`](DESIGN-causal.md)

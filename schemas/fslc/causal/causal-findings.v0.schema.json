@@ -50,6 +50,19 @@
         "type": "string"
       },
       "minItems": 1
+    },
+    "causal_support": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": [
+          "untested",
+          "supported",
+          "challenged",
+          "inconclusive",
+          "mixed",
+          "unsupported_by_current_evidence"
+        ]
+      }
     }
   },
   "additionalProperties": true,
@@ -73,7 +86,8 @@
         "analysis": {
           "enum": [
             "causal_structure",
-            "causal_time"
+            "causal_time",
+            "causal_evidence"
           ]
         },
         "finding_type": {
@@ -92,7 +106,23 @@
             "measurement_cadence_too_coarse",
             "long_horizon_without_leading_indicator",
             "unknown_lag_blocks_timeline",
-            "feedback_period_exceeds_horizon"
+            "feedback_period_exceeds_horizon",
+            "unobserved_mediator",
+            "proxy_only_critical_variable",
+            "unsupported_assumption_chain",
+            "evidence_scope_mismatch",
+            "evidence_scope_partial_overlap",
+            "evidence_scope_unassessable",
+            "unknown_lifecycle",
+            "evidence_claim_version_mismatch",
+            "evidence_window_shorter_than_lag",
+            "duplicate_evidence_source",
+            "unknown_freshness",
+            "retracted_or_superseded_evidence",
+            "stale_evidence",
+            "evidence_claim_mismatch",
+            "observational_only_support",
+            "conflicting_evidence"
           ]
         },
         "severity": {

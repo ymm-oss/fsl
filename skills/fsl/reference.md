@@ -1719,5 +1719,23 @@ positive-lag cycles are warnings (`causal_unacknowledged_feedback`); zero-lag
 cycles are errors. `measurement_cadence_too_coarse` fires exactly when
 `cadence > persists.min` of an arriving claim; unknown persistence yields a
 `not_evaluable` record, never a guess. `causal diff` reports structural change
-only — `support_transition` stays `not_available` without evidence inputs
-(#322). See `docs/DESIGN-causal.md`.
+only — `support_transition` stays `not_available` without evidence inputs.
+
+External evidence: `fslc causal analyze model.fsl --evidence artifact.json
+[--lifecycle chain.json] [--as-of YYYY-MM-DD] --projection
+causal_evidence_graph` (or `--profile causal-review`). Artifacts
+(`fsl-causal-evidence.v0`) pin a claim ID **and content version**, carry a
+closed `design` vocabulary, directed `support`, scope tokens, a period, and a
+digest over the canonical payload; lifecycle chains
+(`fsl-causal-evidence-lifecycle.v0`) are separate append-only, digest-linked
+records. Schema/digest/lifecycle violations fail closed (exit 2). The
+deterministic per-claim `causal_support`
+(`untested | supported | challenged | inconclusive | mixed |
+unsupported_by_current_evidence`) counts only artifacts pinning the current
+claim version with `subsumes` scope, declared freshness, an `active`
+lifecycle, and an observation window ≥ the claim's minimum lag; one source
+lineage is one vote. Staleness needs an explicit `--as-of` — never the wall
+clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
+`supported` never means proved, `challenged` never means refuted, and
+evidence never changes `formal_assurance: "not_run"`.** See
+`docs/DESIGN-causal.md`.
