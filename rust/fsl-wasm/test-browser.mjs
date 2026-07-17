@@ -25,18 +25,32 @@ if (protocolError?.message !== "initialization: probe" || workerMessageError({ e
 
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 const repository = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const nativeCommandTimeoutMs = 60_000;
 
-async function command(executable, args) {
+async function command(executable, args, timeoutMs = 300_000) {
   return new Promise((resolveCommand, reject) => {
     const process = spawn(executable, args, { cwd: repository, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback(value);
+    };
     process.stdout.setEncoding("utf8");
     process.stderr.setEncoding("utf8");
     process.stdout.on("data", (chunk) => { stdout += chunk; });
     process.stderr.on("data", (chunk) => { stderr += chunk; });
-    process.on("error", reject);
-    process.on("close", (status) => resolveCommand({ status, stdout, stderr }));
+    const timeout = setTimeout(() => {
+      process.kill("SIGKILL");
+      finish(reject, new Error(`${executable} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    process.on("error", (error) => finish(reject, error));
+    process.on("close", (status) => {
+      finish(resolveCommand, { status, stdout, stderr });
+    });
   });
 }
 
@@ -270,31 +284,17 @@ async function nativeEnvelope(testCase) {
       "--deadlock", testCase.options.deadlock,
       "--no-cache",
     ];
-  return new Promise((resolve, reject) => {
-    const childProcess = spawn(nativeBinary, args, {
-      cwd: repository,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    childProcess.stdout.setEncoding("utf8");
-    childProcess.stderr.setEncoding("utf8");
-    childProcess.stdout.on("data", (chunk) => { stdout += chunk; });
-    childProcess.stderr.on("data", (chunk) => { stderr += chunk; });
-    childProcess.on("error", reject);
-    childProcess.on("close", (status) => {
-      try {
-        const envelope = JSON.parse(stdout);
-        if (testCase.expected_status !== undefined && status !== testCase.expected_status) {
-          reject(new Error(
-            `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${status}`,
-          ));
-          return;
-        }
-        resolve(envelope);
-      } catch (error) { reject(new Error(`native CLI JSON failure: ${error}\n${stderr}`)); }
-    });
-  });
+  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
+  if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
+    throw new Error(
+      `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
+    );
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`native CLI JSON failure: ${error}\n${result.stderr}`);
+  }
 }
 const native = [];
 for (const testCase of parityCases) {

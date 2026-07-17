@@ -14,6 +14,12 @@ FSL is distributed by the tag-driven GitHub Release workflow only. Do not
 publish the frozen Python compatibility reference to PyPI or the Rust crates to
 crates.io.
 
+The `production` branch and its required `production-policy` check must already
+be adopted before promotion. When the latest released baseline predates that
+workflow, follow the internal release skill's one-time reviewed bootstrap; a
+`pull_request_target` workflow cannot validate its own first installation when
+it is absent from the base branch.
+
 ## Supported native targets
 
 Each target ships both `fslc` and `fslc-lsp`, with a SHA-256 file for each
@@ -21,14 +27,20 @@ binary.
 
 | Target | Runner | Binary suffix |
 |---|---|---|
-| macOS arm64 (Apple Silicon) | `macos-14` | `macos-arm64` |
-| Linux x64 | `ubuntu-latest` | `linux-x64` |
+| macOS arm64 (Apple Silicon, macOS 14+) | `macos-15` | `macos-arm64` |
+| Linux x64 | `ubuntu-24.04` | `linux-x64` |
 | Linux arm64 | `ubuntu-24.04-arm` | `linux-arm64` |
 | Windows x64 | `windows-latest` | `windows-x64.exe` |
 
 Intel macOS (`macos-x64`) is not supported. Releases also contain the VS Code
 extension and the Public Kernel contract bundles produced by
 `.github/workflows/release.yml`.
+`install.sh` resolves the latest published tag once and uses that same tag for
+the repository content and both native binaries.
+
+Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
+runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
+It also rejects a dynamic dependency on `libz3`.
 
 ## 1. Prepare the release commit on main
 
@@ -73,7 +85,7 @@ extension and the Public Kernel contract bundles produced by
    `workflow_dispatch` run builds and smoke-tests every artifact but cannot
    attach files to a GitHub Release, even when the selected ref is a tag.
 2. Verify the completed run's `head_sha` equals the recorded candidate SHA and
-   all four native targets, the VS Code extension, and both Kernel bundle jobs
+   all four native targets, the VS Code extension, and both Kernel bundles
    pass. Do not reuse evidence from a moving branch after its SHA changes.
 3. Open the release-promotion pull request from `main` to `production`, stating
    the candidate SHA, version, changes, residual risk, gate results, and dry-run
@@ -92,11 +104,12 @@ extension and the Public Kernel contract bundles produced by
    not valid for a distinct production merge commit.
 3. Regenerate a temporary notes file from the complete `X.Y.Z` section in the
    exact production HEAD's `CHANGELOG.md`, excluding its version heading. Review
-   it and stop if it is empty; do not reuse a file derived from the pre-promotion
-   candidate.
-4. Show the user the production commit, annotated tag `vX.Y.Z`, and that pushing
-   it creates the public GitHub Release and publishes its artifacts. Obtain
-   explicit confirmation immediately before running:
+   it, show it to the user, and stop if it is empty; do not reuse a file derived
+   from the pre-promotion candidate.
+4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
+   and that pushing the tag uploads a draft, verifies its remote inventory, then
+   makes the GitHub Release and notes public. Obtain one explicit confirmation
+   for that complete publication immediately before running:
 
    ```bash
    git tag -a vX.Y.Z PRODUCTION_SHA -m "vX.Y.Z"
@@ -106,23 +119,16 @@ extension and the Public Kernel contract bundles produced by
 5. Watch the tag-triggered workflow to completion. The workflow rejects any
    native binary whose `fslc --version` differs from the tag.
 
-## 4. Publish notes and verify the release
+## 4. Verify the release
 
-1. Show the user the prepared changelog-derived notes and obtain explicit
-   confirmation before setting the GitHub Release body:
-
-   ```bash
-   gh release edit vX.Y.Z --notes-file RELEASE_NOTES_FILE
-   ```
-
-2. Confirm the published body is non-empty and matches the `X.Y.Z` changelog
+1. Confirm the published body is non-empty and matches the `X.Y.Z` changelog
    section.
-3. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
+2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
    four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
    the VS Code extension and both Kernel bundle/checksum pairs are present.
-4. Download the current machine's supported binary and checksum, verify the
+3. Download the current machine's supported binary and checksum, verify the
    checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
-5. Report the promotion pull request, production SHA, tag SHA, release URL,
+4. Report the promotion pull request, production SHA, tag SHA, release URL,
    workflow runs, non-empty notes, asset inventory, checksum, and version smoke
    test.
 
@@ -135,7 +141,9 @@ extension and the Public Kernel contract bundles produced by
 - Never force-move, delete, or reuse a pushed release tag. If the tagged commit
   or artifacts are wrong, fix the defect upstream, promote it, and cut a new
   patch version.
-- If release-note publication or asset verification fails, leave the release
-  visibly unresolved until repaired. Do not report completion.
+- The tag workflow uploads notes and all assets to a non-public draft, verifies
+  the remote inventory, and only then makes the Release public. If any publish
+  step fails, leave the draft non-public until the defect is fixed upstream.
+  Do not report completion.
 - Follow the internal release skill's `release/vX.Y` stabilization and hotfix
   procedures when `main` cannot be promoted as a whole.
