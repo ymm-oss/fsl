@@ -89,6 +89,9 @@ const unsupportedDocuments = new Map(Object.entries({
   "specs/bank_refines.fsl": "refinement",
   "specs/cart_refines.fsl": "refinement",
   "specs/seat_refines.fsl": "refinement",
+  "examples/causal/incident_response.fsl": "causal",
+  "examples/causal/marketing_funnel.fsl": "causal",
+  "examples/causal/subscription_retention.fsl": "causal",
 }));
 const observedUnsupported = new Set();
 const parityCases = [];
@@ -99,8 +102,16 @@ for (const path of candidates) {
   if (classified.status === 0) {
     const ast = JSON.parse(classified.stdout);
     documentType = Array.isArray(ast) ? ast[0] : ast.$type?.toLowerCase();
+  } else {
+    // Standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md);
+    // detect them by their first significant declaration keyword.
+    const stripped = (await readFile(path, "utf8"))
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, "").trim())
+      .find((line) => line.length > 0);
+    if (stripped !== undefined && /^causal\s/.test(stripped)) documentType = "causal";
   }
-  if (["agent", "refinement"].includes(documentType)) {
+  if (["agent", "refinement", "causal"].includes(documentType)) {
     if (unsupportedDocuments.get(repositoryPath) !== documentType) {
       throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
     }
