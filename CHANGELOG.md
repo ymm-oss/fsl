@@ -12,6 +12,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Added the Requirement Claim IR (RCIR) v1 schema and native projector (issue #325),
+  the foundation of the upcoming `fslc document` requirements-document generator.
+  `fsl_tools::project_requirement_claims_from_source` compiles a checked `spec` or
+  `requirements` dialect model into `schemas/fslc/document/requirement-claims.v1.schema.json`:
+  nine claim kinds (`operation`, `state_rule`, `transition_rule`, `progress_rule`,
+  `reachability_goal`, `acceptance_trace`, `forbidden_trace`, `deadline_rule`,
+  `terminal_rule`), full many-to-many requirement relations (no singular compatibility
+  projection), a fail-closed `rendered`/`unattributed`/`unsupported` coverage
+  partition over every authored semantic target, `spec_digest`/`claim_set_digest`/
+  `claim_digest` (mutation-sensitive, comment/formatting-stable), and provenance
+  reusing the Public Kernel v2 assurance vocabulary (falling back to the checked
+  declaration's own span, never a guess, when the origin registry has no chain for
+  a target). RCIR is not a second semantics: expressions/statements are carried as
+  the same location-normalized checked kernel AST the approval spec digest uses.
+  CLI wiring, the controlled-language renderer, drift checking, the no-silent-omission
+  gate, glossary, evidence overlay, and approval integration are follow-up issues
+  #326-#334; this change ships schema + library projector only. See
+  `docs/DESIGN-document-requirement-claim-ir.md`.
+- `fsl_tools::undecided` gains `undecided_records`, a typed variant of
+  `undecided_declarations` (issue #189) that additionally carries the annotation's
+  source span; the existing JSON-producing function is now a thin projection over it
+  with unchanged output.
 - Documented a rationale convention for annotating a declaration so tooling and
   AI agents can see the "why" that used to live only in `//` comments (lexer
   trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the

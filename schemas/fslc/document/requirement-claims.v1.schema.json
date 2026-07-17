@@ -1,0 +1,640 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/document/requirement-claims.v1.schema.json",
+  "title": "FSL requirement claims (RCIR) v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "result",
+    "spec",
+    "semantics",
+    "requirements",
+    "claims",
+    "trace_cases",
+    "undecided",
+    "analysis_scope",
+    "coverage",
+    "provenance"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://fsl.dev/schemas/fslc/document/requirement-claims.v1.schema.json"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+    },
+    "result": { "const": "requirement_claims" },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "dialect",
+        "source",
+        "spec_digest",
+        "spec_digest_algorithm",
+        "claim_set_digest",
+        "claim_set_digest_algorithm",
+        "claim_digest_algorithm"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "dialect": { "enum": ["spec", "requirements"] },
+        "source": { "type": ["string", "null"], "minLength": 1 },
+        "spec_digest": { "$ref": "#/$defs/sha256" },
+        "spec_digest_algorithm": { "const": "fsl-kernel-ast-v1+sha256" },
+        "claim_set_digest": { "$ref": "#/$defs/sha256" },
+        "claim_set_digest_algorithm": { "const": "fsl-rcir-claim-set-v1+sha256" },
+        "claim_digest_algorithm": { "const": "fsl-rcir-claim-v1+sha256" }
+      }
+    },
+    "semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["updates", "reads", "failed_step", "fairness"],
+      "properties": {
+        "updates": { "const": "simultaneous" },
+        "reads": { "const": "pre_state" },
+        "failed_step": { "const": "rollback" },
+        "fairness": { "const": "weak" }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "claims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim" }
+    },
+    "trace_cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trace_case" }
+    },
+    "undecided": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/undecided_item" }
+    },
+    "analysis_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instances", "values"],
+      "properties": {
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entity", "count"],
+            "properties": {
+              "entity": { "type": "string", "minLength": 1 },
+              "count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["number", "lo", "hi"],
+            "properties": {
+              "number": { "type": "string", "minLength": 1 },
+              "lo": { "$ref": "#/$defs/kernel_ast" },
+              "hi": { "$ref": "#/$defs/kernel_ast" }
+            }
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authored", "rendered", "unattributed", "unsupported", "counts"],
+      "properties": {
+        "authored": { "$ref": "#/$defs/target_list" },
+        "rendered": { "$ref": "#/$defs/target_list" },
+        "unattributed": { "$ref": "#/$defs/target_list" },
+        "unsupported": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target", "reason"],
+            "properties": {
+              "target": { "$ref": "#/$defs/semantic_target" },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authored", "rendered", "unattributed", "unsupported"],
+          "properties": {
+            "authored": { "type": "integer", "minimum": 0 },
+            "rendered": { "type": "integer", "minimum": 0 },
+            "unattributed": { "type": "integer", "minimum": 0 },
+            "unsupported": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completeness", "identity_stability", "counts"],
+      "properties": {
+        "completeness": { "enum": ["complete", "partial", "unknown"] },
+        "identity_stability": { "const": "exact_source_revision" },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_backed", "generated_from_source", "generated_only", "unknown"],
+          "properties": {
+            "source_backed": { "type": "integer", "minimum": 0 },
+            "generated_from_source": { "type": "integer", "minimum": 0 },
+            "generated_only": { "type": "integer", "minimum": 0 },
+            "unknown": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "semantic_target": { "type": "string", "minLength": 1 },
+    "target_list": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/semantic_target" }
+    },
+    "requirement_id": { "type": "string", "minLength": 1 },
+    "claim_id": { "type": "string", "minLength": 1 },
+    "kernel_ast": {
+      "description": "Location-normalized checked kernel AST JSON (python_ast projection with location objects stripped and object keys sorted). Its inner shape is governed by the kernel AST contract, not by this schema; any JSON value is permitted here."
+    },
+    "source_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "line", "column"],
+      "properties": {
+        "path": { "type": ["string", "null"], "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "nullable_source_ref": {
+      "oneOf": [{ "$ref": "#/$defs/source_ref" }, { "type": "null" }]
+    },
+    "type_ref": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "int" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "bool" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "const": "named" },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "lo", "hi"],
+          "properties": {
+            "kind": { "const": "range" },
+            "lo": { "type": "integer" },
+            "hi": { "type": "integer" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key", "value"],
+          "properties": {
+            "kind": { "const": "map" },
+            "key": { "$ref": "#/$defs/type_ref" },
+            "value": { "$ref": "#/$defs/type_ref" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "left", "right"],
+          "properties": {
+            "kind": { "const": "relation" },
+            "left": { "$ref": "#/$defs/type_ref" },
+            "right": { "$ref": "#/$defs/type_ref" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "element"],
+          "properties": {
+            "kind": { "const": "set" },
+            "element": { "$ref": "#/$defs/type_ref" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "element", "bound"],
+          "properties": {
+            "kind": { "const": "seq" },
+            "element": { "$ref": "#/$defs/type_ref" },
+            "bound": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "element"],
+          "properties": {
+            "kind": { "const": "option" },
+            "element": { "$ref": "#/$defs/type_ref" }
+          }
+        }
+      ]
+    },
+    "operation_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "display_name", "parameters"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "$ref": "#/$defs/type_ref" }
+            }
+          }
+        }
+      }
+    },
+    "property_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["property", "display_name"],
+      "properties": {
+        "property": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "trace_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_case", "display_name"],
+      "properties": {
+        "trace_case": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "guard_expr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "name", "ast"],
+      "properties": {
+        "role": { "enum": ["requires", "let"] },
+        "name": { "type": ["string", "null"], "minLength": 1 },
+        "ast": { "$ref": "#/$defs/kernel_ast" }
+      }
+    },
+    "enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "expressions"],
+      "properties": {
+        "mode": { "const": "all" },
+        "expressions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/guard_expr" }
+        }
+      }
+    },
+    "effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "reads", "statements"],
+      "properties": {
+        "commit": { "const": "simultaneous" },
+        "reads": { "const": "pre_state" },
+        "statements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/kernel_ast" }
+        }
+      }
+    },
+    "progress_body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binders", "before", "after", "within", "decreases"],
+      "properties": {
+        "binders": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/kernel_ast" }
+        },
+        "before": { "$ref": "#/$defs/kernel_ast" },
+        "after": { "$ref": "#/$defs/kernel_ast" },
+        "within": { "type": ["integer", "null"], "minimum": 0 },
+        "decreases": { "$ref": "#/$defs/kernel_ast" }
+      }
+    },
+    "trace_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_case"],
+      "properties": {
+        "trace_case": { "type": "string", "minLength": 1 }
+      }
+    },
+    "claim_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assurance", "sources", "origin_ids"],
+      "properties": {
+        "assurance": {
+          "enum": ["source_backed", "generated_from_source", "generated_only", "unknown"]
+        },
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/source_ref" }
+        },
+        "origin_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "requirements",
+        "subject",
+        "semantic_targets",
+        "source",
+        "provenance",
+        "claim_digest"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/claim_id" },
+        "kind": {
+          "enum": [
+            "operation",
+            "state_rule",
+            "transition_rule",
+            "progress_rule",
+            "reachability_goal",
+            "acceptance_trace",
+            "forbidden_trace",
+            "deadline_rule",
+            "terminal_rule"
+          ]
+        },
+        "requirements": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/requirement_id" }
+        },
+        "subject": {
+          "oneOf": [
+            { "$ref": "#/$defs/operation_subject" },
+            { "$ref": "#/$defs/property_subject" },
+            { "$ref": "#/$defs/trace_subject" }
+          ]
+        },
+        "enablement": { "$ref": "#/$defs/enablement" },
+        "effects": { "$ref": "#/$defs/effects" },
+        "postconditions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/kernel_ast" }
+        },
+        "condition": { "$ref": "#/$defs/kernel_ast" },
+        "progress": { "$ref": "#/$defs/progress_body" },
+        "trace": { "$ref": "#/$defs/trace_ref" },
+        "fairness": { "enum": ["weak", "none"] },
+        "semantic_targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/semantic_target" }
+        },
+        "source": { "$ref": "#/$defs/nullable_source_ref" },
+        "provenance": { "$ref": "#/$defs/claim_provenance" },
+        "claim_digest": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "operation" } } },
+          "then": {
+            "required": ["enablement", "effects", "postconditions", "fairness"],
+            "properties": {
+              "subject": { "$ref": "#/$defs/operation_subject" },
+              "condition": false,
+              "progress": false,
+              "trace": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "state_rule",
+                  "transition_rule",
+                  "reachability_goal",
+                  "deadline_rule",
+                  "terminal_rule"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": ["condition"],
+            "properties": {
+              "subject": { "$ref": "#/$defs/property_subject" },
+              "enablement": false,
+              "effects": false,
+              "postconditions": false,
+              "fairness": false,
+              "progress": false,
+              "trace": false
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "progress_rule" } } },
+          "then": {
+            "required": ["progress"],
+            "properties": {
+              "subject": { "$ref": "#/$defs/property_subject" },
+              "enablement": false,
+              "effects": false,
+              "postconditions": false,
+              "fairness": false,
+              "condition": false,
+              "trace": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": { "enum": ["acceptance_trace", "forbidden_trace"] }
+            }
+          },
+          "then": {
+            "required": ["trace"],
+            "properties": {
+              "subject": { "$ref": "#/$defs/trace_subject" },
+              "enablement": false,
+              "effects": false,
+              "postconditions": false,
+              "fairness": false,
+              "condition": false,
+              "progress": false
+            }
+          }
+        }
+      ]
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statements", "claim_ids", "kinds"],
+      "properties": {
+        "id": { "$ref": "#/$defs/requirement_id" },
+        "statements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "source"],
+            "properties": {
+              "text": { "type": ["string", "null"] },
+              "source": { "$ref": "#/$defs/nullable_source_ref" }
+            }
+          }
+        },
+        "claim_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/claim_id" }
+        },
+        "kinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "trace_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "args", "source"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/kernel_ast" }
+        },
+        "source": { "$ref": "#/$defs/source_ref" }
+      }
+    },
+    "trace_expectation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ast"],
+          "properties": {
+            "kind": { "const": "expr" },
+            "ast": { "$ref": "#/$defs/kernel_ast" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "entity", "instance", "stage"],
+          "properties": {
+            "kind": { "const": "stage" },
+            "entity": { "type": "string", "minLength": 1 },
+            "instance": { "type": "integer" },
+            "stage": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "trace_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "text", "steps", "expectation", "source", "requirements"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["acceptance", "forbidden"] },
+        "text": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/trace_step" }
+        },
+        "expectation": {
+          "oneOf": [{ "$ref": "#/$defs/trace_expectation" }, { "type": "null" }]
+        },
+        "source": { "$ref": "#/$defs/source_ref" },
+        "requirements": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/requirement_id" }
+        }
+      }
+    },
+    "undecided_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "declaration", "reason", "requirement_ids", "source"],
+      "properties": {
+        "target": { "$ref": "#/$defs/semantic_target" },
+        "declaration": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string" },
+        "requirement_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/requirement_id" }
+        },
+        "source": { "$ref": "#/$defs/nullable_source_ref" }
+      }
+    }
+  }
+}
