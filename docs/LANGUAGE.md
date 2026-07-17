@@ -2409,11 +2409,13 @@ DESIGN-*.md).
   `unanchored_property`, `progressless_cycle`, `unwritten_state`,
   `unread_state`, `unguarded_action`, `conservation_candidate`,
   `divergent_choice`, and `unconstrained_effect`. The last two use a fixed
-  depth-4 BMC probe: they include `evidence_basis:"bounded_bmc"`, the reachable
+  depth-4 bounded probe (solver-free explicit-state exploration via the runtime
+  Monitor): they include `evidence_basis:"bounded_bmc"` (frozen v0 vocabulary
+  for "backed by a bounded reachability witness"), the reachable
   branch witness, and a question-form `spec_question` asking which outcome is
   intended. Exact matches with `undecided:` declarations remain visible with
   `acknowledged:true` and `acknowledged_by`; unmatched semantic findings carry
-  no acknowledgement fields. A BMC-backed `unconstrained_effect` suppresses the same state's
+  no acknowledgement fields. A bounded-witness-backed `unconstrained_effect` suppresses the same state's
   structural `unread_state`; semantic action witnesses similarly suppress a
   duplicate `unguarded_action`. Absence is not proof of determinism beyond the
   bound. See [`DESIGN-underspecification.md`](DESIGN-underspecification.md).

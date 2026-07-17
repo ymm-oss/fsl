@@ -11,6 +11,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
+### Fixed
+- Documentation for the depth-4 underspecification probe (`divergent_choice`,
+  `unconstrained_effect`) now matches the native implementation: a solver-free
+  explicit-state BFS over the runtime Monitor, not symbolic BMC/Z3.
+  `docs/DESIGN-underspecification.md`, `docs/DESIGN-analysis.md`,
+  `docs/LANGUAGE.md`/`docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` are
+  corrected; the `evidence_basis:"bounded_bmc"` schema enum value is retained
+  unchanged as frozen v0 vocabulary for "backed by a bounded reachability
+  witness", so no output or schema contract moves (issue #318).
+
 ### Added
 - Documented a rationale convention for annotating a declaration so tooling and
   AI agents can see the "why" that used to live only in `//` comments (lexer

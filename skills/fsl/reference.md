@@ -1020,8 +1020,10 @@ verification strength. See `docs/DESIGN-code-audit.md`.
 for `divergent_choice` (two same-state enabled actions split an
 invariant/acceptance outcome) and `unconstrained_effect` (an unread state can
 receive different next values from two enabled actions). These add
-`evidence_basis:"bounded_bmc"`, a reachable witness, and `spec_question` ending
-in `?`. Ask that question; do not invent which branch is intended. BMC-backed
+`evidence_basis:"bounded_bmc"` (frozen v0 vocabulary for a bounded reachability
+witness; the native probe is solver-free explicit-state exploration, not
+symbolic BMC), a reachable witness, and `spec_question` ending
+in `?`. Ask that question; do not invent which branch is intended. Bounded-witness
 findings supersede duplicate `unread_state`/`unguarded_action` approximations.
 No finding means only “not witnessed within depth 4,” not proof of determinism.
 Treat all findings as review signals: they carry
