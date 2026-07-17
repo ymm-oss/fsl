@@ -325,14 +325,16 @@ fn action_state(tsg: &Value) -> (Vec<Value>, Vec<Value>) {
     for edge in tsg["edges"].as_array().into_iter().flatten() {
         let from = edge["from"].as_str().unwrap_or_default();
         let to = edge["to"].as_str().unwrap_or_default();
-        if edge["kind"] == "writes" && state_ids.contains(to) {
-            if let Some(action) = owner(from) {
-                edges.push(projection_edge(&action, "writes", to));
-            }
-        } else if edge["kind"] == "reads" && state_ids.contains(to) {
-            if let Some(action) = owner(from) {
-                edges.push(projection_edge(to, "read_by", &action));
-            }
+        if edge["kind"] == "writes"
+            && state_ids.contains(to)
+            && let Some(action) = owner(from)
+        {
+            edges.push(projection_edge(&action, "writes", to));
+        } else if edge["kind"] == "reads"
+            && state_ids.contains(to)
+            && let Some(action) = owner(from)
+        {
+            edges.push(projection_edge(to, "read_by", &action));
         }
     }
     select(tsg, &action_ids.union(&state_ids).cloned().collect(), edges)

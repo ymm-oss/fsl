@@ -6,6 +6,7 @@ use fsl_solver::{
     BackendStatistics, CheckFuture, ModelValue, SatResult, SmtSolver, SolverError, SolverMetrics,
     SolverResult, Sort, VerificationStatistics,
 };
+use std::sync::OnceLock;
 use z3::ast::{Array, Ast, Bool, Dynamic, Int};
 use z3::{Model, Params, Solver, StatisticsValue};
 
@@ -15,7 +16,15 @@ const RANDOM_SEED: u32 = 0;
 /// Return the version reported by the linked Z3 library.
 #[must_use]
 pub fn version() -> &'static str {
-    z3::full_version()
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION.get_or_init(|| {
+        let version = z3::full_version();
+        if version.starts_with("Z3 ") {
+            version.to_owned()
+        } else {
+            format!("Z3 {version}")
+        }
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -533,6 +542,12 @@ mod tests {
         };
         assert!((4..7).contains(&value));
         Ok(())
+    }
+
+    #[test]
+    fn linked_version_uses_the_public_z3_prefix() {
+        assert!(version().starts_with("Z3 "));
+        assert!(version().starts_with(&format!("Z3 {REQUIRED_Z3_VERSION}.")));
     }
 
     #[test]
