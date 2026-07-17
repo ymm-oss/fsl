@@ -12,6 +12,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Documented that the persistent verify cache is safe under concurrent
+  processes: writes are atomic, so parallel `fslc verify` invocations over many
+  files (`xargs -P`, CI job matrices) at worst duplicate solving and never
+  corrupt or poison the cache. `docs/DESIGN-incremental-verify.md` §3 and
+  `skills/fsl/reference.md` now state this explicitly so users and AI agents
+  choose process-level parallelism instead of a sequential per-file loop
+  (issue #353). No implementation change.
 - Documented a rationale convention for annotating a declaration so tooling and
   AI agents can see the "why" that used to live only in `//` comments (lexer
   trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the
