@@ -417,6 +417,8 @@ fn production_accepts_only_governed_source_branches() {
     assert!(!policy.contains("\n  pull_request:\n"));
     assert!(!policy.contains("actions/checkout@"));
     assert!(policy.contains("HEAD_REF: ${{ github.event.pull_request.head.ref }}"));
+    assert!(policy.contains("HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}"));
+    assert!(policy.contains("REPOSITORY: ${{ github.repository }}"));
     let policy_script = policy
         .split_once("        run: |\n")
         .expect("inline production policy")
@@ -425,17 +427,23 @@ fn production_accepts_only_governed_source_branches() {
         .map(|line| line.strip_prefix("          ").unwrap_or(line))
         .collect::<Vec<_>>()
         .join("\n");
+    let run_policy = |head_ref: &str, head_repo: &str| {
+        Command::new("bash")
+            .arg("-c")
+            .arg(&policy_script)
+            .env("HEAD_REF", head_ref)
+            .env("HEAD_REPO", head_repo)
+            .env("REPOSITORY", "ymm-oss/fsl")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    };
 
     for accepted in ["main", "release/v3.0", "hotfix/v3.0.1"] {
-        assert!(
-            Command::new("bash")
-                .arg("-c")
-                .arg(&policy_script)
-                .env("HEAD_REF", accepted)
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(run_policy(accepted, "ymm-oss/fsl"));
+        assert!(!run_policy(accepted, "attacker/fsl"));
     }
     for rejected in [
         "feature/release",
@@ -444,16 +452,6 @@ fn production_accepts_only_governed_source_branches() {
         "hotfix/v3.0",
         "main-extra",
     ] {
-        assert!(
-            !Command::new("bash")
-                .arg("-c")
-                .arg(&policy_script)
-                .env("HEAD_REF", rejected)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(!run_policy(rejected, "ymm-oss/fsl"));
     }
 }
