@@ -1675,6 +1675,34 @@ native-only surface addition — the frozen Python reference does not parse
 it, so specs that use it are outside the Python-parity corpus by
 construction.
 
+#### 13.1.2 Rationale for tooling and AI consumption
+
+A `//` comment is lexer trivia (`rust/fsl-syntax/src/lexer.rs`): it never
+reaches the AST, `KernelModel`, `python_ast()`, the JSON result envelope, the
+LSP index, or the audit ledger. A fact a downstream tool or an AI agent must
+not lose — that an auxiliary invariant exists to close a k-induction CTI, or
+that an implementation guard is deliberately stronger than its abstract
+counterpart — should therefore ride the annotation carrier instead of living
+only in prose:
+
+- Use the built-in `@kind(id, text?)` to classify and explain a declaration in
+  one line, e.g. `@kind("aux_invariant", "closes the k-induction CTI for
+  attempts_bounded")`. `Kind` never alters guards, actions, property kinds,
+  verification, or lowering; every consumer reading
+  `KernelModel::annotations_for` — including the JSON envelope and the LSP —
+  sees it.
+- For a short rationale that does not naturally fit a classification, the
+  recommended custom namespace is `@doc.rationale("...")` (an ordinary
+  `Custom` annotation; see 13.1). It carries the same verification-inert,
+  queryable guarantee as any other custom namespace and needs no grammar
+  change.
+- Multi-sentence narrative — what a spec demonstrates, a walkthrough of why a
+  design works, a pedagogical bug marker in an intentionally-broken example —
+  stays an ordinary `//` comment. Annotation argument strings have no escape
+  syntax and stop at the first `"` or newline (`lex_string`), so they cannot
+  hold prose; forcing narrative into an annotation argument makes a spec
+  harder to read, not easier.
+
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
 ```fsl

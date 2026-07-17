@@ -290,6 +290,34 @@ manually against the corpus to confirm).
   or lowering behavior. A dialect-specific modifier such as DB `destructive`
   remains separate from this common custom-annotation carrier.
 
+## Rationale convention for tooling and AI consumption
+
+Editorial convention, not a new checked behavior: a `//` comment is lexer
+trivia and never reaches `KernelModel`, `python_ast()`, the JSON result
+envelope, the LSP index, or the audit ledger (confirmed by
+`comments_are_trivia_and_locations_are_one_based` in
+`rust/fsl-syntax/src/lexer.rs`). A fact a downstream tool or an AI agent must
+not lose belongs on the existing annotation carrier instead:
+
+- `@kind(id, text?)` classifies and explains a declaration in one line (e.g.
+  an auxiliary invariant's k-induction CTI provenance, or why an
+  implementation guard is deliberately stronger than its abstract
+  counterpart). This is the existing built-in `Kind` annotation; nothing new.
+- `@doc.rationale("...")` is the recommended `Custom` namespace for a short
+  rationale that does not fit a classification. It is an ordinary `Custom`
+  annotation (no grammar change) and stays verification-inert like every
+  other custom namespace.
+- Multi-sentence narrative (what a spec demonstrates, a design walkthrough, a
+  pedagogical bug marker) stays a plain `//` comment: annotation argument
+  strings have no escape syntax and stop at the first `"` or newline
+  (`lex_string`), so they cannot carry prose.
+
+See `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`) and
+`skills/fsl/reference.md` for the consumer-facing guidance. This convention
+adds no grammar, no IR variant, no Kernel/JSON schema change, and no
+Python-parity impact; it only documents how to use `Kind`/`Custom`, both
+already accepted by this design.
+
 ## Superseded limit
 
 `DESIGN-undecided.md` originally listed multi-tag declarations as a non-goal for

@@ -48,6 +48,15 @@ they generate together; an `effect` or saga `step` broadcasts to every
 action it generates. This is native-only syntax the frozen Python reference
 does not parse.
 
+**Rationale for tooling/AI consumption:** comments are trivia and invisible
+to any structured output (JSON envelope, LSP, audit ledger). Use
+`@kind(id, text?)` to classify + explain a declaration in one line (e.g. an
+aux invariant's CTI provenance, or why an impl guard is deliberately stronger
+than the abstract one); use the custom namespace `@doc.rationale("...")` for
+a short rationale that isn't a classification. Keep multi-sentence narrative
+in `//` comments — annotation strings have no escape syntax and stop at the
+first `"` or newline.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
