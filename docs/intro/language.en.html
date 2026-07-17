@@ -2403,11 +2403,13 @@ DESIGN-*.md).</p>
   <code>unanchored_property</code>, <code>progressless_cycle</code>, <code>unwritten_state</code>,
   <code>unread_state</code>, <code>unguarded_action</code>, <code>conservation_candidate</code>,
   <code>divergent_choice</code>, and <code>unconstrained_effect</code>. The last two use a fixed
-  depth-4 BMC probe: they include <code>evidence_basis:"bounded_bmc"</code>, the reachable
+  depth-4 bounded probe (solver-free explicit-state exploration via the runtime
+  Monitor): they include <code>evidence_basis:"bounded_bmc"</code> (frozen v0 vocabulary
+  for "backed by a bounded reachability witness"), the reachable
   branch witness, and a question-form <code>spec_question</code> asking which outcome is
   intended. Exact matches with <code>undecided:</code> declarations remain visible with
   <code>acknowledged:true</code> and <code>acknowledged_by</code>; unmatched semantic findings carry
-  no acknowledgement fields. A BMC-backed <code>unconstrained_effect</code> suppresses the same state's
+  no acknowledgement fields. A bounded-witness-backed <code>unconstrained_effect</code> suppresses the same state's
   structural <code>unread_state</code>; semantic action witnesses similarly suppress a
   duplicate <code>unguarded_action</code>. Absence is not proof of determinism beyond the
   bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
