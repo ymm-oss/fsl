@@ -18,7 +18,7 @@ resolver = "2"
 version = "3.0.0"
 edition = "2024"
 license = "Apache-2.0"
-rust-version = "1.85"
+rust-version = "1.88"
 publish = false
 
 [workspace.dependencies]

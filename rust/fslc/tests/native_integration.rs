@@ -346,7 +346,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
             "mutable release action: {mutable}"
         );
     }
-    assert!(workflow.contains("toolchain: 1.85.0"));
+    assert!(workflow.contains("toolchain: 1.88.0"));
 
     let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
     assert!(!installer.contains("echo \"macos-x64\""));
