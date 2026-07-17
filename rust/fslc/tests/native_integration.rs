@@ -435,7 +435,7 @@ fn production_accepts_only_governed_source_branches() {
             .arg(&policy_script)
             .env("HEAD_REF", head_ref)
             .env("HEAD_REPO", head_repo)
-            .env("REPOSITORY", "ymm-oss/fsl")
+            .env("REPOSITORY", "expected-repository")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -444,8 +444,8 @@ fn production_accepts_only_governed_source_branches() {
     };
 
     for accepted in ["main", "release/v3.0", "hotfix/v3.0.1"] {
-        assert!(run_policy(accepted, "ymm-oss/fsl"));
-        assert!(!run_policy(accepted, "attacker/fsl"));
+        assert!(run_policy(accepted, "expected-repository"));
+        assert!(!run_policy(accepted, "foreign-repository"));
     }
     for rejected in [
         "feature/release",
@@ -454,6 +454,6 @@ fn production_accepts_only_governed_source_branches() {
         "hotfix/v3.0",
         "main-extra",
     ] {
-        assert!(!run_policy(rejected, "ymm-oss/fsl"));
+        assert!(!run_policy(rejected, "expected-repository"));
     }
 }
