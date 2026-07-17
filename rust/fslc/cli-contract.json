@@ -2321,7 +2321,7 @@
       {
         "path": ["lint"],
         "prog": "fslc lint",
-        "help": "usage: fslc lint [-h] [--edition {current,next}] path [path ...]\n\nReport stable edition diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n",
+        "help": "usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n",
         "actions": [
           {
             "dest": "help",
@@ -2343,6 +2343,12 @@
             "flags": ["--edition"],
             "choices": ["current", "next"],
             "default": "current",
+            "action": "store"
+          },
+          {
+            "dest": "project",
+            "required": false,
+            "flags": ["--project"],
             "action": "store"
           }
         ],

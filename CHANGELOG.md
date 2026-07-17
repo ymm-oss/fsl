@@ -5,7 +5,32 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
+  hashing the full executable on every invocation, and CLI preparation reuses its validated
+  `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
+  entries fail-closed while removing the engine-independent fixed cost found in issue #349.
+
 ### Added
+- Documented a rationale convention for annotating a declaration so tooling and
+  AI agents can see the "why" that used to live only in `//` comments (lexer
+  trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the
+  existing `@kind(id, text?)` to classify and explain a declaration in one
+  line, and the recommended custom namespace `@doc.rationale("...")` for a
+  short rationale that isn't a classification. No grammar, IR, or schema
+  change; multi-sentence narrative keeps living in comments. See
+  `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`),
+  `docs/DESIGN-annotations.md`, and `skills/fsl/reference.md`.
+- `fslc lint` now enforces a built-in, kind-aware canonical ID policy and accepts
+  an explicit `--project fsl-project.toml` override. Requirement, acceptance,
+  forbidden, policy, goal, control, model, and assumption IDs have distinct
+  default templates; project tables can replace individual kinds while retaining
+  all other defaults. Results record the resolved policy, invalid configuration
+  fails closed, zero-padded numeric ID components retain their exact source
+  spelling through parsing/lowering, and ID findings are deliberately non-machine-applicable so
+  `migrate` never guesses cross-artifact renames. Typed `@requirement` annotations
+  are the canonical declaration-link syntax; legacy `"ID: text"` metadata remains
+  migration input.
 - `docs/intro/language.ja.html` now renders from a new, section-aligned Japanese
   translation, `docs/LANGUAGE.ja.md`, instead of reusing the English `docs/LANGUAGE.md`
   body verbatim. FSL keywords, `fslc` commands/flags, diagnostic/result identifiers,
@@ -148,6 +173,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   #278).
 
 ### Changed
+- Required product CI now runs the Rust workspace and WASM integration phases in parallel while
+  preserving `tools/check-native-integration.sh` as the complete local gate. The pinned
+  `wasm-bindgen-cli` binaries are cached by runner OS and version instead of being rebuilt on every
+  run.
+- The internal `release` Skill now operates a GitLab Flow-inspired
+  `short-lived branch -> main -> production -> vX.Y.Z` lifecycle. It separates
+  integration evidence from release readiness, omits permanent `develop` and
+  `pre-production` branches, defines promotion, stabilization, and hotfix
+  procedures, and keeps component behavior independent of branch names. Codex
+  and Claude share the same internal Skill definition.
+- Releases now follow one documented, agent-operable procedure that gates the
+  Rust version/changelog PR, exact-SHA `main` to `production` promotion,
+  four-target workflow dry runs, confirmed annotated tag push,
+  changelog-derived GitHub Release notes, and post-release asset/version checks.
+  Intel macOS binaries are no longer built or advertised (issue #335).
 - Chronological field-trial reports were distilled into authoritative design
   contracts, language/skill rules, maintained examples, and executable regression
   tests, then removed as a parallel documentation source. The native pytest

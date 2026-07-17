@@ -85,22 +85,22 @@
       with a: Amount
       when a &gt; 0
       set amount = a
-      covers REQ-1 "申請者が金額を入力して経費を申請する"
+      covers REQ-EXPENSE-001 "申請者が金額を入力して経費を申請する"
 
     transition auto_approve Submitted -&gt; Approved by System
       when amount &lt;= AUTO_LIMIT
-      covers REQ-2 "少額申請は自動承認される"
+      covers REQ-EXPENSE-002 "少額申請は自動承認される"
 
     transition mgr_approve Submitted -&gt; Approved by Manager
       when amount &gt; AUTO_LIMIT
-      covers REQ-3 "高額申請は管理者が承認する"
+      covers REQ-EXPENSE-003 "高額申請は管理者が承認する"
 
     transition reject Submitted -&gt; Rejected by Manager
       when amount &gt; AUTO_LIMIT
-      covers REQ-3 "高額申請は管理者が却下できる"
+      covers REQ-EXPENSE-003 "高額申請は管理者が却下できる"
 
     transition pay Approved -&gt; Paid by Finance
-      covers REQ-4 "承認済み申請だけが支払われる"
+      covers REQ-EXPENSE-004 "承認済み申請だけが支払われる"
   }
 }
 
@@ -117,7 +117,7 @@ verify {
       <tr><td><code>with a: Amount</code></td><td>操作の入力。</td><td>ユーザーやシステムが操作時に渡す値。</td></tr>
       <tr><td><code>when ...</code></td><td>実行できる条件。</td><td>しきい値、状態、権限、期限など。</td></tr>
       <tr><td><code>set amount = a</code></td><td>持ち回るデータの更新。</td><td>あとで判断に使う値だけ保存します。</td></tr>
-      <tr><td><code>covers REQ-1 "..."</code></td><td>要件IDと原文。</td><td>診断JSON、反例、シナリオに伝わります。</td></tr>
+      <tr><td><code>covers REQ-EXPENSE-001 "..."</code></td><td>要件IDと原文。</td><td>診断JSON、反例、シナリオに伝わります。</td></tr>
     </table>
   </div>
 </section>
@@ -131,7 +131,7 @@ verify {
     <div class="split reveal" style="margin-top:24px">
       <div class="panel" style="margin-top:0">
         <h3>受け入れ手順</h3>
-        <pre><code>acceptance AC-1 "少額申請は支払いまで進める" {
+        <pre><code>acceptance AC-EXPENSE-001 "少額申請は支払いまで進める" {
   submit(0, 1)
   auto_approve(0)
   pay(0)
@@ -141,7 +141,7 @@ verify {
       </div>
       <div class="panel" style="margin-top:0">
         <h3>禁止手順</h3>
-        <pre><code>forbidden FB-1 "下書き申請は支払えない" {
+        <pre><code>forbidden FB-EXPENSE-001 "下書き申請は支払えない" {
   pay(0)
   expect rejected
 }</code></pre>
