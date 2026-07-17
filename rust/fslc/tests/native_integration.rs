@@ -16,6 +16,9 @@ fn root() -> PathBuf {
 
 fn assert_vendored_z3(root: &Path, workflow: &str) {
     assert!(!workflow.contains("Z3_SYS_Z3_VERSION"));
+    assert!(workflow.contains("MACOSX_DEPLOYMENT_TARGET: \"14.0\""));
+    assert!(workflow.contains("os: macos-15"));
+    assert!(!workflow.contains("os: macos-14"));
     let workspace = std::fs::read_to_string(root.join("rust/Cargo.toml")).expect("workspace");
     assert!(workspace.contains("features = [\"vendored\", \"z3_4_16\"]"));
     assert!(!workspace.contains("\"gh-release\""));

@@ -27,7 +27,7 @@ binary.
 
 | Target | Runner | Binary suffix |
 |---|---|---|
-| macOS arm64 (Apple Silicon) | `macos-14` | `macos-arm64` |
+| macOS arm64 (Apple Silicon, macOS 14+) | `macos-15` | `macos-arm64` |
 | Linux x64 | `ubuntu-24.04` | `linux-x64` |
 | Linux arm64 | `ubuntu-24.04-arm` | `linux-arm64` |
 | Windows x64 | `windows-latest` | `windows-x64.exe` |

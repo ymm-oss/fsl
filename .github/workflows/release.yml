@@ -1,5 +1,8 @@
 name: release-binaries
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
 # When a v* tag is pushed, build the native Rust fslc binary for each supported
 # OS/architecture and attach it to the GitHub Release.
 #
@@ -28,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14        # Apple Silicon
+          - os: macos-15        # Apple Silicon; Clang 17 is required by vendored Z3 4.16
             target: macos-arm64
             asset: fslc-macos-arm64
             lsp_asset: fslc-lsp-macos-arm64

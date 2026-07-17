@@ -19,7 +19,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   binaries before replacing either installed command. Linux artifacts now have
   an explicit Ubuntu 24.04 / glibc 2.39 baseline. All native targets build the
   vendored Z3 4.16 source so the distributed binaries do not require `libz3` or
-  `z3.dll` at runtime.
+  `z3.dll` at runtime. macOS builds use the Clang 17 runner required by Z3 while
+  retaining a macOS 14 deployment target.
 - Release distribution checks now run in the authoritative native Rust gate;
   the redundant Python-only release workflow test was removed.
 - Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
