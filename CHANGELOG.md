@@ -12,6 +12,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Added an explicit RCIR coverage registry and a no-silent-omission gate (issue
+  #328). `fsl_tools::RCIR_TARGET_KIND_REGISTRY` names every semantic-target kind
+  the RCIR v1 projector (#325) can classify (`action`, four `property:*` kinds,
+  `terminal`, `acceptance`, `forbidden`, `init`, `projection`, `refinement`) and
+  whether it renders as a claim or reports as unsupported. Two coupled-change
+  tests keep it honest: one cross-references the Kernel-native rows against
+  `kernel.v1.schema.json`'s own required-key lists (catching a wholly new
+  Kernel-level construct that the projector was never updated to handle at all,
+  which the projector's existing runtime completeness invariant cannot see on its
+  own), the other cross-references every kind actually observed across the
+  fixture corpus. A third test pins the projection-completeness guarantee itself
+  (`rendered + unattributed + unsupported == authored`, as a disjoint-union-of-
+  sets check, not just a count). `--strict` erroring on an unattributed or
+  unsupported authored target was already implemented in #327 and needed no
+  change. See `docs/DESIGN-document-coverage-registry.md`.
 - Added the `fsl-requirements-document` Agent Skill (issue #331):
   `skills/fsl-requirements-document/SKILL.md` (symlinked under `.claude/skills/`
   and `.agents/skills/`, per the existing skill convention) documents the

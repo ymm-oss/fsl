@@ -10,6 +10,7 @@ mod db;
 mod db_import;
 mod document;
 mod document_check;
+mod document_coverage;
 mod document_digest;
 mod document_markers;
 mod document_project;
@@ -39,6 +40,9 @@ pub use document::{
 };
 pub use document_check::{
     CheckError, DocumentCheckReport, DriftReason, check_requirements_document,
+};
+pub use document_coverage::{
+    RCIR_TARGET_KIND_REGISTRY, TargetKindRow, TargetTreatment, target_kind,
 };
 pub use document_digest::{CLAIM_BLOCK_DIGEST_ALGORITHM, framed_text_digest};
 pub use document_markers::{
