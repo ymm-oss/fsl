@@ -333,6 +333,9 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("\"fslc ${GITHUB_REF_NAME#v}\""));
     assert!(workflow.contains("$env:GITHUB_REF_NAME.Substring(1)"));
     assert!(workflow.contains("binary version does not match tag"));
+    assert!(workflow.contains("$verifyExit = $LASTEXITCODE"));
+    assert!(workflow.contains("$verifyResult = $verifyOutput | ConvertFrom-Json"));
+    assert!(workflow.contains("$verifyResult.result -ne \"verified\""));
     for mutable in [
         "uses: actions/checkout@v4",
         "uses: actions/setup-node@v4",

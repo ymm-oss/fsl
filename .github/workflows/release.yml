@@ -105,7 +105,14 @@ jobs:
             $expected = "fslc $($env:GITHUB_REF_NAME.Substring(1))"
             if ((./rust/target/release/fslc.exe --version) -ne $expected) { throw "binary version does not match tag" }
           }
-          ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl > $null
+          $verifyOutput = ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl | Out-String
+          $verifyExit = $LASTEXITCODE
+          if ($verifyExit -ne 0) {
+            Write-Output $verifyOutput
+            throw "fslc verify smoke test exited $verifyExit"
+          }
+          $verifyResult = $verifyOutput | ConvertFrom-Json
+          if ($verifyResult.result -ne "verified") { throw "fslc verify smoke test was not verified" }
           echo "ok"
 
       - name: Smoke test LSP startup handshake (Windows)
