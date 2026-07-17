@@ -969,6 +969,37 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
 }
 ```
 
+### Literate Markdown FSL
+
+` ```fsl ` フェンス付きコードブロックを含む Markdown ファイル(`.md`)は、
+`fslc check`・`fslc verify`・`fslc scenarios` がそのまま受け付けます — フラグも
+抽出ステップも不要です。fsl ブロックの外側の行は空行に置き換えられる(blank 化)
+ため、すべての診断位置(エラーメッセージや反例の行番号・桁)は元の Markdown
+ドキュメントを指します。1 つのドキュメント内の複数の fsl ブロックは 1 つの
+コンパイル単位として扱われるため、定義をセクションをまたいで分割できます:
+
+    # Cart invariant
+
+    ```fsl
+    spec Cart {
+      state { count: 0..3 }
+      init  { count = 0 }
+    ```
+
+    ## Actions (continued in a second fsl block)
+
+    ```fsl
+      action inc() { requires count < 3  count = count + 1 }
+      invariant Bounded { count >= 0 and count <= 3 }
+    }
+    ```
+
+` ```fsl ` フェンスを 1 つも含まない `.md` ファイルは明確な診断とともに拒否されます。
+fsl 以外のフェンス付きブロック(` ```python ` など)は無視されます。`use`/compose の
+パスは(`.fsl` ファイルと同様に)Markdown ファイルのディレクトリを基準に解決されます。
+literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose できますが、別の
+`.md` ファイルを compose のターゲットにすることはサポートされません。
+
 ## 8. 推奨ワークフロー: proved を標準にする
 
 1. spec を書く → `fslc check`(高速な構文/型のループ)
