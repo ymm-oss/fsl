@@ -38,9 +38,10 @@ pub use causal_analysis::{
     indicator_classes, latest_bound_from, polarity_reach,
 };
 pub use causal_evidence::{
-    Applicability, EvidenceArtifact, EvidenceError, LifecycleStatus, ScopeApplication,
-    SupportOverlay, aggregate_support, artifact_digest, canonical_json, causal_evidence_graph,
-    lifecycle_record_digest, parse_artifact, validate_lifecycle_chain,
+    Applicability, EVIDENCE_SCHEMA_VERSION, EvidenceArtifact, EvidenceError,
+    LIFECYCLE_SCHEMA_VERSION, LifecycleStatus, ScopeApplication, SupportOverlay, aggregate_support,
+    artifact_digest, canonical_json, causal_evidence_graph, lifecycle_record_digest,
+    parse_artifact, validate_lifecycle_chain,
 };
 pub use causal_expectation::{CompiledExpectation, compile_expectations};
 pub use causal_projection::{

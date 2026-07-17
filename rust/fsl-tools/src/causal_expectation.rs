@@ -32,6 +32,8 @@ pub struct CompiledExpectation {
     /// The augmented kernel model carrying the generated `leadsTo`.
     pub model: KernelModel,
     pub trigger_kind: &'static str,
+    /// For action triggers, the spec-level action name that fires the ghost.
+    pub trigger_action: Option<String>,
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -221,6 +223,10 @@ pub fn compile_expectations(
                 ),
             )
         })?;
+        let trigger_action = match trigger {
+            ExpectationTrigger::Action(reference) => Some(reference.name.clone()),
+            ExpectationTrigger::Predicate { .. } => None,
+        };
         compiled.push(CompiledExpectation {
             id: declaration.id.clone(),
             property,
@@ -233,6 +239,7 @@ pub fn compile_expectations(
             within_ticks,
             model,
             trigger_kind,
+            trigger_action,
         });
     }
     Ok(compiled)

@@ -658,3 +658,253 @@ fn generated_leadsto_matches_a_hand_written_property() {
     assert_eq!(output["result"], "violated");
     assert_eq!(output["invariant"], "Manual");
 }
+
+// ── observe-expectations (issue #360) ──────────────────────────────
+
+const OBS_LOG: &str = "examples/causal/evidence/incident-observation-log.jsonl";
+const OBS_MAPPING: &str = "examples/causal/evidence/incident-log-mapping.fsl";
+const OBS_SCOPE: &str = "examples/causal/evidence/incident-replay-scope.json";
+
+fn run_observe(extra: &[&str]) -> (Value, i32) {
+    let mut args = vec![
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ];
+    args.extend_from_slice(extra);
+    run_cli(&args)
+}
+
+#[test]
+fn observe_expectations_pass_and_violated_golden() {
+    let (output, status) = run_observe(&[]);
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "causal_expectations_observed");
+    assert_eq!(output["schema_version"], "causal-observation.v0");
+    assert_review_only(&output);
+    let expectations = output["expectations"].as_array().expect("expectations");
+    let verdict = |id: &str| {
+        expectations
+            .iter()
+            .find(|entry| entry["id"] == format!("expectation:{id}"))
+            .unwrap_or_else(|| panic!("missing {id}"))["verdict"]
+            .clone()
+    };
+    assert_eq!(verdict("E_GuardrailsVisible"), "pass");
+    assert_eq!(verdict("E_AlertQualityImproves"), "violated");
+    // Claims must never move from not_run/untested (AC 2).
+    for claim in output["claims"].as_array().expect("claims") {
+        assert_eq!(claim["formal_assurance"], "not_run");
+        assert_eq!(claim["causal_support"], "untested");
+    }
+    // Every expectation carries replay-observed assurance and do_not_assume (AC 3).
+    for entry in expectations {
+        assert_eq!(entry["assurance"], "replay-observed");
+        assert!(
+            entry["do_not_assume"]
+                .as_array()
+                .expect("list")
+                .iter()
+                .any(|line| line == "Temporal co-occurrence establishes causality"),
+            "must include temporal co-occurrence caveat"
+        );
+    }
+}
+
+#[test]
+fn observe_expectations_generates_valid_evidence_artifacts() {
+    let scratch = tempfile_dir();
+    let out = scratch.join("evidence.causal.json");
+    let lifecycle_out = scratch.join("evidence.lifecycle.json");
+    let (output, status) = run_observe(&[
+        "--out",
+        out.to_str().expect("utf-8"),
+        "--lifecycle-out",
+        lifecycle_out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(status, 0, "{output}");
+    assert!(output["artifacts_generated"].as_u64().unwrap_or(0) >= 2);
+
+    // Read the generated evidence artifact (first of two files).
+    let evidence_files: Vec<_> = std::fs::read_dir(&scratch)
+        .expect("read dir")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.file_name()?.to_str()?.contains("evidence")
+                && path.extension()?.to_str()? == "json"
+                && !path.file_name()?.to_str()?.contains("lifecycle")
+            {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        !evidence_files.is_empty(),
+        "at least one evidence file must be generated"
+    );
+
+    for evidence_path in &evidence_files {
+        let artifact: Value =
+            serde_json::from_str(&std::fs::read_to_string(evidence_path).expect("read evidence"))
+                .expect("parse evidence JSON");
+        assert_eq!(artifact["schema_version"], "fsl-causal-evidence.v0");
+        assert_eq!(artifact["design"], "observational", "AC 3");
+        assert_eq!(artifact["support"], "inconclusive", "AC 3/4");
+        assert_eq!(artifact["formal_result"], "not_run");
+        let observation = &artifact["observation"];
+        assert_eq!(observation["kind"], "expectation_replay");
+        assert_eq!(observation["assurance"], "replay-observed", "AC 1");
+    }
+
+    // Lifecycle files exist and parse.
+    let lifecycle_files: Vec<_> = std::fs::read_dir(&scratch)
+        .expect("read dir")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.file_name()?.to_str()?.contains("lifecycle") {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        !lifecycle_files.is_empty(),
+        "at least one lifecycle file must be generated"
+    );
+    for lifecycle_path in &lifecycle_files {
+        let chain: Value =
+            serde_json::from_str(&std::fs::read_to_string(lifecycle_path).expect("read lifecycle"))
+                .expect("parse lifecycle JSON");
+        assert_eq!(chain["schema_version"], "fsl-causal-evidence-lifecycle.v0");
+        let records = chain["records"].as_array().expect("records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["sequence"], 1);
+        assert_eq!(records[0]["status"], "active");
+    }
+}
+
+#[test]
+fn observe_expectations_fails_without_scope() {
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        OBS_MAPPING,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ]);
+    assert_eq!(status, 2, "{output}");
+    assert!(
+        output["message"].as_str().unwrap_or("").contains("--scope"),
+        "error must name the missing --scope flag"
+    );
+}
+
+#[test]
+fn observe_expectations_fails_without_period() {
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+    ]);
+    assert_eq!(status, 2, "{output}");
+    assert!(
+        output["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("--period-start"),
+        "error must name the missing --period-start flag"
+    );
+}
+
+#[test]
+fn observe_expectations_rejects_nonconformant_log() {
+    let scratch = tempfile_dir();
+    let bad_log = scratch.join("bad.jsonl");
+    // State says guardrails=0 after deploy_guardrails — nonconformant.
+    std::fs::write(
+        &bad_log,
+        r#"{"action":"deploy_guardrails","params":{},"state":{"guardrails":0,"alert_precision":3,"mttr_hours":24}}"#,
+    )
+    .expect("write bad log");
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        bad_log.to_str().expect("utf-8"),
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ]);
+    assert_eq!(status, 2, "{output}");
+    assert!(
+        output["kind"]
+            .as_str()
+            .unwrap_or("")
+            .contains("nonconformant"),
+        "nonconformant log must be fail-closed"
+    );
+}
+
+#[test]
+fn observe_expectations_rejects_tampered_mapping() {
+    let scratch = tempfile_dir();
+    std::fs::copy(
+        repository_root().join("examples/causal/incident_system.fsl"),
+        scratch.join("incident_system.fsl"),
+    )
+    .expect("copy companion");
+    let bad_mapping = scratch.join("bad_mapping.fsl");
+    // Map deploy_guardrails to a nonexistent action.
+    std::fs::write(
+        &bad_mapping,
+        "refinement BadMapping {\n  impl Bad\n  abs IncidentSystem\n  action deploy_guardrails() -> nonexistent_action()\n  maps auto\n}\n",
+    )
+    .expect("write bad mapping");
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        bad_mapping.to_str().expect("utf-8"),
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ]);
+    assert_eq!(status, 2, "{output}");
+}

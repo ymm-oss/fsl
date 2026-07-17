@@ -1747,5 +1747,19 @@ or fractional tick conversion; the legacy `supports` field is rejected. **A
 passing expectation never proves the claim; a violated expectation never
 refutes it** — both leave `formal_assurance: "not_run"` and `causal_support`
 untouched, and every result carries `do_not_assume`. Never summarize an
-expectation verdict as the causal claim's status. See
-`docs/DESIGN-causal.md`.
+expectation verdict as the causal claim's status.
+
+Observation replay: `fslc causal observe-expectations model.fsl --from-log
+events.jsonl --mapping log_mapping.fsl --scope scope.json --period-start
+YYYY-MM-DD --period-end YYYY-MM-DD [--out evidence.json] [--lifecycle-out
+lifecycle.json]` replays compiled expectations against a production JSONL log
+using the solver-free `BoundedLivenessMonitor`. Generates per-expectation
+`fsl-causal-evidence.v0` artifacts with `design: "observational"`,
+`support: "inconclusive"`, `assurance: "replay-observed"`, and matching
+lifecycle records. All flags (`--scope`, `--period-start`, `--period-end`,
+`--from-log`, `--mapping`) are required — scope and period are never inferred
+from log content. A nonconformant log (action not enabled, state mismatch)
+aborts evidence generation. **Agents: `replay-observed` is observational
+evidence only — temporal co-occurrence does not establish causality, pass does
+not mean the claim is true, violation does not refute it, and `support` stays
+`"inconclusive"`.** See `docs/DESIGN-causal.md` §16.

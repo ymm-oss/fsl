@@ -89,6 +89,7 @@ const unsupportedDocuments = new Map(Object.entries({
   "specs/bank_refines.fsl": "refinement",
   "specs/cart_refines.fsl": "refinement",
   "specs/seat_refines.fsl": "refinement",
+  "examples/causal/evidence/incident-log-mapping.fsl": "refinement",
   "examples/causal/incident_response.fsl": "causal",
   "examples/causal/marketing_funnel.fsl": "causal",
   "examples/causal/subscription_retention.fsl": "causal",

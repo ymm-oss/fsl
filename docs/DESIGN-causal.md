@@ -684,3 +684,51 @@ tests in #321. Claim version pinning and the retired lifecycle (§4.5) must be
 covered so that old-version evidence never supports a current claim and
 refuted-claim history is never lost. Clock-mapping syntax, placement, and
 integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
+
+## 16. Phase 4 implementation notes (fixed by #360)
+
+- **Observation bridge architecture.** `fslc causal observe-expectations`
+  replays compiled expectations against a production JSONL log using the
+  solver-free `BoundedLivenessMonitor` from `fsl-runtime`. For each compiled
+  expectation, one `BoundedLivenessMonitor` is built from the augmented
+  `KernelModel` (carrying the generated `leadsTo`). The monitor is fed the
+  log's mapped observed state — extended with the pulse ghost for action
+  triggers — at each step. Pass or violated verdicts carry
+  `assurance: "replay-observed"` and never change `formal_assurance` or
+  `causal_support` on any claim.
+- **Ghost state extension.** For action-trigger expectations, the pulse ghost
+  `_expectation_fired_<id>` is computed per log record as
+  `mapped_action == trigger_action`; it is not part of the production state.
+  For predicate-trigger expectations, no ghost is needed — the trigger
+  expression evaluates directly against the mapped observed state.
+- **`--trace` / `--from-log` equivalence (AC 7).** The existing `fslc replay
+  --trace` (schema 1.2) feeds the `Monitor`'s spec-computed state to
+  `BoundedLivenessMonitor`. The observation bridge feeds the log's mapped
+  observed state instead. For conformant logs (observed state ≡ spec-computed
+  state) the two paths produce identical verdicts. Conformance is checked as
+  a precondition — a nonconformant log aborts evidence generation.
+- **Fail-closed conditions.** Missing `--scope`, `--period-start`,
+  `--period-end`, `--from-log`, or `--mapping` is a CLI error (exit 2).
+  A nonconformant log record (action not enabled, state mismatch) aborts
+  with `observation_replay_nonconformant`. A mapping failure (unknown
+  action, parameter mismatch, missing state variable) aborts with
+  `observation_replay_failed`. All failure outputs carry `do_not_assume`.
+- **Evidence artifacts.** Per-expectation `fsl-causal-evidence.v0` artifacts
+  with the `observation` object filled in: `design: "observational"`,
+  `support: "inconclusive"`, `observation.kind: "expectation_replay"`,
+  `observation.assurance: "replay-observed"`. The schema's `if/then` gate
+  rejects any artifact that sets `observation` but declares `support` other
+  than `"inconclusive"` or `design` other than `"observational"` (AC 3/4).
+  `observation.digests` carries sha256 digests of the causal source, JSONL
+  log, and mapping file. Lifecycle records are sequence-1 active chains.
+- **File output.** `--out` and `--lifecycle-out` write one file per artifact
+  (individually consumable by `fslc causal analyze --evidence`). Multiple
+  expectations produce files with the evidence ID embedded in the filename.
+- **`do_not_assume`.** Every envelope and per-expectation result includes the
+  five-item array specified in #360: "The causal claim is proved", "Temporal
+  co-occurrence establishes causality", "No unmodeled common cause exists",
+  "Expectation violation refutes the causal claim", "Unobserved behavior did
+  not occur".
+- **CLI envelope.** `causal-observation.v0` schema (inventory now 36);
+  `result: "causal_expectations_observed"`, `formal_result: "not_run"`.
+- **Worker waiver.** Same policy as other causal commands: CLI-only.

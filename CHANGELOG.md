@@ -12,6 +12,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Causal observation bridge (Phase 4, issue #360): `fslc causal
+  observe-expectations model.fsl --from-log events.jsonl --mapping
+  log_mapping.fsl --scope scope.json --period-start ... --period-end ...`
+  replays compiled expectations against a production JSONL log using the
+  solver-free `BoundedLivenessMonitor`. Generates per-expectation
+  `fsl-causal-evidence.v0` artifacts with `design: "observational"`,
+  `support: "inconclusive"`, `assurance: "replay-observed"`, and matching
+  lifecycle records. Pass/violated verdicts never change claim
+  `formal_assurance` or `causal_support`. Nonconformant logs,
+  missing scope/period, and mapping failures are fail-closed.
+  CLI envelope schema: `causal-observation.v0` (inventory 36).
 - Causal expectation lowering (Phase 3, issue #323): explicit `expectation`
   declarations (trigger action or inline predicate, response predicate,
   `within N clock <name>`, `derived_from_claim`) compile — fail-closed on
