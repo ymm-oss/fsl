@@ -85,6 +85,7 @@ fn req2_ja_golden_matches_exactly() {
 \n\
 **形式化された意味（FSLから決定論的に生成）**\n\
 \n\
+<!-- fsl:claim begin id=\"action:submit_cancel#operation\" digest=\"sha256:62bfddb43c581089b0c8c3a3516c58d576708efaeda042793c0cd180c0b7b547\" -->\n\
 #### 操作: `submit_cancel`\n\
 \n\
 - 識別子: `action:submit_cancel#operation`\n\
@@ -100,7 +101,8 @@ fn req2_ja_golden_matches_exactly() {
 \n\
 1. `scr[c]` を `SubView { offered: true, st: OfferDialog }` に置き換える。すなわち、`scr[c].offered` を `true` に、`scr[c].st` を `OfferDialog` にする。\n\
 \n\
-この操作には弱い公平性（weak fairness）を仮定する。これはスケジューリング上の仮定であり、この操作が実行可能（enabled）であり続けるならば、いつかは実行される、という意味である。直ちに実行されることを意味しない。";
+この操作には弱い公平性（weak fairness）を仮定する。これはスケジューリング上の仮定であり、この操作が実行可能（enabled）であり続けるならば、いつかは実行される、という意味である。直ちに実行されることを意味しない。\n\
+<!-- fsl:claim end -->";
     assert_eq!(req2_block(&doc.markdown), expected);
 }
 
@@ -118,6 +120,7 @@ fn req2_en_golden_matches_exactly() {
 \n\
 **Formalized meaning (generated deterministically from the FSL)**\n\
 \n\
+<!-- fsl:claim begin id=\"action:submit_cancel#operation\" digest=\"sha256:8ad70c92eda277d36efca15a5d82569add1d1d8392d9f6e07fae4134d003059f\" -->\n\
 #### Operation: `submit_cancel`\n\
 \n\
 - Identifier: `action:submit_cancel#operation`\n\
@@ -133,7 +136,8 @@ When the action succeeds, the following updates are applied simultaneously withi
 \n\
 1. Replace `scr[c]` with `SubView { offered: true, st: OfferDialog }`; that is, set `scr[c].offered` to `true` and `scr[c].st` to `OfferDialog`.\n\
 \n\
-Weak fairness is assumed for this action. This is a scheduling assumption: if the action remains continuously enabled, it is eventually executed. It does not mean that the action is executed immediately.";
+Weak fairness is assumed for this action. This is a scheduling assumption: if the action remains continuously enabled, it is eventually executed. It does not mean that the action is executed immediately.\n\
+<!-- fsl:claim end -->";
     assert_eq!(req2_block(&doc.markdown), expected);
 }
 

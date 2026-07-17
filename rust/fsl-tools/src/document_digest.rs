@@ -18,6 +18,10 @@ use sha2::{Digest, Sha256};
 pub const SPEC_DIGEST_ALGORITHM: &str = "fsl-kernel-ast-v1+sha256";
 pub const CLAIM_SET_DIGEST_ALGORITHM: &str = "fsl-rcir-claim-set-v1+sha256";
 pub const CLAIM_DIGEST_ALGORITHM: &str = "fsl-rcir-claim-v1+sha256";
+/// Digests a generated document's own claim-block *text* (issue #329) —
+/// distinct from [`CLAIM_DIGEST_ALGORITHM`], which digests a claim's checked
+/// semantics and never sees rendered prose.
+pub const CLAIM_BLOCK_DIGEST_ALGORITHM: &str = "fsl-doc-claim-block-v1+sha256";
 
 #[must_use]
 pub fn sha256_bytes(bytes: &[u8]) -> String {
@@ -87,6 +91,18 @@ pub fn framed_digest(algorithm: &str, value: &Value) -> String {
     let mut framed = algorithm.as_bytes().to_vec();
     framed.push(0);
     framed.extend(encoded);
+    sha256_bytes(&framed)
+}
+
+/// `sha256(algorithm || 0x00 || utf8(text))`, framed like [`framed_digest`]
+/// but over raw text bytes rather than canonical JSON — used to digest a
+/// generated document's rendered claim-block text (issue #329), where the
+/// input is prose, not an AST value.
+#[must_use]
+pub fn framed_text_digest(algorithm: &str, text: &str) -> String {
+    let mut framed = algorithm.as_bytes().to_vec();
+    framed.push(0);
+    framed.extend(text.as_bytes());
     sha256_bytes(&framed)
 }
 

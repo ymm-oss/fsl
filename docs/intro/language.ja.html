@@ -784,6 +784,8 @@ fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--
                                                   # deterministic ja/en requirements document from the Requirement Claim IR (§13)
 fslc document claims &lt;file.fsl&gt; [--view requirements] [-o requirements.claims.json]
                                                   # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
+fslc document check &lt;file.fsl&gt; &lt;document.md&gt;     # structural drift check: generated claim blocks vs a
+                                                  # fresh re-render; never interprets prose (§13)
 fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [--signing-key private.pem] [-o record.json]
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]

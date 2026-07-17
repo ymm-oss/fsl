@@ -9,7 +9,9 @@ mod analysis_graph;
 mod db;
 mod db_import;
 mod document;
+mod document_check;
 mod document_digest;
+mod document_markers;
 mod document_project;
 mod document_render;
 mod document_render_expr;
@@ -34,6 +36,15 @@ pub use document::{
     CoverageCounts, ProvenanceAssurance, ProvenanceSummary, RCIR_SCHEMA_ID, RCIR_SCHEMA_VERSION,
     Requirement, RequirementClaimSet, RequirementStatement, SemanticsInfo, SourceRef, SpecInfo,
     TraceCase, TraceCaseKind, UndecidedItem, UnsupportedEntry,
+};
+pub use document_check::{
+    CheckError, DocumentCheckReport, DriftReason, check_requirements_document,
+};
+pub use document_digest::{CLAIM_BLOCK_DIGEST_ALGORITHM, framed_text_digest};
+pub use document_markers::{
+    DOCUMENT_RENDERER, DOCUMENT_RENDERER_VERSION, DOCUMENT_SCHEMA, Frontmatter, MarkerIssue,
+    NORMATIVE_SCOPE, ParsedDocument, SLOT_NAMES, Segment, parse_frontmatter_only,
+    parse_generated_document,
 };
 pub use document_project::{
     DocumentDialect, DocumentInput, project_requirement_claims,

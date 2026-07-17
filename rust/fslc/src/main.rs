@@ -1796,15 +1796,39 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             }
             Ok(result)
         }
+        "check" => {
+            let artifact = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?,
+            );
+            if let Some(option) = args.next() {
+                return Err(format!("unknown document check option '{option}'"));
+            }
+            Ok(run_document_check(&path, &artifact))
+        }
         _ => Err(format!("unknown document subcommand '{subcommand}'")),
     }
 }
 
 fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
+    load_document_claims_with_label(path, &path.to_string_lossy())
+}
+
+/// Like [`load_document_claims`], but projects under an explicit label
+/// rather than `path`'s own spelling. `fslc document check` (issue #329)
+/// needs this: every rendered `出典`/`Source:` line carries the label
+/// verbatim, so re-projecting under a *different* spelling of the same file
+/// (e.g. a relative-path difference from running `check` in another
+/// directory than `generate`) would report false drift. `check` re-projects
+/// under the label the artifact's own frontmatter recorded instead.
+fn load_document_claims_with_label(
+    path: &Path,
+    label: &str,
+) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
     let source =
         std::fs::read_to_string(path).map_err(|error| error_output("io", &error.to_string()))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    fsl_tools::project_requirement_claims_from_source(&source, Some(&path.to_string_lossy()), base)
+    fsl_tools::project_requirement_claims_from_source(&source, Some(label), base)
         .map(|claims| (source, claims))
         .map_err(|error| semantic_error_output(&error))
 }
@@ -1971,6 +1995,101 @@ fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) 
         output.insert("content".to_owned(), json!(content));
     }
     (Value::Object(output), 0)
+}
+
+fn document_schema_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-SCHEMA-UNSUPPORTED"));
+    output
+}
+
+/// `fslc document check` (issue #329): a purely structural drift check
+/// between `artifact` (a possibly hand-edited `fslc document generate`
+/// output) and a fresh re-projection + re-render of `spec_path`, under the
+/// locale and source label the artifact's own frontmatter recorded.
+fn run_document_check(spec_path: &Path, artifact: &Path) -> (Value, i32) {
+    let artifact_text = match std::fs::read_to_string(artifact) {
+        Ok(text) => text,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
+        Ok(frontmatter) => frontmatter,
+        Err(issue) => return (document_schema_error(&issue.to_string()), 2),
+    };
+    if frontmatter.schema != fsl_tools::DOCUMENT_SCHEMA {
+        return (
+            document_schema_error(&format!(
+                "unsupported fsl_document_schema '{}' (expected '{}')",
+                frontmatter.schema,
+                fsl_tools::DOCUMENT_SCHEMA
+            )),
+            2,
+        );
+    }
+    if frontmatter.view != "requirements" {
+        return (
+            document_schema_error(&format!("unsupported document view '{}'", frontmatter.view)),
+            2,
+        );
+    }
+    let Some(locale) = fsl_tools::Locale::parse(&frontmatter.lang) else {
+        return (
+            document_schema_error(&format!("unsupported document lang '{}'", frontmatter.lang)),
+            2,
+        );
+    };
+
+    let spec_label = frontmatter
+        .source
+        .clone()
+        .unwrap_or_else(|| spec_path.to_string_lossy().into_owned());
+    let (source, claims) = match load_document_claims_with_label(spec_path, &spec_label) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let trace = match fsl_core::requirements_trace_contract(&source) {
+        Ok(trace) => trace,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let rendered = fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale);
+
+    let report =
+        match fsl_tools::check_requirements_document(&artifact_text, &claims, &rendered.markdown) {
+            Ok(report) => report,
+            Err(error) => return (document_schema_error(&error.to_string()), 2),
+        };
+
+    let mut output = envelope();
+    output.insert("artifact".to_owned(), json!(artifact));
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    if report.is_conformant() {
+        output.insert("result".to_owned(), json!("document_conformant"));
+        (Value::Object(output), 0)
+    } else {
+        output.insert("result".to_owned(), json!("document_drifted"));
+        output.insert(
+            "reasons".to_owned(),
+            serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+        );
+        (Value::Object(output), 1)
+    }
 }
 
 fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {

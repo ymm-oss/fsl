@@ -840,6 +840,8 @@ fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--st
                                                         # deterministic ja/en requirements document from RCIR (Requirement Claim IR)
 fslc document claims <f> [--view requirements] [-o requirements.claims.json]
                                                         # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
+fslc document check <f> <document.md>                   # structural drift check: generated claim blocks vs a fresh re-render;
+                                                        # document_conformant (0) | document_drifted (1); never interprets prose
 fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]
                                                         # bind the reviewed artifact to normalized spec + Git baseline
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
