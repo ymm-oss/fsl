@@ -1000,7 +1000,11 @@ earliest step does not depend on the requested search bound. Comment/
 whitespace-only edits still miss (diagnostics quote source by line number,
 so entry-file text is hashed verbatim) — that is a deliberate hit-rate/
 staleness trade-off, never a soundness one. `--no-cache` (or `FSLC_CACHE=off`)
-opts a run out entirely. See `docs/DESIGN-incremental-verify.md`.
+opts a run out entirely. Cache writes are atomic, so running `fslc verify` on
+many files as concurrent processes (e.g. `xargs -P`, a CI job matrix) is safe —
+concurrent runs at worst duplicate solving, never corrupt the cache. When
+verifying a whole project's specs, prefer process-level parallelism over a
+sequential per-file loop. See `docs/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
@@ -1026,8 +1030,10 @@ verification strength. See `docs/DESIGN-code-audit.md`.
 for `divergent_choice` (two same-state enabled actions split an
 invariant/acceptance outcome) and `unconstrained_effect` (an unread state can
 receive different next values from two enabled actions). These add
-`evidence_basis:"bounded_bmc"`, a reachable witness, and `spec_question` ending
-in `?`. Ask that question; do not invent which branch is intended. BMC-backed
+`evidence_basis:"bounded_bmc"` (frozen v0 vocabulary for a bounded reachability
+witness; the native probe is solver-free explicit-state exploration, not
+symbolic BMC), a reachable witness, and `spec_question` ending
+in `?`. Ask that question; do not invent which branch is intended. Bounded-witness
 findings supersede duplicate `unread_state`/`unguarded_action` approximations.
 No finding means only “not witnessed within depth 4,” not proof of determinism.
 Treat all findings as review signals: they carry

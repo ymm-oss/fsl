@@ -268,9 +268,35 @@ jobs:
             dist/fsl-kernel-contract-v2.tar.gz
             dist/fsl-kernel-contract-v2.tar.gz.sha256
 
+  skills:
+    name: package Agent Skills
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Package the installable Agent Skills
+        run: |
+          mkdir -p dist
+          tar -czf dist/fsl-skills.tar.gz \
+            skills/fsl \
+            skills/fsl-business \
+            skills/fsl-requirements \
+            skills/fsl-design \
+            skills/fsl-design-review \
+            skills/fsl-delivery
+          ( cd dist && shasum -a 256 fsl-skills.tar.gz > fsl-skills.tar.gz.sha256 )
+
+      - name: Upload skill bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fsl-skills
+          path: |
+            dist/fsl-skills.tar.gz
+            dist/fsl-skills.tar.gz.sha256
+
   assemble:
     name: assemble complete release unit
-    needs: [build, vsix, kernel-contract]
+    needs: [build, vsix, kernel-contract, skills]
     runs-on: ubuntu-24.04
     steps:
       - name: Download the complete release unit
@@ -294,6 +320,7 @@ jobs:
             fsl-vscode.vsix
             fsl-kernel-contract-v1.tar.gz fsl-kernel-contract-v1.tar.gz.sha256
             fsl-kernel-contract-v2.tar.gz fsl-kernel-contract-v2.tar.gz.sha256
+            fsl-skills.tar.gz fsl-skills.tar.gz.sha256
           )
           test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "${#expected[@]}"
           for asset in "${expected[@]}"; do test -f "release-assets/$asset"; done

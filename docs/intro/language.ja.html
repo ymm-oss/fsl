@@ -1052,7 +1052,35 @@ witness のコントラクトを使わなければなりません。</p>
   &quot;blocking_requires&quot;: [{&quot;kind&quot;: &quot;type_bound&quot;, &quot;name&quot;: &quot;_bounds_x&quot;}],
   &quot;hint&quot;: &quot;target predicate is unsatisfiable under type bounds/invariants (_bounds_x); ...&quot;
 }
-</code></pre></div></details>
+</code></pre>
+<h3 id="literate-markdown-fsl">Literate Markdown FSL</h3>
+<p><code>```fsl</code> フェンス付きコードブロックを含む Markdown ファイル(<code>.md</code>)は、
+<code>fslc check</code>・<code>fslc verify</code>・<code>fslc scenarios</code> がそのまま受け付けます — フラグも
+抽出ステップも不要です。fsl ブロックの外側の行は空行に置き換えられる(blank 化)
+ため、すべての診断位置(エラーメッセージや反例の行番号・桁)は元の Markdown
+ドキュメントを指します。1 つのドキュメント内の複数の fsl ブロックは 1 つの
+コンパイル単位として扱われるため、定義をセクションをまたいで分割できます:</p>
+<pre><code># Cart invariant
+
+```fsl
+spec Cart {
+  state { count: 0..3 }
+  init  { count = 0 }
+```
+
+## Actions (continued in a second fsl block)
+
+```fsl
+  action inc() { requires count &lt; 3  count = count + 1 }
+  invariant Bounded { count &gt;= 0 and count &lt;= 3 }
+}
+```
+</code></pre>
+<p><code>```fsl</code> フェンスを 1 つも含まない <code>.md</code> ファイルは明確な診断とともに拒否されます。
+fsl 以外のフェンス付きブロック(<code>```python</code> など)は無視されます。<code>use</code>/compose の
+パスは(<code>.fsl</code> ファイルと同様に)Markdown ファイルのディレクトリを基準に解決されます。
+literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイルを <code>use</code>/compose できますが、別の
+<code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. 推奨ワークフロー: proved を標準にする<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>spec を書く → <code>fslc check</code>(高速な構文/型のループ)</li>
 <li><code>fslc verify --depth 8</code> → violated ならトレースを使って直す。
@@ -2338,11 +2366,13 @@ DESIGN-*.md があります)。</p>
   <code>unanchored_property</code>、<code>progressless_cycle</code>、<code>unwritten_state</code>、
   <code>unread_state</code>、<code>unguarded_action</code>、<code>conservation_candidate</code>、
   <code>divergent_choice</code>、<code>unconstrained_effect</code> のようなレビュー findings を出力
-  します。最後の 2 つは固定の深さ 4 の BMC プローブを使います:
-  <code>evidence_basis:"bounded_bmc"</code>、reachable な分岐の witness、どの成果が意図されて
+  します。最後の 2 つは固定の深さ 4 の有界プローブ(ランタイム Monitor による
+  solver 非依存の明示的状態探索)を使います:
+  <code>evidence_basis:"bounded_bmc"</code>(「有界の到達可能性 witness に裏付けられている」
+  ことを意味する凍結された v0 語彙)、reachable な分岐の witness、どの成果が意図されて
   いるかを問う疑問形の <code>spec_question</code> を含みます。<code>undecided:</code> の宣言との完全一致
   は <code>acknowledged:true</code> と <code>acknowledged_by</code> つきで可視のままです。一致しない
-  意味的な findings は acknowledgement のフィールドを運びません。BMC に裏付け
+  意味的な findings は acknowledgement のフィールドを運びません。有界 witness に裏付け
   られた <code>unconstrained_effect</code> は、同じ状態の
   構造的な <code>unread_state</code> を抑制します。意味的な action の witness は、同様に重複
   する <code>unguarded_action</code> を抑制します。不在は、境界を超えた決定性の証明では

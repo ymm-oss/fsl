@@ -5,6 +5,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- The native installer no longer clones the repository into `~/.fsl`. It now
+  installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
+  atomically activates the complete payload, safely migrates recognized Python
+  2.7 links, and rejects binaries whose reported version differs from the
+  Release tag. Agent Skills are packaged as a checksummed Release asset; the
+  v3.0.0 compatibility path verifies a pinned tag-archive checksum and extracts
+  only the six installed skills.
+
 ## [3.0.0] - 2026-07-17
 
 ### Changed
@@ -28,6 +37,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   hashing the full executable on every invocation, and CLI preparation reuses its validated
   `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
+
+### Fixed
+- `docs/LANGUAGE.ja.md` now carries the Japanese translation of the
+  "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
+  literate Markdown feature, so `docs/intro/language.ja.html` documents the
+  `.md` input support instead of silently omitting it (issue #346).
+- Documentation for the depth-4 underspecification probe (`divergent_choice`,
+  `unconstrained_effect`) now matches the native implementation: a solver-free
+  explicit-state BFS over the runtime Monitor, not symbolic BMC/Z3.
+  `docs/DESIGN-underspecification.md`, `docs/DESIGN-analysis.md`,
+  `docs/LANGUAGE.md`/`docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` are
+  corrected; the `evidence_basis:"bounded_bmc"` schema enum value is retained
+  unchanged as frozen v0 vocabulary for "backed by a bounded reachability
+  witness", so no output or schema contract moves (issue #318).
 
 ### Added
 - Causal portfolio ledger (Phase 5, issue #364): `fslc causal ledger
@@ -125,6 +148,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   IR boundary, and versioned JSON contracts under `schemas/fslc/causal/`.
   Causal claims never receive `proved`/`verified`; Public Kernel v1, runtime,
   solver, and verifier are unchanged by design (issue #320).
+- Documented that the persistent verify cache is safe under concurrent
+  processes: writes are atomic, so parallel `fslc verify` invocations over many
+  files (`xargs -P`, CI job matrices) at worst duplicate solving and never
+  corrupt or poison the cache. `docs/DESIGN-incremental-verify.md` §3 and
+  `skills/fsl/reference.md` now state this explicitly so users and AI agents
+  choose process-level parallelism instead of a sequential per-file loop
+  (issue #353). No implementation change.
 - Documented a rationale convention for preserving a declaration's "why" in
   the checked model instead of only in `//` comments (lexer trivia): use the
   existing `@kind(id, text?)` to classify and explain a declaration in one
