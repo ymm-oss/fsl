@@ -178,7 +178,10 @@ fn causal_graph_projection_carries_loop_class_and_truncation() {
     let feedback = &output["feedbacks"][0];
     assert_eq!(feedback["loop_class"], "reinforcing");
     assert_eq!(feedback["recurrent"], true);
-    assert_eq!(feedback["claims"].as_array().expect("witness claims").len(), 4);
+    assert_eq!(
+        feedback["claims"].as_array().expect("witness claims").len(),
+        4
+    );
     assert_eq!(output["truncation"]["paths_truncated"], 0);
 }
 
