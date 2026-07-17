@@ -908,3 +908,135 @@ fn observe_expectations_rejects_tampered_mapping() {
     ]);
     assert_eq!(status, 2, "{output}");
 }
+
+// ── ledger (issue #364) ────────────────────────────────────────────
+
+const PLAN: &str = "examples/causal/evidence/onboarding-validation-plan.json";
+const PLAN_LIFECYCLE: &str = "examples/causal/evidence/onboarding-validation-plan.lifecycle.json";
+
+fn run_ledger(extra: &[&str]) -> (Value, i32) {
+    let mut args = vec!["causal", "ledger", RETENTION];
+    args.extend_from_slice(extra);
+    run_cli(&args)
+}
+
+fn claim_attention(output: &Value, claim_id: &str) -> Vec<String> {
+    output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|entry| entry["id"] == format!("claim:{claim_id}"))
+        .unwrap_or_else(|| panic!("missing {claim_id}"))["attention_reasons"]
+        .as_array()
+        .expect("reasons")
+        .iter()
+        .map(|reason| reason["reason"].as_str().expect("reason string").to_owned())
+        .collect()
+}
+
+#[test]
+fn ledger_all_claims_appear_even_without_plans_or_evidence() {
+    let (output, status) = run_ledger(&[]);
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "causal_ledger");
+    assert_eq!(output["schema_version"], "causal-ledger.v0");
+    assert_review_only(&output);
+    let claims = output["claims"].as_array().expect("claims");
+    assert_eq!(claims.len(), 4, "all 4 retention claims must appear");
+    for entry in claims {
+        assert_eq!(entry["formal_assurance"], "not_run");
+        assert_eq!(entry["status"], "active");
+    }
+}
+
+#[test]
+fn ledger_plan_missing_attention_fires_without_plans() {
+    let (output, status) = run_ledger(&[]);
+    assert_eq!(status, 0, "{output}");
+    let reasons = claim_attention(&output, "C_Onboarding_FirstSuccess");
+    assert!(
+        reasons.contains(&"validation_plan_missing".to_owned()),
+        "plan_missing must fire: {reasons:?}"
+    );
+    assert!(
+        reasons.contains(&"current_evidence_missing".to_owned()),
+        "evidence_missing must fire: {reasons:?}"
+    );
+}
+
+#[test]
+fn ledger_with_plan_and_evidence_clears_attention() {
+    let (output, status) = run_ledger(&[
+        "--plans",
+        PLAN,
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+        "--lifecycle",
+        PLAN_LIFECYCLE,
+        "--as-of",
+        "2027-01-15",
+    ]);
+    assert_eq!(status, 0, "{output}");
+    let reasons = claim_attention(&output, "C_Onboarding_FirstSuccess");
+    assert!(
+        !reasons.contains(&"validation_plan_missing".to_owned()),
+        "plan should be applicable: {reasons:?}"
+    );
+    let claim = output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|entry| entry["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("claim");
+    assert_eq!(claim["causal_support"], "supported");
+    assert!(!claim["external_refs"].as_array().expect("refs").is_empty());
+}
+
+#[test]
+fn ledger_deterministic_output() {
+    let args = &[
+        "--plans",
+        PLAN,
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+        "--lifecycle",
+        PLAN_LIFECYCLE,
+        "--as-of",
+        "2027-01-15",
+    ];
+    let (output_a, _) = run_ledger(args);
+    let (output_b, _) = run_ledger(args);
+    assert_eq!(
+        output_a.to_string(),
+        output_b.to_string(),
+        "ledger must be byte-stable"
+    );
+}
+
+#[test]
+fn ledger_claims_without_plan_have_missing_attention() {
+    let (output, status) = run_ledger(&[
+        "--plans",
+        PLAN,
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+        "--lifecycle",
+        PLAN_LIFECYCLE,
+        "--as-of",
+        "2027-01-15",
+    ]);
+    assert_eq!(status, 0, "{output}");
+    // Claims other than C_Onboarding_FirstSuccess should still have
+    // validation_plan_missing because the plan only pins that one claim.
+    let reasons = claim_attention(&output, "C_Habit_Retention");
+    assert!(
+        reasons.contains(&"validation_plan_missing".to_owned()),
+        "claims without plans must have plan_missing: {reasons:?}"
+    );
+}

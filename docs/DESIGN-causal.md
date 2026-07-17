@@ -732,3 +732,49 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
 - **CLI envelope.** `causal-observation.v0` schema (inventory now 36);
   `result: "causal_expectations_observed"`, `formal_result: "not_run"`.
 - **Worker waiver.** Same policy as other causal commands: CLI-only.
+
+## 17. Phase 5 implementation notes (fixed by #364)
+
+- **Validation plan artifacts.** `fsl-causal-validation-plan.v0` is an
+  immutable JSON artifact pinning claim IDs + content versions, a study
+  `design` (same closed vocabulary as evidence), scope tokens, an
+  observation window (timebase + minimum), measurement variable references,
+  opaque `external_refs`, and a canonical `artifact_digest`. Plan lifecycle
+  reuses the existing `fsl-causal-evidence-lifecycle.v0` chain schema —
+  the `evidence_id` field carries the `plan_id`.
+- **Plan validator.** `parse_plan()` in `fsl-tools/src/causal_plan.rs`
+  validates schema version, claim pins, design vocabulary, scope tokens,
+  observation window, measurements, and artifact digest (fail-closed on
+  mismatch). Lifecycle validation uses the existing
+  `validate_lifecycle_chain()`.
+- **Ledger projection.** `fslc causal ledger model.fsl [--plans ...
+  --evidence ... --lifecycle ... --as-of YYYY-MM-DD]` integrates the
+  model's claims with plans, evidence (via the existing
+  `aggregate_support()`), and per-claim attention reasons into a
+  `causal-ledger.v0` JSON envelope. Every active claim appears regardless
+  of plan/evidence availability (AC 1). Retired claims appear but have no
+  attention reasons. Output is claim-ID-ordered and byte-stable (AC 5).
+- **Attention reasons (closed vocabulary).** 12 deterministic attention
+  reasons derived from facts: `validation_plan_missing`,
+  `validation_plan_version_mismatch`, `validation_plan_scope_unassessable`,
+  `validation_plan_scope_inapplicable`,
+  `validation_window_shorter_than_lag`,
+  `required_measurement_unavailable`, `current_evidence_missing`,
+  `current_evidence_inconclusive`,
+  `conflicting_evidence_requires_decision`,
+  `challenging_evidence_requires_decision`,
+  `evidence_freshness_requires_refresh`,
+  `observation_not_directional_support`. Each carries a typed witness.
+  Attention reasons are review projections, not formal violations (AC 7).
+- **Plan scope checking.** The existing 3-valued scope comparison
+  (`compare_scope`, extracted from `scope_application`) is reused for
+  plan–claim scope assessment with the same `subsumes / partial_overlap /
+  disjoint / unassessable` semantics.
+- **`do_not_assume`.** Every ledger output includes: "The causal claim is
+  proved or verified", "A completed validation plan establishes causality",
+  "No unmodeled common cause exists", "Absence of challenging evidence
+  means the claim is true", "Portfolio readiness is a formal assurance
+  class".
+- **Schemas.** `fsl-causal-validation-plan.v0` and `causal-ledger.v0`
+  (inventory now 38).
+- **Worker waiver.** Same policy as other causal commands: CLI-only.

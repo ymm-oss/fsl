@@ -1769,3 +1769,20 @@ aborts evidence generation. **Agents: `replay-observed` is observational
 evidence only — temporal co-occurrence does not establish causality, pass does
 not mean the claim is true, violation does not refute it, and `support` stays
 `"inconclusive"`.** See `docs/DESIGN-causal.md` §16.
+
+Portfolio ledger: `fslc causal ledger model.fsl [--plans plan.json ...]
+[--evidence ev.json ...] [--lifecycle lc.json ...] [--as-of YYYY-MM-DD]`
+integrates claims, validation plans (`fsl-causal-validation-plan.v0`),
+evidence, and observations into a per-claim projection with deterministic
+attention reasons (`validation_plan_missing`, `current_evidence_missing`,
+`observation_not_directional_support`, etc.). Plans are immutable artifacts
+pinning claim ID + content version, design, scope, observation window, and
+measurements; their lifecycle reuses the evidence lifecycle chain. Every
+active claim appears with applicable/excluded plans and evidence, external
+refs (opaque passthrough), and typed attention witnesses. Retired claims
+appear but have no attention reasons. **Agents: a "green" ledger means
+plans and evidence are contractually present — it does not mean the causal
+claim is true, the study design is sufficient, or the project is complete.
+`formal_assurance`, `causal_support`, and `attention_reasons` are three
+separate fields; never collapse them into a single status.** See
+`docs/DESIGN-causal.md` §17.

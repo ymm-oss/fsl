@@ -30,6 +30,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Causal portfolio ledger (Phase 5, issue #364): `fslc causal ledger
+  model.fsl [--plans ... --evidence ... --lifecycle ... --as-of ...]`
+  integrates claims, validation plans, evidence, and observations into
+  a per-claim projection with 12 deterministic attention reasons
+  (`validation_plan_missing`, `current_evidence_missing`,
+  `observation_not_directional_support`, etc.). New
+  `fsl-causal-validation-plan.v0` schema for immutable plan artifacts
+  with claim pins, design, scope, observation window, measurements,
+  and opaque external refs. Plan lifecycle reuses
+  `fsl-causal-evidence-lifecycle.v0`. CLI envelope:
+  `causal-ledger.v0` (inventory 38). Every claim appears regardless of
+  plan/evidence; retired claims have no attention; output is byte-stable.
 - Causal observation bridge (Phase 4, issue #360): `fslc causal
   observe-expectations model.fsl --from-log events.jsonl --mapping
   log_mapping.fsl --scope scope.json --period-start ... --period-end ...`

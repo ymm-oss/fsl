@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/fsl-causal-validation-plan.v0.schema.json",
+  "title": "fsl-causal-validation-plan v0 artifact",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "plan_id",
+    "claims",
+    "design",
+    "artifact_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "fsl-causal-validation-plan.v0" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "version"],
+        "properties": {
+          "id": { "type": "string" },
+          "version": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "design": {
+      "enum": [
+        "randomized_experiment",
+        "quasi_experiment",
+        "observational",
+        "expert_judgment"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "population": { "$ref": "#/$defs/tokens" },
+        "environment": { "$ref": "#/$defs/tokens" },
+        "segment": { "$ref": "#/$defs/tokens" }
+      },
+      "additionalProperties": false
+    },
+    "observation_window": {
+      "type": "object",
+      "required": ["timebase", "minimum"],
+      "properties": {
+        "timebase": { "type": "string" },
+        "minimum": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "measurements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "external_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "system", "id"],
+        "properties": {
+          "kind": { "type": "string" },
+          "system": { "type": "string" },
+          "id": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "artifact_digest": { "$ref": "#/$defs/digest" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "tokens": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

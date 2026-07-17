@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/causal-ledger.v0.schema.json",
+  "title": "fslc causal ledger CLI envelope",
+  "type": "object",
+  "required": [
+    "fsl",
+    "result",
+    "schema_version",
+    "formal_result",
+    "model",
+    "claims",
+    "do_not_assume"
+  ],
+  "properties": {
+    "fsl": { "const": "1.0" },
+    "result": { "const": "causal_ledger" },
+    "schema_version": { "const": "causal-ledger.v0" },
+    "formal_result": { "const": "not_run" },
+    "model": { "type": "string" },
+    "as_of": { "type": ["string", "null"] },
+    "claims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim_entry" }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 5
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "claim_entry": {
+      "type": "object",
+      "required": [
+        "id",
+        "version",
+        "status",
+        "formal_assurance",
+        "causal_support",
+        "plans",
+        "evidence",
+        "attention_reasons"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["active", "retired"] },
+        "formal_assurance": { "const": "not_run" },
+        "causal_support": { "type": "string" },
+        "plans": { "$ref": "#/$defs/plan_summary" },
+        "evidence": { "$ref": "#/$defs/evidence_summary" },
+        "expectations": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "external_refs": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "attention_reasons": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attention_reason" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "plan_summary": {
+      "type": "object",
+      "required": ["applicable", "excluded"],
+      "properties": {
+        "applicable": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "excluded": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_summary": {
+      "type": "object",
+      "required": ["applicable", "excluded"],
+      "properties": {
+        "applicable": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "excluded": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "attention_reason": {
+      "type": "object",
+      "required": ["reason", "witness"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "validation_plan_missing",
+            "validation_plan_version_mismatch",
+            "validation_plan_scope_unassessable",
+            "validation_plan_scope_inapplicable",
+            "validation_window_shorter_than_lag",
+            "required_measurement_unavailable",
+            "current_evidence_missing",
+            "current_evidence_inconclusive",
+            "conflicting_evidence_requires_decision",
+            "challenging_evidence_requires_decision",
+            "evidence_freshness_requires_refresh",
+            "observation_not_directional_support"
+          ]
+        },
+        "witness": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -10,6 +10,8 @@ mod causal;
 mod causal_analysis;
 mod causal_evidence;
 mod causal_expectation;
+mod causal_ledger_projection;
+mod causal_plan;
 mod causal_projection;
 mod db;
 mod db_import;
@@ -44,6 +46,8 @@ pub use causal_evidence::{
     parse_artifact, validate_lifecycle_chain,
 };
 pub use causal_expectation::{CompiledExpectation, compile_expectations};
+pub use causal_ledger_projection::build_ledger;
+pub use causal_plan::{ObservationWindow, PLAN_SCHEMA_VERSION, PlanArtifact, parse_plan};
 pub use causal_projection::{
     causal_diff_json, causal_dot, causal_graph_projection, causal_mermaid, causal_review_json,
     causal_timeline_projection, causal_traceability_projection,

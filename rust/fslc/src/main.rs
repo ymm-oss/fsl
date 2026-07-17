@@ -1990,7 +1990,7 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
 #[allow(clippy::too_many_lines)]
 fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
     let subcommand = args.next().ok_or_else(|| {
-        "usage: fslc causal <check|analyze|verify-expectations|observe-expectations|diff> ..."
+        "usage: fslc causal <check|analyze|verify-expectations|observe-expectations|diff|ledger> ..."
             .to_owned()
     })?;
     match subcommand.as_str() {
@@ -2185,8 +2185,47 @@ fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             }
             Ok(run_causal_diff(&before, &after))
         }
+        "ledger" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal ledger requires a file".to_owned())?,
+            );
+            let mut plans = Vec::new();
+            let mut evidence = Vec::new();
+            let mut lifecycle = Vec::new();
+            let mut as_of = None;
+            let mut format = "json".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--plans" => {
+                        plans.push(PathBuf::from(required_option_value(&mut args, "--plans")?));
+                    }
+                    "--evidence" => evidence.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--evidence",
+                    )?)),
+                    "--lifecycle" => lifecycle.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--lifecycle",
+                    )?)),
+                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    "--format" => format = required_option_value(&mut args, "--format")?,
+                    _ => return Err(format!("unknown causal ledger option '{option}'")),
+                }
+            }
+            if format != "json" {
+                return Err("causal ledger supports only --format json".to_owned());
+            }
+            Ok(run_causal_ledger(
+                &path,
+                &plans,
+                &evidence,
+                &lifecycle,
+                as_of.as_deref(),
+            ))
+        }
         other => Err(format!(
-            "unknown causal subcommand '{other}' (expected check | analyze | verify-expectations | observe-expectations | diff; there is deliberately no 'causal verify')"
+            "unknown causal subcommand '{other}' (expected check | analyze | verify-expectations | observe-expectations | diff | ledger; there is deliberately no 'causal verify')"
         )),
     }
 }
@@ -3192,33 +3231,33 @@ fn run_causal_observe_expectations(
             }
             evidence_paths.push(file_path.display().to_string());
         }
-        if let Some(base) = lifecycle_out_path {
-            if let Some(lifecycle) = lifecycle_records.get(index) {
-                let file_path = if lifecycle_records.len() == 1 {
-                    base.to_path_buf()
-                } else {
-                    let stem = base
-                        .file_stem()
-                        .and_then(|stem| stem.to_str())
-                        .unwrap_or("lifecycle");
-                    let extension = base
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .unwrap_or("json");
-                    base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
-                };
-                let lifecycle_json = serde_json::to_string_pretty(lifecycle).expect("valid JSON");
-                if let Err(error) = std::fs::write(&file_path, format!("{lifecycle_json}\n")) {
-                    return (
-                        error_output(
-                            "io",
-                            &format!("cannot write {}: {error}", file_path.display()),
-                        ),
-                        2,
-                    );
-                }
-                lifecycle_paths.push(file_path.display().to_string());
+        if let Some(base) = lifecycle_out_path
+            && let Some(lifecycle) = lifecycle_records.get(index)
+        {
+            let file_path = if lifecycle_records.len() == 1 {
+                base.to_path_buf()
+            } else {
+                let stem = base
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("lifecycle");
+                let extension = base
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("json");
+                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
+            };
+            let lifecycle_json = serde_json::to_string_pretty(lifecycle).expect("valid JSON");
+            if let Err(error) = std::fs::write(&file_path, format!("{lifecycle_json}\n")) {
+                return (
+                    error_output(
+                        "io",
+                        &format!("cannot write {}: {error}", file_path.display()),
+                    ),
+                    2,
+                );
             }
+            lifecycle_paths.push(file_path.display().to_string());
         }
     }
 
@@ -3292,6 +3331,81 @@ fn sha256_digest(text: &str) -> String {
     let mut hasher = sha2::Sha256::new();
     hasher.update(text.as_bytes());
     format!("sha256:{:x}", hasher.finalize())
+}
+
+fn run_causal_ledger(
+    path: &Path,
+    plan_paths: &[PathBuf],
+    evidence_paths: &[PathBuf],
+    lifecycle_paths: &[PathBuf],
+    as_of: Option<&str>,
+) -> (Value, i32) {
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+
+    // Load plan artifacts.
+    let mut plans = std::collections::BTreeMap::new();
+    for plan_path in plan_paths {
+        let source = match std::fs::read_to_string(plan_path) {
+            Ok(source) => source,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let value: Value = match serde_json::from_str(&source) {
+            Ok(value) => value,
+            Err(error) => {
+                return (
+                    error_output(
+                        "io",
+                        &format!("invalid JSON in {}: {error}", plan_path.display()),
+                    ),
+                    2,
+                );
+            }
+        };
+        let plan = match fsl_tools::parse_plan(&value) {
+            Ok(plan) => plan,
+            Err(error) => return (error_output(error.kind, &error.message), 2),
+        };
+        plans.insert(plan.plan_id.clone(), plan);
+    }
+
+    // Load evidence + lifecycle (reuse existing pattern).
+    let (artifacts, overlay) =
+        match load_causal_evidence(&model, evidence_paths, lifecycle_paths, as_of) {
+            Ok(loaded) => loaded,
+            Err(error) => return error,
+        };
+
+    // Apply lifecycle status to plans from the same lifecycle files.
+    for lifecycle_path in lifecycle_paths {
+        let Ok(source) = std::fs::read_to_string(lifecycle_path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&source) else {
+            continue;
+        };
+        if let Some(plan_id) = value.get("evidence_id").and_then(Value::as_str)
+            && let Some(plan) = plans.get_mut(plan_id)
+        {
+            let empty_artifacts = std::collections::BTreeMap::new();
+            let Ok((_, status)) = fsl_tools::validate_lifecycle_chain(&value, &empty_artifacts)
+            else {
+                continue;
+            };
+            plan.lifecycle_status = status;
+        }
+    }
+
+    // Build ledger projection.
+    let ledger_body = fsl_tools::build_ledger(&model, &plans, &artifacts, &overlay, as_of);
+    let Value::Object(body) = ledger_body else {
+        return (error_output("internal", "invalid ledger result"), 3);
+    };
+    let mut output = envelope();
+    output.extend(body);
+    (Value::Object(output), 0)
 }
 
 fn run_causal_diff(before: &Path, after: &Path) -> (Value, i32) {

@@ -605,22 +605,22 @@ fn scope_dimension_relation(
     ScopeApplication::Unassessable
 }
 
-fn scope_application(
+pub(crate) fn compare_scope(
     model: &CausalModel,
     claim: &Claim,
-    artifact: &EvidenceArtifact,
+    other_scope: &BTreeMap<String, Vec<String>>,
 ) -> ScopeApplication {
     let claim_scope = model.claim_scope(claim);
-    if claim_scope.is_empty() || artifact.scope.is_empty() {
+    if claim_scope.is_empty() || other_scope.is_empty() {
         return ScopeApplication::Unassessable;
     }
     let mut composed = ScopeApplication::Subsumes;
     for (dimension, claim_token) in claim_scope {
-        let Some(evidence_tokens) = artifact.scope.get(dimension) else {
+        let Some(tokens) = other_scope.get(dimension) else {
             composed = ScopeApplication::Unassessable;
             continue;
         };
-        match scope_dimension_relation(model, dimension, claim_token, evidence_tokens) {
+        match scope_dimension_relation(model, dimension, claim_token, tokens) {
             ScopeApplication::Disjoint => return ScopeApplication::Disjoint,
             ScopeApplication::Unassessable => composed = ScopeApplication::Unassessable,
             ScopeApplication::PartialOverlap => {
@@ -632,6 +632,14 @@ fn scope_application(
         }
     }
     composed
+}
+
+fn scope_application(
+    model: &CausalModel,
+    claim: &Claim,
+    artifact: &EvidenceArtifact,
+) -> ScopeApplication {
+    compare_scope(model, claim, &artifact.scope)
 }
 
 /// Convert an artifact's observation window to model timebase units.
