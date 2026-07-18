@@ -19,8 +19,9 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use fsl_core::{
-    ActionGuard, KernelModel, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, display_name,
+    ActionGuard, KernelModel, KernelSpec, LeadsToDef, ParamDef, PropertyDef, PublicKernelVersion,
+    RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation, TypeRef,
+    display_name, public_kernel_contract_for_version,
 };
 
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
@@ -32,6 +33,7 @@ pub enum Locale {
     En,
 }
 
+#[derive(Debug)]
 pub struct RenderedDocument {
     pub markdown: String,
     pub formula_fallback_count: u64,
@@ -50,13 +52,19 @@ struct Ctx<'a> {
 /// `trace_contract` should be `requirements_trace_contract(source)`'s result
 /// for the same source the RCIR claim set was projected from (`None` for a
 /// direct `spec` dialect, which has no acceptance/forbidden cases).
-#[must_use]
+///
+/// # Errors
+///
+/// Returns an error before rendering when the embedded Public Kernel differs
+/// from the supplied checked model or a semantic target does not resolve once.
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
+    kernel: &KernelSpec,
     model: &KernelModel,
     trace_contract: Option<&RequirementsTraceContract>,
     locale: Locale,
-) -> RenderedDocument {
+) -> Result<RenderedDocument, String> {
+    validate_render_inputs(claims, kernel, model, trace_contract)?;
     let mut ctx = Ctx {
         model,
         trace: trace_contract,
@@ -81,10 +89,93 @@ pub fn render_requirements_document(
         out.push('\n');
     }
 
-    RenderedDocument {
+    Ok(RenderedDocument {
         markdown: out,
         formula_fallback_count: ctx.fallback_count,
+    })
+}
+
+fn validate_render_inputs(
+    claims: &RequirementClaimSet,
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    trace: Option<&RequirementsTraceContract>,
+) -> Result<(), String> {
+    let current = public_kernel_contract_for_version(
+        kernel,
+        model,
+        claims.spec.source.as_deref().unwrap_or(""),
+        &claims.spec.dialect,
+        PublicKernelVersion::V2,
+    )
+    .map_err(|error| error.to_string())?;
+    if current != claims.public_kernel {
+        return Err("RCIR public_kernel does not match the renderer model".to_owned());
     }
+    for claim in &claims.claims {
+        for target in &claim.semantic_targets {
+            let resolved = if let Some(name) = target.strip_prefix("action:") {
+                model
+                    .actions
+                    .iter()
+                    .filter(|action| action.name == name)
+                    .count()
+            } else if let Some(rest) = target.strip_prefix("property:") {
+                let (kind, name) = rest
+                    .split_once(':')
+                    .ok_or_else(|| format!("invalid RCIR semantic target '{target}'"))?;
+                match kind {
+                    "invariant" => model
+                        .invariants
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    "trans" => model
+                        .transitions
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    "reachable" => model
+                        .reachables
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    "leadsTo" => model
+                        .leadstos
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    _ => 0,
+                }
+            } else if target == "terminal" {
+                usize::from(model.terminal.is_some())
+            } else if let Some(id) = target.strip_prefix("acceptance:") {
+                trace.map_or(0, |contract| {
+                    contract
+                        .acceptance
+                        .iter()
+                        .filter(|case| case.id == id)
+                        .count()
+                })
+            } else if let Some(id) = target.strip_prefix("forbidden:") {
+                trace.map_or(0, |contract| {
+                    contract
+                        .forbidden
+                        .iter()
+                        .filter(|case| case.id == id)
+                        .count()
+                })
+            } else {
+                0
+            };
+            if resolved != 1 {
+                return Err(format!(
+                    "RCIR semantic target '{target}' resolved {resolved} times; expected exactly once"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn push_section(out: &mut String, section: &str) {

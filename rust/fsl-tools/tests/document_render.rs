@@ -55,9 +55,11 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
     .unwrap_or_else(|error| panic!("project {}: {error}", fixture.source_path));
     let resolver = fsl_core::FsResolver::new(&fixture.root);
     let kernel = fsl_core::parse_kernel_source(&fixture.source, &resolver).expect("parse");
-    let model = fsl_core::build_model(kernel).expect("build model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
-    let doc = fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale);
+    let doc =
+        fsl_tools::render_requirements_document(&claims, &kernel, &model, trace.as_ref(), locale)
+            .expect("render paired RCIR");
     (claims, doc)
 }
 
@@ -66,6 +68,51 @@ fn req2_block(markdown: &str) -> &str {
     let rest = &markdown[start..];
     let end = rest.find("### REQ-3").expect("REQ-3 section exists");
     rest[..end].trim_end()
+}
+
+#[test]
+fn renderer_rejects_rcir_paired_with_another_valid_model() {
+    let claims_source = claims_fixture();
+    let claims = fsl_tools::project_requirement_claims_from_source(
+        &claims_source.source,
+        Some(&claims_source.source_path),
+        &claims_source.root,
+    )
+    .expect("project claims fixture");
+    let other = cancel_system();
+    let kernel =
+        fsl_core::parse_kernel_source(&other.source, &fsl_core::FsResolver::new(&other.root))
+            .expect("parse other model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build other model");
+    let error = fsl_tools::render_requirements_document(&claims, &kernel, &model, None, Locale::En)
+        .expect_err("mismatched Public Kernel must fail closed");
+    assert!(error.contains("does not match"));
+}
+
+#[test]
+fn renderer_rejects_an_unresolved_semantic_target() {
+    let fixture = cancel_system();
+    let mut claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    claims.claims[0].semantic_targets = vec!["action:missing".to_owned()];
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        Locale::En,
+    )
+    .expect_err("unresolved target must fail closed");
+    assert!(error.contains("resolved 0 times"));
 }
 
 // --- Acceptance criterion 1: cancel_system.fsl REQ-2 renders both guards, ---

@@ -77,7 +77,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   reads as an enablement condition, `not`/negation is never dropped, weak fairness is
   always "a scheduling assumption" and never "immediately", `acceptance`/`forbidden`
   always carry a non-generalization disclaimer, and a progress/reachability claim never
-  claims established evidence (RCIR v1 carries none). `fsl_core::expr_text`/
+  claims established evidence (RCIR v1 carries none). The renderer verifies the embedded
+  Public Kernel and requires every semantic
+  target to resolve exactly once before emitting Markdown, rejecting mismatched models.
+  `fsl_core::expr_text`/
   `source_expr_text` (the `explain --readable` canonical-text renderer) moved from the
   `fslc` binary crate into `fsl_core` so `fsl-tools` could reuse it without a
   second implementation; `fslc` re-exports both names unchanged. CLI wiring is issue
