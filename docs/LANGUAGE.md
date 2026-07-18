@@ -744,6 +744,12 @@ invalid token and is therefore reported with an `and` suggestion but is never
 machine-applied. See `docs/DESIGN-migration.md` for atomicity and bulk-update
 steps.
 
+Each `fslc lint` path may be a file or directory. Directories recursively expand
+to regular `*.fsl` files; symlink entries and other extensions are skipped while
+walking them, and the combined file set is deduplicated and sorted
+deterministically. Explicit file paths retain their existing extension-agnostic
+behavior.
+
 The native Rust-only `kernel` command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,
 source spans, requirement/lowering origin, simultaneous-update semantics, and

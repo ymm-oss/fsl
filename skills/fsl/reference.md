@@ -871,6 +871,12 @@ fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifa
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
 
+Each `lint` path may be a file or directory. Directories recursively expand to
+regular `*.fsl` files; symlink entries and other extensions are skipped while
+walking them, and the combined file set is deduplicated and sorted
+deterministically. Explicit file paths retain their existing extension-agnostic
+behavior.
+
 Native generated-code replay uses `replay-trace.v1`: a closed root carrying
 trace and Kernel versions, exact spec identity, complete tick-0 `initial`, and
 events with exact Public Kernel `action`/`params`, canonical ticks `1..N`, and

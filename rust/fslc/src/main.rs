@@ -495,9 +495,13 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
         Ok(policy) => policy,
         Err(error) => return (error_output("config", &error), 2),
     };
+    let paths = match expand_lint_paths(&options.paths) {
+        Ok(paths) => paths,
+        Err(error) => return (error_output("io", &error), 2),
+    };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
-    for path in &options.paths {
+    for path in &paths {
         let (source, mut plan) = match load_migration_plan(path, options.edition) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
@@ -528,6 +532,44 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
         }),
         i32::from(finding_count > 0),
     )
+}
+
+fn expand_lint_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut files = std::collections::BTreeSet::new();
+    for path in paths {
+        if path.is_dir() {
+            collect_lint_directory(path, &mut files)?;
+        } else {
+            files.insert(path.clone());
+        }
+    }
+    Ok(files.into_iter().collect())
+}
+
+fn collect_lint_directory(
+    directory: &Path,
+    files: &mut std::collections::BTreeSet<PathBuf>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("{}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", directory.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_lint_directory(&path, files)?;
+        } else if file_type.is_file()
+            && path.extension().and_then(std::ffi::OsStr::to_str) == Some("fsl")
+        {
+            files.insert(path);
+        }
+    }
+    Ok(())
 }
 
 fn load_id_policy(

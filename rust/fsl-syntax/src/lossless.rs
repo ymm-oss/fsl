@@ -3,6 +3,7 @@
 
 //! Lossless source nodes and the shared, trivia-preserving formatter.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::{LexError, ParseError, SourceFile, Span, TokenKind, lex, parse_document};
@@ -291,7 +292,9 @@ pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, Fo
             .collect(),
     )?;
     let tree = lossless_document(&rewritten);
-    let mut formatter = Formatter::new();
+    let parsed = parse_document(SourceFile::new(&rewritten)).map_err(FormatError::Parse)?;
+    let compact_hyphens = business_id_hyphen_offsets(&tree, parsed.keyword);
+    let mut formatter = Formatter::new(compact_hyphens);
     formatter.write(tree.nodes());
     let output = formatter.finish();
     parse_document(SourceFile::new(&output)).map_err(FormatError::Parse)?;
@@ -600,6 +603,80 @@ fn plan_domain_enum(
     Ok(replacements)
 }
 
+fn business_id_hyphen_offsets(tree: &LosslessDocument, dialect: &str) -> BTreeSet<usize> {
+    if dialect != "business" {
+        return BTreeSet::new();
+    }
+    let tokens = tree
+        .nodes()
+        .iter()
+        .filter(|node| matches!(node.kind, LosslessKind::Token(_)))
+        .collect::<Vec<_>>();
+    let mut offsets = BTreeSet::new();
+    let mut brace_depth = 0_usize;
+    let mut business_started = false;
+    for (index, token) in tokens.iter().enumerate() {
+        let Some(keyword) = token.ident().filter(|_| brace_depth == 1) else {
+            match token.symbol() {
+                Some("{") => {
+                    brace_depth += 1;
+                    business_started = true;
+                }
+                Some("}") => {
+                    brace_depth = brace_depth.saturating_sub(1);
+                    if business_started && brace_depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        };
+        if matches!(keyword, "control" | "policy" | "goal") {
+            collect_id_hyphens(&tokens, index + 1, &mut offsets);
+        } else if keyword == "satisfies" {
+            let mut cursor = index + 1;
+            loop {
+                cursor = collect_id_hyphens(&tokens, cursor, &mut offsets);
+                if tokens.get(cursor).and_then(|token| token.symbol()) != Some(",") {
+                    break;
+                }
+                cursor += 1;
+            }
+        }
+    }
+    offsets
+}
+
+fn collect_id_hyphens(
+    tokens: &[&LosslessNode],
+    start: usize,
+    offsets: &mut BTreeSet<usize>,
+) -> usize {
+    let Some(first) = tokens.get(start) else {
+        return start;
+    };
+    if !matches!(
+        first.kind,
+        LosslessKind::Token(TokenKind::Ident(_) | TokenKind::Int(_))
+    ) {
+        return start;
+    }
+    let mut cursor = start + 1;
+    while tokens.get(cursor).and_then(|token| token.symbol()) == Some("-")
+        && tokens.get(cursor + 1).is_some_and(|token| {
+            matches!(
+                token.kind,
+                LosslessKind::Token(TokenKind::Ident(_) | TokenKind::Int(_))
+            )
+        })
+    {
+        offsets.insert(tokens[cursor].span.start.offset);
+        cursor += 2;
+    }
+    cursor
+}
+
 struct Formatter {
     output: String,
     indent: usize,
@@ -607,12 +684,14 @@ struct Formatter {
     pending_lines: usize,
     pending_space: bool,
     previous: Option<TokenKind>,
+    previous_offset: Option<usize>,
+    compact_hyphens: BTreeSet<usize>,
     type_argument_depth: usize,
     source_line_break: bool,
 }
 
 impl Formatter {
-    fn new() -> Self {
+    fn new(compact_hyphens: BTreeSet<usize>) -> Self {
         Self {
             output: String::new(),
             indent: 0,
@@ -620,6 +699,8 @@ impl Formatter {
             pending_lines: 0,
             pending_space: false,
             previous: None,
+            previous_offset: None,
+            compact_hyphens,
             type_argument_depth: 0,
             source_line_break: false,
         }
@@ -630,7 +711,7 @@ impl Formatter {
             match &node.kind {
                 LosslessKind::Whitespace => self.whitespace(&node.text),
                 LosslessKind::LineComment => self.comment(&node.text),
-                LosslessKind::Token(kind) => self.token(kind, &node.text),
+                LosslessKind::Token(kind) => self.token(kind, &node.text, node.span),
                 LosslessKind::Error => unreachable!("lexical errors are refused"),
             }
         }
@@ -666,7 +747,7 @@ impl Formatter {
         self.source_line_break = true;
     }
 
-    fn token(&mut self, kind: &TokenKind, original: &str) {
+    fn token(&mut self, kind: &TokenKind, original: &str, span: Span) {
         let closes = matches!(kind, TokenKind::Symbol(symbol) if symbol == "}");
         if closes {
             self.indent = self.indent.saturating_sub(1);
@@ -677,12 +758,18 @@ impl Formatter {
         self.flush_pending();
         let at_line_start = self.line_start;
         self.write_indent();
+        let compact_hyphen = matches!(kind, TokenKind::Symbol(symbol) if symbol == "-")
+            && self.compact_hyphens.contains(&span.start.offset);
+        let previous_compact_hyphen = self
+            .previous_offset
+            .is_some_and(|offset| self.compact_hyphens.contains(&offset));
         if !at_line_start
             && needs_space(
                 self.previous.as_ref(),
                 kind,
                 self.pending_space,
                 self.type_argument_depth,
+                previous_compact_hyphen || compact_hyphen,
             )
         {
             self.output.push(' ');
@@ -707,6 +794,7 @@ impl Formatter {
             self.type_argument_depth -= 1;
         }
         self.previous = Some(kind.clone());
+        self.previous_offset = Some(span.start.offset);
         self.source_line_break = false;
     }
 
@@ -756,6 +844,7 @@ fn needs_space(
     current: &TokenKind,
     had_space: bool,
     type_argument_depth: usize,
+    compact_hyphen: bool,
 ) -> bool {
     let Some(previous) = previous else {
         return false;
@@ -772,6 +861,9 @@ fn needs_space(
         || type_argument_depth > 0 && current_symbol == Some(">")
         || type_argument_depth > 0 && previous_symbol == Some("<")
     {
+        return false;
+    }
+    if compact_hyphen {
         return false;
     }
     if !had_space
