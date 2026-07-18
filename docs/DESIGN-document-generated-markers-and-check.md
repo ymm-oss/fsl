@@ -66,7 +66,7 @@ view: requirements
 lang: ja
 source: examples/pm/cancel_system.fsl
 renderer: fslc-document-renderer
-renderer_version: 1.2.0
+renderer_version: 1.3.0
 normative_scope: generated-claim-blocks-only
 spec_digest: sha256:...
 claim_set_digest: sha256:...

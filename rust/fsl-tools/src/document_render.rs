@@ -19,8 +19,9 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use fsl_core::{
-    ActionGuard, KernelModel, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target, display_name,
+    ActionGuard, KernelModel, KernelSpec, LeadsToDef, ParamDef, PropertyDef, PublicKernelVersion,
+    RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation, TypeRef,
+    action_target, display_name, public_kernel_contract_for_version,
 };
 use serde_json::Value;
 
@@ -56,6 +57,7 @@ impl Locale {
     }
 }
 
+#[derive(Debug)]
 pub struct RenderedDocument {
     pub markdown: String,
     pub formula_fallback_count: u64,
@@ -117,16 +119,22 @@ struct Ctx<'a> {
 /// function is ever reached — a mismatch is the caller's job to reject, not
 /// this renderer's). Rendered as its own reference section, never inside a
 /// claim block, and always paired with the fixed intent-fidelity disclaimer.
-#[must_use]
+/// # Errors
+///
+/// Returns an error before rendering when the embedded Public Kernel differs
+/// from the supplied checked model or a semantic target does not resolve once.
+#[allow(clippy::too_many_arguments)]
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
+    kernel: &KernelSpec,
     model: &KernelModel,
     trace_contract: Option<&RequirementsTraceContract>,
     locale: Locale,
     glossary: Option<&AppliedGlossary<'_>>,
     evidence: Option<&AppliedEvidence<'_>>,
     approvals: Option<&AppliedApprovals<'_>>,
-) -> RenderedDocument {
+) -> Result<RenderedDocument, String> {
+    validate_render_inputs(claims, kernel, model, trace_contract)?;
     let mut ctx = Ctx {
         model,
         trace: trace_contract,
@@ -178,10 +186,93 @@ pub fn render_requirements_document(
         out.push('\n');
     }
 
-    RenderedDocument {
+    Ok(RenderedDocument {
         markdown: out,
         formula_fallback_count: ctx.fallback_count,
+    })
+}
+
+fn validate_render_inputs(
+    claims: &RequirementClaimSet,
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    trace: Option<&RequirementsTraceContract>,
+) -> Result<(), String> {
+    let current = public_kernel_contract_for_version(
+        kernel,
+        model,
+        claims.spec.source.as_deref().unwrap_or(""),
+        &claims.spec.dialect,
+        PublicKernelVersion::V2,
+    )
+    .map_err(|error| error.to_string())?;
+    if current != claims.public_kernel {
+        return Err("RCIR public_kernel does not match the renderer model".to_owned());
     }
+    for claim in &claims.claims {
+        for target in &claim.semantic_targets {
+            let resolved = if let Some(name) = target.strip_prefix("action:") {
+                model
+                    .actions
+                    .iter()
+                    .filter(|action| action.name == name)
+                    .count()
+            } else if let Some(rest) = target.strip_prefix("property:") {
+                let (kind, name) = rest
+                    .split_once(':')
+                    .ok_or_else(|| format!("invalid RCIR semantic target '{target}'"))?;
+                match kind {
+                    "invariant" => model
+                        .invariants
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    "trans" => model
+                        .transitions
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    "reachable" => model
+                        .reachables
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    "leadsTo" => model
+                        .leadstos
+                        .iter()
+                        .filter(|item| item.name == name)
+                        .count(),
+                    _ => 0,
+                }
+            } else if target == "terminal" {
+                usize::from(model.terminal.is_some())
+            } else if let Some(id) = target.strip_prefix("acceptance:") {
+                trace.map_or(0, |contract| {
+                    contract
+                        .acceptance
+                        .iter()
+                        .filter(|case| case.id == id)
+                        .count()
+                })
+            } else if let Some(id) = target.strip_prefix("forbidden:") {
+                trace.map_or(0, |contract| {
+                    contract
+                        .forbidden
+                        .iter()
+                        .filter(|case| case.id == id)
+                        .count()
+                })
+            } else {
+                0
+            };
+            if resolved != 1 {
+                return Err(format!(
+                    "RCIR semantic target '{target}' resolved {resolved} times; expected exactly once"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn push_section(out: &mut String, section: &str) {
@@ -713,7 +804,12 @@ fn glossary_section(
     let rows = glossary
         .labels
         .iter()
-        .map(|(target, label)| format!("- `{target}`: {label}"))
+        .map(|(target, label)| {
+            format!(
+                "- `{target}`: {}",
+                crate::document_glossary::markdown_label(label)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!("{head}\n\n{intro}\n\n{rows}"))
@@ -738,9 +834,11 @@ fn evidence_sources_section(
         "Verification evidence sources",
     );
     let intro = match locale {
-        Locale::Ja => "本書の保証クラス欄が参照する外部エビデンスの一覧。",
+        Locale::Ja => {
+            "本書に指定された外部エビデンスの一覧。要件 ID に対応する行だけが各要件の保証クラス欄に反映される。"
+        }
         Locale::En => {
-            "The external evidence files referenced by this document's assurance-class fields."
+            "The external evidence files supplied to this document. Only rows matching a requirement ID contribute to that requirement's assurance-class fields."
         }
     };
     let known_ids: BTreeSet<&str> = claims
@@ -752,13 +850,23 @@ fn evidence_sources_section(
         .iter()
         .map(|(path, item)| {
             let result = item.get("result").and_then(Value::as_str).unwrap_or("");
-            let mut ids: Vec<&str> = crate::ledger::evidence_requirement_ids(item)
-                .into_iter()
+            let evidence_ids = crate::ledger::evidence_requirement_ids(item);
+            let mut ids: Vec<&str> = evidence_ids
+                .iter()
+                .copied()
                 .filter(|id| known_ids.contains(id))
                 .collect();
             ids.sort_unstable();
             ids.dedup();
-            let matched = if ids.is_empty() {
+            let matched = if evidence_ids.is_empty() {
+                match locale {
+                    Locale::Ja => "（仕様全体。個別要件には帰属しない）".to_owned(),
+                    Locale::En => {
+                        "(whole specification; not attributed to an individual requirement)"
+                            .to_owned()
+                    }
+                }
+            } else if ids.is_empty() {
                 match locale {
                     Locale::Ja => "（本仕様のどの要件 ID にも対応しない）".to_owned(),
                     Locale::En => {
@@ -1015,10 +1123,13 @@ fn metadata_header(
 ) -> String {
     let kind = kind_label(claim.kind, locale);
     let heading = match glossary_label {
-        Some(label) => match locale {
-            Locale::Ja => format!("#### {kind}: {label}（`{display}`）"),
-            Locale::En => format!("#### {kind}: {label} (`{display}`)"),
-        },
+        Some(label) => {
+            let label = crate::document_glossary::markdown_label(label);
+            match locale {
+                Locale::Ja => format!("#### {kind}: {label}（`{display}`）"),
+                Locale::En => format!("#### {kind}: {label} (`{display}`)"),
+            }
+        }
         None => format!("#### {kind}: `{display}`"),
     };
     let mut lines = vec![heading, String::new()];
@@ -1296,23 +1407,22 @@ fn statement_text(statement: &fsl_core::KernelStatement, ctx: &mut Ctx<'_>) -> S
         } => {
             let condition_text =
                 document_render_expr::render_inline(condition, ctx.model, ctx.locale);
+            let nested = nested_statement_text(then_statements, ctx);
             if let Some(condition_text) = condition_text {
                 let intro = match ctx.locale {
                     Locale::Ja => format!("「{condition_text}」の場合に限り、次を適用する。"),
                     Locale::En => format!("Only if \"{condition_text}\", apply the following."),
                 };
-                let nested = then_statements
-                    .iter()
-                    .enumerate()
-                    .map(|(index, statement)| {
-                        format!("   {}. {}", index + 1, statement_text(statement, ctx))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
                 format!("{intro}\n\n{nested}")
             } else {
-                ctx.fallback_count += 1;
-                document_render_expr::fallback_list_item(condition, ctx.model, ctx.locale, 0)
+                let condition =
+                    document_render_expr::render_condition(condition, ctx.model, ctx.locale);
+                ctx.fallback_count += u64::from(condition.used_fallback);
+                let intro = match ctx.locale {
+                    Locale::Ja => "次の条件が成立する場合に限り、次を適用する。",
+                    Locale::En => "Only if the following condition holds, apply the following.",
+                };
+                format!("{intro}\n\n{}\n\n{nested}", condition.text)
             }
         }
         Statement::ForAll {
@@ -1323,17 +1433,19 @@ fn statement_text(statement: &fsl_core::KernelStatement, ctx: &mut Ctx<'_>) -> S
                 Locale::Ja => format!("すべての `{binder_text}` について、次を適用する。"),
                 Locale::En => format!("For every `{binder_text}`, apply the following."),
             };
-            let nested = statements
-                .iter()
-                .enumerate()
-                .map(|(index, statement)| {
-                    format!("   {}. {}", index + 1, statement_text(statement, ctx))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let nested = nested_statement_text(statements, ctx);
             format!("{intro}\n\n{nested}")
         }
     }
+}
+
+fn nested_statement_text(statements: &[fsl_core::KernelStatement], ctx: &mut Ctx<'_>) -> String {
+    statements
+        .iter()
+        .enumerate()
+        .map(|(index, statement)| format!("   {}. {}", index + 1, statement_text(statement, ctx)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn render_assign(lvalue_text: &str, value: &fsl_core::KernelExpr, ctx: &mut Ctx<'_>) -> String {

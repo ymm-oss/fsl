@@ -55,17 +55,19 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
     .unwrap_or_else(|error| panic!("project {}: {error}", fixture.source_path));
     let resolver = fsl_core::FsResolver::new(&fixture.root);
     let kernel = fsl_core::parse_kernel_source(&fixture.source, &resolver).expect("parse");
-    let model = fsl_core::build_model(kernel).expect("build model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
     let doc = fsl_tools::render_requirements_document(
         &claims,
+        &kernel,
         &model,
         trace.as_ref(),
         locale,
         None,
         None,
         None,
-    );
+    )
+    .expect("render paired RCIR");
     (claims, doc)
 }
 
@@ -74,6 +76,63 @@ fn req2_block(markdown: &str) -> &str {
     let rest = &markdown[start..];
     let end = rest.find("### REQ-3").expect("REQ-3 section exists");
     rest[..end].trim_end()
+}
+
+#[test]
+fn renderer_rejects_rcir_paired_with_another_valid_model() {
+    let claims_source = claims_fixture();
+    let claims = fsl_tools::project_requirement_claims_from_source(
+        &claims_source.source,
+        Some(&claims_source.source_path),
+        &claims_source.root,
+    )
+    .expect("project claims fixture");
+    let other = cancel_system();
+    let kernel =
+        fsl_core::parse_kernel_source(&other.source, &fsl_core::FsResolver::new(&other.root))
+            .expect("parse other model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build other model");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        None,
+        Locale::En,
+        None,
+        None,
+        None,
+    )
+    .expect_err("mismatched Public Kernel must fail closed");
+    assert!(error.contains("does not match"));
+}
+
+#[test]
+fn renderer_rejects_an_unresolved_semantic_target() {
+    let fixture = cancel_system();
+    let mut claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    claims.claims[0].semantic_targets = vec!["action:missing".to_owned()];
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        Locale::En,
+        None,
+        None,
+        None,
+    )
+    .expect_err("unresolved target must fail closed");
+    assert!(error.contains("resolved 0 times"));
 }
 
 // --- Acceptance criterion 1: cancel_system.fsl REQ-2 renders both guards, ---
@@ -280,6 +339,36 @@ fn rendering_is_byte_identical_across_repeated_runs() {
     let (_, second) = render(&fixture, Locale::Ja);
     assert_eq!(first.markdown, second.markdown);
     assert_eq!(first.formula_fallback_count, second.formula_fallback_count);
+}
+
+#[test]
+fn non_inline_if_condition_keeps_its_nested_updates() {
+    let fixture = Fixture {
+        source: r#"requirements ConditionalUpdate {
+  state { a: Bool, b: Bool, c: Bool, changed: Bool }
+  init {
+    a = false
+    b = false
+    c = false
+    changed = false
+  }
+
+  @requirement("REQ-IF", "The conditional update remains visible")
+  action update() {
+    if a and b and c { changed = true }
+  }
+}"#
+        .to_owned(),
+        root: manifest_path("tests/fixtures"),
+        source_path: "conditional-update.fsl".to_owned(),
+    };
+    let (_, document) = render(&fixture, Locale::En);
+    assert!(
+        document
+            .markdown
+            .contains("Only if the following condition holds, apply the following.")
+    );
+    assert!(document.markdown.contains("Set `changed` to `true`."));
 }
 
 // --- Meaning-fidelity: `requires` renders as an enablement condition, ---

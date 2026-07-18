@@ -207,7 +207,22 @@ fn compiled_rcir_schema() -> jsonschema::Validator {
     )
     .expect("read RCIR v1 schema");
     let schema_value: Value = serde_json::from_str(&schema_text).expect("schema is valid JSON");
-    jsonschema::validator_for(&schema_value).expect("schema compiles")
+    let kernel_text =
+        std::fs::read_to_string(root().join("schemas/fslc/kernel/kernel.v2.schema.json"))
+            .expect("read Public Kernel v2 schema");
+    let kernel_value: Value = serde_json::from_str(&kernel_text).expect("kernel schema is JSON");
+    let registry = jsonschema::Registry::new()
+        .add(
+            "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json",
+            &kernel_value,
+        )
+        .expect("kernel schema resource")
+        .prepare()
+        .expect("schema registry");
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&schema_value)
+        .expect("schema compiles")
 }
 
 #[test]

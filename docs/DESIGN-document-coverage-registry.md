@@ -83,8 +83,11 @@ half catches a distinct failure mode neither alone would:
    — bidirectional, schema-anchored. Cross-references the registry's seven
    Kernel-native rows against `kernel.v1.schema.json`'s own `required` (top-level
    `init`/`actions`) and `properties.properties.required`
-   (`invariants`/`transitions`/`reachables`/`leads_to`/`terminal`) key lists, via
-   `assert_eq!` on the two sets. This is the test that actually closes the gap
+   (`invariants`/`transitions`/`reachables`/`leads_to`/`terminal`) key lists. Each
+   Kernel-native registry row carries that schema key; the test derives the full
+   required semantic-key set from the schema, subtracting only an explicit fixed
+   set of envelope/declaration keys, and compares the sets via `assert_eq!`. This
+   is the test that actually closes the gap
    the runtime invariant cannot: if a wholly new Kernel-level semantic element is
    added to the language and (per the Kernel schema's own coupled-change
    discipline) to this required-key list, this test fails until the RCIR
@@ -122,8 +125,10 @@ multi-dimensional matrix) would be more machinery than this issue's scope needs.
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document_coverage.rs` (3 tests, described above). Manually
-verified the no-silent-omission gate actually bites: removing the `terminal` row
+`rust/fsl-tools/tests/document_coverage.rs` (4 tests, described above). A negative
+control injects a synthetic required Kernel collection and proves it appears in the
+schema-derived set without a registry row. Manually verified the no-silent-omission
+gate actually bites: removing the `terminal` row
 from `RCIR_TARGET_KIND_REGISTRY` fails both coupled-change tests with a message
 naming exactly the missing kind, restoring it passes again — confirming the gate
 would catch a real future omission, not just tautologically agree with itself.

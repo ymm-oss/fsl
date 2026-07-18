@@ -27,6 +27,9 @@ pub struct TargetKindRow {
     /// The prefix `crate::document_coverage::target_kind` extracts from a
     /// raw semantic-target string (e.g. `"action"`, `"property:invariant"`).
     pub kind: &'static str,
+    /// Required Public Kernel schema key for Kernel-native kinds. `None`
+    /// means the target exists only in the requirements surface contract.
+    pub kernel_schema_key: Option<&'static str>,
     pub treatment: TargetTreatment,
     pub description: &'static str,
 }
@@ -38,57 +41,68 @@ pub struct TargetKindRow {
 pub const RCIR_TARGET_KIND_REGISTRY: &[TargetKindRow] = &[
     TargetKindRow {
         kind: "action",
+        kernel_schema_key: Some("actions"),
         treatment: TargetTreatment::Rendered,
         description: "an executable operation -> an `operation` claim",
     },
     TargetKindRow {
         kind: "property:invariant",
+        kernel_schema_key: Some("properties.invariants"),
         treatment: TargetTreatment::Rendered,
         description: "a state invariant -> a `state_rule` claim (or a `deadline_rule` claim \
                        for a requirements-dialect deadline invariant)",
     },
     TargetKindRow {
         kind: "property:trans",
+        kernel_schema_key: Some("properties.transitions"),
         treatment: TargetTreatment::Rendered,
         description: "a transition rule -> a `transition_rule` claim",
     },
     TargetKindRow {
         kind: "property:reachable",
+        kernel_schema_key: Some("properties.reachables"),
         treatment: TargetTreatment::Rendered,
         description: "a reachability goal -> a `reachability_goal` claim",
     },
     TargetKindRow {
         kind: "property:leadsTo",
+        kernel_schema_key: Some("properties.leads_to"),
         treatment: TargetTreatment::Rendered,
         description: "a progress/liveness property -> a `progress_rule` claim",
     },
     TargetKindRow {
         kind: "terminal",
+        kernel_schema_key: Some("properties.terminal"),
         treatment: TargetTreatment::Rendered,
         description: "the terminal-state expression -> a `terminal_rule` claim",
     },
     TargetKindRow {
         kind: "acceptance",
+        kernel_schema_key: None,
         treatment: TargetTreatment::Rendered,
         description: "a requirements acceptance trace case -> an `acceptance_trace` claim",
     },
     TargetKindRow {
         kind: "forbidden",
+        kernel_schema_key: None,
         treatment: TargetTreatment::Rendered,
         description: "a requirements forbidden trace case -> a `forbidden_trace` claim",
     },
     TargetKindRow {
         kind: "init",
+        kernel_schema_key: Some("init"),
         treatment: TargetTreatment::Unsupported,
         description: "no v1 claim kind projects initial-state definitions",
     },
     TargetKindRow {
         kind: "projection",
+        kernel_schema_key: None,
         treatment: TargetTreatment::Unsupported,
         description: "a KPI projection is a business-layer artifact; not projected in RCIR v1",
     },
     TargetKindRow {
         kind: "refinement",
+        kernel_schema_key: None,
         treatment: TargetTreatment::Unsupported,
         description: "the `implements` correspondence belongs to the refinement contract, not \
                        the requirement claim projection, in v1",

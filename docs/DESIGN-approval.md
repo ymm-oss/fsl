@@ -331,6 +331,9 @@ already computed — no live re-render for comparison purposes beyond what
 overlay's job is display, not the authoritative approval-governance check
 `fslc approval check` performs.
 
+Adding the approval frontmatter binding and reference section advances the
+requirements-document renderer from evidence overlay version `1.2.0` to `1.3.0`.
+
 ## Status and failure reasons
 
 An approval is `approved` only when all applicable bindings match:

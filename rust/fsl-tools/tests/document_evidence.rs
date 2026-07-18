@@ -131,25 +131,31 @@ fn evidence_file_order_does_not_change_the_computed_assurance() {
     let forward = vec![
         evidence(
             "a.json",
-            json!({"requirement": {"id": "REQ-1"}, "completeness": "unbounded"}),
+            json!({"requirement": {"id": "REQ-1"}, "completeness": "bounded", "checked_to_depth": 8, "result": "verified"}),
         ),
         evidence(
             "b.json",
-            json!({"requirement": {"id": "REQ-1"}, "completeness": "bounded", "checked_to_depth": 3}),
+            json!({"requirement": {"id": "REQ-1"}, "completeness": "bounded", "checked_to_depth": 8, "result": "violated"}),
         ),
     ];
     let mut reversed = forward.clone();
     reversed.reverse();
     let forward_assurance = fsl_tools::requirement_assurance("REQ-1", &forward);
     let reversed_assurance = fsl_tools::requirement_assurance("REQ-1", &reversed);
-    let labels = |assurance: &fsl_tools::RequirementAssurance| -> Vec<String> {
+    let entries = |assurance: &fsl_tools::RequirementAssurance| -> Vec<_> {
         assurance
             .formal
             .iter()
-            .map(|entry| entry.label.clone())
+            .map(|entry| {
+                (
+                    entry.label.clone(),
+                    entry.source.clone(),
+                    entry.result.clone(),
+                )
+            })
             .collect()
     };
-    assert_eq!(labels(&forward_assurance), labels(&reversed_assurance));
+    assert_eq!(entries(&forward_assurance), entries(&reversed_assurance));
 }
 
 // --- `unmatched_evidence_paths` ----------------------------------------------
@@ -197,17 +203,19 @@ fn claims_fixture_render(
         .expect("project document_claims_fixture.fsl");
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
-    let model = fsl_core::build_model(kernel).expect("build model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
     let doc = fsl_tools::render_requirements_document(
         &claims,
+        &kernel,
         &model,
         trace.as_ref(),
         locale,
         None,
         evidence,
         None,
-    );
+    )
+    .expect("render paired RCIR");
     (claims, doc.markdown)
 }
 
@@ -334,6 +342,10 @@ fn evidence_sources_section_lists_files_sorted_with_matched_requirement_ids() {
             "a_evidence.json",
             json!({"requirement": {"id": "REQ-9"}, "result": "conformant"}),
         ),
+        evidence(
+            "whole_spec.json",
+            json!({"completeness": "unbounded", "result": "verified"}),
+        ),
     ];
     let applied = AppliedEvidence {
         files: &files,
@@ -348,6 +360,7 @@ fn evidence_sources_section_lists_files_sorted_with_matched_requirement_ids() {
     let z_pos = section.find("z_evidence.json").expect("z_evidence row");
     assert!(a_pos < z_pos, "rows must be sorted");
     assert!(section.contains("（本仕様のどの要件 ID にも対応しない）"));
+    assert!(section.contains("（仕様全体。個別要件には帰属しない）"));
 }
 
 #[test]

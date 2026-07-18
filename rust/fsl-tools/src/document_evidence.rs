@@ -106,14 +106,22 @@ pub fn requirement_assurance(
             _ => {}
         }
     }
-    let rank = |entry: &EvidenceEntry| -> (u8, String) {
-        let strength = u8::from(!entry.label.starts_with("proved"));
-        (strength, entry.label.clone())
+    let sort_entries = |entries: &mut Vec<EvidenceEntry>| {
+        entries.sort_by(|left, right| evidence_entry_key(left).cmp(&evidence_entry_key(right)));
     };
-    out.formal.sort_by_key(rank);
-    out.conformance.sort_by_key(rank);
-    out.statistical.sort_by_key(rank);
+    sort_entries(&mut out.formal);
+    sort_entries(&mut out.conformance);
+    sort_entries(&mut out.statistical);
     out
+}
+
+fn evidence_entry_key(entry: &EvidenceEntry) -> (u8, &str, &str, Option<&str>) {
+    (
+        u8::from(!entry.label.starts_with("proved")),
+        &entry.label,
+        &entry.source,
+        entry.result.as_deref(),
+    )
 }
 
 /// Every evidence file that names at least one requirement ID but matches
