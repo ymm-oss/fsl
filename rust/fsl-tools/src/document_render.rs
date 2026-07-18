@@ -24,8 +24,9 @@ use fsl_core::{
     action_target, display_name, public_kernel_contract_for_version,
 };
 
-use crate::document::{Claim, ClaimKind, RequirementClaimSet};
+use crate::document::{Claim, ClaimKind, RequirementClaimSet, TraceCaseKind};
 use crate::document_glossary::AppliedGlossary;
+use crate::document_project::project_trace_case_payload;
 use crate::document_render_expr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -157,6 +158,20 @@ fn validate_render_inputs(
         return Err("RCIR public_kernel does not match the renderer model".to_owned());
     }
     for claim in &claims.claims {
+        let subject = claim_subject_target(claim)?;
+        if claim.semantic_targets.as_slice() != [subject.as_str()] {
+            return Err(format!(
+                "RCIR claim '{}' subject does not match its semantic target",
+                claim.id
+            ));
+        }
+        let expected_id = format!("{subject}#{}", claim.kind.as_str());
+        if claim.id != expected_id {
+            return Err(format!(
+                "RCIR claim '{}' does not match its subject and kind",
+                claim.id
+            ));
+        }
         for target in &claim.semantic_targets {
             let resolved = if let Some(name) = target.strip_prefix("action:") {
                 model
@@ -217,6 +232,75 @@ fn validate_render_inputs(
                     "RCIR semantic target '{target}' resolved {resolved} times; expected exactly once"
                 ));
             }
+        }
+    }
+    validate_trace_payloads(claims, model, trace)?;
+    Ok(())
+}
+
+fn claim_subject_target(claim: &Claim) -> Result<String, String> {
+    let field = |name: &str| {
+        claim.subject[name]
+            .as_str()
+            .ok_or_else(|| format!("RCIR claim '{}' has no {name} subject", claim.id))
+    };
+    Ok(match claim.kind {
+        ClaimKind::Operation => format!("action:{}", field("action")?),
+        ClaimKind::StateRule | ClaimKind::DeadlineRule => {
+            format!("property:invariant:{}", field("property")?)
+        }
+        ClaimKind::TransitionRule => format!("property:trans:{}", field("property")?),
+        ClaimKind::ProgressRule => format!("property:leadsTo:{}", field("property")?),
+        ClaimKind::ReachabilityGoal => format!("property:reachable:{}", field("property")?),
+        ClaimKind::AcceptanceTrace => format!("acceptance:{}", field("trace_case")?),
+        ClaimKind::ForbiddenTrace => format!("forbidden:{}", field("trace_case")?),
+        ClaimKind::TerminalRule => "terminal".to_owned(),
+    })
+}
+
+fn validate_trace_payloads(
+    claims: &RequirementClaimSet,
+    model: &KernelModel,
+    trace: Option<&RequirementsTraceContract>,
+) -> Result<(), String> {
+    let supplied = trace
+        .into_iter()
+        .flat_map(|contract| {
+            contract
+                .acceptance
+                .iter()
+                .map(|case| (TraceCaseKind::Acceptance, case))
+                .chain(
+                    contract
+                        .forbidden
+                        .iter()
+                        .map(|case| (TraceCaseKind::Forbidden, case)),
+                )
+        })
+        .collect::<Vec<_>>();
+    if supplied.len() != claims.trace_cases.len() {
+        return Err("RCIR trace_cases do not match the renderer trace contract".to_owned());
+    }
+    for projected in &claims.trace_cases {
+        let matches = supplied
+            .iter()
+            .filter(|(kind, case)| *kind == projected.kind && case.id == projected.id)
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err(format!(
+                "RCIR trace case '{}' resolved {} times; expected exactly once",
+                projected.id,
+                matches.len()
+            ));
+        }
+        let (_, supplied_case) = matches[0];
+        let (steps, expectation) =
+            project_trace_case_payload(supplied_case, model, claims.spec.source.as_deref())?;
+        if steps != projected.steps || expectation != projected.expectation {
+            return Err(format!(
+                "RCIR trace case '{}' payload does not match the renderer trace contract",
+                projected.id
+            ));
         }
     }
     Ok(())
