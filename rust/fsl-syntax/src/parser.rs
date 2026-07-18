@@ -1585,12 +1585,12 @@ impl<'a> Parser<'a> {
                 return Ok(result);
             }
         }
-        if let TokenKind::Ident(name) = &self.peek().kind {
-            if self.next_is_type_delimiter() {
-                let name = name.clone();
-                self.bump();
-                return Ok(TypeExpr::Name(name));
-            }
+        if let TokenKind::Ident(name) = &self.peek().kind
+            && self.next_is_type_delimiter()
+        {
+            let name = name.clone();
+            self.bump();
+            return Ok(TypeExpr::Name(name));
         }
         let lo = self.expression(0)?;
         self.expect_symbol("..")?;
