@@ -824,23 +824,22 @@ fn statement_text(statement: &fsl_core::KernelStatement, ctx: &mut Ctx<'_>) -> S
         } => {
             let condition_text =
                 document_render_expr::render_inline(condition, ctx.model, ctx.locale);
+            let nested = nested_statement_text(then_statements, ctx);
             if let Some(condition_text) = condition_text {
                 let intro = match ctx.locale {
                     Locale::Ja => format!("「{condition_text}」の場合に限り、次を適用する。"),
                     Locale::En => format!("Only if \"{condition_text}\", apply the following."),
                 };
-                let nested = then_statements
-                    .iter()
-                    .enumerate()
-                    .map(|(index, statement)| {
-                        format!("   {}. {}", index + 1, statement_text(statement, ctx))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
                 format!("{intro}\n\n{nested}")
             } else {
-                ctx.fallback_count += 1;
-                document_render_expr::fallback_list_item(condition, ctx.model, ctx.locale, 0)
+                let condition =
+                    document_render_expr::render_condition(condition, ctx.model, ctx.locale);
+                ctx.fallback_count += u64::from(condition.used_fallback);
+                let intro = match ctx.locale {
+                    Locale::Ja => "次の条件が成立する場合に限り、次を適用する。",
+                    Locale::En => "Only if the following condition holds, apply the following.",
+                };
+                format!("{intro}\n\n{}\n\n{nested}", condition.text)
             }
         }
         Statement::ForAll {
@@ -851,17 +850,19 @@ fn statement_text(statement: &fsl_core::KernelStatement, ctx: &mut Ctx<'_>) -> S
                 Locale::Ja => format!("すべての `{binder_text}` について、次を適用する。"),
                 Locale::En => format!("For every `{binder_text}`, apply the following."),
             };
-            let nested = statements
-                .iter()
-                .enumerate()
-                .map(|(index, statement)| {
-                    format!("   {}. {}", index + 1, statement_text(statement, ctx))
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let nested = nested_statement_text(statements, ctx);
             format!("{intro}\n\n{nested}")
         }
     }
+}
+
+fn nested_statement_text(statements: &[fsl_core::KernelStatement], ctx: &mut Ctx<'_>) -> String {
+    statements
+        .iter()
+        .enumerate()
+        .map(|(index, statement)| format!("   {}. {}", index + 1, statement_text(statement, ctx)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn render_assign(lvalue_text: &str, value: &fsl_core::KernelExpr, ctx: &mut Ctx<'_>) -> String {

@@ -258,6 +258,36 @@ fn rendering_is_byte_identical_across_repeated_runs() {
     assert_eq!(first.formula_fallback_count, second.formula_fallback_count);
 }
 
+#[test]
+fn non_inline_if_condition_keeps_its_nested_updates() {
+    let fixture = Fixture {
+        source: r#"requirements ConditionalUpdate {
+  state { a: Bool, b: Bool, c: Bool, changed: Bool }
+  init {
+    a = false
+    b = false
+    c = false
+    changed = false
+  }
+
+  @requirement("REQ-IF", "The conditional update remains visible")
+  action update() {
+    if a and b and c { changed = true }
+  }
+}"#
+        .to_owned(),
+        root: manifest_path("tests/fixtures"),
+        source_path: "conditional-update.fsl".to_owned(),
+    };
+    let (_, document) = render(&fixture, Locale::En);
+    assert!(
+        document
+            .markdown
+            .contains("Only if the following condition holds, apply the following.")
+    );
+    assert!(document.markdown.contains("Set `changed` to `true`."));
+}
+
 // --- Meaning-fidelity: `requires` renders as an enablement condition, ---
 // --- `not` is preserved, weak fairness is not "immediately".         ---
 
