@@ -1873,7 +1873,7 @@ fn run_document_generate(
         Ok(kernel) => kernel,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let model = match fsl_core::build_model(kernel) {
+    let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
@@ -1881,7 +1881,16 @@ fn run_document_generate(
         Ok(trace) => trace,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let rendered = fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale);
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        locale,
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
     if strict_rendering && rendered.formula_fallback_count > 0 {
         let mut output = error_output(
             "document",
