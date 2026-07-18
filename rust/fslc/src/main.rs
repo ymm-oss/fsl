@@ -2282,6 +2282,7 @@ fn document_schema_error(message: &str) -> Value {
 /// between `artifact` (a possibly hand-edited `fslc document generate`
 /// output) and a fresh re-projection + re-render of `spec_path`, under the
 /// locale and source label the artifact's own frontmatter recorded.
+#[allow(clippy::too_many_lines)]
 fn run_document_check(
     spec_path: &Path,
     artifact: &Path,
