@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- The requirements-document renderer now fails closed unless each RCIR claim
+  subject identifies its semantic target and each projected trace payload
+  exactly matches the checked trace contract supplied for rendering.
 - The native installer no longer clones the repository into `~/.fsl`. It now
   installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
   atomically activates the complete payload, safely migrates recognized Python

@@ -46,7 +46,9 @@ fn temp_path(suffix: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!(
+    let directory = root().join("rust/target/fslc-tests");
+    std::fs::create_dir_all(&directory).expect("create repository-local test directory");
+    directory.join(format!(
         "fslc-issue-330-{}-{nonce}-{}{suffix}",
         std::process::id(),
         NEXT_OUTPUT.fetch_add(1, Ordering::Relaxed),
@@ -174,7 +176,11 @@ fn generate_unknown_label_fails_under_strict_on_a_fixture_with_no_other_coverage
     )
     .expect("write spec");
     let glossary = write_glossary(r#"{"action:nonexistent":"存在しない"}"#);
-    let spec_str = spec.to_str().expect("utf8 path");
+    let spec_str = spec
+        .strip_prefix(root())
+        .expect("repository-local fixture")
+        .to_str()
+        .expect("utf8 path");
     let glossary_str = glossary.to_str().expect("utf8 path");
 
     let clean = run(&["document", "generate", spec_str, "--lang", "ja", "--strict"]);
