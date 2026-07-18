@@ -704,9 +704,11 @@ fn evidence_sources_section(
         "Verification evidence sources",
     );
     let intro = match locale {
-        Locale::Ja => "本書の保証クラス欄が参照する外部エビデンスの一覧。",
+        Locale::Ja => {
+            "本書に指定された外部エビデンスの一覧。要件 ID に対応する行だけが各要件の保証クラス欄に反映される。"
+        }
         Locale::En => {
-            "The external evidence files referenced by this document's assurance-class fields."
+            "The external evidence files supplied to this document. Only rows matching a requirement ID contribute to that requirement's assurance-class fields."
         }
     };
     let known_ids: BTreeSet<&str> = claims
@@ -718,13 +720,23 @@ fn evidence_sources_section(
         .iter()
         .map(|(path, item)| {
             let result = item.get("result").and_then(Value::as_str).unwrap_or("");
-            let mut ids: Vec<&str> = crate::ledger::evidence_requirement_ids(item)
-                .into_iter()
+            let evidence_ids = crate::ledger::evidence_requirement_ids(item);
+            let mut ids: Vec<&str> = evidence_ids
+                .iter()
+                .copied()
                 .filter(|id| known_ids.contains(id))
                 .collect();
             ids.sort_unstable();
             ids.dedup();
-            let matched = if ids.is_empty() {
+            let matched = if evidence_ids.is_empty() {
+                match locale {
+                    Locale::Ja => "（仕様全体。個別要件には帰属しない）".to_owned(),
+                    Locale::En => {
+                        "(whole specification; not attributed to an individual requirement)"
+                            .to_owned()
+                    }
+                }
+            } else if ids.is_empty() {
                 match locale {
                     Locale::Ja => "（本仕様のどの要件 ID にも対応しない）".to_owned(),
                     Locale::En => {
