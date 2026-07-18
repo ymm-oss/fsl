@@ -115,6 +115,19 @@ fn empty_label_is_rejected() {
 }
 
 #[test]
+fn multiline_and_control_character_labels_are_rejected() {
+    let text = r#"{"schema":"fslc.document-glossary.v1","locale":"ja","labels":{"action:x":"safe\n## injected","state:y":"safe\ttext"}}"#;
+    let issues = fsl_tools::parse_glossary(text).expect_err("control characters must be rejected");
+    assert_eq!(
+        issues
+            .iter()
+            .filter(|issue| matches!(issue, GlossaryIssue::UnsafeLabel(_)))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn unknown_top_level_key_is_rejected() {
     let text = r#"{"schema":"fslc.document-glossary.v1","locale":"ja","labels":{},"extra":true}"#;
     assert!(fsl_tools::parse_glossary(text).is_err());
@@ -218,9 +231,9 @@ fn render_cancel_system(locale: Locale, glossary: Option<&fsl_tools::Glossary>) 
 }
 
 #[test]
-fn no_glossary_renders_byte_identically_to_no_glossary_argument() {
-    // Regression guard: `None` behaves exactly as it did before this issue
-    // (no frontmatter key, no Glossary section, no label anywhere).
+fn no_glossary_omits_glossary_specific_content() {
+    // `None` emits no glossary key, section, or label under the v2 document
+    // schema introduced by this issue.
     let with_explicit_none = render_cancel_system(Locale::Ja, None);
     assert!(!with_explicit_none.contains("glossary_digest"));
     assert!(!with_explicit_none.contains("## 用語集"));
@@ -276,4 +289,13 @@ fn glossary_en_locale_uses_the_english_heading_format() {
     let glossary = fsl_tools::parse_glossary(text).expect("parse");
     let markdown = render_cancel_system(Locale::En, Some(&glossary));
     assert!(markdown.contains("#### Operation: Submit the cancellation form (`submit_cancel`)"));
+}
+
+#[test]
+fn glossary_labels_are_escaped_as_markdown_text() {
+    let text = r###"{"schema":"fslc.document-glossary.v1","locale":"en","labels":{"action:submit_cancel":"## MUST <script> *now*"}}"###;
+    let glossary = fsl_tools::parse_glossary(text).expect("parse");
+    let markdown = render_cancel_system(Locale::En, Some(&glossary));
+    assert!(markdown.contains(r"\#\# MUST &lt;script&gt; \*now\*"));
+    assert!(!markdown.contains("## MUST <script> *now*"));
 }

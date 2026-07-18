@@ -50,6 +50,7 @@ pub enum GlossaryIssue {
     UnsupportedLocale(String),
     DuplicateTarget(String),
     EmptyLabel(String),
+    UnsafeLabel(String),
 }
 
 impl fmt::Display for GlossaryIssue {
@@ -68,6 +69,12 @@ impl fmt::Display for GlossaryIssue {
             }
             Self::EmptyLabel(target) => {
                 write!(f, "glossary target '{target}' has an empty label")
+            }
+            Self::UnsafeLabel(target) => {
+                write!(
+                    f,
+                    "glossary target '{target}' has a label containing control characters"
+                )
             }
         }
     }
@@ -143,6 +150,9 @@ pub fn parse_glossary(text: &str) -> Result<Glossary, Vec<GlossaryIssue>> {
         if label.is_empty() {
             issues.push(GlossaryIssue::EmptyLabel(target.clone()));
         }
+        if label.chars().any(char::is_control) {
+            issues.push(GlossaryIssue::UnsafeLabel(target.clone()));
+        }
         if labels.insert(target.clone(), label).is_some() {
             issues.push(GlossaryIssue::DuplicateTarget(target));
         }
@@ -154,6 +164,23 @@ pub fn parse_glossary(text: &str) -> Result<Glossary, Vec<GlossaryIssue>> {
         locale: locale.expect("checked above"),
         labels,
     })
+}
+
+pub(crate) fn markdown_label(label: &str) -> String {
+    let mut escaped = String::with_capacity(label.len());
+    for character in label.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            character if character.is_ascii_punctuation() => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 /// A glossary target with no corresponding semantic element in the checked

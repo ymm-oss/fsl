@@ -34,7 +34,7 @@ line, which is not the guarantee the issue asks for.
 one-file-per-concern convention alongside `document_markers.rs`/
 `document_check.rs`/`document_coverage.rs`) owns `Glossary { locale, labels:
 BTreeMap<String, String> }`, `GlossaryIssue` (`Json`/`UnsupportedSchema`/
-`UnsupportedLocale`/`DuplicateTarget`/`EmptyLabel`), and `parse_glossary(text: &str)
+`UnsupportedLocale`/`DuplicateTarget`/`EmptyLabel`/`UnsafeLabel`), and `parse_glossary(text: &str)
 -> Result<Glossary, Vec<GlossaryIssue>>`.
 
 The issue requires a duplicate label target to be its own diagnosed error
@@ -57,8 +57,12 @@ including both `"a"`s.
 issue's own table — it is not a policy choice `--strict` gates, so it is returned
 unconditionally from `parse_glossary`, alongside a few v1-only additions:
 `schema` must equal `"fslc.document-glossary.v1"`, `locale` must be `ja`/`en`, an
-empty label string is rejected (it would render as bare `（`id`）` noise), and an
-unknown top-level key is rejected (the frontmatter parser already treats an
+empty label string is rejected (it would render as bare `（`id`）` noise), and a
+label containing a newline, tab, or another control character is rejected so it
+cannot escape its one display line. Accepted labels are escaped once by the shared
+Markdown-label renderer at both output sites; Markdown punctuation and raw HTML
+therefore remain literal display text rather than headings, emphasis, links, or
+HTML. An unknown top-level key is rejected (the frontmatter parser already treats an
 unrecognized key this way; a glossary sidecar keeps the same closed-key
 discipline).
 
@@ -201,9 +205,12 @@ Frontmatter gains one new optional key, `glossary_digest` (a plain, non-framed
 `sha256:`-prefixed digest of the raw glossary file bytes — the same identity
 `artifact_digest` uses for the whole document, not RCIR's canonical-JSON `framed_
 digest` scheme, since the recorded fact is "this exact sidecar file"). Emitted only
-when `--glossary` was given to `generate`, so a glossary-less document's bytes are
-completely unaffected by this issue (verified directly:
-`no_glossary_renders_byte_identically_to_no_glossary_argument`).
+when `--glossary` was given to `generate`. Because this changes the closed
+frontmatter grammar,
+`fsl_document_schema` is bumped from `fsl-requirements-document-v1` to
+`fsl-requirements-document-v2` and the renderer from `1.0.0` to `1.1.0`, as required
+by the accepted marker/check contract. Passing no glossary remains byte-identical
+to an explicit `None` under the new v2 renderer.
 
 `check` needs the actual label strings to reproduce the labeled text, and the
 artifact stores only a digest of them — so, unlike `lang`/`view` (which `check`
@@ -254,15 +261,15 @@ reads.
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document_glossary.rs` (17 tests): parsing and every
+`rust/fsl-tools/tests/document_glossary.rs` (19 tests): parsing and every
 `GlossaryIssue` variant, including the duplicate-key mechanism itself (a single
 duplicate, a triple duplicate, and a duplicate with identical values, all
 detected); target validation for all three namespaces (known and unknown cases,
 including a member matched to the wrong enum type); an unrecognized namespace and
 a colonless target; the action-heading label format in both locales; the Glossary
-section's content and sort order; the composite-lvalue negative control; and a
-direct confirmation that passing `None` renders byte-identically to before this
-issue.
+section's content and sort order; the composite-lvalue negative control; unsafe
+multiline/control-character rejection; Markdown/HTML escaping; and a direct
+confirmation that passing `None` emits no glossary-specific content under v2.
 
 `rust/fslc/tests/document_glossary_cli.rs` (13 tests): the happy path (envelope
 shape, frontmatter, heading, Glossary section); `FSL-DOC-LABEL-CONFLICT` always an

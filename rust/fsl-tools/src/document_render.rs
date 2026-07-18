@@ -477,7 +477,12 @@ fn glossary_section(
     let rows = glossary
         .labels
         .iter()
-        .map(|(target, label)| format!("- `{target}`: {label}"))
+        .map(|(target, label)| {
+            format!(
+                "- `{target}`: {}",
+                crate::document_glossary::markdown_label(label)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!("{head}\n\n{intro}\n\n{rows}"))
@@ -658,10 +663,13 @@ fn metadata_header(
 ) -> String {
     let kind = kind_label(claim.kind, locale);
     let heading = match glossary_label {
-        Some(label) => match locale {
-            Locale::Ja => format!("#### {kind}: {label}（`{display}`）"),
-            Locale::En => format!("#### {kind}: {label} (`{display}`)"),
-        },
+        Some(label) => {
+            let label = crate::document_glossary::markdown_label(label);
+            match locale {
+                Locale::Ja => format!("#### {kind}: {label}（`{display}`）"),
+                Locale::En => format!("#### {kind}: {label} (`{display}`)"),
+            }
+        }
         None => format!("#### {kind}: `{display}`"),
     };
     let mut lines = vec![heading, String::new()];

@@ -230,8 +230,8 @@ fn an_old_renderer_version_is_reported_as_renderer_changed() {
     let artifact = generate(&["--lang", "ja"]);
     let edited = edit(
         &artifact,
+        "renderer_version: 1.1.0",
         "renderer_version: 1.0.0",
-        "renderer_version: 0.9.0",
     );
     let output = check(CANCEL_SYSTEM, &edited);
     assert_eq!(output.status.code(), Some(1));
@@ -335,8 +335,8 @@ fn an_unsupported_document_schema_exits_two() {
     let artifact = generate(&["--lang", "ja"]);
     let edited = edit(
         &artifact,
-        "fsl_document_schema: fsl-requirements-document-v1",
         "fsl_document_schema: fsl-requirements-document-v2",
+        "fsl_document_schema: fsl-requirements-document-v999",
     );
     let output = check(CANCEL_SYSTEM, &edited);
     assert_eq!(output.status.code(), Some(2));

@@ -18,13 +18,13 @@ use crate::document_render::Locale;
 /// Versions the *artifact format* (frontmatter key set + marker grammar) —
 /// distinct from `RCIR_SCHEMA_VERSION`, which versions the claims JSON, not
 /// the Markdown envelope around it.
-pub const DOCUMENT_SCHEMA: &str = "fsl-requirements-document-v1";
+pub const DOCUMENT_SCHEMA: &str = "fsl-requirements-document-v2";
 pub const DOCUMENT_RENDERER: &str = "fslc-document-renderer";
 /// Bumped by hand whenever a template string or section skeleton changes.
 /// Deliberately independent of the crate version: keying this to
 /// `CARGO_PKG_VERSION` would mark every previously generated document
 /// drifted on every unrelated `fslc` release, not only when a template did.
-pub const DOCUMENT_RENDERER_VERSION: &str = "1.0.0";
+pub const DOCUMENT_RENDERER_VERSION: &str = "1.1.0";
 pub const NORMATIVE_SCOPE: &str = "generated-claim-blocks-only";
 
 /// The closed set of editable slot names `fslc document generate` emits and
