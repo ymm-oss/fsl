@@ -21,11 +21,12 @@ use std::fmt::Write as _;
 use fsl_core::{
     ActionGuard, KernelModel, KernelSpec, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target, display_name,
+    requirements_trace_contract,
 };
 
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
 use crate::document_glossary::AppliedGlossary;
-use crate::document_project::project_renderer_roles;
+use crate::document_project::project_renderer_contract;
 use crate::document_render_expr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -72,9 +73,7 @@ struct Ctx<'a> {
 
 /// Compile RCIR claims into a controlled-language Markdown document.
 ///
-/// `trace_contract` should be `requirements_trace_contract(source)`'s result
-/// for the same source the RCIR claim set was projected from (`None` for a
-/// direct `spec` dialect, which has no acceptance/forbidden cases).
+/// `source` must be the exact source the RCIR claim set was projected from.
 ///
 /// `glossary` (issue #330) is presentation-only: it can only change how an
 /// `action:`/`state:`/`enum:` identifier *displays* (an action's own claim
@@ -89,14 +88,15 @@ pub fn render_requirements_document(
     claims: &RequirementClaimSet,
     kernel: &KernelSpec,
     model: &KernelModel,
-    trace_contract: Option<&RequirementsTraceContract>,
+    source: &str,
     locale: Locale,
     glossary: Option<&AppliedGlossary<'_>>,
 ) -> Result<RenderedDocument, String> {
-    validate_render_inputs(claims, kernel, model, trace_contract)?;
+    let trace = requirements_trace_contract(source).map_err(|error| error.to_string())?;
+    validate_render_inputs(claims, kernel, model, source, trace.as_ref())?;
     let mut ctx = Ctx {
         model,
-        trace: trace_contract,
+        trace: trace.as_ref(),
         locale,
         fallback_count: 0,
         rendered_claims: BTreeSet::new(),
@@ -143,21 +143,13 @@ fn validate_render_inputs(
     claims: &RequirementClaimSet,
     kernel: &KernelSpec,
     model: &KernelModel,
+    source: &str,
     trace: Option<&RequirementsTraceContract>,
 ) -> Result<(), String> {
-    let projected = project_renderer_roles(
-        kernel,
-        model,
-        claims.spec.source.as_deref(),
-        &claims.spec.dialect,
-        trace,
-    )?;
-    if projected.public_kernel != claims.public_kernel
-        || projected.requirements != claims.requirements
-        || projected.claims != claims.claims
-        || projected.trace_cases != claims.trace_cases
-    {
-        return Err("RCIR renderer roles do not match the paired checked inputs".to_owned());
+    let projected =
+        project_renderer_contract(kernel, model, source, claims.spec.source.as_deref(), trace)?;
+    if projected != *claims {
+        return Err("RCIR does not match the paired checked source and model".to_owned());
     }
     Ok(())
 }
