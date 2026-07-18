@@ -6,9 +6,8 @@
 //! `project_requirement_claims_from_source` compiles a checked `requirements`
 //! or direct `spec` dialect model into the versioned RCIR contract
 //! (`schemas/fslc/document/requirement-claims.v1.schema.json`). RCIR is not a
-//! second semantics: expressions, lvalues, and statements are carried as the
-//! location-normalized checked kernel AST (the same projection the approval
-//! spec digest uses); RCIR only attaches a document role to each checked node.
+//! second semantics: it embeds the validated Public Kernel v2 contract and
+//! attaches document roles and traceability to stable semantic targets.
 //! See `docs/DESIGN-document-requirement-claim-ir.md`.
 
 use serde::{Deserialize, Serialize};
@@ -25,6 +24,7 @@ pub struct RequirementClaimSet {
     pub schema_version: String,
     pub result: String,
     pub spec: SpecInfo,
+    pub public_kernel: Value,
     pub semantics: SemanticsInfo,
     pub requirements: Vec<Requirement>,
     pub claims: Vec<Claim>,
@@ -124,15 +124,15 @@ pub struct Claim {
     pub kind: ClaimKind,
     pub requirements: Vec<String>,
     pub subject: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub enablement: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub effects: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub postconditions: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub condition: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub progress: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Value>,

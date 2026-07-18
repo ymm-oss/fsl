@@ -24,8 +24,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `claim_digest` (mutation-sensitive, comment/formatting-stable), and provenance
   reusing the Public Kernel v2 assurance vocabulary (falling back to the checked
   declaration's own span, never a guess, when the origin registry has no chain for
-  a target). RCIR is not a second semantics: expressions/statements are carried as
-  the same location-normalized checked kernel AST the approval spec digest uses.
+  a target). RCIR is not a second semantics: it embeds the schema-validated Public
+  Kernel v2 artifact, while claims expose typed subjects and stable target references
+  instead of a second, unconstrained Python-shaped AST. Trace-only expressions reuse
+  the Public Kernel expression contract.
   CLI wiring, the controlled-language renderer, drift checking, the no-silent-omission
   gate, glossary, evidence overlay, and approval integration are follow-up issues
   #326-#334; this change ships schema + library projector only. See
