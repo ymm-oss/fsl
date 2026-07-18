@@ -2277,10 +2277,6 @@ fn run_document_generate(
             label_warnings = unknown;
         }
     }
-    let trace = match fsl_core::requirements_trace_contract(&source) {
-        Ok(trace) => trace,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
@@ -2291,7 +2287,7 @@ fn run_document_generate(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
@@ -2372,7 +2368,7 @@ fn run_document_generate(
             &claims,
             &kernel,
             &model,
-            trace.as_ref(),
+            &source,
             locale,
             applied_glossary.as_ref(),
             applied_evidence.as_ref(),
@@ -2634,10 +2630,6 @@ fn run_document_check(
         Ok(loaded) => loaded,
         Err(output) => return (output, 2),
     };
-    let trace = match fsl_core::requirements_trace_contract(&source) {
-        Ok(trace) => trace,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
@@ -2651,7 +2643,7 @@ fn run_document_check(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
@@ -9448,8 +9440,6 @@ fn render_document_for_approval(
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model = fsl_core::build_model(kernel.clone())
         .map_err(|error| semantic_error_output(&error.to_string()))?;
-    let trace = fsl_core::requirements_trace_contract(&source)
-        .map_err(|error| semantic_error_output(&error.to_string()))?;
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
@@ -9460,7 +9450,7 @@ fn render_document_for_approval(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),

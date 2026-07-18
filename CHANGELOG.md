@@ -8,8 +8,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ### Changed
 - The requirements-document renderer now reprojects and exactly matches the
   complete RCIR renderer role sidecar against its checked Kernel/Model/trace
-  inputs, failing closed on changed claim classification, requirement
-  attribution, trace title, source, steps, or expectation.
+  and original source inputs, failing closed on any changed spec metadata,
+  claim classification, requirement attribution, trace data, undecided item,
+  analysis bound, coverage entry, or provenance field.
 - The native installer no longer clones the repository into `~/.fsl`. It now
   installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
   atomically activates the complete payload, safely migrates recognized Python
