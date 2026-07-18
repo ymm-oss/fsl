@@ -248,6 +248,28 @@ fn an_old_renderer_version_is_reported_as_renderer_changed() {
 }
 
 #[test]
+fn editing_the_normative_scope_fails() {
+    let artifact = generate(&["--lang", "ja"]);
+    let edited = edit(
+        &artifact,
+        "normative_scope: generated-claim-blocks-only",
+        "normative_scope: background-slot-too",
+    );
+    let output = check(CANCEL_SYSTEM, &edited);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = json_stdout(&output);
+    let reasons = envelope["reasons"].as_array().expect("reasons array");
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason["kind"] == "normative_scope_changed"
+                && reason["code"] == "FSL-DOC-EDIT-OUTSIDE-SLOT")
+    );
+    let _ = std::fs::remove_file(&artifact);
+    let _ = std::fs::remove_file(&edited);
+}
+
+#[test]
 fn editing_generated_prose_outside_any_slot_fails() {
     let artifact = generate(&["--lang", "ja"]);
     let edited = edit(&artifact, "全体の意味規約", "全体の意味規約（改変）");

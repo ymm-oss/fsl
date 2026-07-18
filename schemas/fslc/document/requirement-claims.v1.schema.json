@@ -9,6 +9,7 @@
     "schema_version",
     "result",
     "spec",
+    "public_kernel",
     "semantics",
     "requirements",
     "claims",
@@ -50,6 +51,9 @@
         "claim_set_digest_algorithm": { "const": "fsl-rcir-claim-set-v1+sha256" },
         "claim_digest_algorithm": { "const": "fsl-rcir-claim-v1+sha256" }
       }
+    },
+    "public_kernel": {
+      "$ref": "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json"
     },
     "semantics": {
       "type": "object",
@@ -103,8 +107,8 @@
             "required": ["number", "lo", "hi"],
             "properties": {
               "number": { "type": "string", "minLength": 1 },
-              "lo": { "$ref": "#/$defs/kernel_ast" },
-              "hi": { "$ref": "#/$defs/kernel_ast" }
+              "lo": { "type": "integer" },
+              "hi": { "type": "integer" }
             }
           }
         }
@@ -178,7 +182,7 @@
     "requirement_id": { "type": "string", "minLength": 1 },
     "claim_id": { "type": "string", "minLength": 1 },
     "kernel_ast": {
-      "description": "Location-normalized checked kernel AST JSON (python_ast projection with location objects stripped and object keys sorted). Its inner shape is governed by the kernel AST contract, not by this schema; any JSON value is permitted here."
+      "$ref": "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json#/$defs/expression"
     },
     "source_ref": {
       "type": "object",
@@ -432,14 +436,6 @@
             { "$ref": "#/$defs/trace_subject" }
           ]
         },
-        "enablement": { "$ref": "#/$defs/enablement" },
-        "effects": { "$ref": "#/$defs/effects" },
-        "postconditions": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/kernel_ast" }
-        },
-        "condition": { "$ref": "#/$defs/kernel_ast" },
-        "progress": { "$ref": "#/$defs/progress_body" },
         "trace": { "$ref": "#/$defs/trace_ref" },
         "fairness": { "enum": ["weak", "none"] },
         "semantic_targets": {
@@ -456,12 +452,9 @@
         {
           "if": { "properties": { "kind": { "const": "operation" } } },
           "then": {
-            "required": ["enablement", "effects", "postconditions", "fairness"],
+            "required": ["fairness"],
             "properties": {
-              "subject": { "$ref": "#/$defs/operation_subject" },
-              "condition": false,
-              "progress": false,
-              "trace": false
+              "subject": { "$ref": "#/$defs/operation_subject" }
             }
           }
         },
@@ -480,30 +473,16 @@
             }
           },
           "then": {
-            "required": ["condition"],
             "properties": {
-              "subject": { "$ref": "#/$defs/property_subject" },
-              "enablement": false,
-              "effects": false,
-              "postconditions": false,
-              "fairness": false,
-              "progress": false,
-              "trace": false
+              "subject": { "$ref": "#/$defs/property_subject" }
             }
           }
         },
         {
           "if": { "properties": { "kind": { "const": "progress_rule" } } },
           "then": {
-            "required": ["progress"],
             "properties": {
-              "subject": { "$ref": "#/$defs/property_subject" },
-              "enablement": false,
-              "effects": false,
-              "postconditions": false,
-              "fairness": false,
-              "condition": false,
-              "trace": false
+              "subject": { "$ref": "#/$defs/property_subject" }
             }
           }
         },
@@ -516,13 +495,7 @@
           "then": {
             "required": ["trace"],
             "properties": {
-              "subject": { "$ref": "#/$defs/trace_subject" },
-              "enablement": false,
-              "effects": false,
-              "postconditions": false,
-              "fairness": false,
-              "condition": false,
-              "progress": false
+              "subject": { "$ref": "#/$defs/trace_subject" }
             }
           }
         }
@@ -577,10 +550,10 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "ast"],
+          "required": ["kind", "expression"],
           "properties": {
             "kind": { "const": "expr" },
-            "ast": { "$ref": "#/$defs/kernel_ast" }
+            "expression": { "$ref": "#/$defs/kernel_ast" }
           }
         },
         {

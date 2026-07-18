@@ -606,15 +606,15 @@ fn walk_value_kinds(
         },
         TypeRef::Option(inner) => {
             tags.insert("value_option");
-            if value.get("kind").and_then(Value::as_str) == Some("some") {
-                if let Some(inner_value) = value.get("value") {
-                    if matches!(inner.as_ref(), TypeRef::Option(_))
-                        && inner_value.get("kind").and_then(Value::as_str) == Some("none")
-                    {
-                        *nested_option = true;
-                    }
-                    walk_value_kinds(inner, inner_value, model, tags, nested_option);
+            if value.get("kind").and_then(Value::as_str) == Some("some")
+                && let Some(inner_value) = value.get("value")
+            {
+                if matches!(inner.as_ref(), TypeRef::Option(_))
+                    && inner_value.get("kind").and_then(Value::as_str) == Some("none")
+                {
+                    *nested_option = true;
                 }
+                walk_value_kinds(inner, inner_value, model, tags, nested_option);
             }
         }
         TypeRef::Map(_, item) => {

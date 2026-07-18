@@ -312,6 +312,12 @@ not lose belongs on the existing annotation carrier instead:
   strings have no escape syntax and stop at the first `"` or newline
   (`lex_string`), so they cannot carry prose.
 
+`Kind` and `Custom` survive in the checked model for in-process consumers of
+`KernelModel::annotations_for`. The current JSON result envelope, LSP index,
+and audit ledger do not expose generic annotations. Adding one of those public
+projections requires its own versioned contract and tests; this editorial
+convention does not imply that projection.
+
 See `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`) and
 `skills/fsl/reference.md` for the consumer-facing guidance. This convention
 adds no grammar, no IR variant, no Kernel/JSON schema change, and no

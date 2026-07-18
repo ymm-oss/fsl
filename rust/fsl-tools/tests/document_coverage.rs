@@ -134,26 +134,29 @@ fn every_authored_target_kind_across_the_corpus_is_registered_and_every_register
 /// unaware the new construct exists at all, which the corpus-observed test
 /// above cannot catch on its own (nothing pushes an unrecognized construct
 /// into any fixture's `coverage.authored` in the first place).
-const KERNEL_NATIVE_KINDS: &[&str] = &[
-    "action",
-    "property:invariant",
-    "property:trans",
-    "property:reachable",
-    "property:leadsTo",
-    "terminal",
-    "init",
+const NON_TARGET_TOP_LEVEL_KERNEL_KEYS: &[&str] = &[
+    "$schema",
+    "schema_version",
+    "language_version",
+    "spec",
+    "semantics",
+    "constants",
+    "types",
+    "state",
+    "properties",
 ];
 
-#[test]
-fn kernel_native_target_kinds_match_the_public_kernel_v1_schema_required_keys() {
-    let schema: Value = serde_json::from_str(
+fn public_kernel_schema() -> Value {
+    serde_json::from_str(
         &std::fs::read_to_string(
             workspace_root().join("schemas/fslc/kernel/kernel.v1.schema.json"),
         )
         .expect("read Public Kernel v1 schema"),
     )
-    .expect("Kernel schema is valid JSON");
+    .expect("Kernel schema is valid JSON")
+}
 
+fn kernel_semantic_schema_keys(schema: &Value) -> BTreeSet<String> {
     let top_required: BTreeSet<&str> = schema["required"]
         .as_array()
         .expect("top-level required")
@@ -167,33 +170,29 @@ fn kernel_native_target_kinds_match_the_public_kernel_v1_schema_required_keys() 
         .map(|value| value.as_str().expect("string key"))
         .collect();
 
-    let mut expected: BTreeSet<String> = BTreeSet::new();
-    assert!(top_required.contains("init"), "schema must require 'init'");
-    expected.insert("init".to_owned());
-    assert!(
-        top_required.contains("actions"),
-        "schema must require 'actions'"
-    );
-    expected.insert("action".to_owned());
-    for (schema_key, rcir_kind) in [
-        ("invariants", "property:invariant"),
-        ("transitions", "property:trans"),
-        ("reachables", "property:reachable"),
-        ("leads_to", "property:leadsTo"),
-        ("terminal", "terminal"),
-    ] {
-        assert!(
-            properties_required.contains(schema_key),
-            "schema properties.required must contain '{schema_key}'"
-        );
-        expected.insert(rcir_kind.to_owned());
-    }
+    let non_targets: BTreeSet<&str> = NON_TARGET_TOP_LEVEL_KERNEL_KEYS.iter().copied().collect();
+    top_required
+        .difference(&non_targets)
+        .map(|key| (*key).to_owned())
+        .chain(
+            properties_required
+                .into_iter()
+                .map(|key| format!("properties.{key}")),
+        )
+        .collect()
+}
 
-    let registered: BTreeSet<String> = RCIR_TARGET_KIND_REGISTRY
+fn registered_kernel_schema_keys() -> BTreeSet<String> {
+    RCIR_TARGET_KIND_REGISTRY
         .iter()
-        .filter(|row| KERNEL_NATIVE_KINDS.contains(&row.kind))
-        .map(|row| row.kind.to_owned())
-        .collect();
+        .filter_map(|row| row.kernel_schema_key.map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn kernel_native_target_kinds_match_the_public_kernel_v1_schema_required_keys() {
+    let expected = kernel_semantic_schema_keys(&public_kernel_schema());
+    let registered = registered_kernel_schema_keys();
     assert_eq!(
         registered, expected,
         "a Kernel-native semantic element kind (from kernel.v1.schema.json's own required-key \
@@ -202,4 +201,17 @@ fn kernel_native_target_kinds_match_the_public_kernel_v1_schema_required_keys() 
          rust/fsl-tools/src/document_coverage.rs (and, if the schema itself just gained a new \
          required key, project it in rust/fsl-tools/src/document_project.rs first)"
     );
+}
+
+#[test]
+fn a_new_required_kernel_collection_is_not_silently_ignored() {
+    let mut schema = public_kernel_schema();
+    schema["required"]
+        .as_array_mut()
+        .expect("top-level required")
+        .push(Value::String("new_semantic_collection".to_owned()));
+    let expected = kernel_semantic_schema_keys(&schema);
+    let registered = registered_kernel_schema_keys();
+    assert_ne!(registered, expected);
+    assert!(expected.contains("new_semantic_collection"));
 }

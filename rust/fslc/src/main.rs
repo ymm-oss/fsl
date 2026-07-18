@@ -1995,7 +1995,7 @@ fn run_document_generate(
         Ok(kernel) => kernel,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let model = match fsl_core::build_model(kernel) {
+    let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
@@ -2030,13 +2030,17 @@ fn run_document_generate(
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
-    let rendered = fsl_tools::render_requirements_document(
+    let rendered = match fsl_tools::render_requirements_document(
         &claims,
+        &kernel,
         &model,
         trace.as_ref(),
         locale,
         applied_glossary.as_ref(),
-    );
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
     if strict_rendering && rendered.formula_fallback_count > 0 {
         let mut output = error_output(
             "document",
@@ -2216,7 +2220,7 @@ fn run_document_check(
         Ok(kernel) => kernel,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let model = match fsl_core::build_model(kernel) {
+    let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
@@ -2231,13 +2235,17 @@ fn run_document_check(
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
-    let rendered = fsl_tools::render_requirements_document(
+    let rendered = match fsl_tools::render_requirements_document(
         &claims,
+        &kernel,
         &model,
         trace.as_ref(),
         locale,
         applied_glossary.as_ref(),
-    );
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
 
     let report =
         match fsl_tools::check_requirements_document(&artifact_text, &claims, &rendered.markdown) {
@@ -4340,13 +4348,13 @@ fn run_scenarios_mode(
         insert_requirement_metadata(&mut scenario, &action.annotations, action.meta.as_ref());
         scenarios.push(Value::Object(scenario));
     }
-    if let Some(trace) = &result.deadlock_trace {
-        if deadlock_mode != "ignore" {
-            let mut scenario = scenario_from_trace(trace);
-            scenario.insert("name".to_owned(), json!("deadlock_terminal"));
-            scenario.insert("kind".to_owned(), json!("deadlock"));
-            scenarios.push(Value::Object(scenario));
-        }
+    if let Some(trace) = &result.deadlock_trace
+        && deadlock_mode != "ignore"
+    {
+        let mut scenario = scenario_from_trace(trace);
+        scenario.insert("name".to_owned(), json!("deadlock_terminal"));
+        scenario.insert("kind".to_owned(), json!("deadlock"));
+        scenarios.push(Value::Object(scenario));
     }
     match requirement_trace_scenarios(path, &model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
