@@ -1346,11 +1346,11 @@ impl DomainParser {
             return Err(ParseError::new("expected time value", token.span));
         };
         let mut output = value.to_string();
-        if let TokenKind::Ident(unit) = &self.peek().kind {
-            if token.span.end.offset == self.peek().span.start.offset {
-                output.push_str(unit);
-                self.bump();
-            }
+        if let TokenKind::Ident(unit) = &self.peek().kind
+            && token.span.end.offset == self.peek().span.start.offset
+        {
+            output.push_str(unit);
+            self.bump();
         }
         Ok(output)
     }

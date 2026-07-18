@@ -8,65 +8,55 @@ const heartbeat = setInterval(() => {
   output.dataset.tick = String(Number(output.dataset.tick ?? 0) + 1);
 }, 100);
 
-function runCase(testCase) {
+function requestWorker(message, resultField, timeoutMs = 60_000) {
   return new Promise((resolve, reject) => {
     const worker = new Worker("./worker.js");
+    const finish = (callback, value) => {
+      clearTimeout(timeout);
+      worker.terminate();
+      callback(value);
+    };
+    const timeout = setTimeout(() => {
+      finish(reject, new Error(`${message.id} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
     worker.addEventListener("message", ({ data }) => {
-      if (data.id !== testCase.id) return;
+      if (data.id !== message.id) return;
       const error = workerMessageError(data);
       if (error) {
-        worker.terminate();
-        reject(error);
+        finish(reject, error);
         return;
       }
-      if (!data.envelope) return;
-      worker.terminate();
-      resolve(data.envelope);
+      if (!data[resultField]) return;
+      finish(resolve, data[resultField]);
     });
     worker.addEventListener("error", (event) => {
-      worker.terminate();
-      reject(new Error(event.message));
+      finish(reject, new Error(event.message));
     });
-    worker.postMessage({
-      id: testCase.id,
-      cmd: testCase.cmd ?? "verify",
-      source: testCase.source,
-      source_file: testCase.source_file,
-      files: testCase.files,
-      options: testCase.options,
-    });
+    worker.postMessage(message);
   });
+}
+
+function runCase(testCase) {
+  return requestWorker({
+    id: testCase.id,
+    cmd: testCase.cmd ?? "verify",
+    source: testCase.source,
+    source_file: testCase.source_file,
+    files: testCase.files,
+    options: testCase.options,
+  }, "envelope");
 }
 
 async function runBatches(testCases, width = 4) {
   const checks = testCases.filter((testCase) => testCase.cmd === "check");
   const byId = new Map();
   if (checks.length > 0) {
-    const envelopes = await new Promise((resolve, reject) => {
-      const worker = new Worker("./worker.js");
-      worker.addEventListener("message", ({ data }) => {
-        if (data.id !== "check-batch") return;
-        const error = workerMessageError(data);
-        if (error) {
-          worker.terminate();
-          reject(error);
-          return;
-        }
-        if (!data.envelopes) return;
-        worker.terminate();
-        resolve(data.envelopes);
-      });
-      worker.addEventListener("error", (event) => {
-        worker.terminate();
-        reject(new Error(event.message));
-      });
-      worker.postMessage({
-        id: "check-batch",
-        batch: checks.map(({ cmd, source, source_file, files, options }) => (
-          { cmd, source, source_file, files, options }
-        )),
-      });
-    });
+    const envelopes = await requestWorker({
+      id: "check-batch",
+      batch: checks.map(({ cmd, source, source_file, files, options }) => (
+        { cmd, source, source_file, files, options }
+      )),
+    }, "envelopes");
     if (envelopes.length !== checks.length) {
       throw new Error("check batch returned an incomplete envelope set");
     }
@@ -97,7 +87,7 @@ function cancelAndRecover() {
         reject(error);
         return;
       }
-      if (!data.progress) return;
+      if (data.progress?.phase !== "verifying") return;
       clearTimeout(timeout);
       worker.terminate();
       resolve(true);

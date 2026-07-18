@@ -32,9 +32,11 @@ fn cancel_system_markdown(locale: Locale) -> String {
     .expect("project cancel_system.fsl");
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
-    let model = fsl_core::build_model(kernel).expect("build model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
-    fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), locale).markdown
+    fsl_tools::render_requirements_document(&claims, &kernel, &model, trace.as_ref(), locale)
+        .expect("render paired RCIR")
+        .markdown
 }
 
 #[test]
@@ -113,11 +115,17 @@ fn back_references_carry_no_markers() {
     .expect("project");
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
-    let model = fsl_core::build_model(kernel).expect("build model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
     let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
-    let markdown =
-        fsl_tools::render_requirements_document(&claims, &model, trace.as_ref(), Locale::Ja)
-            .markdown;
+    let markdown = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        Locale::Ja,
+    )
+    .expect("render paired RCIR")
+    .markdown;
     assert!(
         claims
             .claims

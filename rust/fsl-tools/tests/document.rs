@@ -262,6 +262,28 @@ fn keeps_multiple_statements_for_one_requirement_id() {
 }
 
 #[test]
+fn keeps_identical_requirement_text_from_distinct_source_declarations() {
+    let (source, root) = claims_fixture();
+    let source = source.replace(
+        "An escalated case is closed once handled",
+        "An open case can be escalated by staff",
+    );
+    let claims = project(&source, "document_claims_fixture.fsl", &root);
+    let req1 = claims
+        .requirements
+        .iter()
+        .find(|requirement| requirement.id == "REQ-1")
+        .expect("REQ-1 exists");
+    assert_eq!(req1.statements.len(), 2);
+    let source_lines: BTreeSet<u32> = req1
+        .statements
+        .iter()
+        .filter_map(|statement| statement.source.as_ref().map(|source| source.line))
+        .collect();
+    assert_eq!(source_lines.len(), 2);
+}
+
+#[test]
 fn keeps_full_many_to_many_requirement_relation() {
     let (source, root) = claims_fixture();
     let claims = project(&source, "document_claims_fixture.fsl", &root);
@@ -661,7 +683,21 @@ fn compiled_schema() -> jsonschema::Validator {
     let schema_text = read("../../schemas/fslc/document/requirement-claims.v1.schema.json");
     let schema_value: serde_json::Value =
         serde_json::from_str(&schema_text).expect("schema is valid JSON");
-    jsonschema::validator_for(&schema_value).expect("schema compiles")
+    let kernel_text = read("../../schemas/fslc/kernel/kernel.v2.schema.json");
+    let kernel_value: serde_json::Value =
+        serde_json::from_str(&kernel_text).expect("kernel schema is valid JSON");
+    let registry = jsonschema::Registry::new()
+        .add(
+            "https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json",
+            &kernel_value,
+        )
+        .expect("kernel schema resource")
+        .prepare()
+        .expect("schema registry");
+    jsonschema::options()
+        .with_registry(&registry)
+        .build(&schema_value)
+        .expect("schema compiles")
 }
 
 #[test]
@@ -695,4 +731,13 @@ fn schema_rejects_a_malformed_document_negative_control() {
     let validator = compiled_schema();
     let broken = serde_json::json!({"schema_version": "1.0.0", "result": "requirement_claims"});
     assert!(!validator.is_valid(&broken));
+}
+
+#[test]
+fn schema_rejects_a_malformed_embedded_public_kernel() {
+    let (source, root) = cancel_system();
+    let mut value = serde_json::to_value(project(&source, "cancel_system.fsl", &root))
+        .expect("serialize claims");
+    value["public_kernel"]["actions"][0]["name"] = serde_json::Value::Null;
+    assert!(!compiled_schema().is_valid(&value));
 }
