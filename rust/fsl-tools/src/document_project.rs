@@ -280,11 +280,11 @@ fn provenance_for(
             }
         }
     }
-    if assurance.is_none() {
-        if let Some(span) = declared_span {
-            assurance = Some(ProvenanceAssurance::SourceBacked);
-            sources.insert((span.start.line, span.start.column));
-        }
+    if assurance.is_none()
+        && let Some(span) = declared_span
+    {
+        assurance = Some(ProvenanceAssurance::SourceBacked);
+        sources.insert((span.start.line, span.start.column));
     }
     ClaimProvenance {
         assurance: assurance.unwrap_or(ProvenanceAssurance::Unknown),

@@ -1688,14 +1688,15 @@ only in prose:
 - Use the built-in `@kind(id, text?)` to classify and explain a declaration in
   one line, e.g. `@kind("aux_invariant", "closes the k-induction CTI for
   attempts_bounded")`. `Kind` never alters guards, actions, property kinds,
-  verification, or lowering; every consumer reading
-  `KernelModel::annotations_for` — including the JSON envelope and the LSP —
-  sees it.
+  verification, or lowering. It survives in the checked `KernelModel` for
+  in-process consumers that explicitly call `annotations_for`; the current
+  JSON envelope, LSP index, and audit ledger do not project generic annotations.
 - For a short rationale that does not naturally fit a classification, the
   recommended custom namespace is `@doc.rationale("...")` (an ordinary
-  `Custom` annotation; see 13.1). It carries the same verification-inert,
-  queryable guarantee as any other custom namespace and needs no grammar
-  change.
+  `Custom` annotation; see 13.1). It carries the same verification-inert
+  checked-model representation as any other custom namespace and needs no
+  grammar change. A public JSON, LSP, or audit consumer still needs an explicit
+  projection contract before it can query that rationale.
 - Multi-sentence narrative — what a spec demonstrates, a walkthrough of why a
   design works, a pedagogical bug marker in an intentionally-broken example —
   stays an ordinary `//` comment. Annotation argument strings have no escape
@@ -2366,19 +2367,30 @@ DESIGN-*.md).
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)
 - **`fslc mutate`** — mechanically mutates the spec and measures whether each
-  mutant is killed by the existing net of checks. A surviving mutant = behavior
-  constrained by no property = a place where an invariant is missing.
+  mutant is killed by the existing net of checks. The score is **bounded
+  mutant-set sensitivity**: `kill_rate = killed / (killed + survived)` over a
+  selected finite mutant set, at the selected `--depth`, under the
+  verify/acceptance/forbidden/refinement oracle. It moves with the operator
+  mix, the `--max-mutants` cap, the depth, and the oracle — it is not a
+  production defect-detection rate, not a probability that the spec is
+  correct, and not a completeness measure. Survivors are a review queue, not
+  automatic missing-invariant findings: a survivor may be an equivalent
+  mutant, behavior dead at baseline, an effect visible only beyond the depth
+  bound, or genuine under-constraint.
   `--from mutants.jsonl` additionally adjudicates externally generated
   mutations expressed as a full `mutated_spec` or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid external
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are `invalid`, never
-  killed, and are excluded from combined/per-source kill-rate denominators.
+  killed, and are excluded from combined/per-source kill-rate denominators
+  (they measure external generator quality, not spec strength).
   Every entry carries `source:"builtin"|"external"`; `--max-mutants` caps only
   the built-in catalog, so `--max-mutants 0 --from ...` runs external-only.
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
   `empty_formalization` warning (the semantic-level extension of
-  `--strict-tags`). → [`DESIGN-mutate.md`](DESIGN-mutate.md)
+  `--strict-tags`); per-requirement kill counts and this warning are observed
+  lower bounds within the chosen mutant set and depth.
+  → [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
@@ -2409,11 +2421,13 @@ DESIGN-*.md).
   `unanchored_property`, `progressless_cycle`, `unwritten_state`,
   `unread_state`, `unguarded_action`, `conservation_candidate`,
   `divergent_choice`, and `unconstrained_effect`. The last two use a fixed
-  depth-4 BMC probe: they include `evidence_basis:"bounded_bmc"`, the reachable
+  depth-4 bounded probe (solver-free explicit-state exploration via the runtime
+  Monitor): they include `evidence_basis:"bounded_bmc"` (frozen v0 vocabulary
+  for "backed by a bounded reachability witness"), the reachable
   branch witness, and a question-form `spec_question` asking which outcome is
   intended. Exact matches with `undecided:` declarations remain visible with
   `acknowledged:true` and `acknowledged_by`; unmatched semantic findings carry
-  no acknowledgement fields. A BMC-backed `unconstrained_effect` suppresses the same state's
+  no acknowledgement fields. A bounded-witness-backed `unconstrained_effect` suppresses the same state's
   structural `unread_state`; semantic action witnesses similarly suppress a
   duplicate `unguarded_action`. Absence is not proof of determinism beyond the
   bound. See [`DESIGN-underspecification.md`](DESIGN-underspecification.md).

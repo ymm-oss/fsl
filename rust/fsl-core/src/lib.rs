@@ -1361,10 +1361,10 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
     expr: Expr,
     replacements: &HashMap<String, Expr, S>,
 ) -> Expr {
-    if let Expr::Var(name) = &expr {
-        if let Some(replacement) = replacements.get(name) {
-            return replacement.clone();
-        }
+    if let Expr::Var(name) = &expr
+        && let Some(replacement) = replacements.get(name)
+    {
+        return replacement.clone();
     }
     match expr {
         Expr::Some(expr) => Expr::Some(Box::new(substitute(*expr, replacements))),

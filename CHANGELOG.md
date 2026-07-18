@@ -6,10 +6,65 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- The native installer no longer clones the repository into `~/.fsl`. It now
+  installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
+  atomically activates the complete payload, safely migrates recognized Python
+  2.7 links, and rejects binaries whose reported version differs from the
+  Release tag. Agent Skills are packaged as a checksummed Release asset; the
+  v3.0.0 compatibility path verifies a pinned tag-archive checksum and extracts
+  only the six installed skills.
+
+## [3.0.0] - 2026-07-17
+
+### Changed
+- Native v3 releases now assemble and validate all four CLI/LSP pairs, checksums,
+  VSIX, and Kernel bundles before one tag-only publication step. Release actions,
+  the Rust toolchain, and the VSIX packager are pinned; publication verifies a
+  remote draft inventory before making it public, and manual dry runs validate
+  the same assembled unit without publishing it. Native crates and release
+  builds require Rust 1.88 or newer.
+- The installer rejects unsupported Intel macOS, pins repository content and
+  binaries to the same latest Release tag, and stages both checksummed native
+  binaries before replacing either installed command. Linux artifacts now have
+  an explicit Ubuntu 24.04 / glibc 2.39 baseline. All native targets build the
+  vendored Z3 4.16 source so the distributed binaries do not require `libz3` or
+  `z3.dll` at runtime. macOS builds use the Clang 17 runner required by Z3 while
+  retaining a macOS 14 deployment target, and CI timeouts accommodate clean Z3
+  source builds on every supported runner.
+- Release distribution checks now run in the authoritative native Rust gate;
+  the redundant Python-only release workflow test was removed.
 - Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
   hashing the full executable on every invocation, and CLI preparation reuses its validated
   `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
+
+### Fixed
+- `docs/LANGUAGE.ja.md` now carries the Japanese translation of the
+  "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
+  literate Markdown feature, so `docs/intro/language.ja.html` documents the
+  `.md` input support instead of silently omitting it (issue #346).
+- Documentation for the depth-4 underspecification probe (`divergent_choice`,
+  `unconstrained_effect`) now matches the native implementation: a solver-free
+  explicit-state BFS over the runtime Monitor, not symbolic BMC/Z3.
+  `docs/DESIGN-underspecification.md`, `docs/DESIGN-analysis.md`,
+  `docs/LANGUAGE.md`/`docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` are
+  corrected; the `evidence_basis:"bounded_bmc"` schema enum value is retained
+  unchanged as frozen v0 vocabulary for "backed by a bounded reachability
+  witness", so no output or schema contract moves (issue #318).
+- Mutation documentation no longer overstates the score: `kill_rate =
+  killed / (killed + survived)` is now defined everywhere as bounded
+  mutant-set sensitivity — dependent on the operator mix, `--max-mutants`
+  cap, `--depth`, and the verify/acceptance/forbidden/refinement oracle — not
+  a production defect-detection rate, spec-correctness probability, or
+  completeness measure. Survivors are documented as a review queue
+  (equivalent mutants, dead-at-baseline behavior, beyond-depth effects, or
+  genuine under-constraint) instead of "a place where an invariant is
+  missing", and `empty_formalization`/per-requirement kills as observed lower
+  bounds within the chosen mutant set and depth. Aligned across
+  `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `docs/DESIGN-mutate.md`,
+  `README.md`, `skills/fsl/reference.md`, and the generated site reference; a
+  new `rust/fslc/tests/mutation_docs_contract.rs` regression keeps the
+  stronger survivor claim from returning (issue #338).
 
 ### Added
 - Added the Requirement Claim IR (RCIR) v1 schema and native projector (issue #325),
@@ -36,13 +91,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `undecided_declarations` (issue #189) that additionally carries the annotation's
   source span; the existing JSON-producing function is now a thin projection over it
   with unchanged output.
-- Documented a rationale convention for annotating a declaration so tooling and
-  AI agents can see the "why" that used to live only in `//` comments (lexer
-  trivia, invisible to `KernelModel`/JSON/LSP/the audit ledger): use the
+- Documented that the persistent verify cache is safe under concurrent
+  processes: writes are atomic, so parallel `fslc verify` invocations over many
+  files (`xargs -P`, CI job matrices) at worst duplicate solving and never
+  corrupt or poison the cache. `docs/DESIGN-incremental-verify.md` §3 and
+  `skills/fsl/reference.md` now state this explicitly so users and AI agents
+  choose process-level parallelism instead of a sequential per-file loop
+  (issue #353). No implementation change.
+- Documented a rationale convention for preserving a declaration's "why" in
+  the checked model instead of only in `//` comments (lexer trivia): use the
   existing `@kind(id, text?)` to classify and explain a declaration in one
   line, and the recommended custom namespace `@doc.rationale("...")` for a
   short rationale that isn't a classification. No grammar, IR, or schema
-  change; multi-sentence narrative keeps living in comments. See
+  change; multi-sentence narrative keeps living in comments, and generic
+  annotations are not currently projected through JSON, LSP, or the audit ledger. See
   `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`),
   `docs/DESIGN-annotations.md`, and `skills/fsl/reference.md`.
 - `fslc lint` now enforces a built-in, kind-aware canonical ID policy and accepts
@@ -195,6 +257,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics, so user state fields named `kind`, `classification`, or other
   diagnostic discriminators neither crash nor receive routing metadata (issue
   #278).
+- `fslc verify --engine auto` no longer silently drops its `engine_fallback`
+  annotation, or returns a stale/completeness-downgraded BMC verdict, when a
+  warm cache entry was written by an unrelated plain `--engine bmc` run: the
+  fallback gate is recomputed for the current invocation instead of being
+  read back off the cache entry, so a warm hit always matches what a fresh
+  `auto` run would report, and the persisted cache entry itself carries the
+  same fields as a plain engine run's, with the `engine_fallback` sibling no
+  longer written at all (issue #226 follow-up).
 
 ### Changed
 - Required product CI now runs the Rust workspace and WASM integration phases in parallel while
@@ -225,14 +295,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   contracts are unchanged.
 - `fslc verify --engine auto` (issue #226) now dispatches through a
   `VerificationEngine::Auto` variant alongside the other engines instead of
-  resolving before the shared parser, loads the model once per attempt (the
-  static fail-closed gate and the real explicit-state run share it, removing
-  a redundant load/gate re-check on the common decide-by-explicit path), and
-  persists the fallback trace on the BMC cache entry itself so a repeat
-  `auto` cache hit restores the exact original `engine_fallback` rather than
-  recomputing a generic one. Output contract, cache-sharing with plain
-  `--engine explicit`/`bmc` runs, and the `engine_fallback: {from, reason,
-  kind}` shape are unchanged.
+  resolving before the shared parser, and loads the model once per fresh
+  attempt (the static fail-closed gate and the real explicit-state run share
+  it, removing a redundant load/gate re-check on the common decide-by-explicit
+  path). A cache hit recomputes that same fail-closed gate for the current
+  invocation rather than persisting a fallback trace on the BMC cache entry
+  (see the Fixed entry above), so a warm `auto` hit always reproduces the
+  exact `engine_fallback` a fresh run would. Output contract, cache-sharing
+  with plain `--engine explicit`/`bmc` runs, and the `engine_fallback: {from,
+  reason, kind}` shape are unchanged.
 - Native domain TypeScript, Python, Kotlin, Swift, and Rust scaffolds now share
   one versioned input adapter over Public Kernel v1 and the public
   `domain-scaffold-metadata.v1` compatibility bridge. Target emitters no longer
@@ -2126,7 +2197,21 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
+[2.7.0]: https://github.com/ymm-oss/fsl/compare/v2.6.3...v2.7.0
+[2.6.3]: https://github.com/ymm-oss/fsl/compare/v2.6.2...v2.6.3
+[2.6.2]: https://github.com/ymm-oss/fsl/compare/v2.6.1...v2.6.2
+[2.6.1]: https://github.com/ymm-oss/fsl/compare/v2.6.0...v2.6.1
+[2.6.0]: https://github.com/ymm-oss/fsl/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/ymm-oss/fsl/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/ymm-oss/fsl/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/ymm-oss/fsl/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/ymm-oss/fsl/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/ymm-oss/fsl/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/ymm-oss/fsl/compare/v1.5.0...v2.0.0
+[1.5.0]: https://github.com/ymm-oss/fsl/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/ymm-oss/fsl/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/ymm-oss/fsl/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ymm-oss/fsl/compare/v1.2.10...v1.3.0
 [1.2.10]: https://github.com/ymm-oss/fsl/compare/v1.2.9...v1.2.10

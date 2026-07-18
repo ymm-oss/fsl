@@ -99,7 +99,9 @@ than hashing an under-specified representation).
   `error`/internal results are never cached.
 - Writes are atomic (`tempfile` + `os.replace`); concurrent agents at worst duplicate work.
   Unreadable/corrupt entries are treated as a miss and deleted. Entries over 5 MB (huge
-  traces) are not stored.
+  traces) are not stored. Because of this, running many `fslc verify` processes in parallel
+  against a shared cache (e.g. `xargs -P`, a CI job matrix over a project's `.fsl` files) is
+  safe: the worst case is duplicated solving, never a corrupted or wrong cache entry.
 - Eviction: on write, with probability 1/32, prune entries older than 30 days and enforce
   `FSLC_CACHE_MAX_MB` (default 256) LRU-by-mtime; hits touch mtime.
 - Escape hatches: `fslc verify --no-cache` (this run neither reads nor writes),

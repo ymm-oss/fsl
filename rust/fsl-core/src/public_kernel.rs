@@ -272,20 +272,20 @@ fn infer_type(
             _ => Err(error("public Kernel cannot infer uncontextualized none")),
         },
         Expr::Some(item) => {
-            if let Some(expected) = expected {
-                if matches!(resolve(model, expected)?, TypeRef::Option(_)) {
-                    return Ok(expected.clone());
-                }
+            if let Some(expected) = expected
+                && matches!(resolve(model, expected)?, TypeRef::Option(_))
+            {
+                return Ok(expected.clone());
             }
             Ok(TypeRef::Option(Box::new(infer_type(
                 item, env, model, None,
             )?)))
         }
         Expr::Set(items) => {
-            if let Some(expected) = expected {
-                if matches!(resolve(model, expected)?, TypeRef::Set(_)) {
-                    return Ok(expected.clone());
-                }
+            if let Some(expected) = expected
+                && matches!(resolve(model, expected)?, TypeRef::Set(_))
+            {
+                return Ok(expected.clone());
             }
             let first = items
                 .first()
@@ -293,10 +293,10 @@ fn infer_type(
             Ok(TypeRef::Set(Box::new(infer_type(first, env, model, None)?)))
         }
         Expr::Seq(items) => {
-            if let Some(expected) = expected {
-                if matches!(resolve(model, expected)?, TypeRef::Seq(_, _)) {
-                    return Ok(expected.clone());
-                }
+            if let Some(expected) = expected
+                && matches!(resolve(model, expected)?, TypeRef::Seq(_, _))
+            {
+                return Ok(expected.clone());
             }
             let first = items
                 .first()
