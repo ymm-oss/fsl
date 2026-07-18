@@ -32,16 +32,8 @@ fn render_cancel_system(locale: Locale, approvals: Option<&AppliedApprovals<'_>>
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
     fsl_tools::render_requirements_document(
-        &claims,
-        &kernel,
-        &model,
-        trace.as_ref(),
-        locale,
-        None,
-        None,
-        approvals,
+        &claims, &kernel, &model, &source, locale, None, None, approvals,
     )
     .expect("render paired RCIR")
     .markdown

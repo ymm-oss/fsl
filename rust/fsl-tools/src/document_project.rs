@@ -150,9 +150,30 @@ pub fn project_requirement_claims_from_source(
     source_path: Option<&str>,
     resolver_root: &Path,
 ) -> Result<RequirementClaimSet, DocumentProjectionError> {
+    let (dialect, implements_names, analysis_scope) = projection_context(source)?;
+    let resolver = FsResolver::new(resolver_root);
+    let kernel = parse_kernel_source(source, &resolver)
+        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
+    let model = build_model(kernel.clone())
+        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
+    project_requirement_claims(&DocumentInput {
+        kernel: &kernel,
+        model: &model,
+        source,
+        source_path,
+        dialect,
+        implements_names,
+        analysis_scope,
+    })
+    .map_err(DocumentProjectionError::Other)
+}
+
+fn projection_context(
+    source: &str,
+) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), DocumentProjectionError> {
     let parsed = parse_document(SourceFile::new(source))
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
-    let (dialect, implements_names, analysis_scope) = match &parsed.surface {
+    Ok(match &parsed.surface {
         SurfaceDocument::Spec(_) => (DocumentDialect::Spec, Vec::new(), AnalysisScope::default()),
         SurfaceDocument::Requirements(requirements) => {
             let names = requirements
@@ -175,22 +196,7 @@ pub fn project_requirement_claims_from_source(
                 dialect: surface_dialect_name(other),
             });
         }
-    };
-    let resolver = FsResolver::new(resolver_root);
-    let kernel = parse_kernel_source(source, &resolver)
-        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
-    let model = build_model(kernel.clone())
-        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
-    project_requirement_claims(&DocumentInput {
-        kernel: &kernel,
-        model: &model,
-        source,
-        source_path,
-        dialect,
-        implements_names,
-        analysis_scope,
     })
-    .map_err(DocumentProjectionError::Other)
 }
 
 fn surface_dialect_name(document: &SurfaceDocument) -> &'static str {
@@ -1210,41 +1216,25 @@ fn project_requirement_claims_with_trace(
     })
 }
 
-pub(crate) struct RendererRoles {
-    pub requirements: Vec<Requirement>,
-    pub claims: Vec<Claim>,
-    pub trace_cases: Vec<TraceCase>,
-    pub public_kernel: Value,
-}
-
-pub(crate) fn project_renderer_roles(
+pub(crate) fn project_renderer_contract(
     kernel: &KernelSpec,
     model: &KernelModel,
+    source: &str,
     source_path: Option<&str>,
-    dialect: &str,
     trace: Option<&RequirementsTraceContract>,
-) -> Result<RendererRoles, String> {
-    let dialect = match dialect {
-        "spec" => DocumentDialect::Spec,
-        "requirements" => DocumentDialect::Requirements,
-        other => return Err(format!("unsupported RCIR renderer dialect '{other}'")),
-    };
-    let projected = project_requirement_claims_with_trace(
+) -> Result<RequirementClaimSet, String> {
+    let (dialect, implements_names, analysis_scope) =
+        projection_context(source).map_err(|error| error.to_string())?;
+    project_requirement_claims_with_trace(
         &DocumentInput {
             kernel,
             model,
-            source: "",
+            source,
             source_path,
             dialect,
-            implements_names: Vec::new(),
-            analysis_scope: AnalysisScope::default(),
+            implements_names,
+            analysis_scope,
         },
         trace,
-    )?;
-    Ok(RendererRoles {
-        requirements: projected.requirements,
-        claims: projected.claims,
-        trace_cases: projected.trace_cases,
-        public_kernel: projected.public_kernel,
-    })
+    )
 }
