@@ -590,11 +590,11 @@ impl DbParser {
             } else {
                 None
             };
-            if capability == "emits_offline" {
-                if let Some(ttl) = ttl {
-                    for reference in &refs {
-                        offline_ttls.insert(reference.clone(), ttl);
-                    }
+            if capability == "emits_offline"
+                && let Some(ttl) = ttl
+            {
+                for reference in &refs {
+                    offline_ttls.insert(reference.clone(), ttl);
                 }
             }
             capabilities.entry(capability).or_default().extend(refs);
