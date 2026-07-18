@@ -102,7 +102,12 @@ fslc document check spec.fsl requirements.md --approval requirements.approval.js
 
 1. Confirm the spec is checked (`fslc check`, or the existing verification flow
    already run for this spec — do not generate a document from a spec that does
-   not pass `fslc check`).
+   not pass `fslc check`). If `fslc document generate`/`claims` instead reports
+   `FSL-DOC-DIALECT-UNSUPPORTED` (issue #334), the input is a dialect other than
+   `spec`/`requirements` (e.g. `business`, `domain`, `dbsystem`, `ai_component`)
+   — this is a scope boundary of the document layer, not a defect in the spec;
+   report it as such and do not attempt to work around it by rewriting the
+   spec's dialect keyword or otherwise coercing the input.
 2. Fetch the RCIR contract with `fslc document claims` when you need the raw
    claim/requirement/coverage structure (e.g. to draft a summary or a glossary
    candidate) rather than re-parsing `.fsl` yourself.

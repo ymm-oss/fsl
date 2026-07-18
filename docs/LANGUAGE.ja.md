@@ -1469,6 +1469,15 @@ spec 状態変数をカバーし、`action external(params) -> spec_action(exprs
 フロントエンドです。レイヤーは refinement で接続されます: **business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)**。
 
+`fslc document generate`/`claims`(`docs/DESIGN-document-requirement-claim-ir.md`
+参照)は、現時点では `spec` と `requirements` の2ダイアレクトのみを
+Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(`business`、
+`dbsystem`、`ai_component` など)は、部分的な文書を生成するのではなく、コード化
+されたエラー(`FSL-DOC-DIALECT-UNSUPPORTED`)で fail-closed に拒否される。
+`--view business`/`--view design` は予約済みの未実装フラグ値である —
+将来のcross-layer viewが満たすべき有効化契約については
+`docs/DESIGN-document-dialect-adapters.md` を参照。
+
 ### 13.1 宣言タグ(全レイヤー共通のトレーサビリティ)
 
 正準な関係構文は、リンクされる宣言の直前に置く型付きアノテーションです。違反、

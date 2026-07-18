@@ -1532,6 +1532,15 @@ and the per-layer dialects are a front-end that expands into the AST. The layers
 are connected by refinement: **business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay)**.
 
+`fslc document generate`/`claims` (see `docs/DESIGN-document-requirement-claim-ir.md`)
+projects only the `spec` and `requirements` dialects into its Requirement Claim
+IR today. Every other dialect described in this section — `business`,
+`dbsystem`, `ai_component`, and the rest — is rejected fail-closed with a coded
+error (`FSL-DOC-DIALECT-UNSUPPORTED`) rather than producing a partial document.
+`--view business`/`--view design` are reserved, not yet implemented, flag
+values — see `docs/DESIGN-document-dialect-adapters.md` for the activation
+contract a future cross-layer view must satisfy.
+
 ### 13.1 Declaration tags (traceability common to all layers)
 
 The canonical relationship syntax is a typed annotation immediately before the

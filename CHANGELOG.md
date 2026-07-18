@@ -12,6 +12,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Added
+- Added an explicit dialect boundary to `fslc document` (issue #334). RCIR v1
+  supports exactly `spec` and `requirements` (`fsl_tools::
+  RCIR_SUPPORTED_DIALECTS`); every other dialect (`business`, `governance`,
+  `domain`, `dbsystem`, `ai_component`, `compose`, `refinement`, `agent`) was
+  already rejected before projection, but the rejection surfaced as a generic
+  `semantics` error indistinguishable from a defect in the input. The
+  projector now returns a typed `DocumentProjectionError`, and
+  `generate`/`claims`/`check`/`approval create --kind requirements_document`
+  all report `kind: "document"`, `code: FSL-DOC-DIALECT-UNSUPPORTED` with
+  machine-readable `dialect` and `supported_dialects` fields — an explicit
+  unsupported report, never a partial or plausible-looking document.
+  Negative controls now cover all eight rejected dialects (previously only
+  `business`), and a coupled-change test derived from
+  `fsl_syntax::DIALECT_KEYWORDS` pins the supported set as a scope-change
+  tripwire. It does not replace the still-required adapter and dialect-scoped
+  coverage row. `--view business`/`--view
+  design` remain reserved usage errors: "design" is a refinement-chain
+  position, not a dialect keyword, and a cross-layer view is gated on the
+  recorded activation contract (explicit `refinement`/`implements` metadata
+  only; liveness re-verification shown as a separate fact; `compose`
+  rejected until truthful multi-source provenance). See
+  `docs/DESIGN-document-dialect-adapters.md`.
 - Added a `requirements_document` target kind to `fslc approval` (issue #333),
   binding a reviewed `fslc document generate` artifact to a digest-bound
   approval record without implicitly widening the existing closed `kind`

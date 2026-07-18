@@ -7,7 +7,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use fsl_tools::{RCIR_TARGET_KIND_REGISTRY, RequirementClaimSet, target_kind};
+use fsl_tools::{
+    RCIR_SUPPORTED_DIALECTS, RCIR_TARGET_KIND_REGISTRY, RequirementClaimSet, target_kind,
+};
 use serde_json::Value;
 
 fn manifest_path(relative: &str) -> PathBuf {
@@ -201,5 +203,48 @@ fn kernel_native_target_kinds_match_the_public_kernel_v1_schema_required_keys() 
          Kernel-native row doesn't correspond to any required Kernel schema key — add a row to \
          rust/fsl-tools/src/document_coverage.rs (and, if the schema itself just gained a new \
          required key, project it in rust/fsl-tools/src/document_project.rs first)"
+    );
+}
+
+// --- Deliverable 3 (issue #334): the dialect-activation tripwire -----------
+
+/// `RCIR_SUPPORTED_DIALECTS` (`requirements`/`spec` only, issue #334's
+/// deliberately narrow v1) must stay exactly the dialect-keyword registry
+/// minus the eight dialects `fsl_tools::tests::document::
+/// rejects_every_unsupported_dialect_fail_closed` proves are rejected. This
+/// is the activation-contract tripwire: a dialect can only move into
+/// `RCIR_SUPPORTED_DIALECTS` together with a dedicated document adapter and
+/// its own coverage-registry row (issue #328's no-silent-omission gate,
+/// above) — moving it without both fails this test. It also catches a
+/// wholly new dialect keyword added to the language: `DIALECT_KEYWORDS`
+/// growing without a corresponding decision here fails too, forcing an
+/// explicit RCIR posture for the newcomer rather than an implicit one. See
+/// `docs/DESIGN-document-dialect-adapters.md`.
+#[test]
+fn rcir_supported_dialects_are_exactly_spec_and_requirements() {
+    let supported: BTreeSet<&str> = RCIR_SUPPORTED_DIALECTS.iter().copied().collect();
+    assert_eq!(
+        supported,
+        BTreeSet::from(["requirements", "spec"]),
+        "RCIR_SUPPORTED_DIALECTS drifted from issue #334's accepted v1 scope"
+    );
+
+    let all_keywords: BTreeSet<&str> = fsl_syntax::DIALECT_KEYWORDS.iter().copied().collect();
+    let rejected: BTreeSet<&str> = all_keywords.difference(&supported).copied().collect();
+    assert_eq!(
+        rejected,
+        BTreeSet::from([
+            "business",
+            "governance",
+            "compose",
+            "refinement",
+            "domain",
+            "dbsystem",
+            "ai_component",
+            "agent",
+        ]),
+        "a dialect keyword was added to or removed from fsl_syntax::DIALECT_KEYWORDS without an \
+         explicit RCIR-support decision here and in rust/fsl-tools/tests/document.rs's \
+         rejects_every_unsupported_dialect_fail_closed table"
     );
 }

@@ -13,7 +13,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 static NEXT_OUTPUT: AtomicU64 = AtomicU64::new(0);
 
@@ -267,4 +267,57 @@ fn claims_with_output_writes_the_raw_rcir_json_and_a_small_envelope() {
     assert_eq!(written["result"], "requirement_claims");
     assert_eq!(written["spec"]["name"], "CancelSystemReq");
     let _ = std::fs::remove_file(&out);
+}
+
+// --- Dialect boundary (issue #334) -------------------------------------------
+//
+// The RCIR v1 projector itself (library-level, every non-`spec`/`requirements`
+// dialect) is exercised in `rust/fsl-tools/tests/document.rs`'s
+// `rejects_every_unsupported_dialect_fail_closed`; these two tests only pin
+// the CLI's own envelope contract end-to-end for `generate`/`claims`.
+
+#[test]
+fn generate_rejects_an_unsupported_dialect_with_a_coded_error() {
+    let output = run(&[
+        "document",
+        "generate",
+        "examples/annotations/annotated_domain.fsl",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let envelope = json_stdout(&output);
+    assert_eq!(envelope["result"], "error");
+    assert_eq!(envelope["kind"], "document");
+    assert_eq!(envelope["code"], "FSL-DOC-DIALECT-UNSUPPORTED");
+    assert_eq!(envelope["dialect"], "domain");
+    assert_eq!(
+        envelope["supported_dialects"],
+        json!(["requirements", "spec"])
+    );
+    assert_eq!(
+        envelope["message"],
+        "document projection does not support dialect 'domain' in RCIR v1"
+    );
+    // No apparent/partial document ever reaches stdout alongside the error.
+    assert!(envelope.get("content").is_none());
+}
+
+#[test]
+fn claims_rejects_an_unsupported_dialect_with_a_coded_error() {
+    let output = run(&[
+        "document",
+        "claims",
+        "examples/annotations/annotated_dbsystem.fsl",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let envelope = json_stdout(&output);
+    assert_eq!(envelope["result"], "error");
+    assert_eq!(envelope["kind"], "document");
+    assert_eq!(envelope["code"], "FSL-DOC-DIALECT-UNSUPPORTED");
+    assert_eq!(envelope["dialect"], "dbsystem");
+    assert_eq!(
+        envelope["supported_dialects"],
+        json!(["requirements", "spec"])
+    );
+    assert!(envelope.get("content").is_none());
+    assert!(envelope.get("claims").is_none());
 }

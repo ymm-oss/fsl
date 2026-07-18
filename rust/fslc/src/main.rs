@@ -1785,7 +1785,12 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     "--view" => {
                         let value = required_option_value(&mut args, "--view")?;
                         if value != "requirements" {
-                            return Err("--view must be requirements".to_owned());
+                            return Err(
+                                "--view must be requirements ('business'/'design' are reserved \
+                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 contract is met, issue #334)"
+                                    .to_owned(),
+                            );
                         }
                     }
                     "--lang" => {
@@ -1862,7 +1867,12 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     "--view" => {
                         let value = required_option_value(&mut args, "--view")?;
                         if value != "requirements" {
-                            return Err("--view must be requirements".to_owned());
+                            return Err(
+                                "--view must be requirements ('business'/'design' are reserved \
+                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 contract is met, issue #334)"
+                                    .to_owned(),
+                            );
                         }
                     }
                     "-o" | "--output" => {
@@ -1924,6 +1934,32 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
     }
 }
 
+/// An unsupported source dialect is a scope boundary (issue #334,
+/// `docs/DESIGN-document-dialect-adapters.md`), not a defect in the spec: it
+/// gets its own coded `document` envelope so a caller can programmatically
+/// distinguish "RCIR has no adapter for this dialect yet" from a genuine
+/// parse/semantic error in a supported dialect.
+fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) -> Value {
+    match error {
+        fsl_tools::DocumentProjectionError::UnsupportedDialect { dialect } => {
+            let mut output = error_output("document", &error.to_string());
+            output
+                .as_object_mut()
+                .expect("document error envelope")
+                .extend([
+                    ("code".to_owned(), json!("FSL-DOC-DIALECT-UNSUPPORTED")),
+                    ("dialect".to_owned(), json!(dialect)),
+                    (
+                        "supported_dialects".to_owned(),
+                        json!(fsl_tools::RCIR_SUPPORTED_DIALECTS),
+                    ),
+                ]);
+            output
+        }
+        fsl_tools::DocumentProjectionError::Other(message) => semantic_error_output(message),
+    }
+}
+
 fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
     load_document_claims_with_label(path, &path.to_string_lossy())
 }
@@ -1944,7 +1980,7 @@ fn load_document_claims_with_label(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     fsl_tools::project_requirement_claims_from_source(&source, Some(label), base)
         .map(|claims| (source, claims))
-        .map_err(|error| semantic_error_output(&error))
+        .map_err(|error| document_projection_error_output(&error))
 }
 
 fn document_diagnostics_error(
