@@ -11,8 +11,12 @@ templates (#326): those still produce exactly the same normative text; this issu
 only wraps that text in a fixed, machine-checkable envelope. It interprets no
 natural language, and it adds no reverse-sync from Markdown back to FSL — that is
 explicitly out of scope in v1, per the issue: a generated document is a build
-artifact, and a correction always goes back to the FSL source. The glossary sidecar
-(#330), evidence overlay (#332), and approval-target integration (#333) are untouched.
+artifact, and a correction always goes back to the FSL source. The glossary
+sidecar (#330), evidence overlay (#332), and approval-target integration
+(#333) each later extended this same frontmatter/drift-reason mechanism
+(a new digest key plus a `*_changed` reason) rather than replacing it — see
+`docs/DESIGN-document-glossary.md`, `docs/DESIGN-document-evidence-overlay.md`,
+and `docs/DESIGN-approval.md`.
 
 ## Why a claim block needs its own digest
 
@@ -62,7 +66,7 @@ view: requirements
 lang: ja
 source: examples/pm/cancel_system.fsl
 renderer: fslc-document-renderer
-renderer_version: 1.1.0
+renderer_version: 1.2.0
 normative_scope: generated-claim-blocks-only
 spec_digest: sha256:...
 claim_set_digest: sha256:...

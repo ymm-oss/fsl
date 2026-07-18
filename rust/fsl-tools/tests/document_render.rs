@@ -64,6 +64,7 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
         locale,
         None,
         None,
+        None,
     );
     (claims, doc)
 }

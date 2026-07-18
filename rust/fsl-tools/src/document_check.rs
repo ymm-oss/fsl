@@ -167,19 +167,36 @@ pub fn check_requirements_document(
         drift.detail = Some(detail.to_owned());
         reasons.push(drift);
     }
+    // Same trick again: the fresh side's own `approval_digest` reflects
+    // whatever `--approval` records `check`'s caller supplied.
+    let approval_changed = frontmatter.approval_digest != fresh_frontmatter.approval_digest;
+    if approval_changed {
+        let detail = match (
+            &frontmatter.approval_digest,
+            &fresh_frontmatter.approval_digest,
+        ) {
+            (Some(_), None) => "generated_with_approval",
+            (None, Some(_)) => "generated_without_approval",
+            _ => "approval_digest_mismatch",
+        };
+        let mut drift = reason("approval_changed", "FSL-DOC-APPROVAL-CHANGED");
+        drift.detail = Some(detail.to_owned());
+        reasons.push(drift);
+    }
     // A changed renderer or glossary means the rendered claim *text*
     // legitimately differs for a reason unrelated to a hand-edit; skip
     // per-claim-body comparison in either case rather than burying the one
-    // meaningful reason under a flood of `claim_changed` noise. Evidence
-    // never appears inside a claim block (the assurance overlay renders as
+    // meaningful reason under a flood of `claim_changed` noise. Evidence and
+    // approval records never appear inside a claim block (both render as
     // residue, outside every `<!-- fsl:claim -->` marker — see
-    // `docs/DESIGN-document-evidence-overlay.md`), so a pure evidence change
-    // does not skip claim-body comparison: it must still catch a genuine
-    // hand-edit even when the checker's own `--evidence` set does not match
-    // what `generate` was given. Residue text, however, legitimately shifts
-    // whenever evidence changes, so residue comparison skips on all three.
+    // `docs/DESIGN-document-evidence-overlay.md`/`docs/DESIGN-approval.md`),
+    // so neither skips claim-body comparison: a genuine hand-edit inside a
+    // claim must still be caught even when the checker's own `--evidence`/
+    // `--approval` set does not match what `generate` was given. Residue
+    // text, however, legitimately shifts whenever any of the three changes.
     let skip_claim_text = renderer_changed || glossary_changed;
-    let skip_residue_text = renderer_changed || glossary_changed || evidence_changed;
+    let skip_residue_text =
+        renderer_changed || glossary_changed || evidence_changed || approval_changed;
 
     let artifact_body = artifact_text.get(consumed..).unwrap_or("");
     let artifact_segments = match parse_body(artifact_body) {

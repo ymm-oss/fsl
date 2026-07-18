@@ -233,9 +233,12 @@ is this design's own regression guard for the split.
   `assurance_label` remain the sole source of truth.
 - No claim-level assurance (only requirement-level) — see the shared-claim
   rationale above.
-- No `--approval` interaction beyond what already exists elsewhere; approval
-  records remain out of scope for `fslc document` (tracked separately, issue
-  #333).
+- No `--approval` interaction beyond what already exists elsewhere at the
+  time this issue shipped; approval-record integration for `fslc document`
+  landed later in issue #333 (`docs/DESIGN-approval.md`), as its own
+  frontmatter key (`approval_digest`) and drift reason
+  (`approval_changed`/`FSL-DOC-APPROVAL-CHANGED`), following this issue's own
+  `evidence_changed` precedent.
 
 ## Verification evidence
 

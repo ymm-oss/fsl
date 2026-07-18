@@ -11,9 +11,10 @@ two CLI entry points. It adds no new semantics: `fslc document generate` calls
 `fsl_tools::project_requirement_claims_from_source` then
 `fsl_tools::render_requirements_document`; `fslc document claims` calls only the
 projector and serializes its result. Generated block markers and the drift check
-(`fslc document check`) are issue #329; the glossary sidecar, evidence overlay, and
-approval-target integration are issues #330/#332/#333 and are deliberately not wired
-into `generate`'s flag surface here — see "Deferred flags" below.
+(`fslc document check`) are issue #329; the glossary sidecar (#330), evidence
+overlay (#332), and approval-target integration (#333, `docs/DESIGN-approval.md`)
+have since landed on top of this base — see "Deferred flags" below for the
+history of why they were not wired in here initially.
 
 ## CLI surface
 
@@ -109,8 +110,9 @@ issues adds its own flag when the feature behind it exists.
 `--glossary` landed in issue #330 (`docs/DESIGN-document-glossary.md`), on both
 `generate` and `check`. `--evidence` landed in issue #332
 (`docs/DESIGN-document-evidence-overlay.md`), also on both `generate` and
-`check`. `--approval` (#333) remains deferred for the same reason stated
-above.
+`check`. `--approval` (and `--trust-key`) landed in issue #333
+(`docs/DESIGN-approval.md`), also on both `generate` and `check` — no flags
+remain deferred from the issue's original CLI table.
 
 ## Verification evidence
 

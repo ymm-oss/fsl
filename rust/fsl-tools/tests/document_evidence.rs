@@ -206,6 +206,7 @@ fn claims_fixture_render(
         locale,
         None,
         evidence,
+        None,
     );
     (claims, doc.markdown)
 }

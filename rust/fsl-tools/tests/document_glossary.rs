@@ -214,6 +214,7 @@ fn render_cancel_system(locale: Locale, glossary: Option<&fsl_tools::Glossary>) 
         locale,
         applied.as_ref(),
         None,
+        None,
     )
     .markdown
 }

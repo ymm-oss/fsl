@@ -61,6 +61,27 @@ pub struct RenderedDocument {
     pub formula_fallback_count: u64,
 }
 
+/// One `--approval` record's display fields (issue #333) — already
+/// extracted, verified (v2/v4 signature checked), and confirmed to target
+/// `requirements_document` by the caller (`fsl-tools` never reads an
+/// approval record itself; `fslc::approval` owns that). Approval does not
+/// prove intent fidelity: it is an organizational record that the named
+/// approver reviewed the correspondence between the specification and this
+/// document at a specific digest, and the rendered section says so.
+pub struct AppliedApproval {
+    pub record_path: String,
+    pub approver: String,
+    pub approved_at: String,
+    pub requirements: Vec<String>,
+    pub artifact_digest: String,
+    pub signature_key_id: Option<String>,
+}
+
+pub struct AppliedApprovals<'a> {
+    pub records: &'a [AppliedApproval],
+    pub digest: &'a str,
+}
+
 struct Ctx<'a> {
     model: &'a KernelModel,
     trace: Option<&'a RequirementsTraceContract>,
@@ -90,6 +111,12 @@ struct Ctx<'a> {
 /// exclusively as residue *outside* every claim's `<!-- fsl:claim -->`
 /// markers, never inside them, so a claim block's own digest never depends
 /// on whether evidence was supplied.
+///
+/// `approvals` (issue #333) lists already-verified `fslc approval` records
+/// targeting this exact rendering (digest-checked by the caller before this
+/// function is ever reached — a mismatch is the caller's job to reject, not
+/// this renderer's). Rendered as its own reference section, never inside a
+/// claim block, and always paired with the fixed intent-fidelity disclaimer.
 #[must_use]
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
@@ -98,6 +125,7 @@ pub fn render_requirements_document(
     locale: Locale,
     glossary: Option<&AppliedGlossary<'_>>,
     evidence: Option<&AppliedEvidence<'_>>,
+    approvals: Option<&AppliedApprovals<'_>>,
 ) -> RenderedDocument {
     let mut ctx = Ctx {
         model,
@@ -119,6 +147,7 @@ pub fn render_requirements_document(
             &claims.spec.claim_set_digest,
             glossary.map(|applied| applied.digest),
             evidence.map(|applied| applied.digest),
+            approvals.map(|applied| applied.digest),
         ),
     );
     push_section(&mut out, &title(&claims.spec.name, locale));
@@ -134,6 +163,11 @@ pub fn render_requirements_document(
         push_section(&mut out, &section);
     }
     if let Some(section) = evidence_sources_section(claims, ctx.evidence, locale) {
+        push_section(&mut out, &section);
+    }
+    if let Some(section) =
+        approvals_section(approvals.map_or(&[], |applied| applied.records), locale)
+    {
         push_section(&mut out, &section);
     }
     push_section(
@@ -745,6 +779,65 @@ fn evidence_sources_section(
         .collect();
     rows.sort();
     Some(format!("{head}\n\n{intro}\n\n{}", rows.join("\n")))
+}
+
+/// The fixed intent-fidelity disclaimer (issue #333, acceptance criterion
+/// 3): an approval record is an organizational fact about who reviewed what
+/// at which digest, never a proof that the document matches original
+/// intent. Repeated verbatim in `docs/DESIGN-approval.md` and
+/// `skills/fsl-requirements-document/SKILL.md`.
+fn approval_intent_fidelity_disclaimer(locale: Locale) -> &'static str {
+    match locale {
+        Locale::Ja => {
+            "承認記録は、記載された承認者が仕様と本ドキュメントの対応を確認したことを示す組織上の記録である。原意への忠実性を証明するものではない。"
+        }
+        Locale::En => {
+            "An approval record is an organizational record that the named approver reviewed the correspondence between the specification and this document. It does not prove fidelity to original intent."
+        }
+    }
+}
+
+/// A reference section listing every verified `--approval` record (issue
+/// #333), sorted by `(approved_at, record_path)` for determinism regardless
+/// of CLI argument order. `None` (section omitted) when no `--approval` was
+/// supplied at all, so an approval-less document renders byte-identically to
+/// before this issue.
+fn approvals_section(records: &[AppliedApproval], locale: Locale) -> Option<String> {
+    if records.is_empty() {
+        return None;
+    }
+    let head = heading(locale, "##", "承認記録", "Approval records");
+    let disclaimer = approval_intent_fidelity_disclaimer(locale);
+    let mut ordered: Vec<&AppliedApproval> = records.iter().collect();
+    ordered.sort_by(|a, b| (&a.approved_at, &a.record_path).cmp(&(&b.approved_at, &b.record_path)));
+    let rows = ordered
+        .iter()
+        .map(|record| {
+            let signature = match &record.signature_key_id {
+                Some(key_id) => match locale {
+                    Locale::Ja => format!("署名: あり（鍵 ID `{key_id}`）"),
+                    Locale::En => format!("Signature: ed25519, key ID `{key_id}`"),
+                },
+                None => match locale {
+                    Locale::Ja => "署名: なし".to_owned(),
+                    Locale::En => "Signature: none".to_owned(),
+                },
+            };
+            let requirements = record.requirements.join(", ");
+            match locale {
+                Locale::Ja => format!(
+                    "- 承認者: {}\n  - 承認日時: `{}`\n  - 対象要件 ID: {}\n  - 記録: `{}`\n  - 対象ダイジェスト: `{}`\n  - {signature}",
+                    record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
+                ),
+                Locale::En => format!(
+                    "- Approver: {}\n  - Approved at: `{}`\n  - Requirement IDs: {}\n  - Record: `{}`\n  - Target digest: `{}`\n  - {signature}",
+                    record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
+                ),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!("{head}\n\n{disclaimer}\n\n{rows}"))
 }
 
 fn generation_section(claims: &RequirementClaimSet, fallback_count: u64, locale: Locale) -> String {

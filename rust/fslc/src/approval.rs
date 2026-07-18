@@ -19,16 +19,74 @@ use sha2::{Digest, Sha256};
 
 pub const APPROVAL_SCHEMA: &str = "fslc.approval.v1";
 pub const APPROVAL_SCHEMA_V2: &str = "fslc.approval.v2";
+/// A `requirements_document` target (issue #333) is a new, explicit schema
+/// revision rather than an implicit addition to v1/v2's closed `kind` enum —
+/// v1/v2 stay byte-shape compatible and continue to admit only
+/// `ledger`/`html`/`scenarios`.
+pub const APPROVAL_SCHEMA_V3: &str = "fslc.approval.v3";
+/// The signed counterpart of v3, mirroring how v2 is v1 plus `signature`.
+pub const APPROVAL_SCHEMA_V4: &str = "fslc.approval.v4";
 pub const SIGNATURE_ALGORITHM: &str = "ed25519";
 pub const SPEC_DIGEST_ALGORITHM: &str = "fsl-kernel-ast-v1+sha256";
 pub const ARTIFACT_DIGEST_ALGORITHM: &str = "fsl-rendered-artifact-v1+sha256";
+/// The `target.digest_algorithm` for a `requirements_document` target
+/// (v3/v4 only): plain (unframed) `sha256` over the deterministically
+/// rendered Markdown bytes — literally the same value `fslc document
+/// generate`'s own `artifact_digest` envelope field reports, so a caller can
+/// compare the two without any approval-specific machinery.
+pub const REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM: &str =
+    "fsl-rendered-requirements-document-v1+sha256";
+/// The same `claim_set_digest` identity `fsl_tools::document_digest::
+/// CLAIM_SET_DIGEST_ALGORITHM` uses. Duplicated here rather than imported
+/// cross-crate, mirroring `SPEC_DIGEST_ALGORITHM`'s own precedent: the two
+/// producers are independent code that agree on the identity by
+/// construction, keeping this crate's approval logic self-contained.
+pub const CLAIM_SET_DIGEST_ALGORITHM: &str = "fsl-rcir-claim-set-v1+sha256";
 
+/// One repeatable input file (`--glossary`/`--evidence`) recorded at
+/// `requirements_document` approval-creation time, so `approval check` can
+/// re-read the same paths from the current filesystem to reproduce the
+/// approved rendering deterministically.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct GenerationInputs {
+pub struct FileInput {
+    pub path: String,
+    pub digest: String,
+}
+
+/// Reproducibility inputs for a solver-driven target (`ledger`/`html`/
+/// `scenarios`): the BMC/induction run must be repeated identically.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SolverGenerationInputs {
     pub depth: usize,
     pub deadlock: String,
     pub engine: String,
+}
+
+/// Reproducibility inputs for a `requirements_document` target (issue #333):
+/// the deterministic RCIR projection has no solver-depth concept at all —
+/// `view`/`lang` and the exact `--glossary`/`--evidence` file set drive the
+/// rendered bytes instead.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentGenerationInputs {
+    pub view: String,
+    pub lang: String,
+    pub glossary: Option<FileInput>,
+    pub evidence: Vec<FileInput>,
+}
+
+/// Which reproducibility inputs a target binding carries. Untagged: the two
+/// variants have disjoint required field sets (`depth`/`deadlock`/`engine`
+/// vs `view`/`lang`/`glossary`/`evidence`), so serde disambiguates
+/// unambiguously without a discriminator field, and v1/v2 records (always
+/// `Solver`) keep serializing byte-identically.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum GenerationInputs {
+    Solver(SolverGenerationInputs),
+    Document(DocumentGenerationInputs),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -47,6 +105,16 @@ pub struct TargetBinding {
     pub path: String,
     pub digest_algorithm: String,
     pub digest: String,
+    /// Present only for a `requirements_document` target (v3/v4): the RCIR
+    /// claim-set digest (issue #325) alongside the rendered artifact's own
+    /// digest, so drift in the requirements projection itself is
+    /// distinguishable from drift elsewhere. `#[serde(default)]` lets a v1/v2
+    /// record (which never has this key) still deserialize into this same
+    /// struct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_set_digest_algorithm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_set_digest: Option<String>,
     pub generator: String,
     pub generator_version: String,
     pub inputs: GenerationInputs,
@@ -99,12 +167,23 @@ impl VersionedApprovalRecord {
         match self {
             Self::V1(record) => record.clone(),
             Self::V2(record) => ApprovalRecord {
-                schema: APPROVAL_SCHEMA.to_owned(),
+                schema: unsigned_schema_for(&record.schema).to_owned(),
                 spec: record.spec.clone(),
                 target: record.target.clone(),
                 approval: record.approval.clone(),
             },
         }
+    }
+}
+
+/// The unsigned schema a signed schema's own record binds to: v2 -> v1,
+/// v4 -> v3. Falls back to v1 for any other value (`validate_record_v2`
+/// rejects those before this is ever reached).
+fn unsigned_schema_for(signed_schema: &str) -> &'static str {
+    if signed_schema == APPROVAL_SCHEMA_V4 {
+        APPROVAL_SCHEMA_V3
+    } else {
+        APPROVAL_SCHEMA
     }
 }
 
@@ -215,7 +294,11 @@ fn signature_payload(record: &ApprovalRecordV2) -> Result<Vec<u8>, String> {
         .and_then(Value::as_object_mut)
         .expect("serialized v2 signature is an object")
         .remove("value");
-    let mut payload = APPROVAL_SCHEMA_V2.as_bytes().to_vec();
+    // Domain-separate by the record's own schema (v2 or v4) rather than a
+    // hardcoded v2 constant, so a v4 signature can never verify against a v2
+    // payload or vice versa. Byte-identical to before for existing v2
+    // records, since `record.schema` is already `"fslc.approval.v2"` there.
+    let mut payload = record.schema.as_bytes().to_vec();
     payload.push(0);
     payload.extend(
         serde_json::to_vec(&stable_json(&value, false)).map_err(|error| error.to_string())?,
@@ -465,8 +548,8 @@ pub fn read_versioned_record(path: &Path) -> Result<VersionedApprovalRecord, Str
     let header: SchemaHeader = serde_json::from_str(&source)
         .map_err(|error| format!("invalid approval record: {error}"))?;
     match header.schema.as_str() {
-        APPROVAL_SCHEMA => read_record(path).map(VersionedApprovalRecord::V1),
-        APPROVAL_SCHEMA_V2 => {
+        APPROVAL_SCHEMA | APPROVAL_SCHEMA_V3 => read_record(path).map(VersionedApprovalRecord::V1),
+        APPROVAL_SCHEMA_V2 | APPROVAL_SCHEMA_V4 => {
             let record: ApprovalRecordV2 = serde_json::from_str(&source)
                 .map_err(|error| format!("invalid approval record: {error}"))?;
             validate_record_v2(&record)?;
@@ -476,26 +559,17 @@ pub fn read_versioned_record(path: &Path) -> Result<VersionedApprovalRecord, Str
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
-    if record.schema != APPROVAL_SCHEMA {
-        return Err(format!("unsupported approval schema '{}'", record.schema));
-    }
+    let is_document = match record.schema.as_str() {
+        APPROVAL_SCHEMA => false,
+        APPROVAL_SCHEMA_V3 => true,
+        schema => return Err(format!("unsupported approval schema '{schema}'")),
+    };
     if record.spec.digest_algorithm != SPEC_DIGEST_ALGORITHM {
         return Err(format!(
             "unsupported spec digest algorithm '{}'",
             record.spec.digest_algorithm
-        ));
-    }
-    if record.target.digest_algorithm != ARTIFACT_DIGEST_ALGORITHM {
-        return Err(format!(
-            "unsupported artifact digest algorithm '{}'",
-            record.target.digest_algorithm
-        ));
-    }
-    if !matches!(record.target.kind.as_str(), "ledger" | "html" | "scenarios") {
-        return Err(format!(
-            "unsupported approval target '{}'",
-            record.target.kind
         ));
     }
     if record.spec.path.trim().is_empty() || record.target.path.trim().is_empty() {
@@ -516,12 +590,87 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
     if record.target.generator != "fslc" || record.target.generator_version.trim().is_empty() {
         return Err("approval record contains an unsupported generator".to_owned());
     }
-    if !matches!(
-        record.target.inputs.deadlock.as_str(),
-        "warn" | "error" | "ignore"
-    ) || !matches!(record.target.inputs.engine.as_str(), "bmc" | "induction")
-    {
-        return Err("approval record contains invalid generation inputs".to_owned());
+    if is_document {
+        if record.target.kind != "requirements_document" {
+            return Err(format!(
+                "unsupported approval target '{}'",
+                record.target.kind
+            ));
+        }
+        if record.target.digest_algorithm != REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM {
+            return Err(format!(
+                "unsupported artifact digest algorithm '{}'",
+                record.target.digest_algorithm
+            ));
+        }
+        if record.target.claim_set_digest_algorithm.as_deref() != Some(CLAIM_SET_DIGEST_ALGORITHM) {
+            return Err(
+                "requirements_document approval requires a claim_set_digest_algorithm".to_owned(),
+            );
+        }
+        match &record.target.claim_set_digest {
+            Some(digest) if is_sha256(digest) => {}
+            _ => return Err("approval record contains an invalid claim_set_digest".to_owned()),
+        }
+        match &record.target.inputs {
+            GenerationInputs::Document(inputs) => {
+                if inputs.view != "requirements" {
+                    return Err(format!("unsupported document view '{}'", inputs.view));
+                }
+                if !matches!(inputs.lang.as_str(), "ja" | "en") {
+                    return Err(format!("unsupported document lang '{}'", inputs.lang));
+                }
+                let valid_file_input =
+                    |input: &FileInput| !input.path.trim().is_empty() && is_sha256(&input.digest);
+                if !inputs.glossary.as_ref().is_none_or(valid_file_input)
+                    || !inputs.evidence.iter().all(valid_file_input)
+                {
+                    return Err(
+                        "approval record contains an invalid glossary/evidence file input"
+                            .to_owned(),
+                    );
+                }
+            }
+            GenerationInputs::Solver(_) => {
+                return Err(
+                    "requirements_document approval requires document generation inputs".to_owned(),
+                );
+            }
+        }
+    } else {
+        if !matches!(record.target.kind.as_str(), "ledger" | "html" | "scenarios") {
+            return Err(format!(
+                "unsupported approval target '{}'",
+                record.target.kind
+            ));
+        }
+        if record.target.digest_algorithm != ARTIFACT_DIGEST_ALGORITHM {
+            return Err(format!(
+                "unsupported artifact digest algorithm '{}'",
+                record.target.digest_algorithm
+            ));
+        }
+        if record.target.claim_set_digest_algorithm.is_some()
+            || record.target.claim_set_digest.is_some()
+        {
+            return Err(
+                "ledger/html/scenarios approval must not carry a claim_set_digest".to_owned(),
+            );
+        }
+        match &record.target.inputs {
+            GenerationInputs::Solver(inputs) => {
+                if !matches!(inputs.deadlock.as_str(), "warn" | "error" | "ignore")
+                    || !matches!(inputs.engine.as_str(), "bmc" | "induction")
+                {
+                    return Err("approval record contains invalid generation inputs".to_owned());
+                }
+            }
+            GenerationInputs::Document(_) => {
+                return Err(
+                    "ledger/html/scenarios approval requires solver generation inputs".to_owned(),
+                );
+            }
+        }
     }
     if record.approval.approver.trim().is_empty() {
         return Err("approval record requires a non-empty approver".to_owned());
@@ -545,11 +694,13 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
 }
 
 pub fn validate_record_v2(record: &ApprovalRecordV2) -> Result<(), String> {
-    if record.schema != APPROVAL_SCHEMA_V2 {
-        return Err(format!("unsupported approval schema '{}'", record.schema));
-    }
+    let unsigned_schema = match record.schema.as_str() {
+        APPROVAL_SCHEMA_V2 => APPROVAL_SCHEMA,
+        APPROVAL_SCHEMA_V4 => APPROVAL_SCHEMA_V3,
+        schema => return Err(format!("unsupported approval schema '{schema}'")),
+    };
     validate_record(&ApprovalRecord {
-        schema: APPROVAL_SCHEMA.to_owned(),
+        schema: unsigned_schema.to_owned(),
         spec: record.spec.clone(),
         target: record.target.clone(),
         approval: record.approval.clone(),
@@ -636,8 +787,13 @@ pub fn sign_record(record: ApprovalRecord, private_key: &Path) -> Result<Approva
             private_key.display()
         )
     })?;
+    let signed_schema = if record.schema == APPROVAL_SCHEMA_V3 {
+        APPROVAL_SCHEMA_V4
+    } else {
+        APPROVAL_SCHEMA_V2
+    };
     let mut signed = ApprovalRecordV2 {
-        schema: APPROVAL_SCHEMA_V2.to_owned(),
+        schema: signed_schema.to_owned(),
         spec: record.spec,
         target: record.target,
         approval: record.approval,
@@ -667,6 +823,7 @@ pub fn evaluate(
     current_spec_digest: &str,
     current_artifact_digest: &str,
     current_generator_version: &str,
+    current_claim_set_digest: Option<&str>,
 ) -> Value {
     let mut reasons = Vec::new();
     if record.spec.digest != current_spec_digest {
@@ -678,12 +835,18 @@ pub fn evaluate(
     if record.target.generator_version != current_generator_version {
         reasons.push("renderer_changed");
     }
+    if let (Some(recorded), Some(current)) =
+        (&record.target.claim_set_digest, current_claim_set_digest)
+        && recorded != current
+    {
+        reasons.push("claim_set_changed");
+    }
     let status = if reasons.is_empty() {
         "approved"
     } else {
         "drifted"
     };
-    json!({
+    let mut evaluation = json!({
         "status": status,
         "reasons": reasons,
         "record": record_path.display().to_string(),
@@ -701,7 +864,15 @@ pub fn evaluate(
             shell_word(&record.spec.path),
             shell_word(&record_path.display().to_string())
         ),
-    })
+    });
+    let fields = evaluation.as_object_mut().expect("evaluation object");
+    if let Some(recorded) = &record.target.claim_set_digest {
+        fields.insert("claim_set_digest".to_owned(), json!(recorded));
+    }
+    if let Some(current) = current_claim_set_digest {
+        fields.insert("current_claim_set_digest".to_owned(), json!(current));
+    }
+    evaluation
 }
 
 fn shell_word(value: &str) -> String {

@@ -1604,9 +1604,11 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             let mut artifact = None;
             let mut approver = None;
             let mut requirements = Vec::new();
-            let mut depth = 8_usize;
-            let mut deadlock = "ignore".to_owned();
-            let mut engine = "bmc".to_owned();
+            let mut depth = None;
+            let mut deadlock = None;
+            let mut engine = None;
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
             let mut output = None;
             let mut signing_key = None;
             while let Some(option) = args.next() {
@@ -1631,21 +1633,37 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         )?));
                     }
                     "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                        depth = Some(
+                            required_option_value(&mut args, "--depth")?
+                                .parse::<usize>()
+                                .map_err(|_| "--depth must be a non-negative integer".to_owned())?,
+                        );
                     }
                     "--deadlock" => {
-                        deadlock = required_option_value(&mut args, "--deadlock")?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                        let value = required_option_value(&mut args, "--deadlock")?;
+                        if !matches!(value.as_str(), "warn" | "error" | "ignore") {
                             return Err("--deadlock must be warn, error, or ignore".to_owned());
                         }
+                        deadlock = Some(value);
                     }
                     "--engine" => {
-                        engine = required_option_value(&mut args, "--engine")?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
+                        let value = required_option_value(&mut args, "--engine")?;
+                        if !matches!(value.as_str(), "bmc" | "induction") {
                             return Err("--engine must be bmc or induction".to_owned());
                         }
+                        engine = Some(value);
+                    }
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
                     }
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
@@ -1653,17 +1671,39 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     _ => return Err(format!("unknown approval create option '{option}'")),
                 }
             }
+            let kind = kind.ok_or_else(|| "approval create requires --kind".to_owned())?;
+            let artifact =
+                artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?;
+            let approver =
+                approver.ok_or_else(|| "approval create requires --approver".to_owned())?;
+            let inputs = if kind == "requirements_document" {
+                if depth.is_some() || deadlock.is_some() || engine.is_some() {
+                    return Err(
+                        "--depth/--deadlock/--engine are not valid with --kind requirements_document"
+                            .to_owned(),
+                    );
+                }
+                document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths)?
+            } else {
+                if glossary.is_some() || !evidence_paths.is_empty() {
+                    return Err(
+                        "--glossary/--evidence are only valid with --kind requirements_document"
+                            .to_owned(),
+                    );
+                }
+                approval::GenerationInputs::Solver(approval::SolverGenerationInputs {
+                    depth: depth.unwrap_or(8),
+                    deadlock: deadlock.unwrap_or_else(|| "ignore".to_owned()),
+                    engine: engine.unwrap_or_else(|| "bmc".to_owned()),
+                })
+            };
             Ok(run_approval_create(
                 &path,
-                &kind.ok_or_else(|| "approval create requires --kind".to_owned())?,
-                &artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?,
-                &approver.ok_or_else(|| "approval create requires --approver".to_owned())?,
+                &kind,
+                &artifact,
+                &approver,
                 &requirements,
-                &approval::GenerationInputs {
-                    depth,
-                    deadlock,
-                    engine,
-                },
+                &inputs,
                 output.as_deref(),
                 signing_key.as_deref(),
             ))
@@ -1737,6 +1777,8 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             let mut strict_rendering = false;
             let mut glossary = None;
             let mut evidence_paths = Vec::new();
+            let mut approval_paths = Vec::new();
+            let mut trust_keys = Vec::new();
             let mut output = None;
             while let Some(option) = args.next() {
                 match option.as_str() {
@@ -1768,6 +1810,16 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             "--evidence",
                         )?));
                     }
+                    "--approval" => {
+                        approval_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--approval",
+                        )?));
+                    }
+                    "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--trust-key",
+                    )?)),
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
                     }
@@ -1781,6 +1833,8 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                 strict_rendering,
                 glossary.as_deref(),
                 &evidence_paths,
+                &approval_paths,
+                &trust_keys,
                 output.as_deref(),
             );
             if output.is_none()
@@ -1834,6 +1888,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             );
             let mut glossary = None;
             let mut evidence_paths = Vec::new();
+            let mut approval_paths = Vec::new();
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--glossary" => {
@@ -1848,6 +1903,12 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             "--evidence",
                         )?));
                     }
+                    "--approval" => {
+                        approval_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--approval",
+                        )?));
+                    }
                     _ => return Err(format!("unknown document check option '{option}'")),
                 }
             }
@@ -1856,6 +1917,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                 &artifact,
                 glossary.as_deref(),
                 &evidence_paths,
+                &approval_paths,
             ))
         }
         _ => Err(format!("unknown document subcommand '{subcommand}'")),
@@ -2035,7 +2097,97 @@ fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, V
     Ok(Some((files, combined)))
 }
 
-#[allow(clippy::too_many_lines)]
+fn document_approval_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-APPROVAL-INVALID"));
+    output
+}
+
+fn document_approval_drifted_error(reasons: &[&'static str]) -> Value {
+    let mut output = error_output(
+        "document",
+        "a supplied --approval record does not match the current rendering",
+    );
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .extend([
+            ("code".to_owned(), json!("FSL-DOC-APPROVAL-DRIFTED")),
+            ("reasons".to_owned(), json!(reasons)),
+        ]);
+    output
+}
+
+/// A `--approval` record loaded and (for a signed schema) verified for
+/// `fslc document generate`'s overlay (issue #333), retaining the full
+/// parsed record so the caller can compare its `spec`/`target` digests
+/// against the current rendering before ever displaying it.
+struct LoadedApproval {
+    record: approval::ApprovalRecord,
+    record_path: String,
+    signature_key_id: Option<String>,
+}
+
+/// Load and verify every `--approval` record. Each must target
+/// `requirements_document`; a signed (v2/v4) record must verify against
+/// `--trust-key` or this fails closed — a stakeholder document must never
+/// display an unverifiable signed approval. Returns `None` when no
+/// `--approval` flags were given. The combined digest sorts each record
+/// file's own digest before hashing them together, the same order-
+/// independent scheme `load_evidence`/`load_glossary` already use.
+fn load_approvals(
+    paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+) -> Result<Option<(Vec<LoadedApproval>, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let trust =
+        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+    let mut loaded = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let versioned = approval::read_versioned_record(path)
+            .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
+        let (record, signature_key_id) = match &versioned {
+            approval::VersionedApprovalRecord::V1(record) => (record.clone(), None),
+            approval::VersionedApprovalRecord::V2(record) => {
+                let verified = trust
+                    .verify(record)
+                    .map_err(|error| error_output("io", &error))?;
+                if !verified {
+                    return Err(document_approval_error(&format!(
+                        "{}: signature is invalid or untrusted",
+                        path.display()
+                    )));
+                }
+                (versioned.binding(), Some(record.signature.key_id.clone()))
+            }
+        };
+        if record.target.kind != "requirements_document" {
+            return Err(document_approval_error(&format!(
+                "{}: approval record targets '{}', not requirements_document",
+                path.display(),
+                record.target.kind
+            )));
+        }
+        loaded.push(LoadedApproval {
+            record,
+            record_path: path.display().to_string(),
+            signature_key_id,
+        });
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((loaded, combined)))
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_document_generate(
     path: &Path,
     locale: fsl_tools::Locale,
@@ -2043,6 +2195,8 @@ fn run_document_generate(
     strict_rendering: bool,
     glossary_path: Option<&Path>,
     evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     let (source, claims) = match load_document_claims(path) {
@@ -2136,6 +2290,7 @@ fn run_document_generate(
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
+        None,
     );
     if strict_rendering && rendered.formula_fallback_count > 0 {
         let mut output = error_output(
@@ -2151,6 +2306,62 @@ fn run_document_generate(
             .insert("code".to_owned(), json!("FSL-DOC-FORMULA-FALLBACK"));
         return (output, 2);
     }
+    let pre_approval_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
+
+    let loaded_approvals = match load_approvals(approval_paths, trust_keys) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let mut applied_approvals_vec = Vec::new();
+    if let Some((loaded, _)) = &loaded_approvals {
+        let mut mismatched: Vec<&'static str> = Vec::new();
+        for approval in loaded {
+            if approval.record.spec.digest != claims.spec.spec_digest {
+                mismatched.push("spec_changed");
+            }
+            if approval.record.target.digest != pre_approval_digest {
+                mismatched.push("rendering_changed");
+            }
+            if approval.record.target.claim_set_digest.as_deref()
+                != Some(claims.spec.claim_set_digest.as_str())
+            {
+                mismatched.push("claim_set_changed");
+            }
+        }
+        mismatched.sort_unstable();
+        mismatched.dedup();
+        if !mismatched.is_empty() {
+            return (document_approval_drifted_error(&mismatched), 2);
+        }
+        applied_approvals_vec = loaded
+            .iter()
+            .map(|approval| fsl_tools::AppliedApproval {
+                record_path: approval.record_path.clone(),
+                approver: approval.record.approval.approver.clone(),
+                approved_at: approval.record.approval.approved_at.clone(),
+                requirements: approval.record.approval.requirements.clone(),
+                artifact_digest: approval.record.target.digest.clone(),
+                signature_key_id: approval.signature_key_id.clone(),
+            })
+            .collect();
+    }
+    let rendered = if let Some((_, combined_digest)) = &loaded_approvals {
+        let applied_approvals = fsl_tools::AppliedApprovals {
+            records: &applied_approvals_vec,
+            digest: combined_digest,
+        };
+        fsl_tools::render_requirements_document(
+            &claims,
+            &model,
+            trace.as_ref(),
+            locale,
+            applied_glossary.as_ref(),
+            applied_evidence.as_ref(),
+            Some(&applied_approvals),
+        )
+    } else {
+        rendered
+    };
     let artifact_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
     if let Some(path) = output_path
         && let Err(error) = std::fs::write(path, &rendered.markdown)
@@ -2202,6 +2413,15 @@ fn run_document_generate(
             json!({
                 "digest": digest,
                 "files": files.len(),
+            }),
+        );
+    }
+    if let Some((_, digest)) = &loaded_approvals {
+        output.insert(
+            "approvals".to_owned(),
+            json!({
+                "digest": digest,
+                "records": applied_approvals_vec.len(),
             }),
         );
     }
@@ -2274,15 +2494,62 @@ fn document_schema_error(message: &str) -> Value {
     output
 }
 
+/// Load every `--approval` record for `fslc document check` (issue #333),
+/// which reproduces the "Approval records" section's *text* for structural
+/// comparison only — unlike `document generate`, it never verifies a
+/// signature (admission was `generate`'s job); it only needs the plaintext
+/// display fields to render byte-identically.
+fn load_approvals_for_check(
+    paths: &[PathBuf],
+) -> Result<Option<(Vec<fsl_tools::AppliedApproval>, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut applied = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let versioned = approval::read_versioned_record(path)
+            .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
+        let (record, signature_key_id) = match &versioned {
+            approval::VersionedApprovalRecord::V1(record) => (record.clone(), None),
+            approval::VersionedApprovalRecord::V2(record) => {
+                (versioned.binding(), Some(record.signature.key_id.clone()))
+            }
+        };
+        if record.target.kind != "requirements_document" {
+            return Err(document_approval_error(&format!(
+                "{}: approval record targets '{}', not requirements_document",
+                path.display(),
+                record.target.kind
+            )));
+        }
+        applied.push(fsl_tools::AppliedApproval {
+            record_path: path.display().to_string(),
+            approver: record.approval.approver,
+            approved_at: record.approval.approved_at,
+            requirements: record.approval.requirements,
+            artifact_digest: record.target.digest,
+            signature_key_id,
+        });
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((applied, combined)))
+}
+
 /// `fslc document check` (issue #329): a purely structural drift check
 /// between `artifact` (a possibly hand-edited `fslc document generate`
 /// output) and a fresh re-projection + re-render of `spec_path`, under the
 /// locale and source label the artifact's own frontmatter recorded.
+#[allow(clippy::too_many_lines)]
 fn run_document_check(
     spec_path: &Path,
     artifact: &Path,
     glossary_path: Option<&Path>,
     evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
 ) -> (Value, i32) {
     let artifact_text = match std::fs::read_to_string(artifact) {
         Ok(text) => text,
@@ -2341,6 +2608,10 @@ fn run_document_check(
         Ok(loaded) => loaded,
         Err(output) => return (output, 2),
     };
+    let loaded_approvals = match load_approvals_for_check(approval_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
     let trace = match fsl_core::requirements_trace_contract(&source) {
         Ok(trace) => trace,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
@@ -2351,6 +2622,9 @@ fn run_document_check(
     let applied_evidence = loaded_evidence
         .as_ref()
         .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let applied_approvals = loaded_approvals
+        .as_ref()
+        .map(|(records, digest)| fsl_tools::AppliedApprovals { records, digest });
     let rendered = fsl_tools::render_requirements_document(
         &claims,
         &model,
@@ -2358,6 +2632,7 @@ fn run_document_check(
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
+        applied_approvals.as_ref(),
     );
 
     let report =
@@ -9068,11 +9343,132 @@ fn run_html_report(
     )
 }
 
+fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    Ok(approval::FileInput {
+        path: path.display().to_string(),
+        digest: approval::sha256_bytes(&bytes),
+    })
+}
+
+/// Build `--kind requirements_document`'s recorded reproducibility inputs
+/// (issue #333): `view`/`lang` are read from the reviewed artifact's own
+/// frontmatter (no new `--view`/`--lang` flags on `approval create`, mirroring
+/// how `fslc document check` already reads them back rather than trusting a
+/// possibly-inconsistent flag), while `--glossary`/`--evidence` are hashed
+/// the same way `fslc document generate` hashes them.
+fn document_generation_inputs(
+    artifact_path: &Path,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+) -> Result<approval::GenerationInputs, String> {
+    let artifact_text =
+        std::fs::read_to_string(artifact_path).map_err(|error| error.to_string())?;
+    let frontmatter =
+        fsl_tools::parse_frontmatter_only(&artifact_text).map_err(|error| error.to_string())?;
+    if frontmatter.view != "requirements" {
+        return Err(format!("unsupported document view '{}'", frontmatter.view));
+    }
+    let glossary = glossary_path.map(load_file_input).transpose()?;
+    let evidence = evidence_paths
+        .iter()
+        .map(|path| load_file_input(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(approval::GenerationInputs::Document(
+        approval::DocumentGenerationInputs {
+            view: "requirements".to_owned(),
+            lang: frontmatter.lang,
+            glossary,
+            evidence,
+        },
+    ))
+}
+
+/// Re-render a `requirements` document deterministically from `(spec,
+/// inputs)` alone, with no `--strict` gate and no approval overlay — used by
+/// both `fslc approval create --kind requirements_document` (to build the
+/// canonical rendering a reviewed artifact must conform to) and `fslc
+/// approval check`/`fslc document generate --approval` (to reproduce the
+/// same rendering's digest at check time). Returns the claims (needed for
+/// `fsl_tools::check_requirements_document`'s conformance gate at create
+/// time) alongside the canonical Markdown.
+fn render_document_for_approval(
+    path: &Path,
+    inputs: &approval::DocumentGenerationInputs,
+) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
+    let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
+        error_output(
+            "document",
+            &format!("unsupported document lang '{}'", inputs.lang),
+        )
+    })?;
+    let (source, claims) = load_document_claims(path)?;
+    let loaded_glossary = load_glossary(
+        inputs
+            .glossary
+            .as_ref()
+            .map(|file| Path::new(file.path.as_str())),
+        locale,
+    )?;
+    let evidence_paths: Vec<PathBuf> = inputs
+        .evidence
+        .iter()
+        .map(|file| PathBuf::from(&file.path))
+        .collect();
+    let loaded_evidence = load_evidence(&evidence_paths)?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source(&source, &resolver)
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model =
+        fsl_core::build_model(kernel).map_err(|error| semantic_error_output(&error.to_string()))?;
+    let trace = fsl_core::requirements_trace_contract(&source)
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let rendered = fsl_tools::render_requirements_document(
+        &claims,
+        &model,
+        trace.as_ref(),
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        None,
+    );
+    Ok((claims, rendered.markdown))
+}
+
+/// Reproduce a target's canonical rendering fresh from `(spec, inputs)` —
+/// the shared re-render dispatch `approval create`'s conformance gate and
+/// `approval check`/`approval diff`'s drift comparison both call. Returns the
+/// rendered bytes plus, for `requirements_document` only, the RCIR claim-set
+/// digest that rendering used (`None` for the three solver-driven kinds,
+/// which have no RCIR concept at all).
 fn approval_artifact(
     path: &Path,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<Vec<u8>, Value> {
+) -> Result<(Vec<u8>, Option<String>), Value> {
+    if kind == "requirements_document" {
+        let approval::GenerationInputs::Document(document_inputs) = inputs else {
+            return Err(error_output(
+                "usage",
+                "requirements_document approval requires document generation inputs",
+            ));
+        };
+        let (claims, markdown) = render_document_for_approval(path, document_inputs)?;
+        return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
+    }
+    let approval::GenerationInputs::Solver(inputs) = inputs else {
+        return Err(error_output(
+            "usage",
+            "ledger/html/scenarios approval requires solver generation inputs",
+        ));
+    };
     let (result, status) = match kind {
         "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
             path,
@@ -9095,18 +9491,19 @@ fn approval_artifact(
     if status != 0 {
         return Err(result);
     }
-    if matches!(kind, "ledger" | "html") {
+    let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
-            .ok_or_else(|| error_output("internal", "generated artifact has no content"))
+            .ok_or_else(|| error_output("internal", "generated artifact has no content"))?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
             .map_err(|error| error_output("internal", &error.to_string()))?;
         encoded.push(b'\n');
-        Ok(encoded)
-    }
+        encoded
+    };
+    Ok((bytes, None))
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -9120,9 +9517,15 @@ fn run_approval_create(
     output_path: Option<&Path>,
     signing_key: Option<&Path>,
 ) -> (Value, i32) {
-    if !matches!(kind, "ledger" | "html" | "scenarios") {
+    if !matches!(
+        kind,
+        "ledger" | "html" | "scenarios" | "requirements_document"
+    ) {
         return (
-            error_output("usage", "--kind must be ledger, html, or scenarios"),
+            error_output(
+                "usage",
+                "--kind must be ledger, html, scenarios, or requirements_document",
+            ),
             2,
         );
     }
@@ -9141,31 +9544,98 @@ fn run_approval_create(
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let expected_artifact = match approval_artifact(path, kind, inputs) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error, 2),
-    };
-    let reviewed_artifact = match std::fs::read(artifact_path) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("semantics", &error), 2),
-    };
-    let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("internal", &error), 3),
-    };
-    if normalized_reviewed != normalized_expected {
-        return (
-            error_output(
+
+    let (target_digest_bytes, target_digest_algorithm, claim_set_digest, schema) = if kind
+        == "requirements_document"
+    {
+        let approval::GenerationInputs::Document(document_inputs) = inputs else {
+            return (
+                error_output(
+                    "usage",
+                    "--kind requirements_document requires document generation inputs",
+                ),
+                2,
+            );
+        };
+        let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs) {
+            Ok(result) => result,
+            Err(error) => return (error, 2),
+        };
+        let reviewed_text = match std::fs::read_to_string(artifact_path) {
+            Ok(text) => text,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let report = match fsl_tools::check_requirements_document(
+            &reviewed_text,
+            &claims,
+            &fresh_markdown,
+        ) {
+            Ok(report) => report,
+            Err(error) => return (document_schema_error(&error.to_string()), 2),
+        };
+        if !report.is_conformant() {
+            let mut output = error_output(
                 "semantics",
-                "reviewed artifact does not match a fresh rendering with the recorded inputs",
-            ),
-            2,
-        );
-    }
+                "reviewed document does not conform to a fresh rendering with the recorded inputs",
+            );
+            output
+                .as_object_mut()
+                .expect("approval error envelope")
+                .insert(
+                    "reasons".to_owned(),
+                    serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+                );
+            return (output, 2);
+        }
+        (
+            fresh_markdown.into_bytes(),
+            approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
+            Some(claims.spec.claim_set_digest),
+            approval::APPROVAL_SCHEMA_V3,
+        )
+    } else {
+        let approval::GenerationInputs::Solver(_) = inputs else {
+            return (
+                error_output(
+                    "usage",
+                    "--kind ledger/html/scenarios requires solver generation inputs",
+                ),
+                2,
+            );
+        };
+        let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error, 2),
+        };
+        let reviewed_artifact = match std::fs::read(artifact_path) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error_output("semantics", &error), 2),
+        };
+        let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error_output("internal", &error), 3),
+        };
+        if normalized_reviewed != normalized_expected {
+            return (
+                error_output(
+                    "semantics",
+                    "reviewed artifact does not match a fresh rendering with the recorded inputs",
+                ),
+                2,
+            );
+        }
+        (
+            normalized_reviewed,
+            approval::ARTIFACT_DIGEST_ALGORITHM,
+            None,
+            approval::APPROVAL_SCHEMA,
+        )
+    };
+
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
         return (
@@ -9196,7 +9666,7 @@ fn run_approval_create(
         );
     }
     let record = approval::ApprovalRecord {
-        schema: approval::APPROVAL_SCHEMA.to_owned(),
+        schema: schema.to_owned(),
         spec: approval::SpecBinding {
             path: relative_path,
             digest_algorithm: approval::SPEC_DIGEST_ALGORITHM.to_owned(),
@@ -9206,8 +9676,12 @@ fn run_approval_create(
         target: approval::TargetBinding {
             kind: kind.to_owned(),
             path: artifact_path.display().to_string(),
-            digest_algorithm: approval::ARTIFACT_DIGEST_ALGORITHM.to_owned(),
-            digest: approval::sha256_bytes(&normalized_reviewed),
+            digest_algorithm: target_digest_algorithm.to_owned(),
+            digest: approval::sha256_bytes(&target_digest_bytes),
+            claim_set_digest_algorithm: claim_set_digest
+                .as_ref()
+                .map(|_| approval::CLAIM_SET_DIGEST_ALGORITHM.to_owned()),
+            claim_set_digest,
             generator: "fslc".to_owned(),
             generator_version: env!("CARGO_PKG_VERSION").to_owned(),
             inputs: inputs.clone(),
@@ -9300,7 +9774,8 @@ fn approval_evaluation(
         .map_err(|error| error_output("io", &error))?;
     let current_spec_digest =
         approval::spec_digest(path).map_err(|error| semantic_error_output(&error))?;
-    let artifact = approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+    let (artifact, current_claim_set_digest) =
+        approval_artifact(path, &record.target.kind, &record.target.inputs)?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
@@ -9310,6 +9785,7 @@ fn approval_evaluation(
         &current_spec_digest,
         &current_artifact_digest,
         env!("CARGO_PKG_VERSION"),
+        current_claim_set_digest.as_deref(),
     );
     let output = evaluation
         .as_object_mut()

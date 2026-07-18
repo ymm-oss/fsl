@@ -205,6 +205,28 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
         created["record"]["approval"]["requirements"],
         json!(["REQ-190"])
     );
+    // Issue #333 added `claim_set_digest`/`claim_set_digest_algorithm` to
+    // `TargetBinding`, but only for a `requirements_document` target; a
+    // `ledger` record's shape (and schema `fslc.approval.v1`) must stay
+    // byte-identical to before that issue.
+    assert_eq!(created["record"]["schema"], "fslc.approval.v1");
+    assert_eq!(
+        created["record"]["target"]
+            .as_object()
+            .expect("target object")
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([
+            "kind",
+            "path",
+            "digest_algorithm",
+            "digest",
+            "generator",
+            "generator_version",
+            "inputs",
+        ])
+    );
 
     let approved = json_output(&successful(
         &root,
