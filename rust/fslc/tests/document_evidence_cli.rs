@@ -48,7 +48,9 @@ fn temp_path(suffix: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!(
+    let directory = root().join("rust/target/fslc-tests");
+    std::fs::create_dir_all(&directory).expect("create repository-local test directory");
+    directory.join(format!(
         "fslc-issue-332-{}-{nonce}-{}{suffix}",
         std::process::id(),
         NEXT_OUTPUT.fetch_add(1, Ordering::Relaxed),
@@ -181,7 +183,11 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
     )
     .expect("write spec");
     let evidence = write_evidence(r#"{"requirement":{"id":"REQ-99"},"completeness":"unbounded"}"#);
-    let spec_str = spec.to_str().expect("utf8 path");
+    let spec_str = spec
+        .strip_prefix(root())
+        .expect("repository-local fixture")
+        .to_str()
+        .expect("utf8 path");
     let evidence_str = evidence.to_str().expect("utf8 path");
 
     let clean = run(&["document", "generate", spec_str, "--lang", "ja", "--strict"]);

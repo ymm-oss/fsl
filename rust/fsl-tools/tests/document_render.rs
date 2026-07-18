@@ -132,7 +132,72 @@ fn renderer_rejects_an_unresolved_semantic_target() {
         None,
     )
     .expect_err("unresolved target must fail closed");
-    assert!(error.contains("resolved 0 times"));
+    assert!(error.contains("subject does not match"));
+}
+
+#[test]
+fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
+    let fixture = cancel_system();
+    let mut claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    let claim = claims
+        .claims
+        .iter_mut()
+        .find(|claim| claim.id == "action:tap_cancel#operation")
+        .expect("tap_cancel claim");
+    claim.subject["action"] = serde_json::json!("submit_cancel");
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        Locale::En,
+        None,
+        None,
+        None,
+    )
+    .expect_err("mismatched RCIR role mapping must fail closed");
+    assert!(error.contains("subject does not match"));
+}
+
+#[test]
+fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
+    let fixture = cancel_system();
+    let claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let mut trace = fsl_core::requirements_trace_contract(&fixture.source)
+        .expect("trace contract")
+        .expect("requirements trace");
+    trace.acceptance[0].steps[2].name = "decline".to_owned();
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        Some(&trace),
+        Locale::En,
+        None,
+        None,
+        None,
+    )
+    .expect_err("mismatched trace payload must fail closed");
+    assert!(error.contains("payload does not match"));
 }
 
 // --- Acceptance criterion 1: cancel_system.fsl REQ-2 renders both guards, ---

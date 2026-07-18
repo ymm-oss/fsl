@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- The requirements-document renderer now fails closed unless each RCIR claim
+  subject identifies its semantic target and each projected trace payload
+  exactly matches the checked trace contract supplied for rendering.
 - The native installer no longer clones the repository into `~/.fsl`. It now
   installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
   atomically activates the complete payload, safely migrates recognized Python
@@ -115,7 +118,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   "Approval records" section — always paired with a fixed disclaimer that
   approval is an organizational record, never proof of intent fidelity —
   and fails closed (`FSL-DOC-APPROVAL-DRIFTED`) if the record does not match
-  the current rendering; `fslc document check --approval RECORD` reproduces
+  the current rendering or the literal reviewed file has changed. The section
+  displays the reviewed-file digest rather than the canonical rendering
+  digest; `fslc document check --approval RECORD` reproduces
   the same section for structural comparison (never verifying a signature)
   via a new `approval_digest` frontmatter key and `approval_changed`/
   `FSL-DOC-APPROVAL-CHANGED` drift reason. See `docs/DESIGN-approval.md`.
