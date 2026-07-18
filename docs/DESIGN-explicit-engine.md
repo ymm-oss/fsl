@@ -199,14 +199,22 @@ parsing `reason`'s prose.
 **Cache contract**: `auto` is never itself part of a cache key. Internally,
 the dispatcher computes and looks up the explicit cache key first (as if
 `--engine explicit` had been passed with all other options unchanged); on a
-non-`unknown_budget` hit it returns that entry directly. On a miss (or an
-`unknown_budget` hit), it falls back to the bmc cache key (as if `--engine
-bmc` had been passed). Each sub-attempt stores under its own real key, so an
+non-`unknown_budget` hit it returns that entry directly. Otherwise — no
+explicit entry yet, or a cached `unknown_budget` — the dispatcher
+re-evaluates *this invocation's own* fail-closed gate (the same static
+pre-check the selection rule above runs before a fresh explicit attempt) to
+decide whether a fresh run would actually fall back to BMC. Only when that
+gate (or the cached `unknown_budget` verdict) calls for a fallback does the
+bmc cache key get consulted (as if `--engine bmc` had been passed); if
+explicit is still viable and undecided, the run proceeds fresh rather than
+returning a bare bmc verdict — so warm-cache dispatch always matches
+cold-cache dispatch. Each sub-attempt stores under its own real key, so an
 `auto` run and a plain run of whichever engine actually decides always share
 one cache entry — and a plain `--engine bmc` run that later hits a
 fallback-populated entry never sees `engine`/`engine_fallback` on it, because
-those two fields are stamped onto the *returned* value after the cache
-read/write, never persisted into the cached entry itself.
+those two fields are recomputed from the gate check and stamped onto the
+*returned* value on every `auto` call, hit or miss alike, and are never
+persisted into the cached entry itself.
 
 **Non-goals**: no default-engine change (still Rust-only, opt-in); no
 `induction` participation in `auto`; no parallel/portfolio execution trying
