@@ -21,9 +21,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   byte-shape compatible. `target.digest_algorithm` is
   `fsl-rendered-requirements-document-v1+sha256` — the same plain-`sha256`
   value `fslc document generate`'s own `artifact_digest` reports — and
-  `target` additionally records the RCIR claim-set digest
+  `target` additionally records the literal reviewed-document digest and the RCIR claim-set digest
   (`claim_set_digest_algorithm`/`claim_set_digest`), so `fslc approval check`
-  can report a new `claim_set_changed` drift reason distinct from
+  can report `artifact_changed` and `claim_set_changed` drift reasons distinct from
   `spec_changed`/`rendering_changed`. Unlike the other three kinds,
   `approval create --kind requirements_document` does not require the
   reviewed artifact's bytes to match a fresh rendering exactly — it reuses

@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
 
@@ -297,7 +297,7 @@ fn requirements_document_approval_detects_spec_and_claim_set_drift() {
 }
 
 #[test]
-fn editable_slot_edits_do_not_change_the_approved_digest() {
+fn editable_slot_is_bound_separately_from_the_canonical_rendering() {
     let root = approval_repo();
     let generated = generate_document(&root);
     edit_artifact(
@@ -324,7 +324,15 @@ fn editable_slot_edits_do_not_change_the_approved_digest() {
     );
     assert_eq!(
         created["record"]["target"]["digest"], generated["artifact_digest"],
-        "the background-slot edit must not change the recorded digest"
+        "the background-slot edit must not change the canonical digest"
+    );
+    assert_eq!(
+        created["record"]["target"]["reviewed_digest_algorithm"],
+        "fsl-reviewed-requirements-document-v1+sha256"
+    );
+    assert_ne!(
+        created["record"]["target"]["reviewed_digest"], created["record"]["target"]["digest"],
+        "the literal reviewed bytes must be bound independently"
     );
     let checked = successful(
         &root,
@@ -337,6 +345,43 @@ fn editable_slot_edits_do_not_change_the_approved_digest() {
         ],
     );
     assert_eq!(checked["status"], "approved");
+
+    edit_artifact(
+        &root,
+        "requirements.md",
+        "本プロジェクト固有の背景説明。",
+        "承認後に差し替えられた背景説明。",
+    );
+    let drifted = successful(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "requirements.approval.json",
+        ],
+    );
+    assert_eq!(drifted["status"], "drifted");
+    assert_eq!(drifted["reasons"], json!(["artifact_changed"]));
+
+    edit_artifact(
+        &root,
+        "requirements.md",
+        "承認後に差し替えられた背景説明。",
+        "本プロジェクト固有の背景説明。",
+    );
+    let restored = successful(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "requirements.approval.json",
+        ],
+    );
+    assert_eq!(restored["status"], "approved");
     std::fs::remove_dir_all(root).expect("remove temporary repository");
 }
 
@@ -738,6 +783,54 @@ fn approval_create_rejects_an_artifact_that_already_carries_an_approval_overlay(
 }
 
 // --- Closed-contract negative controls --------------------------------------
+
+#[test]
+fn requirements_document_record_without_reviewed_digest_is_rejected() {
+    let root = approval_repo();
+    generate_document(&root);
+    successful(
+        &root,
+        &[
+            "approval",
+            "create",
+            "spec.fsl",
+            "--kind",
+            "requirements_document",
+            "--artifact",
+            "requirements.md",
+            "--approver",
+            "alice",
+            "-o",
+            "requirements.approval.json",
+        ],
+    );
+    let record_path = root.join("requirements.approval.json");
+    let mut record: Value =
+        serde_json::from_str(&std::fs::read_to_string(&record_path).expect("read record"))
+            .expect("parse record");
+    record["target"]
+        .as_object_mut()
+        .expect("target object")
+        .remove("reviewed_digest");
+    std::fs::write(
+        &record_path,
+        serde_json::to_string_pretty(&record).expect("serialize hand-edited record"),
+    )
+    .expect("write hand-edited record");
+
+    let output = failed(
+        &root,
+        &[
+            "approval",
+            "check",
+            "spec.fsl",
+            "--record",
+            "requirements.approval.json",
+        ],
+    );
+    assert_eq!(output["kind"], "io");
+    std::fs::remove_dir_all(root).expect("remove temporary repository");
+}
 
 #[test]
 fn a_ledger_kind_record_hand_edited_into_a_document_schema_is_rejected() {

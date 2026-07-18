@@ -9545,96 +9545,100 @@ fn run_approval_create(
         Err(error) => return (semantic_error_output(&error), 2),
     };
 
-    let (target_digest_bytes, target_digest_algorithm, claim_set_digest, schema) = if kind
-        == "requirements_document"
-    {
-        let approval::GenerationInputs::Document(document_inputs) = inputs else {
-            return (
-                error_output(
-                    "usage",
-                    "--kind requirements_document requires document generation inputs",
-                ),
-                2,
-            );
-        };
-        let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs) {
-            Ok(result) => result,
-            Err(error) => return (error, 2),
-        };
-        let reviewed_text = match std::fs::read_to_string(artifact_path) {
-            Ok(text) => text,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
-        };
-        let report = match fsl_tools::check_requirements_document(
-            &reviewed_text,
-            &claims,
-            &fresh_markdown,
-        ) {
-            Ok(report) => report,
-            Err(error) => return (document_schema_error(&error.to_string()), 2),
-        };
-        if !report.is_conformant() {
-            let mut output = error_output(
-                "semantics",
-                "reviewed document does not conform to a fresh rendering with the recorded inputs",
-            );
-            output
-                .as_object_mut()
-                .expect("approval error envelope")
-                .insert(
-                    "reasons".to_owned(),
-                    serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest, schema) =
+        if kind == "requirements_document" {
+            let approval::GenerationInputs::Document(document_inputs) = inputs else {
+                return (
+                    error_output(
+                        "usage",
+                        "--kind requirements_document requires document generation inputs",
+                    ),
+                    2,
                 );
-            return (output, 2);
-        }
-        (
-            fresh_markdown.into_bytes(),
-            approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
-            Some(claims.spec.claim_set_digest),
-            approval::APPROVAL_SCHEMA_V3,
-        )
-    } else {
-        let approval::GenerationInputs::Solver(_) = inputs else {
-            return (
-                error_output(
-                    "usage",
-                    "--kind ledger/html/scenarios requires solver generation inputs",
-                ),
-                2,
-            );
-        };
-        let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
-            Ok(artifact) => artifact,
-            Err(error) => return (error, 2),
-        };
-        let reviewed_artifact = match std::fs::read(artifact_path) {
-            Ok(artifact) => artifact,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
-        };
-        let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
-            Ok(artifact) => artifact,
-            Err(error) => return (error_output("semantics", &error), 2),
-        };
-        let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
-            Ok(artifact) => artifact,
-            Err(error) => return (error_output("internal", &error), 3),
-        };
-        if normalized_reviewed != normalized_expected {
-            return (
-                error_output(
+            };
+            let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs)
+            {
+                Ok(result) => result,
+                Err(error) => return (error, 2),
+            };
+            let reviewed_text = match std::fs::read_to_string(artifact_path) {
+                Ok(text) => text,
+                Err(error) => return (error_output("io", &error.to_string()), 2),
+            };
+            let report = match fsl_tools::check_requirements_document(
+                &reviewed_text,
+                &claims,
+                &fresh_markdown,
+            ) {
+                Ok(report) => report,
+                Err(error) => return (document_schema_error(&error.to_string()), 2),
+            };
+            if !report.is_conformant() {
+                let mut output = error_output(
                     "semantics",
-                    "reviewed artifact does not match a fresh rendering with the recorded inputs",
-                ),
-                2,
-            );
-        }
-        (
-            normalized_reviewed,
-            approval::ARTIFACT_DIGEST_ALGORITHM,
-            None,
-            approval::APPROVAL_SCHEMA,
-        )
-    };
+                    "reviewed document does not conform to a fresh rendering with the recorded inputs",
+                );
+                output
+                    .as_object_mut()
+                    .expect("approval error envelope")
+                    .insert(
+                        "reasons".to_owned(),
+                        serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+                    );
+                return (output, 2);
+            }
+            (
+                fresh_markdown.into_bytes(),
+                approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
+                Some(approval::sha256_bytes(reviewed_text.as_bytes())),
+                Some(claims.spec.claim_set_digest),
+                approval::APPROVAL_SCHEMA_V3,
+            )
+        } else {
+            let approval::GenerationInputs::Solver(_) = inputs else {
+                return (
+                    error_output(
+                        "usage",
+                        "--kind ledger/html/scenarios requires solver generation inputs",
+                    ),
+                    2,
+                );
+            };
+            let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
+                Ok(artifact) => artifact,
+                Err(error) => return (error, 2),
+            };
+            let reviewed_artifact = match std::fs::read(artifact_path) {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("io", &error.to_string()), 2),
+            };
+            let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact)
+            {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("semantics", &error), 2),
+            };
+            let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact)
+            {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("internal", &error), 3),
+            };
+            if normalized_reviewed != normalized_expected {
+                return (
+                    error_output(
+                        "semantics",
+                        "reviewed artifact does not match a fresh rendering with the recorded inputs",
+                    ),
+                    2,
+                );
+            }
+            (
+                normalized_reviewed,
+                approval::ARTIFACT_DIGEST_ALGORITHM,
+                None,
+                None,
+                approval::APPROVAL_SCHEMA,
+            )
+        };
 
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
@@ -9678,6 +9682,10 @@ fn run_approval_create(
             path: artifact_path.display().to_string(),
             digest_algorithm: target_digest_algorithm.to_owned(),
             digest: approval::sha256_bytes(&target_digest_bytes),
+            reviewed_digest_algorithm: reviewed_digest
+                .as_ref()
+                .map(|_| approval::REVIEWED_REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM.to_owned()),
+            reviewed_digest,
             claim_set_digest_algorithm: claim_set_digest
                 .as_ref()
                 .map(|_| approval::CLAIM_SET_DIGEST_ALGORITHM.to_owned()),
@@ -9779,6 +9787,13 @@ fn approval_evaluation(
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
+    let current_reviewed_digest = if record.target.kind == "requirements_document" {
+        let reviewed = std::fs::read(&record.target.path)
+            .map_err(|error| error_output("io", &error.to_string()))?;
+        Some(approval::sha256_bytes(&reviewed))
+    } else {
+        None
+    };
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
@@ -9786,6 +9801,7 @@ fn approval_evaluation(
         &current_artifact_digest,
         env!("CARGO_PKG_VERSION"),
         current_claim_set_digest.as_deref(),
+        current_reviewed_digest.as_deref(),
     );
     let output = evaluation
         .as_object_mut()
