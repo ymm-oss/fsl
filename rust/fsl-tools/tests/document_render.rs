@@ -163,6 +163,7 @@ fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
         Locale::En,
         None,
         None,
+        None,
     )
     .expect_err("mismatched RCIR role mapping must fail closed");
     assert!(error.contains("subject does not match"));
@@ -191,6 +192,7 @@ fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
         &model,
         Some(&trace),
         Locale::En,
+        None,
         None,
         None,
     )

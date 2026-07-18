@@ -245,8 +245,10 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   so this issue could join on that identity).
 - **`reviewed_digest_algorithm`/`reviewed_digest`** bind the exact Markdown
   bytes passed to `approval create`, including the editable background slot.
-  `approval check` re-reads `target.path`; a later replacement or edit is
-  reported as `artifact_changed`, independently of canonical rendering drift.
+  Both `approval check` and `document generate --approval` re-read
+  `target.path`; a later replacement or edit is reported as
+  `artifact_changed`, independently of canonical rendering drift. The overlay
+  displays this reviewed-artifact digest, not the canonical-rendering digest.
 - **`inputs`** replaces the solver triple (`depth`/`deadlock`/`engine` —
   meaningless for a deterministic RCIR projection) with the actual
   reproducibility inputs a rendering depends on: `view`/`lang` (read from the
@@ -326,10 +328,10 @@ without `claim_set_changed`).
 display-only check, distinct from `fslc approval check`) compares the
 supplied record's `spec.digest`/`target.digest`/`target.claim_set_digest`
 directly against the values the current `document generate` invocation
-already computed — no live re-render for comparison purposes beyond what
-`generate` was already doing, and no Git baseline reconstruction, since the
-overlay's job is display, not the authoritative approval-governance check
-`fslc approval check` performs.
+already computed and re-reads `target.path` to compare its literal bytes with
+`target.reviewed_digest`. It performs no additional live rendering and no Git
+baseline reconstruction, since the overlay's job is display, not the
+authoritative approval-governance check `fslc approval check` performs.
 
 Adding the approval frontmatter binding and reference section advances the
 requirements-document renderer from evidence overlay version `1.2.0` to `1.3.0`.

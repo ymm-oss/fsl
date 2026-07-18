@@ -365,6 +365,21 @@ fn editable_slot_is_bound_separately_from_the_canonical_rendering() {
     assert_eq!(drifted["status"], "drifted");
     assert_eq!(drifted["reasons"], json!(["artifact_changed"]));
 
+    let generate = failed(
+        &root,
+        &[
+            "document",
+            "generate",
+            "spec.fsl",
+            "--lang",
+            "ja",
+            "--approval",
+            "requirements.approval.json",
+        ],
+    );
+    assert_eq!(generate["code"], "FSL-DOC-APPROVAL-DRIFTED");
+    assert_eq!(generate["reasons"], json!(["artifact_changed"]));
+
     edit_artifact(
         &root,
         "requirements.md",

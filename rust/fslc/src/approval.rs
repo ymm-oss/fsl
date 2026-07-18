@@ -269,6 +269,14 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
+pub fn reviewed_artifact_digest(record: &ApprovalRecord) -> Result<Option<String>, String> {
+    if record.target.kind != "requirements_document" {
+        return Ok(None);
+    }
+    let reviewed = std::fs::read(&record.target.path).map_err(|error| error.to_string())?;
+    Ok(Some(sha256_bytes(&reviewed)))
+}
+
 fn stable_json(value: &Value, strip_execution_metadata: bool) -> Value {
     match value {
         Value::Array(items) => {

@@ -96,7 +96,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   "Approval records" section — always paired with a fixed disclaimer that
   approval is an organizational record, never proof of intent fidelity —
   and fails closed (`FSL-DOC-APPROVAL-DRIFTED`) if the record does not match
-  the current rendering; `fslc document check --approval RECORD` reproduces
+  the current rendering or the literal reviewed file has changed. The section
+  displays the reviewed-file digest rather than the canonical rendering
+  digest; `fslc document check --approval RECORD` reproduces
   the same section for structural comparison (never verifying a signature)
   via a new `approval_digest` frontmatter key and `approval_changed`/
   `FSL-DOC-APPROVAL-CHANGED` drift reason. See `docs/DESIGN-approval.md`.

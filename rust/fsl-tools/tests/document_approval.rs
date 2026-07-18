@@ -81,6 +81,8 @@ fn approvals_section_includes_the_intent_fidelity_disclaimer() {
     let en = render_cancel_system(Locale::En, Some(&applied));
     assert!(en.contains("## Approval records"));
     assert!(en.contains("It does not prove fidelity to original intent."));
+    assert!(en.contains("Reviewed artifact digest"));
+    assert!(!en.contains("Target digest"));
 }
 
 #[test]

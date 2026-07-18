@@ -2129,6 +2129,7 @@ struct LoadedApproval {
     record: approval::ApprovalRecord,
     record_path: String,
     signature_key_id: Option<String>,
+    current_reviewed_digest: Option<String>,
 }
 
 /// Load and verify every `--approval` record. Each must target
@@ -2176,10 +2177,13 @@ fn load_approvals(
                 record.target.kind
             )));
         }
+        let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+            .map_err(|error| error_output("io", &error))?;
         loaded.push(LoadedApproval {
             record,
             record_path: path.display().to_string(),
             signature_key_id,
+            current_reviewed_digest,
         });
     }
     digests.sort();
@@ -2331,6 +2335,11 @@ fn run_document_generate(
             {
                 mismatched.push("claim_set_changed");
             }
+            if approval.record.target.reviewed_digest.as_deref()
+                != approval.current_reviewed_digest.as_deref()
+            {
+                mismatched.push("artifact_changed");
+            }
         }
         mismatched.sort_unstable();
         mismatched.dedup();
@@ -2344,7 +2353,12 @@ fn run_document_generate(
                 approver: approval.record.approval.approver.clone(),
                 approved_at: approval.record.approval.approved_at.clone(),
                 requirements: approval.record.approval.requirements.clone(),
-                artifact_digest: approval.record.target.digest.clone(),
+                artifact_digest: approval
+                    .record
+                    .target
+                    .reviewed_digest
+                    .clone()
+                    .expect("validated requirements_document approval"),
                 signature_key_id: approval.signature_key_id.clone(),
             })
             .collect();
@@ -9801,13 +9815,8 @@ fn approval_evaluation(
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
-    let current_reviewed_digest = if record.target.kind == "requirements_document" {
-        let reviewed = std::fs::read(&record.target.path)
-            .map_err(|error| error_output("io", &error.to_string()))?;
-        Some(approval::sha256_bytes(&reviewed))
-    } else {
-        None
-    };
+    let current_reviewed_digest =
+        approval::reviewed_artifact_digest(&record).map_err(|error| error_output("io", &error))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,

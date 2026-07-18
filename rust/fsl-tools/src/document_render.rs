@@ -1018,11 +1018,11 @@ fn approvals_section(records: &[AppliedApproval], locale: Locale) -> Option<Stri
             let requirements = record.requirements.join(", ");
             match locale {
                 Locale::Ja => format!(
-                    "- 承認者: {}\n  - 承認日時: `{}`\n  - 対象要件 ID: {}\n  - 記録: `{}`\n  - 対象ダイジェスト: `{}`\n  - {signature}",
+                    "- 承認者: {}\n  - 承認日時: `{}`\n  - 対象要件 ID: {}\n  - 記録: `{}`\n  - レビュー済み成果物ダイジェスト: `{}`\n  - {signature}",
                     record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
                 ),
                 Locale::En => format!(
-                    "- Approver: {}\n  - Approved at: `{}`\n  - Requirement IDs: {}\n  - Record: `{}`\n  - Target digest: `{}`\n  - {signature}",
+                    "- Approver: {}\n  - Approved at: `{}`\n  - Requirement IDs: {}\n  - Record: `{}`\n  - Reviewed artifact digest: `{}`\n  - {signature}",
                     record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
                 ),
             }
