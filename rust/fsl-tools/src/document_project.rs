@@ -800,6 +800,15 @@ pub(crate) fn project_trace_case_payload(
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
 ) -> Result<RequirementClaimSet, String> {
+    let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
+    project_requirement_claims_with_trace(input, trace.as_ref())
+}
+
+#[allow(clippy::too_many_lines)]
+fn project_requirement_claims_with_trace(
+    input: &DocumentInput<'_>,
+    trace_contract: Option<&RequirementsTraceContract>,
+) -> Result<RequirementClaimSet, String> {
     let model = input.model;
     let source_path = input.source_path;
     let mut universe: Vec<String> = Vec::new();
@@ -949,9 +958,7 @@ pub fn project_requirement_claims(
         push_terminal_claim(expr, model, source_path, &mut agg, &mut built);
     }
 
-    let trace_contract: Option<RequirementsTraceContract> =
-        requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
-    if let Some(contract) = &trace_contract {
+    if let Some(contract) = trace_contract {
         for case in &contract.acceptance {
             universe.push(format!("acceptance:{}", case.id));
         }
@@ -1200,5 +1207,44 @@ pub fn project_requirement_claims(
             identity_stability: "exact_source_revision".to_owned(),
             counts: assurance_counts,
         },
+    })
+}
+
+pub(crate) struct RendererRoles {
+    pub requirements: Vec<Requirement>,
+    pub claims: Vec<Claim>,
+    pub trace_cases: Vec<TraceCase>,
+    pub public_kernel: Value,
+}
+
+pub(crate) fn project_renderer_roles(
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    source_path: Option<&str>,
+    dialect: &str,
+    trace: Option<&RequirementsTraceContract>,
+) -> Result<RendererRoles, String> {
+    let dialect = match dialect {
+        "spec" => DocumentDialect::Spec,
+        "requirements" => DocumentDialect::Requirements,
+        other => return Err(format!("unsupported RCIR renderer dialect '{other}'")),
+    };
+    let projected = project_requirement_claims_with_trace(
+        &DocumentInput {
+            kernel,
+            model,
+            source: "",
+            source_path,
+            dialect,
+            implements_names: Vec::new(),
+            analysis_scope: AnalysisScope::default(),
+        },
+        trace,
+    )?;
+    Ok(RendererRoles {
+        requirements: projected.requirements,
+        claims: projected.claims,
+        trace_cases: projected.trace_cases,
+        public_kernel: projected.public_kernel,
     })
 }
