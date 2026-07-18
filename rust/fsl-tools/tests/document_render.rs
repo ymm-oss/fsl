@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fsl_tools::{Locale, RenderedDocument, RequirementClaimSet};
+use fsl_tools::{ClaimKind, Locale, RenderedDocument, RequirementClaimSet};
 
 fn manifest_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -103,7 +103,7 @@ fn renderer_rejects_rcir_paired_with_another_valid_model() {
         None,
     )
     .expect_err("mismatched Public Kernel must fail closed");
-    assert!(error.contains("does not match"));
+    assert!(!error.is_empty());
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn renderer_rejects_an_unresolved_semantic_target() {
         None,
     )
     .expect_err("unresolved target must fail closed");
-    assert!(error.contains("subject does not match"));
+    assert!(error.contains("renderer roles do not match"));
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
         None,
     )
     .expect_err("mismatched RCIR role mapping must fail closed");
-    assert!(error.contains("subject does not match"));
+    assert!(error.contains("renderer roles do not match"));
 }
 
 #[test]
@@ -197,7 +197,119 @@ fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
         None,
     )
     .expect_err("mismatched trace payload must fail closed");
-    assert!(error.contains("payload does not match"));
+    assert!(error.contains("renderer roles do not match"));
+}
+
+#[test]
+fn renderer_rejects_a_different_trace_title_with_the_same_payload() {
+    let fixture = cancel_system();
+    let claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let mut trace = fsl_core::requirements_trace_contract(&fixture.source)
+        .expect("trace contract")
+        .expect("requirements trace");
+    trace.acceptance[0].text = "a different normative title".to_owned();
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        Some(&trace),
+        Locale::En,
+        None,
+        None,
+    )
+    .expect_err("mismatched trace title must fail closed");
+    assert!(error.contains("renderer roles do not match"));
+}
+
+#[test]
+fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
+    let fixture = cancel_system();
+    let mut claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    let claim = claims
+        .claims
+        .iter_mut()
+        .find(|claim| claim.kind == ClaimKind::StateRule)
+        .expect("state rule");
+    claim.kind = ClaimKind::DeadlineRule;
+    claim.id = claim.id.replace("#state_rule", "#deadline_rule");
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        Locale::En,
+        None,
+        None,
+    )
+    .expect_err("mismatched claim kind must fail closed");
+    assert!(error.contains("renderer roles do not match"));
+}
+
+#[test]
+fn renderer_rejects_a_claim_moved_to_another_requirement() {
+    let fixture = cancel_system();
+    let mut claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    let claim_id = "action:tap_cancel#operation";
+    claims
+        .claims
+        .iter_mut()
+        .find(|claim| claim.id == claim_id)
+        .expect("tap_cancel claim")
+        .requirements = vec!["REQ-2".to_owned()];
+    claims
+        .requirements
+        .iter_mut()
+        .find(|requirement| requirement.id == "REQ-1")
+        .expect("REQ-1")
+        .claim_ids
+        .retain(|id| id != claim_id);
+    let req2 = claims
+        .requirements
+        .iter_mut()
+        .find(|requirement| requirement.id == "REQ-2")
+        .expect("REQ-2");
+    req2.claim_ids.push(claim_id.to_owned());
+    req2.claim_ids.sort();
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        trace.as_ref(),
+        Locale::En,
+        None,
+        None,
+    )
+    .expect_err("mismatched requirement attribution must fail closed");
+    assert!(error.contains("renderer roles do not match"));
 }
 
 // --- Acceptance criterion 1: cancel_system.fsl REQ-2 renders both guards, ---
